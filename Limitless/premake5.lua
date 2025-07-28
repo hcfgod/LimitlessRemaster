@@ -72,6 +72,7 @@ project "Limitless"
 
         links
         {
+            "SDL3",
             "Cocoa.framework",
             "IOKit.framework",
             "CoreAudio.framework",
@@ -83,18 +84,6 @@ project "Limitless"
             "Metal.framework",
             "QuartzCore.framework"
         }
-
-        filter "architecture:ARM64"
-            links
-            {
-                "SDL3"
-            }
-
-        filter "architecture:x64"
-            links
-            {
-                "SDL3-static"
-            }
 
     filter "system:linux"
         cppdialect "C++20"
