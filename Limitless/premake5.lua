@@ -28,6 +28,11 @@ project "Limitless"
         "Vendor/SDL3/SDL3Libs"
     }
 
+    filter "system:macosx"
+        libdirs
+        {
+            "/opt/homebrew/lib"
+        }
 
 
     filter "system:windows"
