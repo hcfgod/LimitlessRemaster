@@ -15,18 +15,73 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v1.1
       
+    - name: Verify premake5
+      run: |
+        echo "Checking premake5 executable:"
+        if (Test-Path "Vendor\Premake\premake5.exe") {
+          echo "premake5.exe found"
+          echo "premake5 version:"
+          Vendor\Premake\premake5.exe --version
+        } else {
+          echo "premake5.exe not found"
+          echo "Vendor\Premake directory contents:"
+          Get-ChildItem "Vendor\Premake" -Recurse
+        }
+      
     - name: Generate Visual Studio solution
       run: |
+        echo "Generating Visual Studio solution..."
         Vendor\Premake\premake5.exe vs2022
+        echo "Generated files:"
+        Get-ChildItem -Name "*.sln"
+        echo "Solution file contents (first 50 lines):"
+        Get-Content LimitlessRemaster.sln | Select-Object -First 50
         
     - name: Build project
       run: |
-        msbuild LimitlessRemaster.sln /p:Configuration=Debug /p:Platform=x64 /m
+        echo "Building with detailed output..."
+        msbuild LimitlessRemaster.sln /p:Configuration=Debug /p:Platform=x64 /m /v:detailed /p:BuildProjectReferences=true
+        
+        echo "Build exit code: $LASTEXITCODE"
+        if ($LASTEXITCODE -ne 0) {
+          echo "Build failed with exit code $LASTEXITCODE"
+          exit $LASTEXITCODE
+        }
         
     - name: List build output
       run: |
-        dir Build\Debug-windows-x64\
+        echo "Checking if Build directory exists:"
+        if (Test-Path "Build") {
+          echo "Build directory found"
+          echo "Build directory contents:"
+          Get-ChildItem Build -Recurse | Format-Table Name, FullName
+        } else {
+          echo "Build directory not found"
+          echo "Current directory contents:"
+          Get-ChildItem
+        }
+        
+        echo "Looking for specific build output directories:"
+        if (Test-Path "Build\Debug-windows-x64") {
+          echo "Debug-windows-x64 directory found"
+          echo "Debug-windows-x64 contents:"
+          Get-ChildItem "Build\Debug-windows-x64" -Recurse
+        } else {
+          echo "Debug-windows-x64 directory not found"
+          echo "Available build directories:"
+          if (Test-Path "Build") {
+            Get-ChildItem "Build" -Directory
+          }
+        }
         
     - name: Run tests
       run: |
-        .\Build\Debug-windows-x64\Test\Test.exe --success 
+        $testExe = "Build\Debug-windows-x64\Test\Test.exe"
+        if (Test-Path $testExe) {
+          echo "Found test executable: $testExe"
+          & $testExe --success
+        } else {
+          echo "Test executable not found at: $testExe"
+          echo "Searching for test executables:"
+          Get-ChildItem Build -Recurse -Name "*.exe" | Where-Object { $_ -like "*Test*" }
+        } 

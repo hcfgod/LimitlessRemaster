@@ -24,18 +24,6 @@ project "Limitless"
     }
 
     filter "system:windows"
-        libdirs
-        {
-            "Vendor/SDL3/SDL3Libs"
-        }
-
-    filter "system:macosx"
-        libdirs
-        {
-            "/opt/homebrew/lib"
-        }
-
-    filter "system:windows"
         cppdialect "C++20"
         staticruntime "On"
         systemversion "latest"
@@ -43,6 +31,11 @@ project "Limitless"
         defines
         {
             "LT_PLATFORM_WINDOWS"
+        }
+
+        libdirs
+        {
+            "Vendor/SDL3/SDL3Libs"
         }
 
         links
@@ -68,6 +61,11 @@ project "Limitless"
         defines
         {
             "LT_PLATFORM_MAC"
+        }
+
+        libdirs
+        {
+            "/opt/homebrew/lib"
         }
 
         links
