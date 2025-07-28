@@ -1,0 +1,32 @@
+name: Test Windows Build
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  test-windows:
+    name: Test Windows Build
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.1
+      
+    - name: Generate Visual Studio solution
+      run: |
+        Vendor\Premake\premake5.exe vs2022
+        
+    - name: Build project
+      run: |
+        msbuild LimitlessRemaster.sln /p:Configuration=Debug /p:Platform=x64 /m
+        
+    - name: List build output
+      run: |
+        dir Build\Debug-windows-x64\
+        
+    - name: Run tests
+      run: |
+        .\Build\Debug-windows-x64\Test\Test.exe --success 

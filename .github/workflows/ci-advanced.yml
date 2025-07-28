@@ -40,6 +40,9 @@ jobs:
       run: |
         Vendor\Premake\premake5.exe vs2022
         
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.1
+      
     - name: Build project
       run: |
         msbuild LimitlessRemaster.sln /p:Configuration=${{ matrix.configuration }} /p:Platform=x64 /m /verbosity:minimal
@@ -236,7 +239,11 @@ jobs:
       if: matrix.os != 'windows-latest'
       run: |
         Vendor/Premake/premake5 gmake2
-          
+        
+    - name: Setup MSBuild (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: microsoft/setup-msbuild@v1.1
+      
     - name: Build project (Windows)
       if: matrix.os == 'windows-latest'
       run: |
