@@ -5,8 +5,8 @@ project "Test"
     cppdialect "C++20"
     staticruntime "on"
 
-    targetdir ("../Build/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}/%{prj.name}")
-    objdir ("../Build/Intermediates/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}/%{prj.name}")
+    targetdir ("../Build/%{cfg.buildcfg}-%{cfg.system}-x64/%{prj.name}")
+    objdir ("../Build/Intermediates/%{cfg.buildcfg}-%{cfg.system}-x64/%{prj.name}")
 
     files
     {
@@ -38,6 +38,27 @@ project "Test"
             "LT_PLATFORM_WINDOWS"
         }
 
+        libdirs
+        {
+            "../Limitless/Vendor/SDL3/SDL3Libs"
+        }
+
+        links
+        {
+            "SDL3-static",
+            "user32",
+            "gdi32",
+            "winmm",
+            "imm32",
+            "ole32",
+            "oleaut32",
+            "uuid",
+            "version",
+            "advapi32",
+            "setupapi",
+            "shell32"
+        }
+
     filter "system:macosx"
         cppdialect "C++20"
         staticruntime "On"
@@ -58,10 +79,10 @@ project "Test"
                 "LT_PLATFORM_MAC_ARM64"
             }
 
-        filter "architecture:x86_64"
+        filter "architecture:x64"
             defines
             {
-                "LT_PLATFORM_MAC_X86_64"
+                "LT_PLATFORM_MAC_X64"
             }
 
     filter "system:linux"

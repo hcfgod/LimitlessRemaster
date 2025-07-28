@@ -25,8 +25,8 @@ jobs:
         
     - name: List build output
       run: |
-        dir Build\Debug-windows-x86_64\
+        dir Build\Debug-windows-x64\
         
     - name: Run tests
       run: |
-        .\Build\Debug-windows-x86_64\Test\Test.exe --success 
+        .\Build\Debug-windows-x64\Test\Test.exe --success 

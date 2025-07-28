@@ -15,12 +15,12 @@ workspace "LimitlessRemaster"
     }
 
     filter "platforms:x64"
-        architecture "x86_64"
+        architecture "x64"
 
     filter "platforms:ARM64"
         architecture "ARM64"
 
-outputdir = "Build/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
+outputdir = "Build/%{cfg.buildcfg}-%{cfg.system}-x64"
 
 -- Include sub-projects
 include "Limitless"

@@ -1,4 +1,5 @@
 #include "Platform/SDL/SDLWindow.h"
+#include <SDL3/SDL.h>
 #include <iostream>
 
 namespace Limitless

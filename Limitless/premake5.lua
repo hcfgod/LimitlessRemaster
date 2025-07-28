@@ -5,8 +5,8 @@ project "Limitless"
     cppdialect "C++20"
     staticruntime "on"
 
-    targetdir ("../Build/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}/%{prj.name}")
-    objdir ("../Build/Intermediates/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}/%{prj.name}")
+    targetdir ("../Build/%{cfg.buildcfg}-%{cfg.system}-x64/%{prj.name}")
+    objdir ("../Build/Intermediates/%{cfg.buildcfg}-%{cfg.system}-x64/%{prj.name}")
 
     files
     {
@@ -28,9 +28,6 @@ project "Limitless"
         {
             "Vendor/SDL3/SDL3Libs"
         }
-        
-        -- Explicitly exclude dynamic SDL3 to prevent conflicts
-        linkoptions { "/NODEFAULTLIB:SDL3.lib" }
 
     filter "system:macosx"
         libdirs
@@ -93,10 +90,10 @@ project "Limitless"
                 "SDL3"
             }
 
-        filter "architecture:x86_64"
+        filter "architecture:x64"
             links
             {
-                "SDL3"
+                "SDL3-static"
             }
 
     filter "system:linux"

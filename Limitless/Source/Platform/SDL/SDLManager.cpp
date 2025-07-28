@@ -1,4 +1,5 @@
 #include "SDLManager.h"
+#include <SDL3/SDL.h>
 
 namespace Limitless
 {
