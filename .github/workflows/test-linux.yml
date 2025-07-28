@@ -53,6 +53,11 @@ jobs:
     - name: Generate Makefiles
       run: |
         echo "Generating Makefiles..."
+        echo "Premake5 workspace info:"
+        ./premake5 --version
+        echo "Available premake5 actions:"
+        ./premake5 --help
+        echo "Generating Makefiles..."
         ./premake5 gmake2
         echo "Generated files:"
         ls -la
@@ -60,16 +65,35 @@ jobs:
         head -100 Makefile | grep -E "^[a-zA-Z]" || echo "No targets found in first 100 lines"
         echo "Available configurations:"
         grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" Makefile | head -20 || echo "No configurations found"
+        echo "Looking for specific configuration patterns:"
+        grep -i "debug" Makefile | head -10 || echo "No debug configurations found"
+        grep -i "release" Makefile | head -10 || echo "No release configurations found"
+        echo "All make targets (configurations):"
+        make -qp | grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" | grep -v "^Makefile:" | head -30 || echo "No targets found"
+        echo "Full Makefile content for debugging:"
+        cat Makefile
         
     - name: Build project
       run: |
         echo "Building with verbose output..."
-        make -j$(nproc) config=debug_x86_64 VERBOSE=1
+        echo "Available configurations from premake5.lua: Debug, Release, Dist"
+        echo "Available platforms from premake5.lua: x64, ARM64"
+        echo "Trying Debug-linux-x64 configuration..."
+        make -j$(nproc) config=Debug-linux-x64 VERBOSE=1
         
         echo "Build exit code: $?"
         if [ $? -ne 0 ]; then
           echo "Build failed with exit code $?"
-          exit $?
+          echo "Trying alternative configuration format..."
+          make -j$(nproc) config=Debug_x64 VERBOSE=1
+          if [ $? -ne 0 ]; then
+            echo "Alternative format also failed, trying Debug configuration only..."
+            make -j$(nproc) config=Debug VERBOSE=1
+            if [ $? -ne 0 ]; then
+              echo "All build attempts failed"
+              exit 1
+            fi
+          fi
         fi
         
     - name: List build output
