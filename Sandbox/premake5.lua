@@ -38,6 +38,27 @@ project "Sandbox"
             "LT_PLATFORM_WINDOWS"
         }
 
+        libdirs
+        {
+            "../Limitless/Vendor/SDL3/SDL3Libs"
+        }
+
+        links
+        {
+            "SDL3-static",
+            "user32",
+            "gdi32",
+            "winmm",
+            "imm32",
+            "ole32",
+            "oleaut32",
+            "uuid",
+            "version",
+            "advapi32",
+            "setupapi",
+            "shell32"
+        }
+
     filter "system:macosx"
         cppdialect "C++20"
         staticruntime "On"
