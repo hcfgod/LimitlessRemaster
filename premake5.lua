@@ -20,7 +20,7 @@ workspace "LimitlessRemaster"
     filter "platforms:ARM64"
         architecture "ARM64"
 
-outputdir = "Build/%{cfg.buildcfg}-%{cfg.system}-%{cfg.platform}"
+outputdir = "Build/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
 
 -- Include sub-projects
 include "Limitless"
