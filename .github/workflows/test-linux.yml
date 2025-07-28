@@ -38,11 +38,32 @@ jobs:
         make -j$(nproc)
         sudo make install
         sudo ldconfig
+        sudo ldconfig -p | grep SDL || echo "No SDL libraries found in cache"
+        echo "Updating pkg-config cache..."
+        sudo pkg-config --update-cache || echo "pkg-config cache update failed"
         
         echo "SDL3 installation info:"
         pkg-config --modversion sdl3 || echo "SDL3 not found by pkg-config"
-        ls -la /usr/local/lib/libSDL3*
-        ls -la /usr/local/include/SDL3/
+        echo "SDL3 libraries installed:"
+        ls -la /usr/local/lib/libSDL3* || echo "No SDL3 libraries found in /usr/local/lib"
+        echo "SDL3 headers installed:"
+        ls -la /usr/local/include/SDL3/ || echo "No SDL3 headers found in /usr/local/include"
+        echo "Checking for SDL3 static library specifically:"
+        find /usr/local/lib -name "*SDL3*" -type f || echo "No SDL3 files found"
+        echo "Checking pkg-config for SDL3:"
+        pkg-config --libs sdl3 || echo "pkg-config --libs sdl3 failed"
+        pkg-config --static --libs sdl3 || echo "pkg-config --static --libs sdl3 failed"
+        echo "Checking library dependencies:"
+        ldconfig -p | grep SDL || echo "No SDL libraries in ldconfig cache"
+        echo "Checking if we can link a simple test program:"
+        echo '#include <SDL3/SDL.h>' > /tmp/test_sdl.c
+        echo 'int main() { SDL_Init(SDL_INIT_VIDEO); SDL_Quit(); return 0; }' >> /tmp/test_sdl.c
+        echo "Trying static linking:"
+        gcc -o /tmp/test_sdl /tmp/test_sdl.c -lSDL3-static -L/usr/local/lib -I/usr/local/include/SDL3 2>&1 || echo "Static linking failed"
+        echo "Trying dynamic linking:"
+        gcc -o /tmp/test_sdl_dynamic /tmp/test_sdl.c -lSDL3 -L/usr/local/lib -I/usr/local/include/SDL3 2>&1 || echo "Dynamic linking failed"
+        echo "Trying with pkg-config:"
+        gcc -o /tmp/test_sdl_pkgconfig /tmp/test_sdl.c $(pkg-config --cflags --libs sdl3) 2>&1 || echo "pkg-config linking failed"
         
     - name: Download premake5
       run: |
