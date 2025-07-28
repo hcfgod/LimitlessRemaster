@@ -115,14 +115,18 @@ jobs:
           echo "Premake5 gmake exit code: $?"
         fi
         
+        # Try generating with explicit configuration (only if supported)
+        echo "Checking if --config option is supported:"
+        ./premake5 --help | grep -i "config" || echo "No config option found in help"
+        
         # Try generating with explicit configuration
         echo "Trying to generate with explicit Debug configuration:"
-        ./premake5 --file=premake5.lua gmake2 --config=Debug
+        ./premake5 --file=premake5.lua gmake2 --config=Debug 2>&1 || echo "Config option not supported"
         echo "Premake5 with config exit code: $?"
         
         # If that doesn't work, try generating all configurations
         echo "Trying to generate all configurations:"
-        ./premake5 --file=premake5.lua gmake2 --configs=Debug,Release,Dist
+        ./premake5 --file=premake5.lua gmake2 --configs=Debug,Release,Dist 2>&1 || echo "Configs option not supported"
         echo "Premake5 with configs exit code: $?"
         
         # Check what actions are available
@@ -197,20 +201,26 @@ jobs:
         echo "All make targets (configurations):"
         make -qp | grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" | grep -v "^Makefile:" | sort
         echo "=== END AVAILABLE CONFIGURATIONS ==="
+        echo "=== MAKEFILE ANALYSIS ==="
+        echo "Looking for configuration-specific targets:"
+        grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" Makefile | grep -i "debug\|release\|dist" || echo "No configuration targets found"
+        echo "Looking for project targets:"
+        grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" Makefile | grep -v "Makefile" | head -20
+        echo "=== END MAKEFILE ANALYSIS ==="
         echo "Trying Debug configuration..."
         make -j$(nproc) config=Debug VERBOSE=1
         
         echo "Build exit code: $?"
         if [ $? -ne 0 ]; then
           echo "Build failed with exit code $?"
-          echo "Trying Debug with platform specification..."
-          make -j$(nproc) config=Debug platform=x64 VERBOSE=1
+          echo "Trying to build projects directly..."
+          make -j$(nproc) Limitless VERBOSE=1
           if [ $? -ne 0 ]; then
-            echo "Debug with platform failed, trying Release configuration..."
-            make -j$(nproc) config=Release VERBOSE=1
+            echo "Limitless build failed, trying Sandbox..."
+            make -j$(nproc) Sandbox VERBOSE=1
             if [ $? -ne 0 ]; then
-              echo "Release also failed, trying Dist configuration..."
-              make -j$(nproc) config=Dist VERBOSE=1
+              echo "Sandbox build failed, trying Test..."
+              make -j$(nproc) Test VERBOSE=1
               if [ $? -ne 0 ]; then
                 echo "All build attempts failed"
                 exit 1
