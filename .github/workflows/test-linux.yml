@@ -97,27 +97,32 @@ jobs:
         ./premake5 clean || echo "Clean action failed (this is normal if no build files exist)"
         echo "Generating Makefiles..."
         echo "Running premake5 with verbose output:"
-        set -e  # Exit on any error
-        echo "Command: ./premake5 --verbose gmake2"
-        ./premake5 --verbose gmake2
+        
+        # Try to execute gmake2 action directly
+        echo "Command: ./premake5 gmake2"
+        ./premake5 gmake2
         echo "Premake5 exit code: $?"
         
-        if [ $? -ne 0 ]; then
-          echo "Premake5 failed with exit code $?"
-          echo "Trying without verbose flag:"
-          echo "Command: ./premake5 gmake2"
-          ./premake5 gmake2
+        # Check if Makefile was generated
+        if [ -f "Makefile" ]; then
+          echo "Makefile was generated successfully!"
+          echo "Makefile size: $(wc -l < Makefile) lines"
+        else
+          echo "Makefile was not generated, trying alternative approaches..."
+          
+          # Try without verbose flag
+          echo "Command: ./premake5 --verbose gmake2"
+          ./premake5 --verbose gmake2
           echo "Premake5 exit code: $?"
           
-          if [ $? -ne 0 ]; then
-            echo "Premake5 failed again with exit code $?"
+          if [ ! -f "Makefile" ]; then
             echo "Trying gmake action (older version):"
             echo "Command: ./premake5 gmake"
             ./premake5 gmake
             echo "Premake5 exit code: $?"
             
-            if [ $? -ne 0 ]; then
-              echo "All premake5 actions failed"
+            if [ ! -f "Makefile" ]; then
+              echo "All premake5 actions failed to generate Makefile"
               echo "Trying to list available actions:"
               ./premake5 --help | grep -A 20 "ACTIONS"
               exit 1
