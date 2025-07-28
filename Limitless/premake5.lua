@@ -19,8 +19,16 @@ project "Limitless"
         "Source",
         "Vendor/spdlog",
         "Vendor/doctest",
-        "Vendor/nlohmann"
+        "Vendor/nlohmann",
+        "Vendor/SDL3"
     }
+
+    libdirs
+    {
+        "Vendor/SDL3/SDL3Libs"
+    }
+
+
 
     filter "system:windows"
         cppdialect "C++20"
@@ -32,6 +40,22 @@ project "Limitless"
             "LT_PLATFORM_WINDOWS"
         }
 
+        links
+        {
+            "SDL3-static",
+            "user32",
+            "gdi32",
+            "winmm",
+            "imm32",
+            "ole32",
+            "oleaut32",
+            "uuid",
+            "version",
+            "advapi32",
+            "setupapi",
+            "shell32"
+        }
+
     filter "system:macosx"
         cppdialect "C++20"
         staticruntime "On"
@@ -41,6 +65,21 @@ project "Limitless"
             "LT_PLATFORM_MAC"
         }
 
+        links
+        {
+            "SDL3-static",
+            "Cocoa.framework",
+            "IOKit.framework",
+            "CoreAudio.framework",
+            "AudioToolbox.framework",
+            "ForceFeedback.framework",
+            "Carbon.framework",
+            "CoreVideo.framework",
+            "AVFoundation.framework",
+            "Metal.framework",
+            "QuartzCore.framework"
+        }
+
     filter "system:linux"
         cppdialect "C++20"
         staticruntime "On"
@@ -48,6 +87,26 @@ project "Limitless"
         defines
         {
             "LT_PLATFORM_LINUX"
+        }
+
+        links
+        {
+            "SDL3-static",
+            "X11",
+            "Xext",
+            "Xcursor",
+            "Xinerama",
+            "Xi",
+            "Xrandr",
+            "Xss",
+            "Xxf86vm",
+            "asound",
+            "dbus-1",
+            "ibus-1.0",
+            "udev",
+            "pthread",
+            "dl",
+            "m"
         }
 
     filter "configurations:Debug"

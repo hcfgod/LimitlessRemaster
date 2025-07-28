@@ -10,7 +10,8 @@ Limitless::Application* CreateApplication()
 bool SandboxApp::Initialize()
 {
     // Initialize sandbox-specific resources
-	std::cout << "SandboxApp has been successfully initalized!" << std::endl;
+	std::cout << "SandboxApp has been successfully initialized!" << std::endl;
+	std::cout << "Window created with size: " << GetWindow().GetWidth() << "x" << GetWindow().GetHeight() << std::endl;
     return true;
 }
 

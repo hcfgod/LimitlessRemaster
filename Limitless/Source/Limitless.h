@@ -5,3 +5,4 @@
 #endif
 
 #include "Core/Application.h"
+#include "Platform/Window.h"

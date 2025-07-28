@@ -1,7 +1,11 @@
 #pragma once
 
+#include <memory>
+
 namespace Limitless
 {
+    class Window;
+
 	class Application
 	{
 	public:
@@ -16,8 +20,13 @@ namespace Limitless
 
 		bool IsRunning() const { return m_isRunning; }
 		void SetRunning(bool running) { m_isRunning = running; }
+
+        Window& GetWindow() { return *m_Window; }
+
 	private:
 		bool m_isRunning = true;
+		std::unique_ptr<Window> m_Window;
+		
 		bool InternalInitialize();
 		void InternalShutdown();
 	};
