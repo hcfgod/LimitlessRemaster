@@ -104,6 +104,11 @@ project "Limitless"
             "LT_PLATFORM_LINUX"
         }
 
+        libdirs
+        {
+            "/usr/local/lib"
+        }
+
         links
         {
             "SDL3-static",

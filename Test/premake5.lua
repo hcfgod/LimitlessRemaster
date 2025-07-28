@@ -109,6 +109,31 @@ project "Test"
             "LT_PLATFORM_LINUX"
         }
 
+        libdirs
+        {
+            "/usr/local/lib"
+        }
+
+        links
+        {
+            "SDL3-static",
+            "X11",
+            "Xext",
+            "Xcursor",
+            "Xinerama",
+            "Xi",
+            "Xrandr",
+            "Xss",
+            "Xxf86vm",
+            "asound",
+            "dbus-1",
+            "ibus-1.0",
+            "udev",
+            "pthread",
+            "dl",
+            "m"
+        }
+
     filter "configurations:Debug"
         defines "LT_DEBUG"
         runtime "Debug"
