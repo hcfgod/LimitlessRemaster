@@ -30,15 +30,7 @@ jobs:
         
     - name: Build project
       run: |
-        # Try different configuration formats
-        echo "Available make targets:"
-        make help 2>/dev/null || echo "No help target available"
-        echo "Trying Debug-ARM64 configuration:"
-        make -j$(sysctl -n hw.ncpu) config=Debug-ARM64 || echo "Debug-ARM64 failed"
-        echo "Trying Debug-x86_64 configuration:"
-        make -j$(sysctl -n hw.ncpu) config=Debug-x86_64 || echo "Debug-x86_64 failed"
-        echo "Trying Debug configuration:"
-        make -j$(sysctl -n hw.ncpu) config=Debug
+        make -j$(sysctl -n hw.ncpu) config=debug_arm64
         
     - name: List build output
       run: |
