@@ -21,12 +21,12 @@ jobs:
         
     - name: Build project
       run: |
-        msbuild LimitlessRemaster.sln /p:Configuration=Debug /p:Platform=x64 /m
+        msbuild LimitlessRemaster.sln /p:Configuration=Debug /p:Platform=x86_64 /m
         
     - name: List build output
       run: |
-        dir Build\Debug-windows-x64\
+        dir Build\Debug-windows-x86_64\
         
     - name: Run tests
       run: |
-        .\Build\Debug-windows-x64\Test\Test.exe --success 
+        .\Build\Debug-windows-x86_64\Test\Test.exe --success 
