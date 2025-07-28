@@ -19,7 +19,7 @@ jobs:
         sudo apt-get install -y libasound2-dev libpulse-dev libaudio-dev libjack-dev
         sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev libxxf86vm-dev libxss-dev
         sudo apt-get install -y libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev
-        sudo apt-get install -y libdbus-1-dev libudev-dev libibus-1.0-dev libfcitx-dev
+        sudo apt-get install -y libdbus-1-dev libudev-dev libibus-1.0-dev
         sudo apt-get install -y libdrm-dev libgbm-dev
         sudo apt-get install -y libwayland-dev libxkbcommon-dev libwayland-egl1-mesa-dev
         
