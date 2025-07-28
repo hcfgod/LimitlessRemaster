@@ -24,7 +24,7 @@ jobs:
         
     - name: Build project
       run: |
-        make -j$(sysctl -n hw.ncpu) config=debug_x64
+        make -j$(sysctl -n hw.ncpu) config=Debug
         
     - name: List build output
       run: |
