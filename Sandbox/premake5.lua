@@ -52,25 +52,15 @@ project "Sandbox"
         }
 
         filter "architecture:ARM64"
-            -- Additional ARM64-specific settings if needed
             defines
             {
                 "LT_PLATFORM_MAC_ARM64"
             }
-            links
-            {
-                "SDL3"
-            }
 
         filter "architecture:x86_64"
-            -- Additional x86_64-specific settings if needed
             defines
             {
                 "LT_PLATFORM_MAC_X86_64"
-            }
-            links
-            {
-                "SDL3-static"
             }
 
     filter "system:linux"
