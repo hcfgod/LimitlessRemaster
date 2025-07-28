@@ -85,6 +85,11 @@ project "Sandbox"
                 "LT_PLATFORM_MAC_X64"
             }
 
+        links
+        {
+            "SDL3"
+        }
+
     filter "system:linux"
         cppdialect "C++20"
         staticruntime "On"
