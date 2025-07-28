@@ -23,17 +23,20 @@ project "Limitless"
         "Vendor/SDL3"
     }
 
-    libdirs
-    {
-        "Vendor/SDL3/SDL3Libs"
-    }
+    filter "system:windows"
+        libdirs
+        {
+            "Vendor/SDL3/SDL3Libs"
+        }
+        
+        -- Explicitly exclude dynamic SDL3 to prevent conflicts
+        linkoptions { "/NODEFAULTLIB:SDL3.lib" }
 
     filter "system:macosx"
         libdirs
         {
             "/opt/homebrew/lib"
         }
-
 
     filter "system:windows"
         cppdialect "C++20"
