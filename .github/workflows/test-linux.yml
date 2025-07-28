@@ -115,6 +115,25 @@ jobs:
           echo "Premake5 gmake exit code: $?"
         fi
         
+        # Try generating with explicit configuration
+        echo "Trying to generate with explicit Debug configuration:"
+        ./premake5 --file=premake5.lua gmake2 --config=Debug
+        echo "Premake5 with config exit code: $?"
+        
+        # If that doesn't work, try generating all configurations
+        echo "Trying to generate all configurations:"
+        ./premake5 --file=premake5.lua gmake2 --configs=Debug,Release,Dist
+        echo "Premake5 with configs exit code: $?"
+        
+        # Check what actions are available
+        echo "Available premake5 actions:"
+        ./premake5 --help | grep -A 30 "ACTIONS" || echo "Could not get actions list"
+        
+        # Try to list configurations explicitly
+        echo "Trying to list configurations:"
+        ./premake5 --file=premake5.lua --list-configs 2>&1 || echo "list-configs not available"
+        ./premake5 --file=premake5.lua --list-platforms 2>&1 || echo "list-platforms not available"
+        
         # Check if Makefile was generated
         if [ -f "Makefile" ]; then
           echo "Makefile was generated successfully!"
@@ -160,6 +179,10 @@ jobs:
         grep -i "config.*=" Makefile | head -10 || echo "No config variables found"
         echo "Looking for CONFIG variable usage:"
         grep -i "CONFIG" Makefile | head -10 || echo "No CONFIG usage found"
+        echo "Looking for any configuration-related content:"
+        grep -i "debug\|release\|dist" Makefile | head -10 || echo "No configuration keywords found"
+        echo "Checking Makefile structure around line 42 (where error occurs):"
+        sed -n '35,50p' Makefile || echo "Could not read around line 42"
         echo "Full Makefile content for debugging:"
         cat Makefile
         
@@ -180,14 +203,18 @@ jobs:
         echo "Build exit code: $?"
         if [ $? -ne 0 ]; then
           echo "Build failed with exit code $?"
-          echo "Trying Release configuration..."
-          make -j$(nproc) config=Release VERBOSE=1
+          echo "Trying Debug with platform specification..."
+          make -j$(nproc) config=Debug platform=x64 VERBOSE=1
           if [ $? -ne 0 ]; then
-            echo "Release also failed, trying Dist configuration..."
-            make -j$(nproc) config=Dist VERBOSE=1
+            echo "Debug with platform failed, trying Release configuration..."
+            make -j$(nproc) config=Release VERBOSE=1
             if [ $? -ne 0 ]; then
-              echo "All build attempts failed"
-              exit 1
+              echo "Release also failed, trying Dist configuration..."
+              make -j$(nproc) config=Dist VERBOSE=1
+              if [ $? -ne 0 ]; then
+                echo "All build attempts failed"
+                exit 1
+              fi
             fi
           fi
         fi
