@@ -5,8 +5,8 @@ project "Sandbox"
     cppdialect "C++20"
     staticruntime "on"
 
-    targetdir ("../Build/%{cfg.buildcfg}-%{cfg.system}-x64/%{prj.name}")
-    objdir ("../Build/Intermediates/%{cfg.buildcfg}-%{cfg.system}-x64/%{prj.name}")
+    targetdir ("../Build/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}/%{prj.name}")
+    objdir ("../Build/Intermediates/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}/%{prj.name}")
 
     files
     {
@@ -45,6 +45,20 @@ project "Sandbox"
         {
             "LT_PLATFORM_MAC"
         }
+
+        filter "architecture:ARM64"
+            -- Additional ARM64-specific settings if needed
+            defines
+            {
+                "LT_PLATFORM_MAC_ARM64"
+            }
+
+        filter "architecture:x86_64"
+            -- Additional x86_64-specific settings if needed
+            defines
+            {
+                "LT_PLATFORM_MAC_X86_64"
+            }
 
     filter "system:linux"
         cppdialect "C++20"

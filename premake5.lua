@@ -1,5 +1,4 @@
 workspace "LimitlessRemaster"
-    architecture "x64"
     startproject "Sandbox"
 
     configurations
@@ -7,6 +6,12 @@ workspace "LimitlessRemaster"
         "Debug",
         "Release",
         "Dist"
+    }
+
+    platforms
+    {
+        "x86_64",
+        "ARM64"
     }
 
 outputdir = "Build/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"

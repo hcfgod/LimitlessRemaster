@@ -17,7 +17,7 @@ namespace Limitless
         }
 
         // Initialize SDL
-        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) < 0)
+        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS))
         {
             std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
             return false;

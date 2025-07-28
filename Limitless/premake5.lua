@@ -5,8 +5,8 @@ project "Limitless"
     cppdialect "C++20"
     staticruntime "on"
 
-    targetdir ("../Build/%{cfg.buildcfg}-%{cfg.system}-x64/%{prj.name}")
-    objdir ("../Build/Intermediates/%{cfg.buildcfg}-%{cfg.system}-x64/%{prj.name}")
+    targetdir ("../Build/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}/%{prj.name}")
+    objdir ("../Build/Intermediates/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}/%{prj.name}")
 
     files
     {
@@ -67,7 +67,6 @@ project "Limitless"
 
         links
         {
-            "SDL3-static",
             "Cocoa.framework",
             "IOKit.framework",
             "CoreAudio.framework",
@@ -79,6 +78,18 @@ project "Limitless"
             "Metal.framework",
             "QuartzCore.framework"
         }
+
+        filter "architecture:ARM64"
+            links
+            {
+                "SDL3"
+            }
+
+        filter "architecture:x86_64"
+            links
+            {
+                "SDL3-static"
+            }
 
     filter "system:linux"
         cppdialect "C++20"
