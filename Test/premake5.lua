@@ -116,7 +116,7 @@ project "Test"
 
         links
         {
-            "SDL3-static",
+            "SDL3",
             "X11",
             "Xext",
             "Xcursor",

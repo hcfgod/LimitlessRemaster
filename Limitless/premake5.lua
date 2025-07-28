@@ -109,15 +109,8 @@ project "Limitless"
             "/usr/local/lib"
         }
 
-        -- Try to use pkg-config for SDL3, fallback to manual linking
-        pkgconfigs
-        {
-            "sdl3"
-        }
-
         links
         {
-            "SDL3-static",
             "SDL3",
             "X11",
             "Xext",
