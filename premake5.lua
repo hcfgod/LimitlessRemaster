@@ -10,11 +10,11 @@ workspace "LimitlessRemaster"
 
     platforms
     {
-        "x86_64",
+        "x64",
         "ARM64"
     }
 
-    filter "platforms:x86_64"
+    filter "platforms:x64"
         architecture "x86_64"
 
     filter "platforms:ARM64"

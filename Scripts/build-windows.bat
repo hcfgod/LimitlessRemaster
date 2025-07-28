@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 REM Parse command line arguments
 set CONFIGURATION=Debug
-set PLATFORM=x86_64
+set PLATFORM=x64
 
 if "%1"=="Release" set CONFIGURATION=Release
 if "%1"=="Dist" set CONFIGURATION=Dist
