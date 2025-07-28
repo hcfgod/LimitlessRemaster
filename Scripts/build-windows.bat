@@ -31,12 +31,12 @@ if errorlevel 1 (
 )
 
 echo Build completed successfully!
-echo Output directory: Build\%CONFIGURATION%-windows-%PLATFORM%\
+echo Output directory: Build\%CONFIGURATION%-windows-x86_64\
 
 REM Run tests if they exist
-if exist "Build\%CONFIGURATION%-windows-%PLATFORM%\Test\Test.exe" (
+if exist "Build\%CONFIGURATION%-windows-x86_64%\Test\Test.exe" (
     echo Running tests...
-    Build\%CONFIGURATION%-windows-%PLATFORM%\Test\Test.exe --success
+    Build\%CONFIGURATION%-windows-x86_64%\Test\Test.exe --success
     if errorlevel 1 (
         echo Warning: Some tests failed
     ) else (
