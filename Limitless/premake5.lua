@@ -93,7 +93,7 @@ project "Limitless"
         filter "architecture:x86_64"
             links
             {
-                "SDL3-static"
+                "SDL3"
             }
 
     filter "system:linux"

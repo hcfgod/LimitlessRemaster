@@ -19,7 +19,8 @@ project "Test"
         "../Limitless/Source",
         "../Limitless/Vendor/spdlog",
         "../Limitless/Vendor/doctest",
-        "../Limitless/Vendor/nlohmann"
+        "../Limitless/Vendor/nlohmann",
+        "../Limitless/Vendor/SDL3"
     }
 
     links
@@ -49,6 +50,11 @@ project "Test"
         libdirs
         {
             "/opt/homebrew/lib"
+        }
+
+        links
+        {
+            "SDL3"
         }
 
         filter "architecture:ARM64"
