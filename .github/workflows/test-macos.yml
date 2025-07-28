@@ -12,9 +12,15 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Generate Xcode project
+    - name: Download premake5
       run: |
-        Vendor/Premake/premake5 gmake2
+        curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-macosx.tar.gz
+        tar -xzf premake5.tar.gz
+        chmod +x premake5
+        
+    - name: Generate Makefiles
+      run: |
+        ./premake5 gmake2
         
     - name: Build project
       run: |
