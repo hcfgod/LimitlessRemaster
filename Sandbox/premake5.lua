@@ -46,11 +46,20 @@ project "Sandbox"
             "LT_PLATFORM_MAC"
         }
 
+        libdirs
+        {
+            "/opt/homebrew/lib"
+        }
+
         filter "architecture:ARM64"
             -- Additional ARM64-specific settings if needed
             defines
             {
                 "LT_PLATFORM_MAC_ARM64"
+            }
+            links
+            {
+                "SDL3"
             }
 
         filter "architecture:x86_64"
@@ -58,6 +67,10 @@ project "Sandbox"
             defines
             {
                 "LT_PLATFORM_MAC_X86_64"
+            }
+            links
+            {
+                "SDL3-static"
             }
 
     filter "system:linux"
