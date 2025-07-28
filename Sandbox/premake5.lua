@@ -5,8 +5,8 @@ project "Sandbox"
     cppdialect "C++20"
     staticruntime "on"
 
-    targetdir ("../Build/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}/%{prj.name}")
-    objdir ("../Build/Intermediates/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}/%{prj.name}")
+    targetdir ("../Build/%{cfg.buildcfg}-%{cfg.system}-x64/%{prj.name}")
+    objdir ("../Build/Intermediates/%{cfg.buildcfg}-%{cfg.system}-x64/%{prj.name}")
 
     files
     {
