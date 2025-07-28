@@ -33,7 +33,7 @@ jobs:
         
     - name: Build project
       run: |
-        make -j$(nproc) config=debug
+        make -j$(nproc) config=Debug
         
     - name: List build output
       run: |
