@@ -56,14 +56,21 @@ jobs:
         echo "Testing premake5 execution:"
         ./premake5 --version
         
-        echo "Trying alternative premake5 version if current fails..."
-        if ! ./premake5 gmake2 >/dev/null 2>&1; then
+        echo "Testing if premake5 can parse the workspace..."
+        ./premake5 --file=premake5.lua --version
+        echo "Testing gmake2 action..."
+        ./premake5 --file=premake5.lua gmake2 --verbose
+        echo "Premake5 gmake2 exit code: $?"
+        
+        if [ $? -ne 0 ]; then
           echo "Current version failed, trying stable release..."
           curl -L -o premake5-stable.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-alpha16/premake-5.0.0-alpha16-linux.tar.gz
           tar -xzf premake5-stable.tar.gz
           chmod +x premake5
           echo "New premake5 version:"
           ./premake5 --version
+          echo "Testing new version with gmake2..."
+          ./premake5 --file=premake5.lua gmake2 --verbose
         fi
         
     - name: Generate Makefiles
@@ -91,16 +98,13 @@ jobs:
         echo "Generating Makefiles..."
         echo "Premake5 workspace info:"
         ./premake5 --version
-        echo "Available premake5 actions:"
-        ./premake5 --help
         echo "Testing premake5 with a simple action:"
         ./premake5 clean || echo "Clean action failed (this is normal if no build files exist)"
         echo "Generating Makefiles..."
-        echo "Running premake5 with verbose output:"
         
         # Try to execute gmake2 action directly
-        echo "Command: ./premake5 gmake2"
-        ./premake5 gmake2
+        echo "Command: ./premake5 --file=premake5.lua gmake2"
+        ./premake5 --file=premake5.lua gmake2
         echo "Premake5 exit code: $?"
         
         # Check if Makefile was generated
@@ -111,14 +115,14 @@ jobs:
           echo "Makefile was not generated, trying alternative approaches..."
           
           # Try without verbose flag
-          echo "Command: ./premake5 --verbose gmake2"
-          ./premake5 --verbose gmake2
+          echo "Command: ./premake5 --file=premake5.lua --verbose gmake2"
+          ./premake5 --file=premake5.lua --verbose gmake2
           echo "Premake5 exit code: $?"
           
           if [ ! -f "Makefile" ]; then
             echo "Trying gmake action (older version):"
-            echo "Command: ./premake5 gmake"
-            ./premake5 gmake
+            echo "Command: ./premake5 --file=premake5.lua gmake"
+            ./premake5 --file=premake5.lua gmake
             echo "Premake5 exit code: $?"
             
             if [ ! -f "Makefile" ]; then
