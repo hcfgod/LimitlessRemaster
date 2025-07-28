@@ -3,11 +3,11 @@ setlocal enabledelayedexpansion
 
 REM Parse command line arguments
 set CONFIGURATION=Debug
-set PLATFORM=x64
+set PLATFORM=x86_64
 
 if "%1"=="Release" set CONFIGURATION=Release
 if "%1"=="Dist" set CONFIGURATION=Dist
-if "%2"=="x86" set PLATFORM=x86
+if "%2"=="ARM64" set PLATFORM=ARM64
 
 echo Building LimitlessRemaster in %CONFIGURATION% configuration for %PLATFORM%...
 
