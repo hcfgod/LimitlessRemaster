@@ -2,7 +2,6 @@
 
 #include <SDL3/SDL.h>
 #include <memory>
-#include <iostream>
 
 namespace Limitless
 {

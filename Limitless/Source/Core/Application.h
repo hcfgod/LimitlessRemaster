@@ -1,6 +1,9 @@
 #pragma once
 
 #include <memory>
+#include "Logger.h"
+#include "LogManager.h"
+#include "Error.h"
 
 namespace Limitless
 {
@@ -23,9 +26,14 @@ namespace Limitless
 
         Window& GetWindow() { return *m_Window; }
 
+        // Logging access
+        Logger* GetLogger() const { return m_Logger; }
+        LogManager& GetLogManager() { return LogManager::GetInstance(); }
+
 	private:
 		bool m_isRunning = true;
 		std::unique_ptr<Window> m_Window;
+		Logger* m_Logger = nullptr;
 		
 		bool InternalInitialize();
 		void InternalShutdown();

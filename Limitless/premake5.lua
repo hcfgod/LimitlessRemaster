@@ -30,7 +30,7 @@ project "Limitless"
 
         defines
         {
-            "LT_PLATFORM_WINDOWS"
+            "LIMITLESS_PLATFORM_WINDOWS"
         }
 
         libdirs
@@ -51,7 +51,13 @@ project "Limitless"
             "version",
             "advapi32",
             "setupapi",
-            "shell32"
+            "shell32",
+            "psapi"
+        }
+
+        buildoptions
+        {
+            "/utf-8"
         }
 
     filter "system:macosx"
@@ -130,16 +136,16 @@ project "Limitless"
         }
 
     filter "configurations:Debug"
-        defines "LT_DEBUG"
+        defines "LIMITLESS_DEBUG"
         runtime "Debug"
         symbols "on"
 
     filter "configurations:Release"
-        defines "LT_RELEASE"
+        defines "LIMITLESS_RELEASE"
         runtime "Release"
         optimize "on"
 
     filter "configurations:Dist"
-        defines "LT_DIST"
+        defines "LIMITLESS_DIST"
         runtime "Release"
         optimize "on" 

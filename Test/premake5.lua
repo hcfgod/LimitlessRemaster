@@ -56,7 +56,13 @@ project "Test"
             "version",
             "advapi32",
             "setupapi",
-            "shell32"
+            "shell32",
+            "psapi"
+        }
+
+        buildoptions
+        {
+            "/utf-8"
         }
 
     filter "system:macosx"
@@ -135,7 +141,7 @@ project "Test"
         }
 
     filter "configurations:Debug"
-        defines "LT_DEBUG"
+        defines "LT_CONFIG_DEBUG"
         runtime "Debug"
         symbols "on"
 

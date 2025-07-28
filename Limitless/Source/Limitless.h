@@ -5,4 +5,8 @@
 #endif
 
 #include "Core/Application.h"
+#include "Core/Logger.h"
+#include "Core/LogManager.h"
+#include "Core/Error.h"
+#include "Core/PerformanceMonitor.h"
 #include "Platform/Window.h"

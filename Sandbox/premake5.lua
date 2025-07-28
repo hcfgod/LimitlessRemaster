@@ -56,7 +56,13 @@ project "Sandbox"
             "version",
             "advapi32",
             "setupapi",
-            "shell32"
+            "shell32",
+            "psapi"
+        }
+
+        buildoptions
+        {
+            "/utf-8"
         }
 
     filter "system:macosx"
