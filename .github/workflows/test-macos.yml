@@ -24,7 +24,7 @@ jobs:
         
     - name: Build project
       run: |
-        make -j$(sysctl -n hw.ncpu) config=Debug
+        make -j$(sysctl -n hw.ncpu) Limitless_Debug Sandbox_Debug Test_Debug
         
     - name: List build output
       run: |
