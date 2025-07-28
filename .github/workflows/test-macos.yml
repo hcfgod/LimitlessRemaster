@@ -15,6 +15,11 @@ jobs:
     - name: Install SDL3
       run: |
         brew install sdl3
+        echo "SDL3 installation info:"
+        brew list sdl3
+        echo "SDL3 library locations:"
+        find /opt/homebrew -name "*SDL3*" 2>/dev/null || echo "No SDL3 found in /opt/homebrew"
+        find /usr/local -name "*SDL3*" 2>/dev/null || echo "No SDL3 found in /usr/local"
         
     - name: Download premake5
       run: |
@@ -34,7 +39,8 @@ jobs:
         
     - name: Build project
       run: |
-        make -j$(sysctl -n hw.ncpu) config=debug_arm64
+        echo "Building with verbose output to see linker command:"
+        make -j$(sysctl -n hw.ncpu) config=debug_arm64 VERBOSE=1
         
     - name: List build output
       run: |
