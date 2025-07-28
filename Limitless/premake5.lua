@@ -22,11 +22,6 @@ project "Limitless"
         "Vendor/nlohmann"
     }
 
-    links
-    {
-        "Limitless"
-    }
-
     filter "system:windows"
         cppdialect "C++20"
         staticruntime "On"
@@ -34,8 +29,7 @@ project "Limitless"
 
         defines
         {
-            "LT_PLATFORM_WINDOWS",
-            "LT_BUILD_DLL"
+            "LT_PLATFORM_WINDOWS"
         }
 
     filter "configurations:Debug"
