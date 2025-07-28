@@ -21,10 +21,14 @@ jobs:
     - name: Generate Makefiles
       run: |
         ./premake5 gmake2
+        echo "Generated files:"
+        ls -la
+        echo "Makefile targets (first 100 lines):"
+        head -100 Makefile | grep -E "^[a-zA-Z]" || echo "No targets found in first 100 lines"
         
     - name: Build project
       run: |
-        make -j$(sysctl -n hw.ncpu) Limitless_Debug Sandbox_Debug Test_Debug
+        make -j$(sysctl -n hw.ncpu) config=debug
         
     - name: List build output
       run: |
