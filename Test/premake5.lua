@@ -5,8 +5,8 @@ project "Test"
     cppdialect "C++20"
     staticruntime "on"
 
-    targetdir ("../Build/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}/%{prj.name}")
-    objdir ("../Build/Intermediates/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}/%{prj.name}")
+    targetdir ("../Build/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
+    objdir ("../Build/Intermediates/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
 
     files
     {
