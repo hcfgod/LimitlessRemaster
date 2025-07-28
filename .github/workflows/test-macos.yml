@@ -25,9 +25,19 @@ jobs:
         ls -la
         echo "Makefile targets (first 100 lines):"
         head -100 Makefile | grep -E "^[a-zA-Z]" || echo "No targets found in first 100 lines"
+        echo "Available configurations:"
+        grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" Makefile | head -20 || echo "No configurations found"
         
     - name: Build project
       run: |
+        # Try different configuration formats
+        echo "Available make targets:"
+        make help 2>/dev/null || echo "No help target available"
+        echo "Trying Debug-ARM64 configuration:"
+        make -j$(sysctl -n hw.ncpu) config=Debug-ARM64 || echo "Debug-ARM64 failed"
+        echo "Trying Debug-x86_64 configuration:"
+        make -j$(sysctl -n hw.ncpu) config=Debug-x86_64 || echo "Debug-x86_64 failed"
+        echo "Trying Debug configuration:"
         make -j$(sysctl -n hw.ncpu) config=Debug
         
     - name: List build output
