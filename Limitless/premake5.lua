@@ -83,6 +83,18 @@ project "Limitless"
             "QuartzCore.framework"
         }
 
+        filter "architecture:ARM64"
+            defines
+            {
+                "LT_PLATFORM_MAC_ARM64"
+            }
+
+        filter "architecture:x64"
+            defines
+            {
+                "LT_PLATFORM_MAC_X64"
+            }
+
     filter "system:linux"
         cppdialect "C++20"
         staticruntime "On"

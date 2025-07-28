@@ -20,6 +20,8 @@ jobs:
         echo "SDL3 library locations:"
         find /opt/homebrew -name "*SDL3*" 2>/dev/null || echo "No SDL3 found in /opt/homebrew"
         find /usr/local -name "*SDL3*" 2>/dev/null || echo "No SDL3 found in /usr/local"
+        echo "SDL3 library files:"
+        ls -la /opt/homebrew/lib/libSDL3*
         
     - name: Download premake5
       run: |
@@ -29,6 +31,7 @@ jobs:
         
     - name: Generate Makefiles
       run: |
+        echo "Generating Makefiles..."
         ./premake5 gmake2
         echo "Generated files:"
         ls -la
@@ -42,6 +45,12 @@ jobs:
         echo "Building with verbose output to see linker command:"
         make -j$(sysctl -n hw.ncpu) config=debug_arm64 VERBOSE=1
         
+        echo "Build exit code: $?"
+        if [ $? -ne 0 ]; then
+          echo "Build failed with exit code $?"
+          exit $?
+        fi
+        
     - name: List build output
       run: |
         echo "Build directory contents:"
@@ -50,6 +59,9 @@ jobs:
         ls -la Build/debug_arm64-macosx-ARM64/ || echo "ARM64 build directory not found"
         echo "Looking for x64 build output:"
         ls -la Build/debug_x64-macosx-x64/ || echo "x64 build directory not found"
+        
+        echo "Searching for all executables:"
+        find Build/ -name "Test" -o -name "Sandbox" -o -name "*.exe" 2>/dev/null || echo "No executables found"
         
     - name: Run tests
       run: |

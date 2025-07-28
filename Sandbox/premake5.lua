@@ -73,6 +73,21 @@ project "Sandbox"
             "/opt/homebrew/lib"
         }
 
+        links
+        {
+            "SDL3",
+            "Cocoa.framework",
+            "IOKit.framework",
+            "CoreAudio.framework",
+            "AudioToolbox.framework",
+            "ForceFeedback.framework",
+            "Carbon.framework",
+            "CoreVideo.framework",
+            "AVFoundation.framework",
+            "Metal.framework",
+            "QuartzCore.framework"
+        }
+
         filter "architecture:ARM64"
             defines
             {
