@@ -176,9 +176,9 @@ jobs:
         echo "All make targets (configurations):"
         make -qp | grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" | grep -v "^Makefile:" | head -30 || echo "No targets found"
         echo "Testing specific configuration targets:"
-        make -n config=Debug 2>&1 | head -10 || echo "Debug target not found"
-        make -n config=Release 2>&1 | head -10 || echo "Release target not found"
-        make -n config=Dist 2>&1 | head -10 || echo "Dist target not found"
+        make -n config=debug_x64 2>&1 | head -10 || echo "Debug target not found"
+        make -n config=release_x64 2>&1 | head -10 || echo "Release target not found"
+        make -n config=dist_x64 2>&1 | head -10 || echo "Dist target not found"
         echo "Looking for configuration variables in Makefile:"
         grep -i "config.*=" Makefile | head -10 || echo "No config variables found"
         echo "Looking for CONFIG variable usage:"
@@ -195,6 +195,7 @@ jobs:
         echo "Building with verbose output..."
         echo "Available configurations from premake5.lua: Debug, Release, Dist"
         echo "Available platforms from premake5.lua: x64, ARM64"
+        echo "Generated Makefile configurations: debug_x64, debug_arm64, release_x64, release_arm64, dist_x64, dist_arm64"
         echo "Checking available make targets:"
         make -qp | grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" | grep -v "^Makefile:" | head -20
         echo "=== AVAILABLE CONFIGURATIONS ==="
@@ -208,22 +209,30 @@ jobs:
         grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" Makefile | grep -v "Makefile" | head -20
         echo "=== END MAKEFILE ANALYSIS ==="
         echo "Trying Debug configuration..."
-        make -j$(nproc) config=Debug VERBOSE=1
+        make -j$(nproc) config=debug_x64 VERBOSE=1
         
         echo "Build exit code: $?"
         if [ $? -ne 0 ]; then
           echo "Build failed with exit code $?"
-          echo "Trying to build projects directly..."
-          make -j$(nproc) Limitless VERBOSE=1
+          echo "Trying Release configuration..."
+          make -j$(nproc) config=release_x64 VERBOSE=1
           if [ $? -ne 0 ]; then
-            echo "Limitless build failed, trying Sandbox..."
-            make -j$(nproc) Sandbox VERBOSE=1
+            echo "Release build failed, trying Dist configuration..."
+            make -j$(nproc) config=dist_x64 VERBOSE=1
             if [ $? -ne 0 ]; then
-              echo "Sandbox build failed, trying Test..."
-              make -j$(nproc) Test VERBOSE=1
+              echo "All configuration builds failed, trying to build projects directly..."
+              make -j$(nproc) Limitless VERBOSE=1
               if [ $? -ne 0 ]; then
-                echo "All build attempts failed"
-                exit 1
+                echo "Limitless build failed, trying Sandbox..."
+                make -j$(nproc) Sandbox VERBOSE=1
+                if [ $? -ne 0 ]; then
+                  echo "Sandbox build failed, trying Test..."
+                  make -j$(nproc) Test VERBOSE=1
+                  if [ $? -ne 0 ]; then
+                    echo "All build attempts failed"
+                    exit 1
+                  fi
+                fi
               fi
             fi
           fi
