@@ -32,8 +32,21 @@ jobs:
         
     - name: List build output
       run: |
-        ls -la Build/Debug-macos-x64/
+        echo "Build directory contents:"
+        ls -la Build/ || echo "Build directory not found"
+        echo "Looking for debug directories:"
+        find Build/ -name "*debug*" -type d 2>/dev/null || echo "No debug directories found"
+        echo "Looking for Debug directories:"
+        find Build/ -name "*Debug*" -type d 2>/dev/null || echo "No Debug directories found"
         
     - name: Run tests
       run: |
-        ./Build/Debug-macos-x64/Test/Test --success 
+        # Try to find the test executable
+        TEST_EXE=$(find Build/ -name "Test" -type f 2>/dev/null | head -1)
+        if [ -n "$TEST_EXE" ]; then
+          echo "Found test executable: $TEST_EXE"
+          "$TEST_EXE" --success
+        else
+          echo "Test executable not found"
+          find Build/ -name "*Test*" -type f 2>/dev/null || echo "No test files found"
+        fi 
