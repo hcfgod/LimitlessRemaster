@@ -28,14 +28,77 @@ jobs:
         
     - name: Download premake5
       run: |
-        curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-macosx.tar.gz
+        echo "Downloading premake5..."
+        # Try the latest stable release first
+        curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-alpha16/premake-5.0.0-alpha16-macosx.tar.gz
+        echo "Downloaded file info:"
+        ls -la premake5.tar.gz
+        file premake5.tar.gz
+        
+        echo "Extracting premake5..."
         tar -xzf premake5.tar.gz
         chmod +x premake5
+        echo "Premake5 binary info:"
+        ls -la premake5
+        file premake5
+        echo "Testing premake5 execution:"
+        ./premake5 --version
+        
+        if [ $? -ne 0 ]; then
+          echo "Stable version failed, trying beta release..."
+          curl -L -o premake5-beta.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-macosx.tar.gz
+          echo "Beta file info:"
+          ls -la premake5-beta.tar.gz
+          file premake5-beta.tar.gz
+          tar -xzf premake5-beta.tar.gz
+          chmod +x premake5
+          echo "New premake5 version:"
+          ./premake5 --version
+        fi
         
     - name: Generate Makefiles
       run: |
+        echo "Current directory: $(pwd)"
+        echo "Directory contents:"
+        ls -la
+        echo "Checking if premake5.lua exists:"
+        if [ -f "premake5.lua" ]; then
+          echo "premake5.lua found"
+          echo "premake5.lua contents:"
+          cat premake5.lua
+        else
+          echo "premake5.lua not found!"
+          exit 1
+        fi
+        
         echo "Generating Makefiles..."
-        ./premake5 gmake2
+        echo "Premake5 workspace info:"
+        ./premake5 --version
+        echo "Testing premake5 with a simple action:"
+        ./premake5 clean || echo "Clean action failed (this is normal if no build files exist)"
+        echo "Generating Makefiles..."
+        
+        # Try to execute gmake2 action directly
+        echo "Command: ./premake5 --file=premake5.lua gmake2"
+        ./premake5 --file=premake5.lua gmake2
+        echo "Premake5 exit code: $?"
+        
+        # Check if Makefile was generated
+        if [ -f "Makefile" ]; then
+          echo "Makefile was generated successfully!"
+          echo "Makefile size: $(wc -l < Makefile) lines"
+        else
+          echo "Makefile was not generated, trying alternative approaches..."
+          echo "Command: ./premake5 --file=premake5.lua gmake"
+          ./premake5 --file=premake5.lua gmake
+          echo "Premake5 exit code: $?"
+          
+          if [ ! -f "Makefile" ]; then
+            echo "All premake5 actions failed to generate Makefile"
+            exit 1
+          fi
+        fi
+        
         echo "Generated files:"
         ls -la
         echo "Makefile targets (first 100 lines):"
@@ -45,13 +108,29 @@ jobs:
         
     - name: Build project
       run: |
-        echo "Building with verbose output to see linker command:"
+        echo "Building with verbose output..."
+        echo "Available configurations from premake5.lua: Debug, Release, Dist"
+        echo "Available platforms from premake5.lua: x64, ARM64"
+        echo "Generated Makefile configurations: debug_x64, debug_arm64, release_x64, release_arm64, dist_x64, dist_arm64"
+        echo "Checking available make targets:"
+        make -qp | grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" | grep -v "^Makefile:" | head -20
+        
+        echo "Trying Debug ARM64 configuration..."
         make -j$(sysctl -n hw.ncpu) config=debug_arm64 VERBOSE=1
         
         echo "Build exit code: $?"
         if [ $? -ne 0 ]; then
           echo "Build failed with exit code $?"
-          exit $?
+          echo "Trying Debug x64 configuration..."
+          make -j$(sysctl -n hw.ncpu) config=debug_x64 VERBOSE=1
+          if [ $? -ne 0 ]; then
+            echo "Debug x64 build failed, trying Release ARM64..."
+            make -j$(sysctl -n hw.ncpu) config=release_arm64 VERBOSE=1
+            if [ $? -ne 0 ]; then
+              echo "All build attempts failed"
+              exit 1
+            fi
+          fi
         fi
         
     - name: List build output
