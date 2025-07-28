@@ -1,0 +1,57 @@
+name: Test Linux Build
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  test-linux:
+    name: Test Linux Build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential g++ make
+        
+    - name: Download premake5
+      run: |
+        curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
+        tar -xzf premake5.tar.gz
+        chmod +x premake5
+        
+    - name: Generate Makefiles
+      run: |
+        ./premake5 gmake2
+        echo "Generated files:"
+        ls -la
+        echo "Makefile targets (first 100 lines):"
+        head -100 Makefile | grep -E "^[a-zA-Z]" || echo "No targets found in first 100 lines"
+        
+    - name: Build project
+      run: |
+        make -j$(nproc) config=debug
+        
+    - name: List build output
+      run: |
+        echo "Build directory contents:"
+        ls -la Build/ || echo "Build directory not found"
+        echo "Looking for debug directories:"
+        find Build/ -name "*debug*" -type d 2>/dev/null || echo "No debug directories found"
+        echo "Looking for Debug directories:"
+        find Build/ -name "*Debug*" -type d 2>/dev/null || echo "No Debug directories found"
+        
+    - name: Run tests
+      run: |
+        # Try to find the test executable
+        TEST_EXE=$(find Build/ -name "Test" -type f 2>/dev/null | head -1)
+        if [ -n "$TEST_EXE" ]; then
+          echo "Found test executable: $TEST_EXE"
+          "$TEST_EXE" --success
+        else
+          echo "Test executable not found"
+          find Build/ -name "*Test*" -type f 2>/dev/null || echo "No test files found"
+        fi 

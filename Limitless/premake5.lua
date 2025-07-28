@@ -41,6 +41,15 @@ project "Limitless"
             "LT_PLATFORM_MAC"
         }
 
+    filter "system:linux"
+        cppdialect "C++20"
+        staticruntime "On"
+
+        defines
+        {
+            "LT_PLATFORM_LINUX"
+        }
+
     filter "configurations:Debug"
         defines "LT_DEBUG"
         runtime "Debug"
