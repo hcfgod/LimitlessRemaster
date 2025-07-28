@@ -1,7 +1,10 @@
 name: Test Linux Build
 
 on:
-  workflow_dispatch:  # Manual trigger only
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
 
 jobs:
   test-linux:
@@ -21,7 +24,7 @@ jobs:
         sudo apt-get install -y libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev
         sudo apt-get install -y libdbus-1-dev libudev-dev libibus-1.0-dev
         sudo apt-get install -y libdrm-dev libgbm-dev
-        sudo apt-get install -y libwayland-dev libxkbcommon-dev libwayland-egl1-mesa-dev
+        sudo apt-get install -y libwayland-dev libxkbcommon-dev
         
     - name: Build SDL3 from source
       run: |
