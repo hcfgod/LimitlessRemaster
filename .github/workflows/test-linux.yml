@@ -46,6 +46,7 @@ jobs:
         
     - name: Download premake5
       run: |
+        echo "Downloading premake5..."
         curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
         tar -xzf premake5.tar.gz
         chmod +x premake5
@@ -54,6 +55,16 @@ jobs:
         file premake5
         echo "Testing premake5 execution:"
         ./premake5 --version
+        
+        echo "Trying alternative premake5 version if current fails..."
+        if ! ./premake5 gmake2 >/dev/null 2>&1; then
+          echo "Current version failed, trying stable release..."
+          curl -L -o premake5-stable.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-alpha16/premake-5.0.0-alpha16-linux.tar.gz
+          tar -xzf premake5-stable.tar.gz
+          chmod +x premake5
+          echo "New premake5 version:"
+          ./premake5 --version
+        fi
         
     - name: Generate Makefiles
       run: |
@@ -82,17 +93,37 @@ jobs:
         ./premake5 --version
         echo "Available premake5 actions:"
         ./premake5 --help
+        echo "Testing premake5 with a simple action:"
+        ./premake5 clean || echo "Clean action failed (this is normal if no build files exist)"
         echo "Generating Makefiles..."
         echo "Running premake5 with verbose output:"
         set -e  # Exit on any error
-        ./premake5 --verbose gmake2 || {
+        echo "Command: ./premake5 --verbose gmake2"
+        ./premake5 --verbose gmake2
+        echo "Premake5 exit code: $?"
+        
+        if [ $? -ne 0 ]; then
           echo "Premake5 failed with exit code $?"
           echo "Trying without verbose flag:"
-          ./premake5 gmake2 || {
+          echo "Command: ./premake5 gmake2"
+          ./premake5 gmake2
+          echo "Premake5 exit code: $?"
+          
+          if [ $? -ne 0 ]; then
             echo "Premake5 failed again with exit code $?"
-            exit 1
-          }
-        }
+            echo "Trying gmake action (older version):"
+            echo "Command: ./premake5 gmake"
+            ./premake5 gmake
+            echo "Premake5 exit code: $?"
+            
+            if [ $? -ne 0 ]; then
+              echo "All premake5 actions failed"
+              echo "Trying to list available actions:"
+              ./premake5 --help | grep -A 20 "ACTIONS"
+              exit 1
+            fi
+          fi
+        fi
         echo "Generated files:"
         ls -la
         echo "Makefile targets (first 100 lines):"
