@@ -49,16 +49,50 @@ jobs:
         curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
         tar -xzf premake5.tar.gz
         chmod +x premake5
+        echo "Premake5 binary info:"
+        ls -la premake5
+        file premake5
+        echo "Testing premake5 execution:"
+        ./premake5 --version
         
     - name: Generate Makefiles
       run: |
+        echo "Current directory: $(pwd)"
+        echo "Directory contents:"
+        ls -la
+        echo "Checking if premake5.lua exists:"
+        if [ -f "premake5.lua" ]; then
+          echo "premake5.lua found"
+          echo "premake5.lua contents:"
+          cat premake5.lua
+          echo "Checking sub-project premake5.lua files:"
+          for file in */premake5.lua; do
+            if [ -f "$file" ]; then
+              echo "Found: $file"
+            else
+              echo "Missing: $file"
+            fi
+          done
+        else
+          echo "premake5.lua not found!"
+          exit 1
+        fi
         echo "Generating Makefiles..."
         echo "Premake5 workspace info:"
         ./premake5 --version
         echo "Available premake5 actions:"
         ./premake5 --help
         echo "Generating Makefiles..."
-        ./premake5 gmake2
+        echo "Running premake5 with verbose output:"
+        set -e  # Exit on any error
+        ./premake5 --verbose gmake2 || {
+          echo "Premake5 failed with exit code $?"
+          echo "Trying without verbose flag:"
+          ./premake5 gmake2 || {
+            echo "Premake5 failed again with exit code $?"
+            exit 1
+          }
+        }
         echo "Generated files:"
         ls -la
         echo "Makefile targets (first 100 lines):"
