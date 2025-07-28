@@ -47,7 +47,8 @@ jobs:
     - name: Download premake5
       run: |
         echo "Downloading premake5..."
-        curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
+        # Try the latest stable release first
+        curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-alpha16/premake-5.0.0-alpha16-linux.tar.gz
         tar -xzf premake5.tar.gz
         chmod +x premake5
         echo "Premake5 binary info:"
@@ -63,9 +64,9 @@ jobs:
         echo "Premake5 gmake2 exit code: $?"
         
         if [ $? -ne 0 ]; then
-          echo "Current version failed, trying stable release..."
-          curl -L -o premake5-stable.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-alpha16/premake-5.0.0-alpha16-linux.tar.gz
-          tar -xzf premake5-stable.tar.gz
+          echo "Stable version failed, trying beta release..."
+          curl -L -o premake5-beta.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
+          tar -xzf premake5-beta.tar.gz
           chmod +x premake5
           echo "New premake5 version:"
           ./premake5 --version
@@ -107,6 +108,13 @@ jobs:
         ./premake5 --file=premake5.lua gmake2
         echo "Premake5 exit code: $?"
         
+        # If gmake2 fails, try gmake
+        if [ $? -ne 0 ]; then
+          echo "gmake2 failed, trying gmake..."
+          ./premake5 --file=premake5.lua gmake
+          echo "Premake5 gmake exit code: $?"
+        fi
+        
         # Check if Makefile was generated
         if [ -f "Makefile" ]; then
           echo "Makefile was generated successfully!"
@@ -144,6 +152,14 @@ jobs:
         grep -i "release" Makefile | head -10 || echo "No release configurations found"
         echo "All make targets (configurations):"
         make -qp | grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" | grep -v "^Makefile:" | head -30 || echo "No targets found"
+        echo "Testing specific configuration targets:"
+        make -n config=Debug 2>&1 | head -10 || echo "Debug target not found"
+        make -n config=Release 2>&1 | head -10 || echo "Release target not found"
+        make -n config=Dist 2>&1 | head -10 || echo "Dist target not found"
+        echo "Looking for configuration variables in Makefile:"
+        grep -i "config.*=" Makefile | head -10 || echo "No config variables found"
+        echo "Looking for CONFIG variable usage:"
+        grep -i "CONFIG" Makefile | head -10 || echo "No CONFIG usage found"
         echo "Full Makefile content for debugging:"
         cat Makefile
         
@@ -152,17 +168,23 @@ jobs:
         echo "Building with verbose output..."
         echo "Available configurations from premake5.lua: Debug, Release, Dist"
         echo "Available platforms from premake5.lua: x64, ARM64"
-        echo "Trying Debug-linux-x64 configuration..."
-        make -j$(nproc) config=Debug-linux-x64 VERBOSE=1
+        echo "Checking available make targets:"
+        make -qp | grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" | grep -v "^Makefile:" | head -20
+        echo "=== AVAILABLE CONFIGURATIONS ==="
+        echo "All make targets (configurations):"
+        make -qp | grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" | grep -v "^Makefile:" | sort
+        echo "=== END AVAILABLE CONFIGURATIONS ==="
+        echo "Trying Debug configuration..."
+        make -j$(nproc) config=Debug VERBOSE=1
         
         echo "Build exit code: $?"
         if [ $? -ne 0 ]; then
           echo "Build failed with exit code $?"
-          echo "Trying alternative configuration format..."
-          make -j$(nproc) config=Debug_x64 VERBOSE=1
+          echo "Trying Release configuration..."
+          make -j$(nproc) config=Release VERBOSE=1
           if [ $? -ne 0 ]; then
-            echo "Alternative format also failed, trying Debug configuration only..."
-            make -j$(nproc) config=Debug VERBOSE=1
+            echo "Release also failed, trying Dist configuration..."
+            make -j$(nproc) config=Dist VERBOSE=1
             if [ $? -ne 0 ]; then
               echo "All build attempts failed"
               exit 1
