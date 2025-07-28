@@ -1,0 +1,29 @@
+name: Test macOS Build
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  test-macos:
+    name: Test macOS Build
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Generate Xcode project
+      run: |
+        Vendor/Premake/premake5 gmake2
+        
+    - name: Build project
+      run: |
+        make -j$(sysctl -n hw.ncpu) config=debug_x64
+        
+    - name: List build output
+      run: |
+        ls -la Build/Debug-macos-x64/
+        
+    - name: Run tests
+      run: |
+        ./Build/Debug-macos-x64/Test/Test --success 
