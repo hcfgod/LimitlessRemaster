@@ -46,19 +46,19 @@ jobs:
       run: |
         echo "Build directory contents:"
         ls -la Build/ || echo "Build directory not found"
-        echo "Looking for debug directories:"
-        find Build/ -name "*debug*" -type d 2>/dev/null || echo "No debug directories found"
-        echo "Looking for Debug directories:"
-        find Build/ -name "*Debug*" -type d 2>/dev/null || echo "No Debug directories found"
+        echo "Looking for ARM64 build output:"
+        ls -la Build/Debug-macosx-ARM64/ || echo "ARM64 build directory not found"
+        echo "Looking for x64 build output:"
+        ls -la Build/Debug-macosx-x64/ || echo "x64 build directory not found"
         
     - name: Run tests
       run: |
-        # Try to find the test executable
-        TEST_EXE=$(find Build/ -name "Test" -type f 2>/dev/null | head -1)
+        # Try to find the test executable in ARM64 build
+        TEST_EXE=$(find Build/Debug-macosx-ARM64/ -name "Test" -type f 2>/dev/null | head -1)
         if [ -n "$TEST_EXE" ]; then
           echo "Found test executable: $TEST_EXE"
           "$TEST_EXE" --success
         else
-          echo "Test executable not found"
-          find Build/ -name "*Test*" -type f 2>/dev/null || echo "No test files found"
+          echo "Test executable not found in ARM64 build"
+          find Build/Debug-macosx-ARM64/ -name "*Test*" -type f 2>/dev/null || echo "No test files found in ARM64 build"
         fi 

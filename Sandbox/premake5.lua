@@ -5,8 +5,8 @@ project "Sandbox"
     cppdialect "C++20"
     staticruntime "on"
 
-    targetdir ("../Build/%{cfg.buildcfg}-%{cfg.system}-x64/%{prj.name}")
-    objdir ("../Build/Intermediates/%{cfg.buildcfg}-%{cfg.system}-x64/%{prj.name}")
+    targetdir ("../Build/%{cfg.buildcfg}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
+    objdir ("../Build/Intermediates/%{cfg.buildcfg}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
 
     files
     {
@@ -84,11 +84,6 @@ project "Sandbox"
             {
                 "LT_PLATFORM_MAC_X64"
             }
-
-        links
-        {
-            "SDL3"
-        }
 
     filter "system:linux"
         cppdialect "C++20"
