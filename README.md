@@ -6,16 +6,12 @@ A modern, enterprise-grade C++ engine with comprehensive advanced systems, exten
 
 ### **Advanced Systems Added:**
 - **🔧 Configuration Management System** - Centralized JSON-based configuration with validation and hot reloading
-- **📦 Resource Management System** - RAII-based resource handling with automatic cleanup and caching
 - **📡 Event System** - Observer pattern implementation with priority handling and filtering
-- **🔌 Plugin System** - Modular architecture for engine extensions and dynamic loading
-- **📊 Advanced Profiling System** - Detailed performance tracking with memory profiling and real-time monitoring
-- **💾 Serialization System** - Save/load functionality with JSON/binary formats and version compatibility
+monitoring
 - **🪟 Extended Window API** - Comprehensive window management with advanced features and cross-platform support
 
 ### **Core Improvements:**
 - **🛡️ Enhanced Memory Safety** - Smart pointers throughout, RAII patterns, exception safety
-- **⚡ Performance Optimizations** - Advanced profiling, memory management, async operations
 - **🔧 Better Architecture** - Modular design, loose coupling, configuration-driven systems
 - **📚 Comprehensive Documentation** - Detailed guides for all systems and best practices
 - **🌐 Cross-Platform Excellence** - Native support for Windows, macOS, and Linux with platform-specific optimizations
@@ -50,11 +46,7 @@ LimitlessRemaster/
 
 ### **Advanced Systems**
 - **Configuration Management** - Type-safe configuration with validation, hot reloading, and environment/command-line support
-- **Resource Management** - Automatic resource lifecycle management with caching and async loading
 - **Event System** - Event-driven architecture with priority handling, filtering, and deferred processing
-- **Plugin System** - Modular extensions with dynamic loading and hot-swapping
-- **Profiling System** - Detailed performance analysis, memory tracking, and optimization tools
-- **Serialization** - Save/load functionality with version compatibility and multiple formats
 
 ### **Extended Window API**
 - **Comprehensive Window Management** - Full control over window properties, state, and behavior
@@ -148,11 +140,7 @@ public:
         // Configure graphics
         config.SetValue("graphics.vsync", true);
         config.SetValue("graphics.antialiasing", 4);
-        
-        // Load resources
-        auto& resourceManager = GetResourceManager();
-        auto texture = resourceManager.Load<Limitless::Resources::Texture>("textures/player.png");
-        
+    
         // Register event handlers
         auto& eventSystem = GetEventSystem();
         eventSystem.AddCallback(Limitless::EventType::KeyPressed, [this](Limitless::Event& event) {
@@ -176,14 +164,10 @@ public:
     {
         // Process events
         GetEventSystem().ProcessEvents();
-        
-        // Profile frame
-        LT_PROFILE_FRAME();
     }
     
     void OnRender() override
     {
-        LT_PROFILE_SCOPE("Application Render");
         // Rendering code
     }
 };
@@ -271,24 +255,15 @@ window->GetMaximumSize(maxWidth, maxHeight);
 ## 📚 **Documentation**
 
 ### **System Guides**
-- **[Advanced Systems Guide](ADVANCED_SYSTEMS_GUIDE.md)** - Comprehensive guide to all advanced systems
 - **[Logging and Error Handling Guide](LOGGING_GUIDE.md)** - Detailed logging system documentation
 - **[Configuration Management](docs/CONFIGURATION_GUIDE.md)** - Configuration system usage and best practices
-- **[Resource Management](docs/RESOURCE_GUIDE.md)** - Resource loading and management patterns
 - **[Event System](docs/EVENT_GUIDE.md)** - Event-driven architecture and patterns
-- **[Plugin Development](docs/PLUGIN_GUIDE.md)** - Creating and managing plugins
-- **[Profiling Guide](docs/PROFILING_GUIDE.md)** - Performance analysis and optimization
-- **[Serialization Guide](docs/SERIALIZATION_GUIDE.md)** - Save/load functionality and data persistence
 - **[Window API Guide](docs/WINDOW_API_GUIDE.md)** - Comprehensive window management and advanced features
 
 ### **API Reference**
 - **[Core API](docs/API/CORE.md)** - Core system interfaces and classes
 - **[Configuration API](docs/API/CONFIG.md)** - Configuration management interfaces
-- **[Resource API](docs/API/RESOURCE.md)** - Resource management interfaces
 - **[Event API](docs/API/EVENT.md)** - Event system interfaces
-- **[Plugin API](docs/API/PLUGIN.md)** - Plugin system interfaces
-- **[Profiling API](docs/API/PROFILER.md)** - Profiling system interfaces
-- **[Serialization API](docs/API/SERIALIZATION.md)** - Serialization interfaces
 - **[Window API](docs/API/WINDOW.md)** - Extended window management interfaces
 
 ## 🔧 **Continuous Integration**
@@ -332,43 +307,24 @@ This project includes comprehensive GitHub Actions CI/CD workflows:
 
 ### **Game Development**
 - **Advanced Window Management**: Full control over window properties, multi-monitor support
-- **Resource Management**: Efficient texture, shader, and model loading with caching
 - **Event System**: Input handling and game logic communication with filtering
 - **Configuration**: Game settings and user preferences with hot reloading
-- **Profiling**: Performance optimization and debugging with real-time metrics
-- **Serialization**: Save games and level data with version compatibility
 
 ### **Application Development**
-- **Plugin System**: Modular application extensions with hot-swapping
 - **Configuration**: Application settings and user preferences with validation
 - **Logging**: Comprehensive application logging with rotation and filtering
-- **Profiling**: Performance monitoring and optimization with detailed analysis
-- **Serialization**: Data persistence and exchange with multiple formats
 - **Window Management**: Professional window behavior and user experience
-
-### **Engine Development**
-- **Modular Architecture**: Extensible engine design with plugin support
-- **Cross-Platform**: Consistent API across platforms with native optimizations
-- **Performance**: Optimized for high-performance applications with profiling
-- **Debugging**: Comprehensive debugging and profiling tools with real-time monitoring
-- **Documentation**: Detailed guides and examples for all systems and APIs
 
 ## 🚀 **Performance**
 
 ### **Optimizations**
 - **Memory Management**: RAII patterns and smart pointers with automatic cleanup
-- **Resource Caching**: Automatic resource lifecycle management with async loading
 - **Event Filtering**: Efficient event processing with priority handling
-- **Async Operations**: Non-blocking resource loading and processing
-- **Profiling**: Real-time performance monitoring with detailed metrics
 - **Window Management**: Optimized window operations with hardware acceleration
 
 ### **Benchmarks**
 - **Configuration Access**: < 1μs per access with caching
 - **Event Dispatch**: < 10μs per event with filtering
-- **Resource Loading**: Async with progress tracking and caching
-- **Memory Usage**: Automatic cleanup and monitoring with leak detection
-- **Startup Time**: Optimized initialization sequence with parallel loading
 - **Window Operations**: Hardware-accelerated window management
 
 ## 🤝 **Contributing**
