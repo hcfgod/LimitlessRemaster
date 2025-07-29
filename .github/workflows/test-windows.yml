@@ -25,7 +25,7 @@ jobs:
           New-Item -ItemType Directory -Path "Vendor\Premake" -Force
         }
         
-        # Try the latest beta version that supports VS2022
+        # Download the latest beta version that supports VS2022
         $premakeUrl = "https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip"
         $premakeZip = "Vendor\Premake\premake5.zip"
         $premakeDir = "Vendor\Premake"
@@ -37,10 +37,6 @@ jobs:
         echo "Premake5 downloaded and extracted"
         Vendor\Premake\premake5.exe --version
         
-        # Test if vs2022 action is supported
-        echo "Testing vs2022 action support..."
-        Vendor\Premake\premake5.exe --help | Select-String "vs2022" || echo "vs2022 not found in help, trying vs2019"
-      
     - name: Generate Visual Studio solution
       run: |
         echo "Generating Visual Studio solution..."
