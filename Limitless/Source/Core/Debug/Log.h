@@ -180,3 +180,113 @@ private:
         } \
     } while(0)
 #endif
+
+// Conditional logging macros (for application/sandbox use)
+#ifndef LT_TRACE_IF
+#define LT_TRACE_IF(condition, ...) \
+    do { \
+        if ((condition) && ::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetClientLogger()) { \
+            ::Limitless::Log::GetClientLogger()->trace(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_DBG_IF
+#define LT_DBG_IF(condition, ...) \
+    do { \
+        if ((condition) && ::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetClientLogger()) { \
+            ::Limitless::Log::GetClientLogger()->debug(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_INFO_IF
+#define LT_INFO_IF(condition, ...) \
+    do { \
+        if ((condition) && ::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetClientLogger()) { \
+            ::Limitless::Log::GetClientLogger()->info(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_WARN_IF
+#define LT_WARN_IF(condition, ...) \
+    do { \
+        if ((condition) && ::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetClientLogger()) { \
+            ::Limitless::Log::GetClientLogger()->warn(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_ERROR_IF
+#define LT_ERROR_IF(condition, ...) \
+    do { \
+        if ((condition) && ::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetClientLogger()) { \
+            ::Limitless::Log::GetClientLogger()->error(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_CRITICAL_IF
+#define LT_CRITICAL_IF(condition, ...) \
+    do { \
+        if ((condition) && ::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetClientLogger()) { \
+            ::Limitless::Log::GetClientLogger()->critical(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+// Conditional core logging macros (for engine internal use)
+#ifndef LT_CORE_TRACE_IF
+#define LT_CORE_TRACE_IF(condition, ...) \
+    do { \
+        if ((condition) && ::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetCoreLogger()) { \
+            ::Limitless::Log::GetCoreLogger()->trace(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_CORE_DEBUG_IF
+#define LT_CORE_DEBUG_IF(condition, ...) \
+    do { \
+        if ((condition) && ::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetCoreLogger()) { \
+            ::Limitless::Log::GetCoreLogger()->debug(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_CORE_INFO_IF
+#define LT_CORE_INFO_IF(condition, ...) \
+    do { \
+        if ((condition) && ::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetCoreLogger()) { \
+            ::Limitless::Log::GetCoreLogger()->info(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_CORE_WARN_IF
+#define LT_CORE_WARN_IF(condition, ...) \
+    do { \
+        if ((condition) && ::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetCoreLogger()) { \
+            ::Limitless::Log::GetCoreLogger()->warn(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_CORE_ERROR_IF
+#define LT_CORE_ERROR_IF(condition, ...) \
+    do { \
+        if ((condition) && ::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetCoreLogger()) { \
+            ::Limitless::Log::GetCoreLogger()->error(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_CORE_CRITICAL_IF
+#define LT_CORE_CRITICAL_IF(condition, ...) \
+    do { \
+        if ((condition) && ::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetCoreLogger()) { \
+            ::Limitless::Log::GetCoreLogger()->critical(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif

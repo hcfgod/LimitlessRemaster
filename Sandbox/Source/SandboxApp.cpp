@@ -42,6 +42,25 @@ bool SandboxApp::Initialize()
     LT_DBG("Window title: {}", config.GetValue<std::string>(Limitless::Config::Window::TITLE, "Default"));
     LT_DBG("Max threads: {}", config.GetValue<int>(Limitless::Config::System::MAX_THREADS, 4));
     
+    // Demonstrate conditional logging
+    bool debugMode = config.GetValue<std::string>(Limitless::Config::Logging::LEVEL) == "debug";
+    LT_DBG_IF(debugMode, "Debug mode is enabled - showing detailed information");
+    LT_INFO_IF(!debugMode, "Debug mode is disabled - showing basic information only");
+    
+    // Test conditional logging with different conditions
+    int maxThreads = config.GetValue<int>(Limitless::Config::System::MAX_THREADS, 4);
+    LT_WARN_IF(maxThreads > 8, "High thread count detected: {} threads", maxThreads);
+    LT_ERROR_IF(maxThreads == 0, "Invalid thread count: 0 threads");
+    
+    // Test conditional logging with complex conditions
+    bool isFullscreen = config.GetValue<bool>(Limitless::Config::Window::FULLSCREEN, false);
+    uint32_t width = config.GetValue<uint32_t>(Limitless::Config::Window::WIDTH, 800);
+    uint32_t height = config.GetValue<uint32_t>(Limitless::Config::Window::HEIGHT, 600);
+    
+    LT_INFO_IF(isFullscreen && (width < 1920 || height < 1080), 
+               "Fullscreen mode with low resolution: {}x{}", width, height);
+    LT_DBG_IF(!isFullscreen, "Windowed mode: {}x{}", width, height);
+    
     return true;
 }
 
