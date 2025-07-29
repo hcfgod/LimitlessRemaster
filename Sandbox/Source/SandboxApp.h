@@ -3,19 +3,21 @@
 #define LT_ENABLE_ENTRYPOINT
 #include "Limitless.h"
 
-class SandboxApp : public Limitless::Application
+namespace Limitless
 {
-public:
-	SandboxApp()
+	class SandboxApp : public Application
 	{
-		// Initialization code for the sandbox application
-	}
-	virtual ~SandboxApp()
-	{
-		// Cleanup code for the sandbox application
-	}
+	public:
+		SandboxApp();
+		virtual ~SandboxApp();
 
-	// Override the virtual methods from Application
-	bool Initialize() override;
-	void Shutdown() override;
-};
+		// Override the virtual methods from Application
+		bool Initialize() override;
+		void Shutdown() override;
+
+	private:
+		// Demo methods
+		void DemonstratePlatformDetection();
+		void DemonstrateErrorHandling();
+	};
+}

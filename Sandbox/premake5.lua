@@ -63,7 +63,8 @@ project "Sandbox"
 
         buildoptions
         {
-            "/utf-8"
+            "/utf-8",
+            "/std:c++20"
         }
 
     filter "system:macosx"
@@ -73,6 +74,11 @@ project "Sandbox"
         defines
         {
             "LT_PLATFORM_MAC"
+        }
+
+        buildoptions
+        {
+            "-std=c++20"
         }
 
         libdirs
@@ -114,6 +120,11 @@ project "Sandbox"
         defines
         {
             "LT_PLATFORM_LINUX"
+        }
+
+        buildoptions
+        {
+            "-std=c++20"
         }
 
         libdirs

@@ -1,70 +1,274 @@
 #include "SandboxApp.h"
-#include "Limitless.h"
-#include <thread>
+#include "Core/Debug/Log.h"
+#include "Core/Error.h"
+#include "Platform/Platform.h"
+#include <iostream>
 
-// Define CreateApplication in global namespace as expected by EntryPoint.h
+namespace Limitless
+{
+	SandboxApp::SandboxApp()
+	{
+		LT_INFO("SandboxApp Constructor");
+	}
+
+	SandboxApp::~SandboxApp()
+	{
+		LT_INFO("SandboxApp Destructor");
+	}
+
+	bool SandboxApp::Initialize()
+	{
+		LT_INFO("SandboxApp Initialize");
+		
+		// Demonstrate platform detection
+		DemonstratePlatformDetection();
+		
+		// Demonstrate error handling
+		DemonstrateErrorHandling();
+		
+		return true;
+	}
+
+	void SandboxApp::Shutdown()
+	{
+		LT_INFO("SandboxApp Shutdown");
+	}
+
+	void SandboxApp::DemonstratePlatformDetection()
+	{
+		LT_INFO("=== Platform Detection Demo ===");
+		
+		const auto& platformInfo = PlatformDetection::GetPlatformInfo();
+		
+		LT_INFO("Platform: {} ({})", platformInfo.platformName, PlatformDetection::GetPlatformString());
+		LT_INFO("Architecture: {} ({})", platformInfo.architectureName, PlatformDetection::GetArchitectureString());
+		LT_INFO("Compiler: {} {} ({})", platformInfo.compilerName, platformInfo.compilerVersion, PlatformDetection::GetCompilerString());
+		LT_INFO("OS: {} {} ({})", platformInfo.osName, platformInfo.osVersion, PlatformDetection::GetOSString());
+		
+		LT_INFO("System Capabilities:");
+		LT_INFO("  CPU Cores: {}", platformInfo.capabilities.cpuCount);
+		LT_INFO("  Total Memory: {} MB", platformInfo.capabilities.totalMemory / (1024 * 1024));
+		LT_INFO("  Available Memory: {} MB", platformInfo.capabilities.availableMemory / (1024 * 1024));
+		
+		LT_INFO("  CPU Features:");
+		LT_INFO("    SSE2: {}", platformInfo.capabilities.hasSSE2 ? "Yes" : "No");
+		LT_INFO("    SSE3: {}", platformInfo.capabilities.hasSSE3 ? "Yes" : "No");
+		LT_INFO("    SSE4.1: {}", platformInfo.capabilities.hasSSE4_1 ? "Yes" : "No");
+		LT_INFO("    SSE4.2: {}", platformInfo.capabilities.hasSSE4_2 ? "Yes" : "No");
+		LT_INFO("    AVX: {}", platformInfo.capabilities.hasAVX ? "Yes" : "No");
+		LT_INFO("    AVX2: {}", platformInfo.capabilities.hasAVX2 ? "Yes" : "No");
+		LT_INFO("    AVX512: {}", platformInfo.capabilities.hasAVX512 ? "Yes" : "No");
+		LT_INFO("    NEON: {}", platformInfo.capabilities.hasNEON ? "Yes" : "No");
+		LT_INFO("    AltiVec: {}", platformInfo.capabilities.hasAltiVec ? "Yes" : "No");
+		
+		LT_INFO("  Graphics APIs:");
+		LT_INFO("    OpenGL: {}", platformInfo.capabilities.hasOpenGL ? "Yes" : "No");
+		LT_INFO("    Vulkan: {}", platformInfo.capabilities.hasVulkan ? "Yes" : "No");
+		LT_INFO("    Metal: {}", platformInfo.capabilities.hasMetal ? "Yes" : "No");
+		LT_INFO("    DirectX: {}", platformInfo.capabilities.hasDirectX ? "Yes" : "No");
+		
+		LT_INFO("Paths:");
+		LT_INFO("  Executable: {}", platformInfo.executablePath);
+		LT_INFO("  Working Directory: {}", platformInfo.workingDirectory);
+		LT_INFO("  User Data: {}", platformInfo.userDataPath);
+		LT_INFO("  Temp: {}", platformInfo.tempPath);
+		LT_INFO("  System: {}", platformInfo.systemPath);
+		
+		// Demonstrate platform-specific checks
+		LT_INFO("Platform Checks:");
+		LT_INFO("  Is Windows: {}", PlatformDetection::IsWindows() ? "Yes" : "No");
+		LT_INFO("  Is macOS: {}", PlatformDetection::IsMacOS() ? "Yes" : "No");
+		LT_INFO("  Is Linux: {}", PlatformDetection::IsLinux() ? "Yes" : "No");
+		LT_INFO("  Is x64: {}", PlatformDetection::IsX64() ? "Yes" : "No");
+		LT_INFO("  Is ARM64: {}", PlatformDetection::IsARM64() ? "Yes" : "No");
+		LT_INFO("  Is MSVC: {}", PlatformDetection::IsMSVC() ? "Yes" : "No");
+		LT_INFO("  Is GCC: {}", PlatformDetection::IsGCC() ? "Yes" : "No");
+		LT_INFO("  Is Clang: {}", PlatformDetection::IsClang() ? "Yes" : "No");
+		
+		// Demonstrate platform utilities
+		LT_INFO("Platform Utilities:");
+		LT_INFO("  Path Separator: '{}'", PlatformUtils::GetPathSeparator());
+		LT_INFO("  Process ID: {}", PlatformUtils::GetCurrentProcessId());
+		LT_INFO("  Thread ID: {}", PlatformUtils::GetCurrentThreadId());
+		LT_INFO("  High Resolution Time: {} μs", PlatformUtils::GetHighResolutionTime());
+		LT_INFO("  System Time: {} ms", PlatformUtils::GetSystemTime());
+		LT_INFO("  Console Available: {}", PlatformUtils::IsConsoleAvailable() ? "Yes" : "No");
+		
+		// Test path utilities
+		std::string testPath = PlatformUtils::JoinPath("C:\\test", "file.txt");
+		LT_INFO("  Join Path: {}", testPath);
+		LT_INFO("  Directory: {}", PlatformUtils::GetDirectoryName(testPath));
+		LT_INFO("  Filename: {}", PlatformUtils::GetFileName(testPath));
+		LT_INFO("  Extension: {}", PlatformUtils::GetFileExtension(testPath));
+		
+		LT_INFO("=== End Platform Detection Demo ===");
+	}
+
+	void SandboxApp::DemonstrateErrorHandling()
+	{
+		LT_INFO("=== Error Handling Demo ===");
+		
+		// Test different error severities
+		LT_INFO("Testing error severities...");
+		
+		try
+		{
+			// Info level error
+			Error infoError(ErrorCode::Cancelled, "Operation was cancelled", std::source_location::current(), ErrorSeverity::Info);
+			infoError.SetFunctionName("DemonstrateErrorHandling");
+			infoError.SetClassName("SandboxApp");
+			infoError.AddContext("TestContext", "InfoLevelTest");
+			Error::LogError(infoError);
+		}
+		catch (const std::exception& e)
+		{
+			LT_ERROR("Unexpected exception: {}", e.what());
+		}
+		
+		try
+		{
+			// Warning level error
+			Error warningError(ErrorCode::FileExists, "File already exists", std::source_location::current(), ErrorSeverity::Warning);
+			warningError.SetFunctionName("DemonstrateErrorHandling");
+			warningError.SetClassName("SandboxApp");
+			warningError.AddContext("TestContext", "WarningLevelTest");
+			Error::LogError(warningError);
+		}
+		catch (const std::exception& e)
+		{
+			LT_ERROR("Unexpected exception: {}", e.what());
+		}
+		
+		try
+		{
+			// Error level error
+			Error errorError(ErrorCode::FileNotFound, "Configuration file not found", std::source_location::current(), ErrorSeverity::Error);
+			errorError.SetFunctionName("DemonstrateErrorHandling");
+			errorError.SetClassName("SandboxApp");
+			errorError.AddContext("TestContext", "ErrorLevelTest");
+			errorError.AddContext("FileName", "config.json");
+			Error::LogError(errorError);
+		}
+		catch (const std::exception& e)
+		{
+			LT_ERROR("Unexpected exception: {}", e.what());
+		}
+		
+		// Test specific error types
+		LT_INFO("Testing specific error types...");
+		
+		try
+		{
+			        SystemError systemError("Failed to open system file", std::source_location::current());
+			systemError.SetSystemErrorCode(ErrorHandling::GetLastSystemError());
+			Error::LogError(systemError);
+		}
+		catch (const std::exception& e)
+		{
+			LT_ERROR("Unexpected exception: {}", e.what());
+		}
+		
+		try
+		{
+			        PlatformError platformError("Platform-specific operation failed", std::source_location::current());
+			platformError.SetFunctionName("DemonstrateErrorHandling");
+			Error::LogError(platformError);
+		}
+		catch (const std::exception& e)
+		{
+			LT_ERROR("Unexpected exception: {}", e.what());
+		}
+		
+		try
+		{
+			        GraphicsError graphicsError("Failed to create graphics context", std::source_location::current());
+			graphicsError.SetFunctionName("DemonstrateErrorHandling");
+			Error::LogError(graphicsError);
+		}
+		catch (const std::exception& e)
+		{
+			LT_ERROR("Unexpected exception: {}", e.what());
+		}
+		
+		// Test Result class
+		LT_INFO("Testing Result class...");
+		
+		// Success result
+		Result<int> successResult(42);
+		LT_INFO("Success result: {}", successResult.GetValue());
+		LT_INFO("Is success: {}", successResult.IsSuccess());
+		
+		// Error result
+		Result<int> errorResult(ErrorCode::FileNotFound, "File not found");
+		LT_INFO("Is failure: {}", errorResult.IsFailure());
+		LT_INFO("Error message: {}", errorResult.GetError().GetErrorMessage());
+		
+		// Safe value access
+		if (int* value = successResult.GetValuePtr())
+		{
+			LT_INFO("Safe value access: {}", *value);
+		}
+		
+		if (int* value = errorResult.GetValuePtr())
+		{
+			LT_INFO("This should not print");
+		}
+		else
+		{
+			LT_INFO("Value pointer is null (expected for error result)");
+		}
+		
+		// Value or default
+		LT_INFO("Value or default (success): {}", successResult.GetValueOr(0));
+		LT_INFO("Value or default (error): {}", errorResult.GetValueOr(0));
+		
+		// Test Try wrapper
+		LT_INFO("Testing Try wrapper...");
+		
+		auto tryResult = ErrorHandling::Try([]() -> int {
+			return 123;
+		});
+		LT_INFO("Try success result: {}", tryResult.GetValue());
+		
+		auto tryErrorResult = ErrorHandling::Try([]() -> int {
+			        throw Error(ErrorCode::InvalidArgument, "Test error from Try wrapper", std::source_location::current());
+		});
+		LT_INFO("Try error result: {}", tryErrorResult.GetError().GetErrorMessage());
+		
+		// Test assertions and verifications
+		LT_INFO("Testing assertions and verifications...");
+		
+		// This should not throw
+		LT_VERIFY(true, "This verification should pass");
+		LT_INFO("Verification passed");
+		
+		// This should throw
+		try
+		{
+			LT_VERIFY(false, "This verification should fail");
+		}
+		catch (const Error& error)
+		{
+			LT_INFO("Verification failed as expected: {}", error.GetErrorMessage());
+		}
+		
+		// Test error code utilities
+		LT_INFO("Testing error code utilities...");
+		LT_INFO("Error code string: {}", ErrorHandling::GetErrorCodeString(ErrorCode::FileNotFound));
+		LT_INFO("Error code description: {}", ErrorHandling::GetErrorCodeDescription(ErrorCode::FileNotFound));
+		LT_INFO("Error code severity: {}", static_cast<int>(ErrorHandling::GetErrorCodeSeverity(ErrorCode::FileNotFound)));
+		
+		// Test system error utilities
+		LT_INFO("Testing system error utilities...");
+		int lastError = ErrorHandling::GetLastSystemError();
+		LT_INFO("Last system error: {} ({})", lastError, ErrorHandling::GetSystemErrorString(lastError));
+		
+		LT_INFO("=== End Error Handling Demo ===");
+	}
+}
+
+// Define the CreateApplication function that the entry point expects
 Limitless::Application* CreateApplication()
 {
-    return new SandboxApp();
-}
-
-bool SandboxApp::Initialize()
-{
-    LT_INFO("SandboxApp initialized successfully!");
-    LT_INFO("Logging system is now configured from config.json");
-    LT_INFO("Hot reloading is enabled - try changing config.json while the app is running!");
-    
-    // Demonstrate different log levels - these should all be visible with debug level
-    LT_TRACE("This is a trace message - only visible if log level is set to 'trace'");
-    LT_DBG("This is a debug message - only visible if log level is set to 'debug' or lower");
-    LT_INFO("This is an info message - visible with 'info' level or lower");
-    LT_WARN("This is a warning message - visible with 'warn' level or lower");
-    LT_ERROR("This is an error message - visible with 'error' level or lower");
-    
-    // Log some configuration values to demonstrate integration
-    auto& config = Limitless::ConfigManager::GetInstance();
-    LT_INFO("Window configuration: {}x{}", 
-            config.GetValue<int>(Limitless::Config::Window::WIDTH, 1280),
-            config.GetValue<int>(Limitless::Config::Window::HEIGHT, 720));
-    
-    LT_INFO("Window title: {}", config.GetValue<std::string>(Limitless::Config::Window::TITLE, "Default"));
-    LT_INFO("Window fullscreen: {}", config.GetValue<bool>(Limitless::Config::Window::FULLSCREEN, false) ? "enabled" : "disabled");
-    LT_INFO("Window resizable: {}", config.GetValue<bool>(Limitless::Config::Window::RESIZABLE, true) ? "enabled" : "disabled");
-    LT_INFO("Window VSync: {}", config.GetValue<bool>(Limitless::Config::Window::VSYNC, true) ? "enabled" : "disabled");
-    
-    LT_INFO("Logging configuration loaded from config.json");
-    LT_INFO("Log level: {}", config.GetValue<std::string>(Limitless::Config::Logging::LEVEL, "info"));
-    LT_INFO("File logging: {}", config.GetValue<bool>(Limitless::Config::Logging::FILE_ENABLED, true) ? "enabled" : "disabled");
-    LT_INFO("Console logging: {}", config.GetValue<bool>(Limitless::Config::Logging::CONSOLE_ENABLED, true) ? "enabled" : "disabled");
-    
-    // Test configuration changes
-    LT_DBG("Testing configuration access...");
-    LT_DBG("Window title: {}", config.GetValue<std::string>(Limitless::Config::Window::TITLE, "Default"));
-    LT_DBG("Max threads: {}", config.GetValue<int>(Limitless::Config::System::MAX_THREADS, 4));
-    
-    // Demonstrate conditional logging
-    bool debugMode = config.GetValue<std::string>(Limitless::Config::Logging::LEVEL) == "debug";
-    LT_DBG_IF(debugMode, "Debug mode is enabled - showing detailed information");
-    LT_INFO_IF(!debugMode, "Debug mode is disabled - showing basic information only");
-    
-    // Test conditional logging with different conditions
-    int maxThreads = config.GetValue<int>(Limitless::Config::System::MAX_THREADS, 4);
-    LT_WARN_IF(maxThreads > 8, "High thread count detected: {} threads", maxThreads);
-    LT_ERROR_IF(maxThreads == 0, "Invalid thread count: 0 threads");
-    
-    // Test conditional logging with complex conditions
-    bool isFullscreen = config.GetValue<bool>(Limitless::Config::Window::FULLSCREEN, false);
-    uint32_t width = config.GetValue<uint32_t>(Limitless::Config::Window::WIDTH, 800);
-    uint32_t height = config.GetValue<uint32_t>(Limitless::Config::Window::HEIGHT, 600);
-    
-    LT_INFO_IF(isFullscreen && (width < 1920 || height < 1080), 
-               "Fullscreen mode with low resolution: {}x{}", width, height);
-    LT_DBG_IF(!isFullscreen, "Windowed mode: {}x{}", width, height);
-    
-    return true;
-}
-
-void SandboxApp::Shutdown()
-{
-    LT_INFO("SandboxApp shutting down...");
+	return new Limitless::SandboxApp();
 }

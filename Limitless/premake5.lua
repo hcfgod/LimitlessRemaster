@@ -57,7 +57,8 @@ project "Limitless"
 
         buildoptions
         {
-            "/utf-8"
+            "/utf-8",
+            "/std:c++20"
         }
 
     filter "system:macosx"
@@ -67,6 +68,11 @@ project "Limitless"
         defines
         {
             "LT_PLATFORM_MAC"
+        }
+
+        buildoptions
+        {
+            "-std=c++20"
         }
 
         libdirs
@@ -108,6 +114,11 @@ project "Limitless"
         defines
         {
             "LT_PLATFORM_LINUX"
+        }
+
+        buildoptions
+        {
+            "-std=c++20"
         }
 
         libdirs

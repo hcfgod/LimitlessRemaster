@@ -94,7 +94,7 @@ namespace Limitless
         }
 
         // Set up SDL window flags
-        uint32_t windowFlags = ConvertToSDLFags(props.Flags);
+        uint32_t windowFlags = static_cast<uint32_t>(ConvertToSDLFags(props.Flags));
 
         // Create window
         m_Window = SDL_CreateWindow(
@@ -686,7 +686,7 @@ namespace Limitless
     bool SDLWindow::IsForeign() const
     {
         if (!m_Window) return false;
-        SDL_WindowFlags flags = SDL_GetWindowFlags(m_Window);
+        SDL_WindowFlags flags = static_cast<SDL_WindowFlags>(SDL_GetWindowFlags(m_Window));
         return (flags & SDL_WINDOW_EXTERNAL) != 0; // SDL3 renamed this
     }
     
@@ -763,7 +763,7 @@ namespace Limitless
     {
         if (!m_Window) return;
         
-        SDL_WindowFlags currentFlags = SDL_GetWindowFlags(m_Window);
+        SDL_WindowFlags currentFlags = static_cast<SDL_WindowFlags>(SDL_GetWindowFlags(m_Window));
         m_Data.Flags = ConvertFromSDLFags(currentFlags);
     }
 

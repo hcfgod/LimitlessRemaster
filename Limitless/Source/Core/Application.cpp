@@ -2,6 +2,7 @@
 #include "Platform/Window.h"
 #include "Platform/SDL/SDLWindow.h"
 #include "Platform/SDL/SDLManager.h"
+#include "Platform/Platform.h"
 #include "Core/ConfigManager.h"
 #include "Core/Debug/Log.h"
 #include "Core/HotReloadManager.h"
@@ -39,6 +40,9 @@ namespace Limitless
 
 	bool Application::InternalInitialize()
 	{
+		// Initialize platform detection first
+		PlatformDetection::Initialize();
+		
 		// Initialize event system
 		GetEventSystem().Initialize();
 
