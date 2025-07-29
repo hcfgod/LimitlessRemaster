@@ -17,6 +17,7 @@ project "Test"
     includedirs
     {
         "../Limitless/Source",
+        "../Limitless/Vendor/",
         "../Limitless/Vendor/spdlog",
         "../Limitless/Vendor/doctest",
         "../Limitless/Vendor/nlohmann",
