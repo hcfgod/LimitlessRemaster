@@ -94,6 +94,9 @@ namespace Limitless
         
         // Convert to string
         std::string ToString() const;
+        
+        // Log error using the logging system
+        static void LogError(const Error& error);
 
     private:
         ErrorCode m_Code;

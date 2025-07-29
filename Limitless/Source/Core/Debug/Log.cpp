@@ -7,6 +7,7 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/fmt/bundled/format.h>
 
 #if defined(LIMITLESS_PLATFORM_WINDOWS)
 #include <fcntl.h>

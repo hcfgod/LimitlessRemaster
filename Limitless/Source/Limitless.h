@@ -8,4 +8,5 @@
 #include "Core/Error.h"
 #include "Core/ConfigManager.h"
 #include "Core/EventSystem.h"
+#include "Core/Debug/Log.h"
 #include "Platform/Window.h"

@@ -1,7 +1,7 @@
-#include "Platform/Window.h"
+#include "Window.h"
 #include "Platform/SDL/SDLWindow.h"
 #include "Core/ConfigManager.h"
-#include <iostream>
+#include "Core/Debug/Log.h"
 
 namespace Limitless
 {
@@ -21,19 +21,18 @@ namespace Limitless
         props.Fullscreen = config.GetValue<bool>(Config::Window::FULLSCREEN, false);
         props.Resizable = config.GetValue<bool>(Config::Window::RESIZABLE, true);
         
-        // Debug output to show configuration values being used
-        std::cout << "Window configuration from config:" << std::endl;
-        std::cout << "  Title: " << props.Title << std::endl;
-        std::cout << "  Size: " << props.Width << "x" << props.Height << std::endl;
-        std::cout << "  Fullscreen: " << (props.Fullscreen ? "true" : "false") << std::endl;
-        std::cout << "  Resizable: " << (props.Resizable ? "true" : "false") << std::endl;
+        LT_CORE_INFO("Window configuration from config:");
+        LT_CORE_INFO("  Title: {}", props.Title);
+        LT_CORE_INFO("  Size: {}x{}", props.Width, props.Height);
+        LT_CORE_INFO("  Fullscreen: {}", (props.Fullscreen ? "true" : "false"));
+        LT_CORE_INFO("  Resizable: {}", (props.Resizable ? "true" : "false"));
         
         auto window = std::make_unique<SDLWindow>(props);
         
         // Apply additional window settings
         bool vsync = config.GetValue<bool>(Config::Window::VSYNC, true);
         window->SetVSync(vsync);
-        std::cout << "  VSync: " << (vsync ? "true" : "false") << std::endl;
+        LT_CORE_INFO("  VSync: {}", (vsync ? "true" : "false"));
         
         return window;
     }

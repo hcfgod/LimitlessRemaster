@@ -1,4 +1,6 @@
 #include "ConfigManager.h"
+#include "Core/Debug/Log.h"
+#include "FileWatcher.h"
 #include <fstream>
 #include <filesystem>
 #include <algorithm>
@@ -8,6 +10,11 @@
 #include <iomanip>
 #include <iostream>
 #include <nlohmann/json.hpp>
+
+// Disable warning about getenv being unsafe (we're using it safely)
+#ifdef _MSC_VER
+#pragma warning(disable: 4996)
+#endif
 
 namespace Limitless
 {
@@ -52,12 +59,19 @@ namespace Limitless
     {
         if (!m_Initialized) return;
 
+        // Stop hot reload if enabled
+        if (m_HotReloadEnabled && m_FileWatcher)
+        {
+            m_FileWatcher->StopWatching();
+            m_FileWatcher.reset();
+        }
+
         // Save current configuration
         if (!m_ConfigFile.empty())
         {
             if (!SaveToFile(m_ConfigFile)) 
             {
-                std::cerr << "Failed to save configuration to file: " << m_ConfigFile << std::endl;
+                LT_CORE_ERROR("Failed to save configuration to file: {}", m_ConfigFile);
             }
         }
         
@@ -78,7 +92,7 @@ namespace Limitless
             std::ifstream file(filename);
             if (!file.is_open())
             {
-                std::cerr << "Could not open configuration file: " << filename << std::endl;
+                LT_CORE_ERROR("Could not open configuration file: {}", filename);
                 return false;
             }
 
@@ -91,7 +105,7 @@ namespace Limitless
         }
         catch (const std::exception& e) 
         {
-            std::cerr << "Error loading configuration from file " << filename << ": " << e.what() << std::endl;
+            LT_CORE_ERROR("Error loading configuration from file {}: {}", filename, e.what());
             return false;
         }
     }
@@ -103,7 +117,7 @@ namespace Limitless
             std::string saveFile = filename.empty() ? m_ConfigFile : filename;
             if (saveFile.empty())
             {
-                std::cerr << "Cannot save configuration: no filename provided" << std::endl;
+                LT_CORE_ERROR("Cannot save configuration: no filename provided");
                 return false;
             }
 
@@ -117,7 +131,7 @@ namespace Limitless
             std::ofstream file(saveFile);
             if (!file.is_open())
             {
-                std::cerr << "Could not open configuration file for writing: " << saveFile << std::endl;
+                LT_CORE_ERROR("Could not open configuration file for writing: {}", saveFile);
                 return false;
             }
 
@@ -128,7 +142,7 @@ namespace Limitless
         }
         catch (const std::exception& e)
         {
-            std::cerr << "Error saving configuration to file " << filename << ": " << e.what() << std::endl;
+            LT_CORE_ERROR("Error saving configuration to file {}: {}", filename, e.what());
             return false;
         }
     }
@@ -143,7 +157,7 @@ namespace Limitless
         // Validate if validator exists
         if (!ValidateValue(key, configValue))
         {
-            std::cerr << "Validation failed for key: " << key << " with value: " << value << std::endl;
+            LT_CORE_ERROR("Validation failed for key: {} with value: {}", key, value);
             return;
         }
         
@@ -175,7 +189,7 @@ namespace Limitless
             }
             catch (const std::exception& e)
             {
-                std::cerr << "Error converting value for key " << key << ": " << e.what() << std::endl;
+                LT_CORE_ERROR("Error converting value for key {}: {}", key, e.what());
                 return defaultValue;
             }
         }
@@ -198,7 +212,7 @@ namespace Limitless
             }
             catch (const std::exception& e)
             {
-                std::cerr << "Error converting value for key " << key << ": " << e.what() << std::endl;
+                LT_CORE_ERROR("Error converting value for key {}: {}", key, e.what());
                 return std::nullopt;
             }
         }
@@ -338,11 +352,11 @@ namespace Limitless
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
         
-        std::cout << "Loading configuration from JSON with " << json.size() << " items" << std::endl;
+        LT_CORE_INFO("Loading configuration from JSON with {} items", json.size());
         
         ProcessJsonObject(json, "");
         
-        std::cout << "Configuration loading complete. Total values: " << m_Values.size() << std::endl;
+        LT_CORE_INFO("Configuration loading complete. Total values: {}", m_Values.size());
     }
 
     void ConfigManager::ProcessJsonObject(const nlohmann::json& json, const std::string& prefix)
@@ -361,31 +375,31 @@ namespace Limitless
                 else if (value.is_boolean())
                 {
                     m_Values[fullKey] = value.get<bool>();
-                    std::cout << "Loaded config " << fullKey << " = " << (value.get<bool>() ? "true" : "false") << std::endl;
+                    LT_CORE_DEBUG("Loaded config {} = {}", fullKey, (value.get<bool>() ? "true" : "false"));
                 }
                 else if (value.is_number_integer())
                 {
                     m_Values[fullKey] = value.get<int>();
-                    std::cout << "Loaded config " << fullKey << " = " << value.get<int>() << std::endl;
+                    LT_CORE_DEBUG("Loaded config {} = {}", fullKey, value.get<int>());
                 }
                 else if (value.is_number_float())
                 {
                     m_Values[fullKey] = value.get<double>();
-                    std::cout << "Loaded config " << fullKey << " = " << value.get<double>() << std::endl;
+                    LT_CORE_DEBUG("Loaded config {} = {}", fullKey, value.get<double>());
                 }
                 else if (value.is_string())
                 {
                     m_Values[fullKey] = value.get<std::string>();
-                    std::cout << "Loaded config " << fullKey << " = " << value.get<std::string>() << std::endl;
+                    LT_CORE_DEBUG("Loaded config {} = {}", fullKey, value.get<std::string>());
                 }
                 else
                 {
-                    std::cout << "Unknown config value type for key: " << fullKey << std::endl;
+                    LT_CORE_WARN("Unknown config value type for key: {}", fullKey);
                 }
             }
             catch (const std::exception& e)
             {
-                std::cerr << "Error parsing key " << fullKey << ": " << e.what() << std::endl;
+                LT_CORE_ERROR("Error parsing key {}: {}", fullKey, e.what());
                 continue; // Skip invalid entries
             }
         }
@@ -471,7 +485,75 @@ namespace Limitless
 
     void ConfigManager::EnableHotReload(bool enable)
     {
+        if (m_HotReloadEnabled == enable)
+            return;
+
         m_HotReloadEnabled = enable;
+
+        if (enable && !m_ConfigFile.empty())
+        {
+            // Create file watcher if it doesn't exist
+            if (!m_FileWatcher)
+            {
+                m_FileWatcher = std::make_unique<FileWatcher>();
+            }
+
+            // Start watching the config file
+            m_FileWatcher->StartWatching(m_ConfigFile, [this](const std::string& filepath) {
+                LT_CORE_INFO("ConfigManager: Hot reload triggered for {}", filepath);
+                ReloadFromFile();
+            });
+
+            LT_CORE_INFO("ConfigManager: Hot reload enabled for {}", m_ConfigFile);
+        }
+        else if (!enable && m_FileWatcher)
+        {
+            // Stop watching
+            m_FileWatcher->StopWatching();
+            LT_CORE_INFO("ConfigManager: Hot reload disabled");
+        }
+    }
+
+    void ConfigManager::ReloadFromFile()
+    {
+        if (m_ConfigFile.empty())
+            return;
+
+        LT_CORE_INFO("ConfigManager: Reloading configuration from {}", m_ConfigFile);
+
+        // Store current values to detect changes
+        auto oldValues = m_Values;
+
+        // Reload from file
+        if (LoadFromFile(m_ConfigFile))
+        {
+            // Notify change callbacks for any changed values
+            for (const auto& [key, newValue] : m_Values)
+            {
+                auto it = oldValues.find(key);
+                if (it == oldValues.end() || it->second != newValue)
+                {
+                    LT_CORE_INFO("ConfigManager: Value changed for key '{}'", key);
+                    NotifyChangeCallbacks(key, newValue);
+                }
+            }
+
+            // Also check for removed values
+            for (const auto& [key, oldValue] : oldValues)
+            {
+                if (m_Values.find(key) == m_Values.end())
+                {
+                    LT_CORE_INFO("ConfigManager: Key removed '{}'", key);
+                    // You could add a special "removed" callback here if needed
+                }
+            }
+
+            LT_CORE_INFO("ConfigManager: Configuration reloaded successfully");
+        }
+        else
+        {
+            LT_CORE_ERROR("ConfigManager: Failed to reload configuration from {}", m_ConfigFile);
+        }
     }
 
     void ConfigManager::NotifyChangeCallbacks(const std::string& key, const ConfigValue& value)
@@ -487,7 +569,7 @@ namespace Limitless
                 }
                 catch (const std::exception& e)
                 {
-
+                    LT_CORE_ERROR("ConfigManager: Error in change callback for key '{}': {}", key, e.what());
                 }
             }
         }

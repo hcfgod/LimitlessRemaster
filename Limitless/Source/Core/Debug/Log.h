@@ -72,41 +72,111 @@ private:
 } // namespace Limitless
 
 // Core logging macros (for engine internal use)
-#define LT_CORE_TRACE(...)                   \
-    if (!::Limitless::Log::IsShuttingDown()) \
-    ::Limitless::Log::GetCoreLogger()->trace(__VA_ARGS__)
-#define LT_CORE_DEBUG(...)                   \
-    if (!::Limitless::Log::IsShuttingDown()) \
-    ::Limitless::Log::GetCoreLogger()->debug(__VA_ARGS__)
-#define LT_CORE_INFO(...)                    \
-    if (!::Limitless::Log::IsShuttingDown()) \
-    ::Limitless::Log::GetCoreLogger()->info(__VA_ARGS__)
-#define LT_CORE_WARN(...)                    \
-    if (!::Limitless::Log::IsShuttingDown()) \
-    ::Limitless::Log::GetCoreLogger()->warn(__VA_ARGS__)
-#define LT_CORE_ERROR(...)                   \
-    if (!::Limitless::Log::IsShuttingDown()) \
-    ::Limitless::Log::GetCoreLogger()->error(__VA_ARGS__)
-#define LT_CORE_CRITICAL(...)                \
-    if (!::Limitless::Log::IsShuttingDown()) \
-    ::Limitless::Log::GetCoreLogger()->critical(__VA_ARGS__)
+#ifndef LT_CORE_TRACE
+#define LT_CORE_TRACE(...) \
+    do { \
+        if (::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetCoreLogger()) { \
+            ::Limitless::Log::GetCoreLogger()->trace(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_CORE_DEBUG
+#define LT_CORE_DEBUG(...) \
+    do { \
+        if (::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetCoreLogger()) { \
+            ::Limitless::Log::GetCoreLogger()->debug(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_CORE_INFO
+#define LT_CORE_INFO(...) \
+    do { \
+        if (::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetCoreLogger()) { \
+            ::Limitless::Log::GetCoreLogger()->info(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_CORE_WARN
+#define LT_CORE_WARN(...) \
+    do { \
+        if (::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetCoreLogger()) { \
+            ::Limitless::Log::GetCoreLogger()->warn(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_CORE_ERROR
+#define LT_CORE_ERROR(...) \
+    do { \
+        if (::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetCoreLogger()) { \
+            ::Limitless::Log::GetCoreLogger()->error(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_CORE_CRITICAL
+#define LT_CORE_CRITICAL(...) \
+    do { \
+        if (::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetCoreLogger()) { \
+            ::Limitless::Log::GetCoreLogger()->critical(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
 
 // Client logging macros (for application/sandbox use)
-#define LT_TRACE(...)                        \
-    if (!::Limitless::Log::IsShuttingDown()) \
-    ::Limitless::Log::GetClientLogger()->trace(__VA_ARGS__)
-#define LT_DEBUG(...)                        \
-    if (!::Limitless::Log::IsShuttingDown()) \
-    ::Limitless::Log::GetClientLogger()->debug(__VA_ARGS__)
-#define LT_INFO(...)                         \
-    if (!::Limitless::Log::IsShuttingDown()) \
-    ::Limitless::Log::GetClientLogger()->info(__VA_ARGS__)
-#define LT_WARN(...)                         \
-    if (!::Limitless::Log::IsShuttingDown()) \
-    ::Limitless::Log::GetClientLogger()->warn(__VA_ARGS__)
-#define LT_ERROR(...)                        \
-    if (!::Limitless::Log::IsShuttingDown()) \
-    ::Limitless::Log::GetClientLogger()->error(__VA_ARGS__)
-#define LT_CRITICAL(...)                     \
-    if (!::Limitless::Log::IsShuttingDown()) \
-    ::Limitless::Log::GetClientLogger()->critical(__VA_ARGS__)
+#ifndef LT_TRACE
+#define LT_TRACE(...) \
+    do { \
+        if (::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetClientLogger()) { \
+            ::Limitless::Log::GetClientLogger()->trace(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_DBG
+#define LT_DBG(...) \
+    do { \
+        if (::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetClientLogger()) { \
+            ::Limitless::Log::GetClientLogger()->debug(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_INFO
+#define LT_INFO(...) \
+    do { \
+        if (::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetClientLogger()) { \
+            ::Limitless::Log::GetClientLogger()->info(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_WARN
+#define LT_WARN(...) \
+    do { \
+        if (::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetClientLogger()) { \
+            ::Limitless::Log::GetClientLogger()->warn(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_ERROR
+#define LT_ERROR(...) \
+    do { \
+        if (::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetClientLogger()) { \
+            ::Limitless::Log::GetClientLogger()->error(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif
+
+#ifndef LT_CRITICAL
+#define LT_CRITICAL(...) \
+    do { \
+        if (::Limitless::Log::IsInitialized() && !::Limitless::Log::IsShuttingDown() && ::Limitless::Log::GetClientLogger()) { \
+            ::Limitless::Log::GetClientLogger()->critical(__VA_ARGS__); \
+        } \
+    } while(0)
+#endif

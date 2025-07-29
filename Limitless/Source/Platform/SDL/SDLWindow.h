@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Platform/Window.h"
+#include "Core/EventSystem.h"
 #include <SDL3/SDL.h>
 
 namespace Limitless
@@ -25,10 +26,20 @@ namespace Limitless
 
         void* GetNativeWindowHandle() const override { return m_Window; }
         void GetWindowSize(int* width, int* height) const override;
+        
+        // Subscribe to events (call after construction)
+        void SubscribeToEvents();
+        void UnsubscribeFromEvents();
 
     private:
         virtual void Init(const WindowProps& props);
         virtual void Shutdown();
+        
+        // Hot reload event handlers
+        void OnWindowConfigChanged(Events::WindowConfigChangedEvent& event);
+        
+        // Event callback wrapper
+        void OnWindowConfigChangedCallback(Event& event);
 
     private:
         SDL_Window* m_Window;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Error.h"
+#include "ConfigManager.h"
 #include <functional>
 #include <memory>
 #include <unordered_map>
@@ -48,6 +49,11 @@ namespace Limitless
         AppUpdate,
         AppRender,
         AppShutdown,
+        
+        // Hot reload events
+        ConfigReloaded,
+        LoggingConfigChanged,
+        WindowConfigChanged,
         
         // Resource events
         ResourceLoaded,
@@ -460,6 +466,56 @@ namespace Limitless
             std::string GetCategory() const override { return "Application"; }
             std::string GetName() const override { return "AppRender"; }
             std::unique_ptr<Event> Clone() const override;
+        };
+
+        // Hot reload events
+        class ConfigReloadedEvent : public Event
+        {
+        public:
+            ConfigReloadedEvent(const std::string& configFile);
+            
+            const std::string& GetConfigFile() const { return m_ConfigFile; }
+            
+            std::string GetCategory() const override { return "HotReload"; }
+            std::string GetName() const override { return "ConfigReloaded"; }
+            std::unique_ptr<Event> Clone() const override;
+
+        private:
+            std::string m_ConfigFile;
+        };
+
+        class LoggingConfigChangedEvent : public Event
+        {
+        public:
+            LoggingConfigChangedEvent(const std::string& changedKey, const ConfigValue& newValue);
+            
+            const std::string& GetChangedKey() const { return m_ChangedKey; }
+            const ConfigValue& GetNewValue() const { return m_NewValue; }
+            
+            std::string GetCategory() const override { return "HotReload"; }
+            std::string GetName() const override { return "LoggingConfigChanged"; }
+            std::unique_ptr<Event> Clone() const override;
+
+        private:
+            std::string m_ChangedKey;
+            ConfigValue m_NewValue;
+        };
+
+        class WindowConfigChangedEvent : public Event
+        {
+        public:
+            WindowConfigChangedEvent(const std::string& changedKey, const ConfigValue& newValue);
+            
+            const std::string& GetChangedKey() const { return m_ChangedKey; }
+            const ConfigValue& GetNewValue() const { return m_NewValue; }
+            
+            std::string GetCategory() const override { return "HotReload"; }
+            std::string GetName() const override { return "WindowConfigChanged"; }
+            std::unique_ptr<Event> Clone() const override;
+
+        private:
+            std::string m_ChangedKey;
+            ConfigValue m_NewValue;
         };
     }
 

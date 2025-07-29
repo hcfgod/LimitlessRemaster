@@ -16,10 +16,10 @@
     },
     "window": {
         "fullscreen": false,
-        "height": 768,
+        "height": 720,
         "resizable": true,
-        "title": "Limitless Engine - Test Window",
+        "title": "Limitless Engine",
         "vsync": true,
-        "width": 1024
+        "width": 1280
     }
 }

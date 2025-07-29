@@ -482,5 +482,36 @@ namespace Limitless
         {
             return std::make_unique<AppRenderEvent>();
         }
+
+        // Hot reload events
+        ConfigReloadedEvent::ConfigReloadedEvent(const std::string& configFile)
+            : Event(EventType::ConfigReloaded), m_ConfigFile(configFile)
+        {
+        }
+
+        std::unique_ptr<Event> ConfigReloadedEvent::Clone() const
+        {
+            return std::make_unique<ConfigReloadedEvent>(m_ConfigFile);
+        }
+
+        LoggingConfigChangedEvent::LoggingConfigChangedEvent(const std::string& changedKey, const ConfigValue& newValue)
+            : Event(EventType::LoggingConfigChanged), m_ChangedKey(changedKey), m_NewValue(newValue)
+        {
+        }
+
+        std::unique_ptr<Event> LoggingConfigChangedEvent::Clone() const
+        {
+            return std::make_unique<LoggingConfigChangedEvent>(m_ChangedKey, m_NewValue);
+        }
+
+        WindowConfigChangedEvent::WindowConfigChangedEvent(const std::string& changedKey, const ConfigValue& newValue)
+            : Event(EventType::WindowConfigChanged), m_ChangedKey(changedKey), m_NewValue(newValue)
+        {
+        }
+
+        std::unique_ptr<Event> WindowConfigChangedEvent::Clone() const
+        {
+            return std::make_unique<WindowConfigChangedEvent>(m_ChangedKey, m_NewValue);
+        }
     }
 }

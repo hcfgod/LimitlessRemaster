@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest.h"
 #include "Limitless.h"
+#include "Core/HotReloadManager.h"
 
 TEST_CASE("Logging Configuration Integration") {
     // Test that the logging system can be initialized with configuration
@@ -107,4 +108,39 @@ TEST_CASE("Nested JSON Configuration") {
     CHECK(savedConfig["window"]["height"] == 1080);
     CHECK(savedConfig["window"]["title"] == "Nested Test");
     CHECK(savedConfig["system"]["max_threads"] == 16);
+}
+
+TEST_CASE("Hot Reload Functionality") {
+    // Test that hot reload functionality can be enabled and disabled
+    auto& hotReloadManager = Limitless::HotReloadManager::GetInstance();
+    
+    // Test initial state
+    CHECK(hotReloadManager.IsHotReloadEnabled() == false);
+    
+    // Test enabling hot reload
+    hotReloadManager.EnableHotReload(true);
+    CHECK(hotReloadManager.IsHotReloadEnabled() == true);
+    
+    // Test disabling hot reload
+    hotReloadManager.EnableHotReload(false);
+    CHECK(hotReloadManager.IsHotReloadEnabled() == false);
+    
+    // Test configuration change callbacks
+    auto& config = Limitless::ConfigManager::GetInstance();
+    
+    // Set up a test configuration
+    config.SetValue("logging.level", std::string("info"));
+    config.SetValue("window.width", 1280);
+    
+    // Verify initial values
+    CHECK(config.GetValue<std::string>("logging.level") == "info");
+    CHECK(config.GetValue<int>("window.width") == 1280);
+    
+    // Simulate configuration changes (these would normally be triggered by file changes)
+    config.SetValue("logging.level", std::string("debug"));
+    config.SetValue("window.width", 1920);
+    
+    // Verify values were updated
+    CHECK(config.GetValue<std::string>("logging.level") == "debug");
+    CHECK(config.GetValue<int>("window.width") == 1920);
 }

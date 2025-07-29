@@ -1,4 +1,5 @@
 #include "Error.h"
+#include "Core/Debug/Log.h"
 #include <spdlog/fmt/fmt.h>
 #include <sstream>
 #include <iostream>
@@ -33,6 +34,20 @@ namespace Limitless
             oss << " at " << m_Location;
         }
         return oss.str();
+    }
+
+    void Error::LogError(const Error& error)
+    {
+        // Try to use the logging system first
+        if (Limitless::Log::IsInitialized() && !Limitless::Log::IsShuttingDown())
+        {
+            LT_CORE_ERROR("ERROR: {}", error.ToString());
+        }
+        else
+        {
+            // Fallback to cerr if logger is not available
+            std::cerr << "ERROR: " << error.ToString() << std::endl;
+        }
     }
 
     namespace ErrorHandling

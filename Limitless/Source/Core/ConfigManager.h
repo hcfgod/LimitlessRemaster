@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Error.h"
-#include "Debug/Log.h"
+#include "FileWatcher.h"
 #include <nlohmann/json.hpp>
 #include <unordered_map>
 #include <string>
@@ -100,6 +100,7 @@ namespace Limitless
         // Hot reload support
         void EnableHotReload(bool enable = true);
         bool IsHotReloadEnabled() const { return m_HotReloadEnabled; }
+        void ReloadFromFile();
 
     private:
         ConfigManager() = default;
@@ -114,6 +115,7 @@ namespace Limitless
         std::string m_ConfigFile;
         bool m_Initialized = false;
         bool m_HotReloadEnabled = false;
+        std::unique_ptr<FileWatcher> m_FileWatcher;
         mutable std::mutex m_Mutex;
 
         // Internal helper methods

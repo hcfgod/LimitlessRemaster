@@ -1,7 +1,6 @@
 #include "SandboxApp.h"
 #include "Limitless.h"
 #include <thread>
-#include <iostream>
 
 // Define CreateApplication in global namespace as expected by EntryPoint.h
 Limitless::Application* CreateApplication()
@@ -13,10 +12,11 @@ bool SandboxApp::Initialize()
 {
     LT_INFO("SandboxApp initialized successfully!");
     LT_INFO("Logging system is now configured from config.json");
+    LT_INFO("Hot reloading is enabled - try changing config.json while the app is running!");
     
     // Demonstrate different log levels - these should all be visible with debug level
     LT_TRACE("This is a trace message - only visible if log level is set to 'trace'");
-    LT_DEBUG("This is a debug message - only visible if log level is set to 'debug' or lower");
+    LT_DBG("This is a debug message - only visible if log level is set to 'debug' or lower");
     LT_INFO("This is an info message - visible with 'info' level or lower");
     LT_WARN("This is a warning message - visible with 'warn' level or lower");
     LT_ERROR("This is an error message - visible with 'error' level or lower");
@@ -38,9 +38,9 @@ bool SandboxApp::Initialize()
     LT_INFO("Console logging: {}", config.GetValue<bool>(Limitless::Config::Logging::CONSOLE_ENABLED, true) ? "enabled" : "disabled");
     
     // Test configuration changes
-    LT_DEBUG("Testing configuration access...");
-    LT_DEBUG("Window title: {}", config.GetValue<std::string>(Limitless::Config::Window::TITLE, "Default"));
-    LT_DEBUG("Max threads: {}", config.GetValue<int>(Limitless::Config::System::MAX_THREADS, 4));
+    LT_DBG("Testing configuration access...");
+    LT_DBG("Window title: {}", config.GetValue<std::string>(Limitless::Config::Window::TITLE, "Default"));
+    LT_DBG("Max threads: {}", config.GetValue<int>(Limitless::Config::System::MAX_THREADS, 4));
     
     return true;
 }
