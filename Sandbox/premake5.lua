@@ -16,11 +16,12 @@ project "Sandbox"
 
     includedirs
     {
+        "../Limitless/Vendor",
         "../Limitless/Source",
         "../Limitless/Vendor/spdlog",
         "../Limitless/Vendor/doctest",
         "../Limitless/Vendor/nlohmann",
-        "../Limitless/Vendor/SDL3"
+        "../Limitless/Vendor/SDL3",
     }
 
     links

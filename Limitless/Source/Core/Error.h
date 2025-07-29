@@ -2,8 +2,27 @@
 
 #include <exception>
 #include <string>
-#include <source_location>
 #include <functional>
+
+#if __cplusplus >= 202002L
+    #include <source_location>
+#elif defined(__has_include) && __has_include(<experimental/source_location>)
+    #include <experimental/source_location>
+    namespace std {
+        using source_location = std::experimental::source_location;
+    }
+#else
+    // Fallback for older compilers
+    namespace std {
+        struct source_location {
+            static constexpr source_location current() noexcept { return {}; }
+            constexpr const char* file_name() const noexcept { return "unknown"; }
+            constexpr uint_least32_t line() const noexcept { return 0; }
+            constexpr uint_least32_t column() const noexcept { return 0; }
+            constexpr const char* function_name() const noexcept { return "unknown"; }
+        };
+    }
+#endif
 
 namespace Limitless
 {

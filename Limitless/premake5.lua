@@ -17,9 +17,9 @@ project "Limitless"
     includedirs
     {
         "Source",
+        "Vendor/",
         "Vendor/spdlog",
         "Vendor/doctest",
-        "Vendor/nlohmann",
         "Vendor/SDL3"
     }
 

@@ -1,6 +1,6 @@
 #include "SDLManager.h"
 #include <SDL3/SDL.h>
-#include "Core/Logger.h"
+// #include "Core/Logger.h"  // Temporarily disabled
 
 namespace Limitless
 {
@@ -14,21 +14,21 @@ namespace Limitless
     {
         if (m_Initialized)
         {
-            LT_WARN("SDL already initialized");
+            // LT_WARN("SDL already initialized");  // Temporarily disabled
             return true;
         }
 
         // Initialize SDL
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS))
         {
-            LT_ERROR("SDL could not initialize! SDL_Error: {}", SDL_GetError());
+            // LT_ERROR("SDL could not initialize! SDL_Error: {}", SDL_GetError());  // Temporarily disabled
             return false;
         }
 
         // Note: VSync will be handled by custom rendering system
 
         m_Initialized = true;
-        LT_INFO("SDL initialized successfully");
+        // LT_INFO("SDL initialized successfully");  // Temporarily disabled
         return true;
     }
 
@@ -41,6 +41,6 @@ namespace Limitless
 
         SDL_Quit();
         m_Initialized = false;
-        LT_INFO("SDL shutdown successfully");
+        // LT_INFO("SDL shutdown successfully");  // Temporarily disabled
     }
 } 

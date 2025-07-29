@@ -38,9 +38,11 @@ namespace Limitless
             std::string Title;
             uint32_t Width, Height;
             bool VSync;
+            bool Fullscreen;
+            bool Resizable;
 
             WindowData()
-                : Title("Limitless Engine"), Width(1280), Height(720), VSync(false)
+                : Title("Limitless Engine"), Width(1280), Height(720), VSync(false), Fullscreen(false), Resizable(true)
             {
             }
         };

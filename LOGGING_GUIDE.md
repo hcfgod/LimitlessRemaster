@@ -1,379 +1,204 @@
-# Limitless Engine - Logging and Error Handling Guide
+# Logging System Integration Guide
 
 ## Overview
 
-The Limitless engine provides a robust, modular, and cross-platform logging and error handling system built on top of spdlog. This system offers:
+The Limitless Engine logging system is now fully integrated with the ConfigManager, allowing you to configure logging behavior through the `config.json` file or command-line arguments.
 
-- **Multiple logging levels** (Trace, Debug, Info, Warn, Error, Critical)
-- **File and console logging** with rotation and daily logs
-- **Performance monitoring** with automatic timing
-- **Memory usage tracking** across platforms
-- **Comprehensive error handling** with custom exception types
-- **Thread-safe logging** with multiple logger instances
-- **Cross-platform compatibility** (Windows, macOS, Linux)
+## Configuration Options
 
-## Quick Start
+The logging system supports the following configuration options in the `config.json` file:
 
-### Basic Logging
+```json
+{
+  "logging": {
+    "level": "info",
+    "file_enabled": true,
+    "console_enabled": true,
+    "pattern": "[%T] [%l] %n: %v",
+    "directory": "logs",
+    "max_file_size": 52428800,
+    "max_files": 10
+  }
+}
+```
+
+### Configuration Parameters
+
+- **`level`**: Log level (`trace`, `debug`, `info`, `warn`, `error`, `critical`, `off`)
+- **`file_enabled`**: Enable/disable file logging
+- **`console_enabled`**: Enable/disable console logging
+- **`pattern`**: Log message format pattern
+- **`directory`**: Directory where log files are stored
+- **`max_file_size`**: Maximum size of each log file in bytes (default: 50MB)
+- **`max_files`**: Maximum number of backup log files to keep
+
+## Usage
+
+### Basic Usage
+
+The logging system is automatically initialized in the `EntryPoint.h` with configuration from `config.json`:
+
+```cpp
+// The system automatically loads configuration and initializes logging
+auto& configManager = Limitless::ConfigManager::GetInstance();
+configManager.Initialize("config.json");
+
+// Logging is initialized with config settings
+Limitless::Log::Init(logLevel, fileEnabled, consoleEnabled, pattern, directory, maxFileSize, maxFiles);
+```
+
+### Logging Macros
+
+Use the provided macros for logging:
+
+```cpp
+// Core engine logging (for engine internals)
+LT_CORE_TRACE("Trace message");
+LT_CORE_DEBUG("Debug message");
+LT_CORE_INFO("Info message");
+LT_CORE_WARN("Warning message");
+LT_CORE_ERROR("Error message");
+LT_CORE_CRITICAL("Critical message");
+
+// Client application logging (for your application)
+LT_TRACE("Trace message");
+LT_DEBUG("Debug message");
+LT_INFO("Info message");
+LT_WARN("Warning message");
+LT_ERROR("Error message");
+LT_CRITICAL("Critical message");
+```
+
+### Configuration Access
+
+You can access logging configuration values in your code:
+
+```cpp
+auto& config = Limitless::ConfigManager::GetInstance();
+
+// Get logging level
+std::string level = config.GetValue<std::string>(Limitless::Config::Logging::LEVEL, "info");
+
+// Check if file logging is enabled
+bool fileEnabled = config.GetValue<bool>(Limitless::Config::Logging::FILE_ENABLED, true);
+
+// Get log directory
+std::string logDir = config.GetValue<std::string>(Limitless::Config::Logging::DIRECTORY, "logs");
+```
+
+## Command Line Configuration
+
+You can override configuration values via command line:
+
+```bash
+# Set log level to debug
+./YourApp --logging.level=debug
+
+# Disable file logging
+./YourApp --logging.file_enabled=false
+
+# Enable console logging only
+./YourApp --logging.console_enabled=true --logging.file_enabled=false
+
+# Set custom log directory
+./YourApp --logging.directory=custom_logs
+```
+
+## Log Patterns
+
+The log pattern uses spdlog format specifiers:
+
+- `%T`: Time in HH:MM:SS format
+- `%l`: Log level
+- `%n`: Logger name
+- `%v`: Log message
+- `%^` and `%$`: Color markers (for console output)
+
+### Example Patterns
+
+```json
+{
+  "logging": {
+    "pattern": "[%T] [%l] %n: %v"  // [14:30:25] [info] APP: Application started
+  }
+}
+```
+
+## File Rotation
+
+Log files are automatically rotated when they reach the maximum size:
+
+- Files are named: `Limitless.log`, `Limitless.log.1`, `Limitless.log.2`, etc.
+- Old files are automatically deleted when the maximum number is reached
+- Default: 50MB per file, 10 backup files (500MB total)
+
+## Integration Example
+
+Here's a complete example showing how the logging system integrates with your application:
 
 ```cpp
 #include "Limitless.h"
 
-// Simple logging with the default logger
-LT_INFO("Application started");
-LT_WARN("This is a warning message");
-LT_ERROR("An error occurred: {}", errorMessage);
-
-// Conditional logging
-bool debugMode = true;
-LT_DEBUG_IF(debugMode, "Debug info: {}", debugData);
-```
-
-### Performance Monitoring
-
-```cpp
-// Automatic timing with scope
-{
-    LT_PERF_SCOPE("Expensive Operation");
-    // ... your code here ...
-} // Automatically logs timing when scope ends
-
-// Function timing
-auto result = LT_PERF_FUNCTION("Data Processing", [&]() {
-    return ProcessData(input);
-});
-
-// Manual timing
-auto start = Limitless::PerformanceMonitor::Now();
-// ... your code ...
-auto end = Limitless::PerformanceMonitor::Now();
-double ms = Limitless::PerformanceMonitor::DurationMs(start, end);
-```
-
-### Memory Tracking
-
-```cpp
-// Log current memory usage
-LT_LOG_MEMORY("After loading textures");
-
-// Get memory usage programmatically
-size_t memoryUsage = Limitless::PerformanceMonitor::GetCurrentMemoryUsage();
-```
-
-## Detailed Usage
-
-### Logger Class
-
-The `Logger` class provides the core logging functionality:
-
-```cpp
-// Create a logger
-auto logger = std::make_unique<Limitless::Logger>("MyLogger");
-
-// Configure logging level
-logger->SetLevel(Limitless::LogLevel::Debug);
-
-// Configure pattern
-logger->SetPattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%n] %v");
-
-// Enable file logging
-logger->EnableFileLogging("logs");
-
-// Log messages
-logger->Info("Application started");
-logger->Error("Failed to load file: {}", filename);
-logger->LogPerformance("Operation", 15.5); // 15.5ms
-logger->LogMemoryUsage(1024 * 1024, "Texture loading"); // 1MB
-```
-
-### LogManager Singleton
-
-The `LogManager` provides centralized control over multiple loggers:
-
-```cpp
-auto& logManager = Limitless::LogManager::GetInstance();
-
-// Initialize with application name
-logManager.Initialize("MyGame");
-
-// Get or create loggers
-auto graphicsLogger = logManager.GetLogger("Graphics");
-auto audioLogger = logManager.GetLogger("Audio");
-auto defaultLogger = logManager.GetDefaultLogger();
-
-// Global configuration
-logManager.SetGlobalLevel(Limitless::LogLevel::Info);
-logManager.EnableGlobalFileLogging("logs");
-logManager.EnablePerformanceLogging(true);
-logManager.EnableMemoryLogging(true);
-
-// Log system information
-logManager.LogSystemInfo();
-
-// Get statistics
-auto stats = logManager.GetLoggerStats();
-for (const auto& stat : stats) {
-    std::cout << "Logger: " << stat.name << ", Level: " << (int)stat.level << std::endl;
-}
-
-// Cleanup
-logManager.Shutdown();
-```
-
-### Error Handling
-
-The error handling system provides structured error management:
-
-```cpp
-// Custom error types
-try {
-    if (!fileExists) {
-        throw Limitless::SystemError("Configuration file not found");
-    }
-    
-    if (!textureLoaded) {
-        throw Limitless::ResourceError("Failed to load texture: {}", texturePath);
-    }
-    
-    if (!shaderCompiled) {
-        throw Limitless::GraphicsError("Shader compilation failed");
-    }
-} catch (const Limitless::Error& error) {
-    LT_ERROR("Caught error: {}", error.ToString());
-    // Error automatically logged through error handler
-}
-
-// Result class for error handling
-auto result = Limitless::ErrorHandling::Try([]() {
-    return LoadResource("texture.png");
-});
-
-if (result.IsSuccess()) {
-    auto resource = result.GetValue();
-    // Use resource
-} else {
-    LT_ERROR("Failed to load resource: {}", result.GetError().GetMessage());
-}
-
-// Assertions
-LT_ASSERT(pointer != nullptr, "Pointer must not be null");
-LT_ASSERT(index < arraySize, "Index out of bounds: {} >= {}", index, arraySize);
-```
-
-### Performance Monitor
-
-Advanced performance monitoring capabilities:
-
-```cpp
-// Scoped timing
-{
-    auto scope = Limitless::PerformanceMonitor::CreateScope("Rendering", graphicsLogger);
-    RenderFrame();
-    // Automatically logs timing when scope is destroyed
-}
-
-// Function timing with return value
-auto result = Limitless::PerformanceMonitor::TimeFunction("Data Processing", 
-    [&]() { return ProcessData(input); }, logger);
-
-// Manual timing
-auto start = Limitless::PerformanceMonitor::Now();
-// ... your code ...
-auto end = Limitless::PerformanceMonitor::Now();
-double ms = Limitless::PerformanceMonitor::DurationMs(start, end);
-logger->LogPerformance("Manual Operation", ms);
-```
-
-## Configuration
-
-### Log Levels
-
-- **Trace**: Very detailed debugging information
-- **Debug**: Development debugging information
-- **Info**: General information messages
-- **Warn**: Warning messages
-- **Error**: Error messages
-- **Critical**: Critical error messages
-- **Off**: Disable logging
-
-### Log Patterns
-
-Customize log output format:
-
-```cpp
-// Default pattern
-"[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%n] %v"
-
-// Simple pattern
-"[%H:%M:%S] [%l] %v"
-
-// Detailed pattern with thread ID
-"[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [%t] [%n] %v"
-```
-
-Pattern placeholders:
-- `%Y-%m-%d`: Date
-- `%H:%M:%S`: Time
-- `%e`: Milliseconds
-- `%l`: Log level
-- `%n`: Logger name
-- `%t`: Thread ID
-- `%v`: Message
-- `%^` and `%$`: Color markers
-
-### File Logging
-
-```cpp
-// Enable file logging with custom directory
-logManager.EnableGlobalFileLogging("logs");
-
-// This creates:
-// - logs/limitless_daily.log (daily rotation)
-// - logs/limitless_rotating.log (5MB files, keep 3)
-```
-
-## Integration with Application
-
-The logging system is automatically integrated into the `Application` class:
-
-```cpp
-class MyApp : public Limitless::Application
-{
+class MyApp : public Limitless::Application {
 public:
-    bool Initialize() override
-    {
-        // Logging is already initialized
-        LT_INFO("MyApp initializing...");
+    bool Initialize() override {
+        LT_INFO("MyApp initialized successfully!");
         
-        // Access loggers
-        auto logger = GetLogger();
-        auto& logManager = GetLogManager();
+        // Log configuration values
+        auto& config = Limitless::ConfigManager::GetInstance();
+        LT_INFO("Window size: {}x{}", 
+                config.GetValue<int>(Limitless::Config::Window::WIDTH, 1280),
+                config.GetValue<int>(Limitless::Config::Window::HEIGHT, 720));
         
-        // Your initialization code...
         return true;
     }
     
-    void Shutdown() override
-    {
+    void Shutdown() override {
         LT_INFO("MyApp shutting down...");
-        // Your cleanup code...
     }
 };
+
+Limitless::Application* CreateApplication() {
+    return new MyApp();
+}
 ```
 
 ## Best Practices
 
-### 1. Use Appropriate Log Levels
+1. **Use appropriate log levels**: Use `TRACE` for detailed debugging, `INFO` for general information, `WARN` for warnings, and `ERROR`/`CRITICAL` for errors.
 
-```cpp
-// Use TRACE for very detailed debugging
-LT_TRACE("Entering function with params: x={}, y={}", x, y);
+2. **Configure for production**: In production builds, consider setting the log level to `warn` or `error` to reduce log file size.
 
-// Use DEBUG for development debugging
-LT_DEBUG("Processing {} items", itemCount);
+3. **Monitor log files**: Regularly check log file sizes and clean up old logs if needed.
 
-// Use INFO for general information
-LT_INFO("Level {} loaded successfully", levelName);
+4. **Use structured logging**: Include relevant context in your log messages for better debugging.
 
-// Use WARN for potential issues
-LT_WARN("Texture {} not found, using fallback", textureName);
-
-// Use ERROR for actual errors
-LT_ERROR("Failed to connect to server: {}", errorMessage);
-
-// Use CRITICAL for severe errors
-LT_CRITICAL("Application cannot continue: {}", criticalError);
-```
-
-### 2. Performance Monitoring
-
-```cpp
-// Use scoped timing for automatic cleanup
-{
-    LT_PERF_SCOPE("Frame Rendering");
-    RenderScene();
-    RenderUI();
-} // Automatically logs timing
-
-// Use function timing for simple operations
-auto result = LT_PERF_FUNCTION("Data Loading", [&]() {
-    return LoadDataFromFile(filename);
-});
-```
-
-### 3. Error Handling
-
-```cpp
-// Use Result class for operations that can fail
-auto result = LoadResource("texture.png");
-if (result.IsSuccess()) {
-    UseResource(result.GetValue());
-} else {
-    LT_ERROR("Failed to load resource: {}", result.GetError().GetMessage());
-}
-
-// Use assertions for invariants
-LT_ASSERT(pointer != nullptr, "Pointer must not be null");
-LT_ASSERT(index < size, "Index {} out of bounds [0, {})", index, size);
-```
-
-### 4. Multiple Loggers
-
-```cpp
-// Create specialized loggers for different systems
-auto graphicsLogger = GetLogManager().GetLogger("Graphics");
-auto audioLogger = GetLogManager().GetLogger("Audio");
-auto networkLogger = GetLogManager().GetLogger("Network");
-
-graphicsLogger->Info("Rendering frame {}", frameNumber);
-audioLogger->Info("Playing sound {}", soundName);
-networkLogger->Info("Sending packet to {}", serverAddress);
-```
-
-### 5. Memory Tracking
-
-```cpp
-// Track memory usage at key points
-LT_LOG_MEMORY("After loading level");
-LT_LOG_MEMORY("After creating entities");
-LT_LOG_MEMORY("Before rendering frame");
-```
-
-## Platform-Specific Features
-
-The logging system automatically detects the platform and provides appropriate functionality:
-
-- **Windows**: Uses Windows API for memory tracking
-- **macOS**: Uses Mach API for memory tracking  
-- **Linux**: Uses /proc filesystem for memory tracking
+5. **Test configuration**: Verify your logging configuration works as expected in different environments.
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Logs not appearing**: Check log level configuration
-2. **File logging not working**: Ensure directory permissions
-3. **Performance impact**: Use appropriate log levels in release builds
-4. **Memory leaks**: Ensure proper cleanup in destructors
+1. **Logs not appearing**: Check if the log level is set too high or if both file and console logging are disabled.
+
+2. **Permission errors**: Ensure the application has write permissions to the log directory.
+
+3. **Large log files**: Adjust `max_file_size` and `max_files` settings to control log file growth.
+
+4. **Performance impact**: In release builds, consider disabling file logging or using a higher log level.
 
 ### Debug Configuration
 
-For development, use:
+To debug logging configuration issues, you can temporarily force console output:
 
-```cpp
-logManager.SetGlobalLevel(Limitless::LogLevel::Trace);
-logManager.EnablePerformanceLogging(true);
-logManager.EnableMemoryLogging(true);
+```json
+{
+  "logging": {
+    "level": "trace",
+    "file_enabled": false,
+    "console_enabled": true
+  }
+}
 ```
 
-For release builds, use:
-
-```cpp
-logManager.SetGlobalLevel(Limitless::LogLevel::Info);
-logManager.EnablePerformanceLogging(false);
-logManager.EnableMemoryLogging(false);
-```
-
-## Examples
-
-See the `SandboxApp` implementation for a complete example of using the logging and error handling system in a real application.
+This will show all log messages in the console, making it easier to diagnose issues.

@@ -1,5 +1,5 @@
 #include "Error.h"
-#include "Logger.h"
+#include <spdlog/fmt/fmt.h>
 #include <sstream>
 #include <iostream>
 
@@ -51,16 +51,8 @@ namespace Limitless
 
         void DefaultErrorHandler(const Error& error)
         {
-            // Log the error
-            if (g_Logger)
-            {
-                g_Logger->Error(spdlog::fmt_lib::format("{}", error.ToString()));
-            }
-            else
-            {
-                // Fallback to cerr if logger is not available
-                std::cerr << "ERROR: " << error.ToString() << std::endl;
-            }
+            // Fallback to cerr if logger is not available
+            std::cerr << "ERROR: " << error.ToString() << std::endl;
         }
 
         void Assert(bool condition, const std::string& message, const std::source_location& location)

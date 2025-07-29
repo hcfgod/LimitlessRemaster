@@ -19,15 +19,32 @@ namespace Limitless
         m_Data.Title = props.Title;
         m_Data.Width = props.Width;
         m_Data.Height = props.Height;
+        m_Data.Fullscreen = props.Fullscreen;
+        m_Data.Resizable = props.Resizable;
 
         std::cout << "Creating window " << props.Title << " (" << props.Width << ", " << props.Height << ")" << std::endl;
+        if (props.Fullscreen) {
+            std::cout << "Window will be fullscreen" << std::endl;
+        }
+        if (props.Resizable) {
+            std::cout << "Window will be resizable" << std::endl;
+        }
+
+        // Set up SDL window flags
+        uint32_t windowFlags = 0;
+        if (props.Resizable) {
+            windowFlags |= SDL_WINDOW_RESIZABLE;
+        }
+        if (props.Fullscreen) {
+            windowFlags |= SDL_WINDOW_FULLSCREEN;
+        }
 
         // Create window
         m_Window = SDL_CreateWindow(
             props.Title.c_str(),
             props.Width,
             props.Height,
-            SDL_WINDOW_RESIZABLE
+            windowFlags
         );
 
         if (!m_Window)
