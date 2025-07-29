@@ -14,13 +14,25 @@ echo Building LimitlessRemaster in %CONFIGURATION% configuration for %PLATFORM%.
 REM Change to the project root directory
 cd /d "%~dp0.."
 
-REM Generate Visual Studio solution
+REM Generate Visual Studio solution with fallback
 echo Generating Visual Studio solution...
-Vendor\Premake\premake5.exe vs2022
+set VS_ACTION=vs2022
+Vendor\Premake\premake5.exe %VS_ACTION%
 if errorlevel 1 (
-    echo Error: Failed to generate Visual Studio solution
-    exit /b 1
+    echo vs2022 failed, trying vs2019...
+    set VS_ACTION=vs2019
+    Vendor\Premake\premake5.exe %VS_ACTION%
+    if errorlevel 1 (
+        echo vs2019 failed, trying vs2017...
+        set VS_ACTION=vs2017
+        Vendor\Premake\premake5.exe %VS_ACTION%
+        if errorlevel 1 (
+            echo Error: Failed to generate Visual Studio solution with any supported action
+            exit /b 1
+        )
+    )
 )
+echo Generated solution with action: %VS_ACTION%
 
 REM Build the solution
 echo Building solution...

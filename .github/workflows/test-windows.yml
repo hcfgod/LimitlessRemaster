@@ -25,7 +25,8 @@ jobs:
           New-Item -ItemType Directory -Path "Vendor\Premake" -Force
         }
         
-        $premakeUrl = "https://github.com/premake/premake-core/releases/download/v5.0.0-alpha16/premake-5.0.0-alpha16-windows.zip"
+        # Try the latest beta version that supports VS2022
+        $premakeUrl = "https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip"
         $premakeZip = "Vendor\Premake\premake5.zip"
         $premakeDir = "Vendor\Premake"
         
@@ -35,16 +36,34 @@ jobs:
         
         echo "Premake5 downloaded and extracted"
         Vendor\Premake\premake5.exe --version
+        
+        # Test if vs2022 action is supported
+        echo "Testing vs2022 action support..."
+        Vendor\Premake\premake5.exe --help | Select-String "vs2022" || echo "vs2022 not found in help, trying vs2019"
       
     - name: Generate Visual Studio solution
       run: |
         echo "Generating Visual Studio solution..."
-        Vendor\Premake\premake5.exe vs2022
+        
+        # Try vs2022 first, fallback to vs2019 if not supported
+        $vsAction = "vs2022"
+        Vendor\Premake\premake5.exe $vsAction
         if ($LASTEXITCODE -ne 0) {
-          echo "Error: Failed to generate Visual Studio solution"
-          exit 1
+          echo "vs2022 failed, trying vs2019..."
+          $vsAction = "vs2019"
+          Vendor\Premake\premake5.exe $vsAction
+          if ($LASTEXITCODE -ne 0) {
+            echo "vs2019 failed, trying vs2017..."
+            $vsAction = "vs2017"
+            Vendor\Premake\premake5.exe $vsAction
+            if ($LASTEXITCODE -ne 0) {
+              echo "Error: Failed to generate Visual Studio solution with any supported action"
+              exit 1
+            }
+          }
         }
         
+        echo "Generated solution with action: $vsAction"
         echo "Generated files:"
         Get-ChildItem -Name "*.sln"
         
