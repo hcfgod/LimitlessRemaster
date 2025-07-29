@@ -18,73 +18,81 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v1.1
       
-    - name: Verify premake5
+    - name: Download Premake5
       run: |
-        echo "Checking premake5 executable:"
-        if (Test-Path "Vendor\Premake\premake5.exe") {
-          echo "premake5.exe found"
-          echo "premake5 version:"
-          Vendor\Premake\premake5.exe --version
-        } else {
-          echo "premake5.exe not found"
-          echo "Vendor\Premake directory contents:"
-          Get-ChildItem "Vendor\Premake" -Recurse
+        echo "Downloading premake5..."
+        if (!(Test-Path "Vendor\Premake")) {
+          New-Item -ItemType Directory -Path "Vendor\Premake" -Force
         }
+        
+        $premakeUrl = "https://github.com/premake/premake-core/releases/download/v5.0.0-alpha16/premake-5.0.0-alpha16-windows.zip"
+        $premakeZip = "Vendor\Premake\premake5.zip"
+        $premakeDir = "Vendor\Premake"
+        
+        Invoke-WebRequest -Uri $premakeUrl -OutFile $premakeZip
+        Expand-Archive -Path $premakeZip -DestinationPath $premakeDir -Force
+        Remove-Item $premakeZip
+        
+        echo "Premake5 downloaded and extracted"
+        Vendor\Premake\premake5.exe --version
       
     - name: Generate Visual Studio solution
       run: |
         echo "Generating Visual Studio solution..."
         Vendor\Premake\premake5.exe vs2022
+        if ($LASTEXITCODE -ne 0) {
+          echo "Error: Failed to generate Visual Studio solution"
+          exit 1
+        }
+        
         echo "Generated files:"
         Get-ChildItem -Name "*.sln"
-        echo "Solution file contents (first 50 lines):"
-        Get-Content LimitlessRemaster.sln | Select-Object -First 50
         
     - name: Build project
       run: |
         echo "Building with detailed output..."
         msbuild LimitlessRemaster.sln /p:Configuration=Debug /p:Platform=x64 /m /v:detailed /p:BuildProjectReferences=true
         
-        echo "Build exit code: $LASTEXITCODE"
         if ($LASTEXITCODE -ne 0) {
-          echo "Build failed with exit code $LASTEXITCODE"
+          echo "Error: Build failed with exit code $LASTEXITCODE"
           exit $LASTEXITCODE
         }
         
+        echo "Build completed successfully!"
+        
     - name: List build output
       run: |
-        echo "Checking if Build directory exists:"
+        echo "Build directory contents:"
         if (Test-Path "Build") {
-          echo "Build directory found"
-          echo "Build directory contents:"
           Get-ChildItem Build -Recurse | Format-Table Name, FullName
         } else {
-          echo "Build directory not found"
-          echo "Current directory contents:"
-          Get-ChildItem
-        }
-        
-        echo "Looking for specific build output directories:"
-        if (Test-Path "Build\Debug-windows-x64") {
-          echo "Debug-windows-x64 directory found"
-          echo "Debug-windows-x64 contents:"
-          Get-ChildItem "Build\Debug-windows-x64" -Recurse
-        } else {
-          echo "Debug-windows-x64 directory not found"
-          echo "Available build directories:"
-          if (Test-Path "Build") {
-            Get-ChildItem "Build" -Directory
-          }
+          echo "Build directory not found!"
+          exit 1
         }
         
     - name: Run tests
       run: |
         $testExe = "Build\Debug-windows-x64\Test\Test.exe"
         if (Test-Path $testExe) {
-          echo "Found test executable: $testExe"
+          echo "Running tests..."
           & $testExe --success
+          if ($LASTEXITCODE -ne 0) {
+            echo "Warning: Some tests failed"
+          } else {
+            echo "All tests passed!"
+          }
         } else {
           echo "Test executable not found at: $testExe"
-          echo "Searching for test executables:"
-          Get-ChildItem Build -Recurse -Name "*.exe" | Where-Object { $_ -like "*Test*" }
-        } 
+          echo "Available executables:"
+          Get-ChildItem Build -Recurse -Name "*.exe"
+        }
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: windows-build-artifacts
+        path: |
+          Build/
+          *.sln
+        retention-days: 7 

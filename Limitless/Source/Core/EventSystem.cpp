@@ -1,4 +1,5 @@
 #include "EventSystem.h"
+#include "Debug/Log.h"
 #include <algorithm>
 #include <chrono>
 #include <sstream>
@@ -21,6 +22,17 @@ namespace Limitless
     // EventDispatcher implementation
     void EventDispatcher::Dispatch(Event& event)
     {
+        // Check if event filter exists and if it should filter this event
+        if (m_EventFilter && !m_EventFilter(event))
+        {
+            m_EventsFiltered++;
+            LT_DBG("Event filtered out: {}", event.ToString());
+            return; // Event is filtered out, don't dispatch
+        }
+
+        m_TotalEventsDispatched++;
+        auto startTime = std::chrono::high_resolution_clock::now();
+        
         auto eventType = event.GetType();
         auto it = m_Callbacks.find(eventType);
         
@@ -31,10 +43,11 @@ namespace Limitless
                 try
                 {
                     callback.first(event);
+                    m_EventsHandled++;
                 }
-                catch (const std::exception&)
+                catch (const std::exception& e)
                 {
-                    // LT_ERROR("Exception in event callback: {}", e.what());  // Temporarily disabled
+                    LT_ERROR("Exception in event callback: {}", e.what());
                 }
             }
         }
@@ -45,12 +58,16 @@ namespace Limitless
             try
             {
                 listener.listener->OnEvent(event); 
+                m_EventsHandled++;
             }
-            catch (const std::exception&)
+            catch (const std::exception& e)
             {
-                // LT_ERROR("Exception in event listener: {}", e.what());  // Temporarily disabled
+                LT_ERROR("Exception in event listener: {}", e.what());
             }
         }
+        
+        auto endTime = std::chrono::high_resolution_clock::now();
+        m_TotalDispatchTime += std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
     }
 
     void EventDispatcher::DispatchImmediate(Event& event)
@@ -244,38 +261,40 @@ namespace Limitless
     {
         if (m_Initialized)
         {
-            // LT_WARN("EventSystem already initialized");  // Temporarily disabled
+            LT_WARN("EventSystem already initialized");
             return;
         }
 
-        // LT_INFO("Initializing EventSystem");  // Temporarily disabled
+        LT_INFO("Initializing EventSystem");
         m_Dispatcher = std::make_unique<EventDispatcher>();
         m_Queue = std::make_unique<EventQueue>(1000);
         m_Initialized = true;
-        // LT_INFO("EventSystem initialized successfully");  // Temporarily disabled
+        LT_INFO("EventSystem initialized successfully");
     }
 
     void EventSystem::Shutdown()
     {
         if (!m_Initialized) return;
 
-        // LT_INFO("Shutting down EventSystem");  // Temporarily disabled
+        LT_INFO("Shutting down EventSystem");
         
         // Clear all callbacks and listeners
         m_Dispatcher.reset();
         m_Queue.reset();
         m_Initialized = false;
         
-        // LT_INFO("EventSystem shutdown complete");  // Temporarily disabled
+        LT_INFO("EventSystem shutdown complete");
     }
 
     void EventSystem::Dispatch(Event& event)
     {
         if (!m_Initialized)
         {
+            LT_WARN("Attempting to dispatch event when EventSystem is not initialized");
             return;
         }
 
+        LT_DBG("Dispatching event: {} (Type: {})", event.GetName(), static_cast<int>(event.GetType()));
         m_Dispatcher->Dispatch(event);
     }
 
@@ -288,9 +307,11 @@ namespace Limitless
     {
         if (!m_Initialized)
         {
+            LT_WARN("Attempting to dispatch deferred event when EventSystem is not initialized");
             return;
         }
 
+        LT_DBG("Enqueuing deferred event: {} (Type: {})", event->GetName(), static_cast<int>(event->GetType()));
         m_Queue->Enqueue(std::move(event));
     }
 

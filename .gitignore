@@ -3,6 +3,8 @@ Build/
 bin/
 bin-int/
 build/
+obj/
+out/
 
 # Visual Studio files
 .vs/
@@ -10,9 +12,39 @@ build/
 *.vcxproj
 *.vcxproj.filters
 *.vcxproj.user
+*.suo
+*.user
+*.aps
+*.pch
+*.vspscc
+*.vssscc
+*_i.c
+*_p.c
+*.ilk
+*.meta
+*.obj
+*.pdb
+*.pgc
+*.pgd
+*.rsp
+*.sbr
+*.tlb
+*.tli
+*.tlh
+*.tmp
+*.tmp_proj
+*.log
+*.vspscc
+*.vssscc
+.builds
+*.pidb
+*.svclog
+*.scc
 
 # Premake generated files
 *.workspace
+Makefile
+*.make
 
 # OS generated files
 .DS_Store
@@ -22,12 +54,81 @@ build/
 .Trashes
 ehthumbs.db
 Thumbs.db
+desktop.ini
 
 # IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # Logs
-*.log 
+*.log
+logs/
+test_logs/
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+*.temp
+
+# Configuration files (keep config.json but ignore local overrides)
+config.local.json
+config.dev.json
+config.prod.json
+
+# Dependencies (if using package managers)
+node_modules/
+vendor/
+packages/
+
+# Documentation build
+docs/_build/
+docs/build/
+
+# Coverage reports
+coverage/
+*.gcov
+*.gcda
+*.gcno
+
+# Profiling data
+*.prof
+*.gprof
+
+# Core dumps
+core
+core.*
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Archive files
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Executables (platform specific)
+*.exe
+*.dll
+*.so
+*.dylib
+*.app
+
+# Debug symbols
+*.pdb
+*.dbg
+*.sym
+
+# Memory dumps
+*.dmp
+*.mdmp
+
+# Crash reports
+crash-reports/
+*.crash 

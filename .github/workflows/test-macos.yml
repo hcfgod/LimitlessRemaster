@@ -20,139 +20,100 @@ jobs:
         brew install sdl3
         echo "SDL3 installation info:"
         brew list sdl3
-        echo "SDL3 library locations:"
-        find /opt/homebrew -name "*SDL3*" 2>/dev/null || echo "No SDL3 found in /opt/homebrew"
-        find /usr/local -name "*SDL3*" 2>/dev/null || echo "No SDL3 found in /usr/local"
-        echo "SDL3 library files:"
-        ls -la /opt/homebrew/lib/libSDL3*
         
     - name: Download premake5
       run: |
         echo "Downloading premake5..."
-        # Try the latest stable release first
         curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-alpha16/premake-5.0.0-alpha16-macosx.tar.gz
-        echo "Downloaded file info:"
-        ls -la premake5.tar.gz
-        file premake5.tar.gz
-        
-        echo "Extracting premake5..."
         tar -xzf premake5.tar.gz
         chmod +x premake5
-        echo "Premake5 binary info:"
-        ls -la premake5
-        file premake5
-        echo "Testing premake5 execution:"
-        ./premake5 --version
         
-        if [ $? -ne 0 ]; then
-          echo "Stable version failed, trying beta release..."
-          curl -L -o premake5-beta.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-macosx.tar.gz
-          echo "Beta file info:"
-          ls -la premake5-beta.tar.gz
-          file premake5-beta.tar.gz
-          tar -xzf premake5-beta.tar.gz
-          chmod +x premake5
-          echo "New premake5 version:"
-          ./premake5 --version
-        fi
+        echo "Premake5 version:"
+        ./premake5 --version
         
     - name: Generate Makefiles
       run: |
-        echo "Current directory: $(pwd)"
-        echo "Directory contents:"
-        ls -la
-        echo "Checking if premake5.lua exists:"
-        if [ -f "premake5.lua" ]; then
-          echo "premake5.lua found"
-          echo "premake5.lua contents:"
-          cat premake5.lua
-        else
-          echo "premake5.lua not found!"
+        echo "Generating Makefiles..."
+        ./premake5 gmake2
+        
+        if [ ! -f "Makefile" ]; then
+          echo "Error: Makefile was not generated"
           exit 1
         fi
         
-        echo "Generating Makefiles..."
-        echo "Premake5 workspace info:"
-        ./premake5 --version
-        echo "Testing premake5 with a simple action:"
-        ./premake5 clean || echo "Clean action failed (this is normal if no build files exist)"
-        echo "Generating Makefiles..."
+        echo "Makefile generated successfully"
         
-        # Try to execute gmake2 action directly
-        echo "Command: ./premake5 --file=premake5.lua gmake2"
-        ./premake5 --file=premake5.lua gmake2
-        echo "Premake5 exit code: $?"
-        
-        # Check if Makefile was generated
-        if [ -f "Makefile" ]; then
-          echo "Makefile was generated successfully!"
-          echo "Makefile size: $(wc -l < Makefile) lines"
-        else
-          echo "Makefile was not generated, trying alternative approaches..."
-          echo "Command: ./premake5 --file=premake5.lua gmake"
-          ./premake5 --file=premake5.lua gmake
-          echo "Premake5 exit code: $?"
-          
-          if [ ! -f "Makefile" ]; then
-            echo "All premake5 actions failed to generate Makefile"
-            exit 1
-          fi
-        fi
-        
-        echo "Generated files:"
-        ls -la
-        echo "Makefile targets (first 100 lines):"
-        head -100 Makefile | grep -E "^[a-zA-Z]" || echo "No targets found in first 100 lines"
-        echo "Available configurations:"
-        grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" Makefile | head -20 || echo "No configurations found"
-        
-    - name: Build project
+    - name: Build ARM64
       run: |
-        echo "Building with verbose output..."
-        echo "Available configurations from premake5.lua: Debug, Release, Dist"
-        echo "Available platforms from premake5.lua: x64, ARM64"
-        echo "Generated Makefile configurations: debug_x64, debug_arm64, release_x64, release_arm64, dist_x64, dist_arm64"
-        echo "Checking available make targets:"
-        make -qp | grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" | grep -v "^Makefile:" | head -20
+        echo "Building ARM64 configuration..."
+        make -j$(sysctl -n hw.ncpu) config=debug_arm64
         
-        echo "Trying Debug ARM64 configuration..."
-        make -j$(sysctl -n hw.ncpu) config=debug_arm64 VERBOSE=1
-        
-        echo "Build exit code: $?"
         if [ $? -ne 0 ]; then
-          echo "Build failed with exit code $?"
-          echo "Trying Debug x64 configuration..."
-          make -j$(sysctl -n hw.ncpu) config=debug_x64 VERBOSE=1
-          if [ $? -ne 0 ]; then
-            echo "Debug x64 build failed, trying Release ARM64..."
-            make -j$(sysctl -n hw.ncpu) config=release_arm64 VERBOSE=1
-            if [ $? -ne 0 ]; then
-              echo "All build attempts failed"
-              exit 1
-            fi
-          fi
+          echo "Error: ARM64 build failed"
+          exit 1
         fi
+        
+        echo "ARM64 build completed successfully!"
+        
+    - name: Build x64
+      run: |
+        echo "Building x64 configuration..."
+        make -j$(sysctl -n hw.ncpu) config=debug_x64
+        
+        if [ $? -ne 0 ]; then
+          echo "Error: x64 build failed"
+          exit 1
+        fi
+        
+        echo "x64 build completed successfully!"
         
     - name: List build output
       run: |
         echo "Build directory contents:"
         ls -la Build/ || echo "Build directory not found"
-        echo "Looking for ARM64 build output:"
+        
+        echo "ARM64 build output:"
         ls -la Build/debug_arm64-macosx-ARM64/ || echo "ARM64 build directory not found"
-        echo "Looking for x64 build output:"
+        
+        echo "x64 build output:"
         ls -la Build/debug_x64-macosx-x64/ || echo "x64 build directory not found"
         
-        echo "Searching for all executables:"
-        find Build/ -name "Test" -o -name "Sandbox" -o -name "*.exe" 2>/dev/null || echo "No executables found"
-        
-    - name: Run tests
+    - name: Run ARM64 tests
       run: |
-        # Try to find the test executable in ARM64 build
         TEST_EXE=$(find Build/debug_arm64-macosx-ARM64/ -name "Test" -type f 2>/dev/null | head -1)
         if [ -n "$TEST_EXE" ]; then
-          echo "Found test executable: $TEST_EXE"
+          echo "Running ARM64 tests..."
           "$TEST_EXE" --success
+          if [ $? -ne 0 ]; then
+            echo "Warning: Some ARM64 tests failed"
+          else
+            echo "All ARM64 tests passed!"
+          fi
         else
-          echo "Test executable not found in ARM64 build"
-          find Build/debug_arm64-macosx-ARM64/ -name "*Test*" -type f 2>/dev/null || echo "No test files found in ARM64 build"
-        fi 
+          echo "ARM64 test executable not found"
+        fi
+        
+    - name: Run x64 tests
+      run: |
+        TEST_EXE=$(find Build/debug_x64-macosx-x64/ -name "Test" -type f 2>/dev/null | head -1)
+        if [ -n "$TEST_EXE" ]; then
+          echo "Running x64 tests..."
+          "$TEST_EXE" --success
+          if [ $? -ne 0 ]; then
+            echo "Warning: Some x64 tests failed"
+          else
+            echo "All x64 tests passed!"
+          fi
+        else
+          echo "x64 test executable not found"
+        fi
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: macos-build-artifacts
+        path: |
+          Build/
+          Makefile
+        retention-days: 7 

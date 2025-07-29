@@ -22,6 +22,39 @@ namespace Limitless
     // Configuration change callback
     using ConfigChangeCallback = std::function<void(const std::string&, const ConfigValue&)>;
 
+    // Configuration constants namespace
+    namespace Config
+    {
+        namespace Window
+        {
+            constexpr const char* WIDTH = "window.width";
+            constexpr const char* HEIGHT = "window.height";
+            constexpr const char* TITLE = "window.title";
+            constexpr const char* FULLSCREEN = "window.fullscreen";
+            constexpr const char* RESIZABLE = "window.resizable";
+            constexpr const char* VSYNC = "window.vsync";
+        }
+        
+        namespace Logging
+        {
+            constexpr const char* LEVEL = "logging.level";
+            constexpr const char* FILE_ENABLED = "logging.file_enabled";
+            constexpr const char* CONSOLE_ENABLED = "logging.console_enabled";
+            constexpr const char* PATTERN = "logging.pattern";
+            constexpr const char* DIRECTORY = "logging.directory";
+            constexpr const char* MAX_FILE_SIZE = "logging.max_file_size";
+            constexpr const char* MAX_FILES = "logging.max_files";
+        }
+        
+        namespace System
+        {
+            constexpr const char* MAX_THREADS = "system.max_threads";
+            constexpr const char* WORKING_DIRECTORY = "system.working_directory";
+            constexpr const char* TEMP_DIRECTORY = "system.temp_directory";
+            constexpr const char* LOG_DIRECTORY = "system.log_directory";
+        }
+    }
+
     class ConfigManager
     {
     public:
@@ -98,27 +131,24 @@ namespace Limitless
         void LoadFromCommandLine(int argc, char* argv[], const std::string& prefix = "--");
 
         // Hot reload support
-        void EnableHotReload(bool enable = true);
         bool IsHotReloadEnabled() const { return m_HotReloadEnabled; }
+        void EnableHotReload(bool enable);
         void ReloadFromFile();
 
     private:
         ConfigManager() = default;
         ~ConfigManager() = default;
 
-        // Internal data structures
         std::unordered_map<std::string, ConfigValue> m_Values;
         std::unordered_map<std::string, ConfigValidator> m_Validators;
         std::unordered_map<std::string, std::vector<ConfigChangeCallback>> m_ChangeCallbacks;
         std::unordered_map<std::string, ConfigValue> m_Defaults;
-        
         std::string m_ConfigFile;
         bool m_Initialized = false;
         bool m_HotReloadEnabled = false;
         std::unique_ptr<FileWatcher> m_FileWatcher;
         mutable std::mutex m_Mutex;
 
-        // Internal helper methods
         void NotifyChangeCallbacks(const std::string& key, const ConfigValue& value);
         bool ValidateValue(const std::string& key, const ConfigValue& value) const;
         void LoadDefaults();
@@ -132,49 +162,6 @@ namespace Limitless
         bool CanConvert(const ConfigValue& value) const;
     };
 
-    // Convenience functions
+    // Convenience function
     inline ConfigManager& GetConfigManager() { return ConfigManager::GetInstance(); }
-
-    // Configuration macros for easy access
-    #define LT_CONFIG_GET(key, defaultValue) \
-        Limitless::GetConfigManager().GetValue(key, defaultValue)
-    
-    #define LT_CONFIG_SET(key, value) \
-        Limitless::GetConfigManager().SetValue(key, value)
-    
-    #define LT_CONFIG_HAS(key) \
-        Limitless::GetConfigManager().HasValue(key)
-
-    // Configuration categories for organization
-    namespace Config
-    {
-        namespace Window
-        {
-            constexpr const char* WIDTH = "window.width";
-            constexpr const char* HEIGHT = "window.height";
-            constexpr const char* TITLE = "window.title";
-            constexpr const char* FULLSCREEN = "window.fullscreen";
-            constexpr const char* VSYNC = "window.vsync";
-            constexpr const char* RESIZABLE = "window.resizable";
-        }
-
-        namespace Logging
-        {
-            constexpr const char* LEVEL = "logging.level";
-            constexpr const char* FILE_ENABLED = "logging.file_enabled";
-            constexpr const char* CONSOLE_ENABLED = "logging.console_enabled";
-            constexpr const char* PATTERN = "logging.pattern";
-            constexpr const char* DIRECTORY = "logging.directory";
-            constexpr const char* MAX_FILE_SIZE = "logging.max_file_size";
-            constexpr const char* MAX_FILES = "logging.max_files";
-        }
-
-        namespace System
-        {
-            constexpr const char* MAX_THREADS = "system.max_threads";
-            constexpr const char* WORKING_DIRECTORY = "system.working_directory";
-            constexpr const char* TEMP_DIRECTORY = "system.temp_directory";
-            constexpr const char* LOG_DIRECTORY = "system.log_directory";
-        }
-    }
 }

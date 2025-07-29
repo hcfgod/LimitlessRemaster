@@ -20,6 +20,7 @@ workspace "LimitlessRemaster"
     filter "platforms:ARM64"
         architecture "ARM64"
 
+    -- TODO:Make sure output directory format matches CI/CD expectations
     outputdir = "Build/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}"
 
 -- Include sub-projects

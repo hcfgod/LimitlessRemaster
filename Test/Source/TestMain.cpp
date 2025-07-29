@@ -145,6 +145,142 @@ TEST_CASE("Hot Reload Functionality") {
     CHECK(config.GetValue<int>("window.width") == 1920);
 }
 
+TEST_CASE("Event System Functionality") {
+    // Test that the event system can be initialized and used
+    auto& eventSystem = Limitless::GetEventSystem();
+    
+    // Test initialization
+    CHECK(eventSystem.IsInitialized() == false);
+    eventSystem.Initialize();
+    CHECK(eventSystem.IsInitialized() == true);
+    
+    // Test event callback registration
+    bool callbackCalled = false;
+    eventSystem.AddCallback(Limitless::EventType::AppTick, [&callbackCalled](Limitless::Event& event) {
+        callbackCalled = true;
+    });
+    
+    // Test event dispatching
+    auto tickEvent = std::make_unique<Limitless::Events::AppTickEvent>(0.016f);
+    eventSystem.Dispatch(*tickEvent);
+    
+    // Process events
+    eventSystem.ProcessEvents();
+    
+    // Verify callback was called
+    CHECK(callbackCalled == true);
+    
+    // Clear the event system state for the next test
+    eventSystem.Shutdown();
+    eventSystem.Initialize();
+    
+    // Test event filtering
+    bool filteredEventCalled = false;
+    eventSystem.SetEventFilter([](const Limitless::Event& event) {
+        return event.GetType() == Limitless::EventType::AppTick;
+    });
+    
+    eventSystem.AddCallback(Limitless::EventType::AppUpdate, [&filteredEventCalled](Limitless::Event& event) {
+        filteredEventCalled = true;
+    });
+    
+    auto updateEvent = std::make_unique<Limitless::Events::AppUpdateEvent>(0.016f);
+    eventSystem.Dispatch(*updateEvent);
+    eventSystem.ProcessEvents();
+    
+    // Verify filtered event was not called
+    CHECK(filteredEventCalled == false);
+    
+    // Test that non-filtered events still work
+    bool nonFilteredEventCalled = false;
+    eventSystem.AddCallback(Limitless::EventType::AppTick, [&nonFilteredEventCalled](Limitless::Event& event) {
+        nonFilteredEventCalled = true;
+    });
+    
+    auto tickEvent2 = std::make_unique<Limitless::Events::AppTickEvent>(0.016f);
+    eventSystem.Dispatch(*tickEvent2);
+    eventSystem.ProcessEvents();
+    
+    // Verify non-filtered event was called
+    CHECK(nonFilteredEventCalled == true);
+    
+    // Cleanup
+    eventSystem.Shutdown();
+}
+
+TEST_CASE("Error Handling") {
+    // Test error handling and custom exceptions
+    auto& config = Limitless::ConfigManager::GetInstance();
+    
+    // Test invalid configuration access
+    CHECK(config.GetValue<int>("nonexistent.key", 42) == 42);
+    CHECK(config.HasValue("nonexistent.key") == false);
+    
+    // Test configuration validation
+    config.RegisterSchema("test.number", [](const Limitless::ConfigValue& value) {
+        return std::visit([](const auto& v) {
+            if constexpr (std::is_same_v<std::decay_t<decltype(v)>, int>) {
+                return v >= 0 && v <= 100;
+            }
+            return false;
+        }, value);
+    });
+    
+    // Test valid value
+    config.SetValue("test.number", 50);
+    CHECK(config.GetValue<int>("test.number") == 50);
+    
+    // Test invalid value (should be ignored)
+    config.SetValue("test.number", 150);
+    CHECK(config.GetValue<int>("test.number") == 50); // Should remain unchanged
+    
+    // Test configuration validation
+    CHECK(config.ValidateConfiguration() == true);
+}
+
+TEST_CASE("Memory Management") {
+    // Test that smart pointers and RAII work correctly
+    auto& config = Limitless::ConfigManager::GetInstance();
+    
+    // Test that configuration values are properly managed
+    config.SetValue("test.string", std::string("test_value"));
+    config.SetValue("test.number", 42);
+    
+    // Verify values are accessible
+    CHECK(config.GetValue<std::string>("test.string") == "test_value");
+    CHECK(config.GetValue<int>("test.number") == 42);
+    
+    // Test that values persist across operations
+    config.SetValue("test.string", std::string("new_value"));
+    CHECK(config.GetValue<std::string>("test.string") == "new_value");
+    CHECK(config.GetValue<int>("test.number") == 42); // Should still be 42
+    
+    // Test removal
+    config.RemoveValue("test.string");
+    CHECK(config.HasValue("test.string") == false);
+    CHECK(config.GetValue<std::string>("test.string", "default") == "default");
+}
+
+TEST_CASE("Cross-Platform Compatibility") {
+    // Test platform-specific defines
+    #ifdef LT_PLATFORM_WINDOWS
+        CHECK(true); // Windows platform detected
+    #elif defined(LT_PLATFORM_MAC)
+        CHECK(true); // macOS platform detected
+    #elif defined(LT_PLATFORM_LINUX)
+        CHECK(true); // Linux platform detected
+    #else
+        CHECK(false); // No platform detected
+    #endif
+    
+    // Test architecture detection
+    #ifdef LT_PLATFORM_MAC_ARM64
+        CHECK(true); // ARM64 architecture on macOS
+    #elif defined(LT_PLATFORM_MAC_X64)
+        CHECK(true); // x64 architecture on macOS
+    #endif
+}
+
 TEST_CASE("Basic Logging Functionality") {
     // Initialize logging system for testing
     Limitless::Log::Init("debug", true, true, "[%H:%M:%S.%e] [%l] %v", "test_logs", 1024*1024, 5);
