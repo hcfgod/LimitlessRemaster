@@ -1,4 +1,6 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#define DOCTEST_CONFIG_DISABLE_EXCEPTIONS
+#define DOCTEST_CONFIG_WITH_VARIADIC_MACROS
 #include "doctest.h"
 #include "Limitless.h"
 #include "Core/HotReloadManager.h"
@@ -217,14 +219,15 @@ TEST_CASE("Error Handling") {
     CHECK(config.HasValue("nonexistent.key") == false);
     
     // Test configuration validation
-    config.RegisterSchema("test.number", [](const Limitless::ConfigValue& value) {
-        return std::visit([](const auto& v) {
+    auto validateNumber = [](const Limitless::ConfigValue& value) -> bool {
+        return std::visit([](const auto& v) -> bool {
             if constexpr (std::is_same_v<std::decay_t<decltype(v)>, int>) {
                 return v >= 0 && v <= 100;
             }
             return false;
         }, value);
-    });
+    };
+    config.RegisterSchema("test.number", validateNumber);
     
     // Test valid value
     config.SetValue("test.number", 50);

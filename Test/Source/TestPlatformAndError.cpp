@@ -1,3 +1,5 @@
+#define DOCTEST_CONFIG_DISABLE_EXCEPTIONS
+#define DOCTEST_CONFIG_WITH_VARIADIC_MACROS
 #include <doctest/doctest.h>
 #include "Platform/Platform.h"
 #include "Core/Error.h"
@@ -98,15 +100,20 @@ TEST_SUITE("Platform Detection")
         
         // Memory should be reasonable
         CHECK(platformInfo.capabilities.totalMemory > 0);
-        CHECK(platformInfo.capabilities.totalMemory <= 1024ULL * 1024 * 1024 * 1024); // 1TB upper limit
-        CHECK(platformInfo.capabilities.availableMemory <= platformInfo.capabilities.totalMemory);
+        const uint64_t oneTB = 1024ULL * 1024 * 1024 * 1024; // 1TB
+        CHECK(platformInfo.capabilities.totalMemory <= oneTB); // 1TB upper limit
+        uint64_t totalMemory = platformInfo.capabilities.totalMemory;
+        uint64_t availableMemory = platformInfo.capabilities.availableMemory;
+        CHECK(availableMemory <= totalMemory);
     }
     
     TEST_CASE("Platform utilities")
     {
         // Path separator should be valid
         std::string separator = Limitless::PlatformUtils::GetPathSeparator();
-        CHECK(separator == "\\" || separator == "/");
+        if (separator != "\\" && separator != "/") {
+            CHECK(false); // Separator must be '\' or '/'
+        }
         
         // Process and thread IDs should be valid
         CHECK(Limitless::PlatformUtils::GetCurrentProcessId() > 0);
@@ -139,7 +146,7 @@ TEST_SUITE("Error Handling")
         Limitless::Error error(Limitless::ErrorCode::FileNotFound, "Test error", std::source_location::current());
         
         CHECK(error.GetCode() == Limitless::ErrorCode::FileNotFound);
-        		CHECK(error.GetErrorMessage() == "Test error");
+        CHECK(error.GetErrorMessage() == "Test error");
         CHECK_FALSE(error.IsSuccess());
         CHECK(error.IsFailure());
         CHECK_FALSE(error.IsCritical());
