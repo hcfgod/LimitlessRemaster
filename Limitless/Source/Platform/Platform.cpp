@@ -144,13 +144,13 @@ namespace Limitless
             s_PlatformInfo.compiler = Compiler::GCC;
             s_PlatformInfo.compilerName = "GCC";
             s_PlatformInfo.compilerVersion = std::to_string(__GNUC__) + "." + std::to_string(__GNUC_MINOR__);
-        #elif defined(LT_COMPILER_CLANG)
-            s_PlatformInfo.compiler = Compiler::Clang;
-            s_PlatformInfo.compilerName = "Clang";
-            s_PlatformInfo.compilerVersion = std::to_string(__clang_major__) + "." + std::to_string(__clang_minor__);
         #elif defined(LT_COMPILER_APPLE_CLANG)
             s_PlatformInfo.compiler = Compiler::AppleClang;
             s_PlatformInfo.compilerName = "AppleClang";
+            s_PlatformInfo.compilerVersion = std::to_string(__clang_major__) + "." + std::to_string(__clang_minor__);
+        #elif defined(LT_COMPILER_CLANG)
+            s_PlatformInfo.compiler = Compiler::Clang;
+            s_PlatformInfo.compilerName = "Clang";
             s_PlatformInfo.compilerVersion = std::to_string(__clang_major__) + "." + std::to_string(__clang_minor__);
         #else
             s_PlatformInfo.compiler = Compiler::Unknown;
