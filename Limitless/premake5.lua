@@ -24,10 +24,13 @@ project "Limitless"
     includedirs
     {
         "Source",
+        "Source/Core",
+        "Source/Platform",
         "Vendor/",
         "Vendor/spdlog",
         "Vendor/doctest",
-        "Vendor/SDL3"
+        "Vendor/SDL3",
+        "Vendor/nlohmann"
     }
 
     filter "system:windows"
