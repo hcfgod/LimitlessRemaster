@@ -64,7 +64,8 @@ project "Sandbox"
         buildoptions
         {
             "/utf-8",
-            "/std:c++20"
+            "/std:c++20",
+            "/await"  -- Enable coroutines for MSVC
         }
 
     filter "system:macosx"
@@ -79,7 +80,8 @@ project "Sandbox"
 
         buildoptions
         {
-            "-std=c++20"
+            "-std=c++20",
+            "-fcoroutines"  -- Enable coroutines for GCC/Clang
         }
 
         libdirs
@@ -127,7 +129,8 @@ project "Sandbox"
 
         buildoptions
         {
-            "-std=c++20"
+            "-std=c++20",
+            "-fcoroutines"  -- Enable coroutines for GCC/Clang
         }
 
         libdirs

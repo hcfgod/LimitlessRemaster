@@ -1,297 +1,379 @@
 # Build Configuration Guide
 
-This document explains the build configuration system for the Limitless Engine, including logging levels, optimization settings, and platform-specific configurations.
+This guide covers the build system configuration, platform-specific settings, and C++20 coroutine support in the Limitless Engine.
+
+## Table of Contents
+
+1. [Build System Overview](#build-system-overview)
+2. [Platform-Specific Build Options](#platform-specific-build-options)
+3. [C++20 Coroutine Support](#c20-coroutine-support)
+4. [Build Configurations](#build-configurations)
+5. [Cross-Platform Building](#cross-platform-building)
+6. [Best Practices](#best-practices)
+
+## Build System Overview
+
+The Limitless Engine uses **Premake5** as its build system generator, providing:
+- **Cross-platform support** for Windows, macOS, and Linux
+- **Multiple compiler support** (MSVC, GCC, Clang)
+- **Multiple architecture support** (x64, ARM64)
+- **C++20 coroutine support** with platform-specific flags
+- **Automated project generation** with proper dependencies
+
+### Project Structure
+```
+LimitlessRemaster/
+├── premake5.lua              # Main workspace configuration
+├── Limitless/premake5.lua    # Core engine library
+├── Sandbox/premake5.lua      # Example application
+├── Test/premake5.lua         # Unit tests
+└── Scripts/                  # Build scripts
+    ├── build-windows.bat     # Windows build script
+    └── build-unix.sh         # Unix/Linux/macOS build script
+```
+
+## Platform-Specific Build Options
+
+### Windows (MSVC)
+
+**Build Options:**
+```lua
+filter "system:windows"
+    cppdialect "C++20"
+    staticruntime "On"
+    systemversion "latest"
+    
+    buildoptions
+    {
+        "/utf-8",
+        "/std:c++20",
+        "/await"  -- Enable coroutines for MSVC
+    }
+```
+
+**Key Features:**
+- **C++20 Standard**: Full C++20 language support
+- **UTF-8 Support**: Proper Unicode handling
+- **Coroutine Support**: `/await` flag enables C++20 coroutines
+- **Static Runtime**: Self-contained executables
+- **Latest SDK**: Uses the latest Windows SDK
+
+### macOS (GCC/Clang)
+
+**Build Options:**
+```lua
+filter "system:macosx"
+    cppdialect "C++20"
+    staticruntime "On"
+    
+    buildoptions
+    {
+        "-std=c++20",
+        "-fcoroutines"  -- Enable coroutines for GCC/Clang
+    }
+```
+
+**Key Features:**
+- **C++20 Standard**: Full C++20 language support
+- **Coroutine Support**: `-fcoroutines` flag enables C++20 coroutines
+- **Framework Integration**: Native macOS framework support
+- **ARM64 Support**: Native Apple Silicon support
+
+### Linux (GCC/Clang)
+
+**Build Options:**
+```lua
+filter "system:linux"
+    cppdialect "C++20"
+    staticruntime "On"
+    
+    buildoptions
+    {
+        "-std=c++20",
+        "-fcoroutines"  -- Enable coroutines for GCC/Clang
+    }
+```
+
+**Key Features:**
+- **C++20 Standard**: Full C++20 language support
+- **Coroutine Support**: `-fcoroutines` flag enables C++20 coroutines
+- **System Libraries**: Native Linux library integration
+- **Multi-architecture**: x64 and ARM64 support
+
+## C++20 Coroutine Support
+
+### Overview
+
+The engine fully supports C++20 coroutines across all platforms with appropriate compiler flags:
+
+- **Windows (MSVC)**: `/await` flag
+- **macOS/Linux (GCC/Clang)**: `-fcoroutines` flag
+
+### Usage Examples
+
+```cpp
+#include <coroutine>
+#include "Core/Concurrency/AsyncIO.h"
+
+using namespace Limitless::Async;
+
+// Coroutine-based async function
+Async::Task<std::string> LoadFileAsync(const std::string& path) {
+    // This runs in a background thread
+    auto content = co_await ReadFileAsync(path);
+    co_return content;
+}
+
+// Using coroutines in your application
+void ExampleUsage() {
+    auto task = LoadFileAsync("config.json");
+    auto content = task.Get(); // Wait for completion
+}
+```
+
+### Platform-Specific Implementation
+
+The coroutine support is implemented differently per platform:
+
+**Windows (MSVC):**
+```cpp
+// MSVC automatically supports coroutines with /await flag
+#include <coroutine>
+
+template<typename T>
+struct Task {
+    struct promise_type {
+        T value;
+        Task get_return_object() { return Task{}; }
+        std::suspend_never initial_suspend() { return {}; }
+        std::suspend_never final_suspend() noexcept { return {}; }
+        void return_value(T v) { value = v; }
+        void unhandled_exception() {}
+    };
+};
+```
+
+**macOS/Linux (GCC/Clang):**
+```cpp
+// GCC/Clang requires -fcoroutines flag
+#include <coroutine>
+
+template<typename T>
+struct Task {
+    struct promise_type {
+        T value;
+        Task get_return_object() { return Task{}; }
+        std::suspend_never initial_suspend() { return {}; }
+        std::suspend_never final_suspend() noexcept { return {}; }
+        void return_value(T v) { value = v; }
+        void unhandled_exception() {}
+    };
+};
+```
 
 ## Build Configurations
 
-The project supports three main build configurations:
-
-### 1. Debug Configuration
-- **Purpose**: Development and debugging
-- **Optimization**: Disabled (`optimize "off"`)
-- **Symbols**: Enabled (`symbols "on"`)
-- **Runtime**: Debug
-
-**Logging Settings:**
-- **Log Level**: TRACE (all levels enabled)
-- **Console Logging**: Enabled
-- **File Logging**: Enabled
-- **Core Logging**: Enabled (engine internal logs)
-
-**Defines:**
-```cpp
-LT_CONFIG_DEBUG
-LT_LOG_LEVEL_TRACE_ENABLED
-LT_LOG_LEVEL_DEBUG_ENABLED
-LT_LOG_LEVEL_INFO_ENABLED
-LT_LOG_LEVEL_WARN_ENABLED
-LT_LOG_LEVEL_ERROR_ENABLED
-LT_LOG_LEVEL_CRITICAL_ENABLED
-LT_LOG_CONSOLE_ENABLED
-LT_LOG_FILE_ENABLED
-LT_LOG_CORE_ENABLED
-```
-
-### 2. Release Configuration
-- **Purpose**: Testing and performance validation
-- **Optimization**: Speed optimization (`optimize "speed"`)
-- **Symbols**: Disabled (`symbols "off"`)
-- **Runtime**: Release
-
-**Logging Settings:**
-- **Log Level**: INFO (info, warn, error, critical)
-- **Console Logging**: Enabled
-- **File Logging**: Enabled
-- **Core Logging**: Disabled (only client logs)
-
-**Defines:**
-```cpp
-LT_CONFIG_RELEASE
-LT_LOG_LEVEL_INFO_ENABLED
-LT_LOG_LEVEL_WARN_ENABLED
-LT_LOG_LEVEL_ERROR_ENABLED
-LT_LOG_LEVEL_CRITICAL_ENABLED
-LT_LOG_CONSOLE_ENABLED
-LT_LOG_FILE_ENABLED
-LT_LOG_CORE_DISABLED
-```
-
-### 3. Dist Configuration
-- **Purpose**: Production deployment
-- **Optimization**: Speed optimization (`optimize "speed"`)
-- **Symbols**: Disabled (`symbols "off"`)
-- **Runtime**: Release
-- **Subsystem**: Windows (GUI) - No console window
-
-**Logging Settings:**
-- **Log Level**: WARN (warn, error, critical only)
-- **Console Logging**: Disabled
-- **File Logging**: Enabled
-- **Core Logging**: Disabled (only client logs)
-
-**Defines:**
-```cpp
-LT_CONFIG_DIST
-LT_LOG_LEVEL_WARN_ENABLED
-LT_LOG_LEVEL_ERROR_ENABLED
-LT_LOG_LEVEL_CRITICAL_ENABLED
-LT_LOG_CONSOLE_DISABLED
-LT_LOG_FILE_ENABLED
-LT_LOG_CORE_DISABLED
-```
-
-**Windows-Specific:**
-- Sets subsystem to Windows (GUI) to prevent console window from appearing
-- Uses `mainCRTStartup` entry point for proper GUI application behavior
-
-## Platform-Specific Defines
-
-### Windows
-```cpp
-LT_PLATFORM_WINDOWS
-LT_COMPILER_MSVC (when using MSVC)
-```
-
-### macOS
-```cpp
-LT_PLATFORM_MACOS
-LT_PLATFORM_MAC
-LT_ARCHITECTURE_ARM64 (on Apple Silicon)
-LT_ARCHITECTURE_X64 (on Intel)
-LT_PLATFORM_MAC_ARM64 (on Apple Silicon)
-LT_PLATFORM_MAC_X64 (on Intel)
-LT_COMPILER_CLANG (when using Clang)
-LT_COMPILER_APPLE_CLANG (when using Apple Clang)
-```
-
-### Linux
-```cpp
-LT_PLATFORM_LINUX
-LT_ARCHITECTURE_ARM64 (on ARM64)
-LT_ARCHITECTURE_X64 (on x64)
-LT_COMPILER_GCC (when using GCC)
-LT_COMPILER_CLANG (when using Clang)
-```
-
-## Logging System
-
-### Log Levels
-The logging system supports the following levels (from lowest to highest priority):
-1. **TRACE** - Detailed trace information
-2. **DEBUG** - Debug information
-3. **INFO** - General information
-4. **WARN** - Warning messages
-5. **ERROR** - Error messages
-6. **CRITICAL** - Critical error messages
-
-### Logging Macros
-
-#### Client Logging (Application Layer)
-```cpp
-LT_TRACE("Trace message");
-LT_DBG("Debug message");
-LT_INFO("Info message");
-LT_WARN("Warning message");
-LT_ERROR("Error message");
-LT_CRITICAL("Critical message");
-
-// Conditional logging
-LT_TRACE_IF(condition, "Conditional trace");
-LT_DBG_IF(condition, "Conditional debug");
-LT_INFO_IF(condition, "Conditional info");
-LT_WARN_IF(condition, "Conditional warning");
-LT_ERROR_IF(condition, "Conditional error");
-LT_CRITICAL_IF(condition, "Conditional critical");
-```
-
-#### Core Logging (Engine Internal)
-```cpp
-LT_CORE_TRACE("Core trace message");
-LT_CORE_DEBUG("Core debug message");
-LT_CORE_INFO("Core info message");
-LT_CORE_WARN("Core warning message");
-LT_CORE_ERROR("Core error message");
-LT_CORE_CRITICAL("Core critical message");
-
-// Conditional core logging
-LT_CORE_TRACE_IF(condition, "Conditional core trace");
-LT_CORE_DEBUG_IF(condition, "Conditional core debug");
-LT_CORE_INFO_IF(condition, "Conditional core info");
-LT_CORE_WARN_IF(condition, "Conditional core warning");
-LT_CORE_ERROR_IF(condition, "Conditional core error");
-LT_CORE_CRITICAL_IF(condition, "Conditional core critical");
-```
-
-### Build Configuration Impact on Logging
-
-#### Debug Build
-- All logging levels are enabled
-- Both console and file logging are active
-- Core logging is enabled for engine debugging
-- Logging macros compile to actual logging calls
-
-#### Release Build
-- Only INFO, WARN, ERROR, and CRITICAL levels are enabled
-- Console and file logging are active
-- Core logging is disabled (compiles to no-ops)
-- TRACE and DEBUG macros compile to no-ops
-
-#### Dist Build
-- Only WARN, ERROR, and CRITICAL levels are enabled
-- Console logging is disabled (compiles to no-ops)
-- File logging is active
-- Core logging is disabled (compiles to no-ops)
-- TRACE, DEBUG, and INFO macros compile to no-ops
-
-## Optimization Settings
-
 ### Debug Configuration
-- **Optimization**: Disabled for faster compilation and better debugging
-- **Symbols**: Enabled for stack traces and debugging
-- **Runtime**: Debug runtime libraries
+```lua
+filter "configurations:Debug"
+    defines 
+    { 
+        "LT_CONFIG_DEBUG",
+        "LT_LOG_LEVEL_TRACE_ENABLED",
+        "LT_LOG_LEVEL_DEBUG_ENABLED",
+        "LT_LOG_LEVEL_INFO_ENABLED",
+        "LT_LOG_LEVEL_WARN_ENABLED",
+        "LT_LOG_LEVEL_ERROR_ENABLED",
+        "LT_LOG_LEVEL_CRITICAL_ENABLED",
+        "LT_LOG_CONSOLE_ENABLED",
+        "LT_LOG_FILE_ENABLED",
+        "LT_LOG_CORE_ENABLED"
+    }
+    runtime "Debug"
+    symbols "on"
+    optimize "off"
+```
+
+**Features:**
+- **Full Debugging**: Complete debug information
+- **All Log Levels**: Maximum logging output
+- **No Optimization**: Easier debugging
+- **Symbols**: Full symbol information
 
 ### Release Configuration
-- **Optimization**: Speed optimization for performance
-- **Symbols**: Disabled to reduce binary size
-- **Runtime**: Release runtime libraries
-
-### Dist Configuration
-- **Optimization**: Speed optimization for maximum performance
-- **Symbols**: Disabled for minimal binary size
-- **Runtime**: Release runtime libraries
-
-## Console Window Prevention (Windows)
-
-In the Dist build configuration, the application is configured to run as a Windows GUI application, which prevents a console window from appearing. This is achieved through:
-
-1. **Premake5 Configuration**: Sets the subsystem to "windows" for Dist builds
-2. **Linker Pragma**: Uses `#pragma comment(linker, "/SUBSYSTEM:windows /ENTRY:mainCRTStartup")` to ensure proper GUI application behavior
-
-This configuration only affects Windows builds and is ignored on other platforms (macOS, Linux).
-
-## Usage Examples
-
-### Conditional Compilation
-```cpp
-#ifdef LT_CONFIG_DEBUG
-    // Debug-only code
-    LT_CORE_TRACE("Debug information");
-#endif
-
-#ifdef LT_CONFIG_RELEASE
-    // Release-only code
-    LT_INFO("Release build active");
-#endif
-
-#ifdef LT_CONFIG_DIST
-    // Dist-only code
-    LT_WARN("Production build");
-#endif
+```lua
+filter "configurations:Release"
+    defines 
+    { 
+        "LT_CONFIG_RELEASE",
+        "LT_LOG_LEVEL_INFO_ENABLED",
+        "LT_LOG_LEVEL_WARN_ENABLED",
+        "LT_LOG_LEVEL_ERROR_ENABLED",
+        "LT_LOG_LEVEL_CRITICAL_ENABLED",
+        "LT_LOG_CONSOLE_ENABLED",
+        "LT_LOG_FILE_ENABLED",
+        "LT_LOG_CORE_DISABLED"
+    }
+    runtime "Release"
+    optimize "speed"
+    symbols "off"
 ```
 
-### Platform-Specific Code
-```cpp
-#ifdef LT_PLATFORM_WINDOWS
-    // Windows-specific code
-#elif defined(LT_PLATFORM_MACOS)
-    // macOS-specific code
-#elif defined(LT_PLATFORM_LINUX)
-    // Linux-specific code
-#endif
+**Features:**
+- **Speed Optimization**: Maximum performance
+- **Reduced Logging**: Only essential log levels
+- **No Debug Symbols**: Smaller executable size
+- **Release Runtime**: Optimized runtime libraries
+
+### Distribution Configuration
+```lua
+filter "configurations:Dist"
+    defines 
+    { 
+        "LT_CONFIG_DIST",
+        "LT_LOG_LEVEL_WARN_ENABLED",
+        "LT_LOG_LEVEL_ERROR_ENABLED",
+        "LT_LOG_LEVEL_CRITICAL_ENABLED",
+        "LT_LOG_CONSOLE_DISABLED",
+        "LT_LOG_FILE_ENABLED",
+        "LT_LOG_CORE_DISABLED"
+    }
+    runtime "Release"
+    optimize "speed"
+    symbols "off"
+    systemversion "latest"
 ```
 
-### Architecture-Specific Code
-```cpp
-#ifdef LT_ARCHITECTURE_ARM64
-    // ARM64-specific optimizations
-#elif defined(LT_ARCHITECTURE_X64)
-    // x64-specific optimizations
-#endif
+**Features:**
+- **Maximum Performance**: Full optimization
+- **Minimal Logging**: Only critical errors
+- **No Console Output**: Clean user experience
+- **Distribution Ready**: Production-ready build
+
+## Cross-Platform Building
+
+### Windows Building
+
+**Using Build Script:**
+```batch
+# Build Debug x64
+Scripts\build-windows.bat Debug x64
+
+# Build Release ARM64
+Scripts\build-windows.bat Release ARM64
+
+# Build Distribution x64
+Scripts\build-windows.bat Dist x64
 ```
 
-## Building
+**Using Premake Directly:**
+```batch
+# Generate Visual Studio solution
+Vendor/Premake/premake5 vs2022
 
-### Generate Project Files
+# Build with MSBuild
+msbuild LimitlessRemaster.sln /p:Configuration=Debug /p:Platform=x64
+```
+
+### macOS Building
+
+**Using Build Script:**
 ```bash
-# Windows
-premake5 vs2022
+# Build Debug with GCC
+Scripts/build-unix.sh --config Debug --compiler gcc
 
-# macOS/Linux
-premake5 gmake2
+# Build Release with Clang
+Scripts/build-unix.sh --config Release --compiler clang
+
+# Build Distribution
+Scripts/build-unix.sh --config Dist --compiler clang
 ```
 
-### Build Commands
+**Using Premake Directly:**
 ```bash
-# Debug build
-make config=debug
+# Generate Makefiles
+Vendor/Premake/premake5 gmake2
 
-# Release build
-make config=release
-
-# Dist build
-make config=dist
+# Build with make
+make -j$(sysctl -n hw.ncpu) config=Debug_x64
 ```
 
-### Platform-Specific Builds
+### Linux Building
+
+**Using Build Script:**
 ```bash
-# Windows x64 Debug
-make config=debug platform=x64
+# Build Debug with GCC
+Scripts/build-unix.sh --config Debug --compiler gcc
 
-# macOS ARM64 Release
-make config=release platform=ARM64
+# Build Release with Clang
+Scripts/build-unix.sh --config Release --compiler clang
 
-# Linux x64 Dist
-make config=dist platform=x64
+# Build Distribution
+Scripts/build-unix.sh --config Dist --compiler gcc
+```
+
+**Using Premake Directly:**
+```bash
+# Generate Makefiles
+Vendor/Premake/premake5 gmake2
+
+# Build with make
+make -j$(nproc) config=Debug_x64
 ```
 
 ## Best Practices
 
-1. **Use appropriate logging levels**: Use TRACE for detailed debugging, INFO for general information, WARN for warnings, and ERROR/CRITICAL for actual problems.
+### Compiler Selection
 
-2. **Conditional compilation**: Use build configuration defines to include/exclude code based on the build type.
+1. **Windows**: Use MSVC for best Windows integration
+2. **macOS**: Use Clang for best Apple ecosystem integration
+3. **Linux**: Use GCC for best Linux compatibility
 
-3. **Performance considerations**: In Release and Dist builds, logging calls that are disabled compile to no-ops, so there's no runtime overhead.
+### Configuration Selection
 
-4. **Console vs File logging**: In Dist builds, console logging is disabled to avoid cluttering the terminal, but file logging remains active for debugging production issues.
+1. **Development**: Use Debug configuration for development
+2. **Testing**: Use Release configuration for performance testing
+3. **Distribution**: Use Dist configuration for final builds
 
-5. **Core logging**: Use core logging macros for engine internal messages, and client logging macros for application-level messages. 
+### Coroutine Usage
+
+1. **Platform Awareness**: Always check coroutine support
+2. **Error Handling**: Use proper exception handling in coroutines
+3. **Memory Management**: Be aware of coroutine memory allocation
+4. **Performance**: Profile coroutine performance in your use case
+
+### Build Optimization
+
+1. **Parallel Building**: Use `-j` flag for parallel compilation
+2. **Incremental Builds**: Use proper dependency management
+3. **Clean Builds**: Clean build directory for major changes
+4. **Cache Management**: Use build caching when available
+
+### Platform-Specific Considerations
+
+1. **Windows**: Ensure UTF-8 encoding for source files
+2. **macOS**: Consider framework vs static library usage
+3. **Linux**: Ensure proper library linking and dependencies
+
+## Troubleshooting
+
+### Common Build Issues
+
+1. **Coroutine Support**: Ensure `/await` or `-fcoroutines` flags are set
+2. **C++20 Support**: Verify compiler supports C++20 standard
+3. **Library Dependencies**: Check all required libraries are available
+4. **Platform SDK**: Ensure latest platform SDK is installed
+
+### Performance Issues
+
+1. **Build Time**: Use parallel compilation and build caching
+2. **Binary Size**: Use appropriate optimization levels
+3. **Runtime Performance**: Profile with Release configuration
+
+### Platform-Specific Issues
+
+1. **Windows**: Check Windows SDK version compatibility
+2. **macOS**: Verify Xcode command line tools installation
+3. **Linux**: Ensure development libraries are installed
+
+This comprehensive build configuration ensures optimal performance and compatibility across all supported platforms while providing full C++20 coroutine support. 

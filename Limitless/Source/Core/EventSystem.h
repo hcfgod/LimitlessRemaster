@@ -2,6 +2,7 @@
 
 #include "Error.h"
 #include "ConfigManager.h"
+#include "Concurrency/LockFreeQueue.h"
 #include <functional>
 #include <memory>
 #include <unordered_map>
@@ -254,18 +255,20 @@ namespace Limitless
             std::unique_ptr<Event> event;
             std::chrono::system_clock::time_point enqueueTime;
             
+            QueuedEvent() : event(nullptr), enqueueTime(std::chrono::system_clock::now()) {}
+            
             QueuedEvent(std::unique_ptr<Event> e) 
                 : event(std::move(e)), enqueueTime(std::chrono::system_clock::now()) {}
         };
 
-        std::queue<QueuedEvent> m_Events;
+        Concurrency::LockFreeMPMCQueue<QueuedEvent, 16384> m_Queue; // Power of 2 for efficiency
         size_t m_MaxSize;
-        mutable std::mutex m_Mutex;
         
-        // Statistics
-        mutable size_t m_TotalEnqueued = 0;
-        mutable size_t m_TotalDequeued = 0;
-        mutable size_t m_TotalDropped = 0;
+        // Statistics (atomic for thread safety)
+        std::atomic<size_t> m_TotalEnqueued{0};
+        std::atomic<size_t> m_TotalDequeued{0};
+        std::atomic<size_t> m_TotalDropped{0};
+        std::atomic<std::chrono::microseconds> m_TotalQueueTime{std::chrono::microseconds{0}};
     };
 
     // Main event system

@@ -152,101 +152,99 @@ namespace Limitless
         m_TotalDispatchTime = std::chrono::microseconds{0};
     }
 
-    // EventQueue implementation
+    // EventQueue implementation with lock-free queue
     EventQueue::EventQueue(size_t maxSize)
-        : m_MaxSize(maxSize), m_TotalEnqueued(0), m_TotalDequeued(0), m_TotalDropped(0)
+        : m_MaxSize(maxSize)
     {
     }
 
     void EventQueue::Enqueue(std::unique_ptr<Event> event)
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
+        QueuedEvent queuedEvent(std::move(event));
         
-        if (m_Events.size() >= m_MaxSize)
+        if (!m_Queue.TryPush(std::move(queuedEvent)))
         {
-            m_TotalDropped++;
+            m_TotalDropped.fetch_add(1, std::memory_order_relaxed);
+            LT_CORE_WARN("Event queue is full, dropping event");
             return;
         }
-
-        QueuedEvent queuedEvent(std::move(event));
-        m_Events.push(std::move(queuedEvent));
-        m_TotalEnqueued++;
+        
+        m_TotalEnqueued.fetch_add(1, std::memory_order_relaxed);
     }
 
     std::unique_ptr<Event> EventQueue::Dequeue()
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        
-        if (m_Events.empty())
-        {
+        auto result = m_Queue.TryPop();
+        if (!result)
             return nullptr;
-        }
-
-        auto queuedEvent = std::move(m_Events.front());
-        m_Events.pop();
-        m_TotalDequeued++;
         
-        return std::move(queuedEvent.event);
+        m_TotalDequeued.fetch_add(1, std::memory_order_relaxed);
+        return std::move(result->event);
     }
 
     void EventQueue::Clear()
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        while (!m_Events.empty())
-        {
-            m_Events.pop();
-        }
+        m_Queue.Clear();
     }
 
     bool EventQueue::IsEmpty() const
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        return m_Events.empty();
+        return m_Queue.IsEmpty();
     }
 
     bool EventQueue::IsFull() const
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        return m_Events.size() >= m_MaxSize;
+        return m_Queue.IsFull();
     }
 
     size_t EventQueue::GetSize() const
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        return m_Events.size();
+        return m_Queue.GetSize();
     }
 
     void EventQueue::ProcessAll(EventDispatcher& dispatcher)
     {
-        while (auto event = Dequeue())
+        while (!m_Queue.IsEmpty())
         {
-            dispatcher.Dispatch(*event);
+            auto result = m_Queue.TryPop();
+            if (result && result->event)
+            {
+                m_TotalDequeued.fetch_add(1, std::memory_order_relaxed);
+                dispatcher.Dispatch(*result->event);
+            }
         }
     }
 
     void EventQueue::ProcessBatch(EventDispatcher& dispatcher, size_t maxEvents)
     {
         size_t processed = 0;
-        while (processed < maxEvents)
+        while (!m_Queue.IsEmpty() && processed < maxEvents)
         {
-            auto event = Dequeue();
-            if (!event) break;
-            dispatcher.Dispatch(*event);
-            processed++;
+            auto result = m_Queue.TryPop();
+            if (result && result->event)
+            {
+                m_TotalDequeued.fetch_add(1, std::memory_order_relaxed);
+                dispatcher.Dispatch(*result->event);
+                processed++;
+            }
         }
     }
 
     EventQueue::QueueStats EventQueue::GetStats() const
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        
         QueueStats stats;
-        stats.currentSize = m_Events.size();
+        stats.currentSize = m_Queue.GetSize();
         stats.maxSize = m_MaxSize;
-        stats.totalEnqueued = m_TotalEnqueued;
-        stats.totalDequeued = m_TotalDequeued;
-        stats.totalDropped = m_TotalDropped;
-        stats.averageQueueTime = 0.0; // Would need to calculate from enqueue times
+        stats.totalEnqueued = m_TotalEnqueued.load(std::memory_order_relaxed);
+        stats.totalDequeued = m_TotalDequeued.load(std::memory_order_relaxed);
+        stats.totalDropped = m_TotalDropped.load(std::memory_order_relaxed);
+        
+        // Calculate average queue time if we have processed events
+        auto totalTime = m_TotalQueueTime.load(std::memory_order_relaxed);
+        auto totalProcessed = stats.totalDequeued;
+        stats.averageQueueTime = totalProcessed > 0 ? 
+            std::chrono::duration<double, std::micro>(totalTime).count() / totalProcessed : 0.0;
+        
         return stats;
     }
 

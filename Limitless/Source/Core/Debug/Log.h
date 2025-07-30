@@ -11,21 +11,47 @@
 
 // Build configuration-based logging settings
 #ifdef LT_CONFIG_DEBUG
-    #define LT_LOG_LEVEL_TRACE_ENABLED
-    #define LT_LOG_LEVEL_DEBUG_ENABLED
-    #define LT_LOG_LEVEL_INFO_ENABLED
-    #define LT_LOG_LEVEL_WARN_ENABLED
-    #define LT_LOG_LEVEL_ERROR_ENABLED
-    #define LT_LOG_LEVEL_CRITICAL_ENABLED
+    #ifndef LT_LOG_LEVEL_TRACE_ENABLED
+        #define LT_LOG_LEVEL_TRACE_ENABLED
+    #endif
+    #ifndef LT_LOG_LEVEL_DEBUG_ENABLED
+        #define LT_LOG_LEVEL_DEBUG_ENABLED
+    #endif
+    #ifndef LT_LOG_LEVEL_INFO_ENABLED
+        #define LT_LOG_LEVEL_INFO_ENABLED
+    #endif
+    #ifndef LT_LOG_LEVEL_WARN_ENABLED
+        #define LT_LOG_LEVEL_WARN_ENABLED
+    #endif
+    #ifndef LT_LOG_LEVEL_ERROR_ENABLED
+        #define LT_LOG_LEVEL_ERROR_ENABLED
+    #endif
+    #ifndef LT_LOG_LEVEL_CRITICAL_ENABLED
+        #define LT_LOG_LEVEL_CRITICAL_ENABLED
+    #endif
 #elif defined(LT_CONFIG_RELEASE)
-    #define LT_LOG_LEVEL_INFO_ENABLED
-    #define LT_LOG_LEVEL_WARN_ENABLED
-    #define LT_LOG_LEVEL_ERROR_ENABLED
-    #define LT_LOG_LEVEL_CRITICAL_ENABLED
+    #ifndef LT_LOG_LEVEL_INFO_ENABLED
+        #define LT_LOG_LEVEL_INFO_ENABLED
+    #endif
+    #ifndef LT_LOG_LEVEL_WARN_ENABLED
+        #define LT_LOG_LEVEL_WARN_ENABLED
+    #endif
+    #ifndef LT_LOG_LEVEL_ERROR_ENABLED
+        #define LT_LOG_LEVEL_ERROR_ENABLED
+    #endif
+    #ifndef LT_LOG_LEVEL_CRITICAL_ENABLED
+        #define LT_LOG_LEVEL_CRITICAL_ENABLED
+    #endif
 #elif defined(LT_CONFIG_DIST)
-    #define LT_LOG_LEVEL_WARN_ENABLED
-    #define LT_LOG_LEVEL_ERROR_ENABLED
-    #define LT_LOG_LEVEL_CRITICAL_ENABLED
+    #ifndef LT_LOG_LEVEL_WARN_ENABLED
+        #define LT_LOG_LEVEL_WARN_ENABLED
+    #endif
+    #ifndef LT_LOG_LEVEL_ERROR_ENABLED
+        #define LT_LOG_LEVEL_ERROR_ENABLED
+    #endif
+    #ifndef LT_LOG_LEVEL_CRITICAL_ENABLED
+        #define LT_LOG_LEVEL_CRITICAL_ENABLED
+    #endif
 #endif
 
 // Console logging settings

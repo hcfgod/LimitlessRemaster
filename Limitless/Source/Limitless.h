@@ -10,3 +10,8 @@
 #include "Core/EventSystem.h"
 #include "Core/Debug/Log.h"
 #include "Platform/Window.h"
+
+// Concurrency systems
+#include "Core/Concurrency/LockFreeQueue.h"
+#include "Core/Concurrency/AsyncIO.h"
+#include "Core/Concurrency/ThreadSafeConfig.h"
