@@ -1,7 +1,6 @@
 #pragma once
-
+#include "Core/Debug/Log.h"
 #include "LockFreeQueue.h"
-#include "../Debug/Log.h"
 #include <future>
 #include <thread>
 #include <vector>

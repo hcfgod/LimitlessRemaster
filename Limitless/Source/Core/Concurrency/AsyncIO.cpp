@@ -1,5 +1,4 @@
 #include "AsyncIO.h"
-#include "Core/Debug/Log.h"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
