@@ -249,7 +249,7 @@ namespace Limitless
         #define LT_COMPILER_GCC 1
         #define LT_COMPILER_NAME "GCC"
     #elif defined(__clang__)
-        #if defined(__apple_build_version__)
+        #if defined(__apple_build_version__) || (defined(__APPLE__) && defined(__clang__))
             #define LT_COMPILER_APPLE_CLANG 1
             #define LT_COMPILER_NAME "AppleClang"
         #else
