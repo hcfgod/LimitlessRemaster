@@ -31,6 +31,8 @@
     #include <sys/utsname.h>
     #include <stdlib.h>
     #include <signal.h>
+    #include <pthread.h>
+    #include <sys/malloc.h>
 #elif defined(LT_PLATFORM_LINUX)
     #include <sys/sysinfo.h>
     #include <sys/stat.h>
@@ -222,8 +224,8 @@ namespace Limitless
             s_PlatformInfo.capabilities.cpuCount = sysInfo.dwNumberOfProcessors;
         #elif defined(LT_PLATFORM_MACOS)
             int cpuCount;
-            size_t size = sizeof(cpuCount);
-            if (sysctlbyname("hw.ncpu", &cpuCount, &size, nullptr, 0) == 0)
+            size_t cpuSize = sizeof(cpuCount);
+            if (sysctlbyname("hw.ncpu", &cpuCount, &cpuSize, nullptr, 0) == 0)
             {
                 s_PlatformInfo.capabilities.cpuCount = static_cast<uint32_t>(cpuCount);
             }
@@ -242,8 +244,8 @@ namespace Limitless
             }
         #elif defined(LT_PLATFORM_MACOS)
             int64_t totalMem;
-            size_t size = sizeof(totalMem);
-            if (sysctlbyname("hw.memsize", &totalMem, &size, nullptr, 0) == 0)
+            size_t memSize = sizeof(totalMem);
+            if (sysctlbyname("hw.memsize", &totalMem, &memSize, nullptr, 0) == 0)
             {
                 s_PlatformInfo.capabilities.totalMemory = static_cast<uint64_t>(totalMem);
                 
@@ -525,6 +527,11 @@ namespace Limitless
         {
             #ifdef LT_PLATFORM_WINDOWS
                 return static_cast<uint32_t>(::GetCurrentThreadId());
+            #elif defined(LT_PLATFORM_MACOS)
+                // On macOS, pthread_t is a pointer type, so we need to get a unique ID differently
+                uint64_t threadId;
+                pthread_threadid_np(pthread_self(), &threadId);
+                return static_cast<uint32_t>(threadId);
             #else
                 return static_cast<uint32_t>(pthread_self());
             #endif
