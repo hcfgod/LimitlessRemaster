@@ -15,10 +15,11 @@ project "Limitless"
     }
 
     -- Ensure C++20 coroutines are enabled
-    buildoptions
-    {
-        "/await"  -- Enable coroutines for MSVC
-    }
+    filter "toolset:msc"
+        buildoptions
+        {
+            "/await"  -- Enable coroutines for MSVC
+        }
 
     includedirs
     {
@@ -80,8 +81,8 @@ project "Limitless"
 
         buildoptions
         {
-            "-std=c++20",
-            "-fcoroutines"  -- Enable coroutines for GCC/Clang
+            "-std=c++20"
+            -- Coroutines are enabled by default in C++20 for clang/gcc
         }
 
         libdirs
@@ -129,8 +130,8 @@ project "Limitless"
 
         buildoptions
         {
-            "-std=c++20",
-            "-fcoroutines"  -- Enable coroutines for GCC/Clang
+            "-std=c++20"
+            -- Coroutines are enabled by default in C++20 for clang/gcc
         }
 
         libdirs
