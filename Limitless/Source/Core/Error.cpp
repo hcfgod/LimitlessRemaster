@@ -146,36 +146,38 @@ namespace Limitless
             switch (error.GetSeverity())
             {
                 case ErrorSeverity::Info:
-                    LT_INFO("ERROR INFO: {}", error.ToString());
+                    LT_CORE_INFO("ERROR INFO: {}", error.ToString());
                     break;
                 case ErrorSeverity::Warning:
-                    LT_WARN("ERROR WARNING: {}", error.ToString());
+                    LT_CORE_WARN("ERROR WARNING: {}", error.ToString());
                     break;
                 case ErrorSeverity::Error:
-                    LT_ERROR("ERROR: {}", error.ToString());
+                    LT_CORE_ERROR("ERROR: {}", error.ToString());
                     break;
                 case ErrorSeverity::Critical:
-                    LT_CRITICAL("CRITICAL ERROR: {}", error.ToString());
+                    LT_CORE_CRITICAL("CRITICAL ERROR: {}", error.ToString());
                     break;
                 case ErrorSeverity::Fatal:
-                    LT_CRITICAL("FATAL ERROR: {}", error.ToString());
+                    LT_CORE_CRITICAL("FATAL ERROR: {}", error.ToString());
                     break;
             }
             
             // Log detailed information for critical and fatal errors
             if (error.IsCritical())
             {
-                LT_CRITICAL("Detailed Error Information:\n{}", error.ToDetailedString());
+                LT_CORE_CRITICAL("Detailed Error Information:\n{}", error.ToDetailedString());
             }
         }
         else
         {
             // Fallback to cerr if logger is not available
+            #ifdef LT_CONSOLE_LOGGING_ENABLED
             std::cerr << "ERROR: " << error.ToString() << std::endl;
             if (error.IsCritical())
             {
                 std::cerr << "Detailed Error Information:\n" << error.ToDetailedString() << std::endl;
             }
+            #endif
         }
     }
 

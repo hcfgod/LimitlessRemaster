@@ -77,13 +77,13 @@ namespace Limitless
 
         s_Initialized = true;
         
-        LT_INFO("Platform Detection Initialized:");
-        LT_INFO("  Platform: {} ({})", s_PlatformInfo.platformName, GetPlatformString());
-        LT_INFO("  Architecture: {} ({})", s_PlatformInfo.architectureName, GetArchitectureString());
-        LT_INFO("  Compiler: {} {} ({})", s_PlatformInfo.compilerName, s_PlatformInfo.compilerVersion, GetCompilerString());
-        LT_INFO("  OS: {} {} ({})", s_PlatformInfo.osName, s_PlatformInfo.osVersion, GetOSString());
-        LT_INFO("  CPU Cores: {}", s_PlatformInfo.capabilities.cpuCount);
-        LT_INFO("  Total Memory: {} MB", s_PlatformInfo.capabilities.totalMemory / (1024 * 1024));
+        LT_CORE_INFO("Platform Detection Initialized:");
+        LT_CORE_INFO("  Platform: {} ({})", s_PlatformInfo.platformName, GetPlatformString());
+        LT_CORE_INFO("  Architecture: {} ({})", s_PlatformInfo.architectureName, GetArchitectureString());
+        LT_CORE_INFO("  Compiler: {} {} ({})", s_PlatformInfo.compilerName, s_PlatformInfo.compilerVersion, GetCompilerString());
+        LT_CORE_INFO("  OS: {} {} ({})", s_PlatformInfo.osName, s_PlatformInfo.osVersion, GetOSString());
+        LT_CORE_INFO("  CPU Cores: {}", s_PlatformInfo.capabilities.cpuCount);
+        LT_CORE_INFO("  Total Memory: {} MB", s_PlatformInfo.capabilities.totalMemory / (1024 * 1024));
     }
 
     void PlatformDetection::RefreshCapabilities()
@@ -626,7 +626,9 @@ namespace Limitless
                 SetConsoleTextAttribute(hConsole, static_cast<WORD>(color));
             #else
                 // ANSI color codes
+                #ifdef LT_CONSOLE_LOGGING_ENABLED
                 std::cout << "\033[" << color << "m";
+                #endif
             #endif
         }
 
@@ -636,7 +638,9 @@ namespace Limitless
                 HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
                 SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
             #else
+                #ifdef LT_CONSOLE_LOGGING_ENABLED
                 std::cout << "\033[0m";
+                #endif
             #endif
         }
 
@@ -666,7 +670,9 @@ namespace Limitless
                 OutputDebugStringA(message.c_str());
             #else
                 // On non-Windows platforms, just output to stderr
+                #ifdef LT_CONSOLE_LOGGING_ENABLED
                 std::cerr << "[DEBUG] " << message << std::endl;
+                #endif
             #endif
         }
     }

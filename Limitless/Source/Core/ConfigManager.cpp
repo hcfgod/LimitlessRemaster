@@ -39,14 +39,12 @@ namespace Limitless
         {
             if (!LoadFromFile(configFile))
             {
-                // Use std::cerr instead of logging since logging isn't initialized yet
-                std::cerr << "Failed to load configuration from file: " << configFile << std::endl;
+                LT_CORE_ERROR("Failed to load configuration from file: {}", configFile);
             }
         }
         else
         {
-            // Use std::cout instead of logging since logging isn't initialized yet
-            std::cout << "Configuration file not found, using defaults: " << configFile << std::endl;
+            LT_CORE_INFO("Configuration file not found, using defaults: {}", configFile);
         }
 
         // Load from environment variables

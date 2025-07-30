@@ -73,6 +73,7 @@ project "Sandbox"
 
         defines
         {
+            "LT_PLATFORM_MACOS",
             "LT_PLATFORM_MAC"
         }
 
@@ -104,12 +105,14 @@ project "Sandbox"
         filter "architecture:ARM64"
             defines
             {
+                "LT_ARCHITECTURE_ARM64",
                 "LT_PLATFORM_MAC_ARM64"
             }
 
         filter "architecture:x64"
             defines
             {
+                "LT_ARCHITECTURE_X64",
                 "LT_PLATFORM_MAC_X64"
             }
 
@@ -152,17 +155,26 @@ project "Sandbox"
             "m"
         }
 
+        filter "architecture:ARM64"
+            defines
+            {
+                "LT_ARCHITECTURE_ARM64"
+            }
+
+        filter "architecture:x64"
+            defines
+            {
+                "LT_ARCHITECTURE_X64"
+            }
+
+    -- Configuration-specific settings (inherited from workspace)
     filter "configurations:Debug"
-        defines "LT_DEBUG"
-        runtime "Debug"
-        symbols "on"
+        defines { "LT_DEBUG" }
 
     filter "configurations:Release"
-        defines "LT_RELEASE"
-        runtime "Release"
-        optimize "on"
+        defines { "LT_RELEASE" }
 
     filter "configurations:Dist"
-        defines "LT_DIST"
-        runtime "Release"
-        optimize "on" 
+        defines { "LT_DIST" }
+        
+ 

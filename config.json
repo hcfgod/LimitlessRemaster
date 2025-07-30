@@ -11,7 +11,7 @@
   "window": {
     "width": 1024,
     "height": 768,
-    "title": "Limitless Engine - Test Window",
+    "title": "Limitless Engine",
     "fullscreen": false,
     "vsync": true,
     "resizable": true

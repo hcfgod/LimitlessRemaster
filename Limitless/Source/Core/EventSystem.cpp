@@ -26,7 +26,7 @@ namespace Limitless
         if (m_EventFilter && !m_EventFilter(event))
         {
             m_EventsFiltered++;
-            LT_DBG("Event filtered out: {}", event.ToString());
+            LT_CORE_DEBUG("Event filtered out: {}", event.ToString());
             return; // Event is filtered out, don't dispatch
         }
 
@@ -47,7 +47,7 @@ namespace Limitless
                 }
                 catch (const std::exception& e)
                 {
-                    LT_ERROR("Exception in event callback: {}", e.what());
+                    LT_CORE_ERROR("Exception in event callback: {}", e.what());
                 }
             }
         }
@@ -62,7 +62,7 @@ namespace Limitless
             }
             catch (const std::exception& e)
             {
-                LT_ERROR("Exception in event listener: {}", e.what());
+                LT_CORE_ERROR("Exception in event listener: {}", e.what());
             }
         }
         
@@ -261,40 +261,40 @@ namespace Limitless
     {
         if (m_Initialized)
         {
-            LT_WARN("EventSystem already initialized");
+            LT_CORE_WARN("EventSystem already initialized");
             return;
         }
 
-        LT_INFO("Initializing EventSystem");
+        LT_CORE_INFO("Initializing EventSystem");
         m_Dispatcher = std::make_unique<EventDispatcher>();
         m_Queue = std::make_unique<EventQueue>(1000);
         m_Initialized = true;
-        LT_INFO("EventSystem initialized successfully");
+        LT_CORE_INFO("EventSystem initialized successfully");
     }
 
     void EventSystem::Shutdown()
     {
         if (!m_Initialized) return;
 
-        LT_INFO("Shutting down EventSystem");
+        LT_CORE_INFO("Shutting down EventSystem");
         
         // Clear all callbacks and listeners
         m_Dispatcher.reset();
         m_Queue.reset();
         m_Initialized = false;
         
-        LT_INFO("EventSystem shutdown complete");
+        LT_CORE_INFO("EventSystem shutdown complete");
     }
 
     void EventSystem::Dispatch(Event& event)
     {
         if (!m_Initialized)
         {
-            LT_WARN("Attempting to dispatch event when EventSystem is not initialized");
+            LT_CORE_WARN("Attempting to dispatch event when EventSystem is not initialized");
             return;
         }
 
-        LT_DBG("Dispatching event: {} (Type: {})", event.GetName(), static_cast<int>(event.GetType()));
+        LT_CORE_DEBUG("Dispatching event: {} (Type: {})", event.GetName(), static_cast<int>(event.GetType()));
         m_Dispatcher->Dispatch(event);
     }
 
@@ -307,11 +307,11 @@ namespace Limitless
     {
         if (!m_Initialized)
         {
-            LT_WARN("Attempting to dispatch deferred event when EventSystem is not initialized");
+            LT_CORE_WARN("Attempting to dispatch deferred event when EventSystem is not initialized");
             return;
         }
 
-        LT_DBG("Enqueuing deferred event: {} (Type: {})", event->GetName(), static_cast<int>(event->GetType()));
+        LT_CORE_DEBUG("Enqueuing deferred event: {} (Type: {})", event->GetName(), static_cast<int>(event->GetType()));
         m_Queue->Enqueue(std::move(event));
     }
 

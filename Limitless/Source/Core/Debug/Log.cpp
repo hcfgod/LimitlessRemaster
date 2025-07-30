@@ -10,8 +10,6 @@
 #include <spdlog/fmt/bundled/format.h>
 
 #if defined(LIMITLESS_PLATFORM_WINDOWS)
-#include <fcntl.h>
-#include <io.h>
 #include <windows.h>
 #endif
 
@@ -52,6 +50,7 @@ namespace Limitless
         size_t maxFiles = config.GetValue<size_t>(Config::Logging::MAX_FILES, 10);
         
         // Log the configuration values being used (before logging is initialized)
+        #ifdef LT_CONSOLE_LOGGING_ENABLED
         std::cout << "Logging configuration:" << std::endl;
         std::cout << "  Level: " << logLevel << std::endl;
         std::cout << "  File enabled: " << (fileEnabled ? "true" : "false") << std::endl;
@@ -60,6 +59,7 @@ namespace Limitless
         std::cout << "  Directory: " << directory << std::endl;
         std::cout << "  Max file size: " << (maxFileSize / (1024 * 1024)) << "MB" << std::endl;
         std::cout << "  Max files: " << maxFiles << std::endl;
+        #endif
         
         Init(logLevel, fileEnabled, consoleEnabled, pattern, directory, maxFileSize, maxFiles);
     }
@@ -91,10 +91,8 @@ namespace Limitless
         if (currentCP != CP_UTF8) {
             SetConsoleOutputCP(CP_UTF8);
             SetConsoleCP(CP_UTF8);
-            // Switch CRT file descriptors (stdout/stderr) to UTF-8 text mode so that
-            // wide characters emitted by spdlog make it through.
-            _setmode(_fileno(stdout), _O_U8TEXT);
-            _setmode(_fileno(stderr), _O_U8TEXT);
+            // Note: _O_U8TEXT mode setting is not used as it may not be available
+            // in all Windows SDK versions and can cause issues with some compilers
         }
     #endif
 
@@ -115,16 +113,18 @@ namespace Limitless
         std::vector<spdlog::sink_ptr> clientSinks;
 
         // Console sink
+        #ifdef LT_CONSOLE_LOGGING_ENABLED
         if (consoleEnabled) {
             auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
             consoleSink->set_pattern("%^[%T] %n: %v%$");
             clientSinks.push_back(consoleSink);
         
-            // Core logger gets console only in debug builds
-    #if defined(LT_BUILD_DEBUG)
+            // Core logger gets console only if core logging is enabled
+            #ifdef LT_CORE_LOGGING_ENABLED
             coreSinks.push_back(consoleSink);
-    #endif
+            #endif
         }
+        #endif
 
         // File sink
         if (fileEnabled) {
@@ -135,7 +135,8 @@ namespace Limitless
             clientSinks.push_back(fileSink);
         }
 
-        // Create Core logger (engine internals)
+        // Create Core logger (engine internals) - only if core logging is enabled
+        #ifdef LT_CORE_LOGGING_ENABLED
         if (!coreSinks.empty()) {
             s_CoreLogger = std::make_shared<spdlog::async_logger>("LIMITLESS", coreSinks.begin(), coreSinks.end(), threadPool,
                                                                   spdlog::async_overflow_policy::block);
@@ -143,6 +144,7 @@ namespace Limitless
             s_CoreLogger->set_level(level);
             s_CoreLogger->flush_on(level);
         }
+        #endif
 
         // Create Client logger (application layer) - asynchronous
         if (!clientSinks.empty()) {
@@ -154,11 +156,13 @@ namespace Limitless
         }
 
         // Use std::cout for initialization messages since logging isn't ready yet
+        #ifdef LT_CONSOLE_LOGGING_ENABLED
         std::cout << "Limitless Engine Logger Initialized!" << std::endl;
         if (fileEnabled) {
             std::cout << "Log rotation: " << (maxFileSize / (1024 * 1024)) << "MB max file size, " << maxFiles << " backup files" << std::endl;
         }
         std::cout << "Application Logger Initialized!" << std::endl;
+        #endif
     }
 
     void Log::Shutdown() 

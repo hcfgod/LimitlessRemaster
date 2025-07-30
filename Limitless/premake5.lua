@@ -30,7 +30,8 @@ project "Limitless"
 
         defines
         {
-            "LIMITLESS_PLATFORM_WINDOWS"
+            "LT_PLATFORM_WINDOWS",
+            "LT_PLATFORM_WINDOWS"
         }
 
         libdirs
@@ -67,6 +68,7 @@ project "Limitless"
 
         defines
         {
+            "LT_PLATFORM_MACOS",
             "LT_PLATFORM_MAC"
         }
 
@@ -98,12 +100,14 @@ project "Limitless"
         filter "architecture:ARM64"
             defines
             {
+                "LT_ARCHITECTURE_ARM64",
                 "LT_PLATFORM_MAC_ARM64"
             }
 
         filter "architecture:x64"
             defines
             {
+                "LT_ARCHITECTURE_X64",
                 "LT_PLATFORM_MAC_X64"
             }
 
@@ -146,17 +150,34 @@ project "Limitless"
             "m"
         }
 
+        filter "architecture:ARM64"
+            defines
+            {
+                "LT_ARCHITECTURE_ARM64"
+            }
+
+        filter "architecture:x64"
+            defines
+            {
+                "LT_ARCHITECTURE_X64"
+            }
+
+    -- Compiler-specific defines
+    filter "toolset:msc"
+        defines { "LT_COMPILER_MSVC" }
+
+    filter "toolset:gcc"
+        defines { "LT_COMPILER_GCC" }
+
+    filter "toolset:clang"
+        defines { "LT_COMPILER_CLANG" }
+
+    -- Configuration-specific settings (inherited from workspace)
     filter "configurations:Debug"
-        defines "LIMITLESS_DEBUG"
-        runtime "Debug"
-        symbols "on"
+        defines { "LIMITLESS_DEBUG" }
 
     filter "configurations:Release"
-        defines "LIMITLESS_RELEASE"
-        runtime "Release"
-        optimize "on"
+        defines { "LIMITLESS_RELEASE" }
 
     filter "configurations:Dist"
-        defines "LIMITLESS_DIST"
-        runtime "Release"
-        optimize "on" 
+        defines { "LIMITLESS_DIST" } 

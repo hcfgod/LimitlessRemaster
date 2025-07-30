@@ -4,12 +4,25 @@
 #include "Debug/Log.h"
 #include "HotReloadManager.h"
 
+// Prevent console window from appearing in Dist builds on Windows
+#if defined(LT_PLATFORM_WINDOWS) && defined(LT_CONFIG_DIST)
+    /*
+     * Ensure distribution / release builds on Windows do not spawn a console
+     * window by switching the subsystem to WINDOWS and setting the CRT entry
+     * point appropriately.  This pragma is MSVC-specific and is ignored by
+     * other compilers.
+     */
+    #if defined(_MSC_VER)
+        #pragma comment(linker, "/SUBSYSTEM:windows /ENTRY:mainCRTStartup")
+    #endif
+#endif
+
 // This function must be defined by the client application
 extern Limitless::Application* CreateApplication();
 
 int main(int argc, char** argv)
 {
-	// Default logging
+    // Default logging initialization so we can logs errors before the config and other systems are set up
 	Limitless::Log::Init();
 
 	// Initialize configuration system first
