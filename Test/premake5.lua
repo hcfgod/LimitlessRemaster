@@ -64,8 +64,7 @@ project "Test"
         buildoptions
         {
             "/utf-8",
-            "/std:c++20",
-            "/await"  -- Enable coroutines for MSVC
+            "/std:c++20"
         }
 
     filter "system:macosx"
@@ -80,8 +79,7 @@ project "Test"
 
         buildoptions
         {
-            "-std=c++20",
-            "-fcoroutines"  -- Enable coroutines for GCC/Clang
+            "-std=c++20"
         }
 
         libdirs
@@ -129,8 +127,7 @@ project "Test"
 
         buildoptions
         {
-            "-std=c++20",
-            "-fcoroutines"  -- Enable coroutines for GCC/Clang
+            "-std=c++20"
         }
 
         libdirs
