@@ -833,7 +833,6 @@ namespace Limitless
             windowFlags |= WindowFlags::Foreign; // SDL3 renamed this
         if (flags & SDL_WINDOW_MOUSE_CAPTURE)
             windowFlags |= WindowFlags::MouseCapture;
-        // Note: From my knowledge SDL_WINDOW_ALWAYS_ON_TOP_HINT and SDL_WINDOW_BYPASS_WINDOW_MANAGER don't exist in SDL3
             
         return windowFlags;
     }
@@ -841,6 +840,176 @@ namespace Limitless
     void SDLWindow::OnWindowConfigChanged(Events::WindowConfigChangedEvent& event)
     {
         // Handle window configuration changes
-        LT_CORE_INFO("Window configuration changed: {}", event.GetChangedKey());
+        const std::string& key = event.GetChangedKey();
+        const ConfigValue& value = event.GetNewValue();
+        
+        // Convert value to string for logging
+        std::string valueStr = std::visit([](const auto& v) -> std::string {
+            using V = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<V, std::string>)
+                return v;
+            else if constexpr (std::is_same_v<V, bool>)
+                return v ? "true" : "false";
+            else if constexpr (std::is_same_v<V, int> || std::is_same_v<V, float> || std::is_same_v<V, double> || std::is_same_v<V, size_t> || std::is_same_v<V, uint32_t>)
+                return std::to_string(v);
+            else
+                return "unknown";
+        }, value);
+        
+        LT_CORE_INFO("Window configuration changed: {} = {}", key, valueStr);
+        
+        // Apply the configuration change to the window
+        if (key == "window.title")
+        {
+            try {
+                std::string title = std::get<std::string>(value);
+                SetTitle(title);
+            } catch (const std::bad_variant_access&) {
+                LT_CORE_WARN("Failed to get string value for window.title");
+            }
+        }
+        else if (key == "window.width" || key == "window.height")
+        {
+            // Get current size and update the changed dimension
+            uint32_t currentWidth = m_Data.Width;
+            uint32_t currentHeight = m_Data.Height;
+            
+            try {
+                if (key == "window.width") {
+                    int width = std::get<int>(value);
+                    currentWidth = static_cast<uint32_t>(width);
+                } else if (key == "window.height") {
+                    int height = std::get<int>(value);
+                    currentHeight = static_cast<uint32_t>(height);
+                }
+                
+                SetSize(currentWidth, currentHeight);
+            } catch (const std::bad_variant_access&) {
+                LT_CORE_WARN("Failed to get integer value for {}", key);
+            }
+        }
+        else if (key == "window.fullscreen")
+        {
+            try {
+                bool fullscreen = std::get<bool>(value);
+                SetFullscreen(fullscreen);
+            } catch (const std::bad_variant_access&) {
+                LT_CORE_WARN("Failed to get boolean value for window.fullscreen");
+            }
+        }
+        else if (key == "window.resizable")
+        {
+            try {
+                bool resizable = std::get<bool>(value);
+                SetResizable(resizable);
+            } catch (const std::bad_variant_access&) {
+                LT_CORE_WARN("Failed to get boolean value for window.resizable");
+            }
+        }
+        else if (key == "window.vsync")
+        {
+            try {
+                bool vsync = std::get<bool>(value);
+                SetVSync(vsync);
+            } catch (const std::bad_variant_access&) {
+                LT_CORE_WARN("Failed to get boolean value for window.vsync");
+            }
+        }
+        else if (key == "window.borderless")
+        {
+            try {
+                bool borderless = std::get<bool>(value);
+                SetBorderless(borderless);
+            } catch (const std::bad_variant_access&) {
+                LT_CORE_WARN("Failed to get boolean value for window.borderless");
+            }
+        }
+        else if (key == "window.always_on_top")
+        {
+            try {
+                bool alwaysOnTop = std::get<bool>(value);
+                SetAlwaysOnTop(alwaysOnTop);
+            } catch (const std::bad_variant_access&) {
+                LT_CORE_WARN("Failed to get boolean value for window.always_on_top");
+            }
+        }
+        else if (key == "window.position.x" || key == "window.position.y")
+        {
+            // Get current position and update the changed coordinate
+            int currentX = m_Data.PositionX;
+            int currentY = m_Data.PositionY;
+            
+            try {
+                if (key == "window.position.x") {
+                    currentX = std::get<int>(value);
+                } else if (key == "window.position.y") {
+                    currentY = std::get<int>(value);
+                }
+                
+                SetPosition(currentX, currentY);
+            } catch (const std::bad_variant_access&) {
+                LT_CORE_WARN("Failed to get integer value for {}", key);
+            }
+        }
+        else if (key == "window.min_width" || key == "window.min_height")
+        {
+            // Get current min size and update the changed dimension
+            uint32_t currentMinWidth = m_Data.MinWidth;
+            uint32_t currentMinHeight = m_Data.MinHeight;
+            
+            try {
+                if (key == "window.min_width") {
+                    int minWidth = std::get<int>(value);
+                    currentMinWidth = static_cast<uint32_t>(minWidth);
+                } else if (key == "window.min_height") {
+                    int minHeight = std::get<int>(value);
+                    currentMinHeight = static_cast<uint32_t>(minHeight);
+                }
+                
+                SetMinimumSize(currentMinWidth, currentMinHeight);
+            } catch (const std::bad_variant_access&) {
+                LT_CORE_WARN("Failed to get integer value for {}", key);
+            }
+        }
+        else if (key == "window.max_width" || key == "window.max_height")
+        {
+            // Get current max size and update the changed dimension
+            uint32_t currentMaxWidth = m_Data.MaxWidth;
+            uint32_t currentMaxHeight = m_Data.MaxHeight;
+            
+            try {
+                if (key == "window.max_width") {
+                    int maxWidth = std::get<int>(value);
+                    currentMaxWidth = static_cast<uint32_t>(maxWidth);
+                } else if (key == "window.max_height") {
+                    int maxHeight = std::get<int>(value);
+                    currentMaxHeight = static_cast<uint32_t>(maxHeight);
+                }
+                
+                SetMaximumSize(currentMaxWidth, currentMaxHeight);
+            } catch (const std::bad_variant_access&) {
+                LT_CORE_WARN("Failed to get integer value for {}", key);
+            }
+        }
+        else if (key == "window.high_dpi")
+        {
+            try {
+                bool highDpi = std::get<bool>(value);
+                SetHighDPI(highDpi);
+            } catch (const std::bad_variant_access&) {
+                LT_CORE_WARN("Failed to get boolean value for window.high_dpi");
+            }
+        }
+        else if (key == "window.icon")
+        {
+            try {
+                std::string iconPath = std::get<std::string>(value);
+                SetIcon(iconPath);
+            } catch (const std::bad_variant_access&) {
+                LT_CORE_WARN("Failed to get string value for window.icon");
+            }
+        }
+        
+        LT_CORE_INFO("Window configuration change applied successfully");
     }
 } 

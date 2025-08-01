@@ -22,9 +22,18 @@ The hot reload system consists of several components:
 - **Log Directory**: Change where log files are stored
 - **File Size/Count**: Adjust rotation settings
 
-### ⚠️ **Window System (Detection Only)**
-- **Window Properties**: Changes are detected but require application restart
-- **Future Enhancement**: Full window hot reloading planned
+### ✅ **Window System (Fully Supported)**
+- **Window Title**: Change window title in real-time
+- **Window Size**: Change width and height in real-time
+- **Window Position**: Change x and y position in real-time
+- **Fullscreen**: Toggle fullscreen mode in real-time
+- **Resizable**: Enable/disable window resizing in real-time
+- **VSync**: Enable/disable vertical synchronization in real-time
+- **Borderless**: Toggle borderless mode in real-time
+- **Always on Top**: Toggle always-on-top behavior in real-time
+- **High DPI**: Enable/disable high DPI support in real-time
+- **Window Icon**: Change window icon in real-time
+- **Size Constraints**: Change minimum and maximum window sizes in real-time
 
 ## Usage
 
@@ -68,6 +77,7 @@ ConfigManager: Reloading configuration from config.json
 ConfigManager: Value changed for key 'logging.level'
 ConfigManager: Value changed for key 'logging.file_enabled'
 ConfigManager: Value changed for key 'window.width'
+ConfigManager: Value changed for key 'window.title'
 HotReloadManager: Logging configuration changed - logging.level
 HotReloadManager: Reinitializing logging system...
 Logging configuration:
@@ -81,6 +91,12 @@ Logging configuration:
 Limitless Engine Logger Initialized!
 Application Logger Initialized!
 HotReloadManager: Logging system reinitialized
+HotReloadManager: Window configuration changed - window.width
+HotReloadManager: Window configuration changed - window.title
+Window configuration changed: window.width = 1920
+Window configuration change applied successfully
+Window configuration changed: window.title = Hot Reload Test
+Window configuration change applied successfully
 ```
 
 ## Configuration Examples
@@ -114,6 +130,50 @@ HotReloadManager: Logging system reinitialized
 }
 ```
 **Effect**: Changes the format of log messages to include date.
+
+### Change Window Title
+```json
+{
+  "window": {
+    "title": "My New Window Title"
+  }
+}
+```
+**Effect**: Immediately changes the window title bar text.
+
+### Resize Window
+```json
+{
+  "window": {
+    "width": 1920,
+    "height": 1080
+  }
+}
+```
+**Effect**: Immediately resizes the window to the new dimensions.
+
+### Toggle Fullscreen
+```json
+{
+  "window": {
+    "fullscreen": true
+  }
+}
+```
+**Effect**: Immediately switches the window to fullscreen mode.
+
+### Change Window Position
+```json
+{
+  "window": {
+    "position": {
+      "x": 100,
+      "y": 200
+    }
+  }
+}
+```
+**Effect**: Immediately moves the window to the new position.
 
 ### Enable Full Debug Output
 ```json
