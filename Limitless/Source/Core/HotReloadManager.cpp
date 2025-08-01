@@ -68,8 +68,6 @@ namespace Limitless
         // Dispatch event for window config change
         Events::WindowConfigChangedEvent event(key, value);
         GetEventSystem().Dispatch(event);
-        
-        // Note: Window reinitialization is now handled by the window class via event subscription
     }
 
     void HotReloadManager::ReinitializeLogging()

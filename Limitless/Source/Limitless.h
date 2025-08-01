@@ -15,4 +15,3 @@
 // Concurrency systems
 #include "Core/Concurrency/LockFreeQueue.h"
 #include "Core/Concurrency/AsyncIO.h"
-#include "Core/Concurrency/ThreadSafeConfig.h"

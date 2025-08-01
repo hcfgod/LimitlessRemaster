@@ -1,15 +1,13 @@
 #include "ConfigManager.h"
 #include "Core/Debug/Log.h"
-#include "FileWatcher.h"
-#include <fstream>
+#include "Core/Concurrency/AsyncIO.h"
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <algorithm>
 #include <cstdlib>
 #include <cctype>
-#include <sstream>
 #include <iomanip>
-#include <iostream>
-#include <nlohmann/json.hpp>
 
 // Disable warning about getenv being unsafe (we're using it safely)
 #ifdef _MSC_VER
@@ -26,20 +24,31 @@ namespace Limitless
 
     void ConfigManager::Initialize(const std::string& configFile)
     {
-        if (m_Initialized)
-        {
-            return;
-        }
-
-        m_ConfigFile = configFile;
-        LoadDefaults();
+        LT_CORE_INFO("ConfigManager::Initialize called with configFile: {}", configFile);
         
+        m_ConfigFile = configFile;
+        m_Shutdown.store(false);
+
+        LT_CORE_INFO("ConfigManager::Initialize: Config file set to: {}", m_ConfigFile);
+
+        // Load defaults first
+        LoadDefaults();
+
+        // Start async callback processing thread
+        m_AsyncCallbackThread = std::thread(&ConfigManager::ProcessAsyncCallbacks, this);
+
         // Try to load from file if it exists
         if (std::filesystem::exists(configFile))
         {
-            if (!LoadFromFile(configFile))
+            LT_CORE_INFO("ConfigManager::Initialize: Config file exists, loading...");
+            try
             {
-                LT_CORE_ERROR("Failed to load configuration from file: {}", configFile);
+                LoadFromFileAsync(configFile).Get();
+                LT_CORE_INFO("ConfigManager::Initialize: Config file loaded successfully");
+            }
+            catch (const std::exception& e)
+            {
+                LT_CORE_ERROR("Failed to load configuration from file: {} - {}", configFile, e.what());
             }
         }
         else
@@ -49,61 +58,218 @@ namespace Limitless
 
         // Load from environment variables
         LoadFromEnvironment();
-        
-        m_Initialized = true;
+
+        LT_INFO("ConfigManager initialized with config file: {}", configFile);
     }
 
     void ConfigManager::Shutdown()
     {
-        if (!m_Initialized) return;
+        if (m_Shutdown.load())
+            return;
+
+        LT_INFO("Shutting down ConfigManager...");
+
+        m_Shutdown.store(true);
 
         // Stop hot reload if enabled
-        if (m_HotReloadEnabled && m_FileWatcher)
+        if (m_AsyncHotReloadEnabled.load() && m_FileWatcher)
         {
             m_FileWatcher->StopWatching();
             m_FileWatcher.reset();
         }
 
+        // Wait for async callback thread to finish
+        if (m_AsyncCallbackThread.joinable())
+        {
+            m_AsyncCallbackThread.join();
+        }
+
         // Save current configuration
         if (!m_ConfigFile.empty())
         {
-            if (!SaveToFile(m_ConfigFile)) 
+            try
             {
-                LT_CORE_ERROR("Failed to save configuration to file: {}", m_ConfigFile);
+                SaveToFileAsync(m_ConfigFile).Get();
+            }
+            catch (const std::exception& e)
+            {
+                LT_CORE_ERROR("Failed to save configuration to file: {} - {}", m_ConfigFile, e.what());
             }
         }
-        
-        // Clear all data
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        m_Values.clear();
-        m_Validators.clear();
-        m_ChangeCallbacks.clear();
-        m_Defaults.clear();
-        
-        m_Initialized = false;
+
+        LT_INFO("ConfigManager shutdown complete");
     }
 
+    bool ConfigManager::HasValue(const std::string& key) const
+    {
+        std::shared_lock<std::shared_mutex> lock(m_ConfigMutex);
+        return m_Config.find(key) != m_Config.end();
+    }
+
+    void ConfigManager::RemoveValue(const std::string& key)
+    {
+        std::unique_lock<std::shared_mutex> lock(m_ConfigMutex);
+        auto it = m_Config.find(key);
+        if (it != m_Config.end())
+        {
+            ConfigValue oldValue = it->second;
+            m_Config.erase(it);
+            
+            // Notify callbacks about removal
+            NotifyAsyncChangeCallbacks(key, oldValue);
+        }
+    }
+
+    Async::Task<void> ConfigManager::LoadFromFileAsync(const std::string& filename)
+    {
+        return Async::Task<void>([this, filename]() -> void {
+            try
+            {
+                auto configTask = Async::LoadConfigAsync(filename);
+                auto config = configTask.Get();
+
+                std::unique_lock<std::shared_mutex> lock(m_ConfigMutex);
+                m_Config.clear();
+
+                // Process nested JSON structure
+                for (auto it = config.begin(); it != config.end(); ++it)
+                {
+                    if (it.value().is_object())
+                    {
+                        // Handle nested objects
+                        for (auto nestedIt = it.value().begin(); nestedIt != it.value().end(); ++nestedIt)
+                        {
+                            std::string key = std::string(it.key()) + "." + std::string(nestedIt.key());
+                            ConfigValue value;
+
+                            if (nestedIt.value().is_string())
+                                value = nestedIt.value().get<std::string>();
+                            else if (nestedIt.value().is_number_integer())
+                                value = nestedIt.value().get<int>();
+                            else if (nestedIt.value().is_number_float())
+                                value = nestedIt.value().get<float>();
+                            else if (nestedIt.value().is_boolean())
+                                value = nestedIt.value().get<bool>();
+                            else if (nestedIt.value().is_number_unsigned())
+                                value = nestedIt.value().get<size_t>();
+
+                            m_Config[key] = value;
+                        }
+                    }
+                    else
+                    {
+                        // Handle flat values
+                        std::string key = it.key();
+                        ConfigValue value;
+
+                        if (it.value().is_string())
+                            value = it.value().get<std::string>();
+                        else if (it.value().is_number_integer())
+                            value = it.value().get<int>();
+                        else if (it.value().is_number_float())
+                            value = it.value().get<float>();
+                        else if (it.value().is_boolean())
+                            value = it.value().get<bool>();
+                        else if (it.value().is_number_unsigned())
+                            value = it.value().get<size_t>();
+
+                        m_Config[key] = value;
+                    }
+                }
+
+                m_TotalAsyncOperations.fetch_add(1, std::memory_order_relaxed);
+                LT_INFO("Configuration loaded from file: {} ({} entries)", filename, m_Config.size());
+            }
+            catch (const std::exception& e)
+            {
+                LT_ERROR("Failed to load configuration from file: {} - {}", filename, e.what());
+                throw;
+            }
+        });
+    }
+
+    Async::Task<void> ConfigManager::SaveToFileAsync(const std::string& filename)
+    {
+        return Async::Task<void>([this, filename]() -> void {
+            try
+            {
+                std::shared_lock<std::shared_mutex> lock(m_ConfigMutex);
+
+                nlohmann::json config;
+                
+                // Convert flat configuration back to nested structure
+                for (const auto& [key, value] : m_Config)
+                {
+                    size_t dotPos = key.find('.');
+                    if (dotPos != std::string::npos)
+                    {
+                        // Nested key
+                        std::string parentKey = key.substr(0, dotPos);
+                        std::string childKey = key.substr(dotPos + 1);
+                        
+                        if (!config.contains(parentKey))
+                            config[parentKey] = nlohmann::json::object();
+                        
+                        std::visit([&config, &parentKey, &childKey](const auto& v) {
+                            config[parentKey][childKey] = v;
+                        }, value);
+                    }
+                    else
+                    {
+                        // Flat key
+                        std::visit([&config, &key](const auto& v) {
+                            config[key] = v;
+                        }, value);
+                    }
+                }
+
+                lock.unlock();
+
+                auto saveTask = Async::SaveConfigAsync(filename.empty() ? m_ConfigFile : filename, config);
+                saveTask.Get();
+
+                m_TotalAsyncOperations.fetch_add(1, std::memory_order_relaxed);
+                LT_INFO("Configuration saved to file: {} ({} entries)", 
+                       filename.empty() ? m_ConfigFile : filename, m_Config.size());
+            }
+            catch (const std::exception& e)
+            {
+                LT_ERROR("Failed to save configuration to file: {} - {}", 
+                        filename.empty() ? m_ConfigFile : filename, e.what());
+                throw;
+            }
+        });
+    }
+
+    Async::Task<void> ConfigManager::ReloadFromFileAsync()
+    {
+        return Async::Task<void>([this]() -> void {
+            try
+            {
+                auto loadTask = LoadFromFileAsync(m_ConfigFile);
+                loadTask.Get();
+
+                m_TotalHotReloads.fetch_add(1, std::memory_order_relaxed);
+                LT_INFO("Configuration hot reloaded from file: {}", m_ConfigFile);
+            }
+            catch (const std::exception& e)
+            {
+                LT_ERROR("Failed to hot reload configuration: {}", e.what());
+                throw;
+            }
+        });
+    }
+
+    // Sync wrapper methods
     bool ConfigManager::LoadFromFile(const std::string& filename)
     {
         try
         {
-            std::ifstream file(filename);
-            if (!file.is_open())
-            {
-                LT_CORE_ERROR("Could not open configuration file: {}", filename);
-                return false;
-            }
-
-            nlohmann::json json;
-            file >> json;
-            
-            FromJson(json);
-
+            LoadFromFileAsync(filename).Get();
             return true;
         }
-        catch (const std::exception& e) 
+        catch (...)
         {
-            LT_CORE_ERROR("Error loading configuration from file {}: {}", filename, e.what());
             return false;
         }
     }
@@ -112,295 +278,188 @@ namespace Limitless
     {
         try
         {
-            std::string saveFile = filename.empty() ? m_ConfigFile : filename;
-            if (saveFile.empty())
-            {
-                LT_CORE_ERROR("Cannot save configuration: no filename provided");
-                return false;
-            }
-
-            // Create directory if it doesn't exist
-            std::filesystem::path path(saveFile);
-            if (path.has_parent_path())
-            {
-                std::filesystem::create_directories(path.parent_path());
-            }
-
-            std::ofstream file(saveFile);
-            if (!file.is_open())
-            {
-                LT_CORE_ERROR("Could not open configuration file for writing: {}", saveFile);
-                return false;
-            }
-
-            nlohmann::json json = ToJson();
-            file << std::setw(4) << json << std::endl;
-            
+            const_cast<ConfigManager*>(this)->SaveToFileAsync(filename).Get();
             return true;
         }
-        catch (const std::exception& e)
+        catch (...)
         {
-            LT_CORE_ERROR("Error saving configuration to file {}: {}", filename, e.what());
             return false;
         }
     }
 
-    template<typename T>
-    void ConfigManager::SetValue(const std::string& key, const T& value)
+    void ConfigManager::ReloadFromFile()
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
+        LT_CORE_INFO("ConfigManager::ReloadFromFile called");
         
-        ConfigValue configValue = ConfigValue(value);
-        
-        // Validate if validator exists
-        if (!ValidateValue(key, configValue))
+        if (m_ConfigFile.empty())
         {
-            LT_CORE_ERROR("Validation failed for key: {} with value: {}", key, value);
+            LT_CORE_WARN("ConfigManager::ReloadFromFile: Config file is empty, cannot reload");
             return;
         }
-        
-        // Check if value actually changed
-        auto it = m_Values.find(key);
-        if (it != m_Values.end() && it->second == configValue)
+
+        LT_CORE_INFO("ConfigManager: Reloading configuration from {}", m_ConfigFile);
+
+        // Store current values to detect changes
+        std::unordered_map<std::string, ConfigValue> oldValues;
         {
-            return; // No change
+            std::shared_lock<std::shared_mutex> lock(m_ConfigMutex);
+            oldValues = m_Config;
+            LT_CORE_INFO("ConfigManager::ReloadFromFile: Stored {} current values", oldValues.size());
         }
-        
-        m_Values[key] = configValue;
-        
-        // Notify change callbacks
-        NotifyChangeCallbacks(key, configValue);
-    }
 
-    template<typename T>
-    T ConfigManager::GetValue(const std::string& key, const T& defaultValue) const
-    {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        
-        auto it = m_Values.find(key);
-        if (it != m_Values.end())
+        // Reload from file
+        try
         {
-            try
+            LT_CORE_INFO("ConfigManager::ReloadFromFile: Starting async load");
+            LoadFromFileAsync(m_ConfigFile).Get();
+            LT_CORE_INFO("ConfigManager::ReloadFromFile: Async load completed");
+            
+            // Notify change callbacks for any changed values
+            std::shared_lock<std::shared_mutex> lock(m_ConfigMutex);
+            int changedCount = 0;
+            for (const auto& [key, newValue] : m_Config)
             {
-                // Attempt to convert the value to the requested type
-                return ConvertValue<T>(it->second);
+                auto it = oldValues.find(key);
+                if (it == oldValues.end() || it->second != newValue)
+                {
+                    LT_CORE_INFO("ConfigManager: Value changed for key '{}'", key);
+                    NotifyAsyncChangeCallbacks(key, newValue);
+                    changedCount++;
+                }
             }
-            catch (const std::exception& e)
+
+            // Also check for removed values
+            int removedCount = 0;
+            for (const auto& [key, oldValue] : oldValues)
             {
-                LT_CORE_ERROR("Error converting value for key {}: {}", key, e.what());
-                return defaultValue;
+                if (m_Config.find(key) == m_Config.end())
+                {
+                    LT_CORE_INFO("ConfigManager: Key removed '{}'", key);
+                    removedCount++;
+                    // You could add a special "removed" callback here if needed
+                }
             }
+
+            LT_CORE_INFO("ConfigManager: Configuration reloaded successfully - {} changed, {} removed", changedCount, removedCount);
         }
-        
-        return defaultValue;
-    }
-
-    template<typename T>
-    std::optional<T> ConfigManager::GetValueOptional(const std::string& key) const
-    {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        
-        auto it = m_Values.find(key);
-        if (it != m_Values.end())
+        catch (const std::exception& e)
         {
-            try
-            {
-                // Attempt to convert the value to the requested type
-                return ConvertValue<T>(it->second);
-            }
-            catch (const std::exception& e)
-            {
-                LT_CORE_ERROR("Error converting value for key {}: {}", key, e.what());
-                return std::nullopt;
-            }
-        }
-        
-        return std::nullopt;
-    }
-
-    bool ConfigManager::HasValue(const std::string& key) const
-    {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        return m_Values.find(key) != m_Values.end();
-    }
-
-    void ConfigManager::RemoveValue(const std::string& key)
-    {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        
-        auto it = m_Values.find(key);
-        if (it != m_Values.end())
-        {
-            m_Values.erase(it);
+            LT_CORE_ERROR("ConfigManager: Failed to reload configuration from {} - {}", m_ConfigFile, e.what());
         }
     }
 
-    void ConfigManager::RegisterSchema(const std::string& key, ConfigValidator validator)
+    void ConfigManager::EnableAsyncHotReload(bool enable)
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        m_Validators[key] = validator;
+        LT_CORE_INFO("ConfigManager::EnableAsyncHotReload called with enable={}", enable);
+        
+        if (m_AsyncHotReloadEnabled.load() == enable)
+        {
+            LT_CORE_INFO("ConfigManager::EnableAsyncHotReload: Already in desired state, returning");
+            return;
+        }
+
+        m_AsyncHotReloadEnabled.store(enable, std::memory_order_relaxed);
+
+        if (enable && !m_ConfigFile.empty())
+        {
+            LT_CORE_INFO("ConfigManager::EnableAsyncHotReload: Enabling hot reload for file: {}", m_ConfigFile);
+            
+            // Create file watcher if it doesn't exist
+            if (!m_FileWatcher)
+            {
+                LT_CORE_INFO("ConfigManager::EnableAsyncHotReload: Creating new FileWatcher");
+                m_FileWatcher = std::make_unique<FileWatcher>();
+            }
+
+            // Start watching the config file
+            m_FileWatcher->StartWatching(m_ConfigFile, [this](const std::string& filepath) {
+                LT_CORE_INFO("ConfigManager: Hot reload triggered for {}", filepath);
+                ReloadFromFile();
+            });
+
+            LT_CORE_INFO("ConfigManager: Async hot reload enabled for {}", m_ConfigFile);
+        }
+        else if (!enable && m_FileWatcher)
+        {
+            LT_CORE_INFO("ConfigManager::EnableAsyncHotReload: Disabling hot reload");
+            // Stop watching
+            m_FileWatcher->StopWatching();
+            LT_CORE_INFO("ConfigManager: Async hot reload disabled");
+        }
+        else
+        {
+            LT_CORE_WARN("ConfigManager::EnableAsyncHotReload: Cannot enable hot reload - config file is empty or FileWatcher not available");
+        }
     }
 
     bool ConfigManager::ValidateConfiguration() const
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
+        std::shared_lock<std::shared_mutex> lock(m_ConfigMutex);
         
-        bool valid = true;
-        for (const auto& [key, value] : m_Values)
+        for (const auto& [key, value] : m_Config)
         {
-            if (!ValidateValue(key, value))
+            auto validatorIt = m_Validators.find(key);
+            if (validatorIt != m_Validators.end())
             {
-                valid = false;
+                if (!validatorIt->second(value))
+                {
+                    LT_ERROR("Configuration validation failed for key: {}", key);
+                    return false;
+                }
             }
         }
         
-        return valid;
+        return true;
     }
 
-    std::vector<std::string> ConfigManager::GetValidationErrors() const
+    void ConfigManager::RegisterSchema(const std::string& key, ConfigValidator validator)
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        
-        std::vector<std::string> errors;
-        for (const auto& [key, value] : m_Values)
-        {
-            if (!ValidateValue(key, value))
-            {
-                errors.push_back("Validation failed for key: " + key);
-            }
-        }
-        
-        return errors;
+        std::unique_lock<std::shared_mutex> lock(m_ConfigMutex);
+        m_Validators[key] = std::move(validator);
+    }
+
+    void ConfigManager::RegisterAsyncChangeCallback(const std::string& key, 
+                                                   std::function<void(const std::string&, const ConfigValue&)> callback)
+    {
+        std::unique_lock<std::shared_mutex> lock(m_ConfigMutex);
+        m_AsyncCallbacks[key].push_back(std::move(callback));
+    }
+
+    void ConfigManager::UnregisterAsyncChangeCallback(const std::string& key)
+    {
+        std::unique_lock<std::shared_mutex> lock(m_ConfigMutex);
+        m_AsyncCallbacks.erase(key);
     }
 
     void ConfigManager::RegisterChangeCallback(const std::string& key, ConfigChangeCallback callback)
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        m_ChangeCallbacks[key].push_back(callback);
+        std::unique_lock<std::shared_mutex> lock(m_ConfigMutex);
+        m_LegacyCallbacks[key].push_back(std::move(callback));
     }
 
     void ConfigManager::UnregisterChangeCallback(const std::string& key)
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        m_ChangeCallbacks.erase(key);
+        std::unique_lock<std::shared_mutex> lock(m_ConfigMutex);
+        m_LegacyCallbacks.erase(key);
     }
 
-    void ConfigManager::ResetToDefaults()
+    void ConfigManager::BeginBatchUpdate()
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        m_Values = m_Defaults;
+        m_BatchUpdateActive.store(true, std::memory_order_relaxed);
+        m_PendingCallbacks.clear();
     }
 
-    std::vector<std::string> ConfigManager::GetKeys() const
+    void ConfigManager::EndBatchUpdate()
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
+        m_BatchUpdateActive.store(false, std::memory_order_relaxed);
         
-        std::vector<std::string> keys;
-        keys.reserve(m_Values.size());
-        
-        for (const auto& [key, _] : m_Values)
+        // Process all pending callbacks
+        for (const auto& callback : m_PendingCallbacks)
         {
-            keys.push_back(key);
+            if (callback)
+                callback();
         }
-        
-        return keys;
-    }
-
-    nlohmann::json ConfigManager::ToJson() const
-    {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        
-        nlohmann::json json;
-        
-        for (const auto& [key, value] : m_Values)
-        {
-            // Split the key by dots to reconstruct nested structure
-            std::vector<std::string> keyParts;
-            std::string currentKey;
-            for (char c : key) {
-                if (c == '.') {
-                    keyParts.push_back(currentKey);
-                    currentKey.clear();
-                } else {
-                    currentKey += c;
-                }
-            }
-            keyParts.push_back(currentKey);
-            
-            // Navigate to the correct nested location
-            nlohmann::json* current = &json;
-            for (size_t i = 0; i < keyParts.size() - 1; ++i) {
-                if (!current->contains(keyParts[i])) {
-                    (*current)[keyParts[i]] = nlohmann::json::object();
-                }
-                current = &(*current)[keyParts[i]];
-            }
-            
-            // Set the value at the final location
-            std::visit([current, &keyParts](const auto& v) 
-            {
-                (*current)[keyParts.back()] = v;
-            }, value);
-        }
-        
-        return json;
-    }
-
-    void ConfigManager::FromJson(const nlohmann::json& json)
-    {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        
-        LT_CORE_INFO("Loading configuration from JSON with {} items", json.size());
-        
-        ProcessJsonObject(json, "");
-        
-        LT_CORE_INFO("Configuration loading complete. Total values: {}", m_Values.size());
-    }
-
-    void ConfigManager::ProcessJsonObject(const nlohmann::json& json, const std::string& prefix)
-    {
-        for (const auto& [key, value] : json.items())
-        {
-            std::string fullKey = prefix.empty() ? key : prefix + "." + key;
-            
-            try
-            {
-                if (value.is_object())
-                {
-                    // Recursively process nested objects
-                    ProcessJsonObject(value, fullKey);
-                }
-                else if (value.is_boolean())
-                {
-                    m_Values[fullKey] = value.get<bool>();
-                    LT_CORE_DEBUG("Loaded config {} = {}", fullKey, (value.get<bool>() ? "true" : "false"));
-                }
-                else if (value.is_number_integer())
-                {
-                    m_Values[fullKey] = value.get<int>();
-                    LT_CORE_DEBUG("Loaded config {} = {}", fullKey, value.get<int>());
-                }
-                else if (value.is_number_float())
-                {
-                    m_Values[fullKey] = value.get<double>();
-                    LT_CORE_DEBUG("Loaded config {} = {}", fullKey, value.get<double>());
-                }
-                else if (value.is_string())
-                {
-                    m_Values[fullKey] = value.get<std::string>();
-                    LT_CORE_DEBUG("Loaded config {} = {}", fullKey, value.get<std::string>());
-                }
-                else
-                {
-                    LT_CORE_WARN("Unknown config value type for key: {}", fullKey);
-                }
-            }
-            catch (const std::exception& e)
-            {
-                LT_CORE_ERROR("Error parsing key {}: {}", fullKey, e.what());
-                continue; // Skip invalid entries
-            }
-        }
+        m_PendingCallbacks.clear();
     }
 
     void ConfigManager::LoadFromEnvironment(const std::string& prefix)
@@ -481,352 +540,253 @@ namespace Limitless
         }
     }
 
-    void ConfigManager::EnableHotReload(bool enable)
+    void ConfigManager::ResetToDefaults()
     {
-        if (m_HotReloadEnabled == enable)
-            return;
-
-        m_HotReloadEnabled = enable;
-
-        if (enable && !m_ConfigFile.empty())
-        {
-            // Create file watcher if it doesn't exist
-            if (!m_FileWatcher)
-            {
-                m_FileWatcher = std::make_unique<FileWatcher>();
-            }
-
-            // Start watching the config file
-            m_FileWatcher->StartWatching(m_ConfigFile, [this](const std::string& filepath) {
-                LT_CORE_INFO("ConfigManager: Hot reload triggered for {}", filepath);
-                ReloadFromFile();
-            });
-
-            LT_CORE_INFO("ConfigManager: Hot reload enabled for {}", m_ConfigFile);
-        }
-        else if (!enable && m_FileWatcher)
-        {
-            // Stop watching
-            m_FileWatcher->StopWatching();
-            LT_CORE_INFO("ConfigManager: Hot reload disabled");
-        }
+        LoadDefaults();
     }
 
-    void ConfigManager::ReloadFromFile()
+    std::vector<std::string> ConfigManager::GetKeys() const
     {
-        if (m_ConfigFile.empty())
-            return;
-
-        LT_CORE_INFO("ConfigManager: Reloading configuration from {}", m_ConfigFile);
-
-        // Store current values to detect changes
-        auto oldValues = m_Values;
-
-        // Reload from file
-        if (LoadFromFile(m_ConfigFile))
+        std::shared_lock<std::shared_mutex> lock(m_ConfigMutex);
+        
+        std::vector<std::string> keys;
+        keys.reserve(m_Config.size());
+        
+        for (const auto& [key, _] : m_Config)
         {
-            // Notify change callbacks for any changed values
-            for (const auto& [key, newValue] : m_Values)
-            {
-                auto it = oldValues.find(key);
-                if (it == oldValues.end() || it->second != newValue)
-                {
-                    LT_CORE_INFO("ConfigManager: Value changed for key '{}'", key);
-                    NotifyChangeCallbacks(key, newValue);
-                }
-            }
-
-            // Also check for removed values
-            for (const auto& [key, oldValue] : oldValues)
-            {
-                if (m_Values.find(key) == m_Values.end())
-                {
-                    LT_CORE_INFO("ConfigManager: Key removed '{}'", key);
-                    // You could add a special "removed" callback here if needed
-                }
-            }
-
-            LT_CORE_INFO("ConfigManager: Configuration reloaded successfully");
+            keys.push_back(key);
         }
-        else
-        {
-            LT_CORE_ERROR("ConfigManager: Failed to reload configuration from {}", m_ConfigFile);
-        }
+        
+        return keys;
     }
 
-    void ConfigManager::NotifyChangeCallbacks(const std::string& key, const ConfigValue& value)
+    nlohmann::json ConfigManager::ToJson() const
     {
-        auto it = m_ChangeCallbacks.find(key);
-        if (it != m_ChangeCallbacks.end())
+        std::shared_lock<std::shared_mutex> lock(m_ConfigMutex);
+        
+        nlohmann::json json;
+        
+        for (const auto& [key, value] : m_Config)
         {
-            for (const auto& callback : it->second)
-            {
-                try
-                {
-                    callback(key, value);
-                }
-                catch (const std::exception& e)
-                {
-                    LT_CORE_ERROR("ConfigManager: Error in change callback for key '{}': {}", key, e.what());
+            // Split the key by dots to reconstruct nested structure
+            std::vector<std::string> keyParts;
+            std::string currentKey;
+            for (char c : key) {
+                if (c == '.') {
+                    keyParts.push_back(currentKey);
+                    currentKey.clear();
+                } else {
+                    currentKey += c;
                 }
             }
+            keyParts.push_back(currentKey);
+            
+            // Navigate to the correct nested location
+            nlohmann::json* current = &json;
+            for (size_t i = 0; i < keyParts.size() - 1; ++i) {
+                if (!current->contains(keyParts[i])) {
+                    (*current)[keyParts[i]] = nlohmann::json::object();
+                }
+                current = &(*current)[keyParts[i]];
+            }
+            
+            // Set the value at the final location
+            std::visit([current, &keyParts](const auto& v) 
+            {
+                (*current)[keyParts.back()] = v;
+            }, value);
         }
+        
+        return json;
     }
 
-    bool ConfigManager::ValidateValue(const std::string& key, const ConfigValue& value) const
+    void ConfigManager::FromJson(const nlohmann::json& json)
     {
-        auto it = m_Validators.find(key);
-        if (it != m_Validators.end())
+        std::unique_lock<std::shared_mutex> lock(m_ConfigMutex);
+        
+        LT_CORE_INFO("Loading configuration from JSON with {} items", json.size());
+        
+        ProcessJsonObject(json, "");
+        
+        LT_CORE_INFO("Configuration loading complete. Total values: {}", m_Config.size());
+    }
+
+    void ConfigManager::ProcessJsonObject(const nlohmann::json& json, const std::string& prefix)
+    {
+        for (const auto& [key, value] : json.items())
         {
-            return it->second(value);
+            std::string fullKey = prefix.empty() ? key : prefix + "." + key;
+            
+            try
+            {
+                if (value.is_object())
+                {
+                    // Recursively process nested objects
+                    ProcessJsonObject(value, fullKey);
+                }
+                else if (value.is_boolean())
+                {
+                    m_Config[fullKey] = value.get<bool>();
+                    LT_CORE_DEBUG("Loaded config {} = {}", fullKey, (value.get<bool>() ? "true" : "false"));
+                }
+                else if (value.is_number_integer())
+                {
+                    m_Config[fullKey] = value.get<int>();
+                    LT_CORE_DEBUG("Loaded config {} = {}", fullKey, value.get<int>());
+                }
+                else if (value.is_number_float())
+                {
+                    m_Config[fullKey] = value.get<double>();
+                    LT_CORE_DEBUG("Loaded config {} = {}", fullKey, value.get<double>());
+                }
+                else if (value.is_string())
+                {
+                    m_Config[fullKey] = value.get<std::string>();
+                    LT_CORE_DEBUG("Loaded config {} = {}", fullKey, value.get<std::string>());
+                }
+                else
+                {
+                    LT_CORE_WARN("Unknown config value type for key: {}", fullKey);
+                }
+            }
+            catch (const std::exception& e)
+            {
+                LT_CORE_ERROR("Error parsing key {}: {}", fullKey, e.what());
+                continue; // Skip invalid entries
+            }
         }
-        return true; // No validator means always valid
     }
 
     void ConfigManager::LoadDefaults()
     {
+        std::unique_lock<std::shared_mutex> lock(m_ConfigMutex);
+        
         // Window defaults
-        m_Defaults[Config::Window::WIDTH] = 1280;
-        m_Defaults[Config::Window::HEIGHT] = 720;
-        m_Defaults[Config::Window::TITLE] = std::string("Limitless Engine");
-        m_Defaults[Config::Window::FULLSCREEN] = false;
-        m_Defaults[Config::Window::VSYNC] = false;
-        m_Defaults[Config::Window::RESIZABLE] = true;
+        m_Config[Config::Window::WIDTH] = 1280;
+        m_Config[Config::Window::HEIGHT] = 720;
+        m_Config[Config::Window::TITLE] = std::string("Limitless Engine");
+        m_Config[Config::Window::FULLSCREEN] = false;
+        m_Config[Config::Window::VSYNC] = false;
+        m_Config[Config::Window::RESIZABLE] = true;
 
         // Logging defaults
-        m_Defaults[Config::Logging::LEVEL] = std::string("info");
-        m_Defaults[Config::Logging::FILE_ENABLED] = true;
-        m_Defaults[Config::Logging::CONSOLE_ENABLED] = true;
-        m_Defaults[Config::Logging::PATTERN] = std::string("[%T] [%l] %n: %v");
-        m_Defaults[Config::Logging::DIRECTORY] = std::string("logs");
-        m_Defaults[Config::Logging::MAX_FILE_SIZE] = static_cast<size_t>(50 * 1024 * 1024); // 50MB
-        m_Defaults[Config::Logging::MAX_FILES] = static_cast<size_t>(10);
+        m_Config[Config::Logging::LEVEL] = std::string("info");
+        m_Config[Config::Logging::FILE_ENABLED] = true;
+        m_Config[Config::Logging::CONSOLE_ENABLED] = true;
+        m_Config[Config::Logging::PATTERN] = std::string("[%T] [%l] %n: %v");
+        m_Config[Config::Logging::DIRECTORY] = std::string("logs");
+        m_Config[Config::Logging::MAX_FILE_SIZE] = static_cast<size_t>(50 * 1024 * 1024); // 50MB
+        m_Config[Config::Logging::MAX_FILES] = static_cast<size_t>(10);
 
         // System defaults
-        m_Defaults[Config::System::MAX_THREADS] = static_cast<int>(std::thread::hardware_concurrency());
-        m_Defaults[Config::System::WORKING_DIRECTORY] = std::string(".");
-        m_Defaults[Config::System::TEMP_DIRECTORY] = std::string("temp");
-        m_Defaults[Config::System::LOG_DIRECTORY] = std::string("logs");
-
-        // Copy defaults to current values
-        m_Values = m_Defaults;
+        m_Config[Config::System::MAX_THREADS] = static_cast<int>(std::thread::hardware_concurrency());
+        m_Config[Config::System::WORKING_DIRECTORY] = std::string(".");
+        m_Config[Config::System::TEMP_DIRECTORY] = std::string("temp");
+        m_Config[Config::System::LOG_DIRECTORY] = std::string("logs");
     }
 
-    template<typename T>
-    T ConfigManager::ConvertValue(const ConfigValue& value) const
+    ConfigManager::ConfigStats ConfigManager::GetStats() const
     {
-        return std::visit([](const auto& v) -> T {
-            using V = std::decay_t<decltype(v)>;
-            
-            // Direct type match
-            if constexpr (std::is_same_v<T, V>)
+        ConfigStats stats;
+        stats.totalReads = m_TotalReads.load(std::memory_order_relaxed);
+        stats.totalWrites = m_TotalWrites.load(std::memory_order_relaxed);
+        stats.totalAsyncOperations = m_TotalAsyncOperations.load(std::memory_order_relaxed);
+        stats.totalHotReloads = m_TotalHotReloads.load(std::memory_order_relaxed);
+        
+        double totalReadTime = m_TotalReadTime.load(std::memory_order_relaxed);
+        double totalWriteTime = m_TotalWriteTime.load(std::memory_order_relaxed);
+        
+        stats.averageReadTime = stats.totalReads > 0 ? totalReadTime / stats.totalReads : 0.0;
+        stats.averageWriteTime = stats.totalWrites > 0 ? totalWriteTime / stats.totalWrites : 0.0;
+        
+        return stats;
+    }
+
+    void ConfigManager::NotifyAsyncChangeCallbacks(const std::string& key, const ConfigValue& value)
+    {
+        std::shared_lock<std::shared_mutex> lock(m_ConfigMutex);
+        
+        // Notify async callbacks
+        auto asyncIt = m_AsyncCallbacks.find(key);
+        if (asyncIt != m_AsyncCallbacks.end())
+        {
+            for (const auto& callback : asyncIt->second)
             {
-                return v;
-            }
-            // String conversions
-            else if constexpr (std::is_same_v<T, std::string>)
-            {
-                if constexpr (std::is_same_v<V, std::string>)
+                // Queue callback for async execution
+                if (!m_AsyncCallbackQueue.TryPush([callback, key, value]() {
+                    try
+                    {
+                        if (callback)
+                            callback(key, value);
+                    }
+                    catch (const std::exception& e)
+                    {
+                        LT_ERROR("Exception in async config callback: {}", e.what());
+                    }
+                }))
                 {
-                    return v;
-                }
-                else if constexpr (std::is_same_v<V, bool>)
-                {
-                    return v ? "true" : "false";
-                }
-                else if constexpr (std::is_same_v<V, int> || std::is_same_v<V, float> || std::is_same_v<V, double>)
-                {
-                    return std::to_string(v);
-                }
-                else if constexpr (std::is_same_v<V, size_t> || std::is_same_v<V, uint32_t>)
-                {
-                    return std::to_string(v);
-                }
-                else
-                {
-                    static_assert(std::is_same_v<V, void>, "Unsupported type for string conversion");
-                }
-            }
-            // Numeric conversions
-            else if constexpr (std::is_same_v<T, int>)
-            {
-                if constexpr (std::is_same_v<V, std::string>)
-                {
-                    return std::stoi(v);
-                }
-                else if constexpr (std::is_same_v<V, bool>)
-                {
-                    return static_cast<int>(v);
-                }
-                else if constexpr (std::is_same_v<V, float> || std::is_same_v<V, double>)
-                {
-                    return static_cast<int>(v);
-                }
-                else if constexpr (std::is_same_v<V, size_t> || std::is_same_v<V, uint32_t>)
-                {
-                    return static_cast<int>(v);
-                }
-                else
-                {
-                    static_assert(std::is_same_v<V, void>, "Unsupported type for int conversion");
+                    LT_WARN("Async callback queue is full, dropping callback for key: {}", key);
                 }
             }
-            else if constexpr (std::is_same_v<T, float>)
+        }
+
+        // Notify legacy callbacks immediately
+        auto legacyIt = m_LegacyCallbacks.find(key);
+        if (legacyIt != m_LegacyCallbacks.end())
+        {
+            for (const auto& callback : legacyIt->second)
             {
-                if constexpr (std::is_same_v<V, std::string>)
+                try
                 {
-                    return std::stof(v);
+                    if (callback)
+                        callback(key, value);
                 }
-                else if constexpr (std::is_same_v<V, bool>)
+                catch (const std::exception& e)
                 {
-                    return static_cast<float>(v);
-                }
-                else if constexpr (std::is_same_v<V, int> || std::is_same_v<V, double>)
-                {
-                    return static_cast<float>(v);
-                }
-                else if constexpr (std::is_same_v<V, size_t> || std::is_same_v<V, uint32_t>)
-                {
-                    return static_cast<float>(v);
-                }
-                else
-                {
-                    static_assert(std::is_same_v<V, void>, "Unsupported type for float conversion");
+                    LT_ERROR("Exception in legacy config callback: {}", e.what());
                 }
             }
-            else if constexpr (std::is_same_v<T, double>)
+        }
+    }
+
+    void ConfigManager::ProcessAsyncCallbacks()
+    {
+        while (!m_Shutdown.load())
+        {
+            auto callbackResult = m_AsyncCallbackQueue.TryPop();
+            if (callbackResult.has_value())
             {
-                if constexpr (std::is_same_v<V, std::string>)
+                try
                 {
-                    return std::stod(v);
+                    auto& callback = callbackResult.value();
+                    if (callback)
+                        callback();
                 }
-                else if constexpr (std::is_same_v<V, bool>)
+                catch (const std::exception& e)
                 {
-                    return static_cast<double>(v);
-                }
-                else if constexpr (std::is_same_v<V, int> || std::is_same_v<V, float>)
-                {
-                    return static_cast<double>(v);
-                }
-                else if constexpr (std::is_same_v<V, size_t> || std::is_same_v<V, uint32_t>)
-                {
-                    return static_cast<double>(v);
-                }
-                else
-                {
-                    static_assert(std::is_same_v<V, void>, "Unsupported type for double conversion");
-                }
-            }
-            else if constexpr (std::is_same_v<T, size_t>)
-            {
-                if constexpr (std::is_same_v<V, std::string>)
-                {
-                    return std::stoull(v);
-                }
-                else if constexpr (std::is_same_v<V, bool>)
-                {
-                    return static_cast<size_t>(v);
-                }
-                else if constexpr (std::is_same_v<V, int> || std::is_same_v<V, float> || std::is_same_v<V, double>)
-                {
-                    return static_cast<size_t>(v);
-                }
-                else if constexpr (std::is_same_v<V, size_t> || std::is_same_v<V, uint32_t>)
-                {
-                    return static_cast<size_t>(v);
-                }
-                else
-                {
-                    static_assert(std::is_same_v<V, void>, "Unsupported type for size_t conversion");
-                }
-            }
-            else if constexpr (std::is_same_v<T, uint32_t>)
-            {
-                if constexpr (std::is_same_v<V, std::string>)
-                {
-                    return static_cast<uint32_t>(std::stoul(v));
-                }
-                else if constexpr (std::is_same_v<V, bool>)
-                {
-                    return static_cast<uint32_t>(v);
-                }
-                else if constexpr (std::is_same_v<V, int> || std::is_same_v<V, float> || std::is_same_v<V, double>)
-                {
-                    return static_cast<uint32_t>(v);
-                }
-                else if constexpr (std::is_same_v<V, size_t> || std::is_same_v<V, uint32_t>)
-                {
-                    return static_cast<uint32_t>(v);
-                }
-                else
-                {
-                    static_assert(std::is_same_v<V, void>, "Unsupported type for uint32_t conversion");
-                }
-            }
-            else if constexpr (std::is_same_v<T, bool>)
-            {
-                if constexpr (std::is_same_v<V, std::string>)
-                {
-                    std::string lower = v;
-                    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-                    return (lower == "true" || lower == "1" || lower == "yes");
-                }
-                else if constexpr (std::is_same_v<V, int> || std::is_same_v<V, float> || std::is_same_v<V, double>)
-                {
-                    return static_cast<bool>(v);
-                }
-                else if constexpr (std::is_same_v<V, size_t> || std::is_same_v<V, uint32_t>)
-                {
-                    return static_cast<bool>(v);
-                }
-                else
-                {
-                    static_assert(std::is_same_v<V, void>, "Unsupported type for bool conversion");
+                    LT_ERROR("Exception in async callback processing: {}", e.what());
                 }
             }
             else
             {
-                static_assert(std::is_same_v<T, void>, "Unsupported target type for conversion");
+                std::this_thread::yield();
             }
-        }, value);
+        }
     }
 
-    template<typename T>
-    bool ConfigManager::CanConvert(const ConfigValue& value) const
+    void ConfigManager::UpdateStats(bool isRead, double duration) const
     {
-        try
+        if (isRead)
         {
-            ConvertValue<T>(value);
-            return true;
+            m_TotalReads.fetch_add(1, std::memory_order_relaxed);
+            double currentReadTime = m_TotalReadTime.load(std::memory_order_relaxed);
+            m_TotalReadTime.store(currentReadTime + duration, std::memory_order_relaxed);
         }
-        catch (...)
+        else
         {
-            return false;
+            m_TotalWrites.fetch_add(1, std::memory_order_relaxed);
+            double currentWriteTime = m_TotalWriteTime.load(std::memory_order_relaxed);
+            m_TotalWriteTime.store(currentWriteTime + duration, std::memory_order_relaxed);
         }
     }
-
-    // Explicit template instantiations
-    template void ConfigManager::SetValue<bool>(const std::string&, const bool&);
-    template void ConfigManager::SetValue<int>(const std::string&, const int&);
-    template void ConfigManager::SetValue<float>(const std::string&, const float&);
-    template void ConfigManager::SetValue<double>(const std::string&, const double&);
-    template void ConfigManager::SetValue<std::string>(const std::string&, const std::string&);
-    template void ConfigManager::SetValue<size_t>(const std::string&, const size_t&);
-    template void ConfigManager::SetValue<uint32_t>(const std::string&, const uint32_t&);
-
-    template bool ConfigManager::GetValue<bool>(const std::string&, const bool&) const;
-    template int ConfigManager::GetValue<int>(const std::string&, const int&) const;
-    template float ConfigManager::GetValue<float>(const std::string&, const float&) const;
-    template double ConfigManager::GetValue<double>(const std::string&, const double&) const;
-    template std::string ConfigManager::GetValue<std::string>(const std::string&, const std::string&) const;
-    template size_t ConfigManager::GetValue<size_t>(const std::string&, const size_t&) const;
-    template uint32_t ConfigManager::GetValue<uint32_t>(const std::string&, const uint32_t&) const;
-
-    template std::optional<bool> ConfigManager::GetValueOptional<bool>(const std::string&) const;
-    template std::optional<int> ConfigManager::GetValueOptional<int>(const std::string&) const;
-    template std::optional<float> ConfigManager::GetValueOptional<float>(const std::string&) const;
-    template std::optional<double> ConfigManager::GetValueOptional<double>(const std::string&) const;
-    template std::optional<std::string> ConfigManager::GetValueOptional<std::string>(const std::string&) const;
-    template std::optional<size_t> ConfigManager::GetValueOptional<size_t>(const std::string&) const;
-    template std::optional<uint32_t> ConfigManager::GetValueOptional<uint32_t>(const std::string&) const;
 }
