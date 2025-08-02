@@ -1,536 +1,452 @@
-# Concurrency Guide
+# Concurrency and AsyncIO Integration Guide
 
-This document explains the comprehensive concurrency improvements in the Limitless Engine, including lock-free queues, async I/O patterns, and thread-safe systems.
+## Overview
 
-## 🚀 **Concurrency Improvements Overview**
+The Limitless Engine provides a comprehensive concurrency system with AsyncIO capabilities for efficient file operations. This guide covers how to use the AsyncIO system throughout your codebase.
 
-### **What's New**
-- **🔒 Lock-Free Queues** - High-performance concurrent data structures
-- **⚡ Async I/O System** - Modern task-based I/O operations with thread pool
-- **🛡️ Thread-Safe Configuration** - Concurrent configuration management
-- **📊 Performance Monitoring** - Real-time concurrency statistics
-- **🔄 Work Stealing** - Advanced task scheduling algorithms
+## AsyncIO System
 
-## 🏗️ **Architecture**
+### Initialization
 
-### **Lock-Free Data Structures**
-```
-Concurrency/
-├── LockFreeQueue.h          # Lock-free queue implementations
-├── AsyncIO.h               # Async I/O system
-├── ThreadSafeConfig.h      # Thread-safe configuration
-└── AsyncIO.cpp             # Async I/O implementation
-```
+The AsyncIO system is automatically initialized in the main entry point with configuration from `config.json`:
 
-### **Performance Characteristics**
-- **Lock-Free SPSC Queue**: ~10M ops/sec per thread
-- **Lock-Free MPMC Queue**: ~5M ops/sec per thread
-- **Async I/O**: ~100MB/s throughput per thread
-- **Thread-Safe Config**: ~1M reads/sec, ~500K writes/sec
-
-## 🔒 **Lock-Free Queues**
-
-### **Single-Producer Single-Consumer (SPSC) Queue**
 ```cpp
-#include "Core/Concurrency/LockFreeQueue.h"
+// In EntryPoint.h - automatically handled
+auto& asyncIO = Limitless::Async::GetAsyncIO();
+size_t threadCount = configManager.GetValue<size_t>("system.max_threads", 0);
+asyncIO.Initialize(threadCount);
+```
 
-using namespace Limitless::Concurrency;
+### Configuration
 
-// Create a lock-free SPSC queue
-LockFreeSPSCQueue<int, 1024> queue;
+Add AsyncIO settings to your `config.json`:
 
-// Producer thread
-queue.TryPush(42);
-
-// Consumer thread
-auto result = queue.TryPop();
-if (result.has_value()) {
-    int value = *result;
-    // Process value
+```json
+{
+  "system": {
+    "max_threads": 8,
+    "asyncio_enabled": true,
+    "asyncio_queue_size": 8192
+  }
 }
 ```
 
-**Features:**
-- **Zero contention** between producer and consumer
-- **Cache-line aligned** for optimal performance
-- **Power-of-2 size** for efficient modulo operations
-- **No memory allocation** during operations
+## File Operations
 
-### **Multi-Producer Multi-Consumer (MPMC) Queue**
+### Basic File Operations
+
 ```cpp
-#include "Core/Concurrency/LockFreeQueue.h"
+auto& asyncIO = Limitless::Async::GetAsyncIO();
 
-using namespace Limitless::Concurrency;
+// Read file asynchronously
+auto readTask = asyncIO.ReadFileAsync("config.json");
+std::string content = readTask.Get(); // Wait for completion
 
-// Create a lock-free MPMC queue
-LockFreeMPMCQueue<std::string, 2048> queue;
-
-// Multiple producer threads
-std::thread producer1([&queue]() {
-    queue.TryPush("Hello from thread 1");
-});
-
-std::thread producer2([&queue]() {
-    queue.TryPush("Hello from thread 2");
-});
-
-// Multiple consumer threads
-std::thread consumer1([&queue]() {
-    auto result = queue.TryPop();
-    if (result) {
-        // Process message
-    }
-});
-```
-
-**Features:**
-- **CAS-based operations** for thread safety
-- **Multiple producers and consumers** supported
-- **Wait-free operations** in most cases
-- **Automatic load balancing** between consumers
-
-### **Object Pool**
-```cpp
-#include "Core/Concurrency/LockFreeQueue.h"
-
-using namespace Limitless::Concurrency;
-
-// Create an object pool for frequently allocated objects
-ObjectPool<MyClass, 64> pool;
-
-// Acquire object from pool
-auto obj = pool.Acquire();
-if (obj) {
-    // Use object
-    obj->DoSomething();
-    
-    // Return to pool when done
-    pool.Release(std::move(obj));
-}
-```
-
-**Features:**
-- **Reduces allocation overhead** for frequently used objects
-- **Thread-safe acquisition and release**
-- **Automatic fallback** to new allocation when pool is empty
-- **Configurable pool size**
-
-### **Work Stealing Queue**
-```cpp
-#include "Core/Concurrency/LockFreeQueue.h"
-
-using namespace Limitless::Concurrency;
-
-// Create a work stealing queue for task scheduling
-WorkStealingQueue<Task, 1024> queue;
-
-// Owner thread operations (LIFO)
-queue.Push(task1);
-queue.Push(task2);
-auto task = queue.Pop(); // Gets task2 (LIFO)
-
-// Other threads can steal work (FIFO)
-auto stolenTask = queue.Steal(); // Gets task1 (FIFO)
-```
-
-**Features:**
-- **LIFO for owner** (cache-friendly)
-- **FIFO for stealers** (fair distribution)
-- **Lock-free stealing** operations
-- **Ideal for task schedulers**
-
-## ⚡ **Async I/O System**
-
-### **Basic Usage**
-```cpp
-#include "Core/Concurrency/AsyncIO.h"
-
-using namespace Limitless::Async;
-
-// Initialize async I/O system
-auto& asyncIO = GetAsyncIO();
-asyncIO.Initialize(4); // 4 worker threads
-
-// Async file operations
-auto readTask = ReadFileAsync("config.json");
-auto content = readTask.Get(); // Wait for completion
-
-// Async file writing
-auto writeTask = WriteFileAsync("output.txt", "Hello World");
+// Write file asynchronously
+auto writeTask = asyncIO.WriteFileAsync("output.txt", "Hello World!");
 writeTask.Wait(); // Wait for completion
+
+// Check if file exists
+auto existsTask = asyncIO.FileExistsAsync("file.txt");
+bool exists = existsTask.Get();
+
+// Get file size
+auto sizeTask = asyncIO.GetFileSizeAsync("large_file.dat");
+size_t size = sizeTask.Get();
 ```
 
-### **Task-Based Operations**
+### Configuration Operations
+
 ```cpp
-#include "Core/Concurrency/AsyncIO.h"
+// Save configuration asynchronously
+nlohmann::json config;
+config["setting"] = "value";
+config["number"] = 42;
 
-using namespace Limitless::Async;
-
-// Define async function using tasks
-Async::Task<std::string> LoadConfigAsync(const std::string& path) {
-    return Task<std::string>([path]() -> std::string {
-        // This runs in a background thread
-        auto content = ReadFileAsync(path).Get();
-        auto config = ParseJson(content);
-        return config.ToString();
-    });
-}
-
-// Use the async function
-auto task = LoadConfigAsync("config.json");
-auto result = task.Get(); // Wait for result
-```
-
-### **Async I/O Operations**
-```cpp
-// File operations
-auto readTask = ReadFileAsync("file.txt");
-auto writeTask = WriteFileAsync("file.txt", content);
-auto existsTask = FileExistsAsync("file.txt");
-auto sizeTask = GetFileSizeAsync("file.txt");
-
-// Directory operations
-auto listTask = ListDirectoryAsync("path/");
-auto createTask = CreateDirectoryAsync("new/path/");
-auto deleteTask = DeleteFileAsync("file.txt");
-
-// Configuration operations
-auto saveTask = SaveConfigAsync("config.json", jsonData);
-auto loadTask = LoadConfigAsync("config.json");
-```
-
-### **Async Callbacks**
-```cpp
-// Run async operation with callback
-RunAsync(ReadFileAsync("file.txt"), [](std::string content) {
-    LT_INFO("File loaded: {} bytes", content.size());
-});
-
-// Run with error handling
-RunAsyncWithError(
-    ReadFileAsync("file.txt"),
-    [](std::string content) {
-        LT_INFO("Success: {} bytes", content.size());
-    },
-    [](const std::exception& e) {
-        LT_ERROR("Failed: {}", e.what());
-    }
-);
-```
-
-## 🛡️ **Thread-Safe Configuration**
-
-### **Basic Usage**
-```cpp
-#include "Core/Concurrency/ThreadSafeConfig.h"
-
-using namespace Limitless::Concurrency;
-
-// Initialize thread-safe configuration
-auto& config = GetThreadSafeConfig();
-config.Initialize("config.json");
-
-// Thread-safe operations
-config.SetValue("window.width", 1920);
-config.SetValue("window.height", 1080);
-
-int width = config.GetValue<int>("window.width", 1280);
-std::string title = config.GetValue<std::string>("window.title", "Default");
-```
-
-### **Async Configuration Operations**
-```cpp
-// Async file operations
-auto loadTask = config.LoadFromFileAsync("config.json");
-auto saveTask = config.SaveToFileAsync("config.json");
-auto reloadTask = config.ReloadFromFileAsync();
-
-// Wait for completion
-loadTask.Wait();
+auto saveTask = asyncIO.SaveConfigAsync("settings.json", config);
 saveTask.Wait();
-```
-
-### **Batch Operations**
-```cpp
-// Begin batch update (callbacks deferred)
-config.BeginBatchUpdate();
-
-config.SetValue("window.width", 1920);
-config.SetValue("window.height", 1080);
-config.SetValue("window.fullscreen", true);
-config.SetValue("window.vsync", true);
-
-// End batch update (all callbacks fired at once)
-config.EndBatchUpdate();
-```
-
-### **Validation and Schemas**
-```cpp
-// Register validation schema
-config.RegisterSchema("window.width", [](const ConfigValue& value) -> bool {
-    return std::visit([](const auto& v) -> bool {
-        if constexpr (std::is_same_v<std::decay_t<decltype(v)>, int>) {
-            return v >= 800 && v <= 7680; // 800p to 8K
-        }
-        return false;
-    }, value);
-});
-
-// Set value (validated automatically)
-config.SetValue("window.width", 1920); // Valid
-config.SetValue("window.width", 100);  // Invalid, ignored
-```
-
-### **Async Change Callbacks**
-```cpp
-// Register async callback for configuration changes
-config.RegisterAsyncChangeCallback("window.width", 
-    [](const std::string& key, const ConfigValue& value) {
-        LT_INFO("Window width changed to: {}", 
-                std::get<int>(value));
-        // Handle change asynchronously
-    });
-
-// Set value (triggers async callback)
-config.SetValue("window.width", 1920);
-```
-
-## 📊 **Performance Monitoring**
-
-### **Event System Statistics**
-```cpp
-auto& eventSystem = GetEventSystem();
-auto stats = eventSystem.GetStats();
-
-LT_INFO("Event System Stats:");
-LT_INFO("  Total Events: {}", stats.dispatchStats.totalEventsDispatched);
-LT_INFO("  Events Handled: {}", stats.dispatchStats.eventsHandled);
-LT_INFO("  Events Filtered: {}", stats.dispatchStats.eventsFiltered);
-LT_INFO("  Avg Dispatch Time: {:.2f}μs", stats.dispatchStats.averageDispatchTime);
-LT_INFO("  Queue Size: {}", stats.queueStats.currentSize);
-LT_INFO("  Queue Throughput: {:.2f} events/sec", 
-        stats.queueStats.totalDequeued / (stats.dispatchStats.totalDispatchTime.count() / 1000000.0));
-```
-
-### **Configuration Statistics**
-```cpp
-auto& config = GetThreadSafeConfig();
-auto stats = config.GetStats();
-
-LT_INFO("Configuration Stats:");
-LT_INFO("  Total Reads: {}", stats.totalReads);
-LT_INFO("  Total Writes: {}", stats.totalWrites);
-LT_INFO("  Async Operations: {}", stats.totalAsyncOperations);
-LT_INFO("  Hot Reloads: {}", stats.totalHotReloads);
-LT_INFO("  Avg Read Time: {:.2f}μs", stats.averageReadTime);
-LT_INFO("  Avg Write Time: {:.2f}μs", stats.averageWriteTime);
-```
-
-### **Async I/O Statistics**
-```cpp
-auto& asyncIO = GetAsyncIO();
-LT_INFO("Async I/O Threads: {}", asyncIO.GetThreadCount());
-LT_INFO("Async I/O Initialized: {}", asyncIO.IsInitialized());
-```
-
-## 🔄 **Integration Examples**
-
-### **Event System with Lock-Free Queues**
-```cpp
-#include "Limitless.h"
-
-using namespace Limitless;
-
-// Initialize systems
-auto& eventSystem = GetEventSystem();
-eventSystem.Initialize();
-
-// Register event callback
-eventSystem.AddCallback(EventType::KeyPressed, [](Event& event) {
-    LT_INFO("Key pressed event handled");
-});
-
-// Dispatch events from multiple threads
-std::vector<std::thread> dispatchers;
-for (int i = 0; i < 4; ++i) {
-    dispatchers.emplace_back([&eventSystem, i]() {
-        for (int j = 0; j < 1000; ++j) {
-            auto event = std::make_unique<Events::KeyPressedEvent>(j, false);
-            eventSystem.DispatchDeferred(std::move(event));
-        }
-    });
-}
-
-// Process events in main thread
-while (true) {
-    eventSystem.ProcessEvents(100);
-    std::this_thread::yield();
-}
-
-// Wait for dispatchers
-for (auto& thread : dispatchers) {
-    thread.join();
-}
-```
-
-### **Configuration with Async I/O**
-```cpp
-#include "Limitless.h"
-
-using namespace Limitless::Concurrency;
-using namespace Limitless::Async;
-
-// Initialize systems
-auto& asyncIO = GetAsyncIO();
-auto& config = GetThreadSafeConfig();
-
-asyncIO.Initialize(4);
-config.Initialize("game_config.json");
 
 // Load configuration asynchronously
-auto loadTask = config.LoadFromFileAsync("game_config.json");
-loadTask.Wait();
-
-// Set configuration values
-config.SetValue("graphics.resolution", "1920x1080");
-config.SetValue("audio.volume", 0.8f);
-config.SetValue("input.sensitivity", 1.0f);
-
-// Save configuration asynchronously
-auto saveTask = config.SaveToFileAsync();
-saveTask.Wait();
+auto loadTask = asyncIO.LoadConfigAsync("settings.json");
+nlohmann::json loadedConfig = loadTask.Get();
 ```
 
-### **Complete Integration Example**
+### Directory Operations
+
 ```cpp
-#include "Limitless.h"
+// Create directory
+auto createTask = asyncIO.CreateDirectoryAsync("new_folder");
+bool created = createTask.Get();
 
-class GameEngine {
-private:
-    Limitless::Concurrency::ThreadSafeConfigManager& m_Config;
-    Limitless::Async::AsyncIO& m_AsyncIO;
-    Limitless::EventSystem& m_EventSystem;
+// List directory contents
+auto listTask = asyncIO.ListDirectoryAsync(".");
+std::vector<std::string> files = listTask.Get();
 
-public:
-    GameEngine() 
-        : m_Config(Limitless::Concurrency::GetThreadSafeConfig())
-        , m_AsyncIO(Limitless::Async::GetAsyncIO())
-        , m_EventSystem(Limitless::GetEventSystem()) {
-        
-        // Initialize all systems
-        m_AsyncIO.Initialize(4);
-        m_Config.Initialize("game_config.json");
-        m_EventSystem.Initialize();
-        
-        // Register configuration change callbacks
-        m_Config.RegisterAsyncChangeCallback("graphics.resolution", 
-            [this](const std::string& key, const Limitless::ConfigValue& value) {
-                // Handle resolution change
-                auto event = std::make_unique<Limitless::Events::WindowResizeEvent>(1920, 1080);
-                m_EventSystem.DispatchDeferred(std::move(event));
-            });
-        
-        // Register event callbacks
-        m_EventSystem.AddCallback(Limitless::EventType::WindowResize, 
-            [this](Limitless::Event& event) {
-                // Handle window resize
-                LT_INFO("Window resized");
-            });
-    }
+// Delete file
+auto deleteFileTask = asyncIO.DeleteFileAsync("temp.txt");
+bool deleted = deleteFileTask.Get();
+
+// Delete directory
+auto deleteDirTask = asyncIO.DeleteDirectoryAsync("temp_folder");
+bool dirDeleted = deleteDirTask.Get();
+```
+
+## Concurrent Operations
+
+### Multiple File Operations
+
+```cpp
+auto& asyncIO = Limitless::Async::GetAsyncIO();
+
+// Start multiple operations concurrently
+std::vector<Limitless::Async::Task<std::string>> readTasks;
+std::vector<Limitless::Async::Task<void>> writeTasks;
+
+for (int i = 0; i < 10; ++i)
+{
+    std::string filename = "file_" + std::to_string(i) + ".txt";
+    std::string content = "Content for file " + std::to_string(i);
     
-    void Run() {
-        // Load configuration asynchronously
-        auto loadTask = m_Config.LoadFromFileAsync("game_config.json");
-        loadTask.Wait();
-        
-        // Main game loop
-        while (true) {
-            // Process events
-            m_EventSystem.ProcessEvents();
+    writeTasks.push_back(asyncIO.WriteFileAsync(filename, content));
+    readTasks.push_back(asyncIO.ReadFileAsync(filename));
+}
+
+// Wait for all write operations to complete
+for (auto& task : writeTasks)
+{
+    task.Wait();
+}
+
+// Process all read results
+for (auto& task : readTasks)
+{
+    std::string content = task.Get();
+    // Process content...
+}
+```
+
+### Batch Processing
+
+```cpp
+// Process multiple files in batches
+std::vector<std::string> files = {"file1.txt", "file2.txt", "file3.txt"};
+std::vector<Limitless::Async::Task<std::string>> tasks;
+
+for (const auto& file : files)
+{
+    tasks.push_back(asyncIO.ReadFileAsync(file));
+}
+
+// Wait for all tasks and process results
+for (auto& task : tasks)
+{
+    std::string content = task.Get();
+    // Process each file's content...
+}
+```
+
+## Integration Points
+
+### ConfigManager Integration
+
+The ConfigManager automatically uses AsyncIO for all file operations:
+
+```cpp
+auto& config = Limitless::ConfigManager::GetInstance();
+
+// These operations use AsyncIO internally
+config.LoadFromFile("config.json");
+config.SaveToFile("config.json");
+
+// Async versions are also available
+auto loadTask = config.LoadFromFileAsync("config.json");
+auto saveTask = config.SaveToFileAsync("config.json");
+```
+
+### FileWatcher Integration
+
+The FileWatcher uses AsyncIO for file system operations:
+
+```cpp
+auto& fileWatcher = std::make_unique<Limitless::FileWatcher>();
+fileWatcher->StartWatching("config.json", [](const std::string& filepath) {
+    // File changed - reload configuration
+    auto& config = Limitless::ConfigManager::GetInstance();
+    config.ReloadFromFile();
+});
+```
+
+### Logging Integration
+
+The logging system uses AsyncIO for file operations when available:
+
+```cpp
+// Logging automatically uses AsyncIO for file operations
+LT_INFO("This log message will be written asynchronously");
+LT_ERROR("Error messages are also handled asynchronously");
+```
+
+## Best Practices
+
+### 1. Always Initialize AsyncIO
+
+Ensure AsyncIO is initialized before using any file operations:
+
+```cpp
+// Check if AsyncIO is available
+auto& asyncIO = Limitless::Async::GetAsyncIO();
+if (!asyncIO.IsInitialized())
+{
+    LT_ERROR("AsyncIO not initialized!");
+    return;
+}
+```
+
+### 2. Handle Exceptions
+
+Always handle exceptions from async operations:
+
+```cpp
+try
+{
+    auto task = asyncIO.ReadFileAsync("file.txt");
+    std::string content = task.Get();
+}
+catch (const std::exception& e)
+{
+    LT_ERROR("Failed to read file: {}", e.what());
+}
+```
+
+### 3. Use Appropriate Thread Count
+
+Configure the thread count based on your system:
+
+```cpp
+// Use hardware concurrency or a reasonable default
+size_t threadCount = std::thread::hardware_concurrency();
+if (threadCount == 0) threadCount = 4; // Fallback
+
+asyncIO.Initialize(threadCount);
+```
+
+### 4. Batch Operations
+
+Group related operations together for better performance:
+
+```cpp
+// Good: Batch multiple operations
+std::vector<Limitless::Async::Task<void>> tasks;
+for (const auto& file : files)
+{
+    tasks.push_back(asyncIO.DeleteFileAsync(file));
+}
+
+// Wait for all to complete
+for (auto& task : tasks)
+{
+    task.Wait();
+}
+```
+
+### 5. Avoid Blocking
+
+Don't block the main thread unnecessarily:
+
+```cpp
+// Good: Non-blocking approach
+auto task = asyncIO.ReadFileAsync("large_file.txt");
+// Do other work while file is being read
+// ...
+std::string content = task.Get(); // Only block when you need the result
+```
+
+## Performance Considerations
+
+### Thread Pool Sizing
+
+- **Small applications**: 2-4 threads
+- **Medium applications**: 4-8 threads  
+- **Large applications**: 8-16 threads
+- **I/O intensive**: Consider using more threads
+
+### Queue Size
+
+The default queue size (8192) is suitable for most applications. Increase if you have many concurrent file operations:
+
+```cpp
+// For high-throughput applications
+constexpr size_t QUEUE_SIZE = 16384;
+```
+
+### Memory Usage
+
+AsyncIO operations use memory for:
+- Task queue storage
+- Thread stack space
+- Temporary buffers
+
+Monitor memory usage in memory-constrained environments.
+
+## Error Handling
+
+### Common Error Scenarios
+
+```cpp
+// File not found
+try
+{
+    auto task = asyncIO.ReadFileAsync("nonexistent.txt");
+    std::string content = task.Get();
+}
+catch (const std::runtime_error& e)
+{
+    LT_ERROR("File not found: {}", e.what());
+}
+
+// Permission denied
+try
+{
+    auto task = asyncIO.WriteFileAsync("/system/readonly.txt", "data");
+    task.Wait();
+}
+catch (const std::runtime_error& e)
+{
+    LT_ERROR("Permission denied: {}", e.what());
+}
+
+// Disk full
+try
+{
+    auto task = asyncIO.WriteFileAsync("large_file.dat", largeData);
+    task.Wait();
+}
+catch (const std::runtime_error& e)
+{
+    LT_ERROR("Disk full: {}", e.what());
+}
+```
+
+### Recovery Strategies
+
+```cpp
+// Retry with exponential backoff
+auto readWithRetry = [&asyncIO](const std::string& filename, int maxRetries = 3) {
+    for (int attempt = 0; attempt < maxRetries; ++attempt)
+    {
+        try
+        {
+            auto task = asyncIO.ReadFileAsync(filename);
+            return task.Get();
+        }
+        catch (const std::exception& e)
+        {
+            if (attempt == maxRetries - 1)
+                throw;
             
-            // Update game state
-            Update();
-            
-            // Render frame
-            Render();
+            // Wait before retry
+            std::this_thread::sleep_for(std::chrono::milliseconds(100 * (1 << attempt)));
         }
     }
-    
-    void Shutdown() {
-        // Save configuration asynchronously
-        auto saveTask = m_Config.SaveToFileAsync();
-        saveTask.Wait();
-        
-        // Shutdown all systems
-        m_EventSystem.Shutdown();
-        m_Config.Shutdown();
-        m_AsyncIO.Shutdown();
-    }
+    return std::string();
 };
 ```
 
-## 🎯 **Performance Best Practices**
+## Testing AsyncIO
 
-### **Queue Sizing**
-- **SPSC Queue**: Size for expected burst capacity
-- **MPMC Queue**: Size for total concurrent operations
-- **Event Queue**: Size for maximum event backlog (power of 2)
-- **Object Pool**: Size for peak object usage
+### Unit Tests
 
-### **Thread Management**
-- **Async I/O**: Use 2-4 threads for most applications
-- **Event Processing**: Single thread for event processing
-- **Configuration**: Single thread for configuration management
-- **Work Stealing**: One queue per worker thread
-
-### **Memory Management**
-- **Use object pools** for frequently allocated objects
-- **Pre-allocate queues** with appropriate sizes
-- **Avoid dynamic allocation** in hot paths
-- **Use cache-line alignment** for shared data
-
-### **Error Handling**
-- **Handle queue full conditions** gracefully
-- **Implement retry logic** for failed operations
-- **Monitor statistics** for performance issues
-- **Use timeouts** for async operations
-
-## 🧪 **Testing**
-
-### **Running Concurrency Tests**
-```bash
-# Run all concurrency tests
-./Build/Debug_x64/Test/Test --test-suite="Concurrency"
-
-# Run specific test
-./Build/Debug_x64/Test/Test --test-case="Lock-Free MPMC Queue Thread Safety"
-
-# Run performance benchmarks
-./Build/Debug_x64/Test/Test --test-case="Async I/O Performance Benchmark"
+```cpp
+TEST_CASE("AsyncIO Basic Operations")
+{
+    auto& asyncIO = Limitless::Async::GetAsyncIO();
+    asyncIO.Initialize(2);
+    
+    // Test file operations
+    auto writeTask = asyncIO.WriteFileAsync("test.txt", "Hello");
+    writeTask.Wait();
+    
+    auto readTask = asyncIO.ReadFileAsync("test.txt");
+    std::string content = readTask.Get();
+    CHECK(content == "Hello");
+    
+    // Cleanup
+    asyncIO.DeleteFileAsync("test.txt").Wait();
+    asyncIO.Shutdown();
+}
 ```
 
-### **Test Coverage**
-- **Lock-free queue correctness** under concurrent access
-- **Async I/O performance** and error handling
-- **Thread-safe configuration** operations
-- **Event system integration** with lock-free queues
-- **Memory safety** and resource management
+### Performance Tests
 
-## 🚀 **Future Enhancements**
+```cpp
+TEST_CASE("AsyncIO Performance")
+{
+    auto& asyncIO = Limitless::Async::GetAsyncIO();
+    asyncIO.Initialize(4);
+    
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    // Perform multiple concurrent operations
+    std::vector<Limitless::Async::Task<void>> tasks;
+    for (int i = 0; i < 100; ++i)
+    {
+        std::string filename = "perf_test_" + std::to_string(i) + ".txt";
+        tasks.push_back(asyncIO.WriteFileAsync(filename, "test data"));
+    }
+    
+    for (auto& task : tasks)
+    {
+        task.Wait();
+    }
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    
+    LT_INFO("Completed 100 file operations in {} ms", duration.count());
+    
+    // Cleanup
+    for (int i = 0; i < 100; ++i)
+    {
+        std::string filename = "perf_test_" + std::to_string(i) + ".txt";
+        asyncIO.DeleteFileAsync(filename).Wait();
+    }
+    
+    asyncIO.Shutdown();
+}
+```
 
-### **Planned Features**
-- **Lock-free hash tables** for concurrent data structures
-- **Async networking** with coroutines
-- **GPU compute integration** with async operations
-- **Distributed event system** across multiple processes
-- **Real-time performance profiling** and optimization
+## Integration Checklist
 
-### **Performance Targets**
-- **Event System**: 10M events/sec throughput
-- **Configuration**: 5M operations/sec
-- **Async I/O**: 1GB/s throughput
-- **Memory Usage**: <1MB overhead per thread
+- [ ] AsyncIO initialized in main entry point
+- [ ] ConfigManager using AsyncIO for file operations
+- [ ] FileWatcher using AsyncIO for file system operations
+- [ ] Logging system configured for AsyncIO
+- [ ] Error handling implemented for async operations
+- [ ] Thread count configured appropriately
+- [ ] Performance testing completed
+- [ ] Documentation updated
 
----
+## Troubleshooting
 
-**Concurrency Guide** - Comprehensive guide to the high-performance concurrency systems in the Limitless Engine. 
+### Common Issues
+
+1. **AsyncIO not initialized**: Ensure AsyncIO is initialized before use
+2. **Thread pool exhausted**: Increase thread count or reduce concurrent operations
+3. **Queue full**: Increase queue size or reduce operation frequency
+4. **File permission errors**: Check file permissions and paths
+5. **Memory leaks**: Ensure proper cleanup of Task objects
+
+### Debug Information
+
+Enable debug logging to troubleshoot AsyncIO issues:
+
+```cpp
+// In config.json
+{
+  "logging": {
+    "level": "debug"
+  }
+}
+```
+
+This will show detailed AsyncIO operation logs including thread usage, queue status, and operation timing. 

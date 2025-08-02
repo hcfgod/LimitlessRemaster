@@ -1,0 +1,9 @@
+{
+    "async": {
+        "test": {
+            "bool": false,
+            "int": 100,
+            "string": "modified"
+        }
+    }
+}

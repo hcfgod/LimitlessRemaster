@@ -3,6 +3,7 @@
 #include "ConfigManager.h"
 #include "Debug/Log.h"
 #include "HotReloadManager.h"
+#include "Core/Concurrency/AsyncIO.h"
 
 // Prevent console window from appearing in Dist builds on Windows
 #if defined(LT_PLATFORM_WINDOWS) && defined(LT_CONFIG_DIST)
@@ -35,6 +36,11 @@ int main(int argc, char** argv)
 	// Try to initialize logging system with configuration settings
 	Limitless::Log::InitFromConfig();
 
+	// Initialize AsyncIO system with thread count from config
+	auto& asyncIO = Limitless::Async::GetAsyncIO();
+	size_t threadCount = configManager.GetValue<size_t>("system.max_threads", 0);
+	asyncIO.Initialize(threadCount);
+
 	// Initialize hot reload manager
 	auto& hotReloadManager = Limitless::HotReloadManager::GetInstance();
 	hotReloadManager.Initialize();
@@ -55,6 +61,9 @@ int main(int argc, char** argv)
 	
 	// Shutdown hot reload manager
 	hotReloadManager.Shutdown();
+	
+	// Shutdown AsyncIO system
+	asyncIO.Shutdown();
 	
 	// Shutdown logging system
 	Limitless::Log::Shutdown();

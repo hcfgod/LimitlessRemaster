@@ -1,5 +1,6 @@
 #include "FileWatcher.h"
 #include "Core/Debug/Log.h"
+#include "Core/Concurrency/AsyncIO.h"
 #include <filesystem>
 #include <chrono>
 #include <thread>
@@ -25,7 +26,12 @@ namespace Limitless
             StopWatching();
         }
 
-        if (!std::filesystem::exists(filepath))
+        // Use AsyncIO to check if file exists
+        auto& asyncIO = Limitless::Async::GetAsyncIO();
+        auto existsTask = asyncIO.FileExistsAsync(filepath);
+        bool exists = existsTask.Get();
+        
+        if (!exists)
         {
             LT_CORE_ERROR("FileWatcher: Cannot watch non-existent file: {}", filepath);
             return;
@@ -33,7 +39,11 @@ namespace Limitless
 
         m_FilePath = filepath;
         m_Callback = callback;
-        m_LastWriteTime = std::filesystem::last_write_time(filepath);
+        
+        // Use AsyncIO to get initial file modification time
+        auto timeTask = asyncIO.GetFileModifiedTimeAsync(filepath);
+        m_LastWriteTime = timeTask.Get();
+        
         m_IsWatching = true;
         m_ShouldStop = false;
 
@@ -61,13 +71,21 @@ namespace Limitless
 
     void FileWatcher::WatchLoop()
     {
+        auto& asyncIO = Limitless::Async::GetAsyncIO();
+        
         while (m_IsWatching)
         {
             try
             {
-                if (std::filesystem::exists(m_FilePath))
+                // Use AsyncIO to check if file exists
+                auto existsTask = asyncIO.FileExistsAsync(m_FilePath);
+                bool exists = existsTask.Get();
+                
+                if (exists)
                 {
-                    auto currentWriteTime = std::filesystem::last_write_time(m_FilePath);
+                    // Use AsyncIO to get current modification time
+                    auto timeTask = asyncIO.GetFileModifiedTimeAsync(m_FilePath);
+                    auto currentWriteTime = timeTask.Get();
                     
                     if (currentWriteTime != m_LastWriteTime)
                     {
@@ -104,7 +122,9 @@ namespace Limitless
     {
         try
         {
-            return std::filesystem::last_write_time(filepath);
+            auto& asyncIO = Limitless::Async::GetAsyncIO();
+            auto timeTask = asyncIO.GetFileModifiedTimeAsync(filepath);
+            return timeTask.Get();
         }
         catch (const std::exception& e)
         {

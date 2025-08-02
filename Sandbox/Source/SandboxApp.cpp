@@ -23,6 +23,9 @@ namespace Limitless
 		// Demonstrate error handling
 		DemonstrateErrorHandling();
 		
+		// Demonstrate AsyncIO functionality
+		DemonstrateAsyncIO();
+		
 		return true;
 	}
 
@@ -261,6 +264,138 @@ namespace Limitless
 		LT_INFO("Last system error: {} ({})", lastError, ErrorHandling::GetSystemErrorString(lastError));
 		
 		LT_INFO("=== End Error Handling Demo ===");
+	}
+
+	void SandboxApp::DemonstrateAsyncIO()
+	{
+		LT_INFO("=== AsyncIO Demo ===");
+		
+		auto& asyncIO = Limitless::Async::GetAsyncIO();
+		
+		// Check if AsyncIO is initialized
+		LT_INFO("AsyncIO initialized: {}", asyncIO.IsInitialized());
+		LT_INFO("AsyncIO thread count: {}", asyncIO.GetThreadCount());
+		
+		// Test file operations
+		const std::string testFile = "async_test.txt";
+		const std::string testContent = "Hello from AsyncIO! This is a test file created asynchronously.\n";
+		
+		// Write file asynchronously
+		LT_INFO("Writing file asynchronously: {}", testFile);
+		auto writeTask = asyncIO.WriteFileAsync(testFile, testContent);
+		writeTask.Wait(); // Wait for completion
+		LT_INFO("File write completed");
+		
+		// Read file asynchronously
+		LT_INFO("Reading file asynchronously: {}", testFile);
+		auto readTask = asyncIO.ReadFileAsync(testFile);
+		std::string readContent = readTask.Get();
+		LT_INFO("File read completed. Content: {}", readContent);
+		
+		// Check if file exists
+		auto existsTask = asyncIO.FileExistsAsync(testFile);
+		bool exists = existsTask.Get();
+		LT_INFO("File exists: {}", exists);
+		
+		// Get file size
+		auto sizeTask = asyncIO.GetFileSizeAsync(testFile);
+		size_t fileSize = sizeTask.Get();
+		LT_INFO("File size: {} bytes", fileSize);
+		
+		// Append to file
+		const std::string appendContent = "This line was appended asynchronously.\n";
+		auto appendTask = asyncIO.AppendFileAsync(testFile, appendContent);
+		appendTask.Wait();
+		LT_INFO("File append completed");
+		
+		// Read the updated file
+		auto readUpdatedTask = asyncIO.ReadFileAsync(testFile);
+		std::string updatedContent = readUpdatedTask.Get();
+		LT_INFO("Updated file content: {}", updatedContent);
+		
+		// Test configuration operations
+		LT_INFO("Testing configuration operations...");
+		
+		nlohmann::json testConfig;
+		testConfig["test"] = "value";
+		testConfig["number"] = 42;
+		testConfig["array"] = {1, 2, 3, 4, 5};
+		
+		const std::string configFile = "async_test_config.json";
+		
+		// Save config asynchronously
+		auto saveConfigTask = asyncIO.SaveConfigAsync(configFile, testConfig);
+		saveConfigTask.Wait();
+		LT_INFO("Config saved asynchronously");
+		
+		// Load config asynchronously
+		auto loadConfigTask = asyncIO.LoadConfigAsync(configFile);
+		nlohmann::json loadedConfig = loadConfigTask.Get();
+		LT_INFO("Config loaded asynchronously: {}", loadedConfig.dump());
+		
+		// Test directory operations
+		LT_INFO("Testing directory operations...");
+		
+		const std::string testDir = "async_test_dir";
+		
+		// Create directory
+		auto createDirTask = asyncIO.CreateDirectoryAsync(testDir);
+		bool dirCreated = createDirTask.Get();
+		LT_INFO("Directory created: {}", dirCreated);
+		
+		// List directory
+		auto listDirTask = asyncIO.ListDirectoryAsync(".");
+		std::vector<std::string> files = listDirTask.Get();
+		LT_INFO("Directory listing (first 5 files):");
+		for (size_t i = 0; i < std::min(files.size(), size_t(5)); ++i)
+		{
+			LT_INFO("  {}", files[i]);
+		}
+		
+		// Test concurrent operations
+		LT_INFO("Testing concurrent operations...");
+		
+		std::vector<Limitless::Async::Task<std::string>> readTasks;
+		std::vector<Limitless::Async::Task<void>> writeTasks;
+		
+		// Create multiple read/write tasks
+		for (int i = 0; i < 5; ++i)
+		{
+			std::string filename = "concurrent_test_" + std::to_string(i) + ".txt";
+			std::string content = "Concurrent test file " + std::to_string(i) + "\n";
+			
+			writeTasks.push_back(asyncIO.WriteFileAsync(filename, content));
+			readTasks.push_back(asyncIO.ReadFileAsync(filename));
+		}
+		
+		// Wait for all write tasks to complete
+		for (auto& task : writeTasks)
+		{
+			task.Wait();
+		}
+		LT_INFO("All write tasks completed");
+		
+		// Wait for all read tasks to complete
+		for (auto& task : readTasks)
+		{
+			std::string content = task.Get();
+			LT_INFO("Read task completed: {}", content.substr(0, content.find('\n')));
+		}
+		
+		// Cleanup test files
+		LT_INFO("Cleaning up test files...");
+		asyncIO.DeleteFileAsync(testFile).Wait();
+		asyncIO.DeleteFileAsync(configFile).Wait();
+		asyncIO.DeleteDirectoryAsync(testDir).Wait();
+		
+		for (int i = 0; i < 5; ++i)
+		{
+			std::string filename = "concurrent_test_" + std::to_string(i) + ".txt";
+			asyncIO.DeleteFileAsync(filename).Wait();
+		}
+		
+		LT_INFO("AsyncIO demo completed successfully!");
+		LT_INFO("=== End AsyncIO Demo ===");
 	}
 }
 

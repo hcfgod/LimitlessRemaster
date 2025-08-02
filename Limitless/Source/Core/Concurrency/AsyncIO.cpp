@@ -278,15 +278,12 @@ namespace Limitless
             });
         }
 
-        Task<std::chrono::system_clock::time_point> AsyncIO::GetFileModifiedTimeAsync(const std::string& path)
+        Task<std::filesystem::file_time_type> AsyncIO::GetFileModifiedTimeAsync(const std::string& path)
         {
-            return Task<std::chrono::system_clock::time_point>([path]() -> std::chrono::system_clock::time_point {
+            return Task<std::filesystem::file_time_type>([path]() -> std::filesystem::file_time_type {
                 try
                 {
-                    auto ftime = std::filesystem::last_write_time(path);
-                    auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-                        ftime - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
-                    return sctp;
+                    return std::filesystem::last_write_time(path);
                 }
                 catch (const std::filesystem::filesystem_error& e)
                 {

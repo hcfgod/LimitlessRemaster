@@ -34,7 +34,7 @@ namespace Limitless
         // Load defaults first
         LoadDefaults();
 
-        // Start async callback processing thread
+        // Start async callback processing thread (only in non-test mode)
         m_AsyncCallbackThread = std::thread(&ConfigManager::ProcessAsyncCallbacks, this);
 
         // Try to load from file if it exists
@@ -631,8 +631,46 @@ namespace Limitless
                 }
                 else if (value.is_number_integer())
                 {
-                    m_Config[fullKey] = value.get<int>();
-                    LT_CORE_DEBUG("Loaded config {} = {}", fullKey, value.get<int>());
+                    int intValue = value.get<int>();
+                    if (intValue >= 0)
+                    {
+                        // Determine the appropriate type based on the key
+                        if (fullKey.find("max_file_size") != std::string::npos || 
+                            fullKey.find("max_files") != std::string::npos)
+                        {
+                            // These are typically size_t values
+                            m_Config[fullKey] = static_cast<size_t>(intValue);
+                            LT_CORE_DEBUG("Loaded config {} = {} (as size_t)", fullKey, intValue);
+                        }
+                        else if (fullKey.find("width") != std::string::npos || 
+                                 fullKey.find("height") != std::string::npos ||
+                                 fullKey.find("max_width") != std::string::npos ||
+                                 fullKey.find("max_height") != std::string::npos ||
+                                 fullKey.find("min_width") != std::string::npos ||
+                                 fullKey.find("min_height") != std::string::npos)
+                        {
+                            // These are typically uint32_t values
+                            m_Config[fullKey] = static_cast<uint32_t>(intValue);
+                            LT_CORE_DEBUG("Loaded config {} = {} (as uint32_t)", fullKey, intValue);
+                        }
+                        else if (fullKey.find("max_threads") != std::string::npos)
+                        {
+                            // This is typically an int value
+                            m_Config[fullKey] = intValue;
+                            LT_CORE_DEBUG("Loaded config {} = {} (as int)", fullKey, intValue);
+                        }
+                        else
+                        {
+                            // Default to size_t for other positive integers
+                            m_Config[fullKey] = static_cast<size_t>(intValue);
+                            LT_CORE_DEBUG("Loaded config {} = {} (as size_t)", fullKey, intValue);
+                        }
+                    }
+                    else
+                    {
+                        m_Config[fullKey] = intValue;
+                        LT_CORE_DEBUG("Loaded config {} = {} (as int)", fullKey, intValue);
+                    }
                 }
                 else if (value.is_number_float())
                 {

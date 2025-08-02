@@ -1,0 +1,48 @@
+{
+    "batch": {
+        "key1": 100,
+        "key2": 200,
+        "key3": 300
+    },
+    "concurrent": {
+        "key0": 659,
+        "key1": 384,
+        "key2": 647,
+        "key3": 531,
+        "key4": 555,
+        "key5": 176,
+        "key6": 226,
+        "key7": 749,
+        "key8": 42,
+        "key9": 46
+    },
+    "logging": {
+        "console_enabled": true,
+        "directory": "logs",
+        "file_enabled": true,
+        "level": "info",
+        "max_file_size": 52428800,
+        "max_files": 10,
+        "pattern": "[%T] [%l] %n: %v"
+    },
+    "system": {
+        "log_directory": "logs",
+        "max_threads": 20,
+        "temp_directory": "temp",
+        "working_directory": "."
+    },
+    "test": {
+        "bool": true,
+        "int": 42,
+        "range": 50,
+        "string": "hello"
+    },
+    "window": {
+        "fullscreen": false,
+        "height": 720,
+        "resizable": true,
+        "title": "Limitless Engine",
+        "vsync": false,
+        "width": 1280
+    }
+}

@@ -78,6 +78,14 @@ namespace Limitless
     void EventDispatcher::AddCallback(EventType type, EventCallback callback, EventPriority priority)
     {
         m_Callbacks[type].push_back({std::move(callback), priority});
+        
+        // Sort callbacks by priority (higher priority first)
+        auto& callbacks = m_Callbacks[type];
+        std::sort(callbacks.begin(), callbacks.end(),
+            [](const std::pair<EventCallback, EventPriority>& a, 
+               const std::pair<EventCallback, EventPriority>& b) {
+                return static_cast<int>(a.second) < static_cast<int>(b.second);
+            });
     }
 
     void EventDispatcher::RemoveCallback(EventType type, const EventCallback& callback)

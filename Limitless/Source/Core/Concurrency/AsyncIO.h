@@ -152,7 +152,7 @@ namespace Limitless
 
             // Utility operations
             Task<size_t> GetFileSizeAsync(const std::string& path);
-            Task<std::chrono::system_clock::time_point> GetFileModifiedTimeAsync(const std::string& path);
+            Task<std::filesystem::file_time_type> GetFileModifiedTimeAsync(const std::string& path);
 
             // Thread pool management
             size_t GetThreadCount() const { return m_Threads.size(); }
@@ -217,7 +217,7 @@ namespace Limitless
         }
 
         // Async file modification time
-        inline Task<std::chrono::system_clock::time_point> GetFileModifiedTimeAsync(const std::string& path)
+        inline Task<std::filesystem::file_time_type> GetFileModifiedTimeAsync(const std::string& path)
         {
             return GetAsyncIO().GetFileModifiedTimeAsync(path);
         }
