@@ -20,5 +20,6 @@ namespace Limitless
 		void DemonstratePlatformDetection();
 		void DemonstrateErrorHandling();
 		void DemonstrateAsyncIO();
+		void DemonstratePerformanceMonitoring();
 	};
 }

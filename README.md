@@ -10,7 +10,7 @@ A modern, enterprise-grade C++ engine with comprehensive advanced systems, exten
 - **🪟 Extended Window API** - Comprehensive window management with advanced features and cross-platform support
 - **⚡ High-Performance Concurrency** - Lock-free queues, async/await patterns, and thread-safe systems
 - **🛡️ Enhanced Error Handling** - Comprehensive error management with platform integration
-- **📊 Performance Monitoring** - Real-time performance tracking and analysis
+- **📊 Performance Monitoring** - Real-time performance tracking, frame timing, memory monitoring, and CPU/GPU metrics
 
 ### **Core Improvements:**
 - **🛡️ Enhanced Memory Safety** - Smart pointers throughout, RAII patterns, exception safety
@@ -46,7 +46,7 @@ LimitlessRemaster/
 - **Cross-Platform** - Windows, macOS, Linux support with native optimizations
 - **Comprehensive Logging** - Multi-level logging with file rotation and conditional logging
 - **Error Handling** - Structured error management with custom exceptions and recovery
-- **Performance Monitoring** - Real-time performance tracking and analysis with profiling
+- **Performance Monitoring** - Real-time performance tracking, frame timing, memory monitoring, CPU/GPU metrics, and profiling
 
 ### **Advanced Systems**
 - **Configuration Management** - Type-safe configuration with validation, hot reloading, and environment/command-line support
@@ -174,13 +174,31 @@ public:
             // Handle focus changes
         });
         
+        // Initialize performance monitoring
+        auto& monitor = Limitless::PerformanceMonitor::GetInstance();
+        monitor.Initialize();
+        monitor.SetLoggingEnabled(true);
+        
+        // Set up performance metrics callback
+        monitor.SetMetricsCallback([](const Limitless::PerformanceMetrics& metrics) {
+            if (metrics.fps < 30.0) {
+                // Handle low FPS
+            }
+        });
+        
         return true;
     }
     
     void OnUpdate(float deltaTime) override
     {
+        // Begin frame timing
+        LT_PERF_BEGIN_FRAME();
+        
         // Process events
         GetEventSystem().ProcessEvents();
+        
+        // End frame timing
+        LT_PERF_END_FRAME();
     }
     
     void OnRender() override
@@ -190,6 +208,9 @@ public:
     
     void Shutdown() override
     {
+        // Shutdown performance monitoring
+        Limitless::PerformanceMonitor::GetInstance().Shutdown();
+        
         // Shutdown concurrency systems
         Limitless::Async::GetAsyncIO().Shutdown();
     }
@@ -277,6 +298,77 @@ window->Flash();
 window->RequestAttention();
 
 // Display management
+
+### **Performance Monitoring Usage**
+
+```cpp
+#include "Limitless.h"
+
+// Initialize performance monitoring
+auto& monitor = Limitless::PerformanceMonitor::GetInstance();
+monitor.Initialize();
+monitor.SetLoggingEnabled(true);
+
+// Set up metrics callback for real-time monitoring
+monitor.SetMetricsCallback([](const Limitless::PerformanceMetrics& metrics) {
+    if (metrics.fps < 30.0) {
+        LT_WARN("Low FPS detected: {}", metrics.fps);
+    }
+    if (metrics.cpuUsage > 80.0) {
+        LT_WARN("High CPU usage: {}%", metrics.cpuUsage);
+    }
+    if (metrics.currentMemory > 100 * 1024 * 1024) { // 100MB
+        LT_WARN("High memory usage: {:.2f}MB", 
+               metrics.currentMemory / (1024.0 * 1024.0));
+    }
+});
+
+// Frame timing in game loop
+while (running) {
+    LT_PERF_BEGIN_FRAME();
+    
+    // Game update and rendering
+    UpdateGame();
+    RenderFrame();
+    
+    LT_PERF_END_FRAME();
+    
+    // Get frame statistics
+    double frameTime = monitor.GetFrameTime();
+    double fps = monitor.GetFPS();
+    double avgFps = monitor.GetAverageFPS();
+}
+
+// Performance counters for specific operations
+{
+    LT_PERF_COUNTER("PhysicsUpdate");
+    UpdatePhysics();
+} // Counter automatically stops here
+
+// Manual counter usage
+auto* renderCounter = monitor.CreateCounter("Rendering");
+renderCounter->Start();
+RenderScene();
+renderCounter->Stop();
+
+// Memory tracking
+void* ptr = malloc(1024);
+LT_PERF_TRACK_MEMORY(1024);
+// ... use memory ...
+free(ptr);
+LT_PERF_UNTrack_MEMORY(1024);
+
+// Collect comprehensive metrics
+auto metrics = monitor.CollectMetrics();
+LT_INFO("Frame: {} ({} FPS avg)", metrics.frameCount, metrics.fpsAvg);
+LT_INFO("Memory: {:.2f}MB current, {:.2f}MB peak", 
+       metrics.currentMemory / (1024.0 * 1024.0),
+       metrics.peakMemory / (1024.0 * 1024.0));
+LT_INFO("CPU: {:.1f}% usage", metrics.cpuUsage);
+
+// Save performance report
+monitor.SaveMetricsToFile("performance_report.txt");
+```
 auto displayModes = window->GetAvailableDisplayModes();
 auto currentMode = window->GetDisplayMode();
 float scale = window->GetDisplayScale();

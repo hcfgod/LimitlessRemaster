@@ -20,7 +20,7 @@ The platform detection system provides comprehensive information about the curre
 - **Architecture Detection**: x86, x64, ARM32, ARM64, RISC-V
 - **Compiler Detection**: MSVC, GCC, Clang, AppleClang
 - **System Capabilities**: CPU features, memory, graphics APIs
-- **Platform Utilities**: Path handling, environment variables, system calls
+ 
 
 ### Basic Usage
 

@@ -47,7 +47,6 @@ filter "system:windows"
     {
         "/utf-8",
         "/std:c++20",
-        "/await"  -- Enable coroutines for MSVC
     }
 ```
 
@@ -69,7 +68,6 @@ filter "system:macosx"
     buildoptions
     {
         "-std=c++20",
-        "-fcoroutines"  -- Enable coroutines for GCC/Clang
     }
 ```
 
@@ -90,13 +88,12 @@ filter "system:linux"
     buildoptions
     {
         "-std=c++20",
-        "-fcoroutines"  -- Enable coroutines for GCC/Clang
     }
 ```
 
 **Key Features:**
 - **C++20 Standard**: Full C++20 language support
-- **Coroutine Support**: `-fcoroutines` flag enables C++20 coroutines
+- **Coroutine Support** Full coroutine support
 - **System Libraries**: Native Linux library integration
 - **Multi-architecture**: x64 and ARM64 support
 
@@ -107,7 +104,6 @@ filter "system:linux"
 The engine fully supports C++20 coroutines across all platforms with appropriate compiler flags:
 
 - **Windows (MSVC)**: `/await` flag
-- **macOS/Linux (GCC/Clang)**: `-fcoroutines` flag
 
 ### Usage Examples
 

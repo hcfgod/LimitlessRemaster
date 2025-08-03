@@ -1,0 +1,16 @@
+Performance Metrics Report
+==========================
+
+Timestamp: 1754234433533
+Frame Count: 10
+Average FPS: 59.4693
+Average Frame Time: 16.8154ms
+Current Memory: 0.610352MB
+Peak Memory: 1.24512MB
+CPU Usage: 100%
+CPU Usage Average: 50%
+CPU Cores: 20
+
+Performance Counters:
+  DataSort: 0ms
+  DataCompute: 0ms

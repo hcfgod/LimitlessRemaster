@@ -7,17 +7,33 @@
 #include "Core/Debug/Log.h"
 #include "Core/HotReloadManager.h"
 #include "Core/EventSystem.h"
+#include "Core/Concurrency/AsyncIO.h"
 
 namespace Limitless
 {
 	Application::Application()
 	{
-		// Constructor implementation
+		// Initialize AsyncIO system with thread count from config
+		auto& asyncIO = Limitless::Async::GetAsyncIO();
+		auto& configManager = Limitless::ConfigManager::GetInstance();
+		size_t threadCount = configManager.GetValue<size_t>("system.max_threads", 0);
+		asyncIO.Initialize(threadCount);
+
+		// Initialize hot reload manager
+		auto& hotReloadManager = Limitless::HotReloadManager::GetInstance();
+		hotReloadManager.Initialize();
+		hotReloadManager.EnableHotReload(true);
 	}
 
 	Application::~Application()
 	{
-		// Destructor implementation
+        // Shutdown hot reload manager
+        auto& hotReloadManager = Limitless::HotReloadManager::GetInstance();
+        hotReloadManager.Shutdown();
+
+        // Shutdown AsyncIO system
+        auto& asyncIO = Limitless::Async::GetAsyncIO();
+        asyncIO.Shutdown();
 	}
 
 	void Application::Run()

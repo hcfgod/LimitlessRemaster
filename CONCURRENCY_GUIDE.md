@@ -2,16 +2,15 @@
 
 ## Overview
 
-The Limitless Engine provides a comprehensive concurrency system with AsyncIO capabilities for efficient file operations. This guide covers how to use the AsyncIO system throughout your codebase.
+The Limitless Engine provides a comprehensive concurrency system with AsyncIO capabilities for efficient file operations. This guide covers how to use the AsyncIO system throughout the codebase.
 
 ## AsyncIO System
 
 ### Initialization
 
-The AsyncIO system is automatically initialized in the main entry point with configuration from `config.json`:
+The AsyncIO system is automatically initialized with configuration from `config.json`:
 
 ```cpp
-// In EntryPoint.h - automatically handled
 auto& asyncIO = Limitless::Async::GetAsyncIO();
 size_t threadCount = configManager.GetValue<size_t>("system.max_threads", 0);
 asyncIO.Initialize(threadCount);

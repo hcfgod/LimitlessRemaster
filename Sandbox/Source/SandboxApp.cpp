@@ -1,5 +1,6 @@
 #include "SandboxApp.h"
 #include <iostream>
+#include <random>
 
 namespace Limitless
 {
@@ -25,6 +26,9 @@ namespace Limitless
 		
 		// Demonstrate AsyncIO functionality
 		DemonstrateAsyncIO();
+		
+		// Demonstrate Performance Monitoring
+		DemonstratePerformanceMonitoring();
 		
 		return true;
 	}
@@ -396,6 +400,142 @@ namespace Limitless
 		
 		LT_INFO("AsyncIO demo completed successfully!");
 		LT_INFO("=== End AsyncIO Demo ===");
+	}
+
+	void SandboxApp::DemonstratePerformanceMonitoring()
+	{
+		LT_INFO("=== Performance Monitoring Demo ===");
+		
+		// Initialize performance monitor
+		auto& monitor = PerformanceMonitor::GetInstance();
+		monitor.Initialize();
+		monitor.SetLoggingEnabled(true);
+		
+		// Set up metrics callback
+		monitor.SetMetricsCallback([](const PerformanceMetrics& metrics) {
+			LT_INFO("=== Performance Metrics ===");
+			LT_INFO("Frame: {} ({} FPS avg)", metrics.frameCount, metrics.fpsAvg);
+			LT_INFO("Memory: {:.2f}MB current, {:.2f}MB peak", 
+				   metrics.currentMemory / (1024.0 * 1024.0),
+				   metrics.peakMemory / (1024.0 * 1024.0));
+			LT_INFO("CPU: {:.1f}% usage", metrics.cpuUsage);
+		});
+		
+		// Set collection interval to 1 second
+		monitor.SetMetricsCollectionInterval(1.0);
+		
+		LT_INFO("Performance monitor initialized");
+		
+		// Demonstrate frame timing
+		LT_INFO("Demonstrating frame timing...");
+		for (int i = 0; i < 10; ++i)
+		{
+			LT_PERF_BEGIN_FRAME();
+			
+			// Simulate some frame processing
+			std::this_thread::sleep_for(std::chrono::milliseconds(16)); // ~60 FPS
+			
+			LT_PERF_END_FRAME();
+			
+			double frameTime = monitor.GetFrameTime();
+			double fps = monitor.GetFPS();
+			LT_INFO("Frame {}: {:.2f}ms ({:.1f} FPS)", i, frameTime, fps);
+		}
+		
+		// Demonstrate performance counters
+		LT_INFO("Demonstrating performance counters...");
+		
+		auto* sortCounter = monitor.CreateCounter("DataSort");
+		auto* computeCounter = monitor.CreateCounter("DataCompute");
+		
+		// Test data sorting
+		{
+			LT_PERF_COUNTER("DataSort");
+			std::vector<int> data(10000);
+			std::iota(data.begin(), data.end(), 0);
+			std::random_device rd;
+			std::mt19937 gen(rd());
+			std::shuffle(data.begin(), data.end(), gen);
+			std::sort(data.begin(), data.end());
+		}
+		
+		// Test data computation
+		{
+			LT_PERF_COUNTER("DataCompute");
+			double sum = 0.0;
+			for (int i = 0; i < 100000; ++i)
+			{
+				sum += std::sqrt(i) * std::log(i + 1);
+			}
+		}
+		
+		LT_INFO("Sort counter: {:.2f}ms", sortCounter->GetLastValue());
+		LT_INFO("Compute counter: {:.2f}ms", computeCounter->GetLastValue());
+		
+		// Demonstrate memory tracking
+		LT_INFO("Demonstrating memory tracking...");
+		
+		auto* tracker = monitor.GetMemoryTracker();
+		tracker->Reset();
+		
+		// Simulate memory allocations
+		std::vector<std::vector<int>> allocations;
+		for (int i = 0; i < 50; ++i)
+		{
+			size_t size = (i + 1) * 1024; // 1KB to 50KB
+			allocations.emplace_back(size / sizeof(int));
+			LT_PERF_TRACK_MEMORY(size);
+		}
+		
+		LT_INFO("Memory allocated: {:.2f}MB", 
+			   tracker->GetCurrentMemory() / (1024.0 * 1024.0));
+		
+		// Deallocate some memory
+		for (int i = 0; i < 25; ++i)
+		{
+			size_t size = (i + 1) * 1024;
+			allocations.pop_back();
+			LT_PERF_UNTrack_MEMORY(size);
+		}
+		
+		LT_INFO("Memory after deallocation: {:.2f}MB", 
+			   tracker->GetCurrentMemory() / (1024.0 * 1024.0));
+		LT_INFO("Peak memory: {:.2f}MB", 
+			   tracker->GetPeakMemory() / (1024.0 * 1024.0));
+		
+		// Clean up remaining allocations
+		for (auto& alloc : allocations)
+		{
+			LT_PERF_UNTrack_MEMORY(alloc.size() * sizeof(int));
+		}
+		
+		// Demonstrate metrics collection
+		LT_INFO("Demonstrating metrics collection...");
+		
+		auto metrics = monitor.CollectMetrics();
+		LT_INFO("Comprehensive metrics:");
+		LT_INFO("  Frame count: {}", metrics.frameCount);
+		LT_INFO("  Average FPS: {:.1f}", metrics.fpsAvg);
+		LT_INFO("  Average frame time: {:.2f}ms", metrics.frameTimeAvg);
+		LT_INFO("  Current memory: {:.2f}MB", metrics.currentMemory / (1024.0 * 1024.0));
+		LT_INFO("  CPU usage: {:.1f}%", metrics.cpuUsage);
+		LT_INFO("  CPU cores: {}", metrics.cpuCoreCount);
+		
+		// Demonstrate performance reporting
+		LT_INFO("Demonstrating performance reporting...");
+		
+		std::string metricsStr = monitor.GetMetricsString();
+		LT_INFO("Formatted metrics:\n{}", metricsStr);
+		
+		// Save metrics to file
+		monitor.SaveMetricsToFile("sandbox_performance_report.txt");
+		LT_INFO("Performance report saved to 'sandbox_performance_report.txt'");
+		
+		// Shutdown performance monitor
+		monitor.Shutdown();
+		
+		LT_INFO("Performance monitoring demo completed!");
+		LT_INFO("=== End Performance Monitoring Demo ===");
 	}
 }
 
