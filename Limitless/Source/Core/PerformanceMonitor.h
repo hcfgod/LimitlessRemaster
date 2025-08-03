@@ -244,7 +244,7 @@ namespace Limitless {
         
         // Utility methods
         void LogMetrics();
-        std::string GetMetricsString() const;
+        std::string GetMetricsString();
         void SaveMetricsToFile(const std::string& filename);
 
     private:
