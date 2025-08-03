@@ -15,8 +15,11 @@ namespace Limitless {
     class PerformanceCounter;
     class PerformanceTimer;
     class MemoryTracker;
-    class CPUMonitor;
-    class GPUMonitor;
+    
+    // Platform-specific forward declarations
+    class ICPUPlatform;
+    class IGPUPlatform;
+    class ISystemPlatform;
 
     /**
      * @brief Performance data structure containing various metrics
@@ -158,9 +161,8 @@ namespace Limitless {
         double m_updateInterval;
         std::chrono::high_resolution_clock::time_point m_lastUpdate;
         
-        // Platform-specific data
-        struct PlatformData;
-        std::unique_ptr<PlatformData> m_platformData;
+        // Platform-specific implementation
+        std::unique_ptr<ICPUPlatform> m_platform;
     };
 
     /**
@@ -189,9 +191,8 @@ namespace Limitless {
         double m_updateInterval;
         std::chrono::high_resolution_clock::time_point m_lastUpdate;
         
-        // Platform-specific data
-        struct PlatformData;
-        std::unique_ptr<PlatformData> m_platformData;
+        // Platform-specific implementation
+        std::unique_ptr<IGPUPlatform> m_platform;
     };
 
     /**
@@ -280,9 +281,10 @@ namespace Limitless {
         // Memory tracking
         MemoryTracker m_memoryTracker;
         
-        // CPU and GPU monitoring
-        CPUMonitor m_cpuMonitor;
-        GPUMonitor m_gpuMonitor;
+        // Platform-specific monitoring
+        std::unique_ptr<ICPUPlatform> m_cpuPlatform;
+        std::unique_ptr<IGPUPlatform> m_gpuPlatform;
+        std::unique_ptr<ISystemPlatform> m_systemPlatform;
         
         // Metrics collection
         PerformanceMetrics m_currentMetrics;

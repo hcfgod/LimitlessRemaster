@@ -1,28 +1,13 @@
 #include "PerformanceMonitor.h"
 #include "Debug/Log.h"
 #include "Platform/Platform.h"
+#include "Platform/PerformancePlatform.h"
 #include "Error.h"
 
 #include <fstream>
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
-
-#ifdef LT_PLATFORM_WINDOWS
-#include <windows.h>
-#include <psapi.h>
-#include <pdh.h>
-#pragma comment(lib, "pdh.lib")
-#elif defined(LT_PLATFORM_LINUX)
-#include <sys/sysinfo.h>
-#include <sys/resource.h>
-#include <fstream>
-#include <unistd.h>
-#elif defined(LT_PLATFORM_MACOS)
-#include <mach/mach.h>
-#include <mach/mach_host.h>
-#include <sys/sysctl.h>
-#endif
 
 namespace Limitless {
 
@@ -184,135 +169,33 @@ namespace Limitless {
         // For now, we rely on our own tracking
     }
 
-    // CPUMonitor Implementation
-    struct CPUMonitor::PlatformData {
-#ifdef LT_PLATFORM_WINDOWS
-        PDH_HQUERY query;
-        PDH_HCOUNTER counter;
-        bool initialized;
-        
-        PlatformData() : initialized(false) {
-            if (PdhOpenQuery(nullptr, 0, &query) == ERROR_SUCCESS) {
-                if (PdhAddCounter(query, L"\\Processor(_Total)\\% Processor Time", 0, &counter) == ERROR_SUCCESS) {
-                    PdhCollectQueryData(query);
-                    initialized = true;
-                }
-            }
-        }
-        
-        ~PlatformData() {
-            if (initialized) {
-                PdhCloseQuery(query);
-            }
-        }
-#elif defined(LT_PLATFORM_LINUX)
-        std::vector<unsigned long long> lastCpuTimes;
-        unsigned long long lastTotalTime;
-        
-        PlatformData() : lastTotalTime(0) {
-            UpdateCpuTimes();
-        }
-        
-        void UpdateCpuTimes() {
-            std::ifstream file("/proc/stat");
-            if (file.is_open()) {
-                std::string line;
-                if (std::getline(file, line)) {
-                    std::istringstream iss(line);
-                    std::string cpu;
-                    iss >> cpu; // Skip "cpu"
-                    
-                    unsigned long long user, nice, system, idle, iowait, irq, softirq, steal;
-                    iss >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal;
-                    
-                    lastCpuTimes = {user, nice, system, idle, iowait, irq, softirq, steal};
-                    lastTotalTime = user + nice + system + idle + iowait + irq + softirq + steal;
-                }
-            }
-        }
-#elif defined(LT_PLATFORM_MACOS)
-        host_t host;
-        mach_msg_type_number_t count;
-        
-        PlatformData() : host(mach_host_self()), count(HOST_CPU_LOAD_INFO_COUNT) {
-        }
-#endif
-    };
-
+    // CPUMonitor Implementation - Now uses platform abstraction
     CPUMonitor::CPUMonitor() 
         : m_currentUsage(0.0), m_averageUsage(0.0), m_coreCount(0), m_updateInterval(1.0)
-        , m_platformData(std::make_unique<PlatformData>()) {
+        , m_lastUpdate(std::chrono::high_resolution_clock::now()) {
         
-        // Get CPU core count
-#ifdef LT_PLATFORM_WINDOWS
-        SYSTEM_INFO sysInfo;
-        GetSystemInfo(&sysInfo);
-        m_coreCount = sysInfo.dwNumberOfProcessors;
-#elif defined(LT_PLATFORM_LINUX)
-        m_coreCount = get_nprocs();
-#elif defined(LT_PLATFORM_MACOS)
-        int cores;
-        size_t size = sizeof(cores);
-        if (sysctlbyname("hw.ncpu", &cores, &size, nullptr, 0) == 0) {
-            m_coreCount = cores;
+        // Create platform-specific CPU monitor
+        m_platform = PerformancePlatformFactory::CreateCPUPlatform();
+        if (m_platform) {
+            m_platform->Initialize();
+            m_coreCount = m_platform->GetCoreCount();
         }
-#endif
     }
 
     void CPUMonitor::Update() {
-        auto now = std::chrono::high_resolution_clock::now();
-        auto elapsed = std::chrono::duration<double>(now - m_lastUpdate).count();
-        
-        if (elapsed < m_updateInterval) {
+        if (!m_platform) {
             return;
         }
 
-#ifdef LT_PLATFORM_WINDOWS
-        if (m_platformData->initialized) {
-            PDH_FMT_COUNTERVALUE value;
-            if (PdhCollectQueryData(m_platformData->query) == ERROR_SUCCESS) {
-                if (PdhGetFormattedCounterValue(m_platformData->counter, PDH_FMT_DOUBLE, nullptr, &value) == ERROR_SUCCESS) {
-                    m_currentUsage = value.doubleValue;
-                    m_averageUsage = (m_averageUsage + m_currentUsage) * 0.5; // Simple moving average
-                }
-            }
-        }
-#elif defined(LT_PLATFORM_LINUX)
-        auto* data = static_cast<PlatformData*>(m_platformData.get());
-        std::vector<unsigned long long> currentCpuTimes = data->lastCpuTimes;
-        unsigned long long currentTotalTime = data->lastTotalTime;
-        
-        data->UpdateCpuTimes();
-        
-        unsigned long long totalDiff = data->lastTotalTime - currentTotalTime;
-        unsigned long long idleDiff = data->lastCpuTimes[3] - currentCpuTimes[3];
-        
-        if (totalDiff > 0) {
-            m_currentUsage = 100.0 * (1.0 - static_cast<double>(idleDiff) / totalDiff);
-            m_averageUsage = (m_averageUsage + m_currentUsage) * 0.5;
-        }
-#elif defined(LT_PLATFORM_MACOS)
-        auto* data = static_cast<PlatformData*>(m_platformData.get());
-        host_cpu_load_info cpuLoad;
-        mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
-        
-        if (host_statistics(data->host, HOST_CPU_LOAD_INFO, reinterpret_cast<host_info_t>(&cpuLoad), &count) == KERN_SUCCESS) {
-            unsigned long long total = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
-                                     cpuLoad.cpu_ticks[CPU_STATE_IDLE] + cpuLoad.cpu_ticks[CPU_STATE_NICE];
-            unsigned long long used = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
-                                    cpuLoad.cpu_ticks[CPU_STATE_NICE];
-            
-            if (total > 0) {
-                m_currentUsage = 100.0 * static_cast<double>(used) / total;
-                m_averageUsage = (m_averageUsage + m_currentUsage) * 0.5;
-            }
-        }
-#endif
-
-        m_lastUpdate = now;
+        m_platform->Update();
+        m_currentUsage = m_platform->GetCurrentUsage();
+        m_averageUsage = m_platform->GetAverageUsage();
     }
 
     void CPUMonitor::Reset() {
+        if (m_platform) {
+            m_platform->Reset();
+        }
         m_currentUsage = 0.0;
         m_averageUsage = 0.0;
         m_lastUpdate = std::chrono::high_resolution_clock::now();
@@ -332,44 +215,39 @@ namespace Limitless {
 
     void CPUMonitor::SetUpdateInterval(double intervalSeconds) {
         m_updateInterval = intervalSeconds;
+        if (m_platform) {
+            m_platform->SetUpdateInterval(intervalSeconds);
+        }
     }
 
-    // GPUMonitor Implementation
-    struct GPUMonitor::PlatformData {
-        bool available;
-        
-        PlatformData() : available(false) {
-            // GPU monitoring is platform-specific and requires additional libraries
-            // For now, we'll mark it as unavailable
-            // This could be extended with NVML, AMD ADL, or other GPU monitoring APIs
-        }
-    };
-
+    // GPUMonitor Implementation - Now uses platform abstraction
     GPUMonitor::GPUMonitor() 
         : m_usage(0.0), m_memoryUsage(0.0), m_temperature(0.0), m_isAvailable(false), m_updateInterval(1.0)
-        , m_platformData(std::make_unique<PlatformData>()) {
-        m_isAvailable = m_platformData->available;
+        , m_lastUpdate(std::chrono::high_resolution_clock::now()) {
+        
+        // Create platform-specific GPU monitor
+        m_platform = PerformancePlatformFactory::CreateGPUPlatform();
+        if (m_platform) {
+            m_platform->Initialize();
+            m_isAvailable = m_platform->IsAvailable();
+        }
     }
 
     void GPUMonitor::Update() {
-        if (!m_isAvailable) {
+        if (!m_platform || !m_isAvailable) {
             return;
         }
 
-        auto now = std::chrono::high_resolution_clock::now();
-        auto elapsed = std::chrono::duration<double>(now - m_lastUpdate).count();
-        
-        if (elapsed < m_updateInterval) {
-            return;
-        }
-
-        // GPU monitoring implementation would go here
-        // This requires platform-specific GPU monitoring libraries
-        
-        m_lastUpdate = now;
+        m_platform->Update();
+        m_usage = m_platform->GetUsage();
+        m_memoryUsage = m_platform->GetMemoryUsage();
+        m_temperature = m_platform->GetTemperature();
     }
 
     void GPUMonitor::Reset() {
+        if (m_platform) {
+            m_platform->Reset();
+        }
         m_usage = 0.0;
         m_memoryUsage = 0.0;
         m_temperature = 0.0;
@@ -394,6 +272,9 @@ namespace Limitless {
 
     void GPUMonitor::SetUpdateInterval(double intervalSeconds) {
         m_updateInterval = intervalSeconds;
+        if (m_platform) {
+            m_platform->SetUpdateInterval(intervalSeconds);
+        }
     }
 
     // PerformanceMonitor Implementation
@@ -419,9 +300,24 @@ namespace Limitless {
         // Initialize frame time history (keep last 60 frames)
         m_frameTimes.resize(60, 0.0);
         
-        // Initialize monitors
-        m_cpuMonitor.SetUpdateInterval(0.5); // Update every 500ms
-        m_gpuMonitor.SetUpdateInterval(1.0); // Update every 1 second
+        // Initialize platform-specific monitors
+        m_cpuPlatform = PerformancePlatformFactory::CreateCPUPlatform();
+        m_gpuPlatform = PerformancePlatformFactory::CreateGPUPlatform();
+        m_systemPlatform = PerformancePlatformFactory::CreateSystemPlatform();
+        
+        if (m_cpuPlatform) {
+            m_cpuPlatform->Initialize();
+            m_cpuPlatform->SetUpdateInterval(0.5); // Update every 500ms
+        }
+        
+        if (m_gpuPlatform) {
+            m_gpuPlatform->Initialize();
+            m_gpuPlatform->SetUpdateInterval(1.0); // Update every 1 second
+        }
+        
+        if (m_systemPlatform) {
+            m_systemPlatform->Initialize();
+        }
         
         LT_CORE_INFO("Performance Monitor initialized");
     }
@@ -582,9 +478,16 @@ namespace Limitless {
     }
 
     PerformanceMetrics PerformanceMonitor::CollectMetricsInternal() {
-        // Update monitors
-        m_cpuMonitor.Update();
-        m_gpuMonitor.Update();
+        // Update platform-specific monitors
+        if (m_cpuPlatform) {
+            m_cpuPlatform->Update();
+        }
+        if (m_gpuPlatform) {
+            m_gpuPlatform->Update();
+        }
+        if (m_systemPlatform) {
+            m_systemPlatform->Update();
+        }
         
         // Collect frame timing data
         m_currentMetrics.frameTime = GetFrameTimeInternal();
@@ -600,14 +503,26 @@ namespace Limitless {
         m_currentMetrics.allocationCount = m_memoryTracker.GetAllocationCount();
         
         // Collect CPU data
-        m_currentMetrics.cpuUsage = m_cpuMonitor.GetCurrentUsage();
-        m_currentMetrics.cpuUsageAvg = m_cpuMonitor.GetAverageUsage();
-        m_currentMetrics.cpuCoreCount = m_cpuMonitor.GetCoreCount();
+        if (m_cpuPlatform) {
+            m_currentMetrics.cpuUsage = m_cpuPlatform->GetCurrentUsage();
+            m_currentMetrics.cpuUsageAvg = m_cpuPlatform->GetAverageUsage();
+            m_currentMetrics.cpuCoreCount = m_cpuPlatform->GetCoreCount();
+        } else {
+            m_currentMetrics.cpuUsage = 0.0;
+            m_currentMetrics.cpuUsageAvg = 0.0;
+            m_currentMetrics.cpuCoreCount = 0;
+        }
         
         // Collect GPU data
-        m_currentMetrics.gpuUsage = m_gpuMonitor.GetUsage();
-        m_currentMetrics.gpuMemoryUsage = m_gpuMonitor.GetMemoryUsage();
-        m_currentMetrics.gpuTemperature = m_gpuMonitor.GetTemperature();
+        if (m_gpuPlatform) {
+            m_currentMetrics.gpuUsage = m_gpuPlatform->GetUsage();
+            m_currentMetrics.gpuMemoryUsage = m_gpuPlatform->GetMemoryUsage();
+            m_currentMetrics.gpuTemperature = m_gpuPlatform->GetTemperature();
+        } else {
+            m_currentMetrics.gpuUsage = 0.0;
+            m_currentMetrics.gpuMemoryUsage = 0.0;
+            m_currentMetrics.gpuTemperature = 0.0;
+        }
         
         // Collect performance counter data
         m_currentMetrics.counters.clear();
