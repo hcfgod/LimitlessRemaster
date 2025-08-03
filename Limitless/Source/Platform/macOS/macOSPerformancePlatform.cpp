@@ -6,6 +6,7 @@
     #include <sys/syscall.h>
     #include <unistd.h>
     #include <chrono>
+    #include <pthread.h>
 #endif
 
 namespace Limitless {
@@ -177,8 +178,10 @@ namespace Limitless {
 
     bool macOSSystemPlatform::Initialize() {
         m_processId = getpid();
-        // Use syscall for thread ID as gettid() is not available on all systems
-        m_threadId = static_cast<uint32_t>(syscall(SYS_gettid));
+        // Use pthread_threadid_np for thread ID on macOS
+        uint64_t threadId;
+        pthread_threadid_np(pthread_self(), &threadId);
+        m_threadId = static_cast<uint32_t>(threadId);
         Update();
         return true;
     }

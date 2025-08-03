@@ -5,6 +5,7 @@
 #ifdef LT_PLATFORM_MACOS
     #include <mach/mach.h>
     #include <mach/mach_host.h>
+    #include <pthread.h>
 #endif
 
 namespace Limitless {
