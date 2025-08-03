@@ -1,4 +1,4 @@
-#pragma once
+ #pragma once
 
 #define LT_ENABLE_ENTRYPOINT
 #include "Limitless.h"
