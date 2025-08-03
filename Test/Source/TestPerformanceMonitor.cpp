@@ -391,6 +391,45 @@ TEST_SUITE("Performance Monitor") {
         CHECK(counter.GetAverageValue() == 0.0);
     }
     
+    TEST_CASE("Basic Performance Monitor Initialization") {
+        auto& monitor = PerformanceMonitor::GetInstance();
+        
+        // Test basic initialization
+        CHECK(!monitor.IsInitialized());
+        monitor.Initialize();
+        CHECK(monitor.IsInitialized());
+        
+        // Test basic frame timing
+        monitor.BeginFrame();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        monitor.EndFrame();
+        
+        CHECK(monitor.GetFrameCount() == 1);
+        CHECK(monitor.GetFrameTime() > 0.0);
+        
+        // Test basic counter creation
+        auto* counter = monitor.CreateCounter("TestCounter");
+        CHECK(counter != nullptr);
+        
+        // Test basic memory tracking
+        monitor.TrackMemoryAllocation(1024);
+        auto* memoryTracker = monitor.GetMemoryTracker();
+        CHECK(memoryTracker != nullptr);
+        CHECK(memoryTracker->GetCurrentMemory() == 1024);
+        
+        // Test basic metrics collection
+        auto metrics = monitor.CollectMetrics();
+        CHECK(metrics.frameCount == 1);
+        CHECK(metrics.cpuCoreCount > 0);
+        
+        // Test basic metrics string
+        std::string report = monitor.GetMetricsString();
+        CHECK(!report.empty());
+        
+        monitor.Shutdown();
+        CHECK(!monitor.IsInitialized());
+    }
+    
     TEST_CASE("Integration Test - Full Performance Monitoring") {
         auto& monitor = PerformanceMonitor::GetInstance();
         monitor.Initialize();
