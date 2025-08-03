@@ -297,10 +297,10 @@ namespace Limitless {
         mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
         
         if (host_statistics(data->host, HOST_CPU_LOAD_INFO, reinterpret_cast<host_info_t>(&cpuLoad), &count) == KERN_SUCCESS) {
-            unsigned long long total = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
-                                     cpuLoad.cpu_ticks[CPU_STATE_IDLE] + cpuLoad.cpu_ticks[CPU_STATE_NICE];
-            unsigned long long used = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
-                                    cpuLoad.cpu_ticks[CPU_STATE_NICE];
+            unsigned long long total = cpuLoad->cpu_ticks[CPU_STATE_USER] + cpuLoad->cpu_ticks[CPU_STATE_SYSTEM] + 
+                                     cpuLoad->cpu_ticks[CPU_STATE_IDLE] + cpuLoad->cpu_ticks[CPU_STATE_NICE];
+            unsigned long long used = cpuLoad->cpu_ticks[CPU_STATE_USER] + cpuLoad->cpu_ticks[CPU_STATE_SYSTEM] + 
+                                    cpuLoad->cpu_ticks[CPU_STATE_NICE];
             
             if (total > 0) {
                 m_currentUsage = 100.0 * static_cast<double>(used) / total;
