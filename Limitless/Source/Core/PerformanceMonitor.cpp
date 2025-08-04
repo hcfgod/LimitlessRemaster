@@ -478,6 +478,13 @@ namespace Limitless {
     }
 
     PerformanceMetrics PerformanceMonitor::CollectMetricsInternal() {
+        // Ensure we're initialized
+        if (!m_initialized) {
+            // Return empty metrics if not initialized
+            PerformanceMetrics emptyMetrics = {};
+            return emptyMetrics;
+        }
+        
         // Update platform-specific monitors
         if (m_cpuPlatform) {
             m_cpuPlatform->Update();
@@ -612,17 +619,28 @@ namespace Limitless {
         std::ostringstream oss;
         oss << std::fixed << std::setprecision(2);
         
-        oss << "Frame: " << m_currentMetrics.frameCount 
-            << " (" << m_currentMetrics.fpsAvg << " FPS avg)\n";
-        oss << "Frame Time: " << m_currentMetrics.frameTimeAvg << "ms avg\n";
-        oss << "Memory: " << (m_currentMetrics.currentMemory / (1024.0 * 1024.0)) << "MB current, "
-            << (m_currentMetrics.peakMemory / (1024.0 * 1024.0)) << "MB peak\n";
-        oss << "CPU: " << m_currentMetrics.cpuUsage << "% usage (" 
-            << m_currentMetrics.cpuUsageAvg << "% avg)\n";
+        // Use safe access to metrics with fallback values
+        uint32_t frameCount = m_initialized ? m_currentMetrics.frameCount : 0;
+        double fpsAvg = m_initialized ? m_currentMetrics.fpsAvg : 0.0;
+        double frameTimeAvg = m_initialized ? m_currentMetrics.frameTimeAvg : 0.0;
+        uint64_t currentMemory = m_initialized ? m_currentMetrics.currentMemory : 0;
+        uint64_t peakMemory = m_initialized ? m_currentMetrics.peakMemory : 0;
+        double cpuUsage = m_initialized ? m_currentMetrics.cpuUsage : 0.0;
+        double cpuUsageAvg = m_initialized ? m_currentMetrics.cpuUsageAvg : 0.0;
+        double gpuUsage = m_initialized ? m_currentMetrics.gpuUsage : 0.0;
+        double gpuMemoryUsage = m_initialized ? m_currentMetrics.gpuMemoryUsage : 0.0;
         
-        if (m_currentMetrics.gpuUsage > 0.0) {
-            oss << "GPU: " << m_currentMetrics.gpuUsage << "% usage, "
-                << m_currentMetrics.gpuMemoryUsage << "% memory\n";
+        oss << "Frame: " << frameCount 
+            << " (" << fpsAvg << " FPS avg)\n";
+        oss << "Frame Time: " << frameTimeAvg << "ms avg\n";
+        oss << "Memory: " << (currentMemory / (1024.0 * 1024.0)) << "MB current, "
+            << (peakMemory / (1024.0 * 1024.0)) << "MB peak\n";
+        oss << "CPU: " << cpuUsage << "% usage (" 
+            << cpuUsageAvg << "% avg)\n";
+        
+        if (gpuUsage > 0.0) {
+            oss << "GPU: " << gpuUsage << "% usage, "
+                << gpuMemoryUsage << "% memory\n";
         }
         
         return oss.str();
