@@ -33,18 +33,25 @@ namespace Limitless {
     }
 
     bool macOSCPUPlatform::Initialize() {
-        // Get host port
+        // Get host port with error checking
         m_host = mach_host_self();
         if (m_host == MACH_PORT_NULL) {
             LT_CORE_ERROR("Failed to get mach host port");
             return false;
         }
         
-        // Get CPU core count
-        int cores;
+        // Get CPU core count with safer sysctl call
+        int cores = 0;
         size_t size = sizeof(cores);
-        if (sysctlbyname("hw.ncpu", &cores, &size, nullptr, 0) == 0) {
-            m_coreCount = cores;
+        if (sysctlbyname("hw.ncpu", &cores, &size, nullptr, 0) == 0 && cores > 0) {
+            m_coreCount = static_cast<uint32_t>(cores);
+        } else {
+            // Fallback to logical processor count
+            if (sysctlbyname("hw.logicalcpu", &cores, &size, nullptr, 0) == 0 && cores > 0) {
+                m_coreCount = static_cast<uint32_t>(cores);
+            } else {
+                m_coreCount = 1; // Safe fallback
+            }
         }
         
         LT_CORE_INFO("macOS CPU Platform initialized with {} cores", m_coreCount);
@@ -52,7 +59,7 @@ namespace Limitless {
     }
 
     void macOSCPUPlatform::Shutdown() {
-        // Nothing to clean up
+        // Nothing to clean up - Mach ports are automatically managed
     }
 
     void macOSCPUPlatform::Update() {
@@ -67,28 +74,23 @@ namespace Limitless {
             return;
         }
 
-        try {
-            host_cpu_load_info cpuLoad;
-            mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
+        // Use safer CPU statistics collection
+        host_cpu_load_info cpuLoad;
+        mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
+        
+        kern_return_t result = host_statistics(m_host, HOST_CPU_LOAD_INFO, 
+                                             reinterpret_cast<host_info_t>(&cpuLoad), &count);
+        if (result == KERN_SUCCESS && count == HOST_CPU_LOAD_INFO_COUNT) {
+            // Calculate CPU usage with simple arithmetic
+            uint64_t total = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
+                           cpuLoad.cpu_ticks[CPU_STATE_IDLE] + cpuLoad.cpu_ticks[CPU_STATE_NICE];
+            uint64_t used = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
+                          cpuLoad.cpu_ticks[CPU_STATE_NICE];
             
-            kern_return_t result = host_statistics(m_host, HOST_CPU_LOAD_INFO, reinterpret_cast<host_info_t>(&cpuLoad), &count);
-            if (result == KERN_SUCCESS) {
-                unsigned long long total = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
-                                         cpuLoad.cpu_ticks[CPU_STATE_IDLE] + cpuLoad.cpu_ticks[CPU_STATE_NICE];
-                unsigned long long used = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
-                                        cpuLoad.cpu_ticks[CPU_STATE_NICE];
-                
-                if (total > 0) {
-                    m_currentUsage = 100.0 * static_cast<double>(used) / total;
-                    m_averageUsage = (m_averageUsage + m_currentUsage) * 0.5;
-                }
-            } else {
-                // If we can't get CPU stats, keep the last known values
-                // This prevents crashes but maintains functionality
+            if (total > 0) {
+                m_currentUsage = 100.0 * static_cast<double>(used) / static_cast<double>(total);
+                m_averageUsage = (m_averageUsage + m_currentUsage) * 0.5;
             }
-        } catch (...) {
-            // If any system call fails, keep the last known values
-            // This prevents crashes but maintains functionality
         }
 
         m_lastUpdate = now;
@@ -205,13 +207,13 @@ namespace Limitless {
         // Use pthread_self() for thread ID which is more reliable on macOS
         m_threadId = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(pthread_self()));
         
+        // Initialize with safe defaults
+        m_totalMemory = 0;
+        m_availableMemory = 0;
+        m_processMemory = 0;
+        
         // Try to update system info, but don't fail if it doesn't work
-        try {
-            Update();
-        } catch (...) {
-            // If Update() fails, we'll still return true but with default values
-            LT_CORE_WARN("macOS System Platform Update failed, using default values");
-        }
+        Update();
         
         return true;
     }
@@ -221,32 +223,40 @@ namespace Limitless {
     }
 
     void macOSSystemPlatform::Update() {
-        try {
-            // Get system memory information
-            uint64_t totalMem;
-            size_t size = sizeof(totalMem);
-            if (sysctlbyname("hw.memsize", &totalMem, &size, nullptr, 0) == 0) {
-                m_totalMemory = totalMem;
-            }
+        // Get system memory information with safer sysctl calls
+        uint64_t totalMem = 0;
+        size_t size = sizeof(totalMem);
+        if (sysctlbyname("hw.memsize", &totalMem, &size, nullptr, 0) == 0 && totalMem > 0) {
+            m_totalMemory = totalMem;
+        }
 
-            // Get available memory (simplified - in practice you'd use vm_statistics)
-            // For now, we'll use a rough estimate
-            m_availableMemory = m_totalMemory * 0.8; // Assume 80% available
-
-            // Get process memory information
-            struct task_basic_info t_info;
-            mach_msg_type_number_t t_info_count = TASK_BASIC_INFO_COUNT;
-            kern_return_t result = task_info(mach_task_self(), TASK_BASIC_INFO, (task_info_t)&t_info, &t_info_count);
-            if (result == KERN_SUCCESS) {
-                m_processMemory = t_info.resident_size;
+        // Get available memory using vm_statistics (more reliable than estimation)
+        vm_size_t pageSize = 0;
+        if (host_page_size(mach_host_self(), &pageSize) == KERN_SUCCESS && pageSize > 0) {
+            vm_statistics64_data_t vmStats;
+            mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+            if (host_statistics64(mach_host_self(), HOST_VM_INFO64, 
+                                reinterpret_cast<host_info64_t>(&vmStats), &count) == KERN_SUCCESS) {
+                uint64_t freePages = vmStats.free_count + vmStats.inactive_count;
+                m_availableMemory = static_cast<uint64_t>(freePages) * pageSize;
             } else {
-                // Fallback to a safe default
-                m_processMemory = 0;
+                // Fallback to rough estimation
+                m_availableMemory = m_totalMemory * 0.8;
             }
-        } catch (...) {
-            // If any system call fails, use safe defaults
-            m_totalMemory = 0;
-            m_availableMemory = 0;
+        } else {
+            // Fallback to rough estimation
+            m_availableMemory = m_totalMemory * 0.8;
+        }
+
+        // Get process memory information with safer task_info call
+        struct task_basic_info t_info;
+        mach_msg_type_number_t t_info_count = TASK_BASIC_INFO_COUNT;
+        kern_return_t result = task_info(mach_task_self(), TASK_BASIC_INFO, 
+                                       reinterpret_cast<task_info_t>(&t_info), &t_info_count);
+        if (result == KERN_SUCCESS && t_info_count == TASK_BASIC_INFO_COUNT) {
+            m_processMemory = t_info.resident_size;
+        } else {
+            // Fallback to a safe default
             m_processMemory = 0;
         }
     }
