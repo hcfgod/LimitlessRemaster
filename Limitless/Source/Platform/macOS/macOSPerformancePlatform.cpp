@@ -43,29 +43,36 @@ namespace Limitless {
         m_averageUsage = 0.0;
         m_coreCount = 1;
         
-        // Get host port with error checking
-        m_host = mach_host_self();
+        // Get host port with error checking and ARM64 safety
+        try {
+            m_host = mach_host_self();
+        } catch (...) {
+            m_host = MACH_PORT_NULL;
+        }
+        
         if (m_host == MACH_PORT_NULL || m_host == MACH_PORT_DEAD) {
             LT_CORE_ERROR("Failed to get mach host port");
             return false;
         }
         
-        // Get CPU core count with safer sysctl call
+        // Get CPU core count with safer sysctl call and ARM64 handling
         int cores = 0;
         size_t size = sizeof(cores);
+        
+        // Try different sysctl calls for ARM64 compatibility
         if (sysctlbyname("hw.ncpu", &cores, &size, nullptr, 0) == 0 && cores > 0) {
             m_coreCount = static_cast<uint32_t>(cores);
+        } else if (sysctlbyname("hw.logicalcpu", &cores, &size, nullptr, 0) == 0 && cores > 0) {
+            m_coreCount = static_cast<uint32_t>(cores);
+        } else if (sysctlbyname("hw.physicalcpu", &cores, &size, nullptr, 0) == 0 && cores > 0) {
+            m_coreCount = static_cast<uint32_t>(cores);
         } else {
-            // Fallback to logical processor count
-            if (sysctlbyname("hw.logicalcpu", &cores, &size, nullptr, 0) == 0 && cores > 0) {
-                m_coreCount = static_cast<uint32_t>(cores);
-            } else {
-                m_coreCount = 1; // Safe fallback
-            }
+            // Final fallback for ARM64
+            m_coreCount = 1;
         }
         
-        // Additional safety check for x64 architecture
-        if (m_coreCount == 0) {
+        // Additional safety checks for ARM64
+        if (m_coreCount == 0 || m_coreCount > 128) { // Reasonable upper limit
             m_coreCount = 1;
         }
         
@@ -89,7 +96,8 @@ namespace Limitless {
     }
 
     void macOSCPUPlatform::Update() {
-        if (m_host == MACH_PORT_NULL) {
+        // Additional safety check for ARM64
+        if (m_host == MACH_PORT_NULL || m_host == MACH_PORT_DEAD) {
             return;
         }
         
@@ -100,17 +108,25 @@ namespace Limitless {
             return;
         }
 
-        // Use safer CPU statistics collection with additional validation
+        // Use safer CPU statistics collection with extensive error handling
         host_cpu_load_info cpuLoad = {0}; // Initialize to zero
         mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
         
-        // Validate host port before use
+        // Additional validation for ARM64
         if (m_host == MACH_PORT_NULL || m_host == MACH_PORT_DEAD) {
             return;
         }
         
-        kern_return_t result = host_statistics(m_host, HOST_CPU_LOAD_INFO, 
-                                             reinterpret_cast<host_info_t>(&cpuLoad), &count);
+        // Try to get CPU statistics with error handling
+        kern_return_t result = KERN_FAILURE;
+        try {
+            result = host_statistics(m_host, HOST_CPU_LOAD_INFO, 
+                                   reinterpret_cast<host_info_t>(&cpuLoad), &count);
+        } catch (...) {
+            // If host_statistics throws an exception, return safely
+            return;
+        }
+        
         if (result == KERN_SUCCESS && count == HOST_CPU_LOAD_INFO_COUNT) {
             // Validate CPU tick values before calculation
             bool validTicks = true;
@@ -122,15 +138,24 @@ namespace Limitless {
             }
             
             if (validTicks) {
-                // Calculate CPU usage with simple arithmetic
-                uint64_t total = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
-                               cpuLoad.cpu_ticks[CPU_STATE_IDLE] + cpuLoad.cpu_ticks[CPU_STATE_NICE];
-                uint64_t used = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
-                              cpuLoad.cpu_ticks[CPU_STATE_NICE];
+                // Calculate CPU usage with overflow protection
+                uint64_t user = cpuLoad.cpu_ticks[CPU_STATE_USER];
+                uint64_t system = cpuLoad.cpu_ticks[CPU_STATE_SYSTEM];
+                uint64_t idle = cpuLoad.cpu_ticks[CPU_STATE_IDLE];
+                uint64_t nice = cpuLoad.cpu_ticks[CPU_STATE_NICE];
                 
-                if (total > 0) {
-                    m_currentUsage = 100.0 * static_cast<double>(used) / static_cast<double>(total);
-                    m_averageUsage = (m_averageUsage + m_currentUsage) * 0.5;
+                // Check for overflow
+                if (user <= UINT64_MAX - system && 
+                    (user + system) <= UINT64_MAX - nice &&
+                    (user + system + nice) <= UINT64_MAX - idle) {
+                    
+                    uint64_t total = user + system + idle + nice;
+                    uint64_t used = user + system + nice;
+                    
+                    if (total > 0) {
+                        m_currentUsage = 100.0 * static_cast<double>(used) / static_cast<double>(total);
+                        m_averageUsage = (m_averageUsage + m_currentUsage) * 0.5;
+                    }
                 }
             }
         }
