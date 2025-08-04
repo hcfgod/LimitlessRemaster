@@ -5,6 +5,7 @@
 #include "Core/Error.h"
 #include <SDL3/SDL.h>
 #include <vector>
+#include "Graphics/GraphicsContext.h"
 
 namespace Limitless
 {
@@ -148,6 +149,7 @@ namespace Limitless
 
     private:
         SDL_Window* m_Window;
+        std::unique_ptr<Limitless::GraphicsContext> m_Context;
 
         struct WindowData
         {
@@ -165,6 +167,7 @@ namespace Limitless
             bool Borderless;
             bool AlwaysOnTop;
             std::string IconPath;
+            Limitless::GraphicsAPI Api;
 
             WindowData()
                 : Title("Limitless Engine"), Width(1280), Height(720), VSync(false), 

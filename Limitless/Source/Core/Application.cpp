@@ -8,6 +8,7 @@
 #include "Core/HotReloadManager.h"
 #include "Core/EventSystem.h"
 #include "Core/Concurrency/AsyncIO.h"
+#include "Graphics/GraphicsAPIDetector.h"
 #include <chrono>
 
 namespace Limitless
@@ -100,6 +101,9 @@ namespace Limitless
 		{
 			return false;
 		}
+
+		// Initialize graphics API detection system
+		GraphicsAPIDetector::Initialize();
 
 		// Create window using configuration
 		m_Window = Window::CreateFromConfig();

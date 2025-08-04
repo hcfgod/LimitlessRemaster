@@ -11,13 +11,15 @@ project "Limitless"
     files
     {
         "Source/**.h",
-        "Source/**.cpp"
+        "Source/**.cpp",
+        "Vendor/glad/glad/glad.c"
     }
 
     includedirs
     {
         "Source",
         "Vendor/",
+        "Vendor/glad",
         "Vendor/spdlog",
         "Vendor/doctest",
         "Vendor/SDL3"

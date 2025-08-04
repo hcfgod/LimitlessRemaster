@@ -73,6 +73,10 @@ namespace Limitless
             // Icon path
             props.IconPath = config.GetValue<std::string>("window.icon", "");
             
+            // Graphics API
+            std::string apiString = config.GetValue<std::string>("graphics.api", "OpenGL");
+            props.Api = GraphicsAPIFromString(apiString);
+            
             // Window flags
             WindowFlags flags = WindowFlags::Resizable;
             if (props.Resizable) flags |= WindowFlags::Resizable;

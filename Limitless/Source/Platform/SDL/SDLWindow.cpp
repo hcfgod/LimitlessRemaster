@@ -90,6 +90,7 @@ namespace Limitless
         m_Data.Borderless = props.Borderless;
         m_Data.AlwaysOnTop = props.AlwaysOnTop;
         m_Data.IconPath = props.IconPath;
+        m_Data.Api = props.Api;
 
         LT_CORE_INFO("Creating window {} ({}, {})", props.Title, props.Width, props.Height);
         if (props.Fullscreen) {
@@ -99,8 +100,30 @@ namespace Limitless
             LT_CORE_INFO("Window will be resizable");
         }
 
+        // Create graphics context early (before window) to setup attributes
+        m_Context = Limitless::CreateGraphicsContext();
+        if (!m_Context)
+        {
+            std::string errorMsg = "Failed to create graphics context";
+            GraphicsError error(errorMsg, std::source_location::current());
+            error.SetFunctionName("SDLWindow::Init");
+            error.SetClassName("SDLWindow");
+            error.SetModuleName("Platform/SDL");
+            LT_CORE_ERROR("{}", errorMsg);
+            Error::LogError(error);
+            LT_THROW_GRAPHICS_ERROR(errorMsg);
+        }
+
+        // Setup graphics-specific attributes before window creation
+        m_Context->SetupAttributes();
+
         // Set up SDL window flags
         uint32_t windowFlags = static_cast<uint32_t>(ConvertToSDLFags(props.Flags));
+        
+        // Add graphics API specific flags
+        if (props.Api == GraphicsAPI::OpenGL) {
+            windowFlags |= SDL_WINDOW_OPENGL;
+        }
 
         // Create window
         m_Window = SDL_CreateWindow(
@@ -147,6 +170,26 @@ namespace Limitless
         if (!props.IconPath.empty())
         {
             SetIcon(props.IconPath);
+        }
+
+        // Initialize graphics context using clean step-by-step approach
+        LT_CORE_INFO("Initializing graphics context...");
+        try
+        {
+            m_Context->Init(m_Window, m_Data.Api); // Create context, load functions, setup capabilities
+            m_Context->MakeCurrent();             // Make context current
+            LT_CORE_INFO("Graphics context initialized successfully");
+        }
+        catch (const std::exception& e)
+        {
+            std::string errorMsg = fmt::format("Graphics context initialization failed: {}", e.what());
+            GraphicsError error(errorMsg, std::source_location::current());
+            error.SetFunctionName("SDLWindow::Init");
+            error.SetClassName("SDLWindow");
+            error.SetModuleName("Platform/SDL");
+            LT_CORE_ERROR("{}", errorMsg);
+            Error::LogError(error);
+            throw;
         }
 
         LT_CORE_INFO("Window created successfully");
@@ -697,7 +740,7 @@ namespace Limitless
         SDL_DisplayMode sdlMode;
         sdlMode.w = static_cast<int>(mode.width);
         sdlMode.h = static_cast<int>(mode.height);
-        sdlMode.refresh_rate = static_cast<int>(mode.refreshRate);
+        sdlMode.refresh_rate = static_cast<float>(mode.refreshRate);
         sdlMode.format = static_cast<SDL_PixelFormat>(mode.format);
         
         SDL_SetWindowFullscreenMode(m_Window, &sdlMode);
@@ -850,7 +893,7 @@ namespace Limitless
     void SDLWindow::SetCursorPosition(int x, int y)
     {
         LT_VERIFY(m_Window, "Window not initialized");
-        SDL_WarpMouseInWindow(m_Window, x, y);
+        SDL_WarpMouseInWindow(m_Window, static_cast<float>(x), static_cast<float>(y));
     }
 
     void SDLWindow::GetCursorPosition(int& x, int& y) const

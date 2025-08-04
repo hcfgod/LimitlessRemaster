@@ -6,6 +6,7 @@
 #include <vector>
 #include <optional>
 #include "Core/Error.h"
+#include "Graphics/GraphicsContext.h"
 
 struct SDL_Window;
 
@@ -99,6 +100,7 @@ namespace Limitless
         uint32_t MinHeight;
         uint32_t MaxWidth;
         uint32_t MaxHeight;
+        GraphicsAPI Api;
 
         WindowProps(const std::string& title = "Limitless Engine",
                    uint32_t width = 1280,
@@ -107,7 +109,8 @@ namespace Limitless
                    bool resizable = true)
             : Title(title), Width(width), Height(height), Fullscreen(fullscreen), Resizable(resizable),
               PositionX(0), PositionY(0), Flags(WindowFlags::Resizable), VSync(true), HighDPI(true),
-              Borderless(false), AlwaysOnTop(false), MinWidth(0), MinHeight(0), MaxWidth(0), MaxHeight(0)
+              Borderless(false), AlwaysOnTop(false), MinWidth(0), MinHeight(0), MaxWidth(0), MaxHeight(0),
+              Api(GraphicsAPI::OpenGL)
         {
             // Validate window properties
             LT_VERIFY(!Title.empty(), "Window title cannot be empty");
