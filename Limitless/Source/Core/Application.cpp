@@ -8,11 +8,14 @@
 #include "Core/HotReloadManager.h"
 #include "Core/EventSystem.h"
 #include "Core/Concurrency/AsyncIO.h"
+#include <chrono>
 
 namespace Limitless
 {
 	Application::Application()
 	{
+		LT_CORE_INFO("Application constructor starting...");
+		
 		// Initialize AsyncIO system with thread count from config
 		auto& asyncIO = Limitless::Async::GetAsyncIO();
 		auto& configManager = Limitless::ConfigManager::GetInstance();
@@ -23,10 +26,14 @@ namespace Limitless
 		auto& hotReloadManager = Limitless::HotReloadManager::GetInstance();
 		hotReloadManager.Initialize();
 		hotReloadManager.EnableHotReload(true);
+		
+		LT_CORE_INFO("Application constructor completed successfully");
 	}
 
 	Application::~Application()
 	{
+		LT_CORE_INFO("Application destructor starting...");
+		
         // Shutdown hot reload manager
         auto& hotReloadManager = Limitless::HotReloadManager::GetInstance();
         hotReloadManager.Shutdown();
@@ -34,28 +41,53 @@ namespace Limitless
         // Shutdown AsyncIO system
         auto& asyncIO = Limitless::Async::GetAsyncIO();
         asyncIO.Shutdown();
+        
+        LT_CORE_INFO("Application destructor completed");
 	}
 
 	void Application::Run()
 	{
+		LT_CORE_INFO("Application::Run() starting...");
+		
 		if (!InternalInitialize())
 		{
+			LT_CORE_ERROR("Application internal initialization failed!");
 			return;
 		}
 
+		LT_CORE_INFO("Application internal initialization completed, entering main loop...");
+		
+		// Initialize timing
+		auto lastTime = std::chrono::high_resolution_clock::now();
+
 		while(m_isRunning)
 		{
+			// Calculate delta time
+			auto currentTime = std::chrono::high_resolution_clock::now();
+			auto deltaTime = std::chrono::duration<float>(currentTime - lastTime).count();
+			lastTime = currentTime;
+
 			m_Window->OnUpdate();
 			
-			// Process events
+			// Update layers
+			m_LayerStack.OnUpdate(deltaTime);
+			
+			// Process events (this will also dispatch to layers)
 			GetEventSystem().ProcessEvents();
+			
+			// Render layers
+			m_LayerStack.OnRender();
 		}
 
+		LT_CORE_INFO("Main loop ended, beginning shutdown...");
 		InternalShutdown();
+		LT_CORE_INFO("Application::Run() completed");
 	}
 
 	bool Application::InternalInitialize()
 	{
+		LT_CORE_INFO("Application::InternalInitialize() starting...");
+		
 		// Initialize platform detection first
 		PlatformDetection::Initialize();
 		
@@ -73,6 +105,7 @@ namespace Limitless
 		m_Window = Window::CreateFromConfig();
 		if (!m_Window)
 		{
+			LT_CORE_ERROR("Window creation failed!");
 			return false;
 		}
 
@@ -89,11 +122,17 @@ namespace Limitless
 		// Set up close callback
 		m_Window->SetCloseCallback([this]() 
 		{
+			LT_CORE_INFO("Window close callback triggered, setting m_isRunning = false");
 			m_isRunning = false;
 		});
 
+		// Register LayerStack with event system
+		auto& eventSystem = GetEventSystem();
+		eventSystem.AddListener(std::shared_ptr<EventListener>(&m_LayerStack, [](EventListener*){}));
+
 		if (!Initialize())
 		{
+			LT_CORE_ERROR("User-defined Initialize() method failed!");
 			return false;
 		}
 
@@ -102,7 +141,12 @@ namespace Limitless
 
 	void Application::InternalShutdown()
 	{
+		LT_CORE_INFO("Application::InternalShutdown() starting...");
+		
 		Shutdown();
+		
+		// Clear LayerStack (this will detach all layers)
+		m_LayerStack.Clear();
 		
 		// Clean up window (this will unsubscribe from events)
 		m_Window.reset();
@@ -113,7 +157,7 @@ namespace Limitless
 		// Shutdown event system AFTER window is destroyed
 		GetEventSystem().Shutdown();
 		
-		// Shutdown logging
-		Log::Shutdown();
+		// Note: Logging shutdown is handled in main() after this returns
+		LT_CORE_INFO("Application::InternalShutdown() completed");
 	}
 }

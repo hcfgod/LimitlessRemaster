@@ -267,7 +267,7 @@ namespace Limitless
     {
         if (m_Initialized)
         {
-            LT_CORE_WARN("EventSystem already initialized");
+            LT_CORE_WARN("EventSystem already initialized, skipping...");
             return;
         }
 
@@ -275,16 +275,27 @@ namespace Limitless
         m_Dispatcher = std::make_unique<EventDispatcher>();
         m_Queue = std::make_unique<EventQueue>(1000);
         m_Initialized = true;
-        LT_CORE_INFO("EventSystem initialized successfully");
+        LT_CORE_INFO("EventSystem initialized successfully with dispatcher and queue ready");
     }
 
     void EventSystem::Shutdown()
     {
-        if (!m_Initialized) return;
+        if (!m_Initialized) {
+            LT_CORE_DEBUG("EventSystem already shutdown, skipping...");
+            return;
+        }
 
-        LT_CORE_INFO("Shutting down EventSystem");
+        LT_CORE_INFO("Shutting down EventSystem...");
+        
+        // Get stats before shutdown
+        if (m_Dispatcher) {
+            auto stats = m_Dispatcher->GetStats();
+            LT_CORE_INFO("EventSystem shutdown stats - Events dispatched: {}, Events handled: {}, Events filtered: {}", 
+                        stats.totalEventsDispatched, stats.eventsHandled, stats.eventsFiltered);
+        }
         
         // Clear all callbacks and listeners
+        LT_CORE_INFO("Clearing EventDispatcher and EventQueue...");
         m_Dispatcher.reset();
         m_Queue.reset();
         m_Initialized = false;
@@ -477,6 +488,36 @@ namespace Limitless
         std::unique_ptr<Event> MouseMovedEvent::Clone() const
         {
             return std::make_unique<MouseMovedEvent>(m_X, m_Y);
+        }
+
+        MouseButtonPressedEvent::MouseButtonPressedEvent(int button)
+            : Event(EventType::MouseButtonPressed), m_Button(button)
+        {
+        }
+
+        std::unique_ptr<Event> MouseButtonPressedEvent::Clone() const
+        {
+            return std::make_unique<MouseButtonPressedEvent>(m_Button);
+        }
+
+        MouseButtonReleasedEvent::MouseButtonReleasedEvent(int button)
+            : Event(EventType::MouseButtonReleased), m_Button(button)
+        {
+        }
+
+        std::unique_ptr<Event> MouseButtonReleasedEvent::Clone() const
+        {
+            return std::make_unique<MouseButtonReleasedEvent>(m_Button);
+        }
+
+        MouseScrolledEvent::MouseScrolledEvent(float xOffset, float yOffset)
+            : Event(EventType::MouseScrolled), m_XOffset(xOffset), m_YOffset(yOffset)
+        {
+        }
+
+        std::unique_ptr<Event> MouseScrolledEvent::Clone() const
+        {
+            return std::make_unique<MouseScrolledEvent>(m_XOffset, m_YOffset);
         }
 
         // Application events

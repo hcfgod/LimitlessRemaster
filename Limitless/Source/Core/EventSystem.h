@@ -430,6 +430,53 @@ namespace Limitless
             float m_Y;
         };
 
+        class MouseButtonPressedEvent : public Event
+        {
+        public:
+            MouseButtonPressedEvent(int button);
+            
+            int GetButton() const { return m_Button; }
+            
+            std::string GetCategory() const override { return "Input"; }
+            std::string GetName() const override { return "MouseButtonPressed"; }
+            std::unique_ptr<Event> Clone() const override;
+
+        private:
+            int m_Button;
+        };
+
+        class MouseButtonReleasedEvent : public Event
+        {
+        public:
+            MouseButtonReleasedEvent(int button);
+            
+            int GetButton() const { return m_Button; }
+            
+            std::string GetCategory() const override { return "Input"; }
+            std::string GetName() const override { return "MouseButtonReleased"; }
+            std::unique_ptr<Event> Clone() const override;
+
+        private:
+            int m_Button;
+        };
+
+        class MouseScrolledEvent : public Event
+        {
+        public:
+            MouseScrolledEvent(float xOffset, float yOffset);
+            
+            float GetXOffset() const { return m_XOffset; }
+            float GetYOffset() const { return m_YOffset; }
+            
+            std::string GetCategory() const override { return "Input"; }
+            std::string GetName() const override { return "MouseScrolled"; }
+            std::unique_ptr<Event> Clone() const override;
+
+        private:
+            float m_XOffset;
+            float m_YOffset;
+        };
+
         // Application events
         class AppTickEvent : public Event
         {

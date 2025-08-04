@@ -2,6 +2,7 @@
 
 #define LT_ENABLE_ENTRYPOINT
 #include "Limitless.h"
+#include "Core/ExampleLayers.h"
 
 namespace Limitless
 {
@@ -16,10 +17,17 @@ namespace Limitless
 		void Shutdown() override;
 
 	private:
+		// Layer references for management
+		LayerRef m_BackgroundLayer;
+		LayerRef m_GameLayer;
+		LayerRef m_DebugOverlay;
+		LayerRef m_UIOverlay;
+
 		// Demo methods
 		void DemonstratePlatformDetection();
 		void DemonstrateErrorHandling();
 		void DemonstrateAsyncIO();
 		void DemonstratePerformanceMonitoring();
+		void DemonstrateLayerSystem();
 	};
 }

@@ -11,6 +11,8 @@
 #include "Core/ConfigManager.h"
 #include "Core/EventSystem.h"
 #include "Core/Debug/Log.h"
+#include "Core/Layer.h"
+#include "Core/LayerStack.h"
 
 // Platform
 #include "Platform/Platform.h"
