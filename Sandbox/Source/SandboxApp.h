@@ -2,7 +2,7 @@
 
 #define LT_ENABLE_ENTRYPOINT
 #include "Limitless.h"
-#include "Core/ExampleLayers.h"
+#include "ExampleLayers.h"
 
 namespace Limitless
 {
@@ -24,10 +24,6 @@ namespace Limitless
 		LayerRef m_UIOverlay;
 
 		// Demo methods
-		void DemonstratePlatformDetection();
-		void DemonstrateErrorHandling();
-		void DemonstrateAsyncIO();
-		void DemonstratePerformanceMonitoring();
 		void DemonstrateLayerSystem();
 	};
 }
