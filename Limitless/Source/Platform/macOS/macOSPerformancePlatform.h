@@ -3,7 +3,8 @@
 #include "Platform/PerformancePlatform.h"
 #include <chrono>
 #ifdef LT_PLATFORM_MACOS
-    #include <pthread.h>
+    #include <mach/mach.h>
+    #include <mach/mach_host.h>
 #endif
 
 namespace Limitless {
@@ -29,6 +30,8 @@ namespace Limitless {
         void SetUpdateInterval(double intervalSeconds) override;
 
     private:
+        host_t m_host;
+        mach_msg_type_number_t m_count;
         double m_currentUsage;
         double m_averageUsage;
         uint32_t m_coreCount;

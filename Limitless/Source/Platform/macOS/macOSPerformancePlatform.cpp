@@ -2,30 +2,40 @@
 #include "Core/Debug/Log.h"
 
 #ifdef LT_PLATFORM_MACOS
-    #include <pthread.h>
+    #include <sys/sysctl.h>
+    #include <sys/syscall.h>
+    #include <unistd.h>
+    #include <chrono>
 #endif
 
 namespace Limitless {
 
 #ifdef LT_PLATFORM_MACOS
 
-    // macOSCPUPlatform Implementation - Ultra-safe version
+    // macOSCPUPlatform Implementation
     macOSCPUPlatform::macOSCPUPlatform()
-        : m_currentUsage(0.0)
+        : m_host(mach_host_self())
+        , m_count(HOST_CPU_LOAD_INFO_COUNT)
+        , m_currentUsage(0.0)
         , m_averageUsage(0.0)
-        , m_coreCount(8)  // Default to 8 cores for safety
+        , m_coreCount(0)
         , m_updateInterval(1.0)
         , m_lastUpdate(std::chrono::high_resolution_clock::now()) {
     }
 
     macOSCPUPlatform::~macOSCPUPlatform() {
-        // Nothing to clean up
+        Shutdown();
     }
 
     bool macOSCPUPlatform::Initialize() {
-        // Ultra-safe initialization - no system calls
-        m_coreCount = 8; // Default safe value
-        LT_CORE_INFO("macOS CPU Platform initialized with {} cores (safe mode)", m_coreCount);
+        // Get CPU core count
+        int cores;
+        size_t size = sizeof(cores);
+        if (sysctlbyname("hw.ncpu", &cores, &size, nullptr, 0) == 0) {
+            m_coreCount = cores;
+        }
+        
+        LT_CORE_INFO("macOS CPU Platform initialized with {} cores", m_coreCount);
         return true;
     }
 
@@ -34,7 +44,6 @@ namespace Limitless {
     }
 
     void macOSCPUPlatform::Update() {
-        // Ultra-safe update - just update timing, no system calls
         auto now = std::chrono::high_resolution_clock::now();
         auto elapsed = std::chrono::duration<double>(now - m_lastUpdate).count();
         
@@ -42,9 +51,21 @@ namespace Limitless {
             return;
         }
 
-        // Provide safe default values
-        m_currentUsage = 5.0; // Default low usage
-        m_averageUsage = (m_averageUsage + m_currentUsage) * 0.5;
+        host_cpu_load_info cpuLoad;
+        mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
+        
+        if (host_statistics(m_host, HOST_CPU_LOAD_INFO, reinterpret_cast<host_info_t>(&cpuLoad), &count) == KERN_SUCCESS) {
+            unsigned long long total = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
+                                     cpuLoad.cpu_ticks[CPU_STATE_IDLE] + cpuLoad.cpu_ticks[CPU_STATE_NICE];
+            unsigned long long used = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
+                                    cpuLoad.cpu_ticks[CPU_STATE_NICE];
+            
+            if (total > 0) {
+                m_currentUsage = 100.0 * static_cast<double>(used) / total;
+                m_averageUsage = (m_averageUsage + m_currentUsage) * 0.5;
+            }
+        }
+
         m_lastUpdate = now;
     }
 
@@ -70,7 +91,7 @@ namespace Limitless {
         m_updateInterval = intervalSeconds;
     }
 
-    // macOSGPUPlatform Implementation - Ultra-safe version
+    // macOSGPUPlatform Implementation
     macOSGPUPlatform::macOSGPUPlatform()
         : m_available(false)
         , m_usage(0.0)
@@ -81,13 +102,14 @@ namespace Limitless {
     }
 
     macOSGPUPlatform::~macOSGPUPlatform() {
-        // Nothing to clean up
+        Shutdown();
     }
 
     bool macOSGPUPlatform::Initialize() {
-        // GPU monitoring not available in safe mode
+        // GPU monitoring on macOS requires additional libraries
+        // For now, we'll mark it as unavailable
         m_available = false;
-        LT_CORE_WARN("macOS GPU Platform not available - safe mode");
+        LT_CORE_WARN("macOS GPU Platform not available - requires additional libraries");
         return false;
     }
 
@@ -96,7 +118,21 @@ namespace Limitless {
     }
 
     void macOSGPUPlatform::Update() {
-        // No-op in safe mode
+        if (!m_available) {
+            return;
+        }
+
+        auto now = std::chrono::high_resolution_clock::now();
+        auto elapsed = std::chrono::duration<double>(now - m_lastUpdate).count();
+        
+        if (elapsed < m_updateInterval) {
+            return;
+        }
+
+        // GPU monitoring implementation would go here
+        // This requires platform-specific GPU monitoring libraries
+        
+        m_lastUpdate = now;
     }
 
     void macOSGPUPlatform::Reset() {
@@ -126,24 +162,24 @@ namespace Limitless {
         m_updateInterval = intervalSeconds;
     }
 
-    // macOSSystemPlatform Implementation - Ultra-safe version
+    // macOSSystemPlatform Implementation
     macOSSystemPlatform::macOSSystemPlatform()
-        : m_totalMemory(8ULL * 1024 * 1024 * 1024)  // 8GB default
-        , m_availableMemory(6ULL * 1024 * 1024 * 1024)  // 6GB default
+        : m_totalMemory(0)
+        , m_availableMemory(0)
         , m_processMemory(0)
         , m_processId(0)
         , m_threadId(0) {
     }
 
     macOSSystemPlatform::~macOSSystemPlatform() {
-        // Nothing to clean up
+        Shutdown();
     }
 
     bool macOSSystemPlatform::Initialize() {
-        // Ultra-safe initialization - minimal system calls
-        m_processId = 1; // Safe default
-        m_threadId = 1;  // Safe default
-        LT_CORE_INFO("macOS System Platform initialized (safe mode)");
+        m_processId = getpid();
+        // Use syscall for thread ID as gettid() is not available on all systems
+        m_threadId = static_cast<uint32_t>(syscall(SYS_gettid));
+        Update();
         return true;
     }
 
@@ -152,8 +188,23 @@ namespace Limitless {
     }
 
     void macOSSystemPlatform::Update() {
-        // Ultra-safe update - no system calls, just maintain default values
-        m_processMemory = 0; // Safe default
+        // Get system memory information
+        uint64_t totalMem;
+        size_t size = sizeof(totalMem);
+        if (sysctlbyname("hw.memsize", &totalMem, &size, nullptr, 0) == 0) {
+            m_totalMemory = totalMem;
+        }
+
+        // Get available memory (simplified - in practice you'd use vm_statistics)
+        // For now, we'll use a rough estimate
+        m_availableMemory = m_totalMemory * 0.8; // Assume 80% available
+
+        // Get process memory information
+        struct task_basic_info t_info;
+        mach_msg_type_number_t t_info_count = TASK_BASIC_INFO_COUNT;
+        if (task_info(mach_task_self(), TASK_BASIC_INFO, (task_info_t)&t_info, &t_info_count) == KERN_SUCCESS) {
+            m_processMemory = t_info.resident_size;
+        }
     }
 
     uint64_t macOSSystemPlatform::GetTotalMemory() const {

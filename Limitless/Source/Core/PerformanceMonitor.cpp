@@ -300,25 +300,6 @@ namespace Limitless {
         // Initialize frame time history (keep last 60 frames)
         m_frameTimes.resize(60, 0.0);
         
-        // Initialize current metrics to safe defaults
-        m_currentMetrics = {};
-        m_currentMetrics.frameTime = 0.0;
-        m_currentMetrics.frameTimeAvg = 0.0;
-        m_currentMetrics.fps = 0.0;
-        m_currentMetrics.fpsAvg = 0.0;
-        m_currentMetrics.frameCount = 0;
-        m_currentMetrics.totalMemory = 0;
-        m_currentMetrics.peakMemory = 0;
-        m_currentMetrics.currentMemory = 0;
-        m_currentMetrics.allocationCount = 0;
-        m_currentMetrics.cpuUsage = 0.0;
-        m_currentMetrics.cpuUsageAvg = 0.0;
-        m_currentMetrics.cpuCoreCount = 0;
-        m_currentMetrics.gpuUsage = 0.0;
-        m_currentMetrics.gpuMemoryUsage = 0.0;
-        m_currentMetrics.gpuTemperature = 0.0;
-        m_currentMetrics.timestamp = 0;
-        
         // Initialize platform-specific monitors
         m_cpuPlatform = PerformancePlatformFactory::CreateCPUPlatform();
         m_gpuPlatform = PerformancePlatformFactory::CreateGPUPlatform();
@@ -625,11 +606,8 @@ namespace Limitless {
         }
     }
 
-    std::string PerformanceMonitor::GetMetricsString() {
+    std::string PerformanceMonitor::GetMetricsString() const {
         std::lock_guard<std::mutex> lock(m_mutex);
-        
-        // Ensure metrics are up to date
-        CollectMetricsInternal();
         
         std::ostringstream oss;
         oss << std::fixed << std::setprecision(2);
