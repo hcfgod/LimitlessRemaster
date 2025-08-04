@@ -1,4 +1,7 @@
 #include "Platform/PerformancePlatform.h"
+#include "Platform/Platform.h"
+#include "Core/Error.h"
+#include "Core/Debug/Log.h"
 
 // Platform-specific includes
 #ifdef LT_PLATFORM_WINDOWS
@@ -19,8 +22,16 @@ namespace Limitless {
 #elif defined(LT_PLATFORM_MACOS)
         return std::make_unique<macOSCPUPlatform>();
 #else
-        // Return a null implementation for unsupported platforms
-        return nullptr;
+        std::string errorMsg = "CPU Platform not supported on this platform";
+        PlatformError error(errorMsg, std::source_location::current());
+        error.SetFunctionName("PerformancePlatformFactory::CreateCPUPlatform");
+        error.SetClassName("PerformancePlatformFactory");
+        error.SetModuleName("Platform");
+        error.AddContext("platform", LT_PLATFORM_NAME);
+        
+        LT_CORE_ERROR("{}", errorMsg);
+        Error::LogError(error);
+        LT_THROW_PLATFORM_ERROR(errorMsg);
 #endif
     }
 
@@ -32,8 +43,16 @@ namespace Limitless {
 #elif defined(LT_PLATFORM_MACOS)
         return std::make_unique<macOSGPUPlatform>();
 #else
-        // Return a null implementation for unsupported platforms
-        return nullptr;
+        std::string errorMsg = "GPU Platform not supported on this platform";
+        PlatformError error(errorMsg, std::source_location::current());
+        error.SetFunctionName("PerformancePlatformFactory::CreateGPUPlatform");
+        error.SetClassName("PerformancePlatformFactory");
+        error.SetModuleName("Platform");
+        error.AddContext("platform", LT_PLATFORM_NAME);
+        
+        LT_CORE_ERROR("{}", errorMsg);
+        Error::LogError(error);
+        LT_THROW_PLATFORM_ERROR(errorMsg);
 #endif
     }
 
@@ -45,8 +64,16 @@ namespace Limitless {
 #elif defined(LT_PLATFORM_MACOS)
         return std::make_unique<macOSSystemPlatform>();
 #else
-        // Return a null implementation for unsupported platforms
-        return nullptr;
+        std::string errorMsg = "System Platform not supported on this platform";
+        PlatformError error(errorMsg, std::source_location::current());
+        error.SetFunctionName("PerformancePlatformFactory::CreateSystemPlatform");
+        error.SetClassName("PerformancePlatformFactory");
+        error.SetModuleName("Platform");
+        error.AddContext("platform", LT_PLATFORM_NAME);
+        
+        LT_CORE_ERROR("{}", errorMsg);
+        Error::LogError(error);
+        LT_THROW_PLATFORM_ERROR(errorMsg);
 #endif
     }
 

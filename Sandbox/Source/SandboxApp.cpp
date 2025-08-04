@@ -6,36 +6,36 @@ namespace Limitless
 {
 	SandboxApp::SandboxApp()
 	{
-		LT_INFO("SandboxApp Constructor");
+		//LT_INFO("SandboxApp Constructor");
 	}
 
 	SandboxApp::~SandboxApp()
 	{
-		LT_INFO("SandboxApp Destructor");
+		//LT_INFO("SandboxApp Destructor");
 	}
 
 	bool SandboxApp::Initialize()
 	{
-		LT_INFO("SandboxApp Initialize");
+		//LT_INFO("SandboxApp Initialize");
 		
 		// Demonstrate platform detection
-		DemonstratePlatformDetection();
+		//DemonstratePlatformDetection();
 		
 		// Demonstrate error handling
-		DemonstrateErrorHandling();
+		//DemonstrateErrorHandling();
 		
 		// Demonstrate AsyncIO functionality
-		DemonstrateAsyncIO();
+		//DemonstrateAsyncIO();
 		
 		// Demonstrate Performance Monitoring
-		DemonstratePerformanceMonitoring();
+		//DemonstratePerformanceMonitoring();
 		
 		return true;
 	}
 
 	void SandboxApp::Shutdown()
 	{
-		LT_INFO("SandboxApp Shutdown");
+		//LT_INFO("SandboxApp Shutdown");
 	}
 
 	void SandboxApp::DemonstratePlatformDetection()
@@ -255,6 +255,85 @@ namespace Limitless
 		{
 			LT_INFO("Verification failed as expected: {}", error.GetErrorMessage());
 		}
+		
+		// Test LT_ASSERT
+		LT_INFO("Testing LT_ASSERT...");
+		try
+		{
+			LT_ASSERT(true, "This assertion should pass");
+			LT_INFO("Assertion passed");
+		}
+		catch (const Error& error)
+		{
+			LT_INFO("Unexpected assertion failure: {}", error.GetErrorMessage());
+		}
+		
+		try
+		{
+			LT_ASSERT(false, "This assertion should fail");
+		}
+		catch (const Error& error)
+		{
+			LT_INFO("Assertion failed as expected: {}", error.GetErrorMessage());
+		}
+		
+		// Test LT_THROW macros
+		LT_INFO("Testing LT_THROW macros...");
+		
+		try
+		{
+			LT_THROW_SYSTEM_ERROR("Test system error");
+		}
+		catch (const SystemError& error)
+		{
+			LT_INFO("System error thrown as expected: {}", error.GetErrorMessage());
+		}
+		
+		try
+		{
+			LT_THROW_PLATFORM_ERROR("Test platform error");
+		}
+		catch (const PlatformError& error)
+		{
+			LT_INFO("Platform error thrown as expected: {}", error.GetErrorMessage());
+		}
+		
+		try
+		{
+			LT_THROW_GRAPHICS_ERROR("Test graphics error");
+		}
+		catch (const GraphicsError& error)
+		{
+			LT_INFO("Graphics error thrown as expected: {}", error.GetErrorMessage());
+		}
+		
+		// Test LT_TRY macros
+		LT_INFO("Testing LT_TRY macros...");
+		
+		auto tryMacroResult = LT_TRY(42 + 123);
+		LT_INFO("LT_TRY success result: {}", tryMacroResult.GetValue());
+		
+		auto tryMacroErrorResult = LT_TRY([]() -> int {
+			LT_THROW_ERROR(ErrorCode::Timeout, "Test timeout error");
+		}());
+		LT_INFO("LT_TRY error result: {}", tryMacroErrorResult.GetError().GetErrorMessage());
+		
+		// Test LT_RETURN_IF_ERROR
+		LT_INFO("Testing LT_RETURN_IF_ERROR...");
+		
+		auto testFunction = [](bool shouldFail) -> Result<int> {
+			if (shouldFail)
+			{
+				return Result<int>(ErrorCode::InvalidState, "Function failed");
+			}
+			return Result<int>(42);
+		};
+		
+		auto result1 = testFunction(false);
+		LT_INFO("Function success result: {}", result1.GetValue());
+		
+		auto result2 = testFunction(true);
+		LT_INFO("Function error result: {}", result2.GetError().GetErrorMessage());
 		
 		// Test error code utilities
 		LT_INFO("Testing error code utilities...");

@@ -23,7 +23,7 @@ namespace Limitless
             if (threadCount == 0)
                 threadCount = std::thread::hardware_concurrency();
 
-            LT_INFO("Initializing AsyncIO with {} threads", threadCount);
+            LT_CORE_INFO("Initializing AsyncIO with {} threads", threadCount);
 
             m_Shutdown.store(false);
             m_Threads.reserve(threadCount);
@@ -34,7 +34,7 @@ namespace Limitless
             }
 
             m_Initialized.store(true);
-            LT_INFO("AsyncIO initialized successfully");
+            LT_CORE_INFO("AsyncIO initialized successfully");
         }
 
         void AsyncIO::Shutdown()
@@ -42,7 +42,7 @@ namespace Limitless
             if (!m_Initialized.load())
                 return;
 
-            LT_INFO("Shutting down AsyncIO...");
+            LT_CORE_INFO("Shutting down AsyncIO...");
 
             m_Shutdown.store(true);
 
@@ -56,7 +56,7 @@ namespace Limitless
             m_Threads.clear();
             m_Initialized.store(false);
 
-            LT_INFO("AsyncIO shutdown complete");
+            LT_CORE_INFO("AsyncIO shutdown complete");
         }
 
         void AsyncIO::WorkerThread()
@@ -74,7 +74,7 @@ namespace Limitless
                     }
                     catch (const std::exception& e)
                     {
-                        LT_ERROR("Exception in async worker thread: {}", e.what());
+                        LT_CORE_ERROR("Exception in async worker thread: {}", e.what());
                     }
                 }
                 else
@@ -88,7 +88,7 @@ namespace Limitless
         {
             if (!m_TaskQueue.TryPush(std::move(task)))
             {
-                LT_WARN("Async task queue is full, dropping task");
+                LT_CORE_WARN("Async task queue is full, dropping task");
             }
         }
 

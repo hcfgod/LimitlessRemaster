@@ -1,6 +1,4 @@
 #include "ConfigManager.h"
-#include "Core/Debug/Log.h"
-#include "Core/Concurrency/AsyncIO.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -59,7 +57,7 @@ namespace Limitless
         // Load from environment variables
         LoadFromEnvironment();
 
-        LT_INFO("ConfigManager initialized with config file: {}", configFile);
+        LT_CORE_INFO("ConfigManager initialized with config file: {}", configFile);
     }
 
     void ConfigManager::Shutdown()
@@ -67,7 +65,7 @@ namespace Limitless
         if (m_Shutdown.load())
             return;
 
-        LT_INFO("Shutting down ConfigManager...");
+        LT_CORE_INFO("Shutting down ConfigManager...");
 
         m_Shutdown.store(true);
 
@@ -97,7 +95,7 @@ namespace Limitless
             }
         }
 
-        LT_INFO("ConfigManager shutdown complete");
+        LT_CORE_INFO("ConfigManager shutdown complete");
     }
 
     bool ConfigManager::HasValue(const std::string& key) const
@@ -145,7 +143,29 @@ namespace Limitless
                             if (nestedIt.value().is_string())
                                 value = nestedIt.value().get<std::string>();
                             else if (nestedIt.value().is_number_integer())
-                                value = nestedIt.value().get<int>();
+                            {
+                                int intValue = nestedIt.value().get<int>();
+                                std::string fullKey = std::string(it.key()) + "." + std::string(nestedIt.key());
+                                
+                                // Apply type-specific logic
+                                if (fullKey.find("max_threads") != std::string::npos)
+                                {
+                                    value = static_cast<size_t>(intValue);
+                                }
+                                else if (fullKey.find("width") != std::string::npos || 
+                                         fullKey.find("height") != std::string::npos ||
+                                         fullKey.find("max_width") != std::string::npos ||
+                                         fullKey.find("max_height") != std::string::npos ||
+                                         fullKey.find("min_width") != std::string::npos ||
+                                         fullKey.find("min_height") != std::string::npos)
+                                {
+                                    value = static_cast<uint32_t>(intValue);
+                                }
+                                else
+                                {
+                                    value = intValue;
+                                }
+                            }
                             else if (nestedIt.value().is_number_float())
                                 value = nestedIt.value().get<float>();
                             else if (nestedIt.value().is_boolean())
@@ -165,7 +185,29 @@ namespace Limitless
                         if (it.value().is_string())
                             value = it.value().get<std::string>();
                         else if (it.value().is_number_integer())
-                            value = it.value().get<int>();
+                        {
+                            int intValue = it.value().get<int>();
+                            std::string key = it.key();
+                            
+                            // Apply type-specific logic for flat keys
+                            if (key.find("max_threads") != std::string::npos)
+                            {
+                                value = static_cast<size_t>(intValue);
+                            }
+                            else if (key.find("width") != std::string::npos || 
+                                     key.find("height") != std::string::npos ||
+                                     key.find("max_width") != std::string::npos ||
+                                     key.find("max_height") != std::string::npos ||
+                                     key.find("min_width") != std::string::npos ||
+                                     key.find("min_height") != std::string::npos)
+                            {
+                                value = static_cast<uint32_t>(intValue);
+                            }
+                            else
+                            {
+                                value = intValue;
+                            }
+                        }
                         else if (it.value().is_number_float())
                             value = it.value().get<float>();
                         else if (it.value().is_boolean())
@@ -178,11 +220,11 @@ namespace Limitless
                 }
 
                 m_TotalAsyncOperations.fetch_add(1, std::memory_order_relaxed);
-                LT_INFO("Configuration loaded from file: {} ({} entries)", filename, m_Config.size());
+                LT_CORE_INFO("Configuration loaded from file: {} ({} entries)", filename, m_Config.size());
             }
             catch (const std::exception& e)
             {
-                LT_ERROR("Failed to load configuration from file: {} - {}", filename, e.what());
+                LT_CORE_ERROR("Failed to load configuration from file: {} - {}", filename, e.what());
                 throw;
             }
         });
@@ -229,12 +271,12 @@ namespace Limitless
                 saveTask.Get();
 
                 m_TotalAsyncOperations.fetch_add(1, std::memory_order_relaxed);
-                LT_INFO("Configuration saved to file: {} ({} entries)", 
+                LT_CORE_INFO("Configuration saved to file: {} ({} entries)", 
                        filename.empty() ? m_ConfigFile : filename, m_Config.size());
             }
             catch (const std::exception& e)
             {
-                LT_ERROR("Failed to save configuration to file: {} - {}", 
+                LT_CORE_ERROR("Failed to save configuration to file: {} - {}", 
                         filename.empty() ? m_ConfigFile : filename, e.what());
                 throw;
             }
@@ -250,11 +292,11 @@ namespace Limitless
                 loadTask.Get();
 
                 m_TotalHotReloads.fetch_add(1, std::memory_order_relaxed);
-                LT_INFO("Configuration hot reloaded from file: {}", m_ConfigFile);
+                LT_CORE_INFO("Configuration hot reloaded from file: {}", m_ConfigFile);
             }
             catch (const std::exception& e)
             {
-                LT_ERROR("Failed to hot reload configuration: {}", e.what());
+                LT_CORE_ERROR("Failed to hot reload configuration: {}", e.what());
                 throw;
             }
         });
@@ -403,7 +445,7 @@ namespace Limitless
             {
                 if (!validatorIt->second(value))
                 {
-                    LT_ERROR("Configuration validation failed for key: {}", key);
+                    LT_CORE_ERROR("Configuration validation failed for key: {}", key);
                     return false;
                 }
             }
@@ -638,7 +680,6 @@ namespace Limitless
                         if (fullKey.find("max_file_size") != std::string::npos || 
                             fullKey.find("max_files") != std::string::npos)
                         {
-                            // These are typically size_t values
                             m_Config[fullKey] = static_cast<size_t>(intValue);
                             LT_CORE_DEBUG("Loaded config {} = {} (as size_t)", fullKey, intValue);
                         }
@@ -649,15 +690,13 @@ namespace Limitless
                                  fullKey.find("min_width") != std::string::npos ||
                                  fullKey.find("min_height") != std::string::npos)
                         {
-                            // These are typically uint32_t values
                             m_Config[fullKey] = static_cast<uint32_t>(intValue);
                             LT_CORE_DEBUG("Loaded config {} = {} (as uint32_t)", fullKey, intValue);
                         }
                         else if (fullKey.find("max_threads") != std::string::npos)
                         {
-                            // This is typically an int value
-                            m_Config[fullKey] = intValue;
-                            LT_CORE_DEBUG("Loaded config {} = {} (as int)", fullKey, intValue);
+                            m_Config[fullKey] = static_cast<size_t>(intValue);
+                            LT_CORE_DEBUG("Loaded config {} = {} (as size_t)", fullKey, intValue);
                         }
                         else
                         {
@@ -700,8 +739,8 @@ namespace Limitless
         std::unique_lock<std::shared_mutex> lock(m_ConfigMutex);
         
         // Window defaults
-        m_Config[Config::Window::WIDTH] = 1280;
-        m_Config[Config::Window::HEIGHT] = 720;
+        m_Config[Config::Window::WIDTH] = static_cast<uint32_t>(1280);
+        m_Config[Config::Window::HEIGHT] = static_cast<uint32_t>(720);
         m_Config[Config::Window::TITLE] = std::string("Limitless Engine");
         m_Config[Config::Window::FULLSCREEN] = false;
         m_Config[Config::Window::VSYNC] = false;
@@ -717,7 +756,7 @@ namespace Limitless
         m_Config[Config::Logging::MAX_FILES] = static_cast<size_t>(10);
 
         // System defaults
-        m_Config[Config::System::MAX_THREADS] = static_cast<int>(std::thread::hardware_concurrency());
+        m_Config[Config::System::MAX_THREADS] = static_cast<size_t>(std::thread::hardware_concurrency());
         m_Config[Config::System::WORKING_DIRECTORY] = std::string(".");
         m_Config[Config::System::TEMP_DIRECTORY] = std::string("temp");
         m_Config[Config::System::LOG_DIRECTORY] = std::string("logs");
@@ -759,11 +798,11 @@ namespace Limitless
                     }
                     catch (const std::exception& e)
                     {
-                        LT_ERROR("Exception in async config callback: {}", e.what());
+                        LT_CORE_ERROR("Exception in async config callback: {}", e.what());
                     }
                 }))
                 {
-                    LT_WARN("Async callback queue is full, dropping callback for key: {}", key);
+                    LT_CORE_WARN("Async callback queue is full, dropping callback for key: {}", key);
                 }
             }
         }
@@ -781,7 +820,7 @@ namespace Limitless
                 }
                 catch (const std::exception& e)
                 {
-                    LT_ERROR("Exception in legacy config callback: {}", e.what());
+                    LT_CORE_ERROR("Exception in legacy config callback: {}", e.what());
                 }
             }
         }
@@ -802,7 +841,7 @@ namespace Limitless
                 }
                 catch (const std::exception& e)
                 {
-                    LT_ERROR("Exception in async callback processing: {}", e.what());
+                    LT_CORE_ERROR("Exception in async callback processing: {}", e.what());
                 }
             }
             else

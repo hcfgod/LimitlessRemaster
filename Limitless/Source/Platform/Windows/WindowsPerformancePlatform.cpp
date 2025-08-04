@@ -1,5 +1,6 @@
 #include "WindowsPerformancePlatform.h"
 #include "Core/Debug/Log.h"
+#include "Core/Error.h"
 #include <chrono>
 #include <sstream>
 
@@ -26,6 +27,8 @@ namespace Limitless {
     }
 
     bool WindowsCPUPlatform::Initialize() {
+        LT_VERIFY(!m_initialized, "Windows CPU Platform already initialized");
+        
         if (m_initialized) {
             return true;
         }
@@ -34,6 +37,8 @@ namespace Limitless {
         SYSTEM_INFO sysInfo;
         GetSystemInfo(&sysInfo);
         m_coreCount = sysInfo.dwNumberOfProcessors;
+        
+        LT_VERIFY(m_coreCount > 0, "Invalid CPU core count");
 
         // Initialize PDH for CPU monitoring
         if (PdhOpenQuery(nullptr, 0, &m_query) == ERROR_SUCCESS) {
@@ -45,8 +50,16 @@ namespace Limitless {
             }
         }
 
-        LT_CORE_ERROR("Failed to initialize Windows CPU Platform");
-        return false;
+        std::string errorMsg = "Failed to initialize Windows CPU Platform - PDH initialization failed";
+        PlatformError error(errorMsg, std::source_location::current());
+        error.SetFunctionName("WindowsCPUPlatform::Initialize");
+        error.SetClassName("WindowsCPUPlatform");
+        error.SetModuleName("Platform/Windows");
+        error.AddContext("core_count", std::to_string(m_coreCount));
+        
+        LT_CORE_ERROR("{}", errorMsg);
+        Error::LogError(error);
+        LT_THROW_PLATFORM_ERROR(errorMsg);
     }
 
     void WindowsCPUPlatform::Shutdown() {
@@ -57,6 +70,8 @@ namespace Limitless {
     }
 
     void WindowsCPUPlatform::Update() {
+        LT_VERIFY(m_initialized, "Windows CPU Platform not initialized");
+        
         if (!m_initialized) {
             return;
         }
@@ -74,6 +89,32 @@ namespace Limitless {
                 m_currentUsage = value.doubleValue;
                 m_averageUsage = (m_averageUsage + m_currentUsage) * 0.5; // Simple moving average
             }
+            else
+            {
+                std::string errorMsg = "Failed to get formatted counter value for CPU usage";
+                PlatformError error(errorMsg, std::source_location::current());
+                error.SetFunctionName("WindowsCPUPlatform::Update");
+                error.SetClassName("WindowsCPUPlatform");
+                error.SetModuleName("Platform/Windows");
+                error.AddContext("current_usage", std::to_string(m_currentUsage));
+                error.AddContext("average_usage", std::to_string(m_averageUsage));
+                
+                LT_CORE_ERROR("{}", errorMsg);
+                Error::LogError(error);
+                LT_THROW_PLATFORM_ERROR(errorMsg);
+            }
+        }
+        else
+        {
+            std::string errorMsg = "Failed to collect query data for CPU usage";
+            PlatformError error(errorMsg, std::source_location::current());
+            error.SetFunctionName("WindowsCPUPlatform::Update");
+            error.SetClassName("WindowsCPUPlatform");
+            error.SetModuleName("Platform/Windows");
+            
+            LT_CORE_ERROR("{}", errorMsg);
+            Error::LogError(error);
+            LT_THROW_PLATFORM_ERROR(errorMsg);
         }
 
         m_lastUpdate = now;

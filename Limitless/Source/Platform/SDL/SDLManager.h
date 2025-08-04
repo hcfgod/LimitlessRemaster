@@ -1,7 +1,9 @@
 #pragma once
 
+#include "Core/Error.h"
 #include <SDL3/SDL.h>
 #include <memory>
+#include <string>
 
 namespace Limitless
 {
@@ -10,10 +12,16 @@ namespace Limitless
     public:
         static SDLManager& GetInstance();
         
-        bool Initialize();
+        Result<void> Initialize();
         void Shutdown();
         
         bool IsInitialized() const { return m_Initialized; }
+        
+        // Additional SDL management methods
+        Result<void> InitializeSubsystem(uint32_t flags);
+        Result<void> QuitSubsystem(uint32_t flags);
+        Result<std::string> GetLastError();
+        Result<void> ClearError();
         
         // Prevent copying
         SDLManager(const SDLManager&) = delete;

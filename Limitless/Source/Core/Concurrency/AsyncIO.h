@@ -242,7 +242,7 @@ namespace Limitless
                 }
                 catch (const std::exception& e)
                 {
-                    LT_ERROR("Async operation failed: {}", e.what());
+                    LT_CORE_ERROR("Async operation failed: {}", e.what());
                 }
             }).detach();
         }

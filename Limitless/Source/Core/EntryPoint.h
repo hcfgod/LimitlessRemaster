@@ -21,10 +21,7 @@ extern Limitless::Application* CreateApplication();
 
 int main(int argc, char** argv)
 {
-    // Default logging initialization so we can logs errors before the config and other systems are set up
-	Limitless::Log::Init();
-
-	// Initialize configuration system first
+	// Initialize configuration system
 	auto& configManager = Limitless::ConfigManager::GetInstance();
 	configManager.Initialize("config.json");
 	

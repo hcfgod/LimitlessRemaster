@@ -1,5 +1,6 @@
 #include "Platform.h"
 #include "Core/Debug/Log.h"
+#include "Core/Error.h"
 #include <SDL3/SDL.h>
 #include <iostream>
 #include <sstream>
@@ -67,23 +68,38 @@ namespace Limitless
         if (s_Initialized)
             return;
 
-        DetectPlatform();
-        DetectArchitecture();
-        DetectCompiler();
-        DetectOS();
-        DetectCapabilities();
-        DetectPaths();
-        DetectGraphicsAPIs();
+        try
+        {
+            DetectPlatform();
+            DetectArchitecture();
+            DetectCompiler();
+            DetectOS();
+            DetectCapabilities();
+            DetectPaths();
+            DetectGraphicsAPIs();
 
-        s_Initialized = true;
-        
-        LT_CORE_INFO("Platform Detection Initialized:");
-        LT_CORE_INFO("  Platform: {} ({})", s_PlatformInfo.platformName, GetPlatformString());
-        LT_CORE_INFO("  Architecture: {} ({})", s_PlatformInfo.architectureName, GetArchitectureString());
-        LT_CORE_INFO("  Compiler: {} {} ({})", s_PlatformInfo.compilerName, s_PlatformInfo.compilerVersion, GetCompilerString());
-        LT_CORE_INFO("  OS: {} {} ({})", s_PlatformInfo.osName, s_PlatformInfo.osVersion, GetOSString());
-        LT_CORE_INFO("  CPU Cores: {}", s_PlatformInfo.capabilities.cpuCount);
-        LT_CORE_INFO("  Total Memory: {} MB", s_PlatformInfo.capabilities.totalMemory / (1024 * 1024));
+            s_Initialized = true;
+            
+            LT_CORE_INFO("Platform Detection Initialized:");
+            LT_CORE_INFO("  Platform: {} ({})", s_PlatformInfo.platformName, GetPlatformString());
+            LT_CORE_INFO("  Architecture: {} ({})", s_PlatformInfo.architectureName, GetArchitectureString());
+            LT_CORE_INFO("  Compiler: {} {} ({})", s_PlatformInfo.compilerName, s_PlatformInfo.compilerVersion, GetCompilerString());
+            LT_CORE_INFO("  OS: {} {} ({})", s_PlatformInfo.osName, s_PlatformInfo.osVersion, GetOSString());
+            LT_CORE_INFO("  CPU Cores: {}", s_PlatformInfo.capabilities.cpuCount);
+            LT_CORE_INFO("  Total Memory: {} MB", s_PlatformInfo.capabilities.totalMemory / (1024 * 1024));
+        }
+        catch (const std::exception& e)
+        {
+            std::string errorMsg = fmt::format("Failed to initialize platform detection: {}", e.what());
+            PlatformError error(errorMsg, std::source_location::current());
+            error.SetFunctionName("PlatformDetection::Initialize");
+            error.SetClassName("PlatformDetection");
+            error.SetModuleName("Platform");
+            
+            LT_CORE_ERROR("{}", errorMsg);
+            Error::LogError(error);
+            LT_THROW_PLATFORM_ERROR(errorMsg);
+        }
     }
 
     void PlatformDetection::RefreshCapabilities()

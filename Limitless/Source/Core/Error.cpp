@@ -310,6 +310,27 @@ namespace Limitless
             }
         }
 
+        Result<void> TryVoid(std::function<void()> func)
+        {
+            try
+            {
+                func();
+                return Result<void>();
+            }
+            catch (const Error& error)
+            {
+                return Result<void>(error);
+            }
+            catch (const std::exception& e)
+            {
+                return Result<void>(Error(ErrorCode::Unknown, e.what(), std::source_location::current()));
+            }
+            catch (...)
+            {
+                return Result<void>(Error(ErrorCode::Unknown, "Unknown exception", std::source_location::current()));
+            }
+        }
+
         std::string GetErrorCodeString(ErrorCode code)
         {
             static const std::unordered_map<ErrorCode, std::string> errorCodeStrings = {

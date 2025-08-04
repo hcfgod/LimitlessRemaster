@@ -1,14 +1,18 @@
 #pragma once
 
+// Entry point
 #ifdef LT_ENABLE_ENTRYPOINT
 #include "Core/EntryPoint.h"
 #endif
 
+// Core
 #include "Core/Application.h"
 #include "Core/Error.h"
 #include "Core/ConfigManager.h"
 #include "Core/EventSystem.h"
 #include "Core/Debug/Log.h"
+
+// Platform
 #include "Platform/Platform.h"
 #include "Platform/Window.h"
 

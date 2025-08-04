@@ -1,7 +1,9 @@
 #include "SDLWindow.h"
 #include "Core/Debug/Log.h"
 #include "Core/ConfigManager.h"
+#include "Core/Error.h"
 #include <SDL3/SDL.h>
+#include <spdlog/fmt/fmt.h>
 
 namespace Limitless
 {
@@ -66,6 +68,10 @@ namespace Limitless
 
     void SDLWindow::Init(const WindowProps& props)
     {
+        LT_VERIFY(!props.Title.empty(), "Window title cannot be empty");
+        LT_VERIFY(props.Width > 0, "Window width must be greater than 0");
+        LT_VERIFY(props.Height > 0, "Window height must be greater than 0");
+        
         m_Data.Title = props.Title;
         m_Data.Width = props.Width;
         m_Data.Height = props.Height;
@@ -106,8 +112,19 @@ namespace Limitless
 
         if (!m_Window)
         {
-            LT_CORE_ERROR("SDL_CreateWindow failed: {}", SDL_GetError());
-            return;
+            std::string errorMsg = fmt::format("SDL_CreateWindow failed: {}", SDL_GetError());
+            GraphicsError error(errorMsg, std::source_location::current());
+            error.SetFunctionName("SDLWindow::Init");
+            error.SetClassName("SDLWindow");
+            error.SetModuleName("Platform/SDL");
+            error.AddContext("title", props.Title);
+            error.AddContext("width", std::to_string(props.Width));
+            error.AddContext("height", std::to_string(props.Height));
+            error.AddContext("flags", std::to_string(windowFlags));
+            
+            LT_CORE_ERROR("{}", errorMsg);
+            Error::LogError(error);
+            LT_THROW_GRAPHICS_ERROR(errorMsg);
         }
 
         // Set window position if specified
@@ -243,6 +260,10 @@ namespace Limitless
 
     void SDLWindow::SetSize(uint32_t width, uint32_t height)
     {
+        LT_VERIFY(m_Window, "Window not initialized");
+        LT_VERIFY(width > 0, "Window width must be greater than 0");
+        LT_VERIFY(height > 0, "Window height must be greater than 0");
+        
         if (m_Window)
         {
             SDL_SetWindowSize(m_Window, static_cast<int>(width), static_cast<int>(height));
@@ -260,6 +281,8 @@ namespace Limitless
 
     void SDLWindow::SetPosition(int x, int y)
     {
+        LT_VERIFY(m_Window, "Window not initialized");
+        
         if (m_Window)
         {
             SDL_SetWindowPosition(m_Window, x, y);
@@ -270,6 +293,8 @@ namespace Limitless
 
     void SDLWindow::CenterOnScreen()
     {
+        LT_VERIFY(m_Window, "Window not initialized");
+        
         if (m_Window)
         {
             SDL_SetWindowPosition(m_Window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
@@ -280,6 +305,9 @@ namespace Limitless
     // Window title and properties
     void SDLWindow::SetTitle(const std::string& title)
     {
+        LT_VERIFY(m_Window, "Window not initialized");
+        LT_VERIFY(!title.empty(), "Window title cannot be empty");
+        
         if (m_Window)
         {
             SDL_SetWindowTitle(m_Window, title.c_str());
@@ -289,6 +317,9 @@ namespace Limitless
 
     void SDLWindow::SetIcon(const std::string& iconPath)
     {
+        LT_VERIFY(m_Window, "Window not initialized");
+        LT_VERIFY(!iconPath.empty(), "Icon path cannot be empty");
+        
         if (m_Window && !iconPath.empty())
         {
             SDL_Surface* surface = SDL_LoadBMP(iconPath.c_str());
@@ -297,6 +328,18 @@ namespace Limitless
                 SDL_SetWindowIcon(m_Window, surface);
                 SDL_DestroySurface(surface);
                 m_Data.IconPath = iconPath;
+            }
+            else
+            {
+                std::string errorMsg = fmt::format("SDL_LoadBMP failed: {}", SDL_GetError());
+                GraphicsError error(errorMsg, std::source_location::current());
+                error.SetFunctionName("SDLWindow::SetIcon");
+                error.SetClassName("SDLWindow");
+                error.SetModuleName("Platform/SDL");
+                error.AddContext("icon_path", iconPath);
+                LT_CORE_ERROR("{}", errorMsg);
+                Error::LogError(error);
+                LT_THROW_GRAPHICS_ERROR(errorMsg);
             }
         }
     }
@@ -316,6 +359,8 @@ namespace Limitless
 
     void SDLWindow::SetState(WindowState state)
     {
+        LT_VERIFY(m_Window, "Window not initialized");
+        
         if (!m_Window) return;
         
         switch (state)
@@ -335,14 +380,49 @@ namespace Limitless
             case WindowState::Normal:
                 SDL_RestoreWindow(m_Window);
                 break;
+            default:
+                std::string errorMsg = fmt::format("Unknown window state: {}", static_cast<int>(state));
+                PlatformError error(errorMsg, std::source_location::current());
+                error.SetFunctionName("SDLWindow::SetState");
+                error.SetClassName("SDLWindow");
+                error.SetModuleName("Platform/SDL");
+                error.AddContext("state", std::to_string(static_cast<int>(state)));
+                
+                LT_CORE_ERROR("{}", errorMsg);
+                Error::LogError(error);
+                LT_THROW_PLATFORM_ERROR(errorMsg);
         }
     }
 
-    void SDLWindow::Minimize() { SetState(WindowState::Minimized); }
-    void SDLWindow::Maximize() { SetState(WindowState::Maximized); }
-    void SDLWindow::Restore() { SetState(WindowState::Normal); }
-    void SDLWindow::Show() { if (m_Window) SDL_ShowWindow(m_Window); }
-    void SDLWindow::Hide() { if (m_Window) SDL_HideWindow(m_Window); }
+    void SDLWindow::Minimize() 
+    { 
+        LT_VERIFY(m_Window, "Window not initialized");
+        SetState(WindowState::Minimized); 
+    }
+    
+    void SDLWindow::Maximize() 
+    { 
+        LT_VERIFY(m_Window, "Window not initialized");
+        SetState(WindowState::Maximized); 
+    }
+    
+    void SDLWindow::Restore() 
+    { 
+        LT_VERIFY(m_Window, "Window not initialized");
+        SetState(WindowState::Normal); 
+    }
+    
+    void SDLWindow::Show() 
+    { 
+        LT_VERIFY(m_Window, "Window not initialized");
+        if (m_Window) SDL_ShowWindow(m_Window); 
+    }
+    
+    void SDLWindow::Hide() 
+    { 
+        LT_VERIFY(m_Window, "Window not initialized");
+        if (m_Window) SDL_HideWindow(m_Window); 
+    }
 
     bool SDLWindow::IsVisible() const
     {
@@ -455,6 +535,10 @@ namespace Limitless
     // Size constraints
     void SDLWindow::SetMinimumSize(uint32_t width, uint32_t height)
     {
+        LT_VERIFY(m_Window, "Window not initialized");
+        LT_VERIFY(width == 0 || width <= m_Data.Width, "Minimum width cannot be greater than current window width");
+        LT_VERIFY(height == 0 || height <= m_Data.Height, "Minimum height cannot be greater than current window height");
+        
         if (m_Window)
         {
             SDL_SetWindowMinimumSize(m_Window, static_cast<int>(width), static_cast<int>(height));
@@ -465,6 +549,10 @@ namespace Limitless
 
     void SDLWindow::SetMaximumSize(uint32_t width, uint32_t height)
     {
+        LT_VERIFY(m_Window, "Window not initialized");
+        LT_VERIFY(width == 0 || width >= m_Data.Width, "Maximum width cannot be less than current window width");
+        LT_VERIFY(height == 0 || height >= m_Data.Height, "Maximum height cannot be less than current window height");
+        
         if (m_Window)
         {
             SDL_SetWindowMaximumSize(m_Window, static_cast<int>(width), static_cast<int>(height));
@@ -488,10 +576,13 @@ namespace Limitless
     // VSync and rendering
     void SDLWindow::SetVSync(bool enabled)
     {
+        LT_VERIFY(m_Window, "Window not initialized");
+        
         if (m_Window)
         {
             // Note: VSync is typically handled by the renderer, not the window
             m_Data.VSync = enabled;
+            LT_CORE_INFO("VSync set to: {}", enabled ? "enabled" : "disabled");
         }
     }
 
@@ -511,6 +602,8 @@ namespace Limitless
     // Input focus and capture
     void SDLWindow::SetInputFocus()
     {
+        LT_VERIFY(m_Window, "Window not initialized");
+        
         if (m_Window)
             SDL_RaiseWindow(m_Window);
     }
@@ -524,6 +617,8 @@ namespace Limitless
 
     void SDLWindow::SetMouseCapture(bool capture)
     {
+        LT_VERIFY(m_Window, "Window not initialized");
+        
         if (m_Window)
         {
             if (capture)
@@ -651,6 +746,9 @@ namespace Limitless
 
     void SDLWindow::SetOpacity(float opacity)
     {
+        LT_VERIFY(m_Window, "Window not initialized");
+        LT_VERIFY(opacity >= 0.0f && opacity <= 1.0f, "Opacity must be between 0.0 and 1.0");
+        
         if (m_Window)
         {
             SDL_SetWindowOpacity(m_Window, opacity);
@@ -693,7 +791,21 @@ namespace Limitless
     // Clipboard operations
     void SDLWindow::SetClipboardText(const std::string& text)
     {
-        SDL_SetClipboardText(text.c_str());
+        LT_VERIFY(!text.empty(), "Clipboard text cannot be empty");
+        
+        if (SDL_SetClipboardText(text.c_str()) != 0)
+        {
+            std::string errorMsg = fmt::format("Failed to set clipboard text: {}", SDL_GetError());
+            PlatformError error(errorMsg, std::source_location::current());
+            error.SetFunctionName("SDLWindow::SetClipboardText");
+            error.SetClassName("SDLWindow");
+            error.SetModuleName("Platform/SDL");
+            error.AddContext("text_length", std::to_string(text.length()));
+            
+            LT_CORE_ERROR("{}", errorMsg);
+            Error::LogError(error);
+            LT_THROW_PLATFORM_ERROR(errorMsg);
+        }
     }
 
     std::string SDLWindow::GetClipboardText() const
@@ -705,6 +817,8 @@ namespace Limitless
             SDL_free(text);
             return result;
         }
+        
+        // If no text in clipboard, return empty string (not an error)
         return "";
     }
 
@@ -735,6 +849,7 @@ namespace Limitless
 
     void SDLWindow::SetCursorPosition(int x, int y)
     {
+        LT_VERIFY(m_Window, "Window not initialized");
         SDL_WarpMouseInWindow(m_Window, x, y);
     }
 
@@ -876,11 +991,11 @@ namespace Limitless
             
             try {
                 if (key == "window.width") {
-                    int width = std::get<int>(value);
-                    currentWidth = static_cast<uint32_t>(width);
+                    uint32_t width = std::get<uint32_t>(value);
+                    currentWidth = width;
                 } else if (key == "window.height") {
-                    int height = std::get<int>(value);
-                    currentHeight = static_cast<uint32_t>(height);
+                    uint32_t height = std::get<uint32_t>(value);
+                    currentHeight = height;
                 }
                 
                 SetSize(currentWidth, currentHeight);

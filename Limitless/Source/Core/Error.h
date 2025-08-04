@@ -6,6 +6,7 @@
 #include <memory>
 #include <vector>
 #include <unordered_map>
+#include <type_traits>
 
 // For MSVC, we need to check _MSVC_LANG instead of __cplusplus
 #if (defined(_MSC_VER) && _MSVC_LANG >= 202002L) || (!defined(_MSC_VER) && __cplusplus >= 202002L)
@@ -430,9 +431,9 @@ namespace Limitless
         void Verify(bool condition, const std::string& message, 
                    const std::source_location& location = std::source_location::current());
         
-        // Try-catch wrapper
+        // Try-catch wrapper for non-void functions
         template<typename Func>
-        auto Try(Func&& func) -> Result<decltype(func())>
+        auto Try(Func&& func) -> typename std::enable_if<!std::is_same<decltype(func()), void>::value, Result<decltype(func())>>::type
         {
             try
             {
@@ -451,6 +452,34 @@ namespace Limitless
                 return Result<decltype(func())>(Error(ErrorCode::Unknown, "Unknown exception", std::source_location::current()));
             }
         }
+
+        // Try-catch wrapper for void functions
+        template<typename Func>
+        auto Try(Func&& func) -> typename std::enable_if<std::is_same<decltype(func()), void>::value, Result<void>>::type
+        {
+            try
+            {
+                func();
+                return Result<void>();
+            }
+            catch (const Error& error)
+            {
+                return Result<void>(error);
+            }
+            catch (const std::exception& e)
+            {
+                return Result<void>(Error(ErrorCode::Unknown, e.what(), std::source_location::current()));
+            }
+            catch (...)
+            {
+                return Result<void>(Error(ErrorCode::Unknown, "Unknown exception", std::source_location::current()));
+            }
+        }
+
+        // Explicit void function wrapper
+        Result<void> TryVoid(std::function<void()> func);
+        
+
         
         // Error code utilities
         std::string GetErrorCodeString(ErrorCode code);
@@ -498,7 +527,7 @@ namespace Limitless
         Limitless::ErrorHandling::Try([&]() { return expr; })
     
     #define LT_TRY_VOID(expr) \
-        Limitless::ErrorHandling::Try([&]() { expr; return; })
+        Limitless::ErrorHandling::Try([&]() { expr(); })
     
     #define LT_RETURN_IF_ERROR(result) \
         if (result.IsFailure()) return result.GetError();

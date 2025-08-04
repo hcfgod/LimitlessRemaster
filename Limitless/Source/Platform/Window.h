@@ -5,6 +5,7 @@
 #include <functional>
 #include <vector>
 #include <optional>
+#include "Core/Error.h"
 
 struct SDL_Window;
 
@@ -108,6 +109,14 @@ namespace Limitless
               PositionX(0), PositionY(0), Flags(WindowFlags::Resizable), VSync(true), HighDPI(true),
               Borderless(false), AlwaysOnTop(false), MinWidth(0), MinHeight(0), MaxWidth(0), MaxHeight(0)
         {
+            // Validate window properties
+            LT_VERIFY(!Title.empty(), "Window title cannot be empty");
+            LT_VERIFY(Width > 0, "Window width must be greater than 0");
+            LT_VERIFY(Height > 0, "Window height must be greater than 0");
+            LT_VERIFY(MinWidth == 0 || MinWidth <= Width, "Minimum width cannot be greater than window width");
+            LT_VERIFY(MinHeight == 0 || MinHeight <= Height, "Minimum height cannot be greater than window height");
+            LT_VERIFY(MaxWidth == 0 || MaxWidth >= Width, "Maximum width cannot be less than window width");
+            LT_VERIFY(MaxHeight == 0 || MaxHeight >= Height, "Maximum height cannot be less than window height");
         }
     };
 

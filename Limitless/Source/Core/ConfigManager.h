@@ -270,7 +270,7 @@ namespace Limitless
             }
             catch (const std::bad_variant_access&)
             {
-                LT_WARN("Configuration value type mismatch for key: {}", key);
+                LT_CORE_WARN("Configuration value type mismatch for key: {}", key);
             }
         }
 
@@ -296,7 +296,7 @@ namespace Limitless
             }
             catch (const std::bad_variant_access&)
             {
-                LT_WARN("Configuration value type mismatch for key: {}", key);
+                LT_CORE_WARN("Configuration value type mismatch for key: {}", key);
             }
         }
 

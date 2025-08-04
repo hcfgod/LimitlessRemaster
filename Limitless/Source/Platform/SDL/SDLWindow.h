@@ -2,6 +2,7 @@
 
 #include "Platform/Window.h"
 #include "Core/EventSystem.h"
+#include "Core/Error.h"
 #include <SDL3/SDL.h>
 #include <vector>
 

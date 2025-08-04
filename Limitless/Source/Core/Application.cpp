@@ -63,7 +63,8 @@ namespace Limitless
 		GetEventSystem().Initialize();
 
 		// Initialize SDL
-		if (!SDLManager::GetInstance().Initialize())
+		auto sdlInitResult = SDLManager::GetInstance().Initialize();
+		if (sdlInitResult.IsFailure())
 		{
 			return false;
 		}
