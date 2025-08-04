@@ -81,7 +81,6 @@ config.prod.json
 
 # Dependencies (if using package managers)
 node_modules/
-vendor/
 packages/
 
 # Documentation build
