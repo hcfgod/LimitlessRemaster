@@ -26,6 +26,11 @@ namespace Limitless {
         , m_coreCount(0)
         , m_updateInterval(1.0)
         , m_lastUpdate(std::chrono::high_resolution_clock::now()) {
+        
+        // Initialize with safe defaults
+        m_currentUsage = 0.0;
+        m_averageUsage = 0.0;
+        m_coreCount = 1; // Safe default
     }
 
     macOSCPUPlatform::~macOSCPUPlatform() {
@@ -33,9 +38,14 @@ namespace Limitless {
     }
 
     bool macOSCPUPlatform::Initialize() {
+        // Reset to safe defaults first
+        m_currentUsage = 0.0;
+        m_averageUsage = 0.0;
+        m_coreCount = 1;
+        
         // Get host port with error checking
         m_host = mach_host_self();
-        if (m_host == MACH_PORT_NULL) {
+        if (m_host == MACH_PORT_NULL || m_host == MACH_PORT_DEAD) {
             LT_CORE_ERROR("Failed to get mach host port");
             return false;
         }
@@ -54,12 +64,28 @@ namespace Limitless {
             }
         }
         
+        // Additional safety check for x64 architecture
+        if (m_coreCount == 0) {
+            m_coreCount = 1;
+        }
+        
+        // Validate host port is still valid
+        if (m_host == MACH_PORT_NULL || m_host == MACH_PORT_DEAD) {
+            LT_CORE_ERROR("Host port became invalid during initialization");
+            return false;
+        }
+        
         LT_CORE_INFO("macOS CPU Platform initialized with {} cores", m_coreCount);
         return true;
     }
 
     void macOSCPUPlatform::Shutdown() {
-        // Nothing to clean up - Mach ports are automatically managed
+        // Reset all values to safe defaults
+        m_currentUsage = 0.0;
+        m_averageUsage = 0.0;
+        m_coreCount = 0;
+        m_host = MACH_PORT_NULL;
+        m_lastUpdate = std::chrono::high_resolution_clock::now();
     }
 
     void macOSCPUPlatform::Update() {
@@ -74,22 +100,38 @@ namespace Limitless {
             return;
         }
 
-        // Use safer CPU statistics collection
-        host_cpu_load_info cpuLoad;
+        // Use safer CPU statistics collection with additional validation
+        host_cpu_load_info cpuLoad = {0}; // Initialize to zero
         mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
+        
+        // Validate host port before use
+        if (m_host == MACH_PORT_NULL || m_host == MACH_PORT_DEAD) {
+            return;
+        }
         
         kern_return_t result = host_statistics(m_host, HOST_CPU_LOAD_INFO, 
                                              reinterpret_cast<host_info_t>(&cpuLoad), &count);
         if (result == KERN_SUCCESS && count == HOST_CPU_LOAD_INFO_COUNT) {
-            // Calculate CPU usage with simple arithmetic
-            uint64_t total = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
-                           cpuLoad.cpu_ticks[CPU_STATE_IDLE] + cpuLoad.cpu_ticks[CPU_STATE_NICE];
-            uint64_t used = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
-                          cpuLoad.cpu_ticks[CPU_STATE_NICE];
+            // Validate CPU tick values before calculation
+            bool validTicks = true;
+            for (int i = 0; i < CPU_STATE_MAX; ++i) {
+                if (cpuLoad.cpu_ticks[i] < 0) {
+                    validTicks = false;
+                    break;
+                }
+            }
             
-            if (total > 0) {
-                m_currentUsage = 100.0 * static_cast<double>(used) / static_cast<double>(total);
-                m_averageUsage = (m_averageUsage + m_currentUsage) * 0.5;
+            if (validTicks) {
+                // Calculate CPU usage with simple arithmetic
+                uint64_t total = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
+                               cpuLoad.cpu_ticks[CPU_STATE_IDLE] + cpuLoad.cpu_ticks[CPU_STATE_NICE];
+                uint64_t used = cpuLoad.cpu_ticks[CPU_STATE_USER] + cpuLoad.cpu_ticks[CPU_STATE_SYSTEM] + 
+                              cpuLoad.cpu_ticks[CPU_STATE_NICE];
+                
+                if (total > 0) {
+                    m_currentUsage = 100.0 * static_cast<double>(used) / static_cast<double>(total);
+                    m_averageUsage = (m_averageUsage + m_currentUsage) * 0.5;
+                }
             }
         }
 
@@ -232,13 +274,19 @@ namespace Limitless {
 
         // Get available memory using vm_statistics (more reliable than estimation)
         vm_size_t pageSize = 0;
-        if (host_page_size(mach_host_self(), &pageSize) == KERN_SUCCESS && pageSize > 0) {
-            vm_statistics64_data_t vmStats;
-            mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
-            if (host_statistics64(mach_host_self(), HOST_VM_INFO64, 
-                                reinterpret_cast<host_info64_t>(&vmStats), &count) == KERN_SUCCESS) {
-                uint64_t freePages = vmStats.free_count + vmStats.inactive_count;
-                m_availableMemory = static_cast<uint64_t>(freePages) * pageSize;
+        host_t host = mach_host_self();
+        if (host != MACH_PORT_NULL && host != MACH_PORT_DEAD) {
+            if (host_page_size(host, &pageSize) == KERN_SUCCESS && pageSize > 0) {
+                vm_statistics64_data_t vmStats = {0}; // Initialize to zero
+                mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+                if (host_statistics64(host, HOST_VM_INFO64, 
+                                    reinterpret_cast<host_info64_t>(&vmStats), &count) == KERN_SUCCESS) {
+                    uint64_t freePages = vmStats.free_count + vmStats.inactive_count;
+                    m_availableMemory = static_cast<uint64_t>(freePages) * pageSize;
+                } else {
+                    // Fallback to rough estimation
+                    m_availableMemory = m_totalMemory * 0.8;
+                }
             } else {
                 // Fallback to rough estimation
                 m_availableMemory = m_totalMemory * 0.8;
@@ -249,12 +297,18 @@ namespace Limitless {
         }
 
         // Get process memory information with safer task_info call
-        struct task_basic_info t_info;
+        struct task_basic_info t_info = {0}; // Initialize to zero
         mach_msg_type_number_t t_info_count = TASK_BASIC_INFO_COUNT;
-        kern_return_t result = task_info(mach_task_self(), TASK_BASIC_INFO, 
-                                       reinterpret_cast<task_info_t>(&t_info), &t_info_count);
-        if (result == KERN_SUCCESS && t_info_count == TASK_BASIC_INFO_COUNT) {
-            m_processMemory = t_info.resident_size;
+        task_t task = mach_task_self();
+        if (task != MACH_PORT_NULL && task != MACH_PORT_DEAD) {
+            kern_return_t result = task_info(task, TASK_BASIC_INFO, 
+                                           reinterpret_cast<task_info_t>(&t_info), &t_info_count);
+            if (result == KERN_SUCCESS && t_info_count == TASK_BASIC_INFO_COUNT) {
+                m_processMemory = t_info.resident_size;
+            } else {
+                // Fallback to a safe default
+                m_processMemory = 0;
+            }
         } else {
             // Fallback to a safe default
             m_processMemory = 0;
