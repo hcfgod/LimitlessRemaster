@@ -43,6 +43,9 @@ namespace Limitless {
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
         SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+        
+        // Also set forward compatibility for better compatibility
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
     }
 
     void OpenGLContext::MakeCurrent() {
@@ -94,12 +97,52 @@ namespace Limitless {
         // Create the OpenGL context
         LT_CORE_INFO("Creating OpenGL context");
 
-        // Create context using attributes already set up in SetupAttributes()
+        // Try to create context with the requested version
         m_Context = SDL_GL_CreateContext(m_Window);
         
         if (!m_Context) {
-            LT_CORE_ERROR("Failed to create OpenGL context: {}", SDL_GetError());
-            throw std::runtime_error("Failed to create OpenGL context");
+            LT_CORE_WARN("Failed to create OpenGL context with version {}.{}: {}", 
+                        m_RequestMajor, m_RequestMinor, SDL_GetError());
+            
+            // Try with a lower version if the requested version failed
+            std::pair<int, int> fallbackVersions[] = {
+                {3, 3}, {3, 2}, {3, 1}, {3, 0}, {2, 1}, {2, 0}
+            };
+            
+            for (auto [major, minor] : fallbackVersions) {
+                if (major == m_RequestMajor && minor == m_RequestMinor) {
+                    continue; // Skip the version we already tried
+                }
+                
+                LT_CORE_INFO("Trying OpenGL version {}.{}", major, minor);
+                
+                // Clear previous attributes
+                SDL_GL_ResetAttributes();
+                
+                // Set new attributes
+                SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, major);
+                SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, minor);
+                SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+                SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+                SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+                SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+                
+                m_Context = SDL_GL_CreateContext(m_Window);
+                if (m_Context) {
+                    m_RequestMajor = major;
+                    m_RequestMinor = minor;
+                    LT_CORE_INFO("Successfully created OpenGL context with fallback version {}.{}", major, minor);
+                    break;
+                } else {
+                    LT_CORE_WARN("Failed to create OpenGL context with version {}.{}: {}", 
+                                major, minor, SDL_GetError());
+                }
+            }
+            
+            if (!m_Context) {
+                LT_CORE_ERROR("Failed to create OpenGL context with any version");
+                throw std::runtime_error("Failed to create OpenGL context");
+            }
         }
 
         LT_CORE_INFO("Successfully created OpenGL context with requested version {}.{}", m_RequestMajor, m_RequestMinor);

@@ -407,9 +407,15 @@ std::pair<int, int> GraphicsAPIDetector::GetBestSupportedOpenGLVersion() {
         return {3, 3}; // Fallback to minimum supported version
     }
     
-    // Try to get the best version we can, starting with the highest
+    // Try to detect the best supported version by attempting to create contexts
+    // Start with a conservative version and work up
+    std::pair<int, int> versions[] = {
+        {3, 3}, {3, 4}, {4, 0}, {4, 1}, {4, 2}, {4, 3}, {4, 4}, {4, 5}
+    };
+    
+    // For now, return a conservative version that should work on most systems
     // The actual version will be determined when the context is created
-    return {4, 5}; // Try for the best version first
+    return {3, 3}; // Start with OpenGL 3.3 which is widely supported
 }
 
 bool GraphicsAPIDetector::IsVersionSupported(int major, int minor, int requiredMajor, int requiredMinor) {
