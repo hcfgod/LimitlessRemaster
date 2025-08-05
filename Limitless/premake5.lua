@@ -15,11 +15,6 @@ project "Limitless"
         "Vendor/glad/glad/glad.c"
     }
 
-    -- Filter for C files to use C compilation flags
-    filter "files:**.c"
-        language "C"
-        buildoptions { "-std=c11" }
-
     includedirs
     {
         "Source",
@@ -69,10 +64,6 @@ project "Limitless"
             "/std:c++20"
         }
 
-        -- C files on Windows
-        filter "files:**.c"
-            buildoptions { "/std:c11" }
-
     filter "system:macosx"
         cppdialect "C++20"
         staticruntime "On"
@@ -87,10 +78,6 @@ project "Limitless"
         {
             "-std=c++20"
         }
-
-        -- C files on macOS
-        filter "files:**.c"
-            buildoptions { "-std=c11" }
 
         libdirs
         {
@@ -118,6 +105,10 @@ project "Limitless"
                 "LT_ARCHITECTURE_ARM64",
                 "LT_PLATFORM_MAC_ARM64"
             }
+            
+            -- Handle C files specifically for macOS ARM64
+            filter "files:**.c"
+                buildoptions { "-std=c11" }
 
         filter "architecture:x64"
             defines
@@ -139,10 +130,6 @@ project "Limitless"
         {
             "-std=c++20"
         }
-
-        -- C files on Linux
-        filter "files:**.c"
-            buildoptions { "-std=c11" }
 
         libdirs
         {
