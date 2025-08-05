@@ -152,7 +152,8 @@ project "Test"
             "udev",
             "pthread",
             "dl",
-            "m"
+            "m",
+            "atomic"
         }
 
         filter "architecture:ARM64"

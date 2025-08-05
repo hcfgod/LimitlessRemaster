@@ -152,7 +152,8 @@ project "Sandbox"
             "udev",
             "pthread",
             "dl",
-            "m"
+            "m",
+            "atomic"
         }
 
         filter "architecture:ARM64"
