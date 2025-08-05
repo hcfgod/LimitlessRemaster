@@ -22,3 +22,9 @@
 #include "Core/Concurrency/LockFreeQueue.h"
 #include "Core/Concurrency/AsyncIO.h"
 #include "Core/PerformanceMonitor.h"
+
+// Graphics
+#include "Graphics/RenderCommand.h"
+#include "Graphics/RenderCommandQueue.h"
+#include "Graphics/GraphicsEnums.h"
+#include "Graphics/Renderer.h"

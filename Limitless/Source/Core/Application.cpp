@@ -9,6 +9,7 @@
 #include "Core/EventSystem.h"
 #include "Core/Concurrency/AsyncIO.h"
 #include "Graphics/GraphicsAPIDetector.h"
+#include "Graphics/Renderer.h"
 #include <chrono>
 
 namespace Limitless
@@ -68,6 +69,9 @@ namespace Limitless
 			auto deltaTime = std::chrono::duration<float>(currentTime - lastTime).count();
 			lastTime = currentTime;
 
+			// Begin frame
+			Renderer::GetInstance().BeginFrame();
+
 			m_Window->OnUpdate();
 			
 			// Update layers
@@ -78,6 +82,10 @@ namespace Limitless
 			
 			// Render layers
 			m_LayerStack.OnRender();
+			
+			// End frame and swap buffers
+			Renderer::GetInstance().EndFrame();
+			Renderer::GetInstance().SwapBuffers();
 		}
 
 		LT_CORE_INFO("Main loop ended, beginning shutdown...");
@@ -110,6 +118,18 @@ namespace Limitless
 		if (!m_Window)
 		{
 			LT_CORE_ERROR("Window creation failed!");
+			return false;
+		}
+
+		// Initialize the global renderer with the graphics context from the window
+		auto graphicsContext = m_Window->GetGraphicsContext();
+		if (graphicsContext)
+		{
+			Renderer::GetInstance().Initialize(graphicsContext);
+		}
+		else
+		{
+			LT_CORE_ERROR("Window does not have a graphics context!");
 			return false;
 		}
 
@@ -151,6 +171,9 @@ namespace Limitless
 		
 		// Clear LayerStack (this will detach all layers)
 		m_LayerStack.Clear();
+		
+		// Shutdown the renderer
+		Renderer::GetInstance().Shutdown();
 		
 		// Clean up window (this will unsubscribe from events)
 		m_Window.reset();

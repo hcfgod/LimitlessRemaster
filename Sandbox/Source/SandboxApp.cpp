@@ -1,4 +1,5 @@
 #include "SandboxApp.h"
+#include "TestLayer.h"
 #include <iostream>
 #include <random>
 
@@ -17,49 +18,19 @@ namespace Limitless
 	bool SandboxApp::Initialize()
 	{
 		LT_INFO("SandboxApp Initialize");
+
+		// Create and push the test layer
+		auto testLayer = CreateLayer<TestLayer>();
+		PushLayer(testLayer);
 		
-		// Demonstrate the new Layer System
-		DemonstrateLayerSystem();
-		
+		LT_INFO("TestLayer pushed to layer stack");
+
 		return true;
 	}
 
 	void SandboxApp::Shutdown()
 	{
 		LT_INFO("SandboxApp Shutdown");
-		
-		// Remove layers from the layer stack
-		if (m_UIOverlay) PopOverlay(m_UIOverlay);
-		if (m_DebugOverlay) PopOverlay(m_DebugOverlay);
-		if (m_GameLayer) PopLayer(m_GameLayer);
-		if (m_BackgroundLayer) PopLayer(m_BackgroundLayer);
-	}
-
-	void SandboxApp::DemonstrateLayerSystem()
-	{
-		LT_INFO("=== Layer System Demo ===");
-		
-		// Create layers using the helper function
-		m_BackgroundLayer = CreateLayer<BackgroundLayer>();
-		m_GameLayer = CreateLayer<GameLayer>();
-		m_DebugOverlay = CreateLayer<DebugOverlay>();
-		m_UIOverlay = CreateLayer<UIOverlay>();
-		
-		// Add layers to the layer stack
-		// Regular layers (bottom to top rendering order)
-		PushLayer(m_BackgroundLayer);
-		PushLayer(m_GameLayer);
-		
-		// Overlays (rendered on top, processed first for events)
-		PushOverlay(m_DebugOverlay);
-		PushOverlay(m_UIOverlay);
-		
-		// Get layer stack statistics
-		auto stats = GetLayerStack().GetStats();
-		LT_INFO("Layer Stack created with {} total layers ({} regular, {} overlays)", 
-		        stats.totalLayers, stats.regularLayers, stats.overlays);
-		
-		LT_INFO("Layer System demonstration initialized");
 	}
 }
 

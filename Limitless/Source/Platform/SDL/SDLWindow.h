@@ -97,6 +97,9 @@ namespace Limitless
         void* GetNativeWindow() const override { return m_Window; }
         void* GetNativeWindowHandle() const override { return m_Window; }
         void GetWindowSize(int* width, int* height) const override;
+        
+        // Graphics context access
+        GraphicsContext* GetGraphicsContext() const override { return m_Context.get(); }
 
         // Event callbacks
         void SetCloseCallback(std::function<void()> callback) override { m_CloseCallback = callback; }

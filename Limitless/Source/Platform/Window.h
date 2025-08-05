@@ -206,6 +206,9 @@ namespace Limitless
         virtual void* GetNativeWindow() const = 0;
         virtual void* GetNativeWindowHandle() const = 0;
         virtual void GetWindowSize(int* width, int* height) const = 0;
+        
+        // Graphics context access
+        virtual GraphicsContext* GetGraphicsContext() const = 0;
 
         // Event callbacks
         virtual void SetCloseCallback(std::function<void()> callback) = 0;

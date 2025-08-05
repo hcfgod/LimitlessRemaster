@@ -28,28 +28,28 @@ namespace Limitless {
         // Get detailed information about the selected API
         auto apiInfo = GraphicsAPIDetector::GetAPI(selectedAPI);
         if (apiInfo) {
-            LT_CORE_INFO("API Version: {}", apiInfo->version.ToString());
-            LT_CORE_INFO("API Vendor: {}", apiInfo->version.vendor);
-            LT_CORE_INFO("API Renderer: {}", apiInfo->version.renderer);
+            LT_CORE_DEBUG("API Version: {}", apiInfo->version.ToString());
+            LT_CORE_DEBUG("API Vendor: {}", apiInfo->version.vendor);
+            LT_CORE_DEBUG("API Renderer: {}", apiInfo->version.renderer);
         }
         
         // Create context based on selected API
         switch (selectedAPI) {
             case GraphicsAPI::OpenGL:
-                LT_CORE_INFO("Creating OpenGL graphics context");
+                LT_CORE_DEBUG("Creating OpenGL graphics context");
                 return std::make_unique<OpenGLContext>();
             case GraphicsAPI::Vulkan:
-                LT_CORE_INFO("Creating Vulkan graphics context");
+                LT_CORE_DEBUG("Creating Vulkan graphics context");
                 // TODO: Implement VulkanContext
                 LT_CORE_WARN("Vulkan context not yet implemented, falling back to OpenGL");
                 return std::make_unique<OpenGLContext>();
             case GraphicsAPI::DirectX:
-                LT_CORE_INFO("Creating DirectX graphics context");
+                LT_CORE_DEBUG("Creating DirectX graphics context");
                 // TODO: Implement DirectXContext
                 LT_CORE_WARN("DirectX context not yet implemented, falling back to OpenGL");
                 return std::make_unique<OpenGLContext>();
             case GraphicsAPI::Metal:
-                LT_CORE_INFO("Creating Metal graphics context");
+                LT_CORE_DEBUG("Creating Metal graphics context");
                 // TODO: Implement MetalContext
                 LT_CORE_WARN("Metal context not yet implemented, falling back to OpenGL");
                 return std::make_unique<OpenGLContext>();

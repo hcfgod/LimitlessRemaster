@@ -74,7 +74,6 @@ void GraphicsAPIDetector::DetectOpenGL() {
     GraphicsAPICapabilities caps;
     caps.api = GraphicsAPI::OpenGL;
     
-    // Simple OpenGL detection without requiring SDL video subsystem
     // We'll assume OpenGL is available on most modern systems
     // The actual version and capabilities will be determined when the context is created
     
