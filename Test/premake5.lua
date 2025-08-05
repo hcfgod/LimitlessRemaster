@@ -155,7 +155,6 @@ project "Test"
             "m",
             "atomic",
             "GL",
-            "GLU",
             "GLX"
         }
 

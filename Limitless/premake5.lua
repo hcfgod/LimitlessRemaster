@@ -156,7 +156,6 @@ project "Limitless"
             "m",
             "atomic",
             "GL",
-            "GLU",
             "GLX"
         }
 

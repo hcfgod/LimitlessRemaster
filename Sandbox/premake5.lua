@@ -155,7 +155,6 @@ project "Sandbox"
             "m",
             "atomic",
             "GL",
-            "GLU",
             "GLX"
         }
 
