@@ -153,9 +153,7 @@ project "Test"
             "pthread",
             "dl",
             "m",
-            "atomic",
-            "GL",
-            "GLX"
+            "atomic"
         }
 
         filter "architecture:ARM64"
