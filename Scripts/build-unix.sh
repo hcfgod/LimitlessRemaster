@@ -166,7 +166,7 @@ check_dependencies() {
             
             mkdir build && cd build
             echo "Configuring SDL3 build..."
-            if ! cmake .. -DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_TEST=OFF; then
+            if ! cmake .. -DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_TEST=OFF -DSDL_OPENGL=ON -DSDL_OPENGLES=ON; then
                 echo "Error: Failed to configure SDL3 build"
                 cd "$(dirname "$0")/.."
                 rm -rf "$temp_dir"

@@ -39,7 +39,7 @@ jobs:
           cd SDL
           git checkout release-3.2.18
           mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_TEST=OFF
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_TEST=OFF -DSDL_OPENGL=ON -DSDL_OPENGLES=ON
           make -j$(nproc)
           sudo make install
           sudo ldconfig
