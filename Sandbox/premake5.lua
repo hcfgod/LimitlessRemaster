@@ -153,7 +153,10 @@ project "Sandbox"
             "pthread",
             "dl",
             "m",
-            "atomic"
+            "atomic",
+            "GL",
+            "GLU",
+            "GLX"
         }
 
         filter "architecture:ARM64"
