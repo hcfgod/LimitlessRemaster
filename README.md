@@ -8,7 +8,7 @@ A modern, enterprise-grade C++ engine with comprehensive advanced systems, exten
 - **🔧 Configuration Management System** - Centralized JSON-based configuration with validation and hot reloading
 - **📡 Event System** - Observer pattern implementation with priority handling and filtering
 - **🪟 Extended Window API** - Comprehensive window management with advanced features and cross-platform support
-- **⚡ High-Performance Concurrency** - Lock-free queues, async/await patterns, and thread-safe systems
+- **⚡ High-Performance Concurrency** - Lock-free queues, task-based async patterns, and thread-safe systems
 - **🛡️ Enhanced Error Handling** - Comprehensive error management with platform integration
 - **📊 Performance Monitoring** - Real-time performance tracking, frame timing, memory monitoring, and CPU/GPU metrics
 
@@ -17,7 +17,7 @@ A modern, enterprise-grade C++ engine with comprehensive advanced systems, exten
 - **🔧 Better Architecture** - Modular design, loose coupling, configuration-driven systems
 - **📚 Comprehensive Documentation** - Detailed guides for all systems and best practices
 - **🌐 Cross-Platform Excellence** - Native support for Windows, macOS, and Linux with platform-specific optimizations
-- **⚡ C++20 Coroutines** - Full support for async/await patterns with platform-specific build options
+- **⚡ C++20 Ready** - Modern language features with a future-friendly concurrency foundation
 
 ## 🏗️ **Project Structure**
 
@@ -36,13 +36,13 @@ LimitlessRemaster/
 ├── Scripts/           # Build scripts for all platforms
 ├── Vendor/            # Third-party dependencies
 ├── .github/workflows/ # GitHub Actions CI/CD
-└── docs/              # Comprehensive documentation
+└── Docs/              # Comprehensive documentation
 ```
 
 ## 🎯 **Key Features**
 
 ### **Core Systems**
-- **Modern C++20** - Latest language features and best practices with coroutine support
+- **Modern C++20** - Latest language features and best practices
 - **Cross-Platform** - Windows, macOS, Linux support with native optimizations
 - **Comprehensive Logging** - Multi-level logging with file rotation and conditional logging
 - **Error Handling** - Structured error management with custom exceptions and recovery
@@ -66,7 +66,7 @@ LimitlessRemaster/
 
 ### **Concurrency Features**
 - **Lock-Free Queues** - High-performance SPSC and MPMC queues with zero contention
-- **Async I/O System** - Coroutine-based file operations with thread pool management
+- **Async I/O System** - Thread-pool scheduled file operations via future-backed `Task`
 - **Thread-Safe Configuration** - Concurrent configuration access with async callbacks
 - **Work Stealing** - Advanced task scheduling for optimal load balancing
 - **Performance Monitoring** - Real-time concurrency statistics and profiling
@@ -413,20 +413,15 @@ window->GetMaximumSize(maxWidth, maxHeight);
 ## 📚 **Documentation**
 
 ### **System Guides**
-- **[Logging and Error Handling Guide](LOGGING_GUIDE.md)** - Detailed logging system documentation
-- **[Concurrency Guide](CONCURRENCY_GUIDE.md)** - High-performance concurrency systems and async/await patterns
-- **[Hot Reload Guide](HOT_RELOAD_GUIDE.md)** - Real-time configuration hot reloading
-- **[Platform and Error Guide](PLATFORM_AND_ERROR_GUIDE.md)** - Platform detection and error handling
-- **[Configuration Management](docs/CONFIGURATION_GUIDE.md)** - Configuration system usage and best practices
-- **[Event System](docs/EVENT_GUIDE.md)** - Event-driven architecture and patterns
-- **[Window API Guide](docs/WINDOW_API_GUIDE.md)** - Comprehensive window management and advanced features
-
-### **API Reference**
-- **[Core API](docs/API/CORE.md)** - Core system interfaces and classes
-- **[Configuration API](docs/API/CONFIG.md)** - Configuration management interfaces
-- **[Event API](docs/API/EVENT.md)** - Event system interfaces
-- **[Window API](docs/API/WINDOW.md)** - Extended window management interfaces
-- **[Concurrency API](docs/API/CONCURRENCY.md)** - Lock-free queues and async I/O interfaces
+- **[Logging Guide](Docs/LOGGING_GUIDE.md)** - Logging system setup and usage
+- **[Error Handling Guide](Docs/ERROR_HANDLING_GUIDE.md)** - `ErrorCode`, `Error`, and `Result<T>` patterns
+- **[Concurrency Guide](Docs/CONCURRENCY_GUIDE.md)** - Lock-free queues and `AsyncIO` thread-pool tasks
+- **[Hot Reload Guide](Docs/HOT_RELOAD_GUIDE.md)** - Real-time configuration hot reloading
+- **[Platform and Error Guide](Docs/PLATFORM_AND_ERROR_GUIDE.md)** - Platform detection and OS error integration
+- **[Build Configuration Guide](Docs/BUILD_CONFIGURATION_GUIDE.md)** - Premake targets, configs, and CI parity
+- **[Configuration Guide](Docs/CONFIGURATION_GUIDE.md)** - ConfigManager usage and best practices
+- **[Event System Guide](Docs/EVENT_GUIDE.md)** - Event-driven architecture and patterns
+- **[Window API Guide](Docs/WINDOW_API_GUIDE.md)** - Window creation and advanced behaviors
 
 ## 🔧 **Continuous Integration**
 

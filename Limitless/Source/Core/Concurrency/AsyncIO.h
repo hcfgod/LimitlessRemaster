@@ -1,6 +1,6 @@
 #pragma once
 #include "Core/Debug/Log.h"
-#include "LockFreeQueue.h"
+#include <atomic>
 #include <future>
 #include <thread>
 #include <vector>
@@ -11,116 +11,106 @@
 #include <fstream>
 #include <sstream>
 #include <chrono>
+#include <type_traits>
+#include <utility>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
 #include <nlohmann/json.hpp>
 
-// Remove coroutine dependencies for now - using std::function approach
+// NOTE:
+// This module provides a real asynchronous I/O scheduler:
+// - Work is enqueued into a lock-free queue
+// - A dedicated worker thread pool executes the work
+// - Callers receive a future-backed Task that can be waited/queried
 
 namespace Limitless
 {
     namespace Async
     {
-        // Forward declarations
-        template<typename T>
-        class Task;
-        class AsyncIO;
-
-        // Task promise type for async operations (simplified)
-        template<typename T>
-        struct TaskPromise
-        {
-            Task<T> get_return_object() noexcept { return Task<T>(); }
-            void return_value(T value) noexcept { m_Value = std::move(value); }
-            void unhandled_exception() noexcept { m_Exception = std::current_exception(); }
-
-            T m_Value;
-            std::exception_ptr m_Exception;
-        };
-
-        // Simple task wrapper for async operations
+        // Future-backed task wrapper for asynchronous operations.
         template<typename T>
         class Task
         {
         public:
             Task() = default;
-            Task(std::function<T()> func) : m_Function(std::move(func)) {}
+            explicit Task(std::shared_future<T> future) : m_Future(std::move(future)) {}
 
-            // Wait for completion and get result
-            T Get()
+            // Convenience: create a standalone asynchronous task executed by std::async.
+            // Prefer AsyncIO methods for I/O work so tasks run on the engine's thread pool.
+            template<typename Func, typename = std::enable_if_t<std::is_invocable_r_v<T, Func>>>
+            explicit Task(Func&& func)
+                : m_Future(std::async(std::launch::async, std::forward<Func>(func)).share())
             {
-                if (!m_Function)
-                    throw std::runtime_error("Task is not valid");
-
-                try
-                {
-                    return m_Function();
-                }
-                catch (...)
-                {
-                    m_Exception = std::current_exception();
-                    std::rethrow_exception(m_Exception);
-                }
             }
 
-            // Check if task is done
+            bool IsValid() const noexcept { return m_Future.valid(); }
+
+            // Check if task is done (ready).
             bool IsDone() const
             {
-                return m_Function == nullptr;
+                if (!m_Future.valid())
+                    return false;
+                return m_Future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
             }
 
-            // Wait for completion
-            void Wait()
+            void Wait() const
             {
-                if (m_Function)
-                {
-                    Get();
-                }
+                if (!m_Future.valid())
+                    throw std::runtime_error("Task is not valid");
+                m_Future.wait();
+            }
+
+            // Get the result (blocks until ready). Exceptions propagate from the worker thread.
+            T Get() const
+            {
+                if (!m_Future.valid())
+                    throw std::runtime_error("Task is not valid");
+                return T(m_Future.get());
             }
 
         private:
-            std::function<T()> m_Function;
-            std::exception_ptr m_Exception;
+            std::shared_future<T> m_Future;
         };
 
-        // Specialization for void tasks
         template<>
         class Task<void>
         {
         public:
             Task() = default;
-            Task(std::function<void()> func) : m_Function(std::move(func)) {}
+            explicit Task(std::shared_future<void> future) : m_Future(std::move(future)) {}
 
-            void Get()
+            template<typename Func, typename = std::enable_if_t<std::is_invocable_r_v<void, Func>>>
+            explicit Task(Func&& func)
+                : m_Future(std::async(std::launch::async, std::forward<Func>(func)).share())
             {
-                if (!m_Function)
-                    throw std::runtime_error("Task is not valid");
-
-                try
-                {
-                    m_Function();
-                }
-                catch (...)
-                {
-                    m_Exception = std::current_exception();
-                    std::rethrow_exception(m_Exception);
-                }
             }
+
+            bool IsValid() const noexcept { return m_Future.valid(); }
 
             bool IsDone() const
             {
-                return m_Function == nullptr;
+                if (!m_Future.valid())
+                    return false;
+                return m_Future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
             }
 
-            void Wait()
+            void Wait() const
             {
-                if (m_Function)
-                {
-                    Get();
-                }
+                if (!m_Future.valid())
+                    throw std::runtime_error("Task is not valid");
+                m_Future.wait();
+            }
+
+            void Get() const
+            {
+                if (!m_Future.valid())
+                    throw std::runtime_error("Task is not valid");
+                m_Future.get();
             }
 
         private:
-            std::function<void()> m_Function;
-            std::exception_ptr m_Exception;
+            std::shared_future<void> m_Future;
         };
 
         // Async I/O manager
@@ -156,19 +146,57 @@ namespace Limitless
 
             // Thread pool management
             size_t GetThreadCount() const { return m_Threads.size(); }
-            bool IsInitialized() const { return m_Initialized; }
+            bool IsInitialized() const { return m_Initialized.load(); }
 
         private:
             AsyncIO() = default;
-            ~AsyncIO() = default;
+            ~AsyncIO()
+            {
+                // Ensure we never hit std::terminate due to joinable threads during
+                // static deinitialization / process exit.
+                Shutdown();
+            }
 
             void WorkerThread();
             void EnqueueTask(std::function<void()> task);
 
+            template<typename Func>
+            auto Submit(Func&& func) -> Task<std::invoke_result_t<Func>>
+            {
+                using ReturnType = std::invoke_result_t<Func>;
+
+                auto packagedTask = std::make_shared<std::packaged_task<ReturnType()>>(std::forward<Func>(func));
+                std::shared_future<ReturnType> future = packagedTask->get_future().share();
+
+                // If AsyncIO is not initialized (or is shutting down), execute inline.
+                // This is critical for shutdown paths (ex: ConfigManager final save) where
+                // re-initializing a worker pool can create joinable threads that outlive main().
+                if (!m_Initialized.load() || m_Shutdown.load() || !m_AcceptingTasks.load())
+                {
+                    (*packagedTask)();
+                    return Task<ReturnType>(std::move(future));
+                }
+
+                EnqueueTask([packagedTask]() mutable { (*packagedTask)(); });
+                return Task<ReturnType>(std::move(future));
+            }
+
             std::vector<std::thread> m_Threads;
-            Concurrency::LockFreeMPMCQueue<std::function<void()>, 8192> m_TaskQueue;
+
+            // IMPORTANT:
+            // The project contains experimental lock-free queues. The current MPMC queue implementation
+            // is not safe for a work-stealing style scheduler because it does not protect against a
+            // consumer observing the tail reservation before the producer stores the element.
+            //
+            // AsyncIO correctness is higher priority than lock-free behavior, so we use a bounded,
+            // blocking MPMC queue here.
+            std::mutex m_TaskMutex;
+            std::condition_variable m_TaskCv;
+            std::deque<std::function<void()>> m_TaskQueue;
+            size_t m_MaxQueueSize = 8192;
             std::atomic<bool> m_Shutdown{false};
             std::atomic<bool> m_Initialized{false};
+            std::atomic<bool> m_AcceptingTasks{false};
         };
 
         // Convenience functions
@@ -270,4 +298,4 @@ namespace Limitless
     }
 }
 
-// Template implementations removed - using std::function approach 
+// Template implementations are header-only by design.  

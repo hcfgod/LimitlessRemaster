@@ -17,11 +17,14 @@ namespace Limitless
 
         void AsyncIO::Initialize(size_t threadCount)
         {
-            if (m_Initialized.load())
+            bool expectedInitialized = false;
+            if (!m_Initialized.compare_exchange_strong(expectedInitialized, true))
                 return;
 
             if (threadCount == 0)
                 threadCount = std::thread::hardware_concurrency();
+            if (threadCount == 0)
+                threadCount = 4;
 
             LT_CORE_INFO("Initializing AsyncIO with {} threads", threadCount);
 
@@ -33,7 +36,7 @@ namespace Limitless
                 m_Threads.emplace_back(&AsyncIO::WorkerThread, this);
             }
 
-            m_Initialized.store(true);
+            m_AcceptingTasks.store(true);
             LT_CORE_INFO("AsyncIO initialized successfully");
         }
 
@@ -44,7 +47,10 @@ namespace Limitless
 
             LT_CORE_INFO("Shutting down AsyncIO...");
 
+            // Stop accepting new tasks, then request worker shutdown. Workers drain the queue before exiting.
+            m_AcceptingTasks.store(false);
             m_Shutdown.store(true);
+            m_TaskCv.notify_all();
 
             // Wait for all threads to finish
             for (auto& thread : m_Threads)
@@ -61,41 +67,66 @@ namespace Limitless
 
         void AsyncIO::WorkerThread()
         {
-            while (!m_Shutdown.load())
+            for (;;)
             {
-                auto taskResult = m_TaskQueue.TryPop();
-                if (taskResult.has_value())
+                std::function<void()> task;
                 {
-                    try
-                    {
-                        auto& task = taskResult.value();
-                        if (task)
-                            task();
-                    }
-                    catch (const std::exception& e)
-                    {
-                        LT_CORE_ERROR("Exception in async worker thread: {}", e.what());
-                    }
+                    std::unique_lock<std::mutex> lock(m_TaskMutex);
+                    m_TaskCv.wait(lock, [this]() {
+                        return m_Shutdown.load() || !m_TaskQueue.empty();
+                    });
+
+                    if (m_Shutdown.load() && m_TaskQueue.empty())
+                        break;
+
+                    task = std::move(m_TaskQueue.front());
+                    m_TaskQueue.pop_front();
                 }
-                else
+
+                try
                 {
-                    std::this_thread::yield();
+                    if (task)
+                        task();
+                }
+                catch (const std::exception& e)
+                {
+                    LT_CORE_ERROR("Exception in async worker thread: {}", e.what());
                 }
             }
         }
 
         void AsyncIO::EnqueueTask(std::function<void()> task)
         {
-            if (!m_TaskQueue.TryPush(std::move(task)))
+            if (!task)
+                return;
+
+            // If the queue is saturated, execute inline so futures always complete.
+            // This avoids deadlocking callers that are waiting on futures during startup.
             {
-                LT_CORE_WARN("Async task queue is full, dropping task");
+                std::lock_guard<std::mutex> lock(m_TaskMutex);
+                if (!m_Shutdown.load() && m_TaskQueue.size() < m_MaxQueueSize)
+                {
+                    m_TaskQueue.emplace_back(std::move(task));
+                    m_TaskCv.notify_one();
+                    return;
+                }
             }
+
+            if (m_Shutdown.load())
+            {
+                // During shutdown, don't queue new work; execute inline to complete any waiting futures.
+                task();
+                return;
+            }
+
+            LT_CORE_WARN("Async task queue is full; executing task inline");
+            task();
         }
 
         // File operations implementation
         Task<std::string> AsyncIO::ReadFileAsync(const std::string& path)
         {
-            return Task<std::string>([path]() -> std::string {
+            return Submit([path]() -> std::string {
                 std::ifstream file(path, std::ios::binary);
                 if (!file.is_open())
                 {
@@ -110,7 +141,7 @@ namespace Limitless
 
         Task<void> AsyncIO::WriteFileAsync(const std::string& path, const std::string& content)
         {
-            return Task<void>([path, content]() -> void {
+            return Submit([path, content]() -> void {
                 std::ofstream file(path, std::ios::binary);
                 if (!file.is_open())
                 {
@@ -127,14 +158,14 @@ namespace Limitless
 
         Task<bool> AsyncIO::FileExistsAsync(const std::string& path)
         {
-            return Task<bool>([path]() -> bool {
+            return Submit([path]() -> bool {
                 return std::filesystem::exists(path);
             });
         }
 
         Task<std::vector<std::string>> AsyncIO::ReadLinesAsync(const std::string& path)
         {
-            return Task<std::vector<std::string>>([path]() -> std::vector<std::string> {
+            return Submit([path]() -> std::vector<std::string> {
                 std::ifstream file(path);
                 if (!file.is_open())
                 {
@@ -154,7 +185,7 @@ namespace Limitless
 
         Task<void> AsyncIO::AppendFileAsync(const std::string& path, const std::string& content)
         {
-            return Task<void>([path, content]() -> void {
+            return Submit([path, content]() -> void {
                 std::ofstream file(path, std::ios::app | std::ios::binary);
                 if (!file.is_open())
                 {
@@ -171,7 +202,7 @@ namespace Limitless
 
         Task<std::vector<std::string>> AsyncIO::ListDirectoryAsync(const std::string& path)
         {
-            return Task<std::vector<std::string>>([path]() -> std::vector<std::string> {
+            return Submit([path]() -> std::vector<std::string> {
                 std::vector<std::string> entries;
                 
                 try
@@ -192,7 +223,7 @@ namespace Limitless
 
         Task<bool> AsyncIO::CreateDirectoryAsync(const std::string& path)
         {
-            return Task<bool>([path]() -> bool {
+            return Submit([path]() -> bool {
                 try
                 {
                     return std::filesystem::create_directories(path);
@@ -206,7 +237,7 @@ namespace Limitless
 
         Task<bool> AsyncIO::DeleteFileAsync(const std::string& path)
         {
-            return Task<bool>([path]() -> bool {
+            return Submit([path]() -> bool {
                 try
                 {
                     return std::filesystem::remove(path);
@@ -220,7 +251,7 @@ namespace Limitless
 
         Task<bool> AsyncIO::DeleteDirectoryAsync(const std::string& path)
         {
-            return Task<bool>([path]() -> bool {
+            return Submit([path]() -> bool {
                 try
                 {
                     return std::filesystem::remove_all(path) > 0;
@@ -234,7 +265,7 @@ namespace Limitless
 
         Task<void> AsyncIO::SaveConfigAsync(const std::string& path, const nlohmann::json& config)
         {
-            return Task<void>([path, config]() -> void {
+            return Submit([path, config]() -> void {
                 std::ofstream file(path);
                 if (!file.is_open())
                 {
@@ -251,7 +282,7 @@ namespace Limitless
 
         Task<nlohmann::json> AsyncIO::LoadConfigAsync(const std::string& path)
         {
-            return Task<nlohmann::json>([path]() -> nlohmann::json {
+            return Submit([path]() -> nlohmann::json {
                 std::ifstream file(path);
                 if (!file.is_open())
                 {
@@ -266,7 +297,7 @@ namespace Limitless
 
         Task<size_t> AsyncIO::GetFileSizeAsync(const std::string& path)
         {
-            return Task<size_t>([path]() -> size_t {
+            return Submit([path]() -> size_t {
                 try
                 {
                     return std::filesystem::file_size(path);
@@ -280,7 +311,7 @@ namespace Limitless
 
         Task<std::filesystem::file_time_type> AsyncIO::GetFileModifiedTimeAsync(const std::string& path)
         {
-            return Task<std::filesystem::file_time_type>([path]() -> std::filesystem::file_time_type {
+            return Submit([path]() -> std::filesystem::file_time_type {
                 try
                 {
                     return std::filesystem::last_write_time(path);

@@ -8,12 +8,19 @@ The Limitless Engine provides a comprehensive concurrency system with AsyncIO ca
 
 ### Initialization
 
-The AsyncIO system is automatically initialized with configuration from `config.json`:
+When using `Limitless::Application`, the AsyncIO system is initialized early using `system.max_threads` from `config.json`:
 
 ```cpp
 auto& asyncIO = Limitless::Async::GetAsyncIO();
 size_t threadCount = configManager.GetValue<size_t>("system.max_threads", 0);
 asyncIO.Initialize(threadCount);
+```
+
+If you use `AsyncIO` outside `Limitless::Application`, call `Initialize()` yourself (passing `0` selects a sensible default):
+
+```cpp
+auto& asyncIO = Limitless::Async::GetAsyncIO();
+asyncIO.Initialize(0);
 ```
 
 ### Configuration
@@ -23,12 +30,12 @@ Add AsyncIO settings to your `config.json`:
 ```json
 {
   "system": {
-    "max_threads": 8,
-    "asyncio_enabled": true,
-    "asyncio_queue_size": 8192
+    "max_threads": 8
   }
 }
 ```
+
+Note: the internal queue capacity is currently a compile-time constant.  
 
 ## File Operations
 

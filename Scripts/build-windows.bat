@@ -11,6 +11,13 @@ if "%2"=="ARM64" set PLATFORM=ARM64
 
 echo Building LimitlessRemaster in %CONFIGURATION% configuration for %PLATFORM%...
 
+REM Ensure Premake5 exists (download if missing)
+call "%~dp0BootstrapPremake.bat"
+if errorlevel 1 (
+    echo Error: Premake bootstrap failed.
+    exit /b 1
+)
+
 REM Change to the project root directory
 cd /d "%~dp0.."
 

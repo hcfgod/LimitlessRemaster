@@ -2,6 +2,7 @@
 #include "Application.h"
 #include "ConfigManager.h"
 #include "Debug/Log.h"
+#include <iostream>
 
 // Prevent console window from appearing in Dist builds on Windows
 #if defined(LT_PLATFORM_WINDOWS) && defined(LT_CONFIG_DIST)
@@ -60,15 +61,29 @@ int main(int argc, char** argv)
 		LT_CORE_ERROR("Failed to create application instance!");
 		return -1;
 	}
-	
-	// Shutdown logging system
-	LT_CORE_INFO("Shutting down logging system...");
-	Limitless::Log::Shutdown();
-	
-	// Shutdown configuration system last
+
+	// ---------------------------------------------------------------------------------
+	// Shutdown ordering matters.
+	//
+	// Many engine systems (ConfigManager, hot reload, async tasks) may still be running
+	// background threads and/or performing final file I/O during shutdown.
+	//
+	// Keep logging alive until *after* those systems are fully torn down. This avoids
+	// shutdown-time races where another thread attempts to log while spdlog is tearing
+	// down its async thread pool.
+	// ---------------------------------------------------------------------------------
+
 	LT_CORE_INFO("Shutting down configuration system...");
 	configManager.Shutdown();
-	LT_CORE_INFO("=== Limitless Engine Shutdown Complete ===");
+	LT_CORE_INFO("ConfigManager shutdown complete");
+
+	LT_CORE_INFO("Shutting down logging system...");
+	Limitless::Log::Shutdown();
+
+	// Don't use LT_CORE_* after Log::Shutdown().
+	#ifdef LT_CONSOLE_LOGGING_ENABLED
+	std::cout << "=== Limitless Engine Shutdown Complete ===" << std::endl;
+	#endif
 
 	return 0;
 }

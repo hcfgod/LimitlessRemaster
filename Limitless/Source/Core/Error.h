@@ -2,11 +2,13 @@
 
 #include <exception>
 #include <string>
+#include <stdexcept>
 #include <functional>
 #include <memory>
 #include <vector>
 #include <unordered_map>
 #include <type_traits>
+#include <variant>
 
 // For MSVC, we need to check _MSVC_LANG instead of __cplusplus
 #if (defined(_MSC_VER) && _MSVC_LANG >= 202002L) || (!defined(_MSC_VER) && __cplusplus >= 202002L)
@@ -335,51 +337,72 @@ namespace Limitless
     class Result
     {
     public:
-        // Success constructor
-        Result(const T& value) : m_Value(value), m_Error(ErrorCode::Success, "", std::source_location::current()) {}
-        Result(T&& value) : m_Value(std::move(value)), m_Error(ErrorCode::Success, "", std::source_location::current()) {}
-        
-        // Error constructor
-        Result(const Error& error) : m_Error(error) {}
-        Result(ErrorCode code, const std::string& message) : m_Error(code, message, std::source_location::current()) {}
+        // Success constructors
+        Result(const T& value) : m_Storage(value) {}
+        Result(T&& value) : m_Storage(std::move(value)) {}
+
+        // Error constructors
+        Result(const Error& error) : m_Storage(error) {}
+        Result(Error&& error) : m_Storage(std::move(error)) {}
+
+        Result(ErrorCode code, const std::string& message,
+               const std::source_location& location = std::source_location::current(),
+               ErrorSeverity severity = ErrorSeverity::Error)
+            : m_Storage(Error(code, message, location, severity))
+        {
+        }
         
         // Check if successful
-        bool IsSuccess() const { return m_Error.IsSuccess(); }
-        bool IsFailure() const { return m_Error.IsFailure(); }
+        bool IsSuccess() const { return std::holds_alternative<T>(m_Storage); }
+        bool IsFailure() const { return std::holds_alternative<Error>(m_Storage); }
         
         // Get value (throws if error)
         T& GetValue() 
         { 
-            if (IsFailure()) throw m_Error;
-            return m_Value;
+            if (IsFailure()) throw GetError();
+            return std::get<T>(m_Storage);
         }
         
         const T& GetValue() const 
         { 
-            if (IsFailure()) throw m_Error;
-            return m_Value;
+            if (IsFailure()) throw GetError();
+            return std::get<T>(m_Storage);
         }
         
         // Get error
-        const Error& GetError() const { return m_Error; }
+        const Error& GetError() const
+        {
+            if (IsSuccess())
+                throw std::logic_error("Result does not contain an error");
+            return std::get<Error>(m_Storage);
+        }
+
+        const Error* GetErrorPtr() const noexcept
+        {
+            return std::get_if<Error>(&m_Storage);
+        }
         
         // Safe value access
-        T* GetValuePtr() { return IsSuccess() ? &m_Value : nullptr; }
-        const T* GetValuePtr() const { return IsSuccess() ? &m_Value : nullptr; }
+        T* GetValuePtr() { return std::get_if<T>(&m_Storage); }
+        const T* GetValuePtr() const { return std::get_if<T>(&m_Storage); }
         
         // Value or default
-        T GetValueOr(const T& defaultValue) const { return IsSuccess() ? m_Value : defaultValue; }
+        T GetValueOr(const T& defaultValue) const
+        {
+            if (const T* value = std::get_if<T>(&m_Storage))
+                return *value;
+            return defaultValue;
+        }
         
         // Value or throw
         T GetValueOrThrow() const 
         { 
-            if (IsFailure()) throw m_Error;
-            return m_Value;
+            if (IsFailure()) throw GetError();
+            return std::get<T>(m_Storage);
         }
 
     private:
-        T m_Value;
-        Error m_Error;
+        std::variant<T, Error> m_Storage;
     };
 
     // Specialization for void
@@ -388,24 +411,41 @@ namespace Limitless
     {
     public:
         // Success constructor
-        Result() : m_Error(ErrorCode::Success, "", std::source_location::current()) {}
+        Result() : m_Storage(std::monostate{}) {}
         
         // Error constructor
-        Result(const Error& error) : m_Error(error) {}
-        Result(ErrorCode code, const std::string& message) : m_Error(code, message, std::source_location::current()) {}
+        Result(const Error& error) : m_Storage(error) {}
+        Result(Error&& error) : m_Storage(std::move(error)) {}
+
+        Result(ErrorCode code, const std::string& message,
+               const std::source_location& location = std::source_location::current(),
+               ErrorSeverity severity = ErrorSeverity::Error)
+            : m_Storage(Error(code, message, location, severity))
+        {
+        }
         
         // Check if successful
-        bool IsSuccess() const { return m_Error.IsSuccess(); }
-        bool IsFailure() const { return m_Error.IsFailure(); }
+        bool IsSuccess() const { return std::holds_alternative<std::monostate>(m_Storage); }
+        bool IsFailure() const { return std::holds_alternative<Error>(m_Storage); }
         
         // Get error
-        const Error& GetError() const { return m_Error; }
+        const Error& GetError() const
+        {
+            if (IsSuccess())
+                throw std::logic_error("Result does not contain an error");
+            return std::get<Error>(m_Storage);
+        }
+
+        const Error* GetErrorPtr() const noexcept
+        {
+            return std::get_if<Error>(&m_Storage);
+        }
         
         // Throw if error
-        void GetValue() const { if (IsFailure()) throw m_Error; }
+        void GetValue() const { if (IsFailure()) throw GetError(); }
 
     private:
-        Error m_Error;
+        std::variant<std::monostate, Error> m_Storage;
     };
 
     // Error handling utilities
@@ -530,7 +570,7 @@ namespace Limitless
         Limitless::ErrorHandling::Try([&]() { expr(); })
     
     #define LT_RETURN_IF_ERROR(result) \
-        if (result.IsFailure()) return result.GetError();
+        do { if ((result).IsFailure()) return std::decay_t<decltype(result)>((result).GetError()); } while (false)
     
     #define LT_RETURN_IF_ERROR_VOID(result) \
         if (result.IsFailure()) return;
