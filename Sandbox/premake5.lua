@@ -64,7 +64,8 @@ project "Sandbox"
         buildoptions
         {
             "/utf-8",
-            "/std:c++20"
+            "/std:c++20",
+            "/FS" -- Prevent PDB contention in parallel builds
         }
 
     filter "system:macosx"
@@ -101,14 +102,14 @@ project "Sandbox"
             "QuartzCore.framework"
         }
 
-        filter "architecture:ARM64"
+        filter { "system:macosx", "architecture:ARM64" }
             defines
             {
                 "LT_ARCHITECTURE_ARM64",
                 "LT_PLATFORM_MAC_ARM64"
             }
 
-        filter "architecture:x64"
+        filter { "system:macosx", "architecture:x64" }
             defines
             {
                 "LT_ARCHITECTURE_X64",
@@ -155,13 +156,13 @@ project "Sandbox"
             "atomic"
         }
 
-        filter "architecture:ARM64"
+        filter { "system:linux", "architecture:ARM64" }
             defines
             {
                 "LT_ARCHITECTURE_ARM64"
             }
 
-        filter "architecture:x64"
+        filter { "system:linux", "architecture:x64" }
             defines
             {
                 "LT_ARCHITECTURE_X64"

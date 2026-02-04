@@ -297,19 +297,36 @@ fi
 
 # Build the project
 echo "Building project..."
-make -j$(nproc) config="${CONFIGURATION,,}_x64"
+SYSTEM_NAME="$(uname -s | tr '[:upper:]' '[:lower:]')"
+if [[ "$SYSTEM_NAME" == "darwin" ]]; then
+    SYSTEM_NAME="macosx"
+fi
+
+ARCH_NAME="$(uname -m | tr '[:upper:]' '[:lower:]')"
+PLATFORM_NAME="x64"
+MAKE_PLATFORM_NAME="x64"
+if [[ "$ARCH_NAME" == "aarch64" || "$ARCH_NAME" == "arm64" ]]; then
+    PLATFORM_NAME="ARM64"
+    MAKE_PLATFORM_NAME="arm64"
+fi
+
+CONFIG_LOWER="${CONFIGURATION,,}"
+CFG_SHORTNAME="${CONFIG_LOWER}_${MAKE_PLATFORM_NAME}"
+
+make -j"$(nproc)" config="${CFG_SHORTNAME}"
 if [[ $? -ne 0 ]]; then
     echo "Error: Build failed"
     exit 1
 fi
 
 echo "Build completed successfully!"
-echo "Output directory: Build/${CONFIGURATION}_x64/"
+OUTPUT_DIR="Build/${CFG_SHORTNAME}-${SYSTEM_NAME}-${PLATFORM_NAME}"
+echo "Output directory: ${OUTPUT_DIR}/"
 
 # Run tests if they exist
-if [[ -f "Build/${CONFIGURATION}_x64/Test/Test" ]]; then
+if [[ -f "${OUTPUT_DIR}/Test/Test" ]]; then
     echo "Running tests..."
-    ./Build/${CONFIGURATION}_x64/Test/Test --success
+    "./${OUTPUT_DIR}/Test/Test" --success
     if [[ $? -ne 0 ]]; then
         echo "Warning: Some tests failed"
     else

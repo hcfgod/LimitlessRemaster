@@ -60,7 +60,8 @@ project "Limitless"
         buildoptions
         {
             "/utf-8",
-            "/std:c++20"
+            "/std:c++20",
+            "/FS" -- Prevent PDB contention in parallel builds
         }
 
     filter "system:macosx"
@@ -97,18 +98,14 @@ project "Limitless"
             "QuartzCore.framework"
         }
 
-        filter "architecture:ARM64"
+        filter { "system:macosx", "architecture:ARM64" }
             defines
             {
                 "LT_ARCHITECTURE_ARM64",
                 "LT_PLATFORM_MAC_ARM64"
             }
-            
-            -- Handle C files specifically for macOS ARM64
-            filter "files:**.c"
-                buildoptions { "-std=c11" }
 
-        filter "architecture:x64"
+        filter { "system:macosx", "architecture:x64" }
             defines
             {
                 "LT_ARCHITECTURE_X64",
@@ -155,13 +152,13 @@ project "Limitless"
             "atomic"
         }
 
-        filter "architecture:ARM64"
+        filter { "system:linux", "architecture:ARM64" }
             defines
             {
                 "LT_ARCHITECTURE_ARM64"
             }
 
-        filter "architecture:x64"
+        filter { "system:linux", "architecture:x64" }
             defines
             {
                 "LT_ARCHITECTURE_X64"
