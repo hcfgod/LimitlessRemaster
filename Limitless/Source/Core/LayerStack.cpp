@@ -1,5 +1,6 @@
 #include "LayerStack.h"
 #include "Debug/Log.h"
+#include "Core/Time.h"
 
 namespace Limitless
 {
@@ -150,12 +151,28 @@ namespace Limitless
 
     void LayerStack::OnUpdate(float deltaTime)
     {
+        // Time is authoritative (Unity-style). The parameter remains for compatibility.
+        (void)deltaTime;
+        const float frameDeltaTime = Time::GetDeltaTimeSeconds();
+
         // Update layers from bottom to top (regular layers first, then overlays)
         for (auto& layer : m_Layers)
         {
             if (layer && layer->IsEnabled())
             {
-                layer->OnUpdate(deltaTime);
+                layer->OnUpdate(frameDeltaTime);
+            }
+        }
+    }
+
+    void LayerStack::OnFixedUpdate(float fixedDeltaTime)
+    {
+        // FixedUpdate-style simulation step(s), called from the main loop.
+        for (auto& layer : m_Layers)
+        {
+            if (layer && layer->IsEnabled())
+            {
+                layer->OnFixedUpdate(fixedDeltaTime);
             }
         }
     }

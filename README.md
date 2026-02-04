@@ -416,6 +416,7 @@ monitor.SaveMetricsToFile("performance_report.txt");
 - **[Logging Guide](Docs/LOGGING_GUIDE.md)** - Logging system setup and usage
 - **[Error Handling Guide](Docs/ERROR_HANDLING_GUIDE.md)** - `ErrorCode`, `Error`, and `Result<T>` patterns
 - **[Concurrency Guide](Docs/CONCURRENCY_GUIDE.md)** - Lock-free queues and `AsyncIO` thread-pool tasks
+- **[Time Guide](Docs/TIME_GUIDE.md)** - Unity-style `Time` API (delta time, timeScale, fixed step)
 - **[Hot Reload Guide](Docs/HOT_RELOAD_GUIDE.md)** - Real-time configuration hot reloading
 - **[Platform and Error Guide](Docs/PLATFORM_AND_ERROR_GUIDE.md)** - Platform detection and OS error integration
 - **[Platform Truth Table](Docs/PLATFORM_TRUTH_TABLE.md)** - What is implemented on Windows/macOS/Linux today

@@ -10,6 +10,7 @@
 #include "Core/Concurrency/AsyncIO.h"
 #include "Graphics/GraphicsAPIDetector.h"
 #include "Graphics/Renderer.h"
+#include "Core/Time.h"
 #include <chrono>
 
 namespace Limitless
@@ -28,7 +29,7 @@ namespace Limitless
 		auto& hotReloadManager = Limitless::HotReloadManager::GetInstance();
 		hotReloadManager.Initialize();
 		hotReloadManager.EnableHotReload(true);
-		
+
 		LT_CORE_INFO("Application constructor completed successfully");
 	}
 
@@ -58,16 +59,19 @@ namespace Limitless
 		}
 
 		LT_CORE_INFO("Application internal initialization completed, entering main loop...");
-		
-		// Initialize timing
-		auto lastTime = std::chrono::high_resolution_clock::now();
 
 		while(m_isRunning)
 		{
-			// Calculate delta time
-			auto currentTime = std::chrono::high_resolution_clock::now();
-			auto deltaTime = std::chrono::duration<float>(currentTime - lastTime).count();
-			lastTime = currentTime;
+			// Update engine time once per frame (Unity-style)
+			Time::Update();
+			const float deltaTime = Time::GetDeltaTimeSeconds();
+			const float fixedDeltaTime = Time::GetFixedDeltaTimeSeconds();
+
+			// FixedUpdate-style steps (deterministic simulation).
+			while (Time::TryConsumeFixedStep())
+			{
+				m_LayerStack.OnFixedUpdate(fixedDeltaTime);
+			}
 
 			// Begin frame
 			Renderer::GetInstance().BeginFrame();
@@ -102,6 +106,9 @@ namespace Limitless
 		
 		// Initialize platform detection first
 		PlatformDetection::Initialize();
+
+		// Initialize time system (must happen before the first frame)
+		Time::Initialize();
 		
 		// Initialize event system
 		GetEventSystem().Initialize();
@@ -180,6 +187,9 @@ namespace Limitless
 		
 		// Shutdown event system AFTER window is destroyed
 		GetEventSystem().Shutdown();
+
+		// Shutdown time system
+		Time::Shutdown();
 		
 		// Note: Logging shutdown is handled in main() after this returns
 		LT_CORE_INFO("Application::InternalShutdown() completed");

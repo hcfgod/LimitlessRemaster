@@ -13,6 +13,7 @@
 #include "Core/Debug/Log.h"
 #include "Core/Layer.h"
 #include "Core/LayerStack.h"
+#include "Core/Time.h"
 
 // Platform
 #include "Platform/Platform.h"

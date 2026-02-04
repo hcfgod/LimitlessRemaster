@@ -48,6 +48,7 @@ namespace Limitless
 
         // Per-frame updates
         void OnUpdate(float deltaTime);
+        void OnFixedUpdate(float fixedDeltaTime);
         void OnRender();
 
         // Event handling (EventListener interface)

@@ -36,7 +36,7 @@ namespace Limitless
 		bool m_isRunning = true;
 		std::unique_ptr<Window> m_Window;
 		LayerStack m_LayerStack;
-		
+ 
 		bool InternalInitialize();
 		void InternalShutdown();
 	};
