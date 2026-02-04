@@ -307,8 +307,17 @@ TEST_SUITE("Error Handling")
         Limitless::ErrorHandling::Verify(true, "This should not throw");
         
         // These should throw
-        CHECK_THROWS_AS(Limitless::ErrorHandling::Assert(false, "Assertion failed"), Limitless::Error);
-        CHECK_THROWS_AS(Limitless::ErrorHandling::Verify(false, "Verification failed"), Limitless::Error);
+        // Suppress logging for expected failures to keep CI output clean.
+        {
+            Limitless::ErrorHandling::ScopedErrorHandlerOverride suppressExpected(
+                [](const Limitless::Error&) {
+                    // Intentionally silent for tests that validate throws.
+                }
+            );
+
+            CHECK_THROWS_AS(Limitless::ErrorHandling::Assert(false, "Assertion failed"), Limitless::Error);
+            CHECK_THROWS_AS(Limitless::ErrorHandling::Verify(false, "Verification failed"), Limitless::Error);
+        }
     }
     
     TEST_CASE("Error logging")

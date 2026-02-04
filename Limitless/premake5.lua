@@ -60,7 +60,6 @@ project "Limitless"
         buildoptions
         {
             "/utf-8",
-            "/std:c++20",
             "/FS" -- Prevent PDB contention in parallel builds
         }
 
@@ -71,11 +70,6 @@ project "Limitless"
         defines
         {
             "LT_PLATFORM_MACOS"
-        }
-
-        buildoptions
-        {
-            "-std=c++20"
         }
 
         libdirs
@@ -121,15 +115,15 @@ project "Limitless"
             "LT_PLATFORM_LINUX"
         }
 
-        buildoptions
-        {
-            "-std=c++20"
-        }
-
         libdirs
         {
             "/usr/local/lib"
         }
+
+    -- Ensure C sources are treated as C (not C++).
+    filter "files:**.c"
+        language "C"
+        cdialect "C11"
 
         links
         {

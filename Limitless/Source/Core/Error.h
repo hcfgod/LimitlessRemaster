@@ -459,6 +459,64 @@ namespace Limitless
         
         // Get current error handler
         ErrorHandler GetErrorHandler();
+
+        /**
+         * @brief Temporarily override the global error handler (RAII).
+         *
+         * This is primarily intended for tests and tooling where errors are expected
+         * (e.g. verifying that an assertion throws) and logging would add noisy output.
+         *
+         * Note: The error handler is a process-global setting. Do not use this to "silence"
+         * errors in production code paths; prefer proper control of logging configuration instead.
+         */
+        class ScopedErrorHandlerOverride final
+        {
+        public:
+            explicit ScopedErrorHandlerOverride(ErrorHandler handler)
+                : m_Previous(GetErrorHandler())
+                , m_Active(true)
+            {
+                SetErrorHandler(std::move(handler));
+            }
+
+            ~ScopedErrorHandlerOverride()
+            {
+                if (m_Active)
+                {
+                    SetErrorHandler(m_Previous);
+                }
+            }
+
+            ScopedErrorHandlerOverride(const ScopedErrorHandlerOverride&) = delete;
+            ScopedErrorHandlerOverride& operator=(const ScopedErrorHandlerOverride&) = delete;
+
+            ScopedErrorHandlerOverride(ScopedErrorHandlerOverride&& other) noexcept
+                : m_Previous(std::move(other.m_Previous))
+                , m_Active(other.m_Active)
+            {
+                other.m_Active = false;
+            }
+
+            ScopedErrorHandlerOverride& operator=(ScopedErrorHandlerOverride&& other) noexcept
+            {
+                if (this != &other)
+                {
+                    if (m_Active)
+                    {
+                        SetErrorHandler(m_Previous);
+                    }
+
+                    m_Previous = std::move(other.m_Previous);
+                    m_Active = other.m_Active;
+                    other.m_Active = false;
+                }
+                return *this;
+            }
+
+        private:
+            ErrorHandler m_Previous;
+            bool m_Active = false;
+        };
         
         // Default error handling
         void DefaultErrorHandler(const Error& error);
