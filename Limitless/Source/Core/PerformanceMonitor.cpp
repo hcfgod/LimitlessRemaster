@@ -296,6 +296,8 @@ namespace Limitless {
         m_frameCount = 0;
         m_frameTimeIndex = 0;
         m_metricsCollectionInterval = 1.0; // 1 second default
+        m_metricsCallback = nullptr;
+        m_lastMetricsUpdate = std::chrono::high_resolution_clock::now();
         
         // Initialize frame time history (keep last 60 frames)
         m_frameTimes.resize(60, 0.0);
@@ -333,6 +335,16 @@ namespace Limitless {
         if (m_loggingEnabled) {
             LogMetrics();
         }
+
+        // Clear callback to avoid cross-test / cross-run dangling captures.
+        m_metricsCallback = nullptr;
+
+        // Clear counters and current metrics to reset state cleanly.
+        {
+            std::lock_guard<std::mutex> countersLock(m_countersMutex);
+            m_counters.clear();
+        }
+        m_currentMetrics = PerformanceMetrics{};
 
         m_initialized = false;
         m_enabled = false;
@@ -533,8 +545,11 @@ namespace Limitless {
         
         // Collect performance counter data
         m_currentMetrics.counters.clear();
-        for (const auto& pair : m_counters) {
-            m_currentMetrics.counters[pair.first] = pair.second->GetLastValue();
+        {
+            std::lock_guard<std::mutex> countersLock(m_countersMutex);
+            for (const auto& pair : m_counters) {
+                m_currentMetrics.counters[pair.first] = pair.second->GetLastValue();
+            }
         }
         
         // Set timestamp

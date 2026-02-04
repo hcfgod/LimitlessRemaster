@@ -1,4 +1,3 @@
-#define DOCTEST_CONFIG_DISABLE_EXCEPTIONS
 #define DOCTEST_CONFIG_WITH_VARIADIC_MACROS
 #include <doctest/doctest.h>
 #include "Core/EventSystem.h"

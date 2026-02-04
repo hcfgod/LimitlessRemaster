@@ -1,4 +1,3 @@
-#define DOCTEST_CONFIG_DISABLE_EXCEPTIONS
 #define DOCTEST_CONFIG_WITH_VARIADIC_MACROS
 #include <doctest/doctest.h>
 #include "Core/Error.h"
@@ -11,11 +10,28 @@ TEST_SUITE("Error Handling Patterns")
     TEST_CASE("LT_ASSERT and LT_VERIFY Macros")
     {
         // Test LT_ASSERT - should throw on false condition
-        CHECK_THROWS_AS(LT_ASSERT(false, "Assertion failed"), Limitless::Error);
+        // Suppress error logging for expected failures to keep output clean.
+        {
+            Limitless::ErrorHandling::ScopedErrorHandlerOverride suppressExpected(
+                [](const Limitless::Error&) {
+                    // Intentionally silent for tests that validate throws.
+                }
+            );
+
+            CHECK_THROWS_AS(LT_ASSERT(false, "Assertion failed"), Limitless::Error);
+        }
         CHECK_NOTHROW(LT_ASSERT(true, "Assertion should pass"));
         
         // Test LT_VERIFY - should throw on false condition
-        CHECK_THROWS_AS(LT_VERIFY(false, "Verification failed"), Limitless::Error);
+        {
+            Limitless::ErrorHandling::ScopedErrorHandlerOverride suppressExpected(
+                [](const Limitless::Error&) {
+                    // Intentionally silent for tests that validate throws.
+                }
+            );
+
+            CHECK_THROWS_AS(LT_VERIFY(false, "Verification failed"), Limitless::Error);
+        }
         CHECK_NOTHROW(LT_VERIFY(true, "Verification should pass"));
         
         // Test with complex conditions
@@ -23,8 +39,16 @@ TEST_SUITE("Error Handling Patterns")
         CHECK_NOTHROW(LT_ASSERT(value > 0, "Value should be positive"));
         CHECK_NOTHROW(LT_VERIFY(value == 42, "Value should be 42"));
         
-        CHECK_THROWS_AS(LT_ASSERT(value < 0, "Value should be negative"), Limitless::Error);
-        CHECK_THROWS_AS(LT_VERIFY(value != 42, "Value should not be 42"), Limitless::Error);
+        {
+            Limitless::ErrorHandling::ScopedErrorHandlerOverride suppressExpected(
+                [](const Limitless::Error&) {
+                    // Intentionally silent for tests that validate throws.
+                }
+            );
+
+            CHECK_THROWS_AS(LT_ASSERT(value < 0, "Value should be negative"), Limitless::Error);
+            CHECK_THROWS_AS(LT_VERIFY(value != 42, "Value should not be 42"), Limitless::Error);
+        }
     }
     
     TEST_CASE("LT_THROW Macros")

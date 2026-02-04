@@ -1,4 +1,3 @@
-#define DOCTEST_CONFIG_DISABLE_EXCEPTIONS
 #define DOCTEST_CONFIG_WITH_VARIADIC_MACROS
 #include <doctest/doctest.h>
 #include "Core/Concurrency/AsyncIO.h"
@@ -303,7 +302,9 @@ TEST_SUITE("Async I/O System")
         auto writeInvalidTask = asyncIO.WriteFileAsync("/invalid/path/file.txt", "test");
         try
         {
-            writeInvalidTask.Wait();
+            // NOTE: Wait() does not propagate exceptions for future-backed tasks.
+            // Use Get() to rethrow exceptions from the worker thread.
+            writeInvalidTask.Get();
             CHECK(false); // Should not reach here
         }
         catch (const std::exception&)
