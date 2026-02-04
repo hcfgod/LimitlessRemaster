@@ -68,6 +68,7 @@ namespace Limitless
         LT_CORE_INFO("Shutting down ConfigManager...");
 
         m_Shutdown.store(true);
+        m_AsyncCallbackCondition.notify_all();
 
         // Stop hot reload if enabled
         if (m_AsyncHotReloadEnabled.load() && m_FileWatcher)
@@ -129,95 +130,9 @@ namespace Limitless
                 std::unique_lock<std::shared_mutex> lock(m_ConfigMutex);
                 m_Config.clear();
 
-                // Process nested JSON structure
-                for (auto it = config.begin(); it != config.end(); ++it)
-                {
-                    if (it.value().is_object())
-                    {
-                        // Handle nested objects
-                        for (auto nestedIt = it.value().begin(); nestedIt != it.value().end(); ++nestedIt)
-                        {
-                            std::string key = std::string(it.key()) + "." + std::string(nestedIt.key());
-                            ConfigValue value;
-
-                            if (nestedIt.value().is_string())
-                                value = nestedIt.value().get<std::string>();
-                            else if (nestedIt.value().is_number_integer())
-                            {
-                                int intValue = nestedIt.value().get<int>();
-                                std::string fullKey = std::string(it.key()) + "." + std::string(nestedIt.key());
-                                
-                                // Apply type-specific logic
-                                if (fullKey.find("max_threads") != std::string::npos)
-                                {
-                                    value = static_cast<size_t>(intValue);
-                                }
-                                else if (fullKey.find("width") != std::string::npos || 
-                                         fullKey.find("height") != std::string::npos ||
-                                         fullKey.find("max_width") != std::string::npos ||
-                                         fullKey.find("max_height") != std::string::npos ||
-                                         fullKey.find("min_width") != std::string::npos ||
-                                         fullKey.find("min_height") != std::string::npos)
-                                {
-                                    value = static_cast<uint32_t>(intValue);
-                                }
-                                else
-                                {
-                                    value = intValue;
-                                }
-                            }
-                            else if (nestedIt.value().is_number_float())
-                                value = nestedIt.value().get<float>();
-                            else if (nestedIt.value().is_boolean())
-                                value = nestedIt.value().get<bool>();
-                            else if (nestedIt.value().is_number_unsigned())
-                                value = nestedIt.value().get<size_t>();
-
-                            m_Config[key] = value;
-                        }
-                    }
-                    else
-                    {
-                        // Handle flat values
-                        std::string key = it.key();
-                        ConfigValue value;
-
-                        if (it.value().is_string())
-                            value = it.value().get<std::string>();
-                        else if (it.value().is_number_integer())
-                        {
-                            int intValue = it.value().get<int>();
-                            std::string key = it.key();
-                            
-                            // Apply type-specific logic for flat keys
-                            if (key.find("max_threads") != std::string::npos)
-                            {
-                                value = static_cast<size_t>(intValue);
-                            }
-                            else if (key.find("width") != std::string::npos || 
-                                     key.find("height") != std::string::npos ||
-                                     key.find("max_width") != std::string::npos ||
-                                     key.find("max_height") != std::string::npos ||
-                                     key.find("min_width") != std::string::npos ||
-                                     key.find("min_height") != std::string::npos)
-                            {
-                                value = static_cast<uint32_t>(intValue);
-                            }
-                            else
-                            {
-                                value = intValue;
-                            }
-                        }
-                        else if (it.value().is_number_float())
-                            value = it.value().get<float>();
-                        else if (it.value().is_boolean())
-                            value = it.value().get<bool>();
-                        else if (it.value().is_number_unsigned())
-                            value = it.value().get<size_t>();
-
-                        m_Config[key] = value;
-                    }
-                }
+                // Flatten nested JSON of arbitrary depth into "dot" keys.
+                // This keeps hot reload stable for nested structures (e.g. window.position.x/y).
+                ProcessJsonObject(config, "");
 
                 m_TotalAsyncOperations.fetch_add(1, std::memory_order_relaxed);
                 LT_CORE_INFO("Configuration loaded from file: {} ({} entries)", filename, m_Config.size());
@@ -677,7 +592,12 @@ namespace Limitless
                     if (intValue >= 0)
                     {
                         // Determine the appropriate type based on the key
-                        if (fullKey.find("max_file_size") != std::string::npos || 
+                        if (fullKey == Config::Window::POSITION_X || fullKey == Config::Window::POSITION_Y)
+                        {
+                            m_Config[fullKey] = intValue;
+                            LT_CORE_DEBUG("Loaded config {} = {} (as int)", fullKey, intValue);
+                        }
+                        else if (fullKey.find("max_file_size") != std::string::npos || 
                             fullKey.find("max_files") != std::string::npos)
                         {
                             m_Config[fullKey] = static_cast<size_t>(intValue);
@@ -804,6 +724,11 @@ namespace Limitless
                 {
                     LT_CORE_WARN("Async callback queue is full, dropping callback for key: {}", key);
                 }
+                else
+                {
+                    // Wake the async callback thread without spinning.
+                    m_AsyncCallbackCondition.notify_one();
+                }
             }
         }
 
@@ -828,10 +753,20 @@ namespace Limitless
 
     void ConfigManager::ProcessAsyncCallbacks()
     {
+        std::unique_lock<std::mutex> waitLock(m_AsyncCallbackMutex);
+
         while (!m_Shutdown.load())
         {
-            auto callbackResult = m_AsyncCallbackQueue.TryPop();
-            if (callbackResult.has_value())
+            m_AsyncCallbackCondition.wait(waitLock, [this]() {
+                return m_Shutdown.load() || !m_AsyncCallbackQueue.IsEmpty();
+            });
+
+            if (m_Shutdown.load())
+                break;
+
+            waitLock.unlock();
+
+            while (auto callbackResult = m_AsyncCallbackQueue.TryPop())
             {
                 try
                 {
@@ -844,10 +779,8 @@ namespace Limitless
                     LT_CORE_ERROR("Exception in async callback processing: {}", e.what());
                 }
             }
-            else
-            {
-                std::this_thread::yield();
-            }
+
+            waitLock.lock();
         }
     }
 

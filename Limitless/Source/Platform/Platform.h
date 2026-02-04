@@ -229,13 +229,23 @@ namespace Limitless
 
     // Platform-specific macros for compile-time detection
     #if defined(LIMITLESS_PLATFORM_WINDOWS) || defined(LT_PLATFORM_WINDOWS)
-        #define LT_PLATFORM_WINDOWS 1
+        #ifndef LT_PLATFORM_WINDOWS
+            #define LT_PLATFORM_WINDOWS 1
+        #endif
         #define LT_PLATFORM_NAME "Windows"
-    #elif defined(LT_PLATFORM_MAC) || defined(__APPLE__)
-        #define LT_PLATFORM_MACOS 1
+    #elif defined(LT_PLATFORM_MACOS) || defined(LT_PLATFORM_MAC) || defined(__APPLE__)
+        #ifndef LT_PLATFORM_MACOS
+            #define LT_PLATFORM_MACOS 1
+        #endif
+        // Compatibility alias (older code / build scripts)
+        #ifndef LT_PLATFORM_MAC
+            #define LT_PLATFORM_MAC 1
+        #endif
         #define LT_PLATFORM_NAME "macOS"
     #elif defined(LT_PLATFORM_LINUX) || defined(__linux__)
-        #define LT_PLATFORM_LINUX 1
+        #ifndef LT_PLATFORM_LINUX
+            #define LT_PLATFORM_LINUX 1
+        #endif
         #define LT_PLATFORM_NAME "Linux"
     #else
         #define LT_PLATFORM_UNKNOWN 1
@@ -278,14 +288,26 @@ namespace Limitless
         #define LT_ARCHITECTURE_NAME "Unknown"
     #endif
 
-    // Debug configuration macros
-    #if defined(LIMITLESS_DEBUG) || defined(LT_DEBUG)
+    // Build configuration macros
+    // Canonical: LT_CONFIG_DEBUG / LT_CONFIG_RELEASE / LT_CONFIG_DIST
+    // Compatibility: LIMITLESS_DEBUG / LIMITLESS_RELEASE / LIMITLESS_DIST, and LT_DEBUG / LT_RELEASE / LT_DIST
+    #if (defined(LIMITLESS_DEBUG) || defined(LT_DEBUG)) && !defined(LT_CONFIG_DEBUG)
+        #define LT_CONFIG_DEBUG 1
+    #endif
+    #if (defined(LIMITLESS_RELEASE) || defined(LT_RELEASE)) && !defined(LT_CONFIG_RELEASE)
+        #define LT_CONFIG_RELEASE 1
+    #endif
+    #if (defined(LIMITLESS_DIST) || defined(LT_DIST)) && !defined(LT_CONFIG_DIST)
+        #define LT_CONFIG_DIST 1
+    #endif
+
+    #if defined(LT_CONFIG_DEBUG)
         #define LT_DEBUG_BUILD 1
         #define LT_BUILD_TYPE "Debug"
-    #elif defined(LIMITLESS_RELEASE) || defined(LT_RELEASE)
+    #elif defined(LT_CONFIG_RELEASE)
         #define LT_RELEASE_BUILD 1
         #define LT_BUILD_TYPE "Release"
-    #elif defined(LIMITLESS_DIST) || defined(LT_DIST)
+    #elif defined(LT_CONFIG_DIST)
         #define LT_DIST_BUILD 1
         #define LT_BUILD_TYPE "Dist"
     #else

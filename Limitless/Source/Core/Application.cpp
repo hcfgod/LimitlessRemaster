@@ -72,6 +72,9 @@ namespace Limitless
 			// Begin frame
 			Renderer::GetInstance().BeginFrame();
 
+			// Apply any pending hot reload diffs on the main thread
+			Limitless::HotReloadManager::GetInstance().Update();
+
 			m_Window->OnUpdate();
 			
 			// Update layers
@@ -131,12 +134,6 @@ namespace Limitless
 		{
 			LT_CORE_ERROR("Window does not have a graphics context!");
 			return false;
-		}
-
-		// Subscribe to events (if it's an SDLWindow)
-		if (auto* sdlWindow = dynamic_cast<SDLWindow*>(m_Window.get()))
-		{
-			sdlWindow->SubscribeToEvents();
 		}
 
 		// Register window with hot reload manager

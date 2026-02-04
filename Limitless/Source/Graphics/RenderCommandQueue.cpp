@@ -674,6 +674,7 @@ namespace Limitless
     void RenderCommandExecutor::SubmitCommands(std::vector<std::unique_ptr<RenderCommand>> commands)
     {
         m_Queue.SubmitCommands(std::move(commands));
+        m_WorkerCondition.notify_all();
     }
 
     void RenderCommandExecutor::WaitForCompletion()
@@ -696,7 +697,9 @@ namespace Limitless
             
             // Wait for more work
             std::unique_lock<std::mutex> lock(m_WorkerMutex);
-            m_WorkerCondition.wait_for(lock, std::chrono::milliseconds(1));
+            m_WorkerCondition.wait(lock, [this]() {
+                return m_Shutdown.load() || !m_Running.load() || !m_Queue.IsEmpty();
+            });
         }
 
         m_ActiveWorkers.fetch_sub(1);

@@ -93,11 +93,13 @@ Application Logger Initialized!
 HotReloadManager: Logging system reinitialized
 HotReloadManager: Window configuration changed - window.width
 HotReloadManager: Window configuration changed - window.title
-Window configuration changed: window.width = 1920
-Window configuration change applied successfully
-Window configuration changed: window.title = Hot Reload Test
-Window configuration change applied successfully
+HotReloadManager: Applying window config diff: window.width = 1920
+HotReloadManager: Window config applied successfully: window.width
+HotReloadManager: Applying window config diff: window.title = Hot Reload Test
+HotReloadManager: Window config applied successfully: window.title
 ```
+
+**Note**: Window changes are applied on the application's **main thread** (next frame) for maximum platform safety.
 
 ## Configuration Examples
 
@@ -225,7 +227,6 @@ Window configuration change applied successfully
 ## Future Enhancements
 
 ### Planned Features
-- **Full Window Hot Reloading**: Real-time window size, title, and property changes
 - **Audio System Hot Reloading**: Real-time audio configuration changes
 - **Graphics System Hot Reloading**: Real-time graphics quality settings
 - **Input System Hot Reloading**: Real-time input sensitivity and mapping changes

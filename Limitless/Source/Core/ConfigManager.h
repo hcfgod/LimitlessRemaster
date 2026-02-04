@@ -15,6 +15,9 @@
 #include <atomic>
 #include <future>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <chrono>
 
 // Forward declarations
 namespace Limitless
@@ -48,6 +51,18 @@ namespace Limitless
             constexpr const char* FULLSCREEN = "window.fullscreen";
             constexpr const char* RESIZABLE = "window.resizable";
             constexpr const char* VSYNC = "window.vsync";
+
+            // Advanced window configuration (supported for hot reload)
+            constexpr const char* POSITION_X = "window.position.x";
+            constexpr const char* POSITION_Y = "window.position.y";
+            constexpr const char* BORDERLESS = "window.borderless";
+            constexpr const char* ALWAYS_ON_TOP = "window.always_on_top";
+            constexpr const char* MIN_WIDTH = "window.min_width";
+            constexpr const char* MIN_HEIGHT = "window.min_height";
+            constexpr const char* MAX_WIDTH = "window.max_width";
+            constexpr const char* MAX_HEIGHT = "window.max_height";
+            constexpr const char* HIGH_DPI = "window.high_dpi";
+            constexpr const char* ICON = "window.icon";
         }
         
         namespace Logging
@@ -193,6 +208,8 @@ namespace Limitless
         // Background processing
         std::thread m_AsyncCallbackThread;
         std::atomic<bool> m_Shutdown{false};
+        std::mutex m_AsyncCallbackMutex;
+        std::condition_variable m_AsyncCallbackCondition;
         
         // File watching for hot reload
         std::unique_ptr<FileWatcher> m_FileWatcher;

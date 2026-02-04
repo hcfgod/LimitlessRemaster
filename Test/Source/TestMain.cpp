@@ -9,7 +9,7 @@ TEST_CASE("Cross-Platform Compatibility")
     // Test platform-specific defines
     #ifdef LT_PLATFORM_WINDOWS
         CHECK(true); // Windows platform detected
-    #elif defined(LT_PLATFORM_MAC)
+    #elif defined(LT_PLATFORM_MACOS)
         CHECK(true); // macOS platform detected
     #elif defined(LT_PLATFORM_LINUX)
         CHECK(true); // Linux platform detected

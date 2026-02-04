@@ -73,8 +73,7 @@ project "Sandbox"
 
         defines
         {
-            "LT_PLATFORM_MACOS",
-            "LT_PLATFORM_MAC"
+            "LT_PLATFORM_MACOS"
         }
 
         buildoptions
@@ -168,14 +167,5 @@ project "Sandbox"
                 "LT_ARCHITECTURE_X64"
             }
 
-    -- Configuration-specific settings (inherited from workspace)
-    filter "configurations:Debug"
-        defines { "LT_DEBUG" }
-
-    filter "configurations:Release"
-        defines { "LT_RELEASE" }
-
-    filter "configurations:Dist"
-        defines { "LT_DIST" }
-        
+    -- Configuration-specific defines are provided by the workspace `premake5.lua`
  

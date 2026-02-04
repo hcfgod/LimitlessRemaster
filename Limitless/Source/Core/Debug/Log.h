@@ -242,6 +242,14 @@ private:
     #define LT_DBG(...) ((void)0)
 #endif
 
+// Naming alignment / compatibility:
+// - Canonical client debug macro: LT_DBG(...)
+// - Friendly alias: LT_DEBUG(...)
+// If LT_DEBUG is already defined by external build scripts, we leave it untouched.
+#ifndef LT_DEBUG
+    #define LT_DEBUG(...) LT_DBG(__VA_ARGS__)
+#endif
+
 #ifdef LT_LOG_LEVEL_INFO_ENABLED
     #ifndef LT_INFO
     #define LT_INFO(...) \
@@ -319,6 +327,10 @@ private:
     #endif
 #else
     #define LT_DBG_IF(condition, ...) ((void)0)
+#endif
+
+#ifndef LT_DEBUG_IF
+    #define LT_DEBUG_IF(condition, ...) LT_DBG_IF(condition, __VA_ARGS__)
 #endif
 
 #ifdef LT_LOG_LEVEL_INFO_ENABLED

@@ -33,7 +33,6 @@ project "Limitless"
         defines
         {
             "LT_PLATFORM_WINDOWS",
-            "LT_PLATFORM_WINDOWS"
         }
 
         libdirs
@@ -70,8 +69,7 @@ project "Limitless"
 
         defines
         {
-            "LT_PLATFORM_MACOS",
-            "LT_PLATFORM_MAC"
+            "LT_PLATFORM_MACOS"
         }
 
         buildoptions
@@ -179,12 +177,4 @@ project "Limitless"
     filter "toolset:clang"
         defines { "LT_COMPILER_CLANG" }
 
-    -- Configuration-specific settings (inherited from workspace)
-    filter "configurations:Debug"
-        defines { "LIMITLESS_DEBUG" }
-
-    filter "configurations:Release"
-        defines { "LIMITLESS_RELEASE" }
-
-    filter "configurations:Dist"
-        defines { "LIMITLESS_DIST" } 
+    -- Configuration-specific defines are provided by the workspace `premake5.lua`
