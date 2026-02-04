@@ -93,9 +93,9 @@ TEST_SUITE("Error Handling Patterns")
         CHECK(errorResult.GetError().GetCode() == Limitless::ErrorCode::Timeout);
         
         // Test LT_TRY_VOID
-        auto voidSuccessResult = LT_TRY_VOID([]() {
+        auto voidSuccessResult = LT_TRY_VOID(([]() {
             // Do nothing
-        });
+        })());
         CHECK(voidSuccessResult.IsSuccess());
         
         // Debug: Test if the exception is actually being thrown
@@ -108,10 +108,10 @@ TEST_SUITE("Error Handling Patterns")
         
         // Debug: Test if the lambda is being executed
         bool lambdaExecuted = false;
-        auto debugResult = LT_TRY_VOID([&lambdaExecuted]() {
+        auto debugResult = LT_TRY_VOID(([&lambdaExecuted]() {
             lambdaExecuted = true;
             LT_THROW_ERROR(Limitless::ErrorCode::InvalidState, "Test invalid state");
-        });
+        })());
         CHECK(lambdaExecuted); // Should be true if lambda was executed
         
         // Minimal test case
@@ -120,9 +120,9 @@ TEST_SUITE("Error Handling Patterns")
         });
         CHECK(minimalResult.IsFailure());
         
-        auto voidErrorResult = LT_TRY_VOID([]() {
+        auto voidErrorResult = LT_TRY_VOID(([]() {
             LT_THROW_ERROR(Limitless::ErrorCode::InvalidState, "Test invalid state");
-        });
+        })());
         CHECK(voidErrorResult.IsFailure());
         CHECK(voidErrorResult.GetError().GetCode() == Limitless::ErrorCode::InvalidState);
     }
