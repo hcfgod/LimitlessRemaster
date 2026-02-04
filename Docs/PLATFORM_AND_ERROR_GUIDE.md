@@ -16,7 +16,8 @@ The platform detection system provides comprehensive information about the curre
 
 ### Key Features
 
-- **Cross-Platform Support**: Windows, macOS, Linux, Android, iOS, Web
+- **Cross-Platform Support (Implemented targets today)**: Windows, macOS, Linux
+- **Cross-Platform Support (Future targets / API surface exists)**: Android, iOS, Web
 - **Architecture Detection**: x86, x64, ARM32, ARM64, RISC-V
 - **Compiler Detection**: MSVC, GCC, Clang, AppleClang
 - **System Capabilities**: CPU features, memory, graphics APIs
@@ -451,6 +452,8 @@ private:
 - `static bool HasAltiVec()` - Check for AltiVec support
 
 #### Graphics API Checks
+
+**Note (Implemented today)**: These flags currently reflect **platform-default expectations**, not real driver probing. For example, Windows may report `HasDirectX()` as true even if the engine does not have a DirectX renderer backend yet. Use the graphics layer (`GraphicsAPIDetector` + real context creation) to determine what the engine can actually run.
 
 - `static bool HasOpenGL()` - Check for OpenGL support
 - `static bool HasVulkan()` - Check for Vulkan support

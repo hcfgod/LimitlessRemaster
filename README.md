@@ -418,10 +418,12 @@ window->GetMaximumSize(maxWidth, maxHeight);
 - **[Concurrency Guide](Docs/CONCURRENCY_GUIDE.md)** - Lock-free queues and `AsyncIO` thread-pool tasks
 - **[Hot Reload Guide](Docs/HOT_RELOAD_GUIDE.md)** - Real-time configuration hot reloading
 - **[Platform and Error Guide](Docs/PLATFORM_AND_ERROR_GUIDE.md)** - Platform detection and OS error integration
+- **[Platform Truth Table](Docs/PLATFORM_TRUTH_TABLE.md)** - What is implemented on Windows/macOS/Linux today
 - **[Build Configuration Guide](Docs/BUILD_CONFIGURATION_GUIDE.md)** - Premake targets, configs, and CI parity
 - **[Configuration Guide](Docs/CONFIGURATION_GUIDE.md)** - ConfigManager usage and best practices
 - **[Event System Guide](Docs/EVENT_GUIDE.md)** - Event-driven architecture and patterns
 - **[Window API Guide](Docs/WINDOW_API_GUIDE.md)** - Window creation and advanced behaviors
+- **[Graphics API Detection Guide](Docs/GRAPHICS_API_DETECTION_GUIDE.md)** - Implemented OpenGL path vs future backends
 
 ## 🔧 **Continuous Integration**
 

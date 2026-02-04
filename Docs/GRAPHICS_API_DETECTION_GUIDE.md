@@ -2,7 +2,19 @@
 
 ## Overview
 
-The Limitless engine includes a comprehensive graphics API detection and selection system that automatically detects which graphics APIs are available on the current platform and selects the best one based on various criteria. The system is now **production-ready** for OpenGL with improved error handling, thread safety, and configuration options.
+This document describes the engine's **graphics API selection framework**, and it clearly separates what is **implemented today** from what is **planned for the future**.
+
+### Status Legend (read this first)
+
+- ✅ **Implemented**: The engine has working code paths used by the runtime today.
+- ⚠️ **Partially Implemented**: The framework exists, but behavior is conservative / placeholder in places.
+- 🚧 **Future**: The API is present as a planned surface area, but the implementation is not complete yet.
+
+### Current Reality (today)
+
+- ✅ **Rendering / context creation is OpenGL-only** (via SDL + `OpenGLContext`).
+- 🚧 **Vulkan / DirectX / Metal contexts are not implemented yet**. Selection can name them, but context creation will fall back to OpenGL.
+- ⚠️ **Non-OpenGL “detection” is not implemented yet** (the detector currently reports them as unsupported with an explicit message).
 
 **Key Design Principles:**
 - **Lightweight Detection**: The detector doesn't require SDL video subsystem or window creation
@@ -12,26 +24,36 @@ The Limitless engine includes a comprehensive graphics API detection and selecti
 
 ## Features
 
-- **Lightweight Detection**: Detects OpenGL availability without requiring SDL video subsystem
-- **Progressive Enhancement**: Gets basic info during detection, detailed info after context creation
-- **Platform-Specific Priority**: Different API priority lists for each platform
-- **Version Detection**: Detects actual OpenGL versions and capabilities after context creation
-- **Capability Analysis**: Analyzes hardware capabilities and feature support
-- **Smart Selection**: Chooses the best API based on performance, compatibility, features, stability, or power efficiency
-- **Fallback Support**: Graceful fallback to OpenGL if preferred APIs are not available
-- **Thread Safety**: Thread-safe initialization and configuration
-- **Configuration Override**: Users can override automatic API selection
-- **Comprehensive Error Recovery**: Robust fallback logic for context creation
-- **Debugging Support**: Detailed detection reports for troubleshooting
+### ✅ Implemented Today
+
+- **OpenGL context creation**: Robust OpenGL context creation with fallback versions.
+- **Progressive enhancement for OpenGL details**: Vendor/renderer/version are updated after a real OpenGL context is created.
+- **Platform-specific priority lists**: Priority ordering exists per platform.
+- **Fallback behavior**: If a requested/selected API is not available, the engine falls back to OpenGL.
+- **Thread-safe initialization and preference**: `Initialize()` and preferred API control are thread-safe and idempotent.
+- **Debugging support**: You can generate a detailed detection report for troubleshooting.
+
+### ⚠️ Partially Implemented Today
+
+- **“Lightweight detection” for OpenGL**: The detector currently assumes OpenGL is supported and uses conservative defaults until a real context is created (context creation is the real verification step).
+- **“Smart selection” criteria**: The selection API exists, but criteria-based selection and comparison output are placeholders.
+
+### 🚧 Future (Not Implemented Yet)
+
+- **Vulkan detection** (real loader/device probing)
+- **DirectX detection** (DXGI / feature level probing)
+- **Metal detection** (MTLDevice probing)
+- **Vulkan / DirectX / Metal contexts** (actual runtime backends)
+- **Performance and feature comparisons** (runtime benchmarking / capability scoring)
 
 ## Supported Graphics APIs
 
 | API | Platform Support | Minimum Version | Status |
 |-----|-----------------|-----------------|---------|
 | OpenGL | All Platforms | 3.3+ | ✅ Production Ready |
-| Vulkan | Windows, Linux, Android | 1.0+ | 🚧 Detection Only |
-| DirectX | Windows | 12+ | 🚧 Detection Only |
-| Metal | macOS, iOS | 2.0+ | 🚧 Detection Only |
+| Vulkan | Windows, Linux | 1.0+ | 🚧 Future (Detection + Context not implemented yet) |
+| DirectX | Windows | 12+ | 🚧 Future (Detection + Context not implemented yet) |
+| Metal | macOS | 2.0+ | 🚧 Future (Detection + Context not implemented yet) |
 
 ## Quick Start
 
@@ -198,12 +220,15 @@ if (!GraphicsAPIDetector::IsAPISupported(GraphicsAPI::Vulkan)) {
 
 ### 🚧 Future Enhancements
 
-1. **Vulkan Implementation**: Full Vulkan context implementation
-2. **DirectX Implementation**: Full DirectX 12 context implementation
-3. **Metal Implementation**: Full Metal context implementation
-4. **Performance Benchmarking**: Runtime performance comparison between APIs
-5. **Dynamic Switching**: Ability to switch graphics APIs at runtime
-6. **Configuration Persistence**: Save and load API preferences
+1. **Real Vulkan Detection**: Vulkan loader/device probing and capability enumeration
+2. **Real DirectX Detection**: Adapter enumeration and feature-level probing (DX12)
+3. **Real Metal Detection**: MTLDevice probing and capability mapping
+4. **Vulkan Context**: Full Vulkan context + swapchain implementation
+5. **DirectX Context**: Full DirectX 12 context + swapchain implementation
+6. **Metal Context**: Full Metal context + CAMetalLayer integration
+7. **Selection Scoring**: Real selection logic based on criteria (features/stability/perf)
+8. **Configuration Persistence**: Save and load API preferences
+9. **Dynamic Switching**: Runtime API switching (only if architecture supports it)
 
 ## Troubleshooting
 
