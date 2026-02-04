@@ -150,7 +150,7 @@ TEST_SUITE("Event System")
         auto tickEvent = std::make_unique<Limitless::Events::AppTickEvent>(0.016f);
         auto updateEvent = std::make_unique<Limitless::Events::AppUpdateEvent>(0.016f);
         auto keyEvent = std::make_unique<Limitless::Events::KeyPressedEvent>(65, 0); // 'A' key
-        auto mouseEvent = std::make_unique<Limitless::Events::MouseMovedEvent>(100, 200);
+        auto mouseEvent = std::make_unique<Limitless::Events::MouseMovedEvent>(100.0f, 200.0f);
         
         eventSystem.Dispatch(*tickEvent);
         eventSystem.Dispatch(*updateEvent);
@@ -281,43 +281,58 @@ TEST_SUITE("Event System")
         eventSystem.Initialize();
         
         const int numEvents = 10000;
+        std::atomic<int> callbackCount{0};
         
         // Add a simple callback
-        eventSystem.AddCallback(Limitless::EventType::AppTick, [](Limitless::Event& event) {
-            // Simple callback that does nothing
+        eventSystem.AddCallback(Limitless::EventType::AppTick, [&callbackCount](Limitless::Event&) {
+            callbackCount.fetch_add(1, std::memory_order_relaxed);
         });
         
-        // Measure dispatch performance
-        auto dispatchStart = std::chrono::high_resolution_clock::now();
+        // This is a stability-focused test: validate the queue/dispatch paths work correctly under load.
+        // We intentionally avoid hard microsecond thresholds, which are flaky on CI / power-managed systems.
         
+        // Measure immediate dispatch throughput (informational only)
+        auto dispatchStart = std::chrono::high_resolution_clock::now();
         for (int i = 0; i < numEvents; ++i)
         {
             auto tickEvent = std::make_unique<Limitless::Events::AppTickEvent>(0.016f);
             eventSystem.Dispatch(*tickEvent);
         }
-        
         auto dispatchEnd = std::chrono::high_resolution_clock::now();
-        auto dispatchDuration = std::chrono::duration_cast<std::chrono::microseconds>(dispatchEnd - dispatchStart);
-        
-        // Measure processing performance
-        auto processStart = std::chrono::high_resolution_clock::now();
-        
-        int processedEvents = 0;
-        while (processedEvents < numEvents)
+        auto dispatchDuration = std::chrono::duration_cast<std::chrono::microseconds>(dispatchEnd - dispatchStart).count();
+
+        // Validate correctness: callback executed once per dispatch.
+        CHECK(callbackCount.load(std::memory_order_relaxed) == numEvents);
+
+        // Now validate deferred queue processing under load.
+        callbackCount.store(0, std::memory_order_relaxed);
+        for (int i = 0; i < numEvents; ++i)
         {
-            eventSystem.ProcessEvents();
-            processedEvents += 1; // ProcessEvents() returns void, so we count iterations
+            auto tickEvent = std::make_unique<Limitless::Events::AppTickEvent>(0.016f);
+            eventSystem.DispatchDeferred(std::move(tickEvent));
         }
-        
+
+        auto processStart = std::chrono::high_resolution_clock::now();
+        // Important: the EventSystem's deferred queue is bounded (default max size is 1000).
+        // Under heavy bursts, events may be dropped. Drain until the queue is empty and then assert
+        // that we handled exactly (submitted - dropped).
+        for (;;)
+        {
+            eventSystem.ProcessEvents(256);
+            auto stats = eventSystem.GetStats();
+            if (stats.queueStats.currentSize == 0)
+                break;
+        }
         auto processEnd = std::chrono::high_resolution_clock::now();
-        auto processDuration = std::chrono::duration_cast<std::chrono::microseconds>(processEnd - processStart);
-        
-        // Performance should be reasonable
-        double dispatchTimePerEvent = static_cast<double>(dispatchDuration.count()) / numEvents;
-        double processTimePerEvent = static_cast<double>(processDuration.count()) / numEvents;
-        
-        CHECK(dispatchTimePerEvent < 100.0); // Less than 100 microseconds per dispatch
-        CHECK(processTimePerEvent < 100.0);  // Less than 100 microseconds per process
+        auto processDuration = std::chrono::duration_cast<std::chrono::microseconds>(processEnd - processStart).count();
+
+        auto finalStats = eventSystem.GetStats();
+        const int dropped = static_cast<int>(finalStats.queueStats.totalDropped);
+        const int expectedHandled = numEvents - dropped;
+        CHECK(callbackCount.load(std::memory_order_relaxed) == expectedHandled);
+
+        INFO("Immediate dispatch: " << dispatchDuration << " us total for " << numEvents << " events");
+        INFO("Deferred processing: " << processDuration << " us total for " << numEvents << " events (dropped=" << dropped << ")");
         
         eventSystem.Shutdown();
     }

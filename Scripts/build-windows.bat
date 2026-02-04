@@ -22,6 +22,15 @@ REM Change to the project root directory
 cd /d "%~dp0.."
 
 REM --------------------------------------------------------------------------------------
+REM Prevent LNK1168: "cannot open ...\Test.exe for writing"
+REM
+REM This typically happens when a previous test run hung/crashed and left the built Test.exe
+REM running. We only kill Test.exe processes whose executable path is inside THIS repo's
+REM Build output folder, to avoid impacting unrelated programs named "Test.exe".
+REM --------------------------------------------------------------------------------------
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$root = (Resolve-Path '%cd%').Path; $pattern = $root + '\Build\*\Test\Test.exe'; Get-Process -Name Test -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -like $pattern } | Stop-Process -Force -ErrorAction SilentlyContinue" >nul 2>&1
+
+REM --------------------------------------------------------------------------------------
 REM Locate MSBuild (works without a Developer Command Prompt)
 REM --------------------------------------------------------------------------------------
 set "MSBUILD_EXE="

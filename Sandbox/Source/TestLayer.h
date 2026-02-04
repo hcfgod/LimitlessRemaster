@@ -21,5 +21,6 @@ namespace Limitless
     private:
         float m_ClearColor[4]; // RGBA color for clearing
         float m_ColorChangeSpeed; // Speed at which to change colors
+        float m_TimeSeconds = 0.0f; // Per-layer timer used for color transitions (instance-owned)
     };
 } 

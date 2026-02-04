@@ -9,12 +9,17 @@
 #include <vector>
 #include <queue>
 #include <mutex>
+#include <atomic>
+#include <condition_variable>
 #include <typeindex>
 #include <chrono>
 #include <string>
 
 namespace Limitless
 {
+    // Internal helper for shutdown-race safety (friend of EventSystem).
+    class EventSystemOperationGuard;
+
     // Forward declarations
     class Event;
     class EventDispatcher;
@@ -212,10 +217,10 @@ namespace Limitless
         mutable std::mutex m_Mutex;
         
         // Statistics
-        mutable size_t m_TotalEventsDispatched = 0;
-        mutable size_t m_EventsHandled = 0;
-        mutable size_t m_EventsFiltered = 0;
-        mutable std::chrono::microseconds m_TotalDispatchTime{0};
+        std::atomic<size_t> m_TotalEventsDispatched{0};
+        std::atomic<size_t> m_EventsHandled{0};
+        std::atomic<size_t> m_EventsFiltered{0};
+        std::atomic<int64_t> m_TotalDispatchTimeMicroseconds{0};
     };
 
     // Event queue for deferred processing
@@ -265,8 +270,10 @@ namespace Limitless
                 : event(std::move(e)), enqueueTime(std::chrono::system_clock::now()) {}
         };
 
-        Concurrency::LockFreeMPMCQueue<QueuedEvent, 16384> m_Queue; // Power of 2 for efficiency
-        size_t m_MaxSize;
+        static constexpr size_t kQueueCapacity = 16384; // Must match the LockFreeMPMCQueue template size
+        Concurrency::LockFreeMPMCQueue<QueuedEvent, kQueueCapacity> m_Queue; // Power of 2 for efficiency
+        size_t m_MaxSize = kQueueCapacity;
+        std::atomic<size_t> m_ApproxSize{0};
         
         // Statistics (atomic for thread safety)
         std::atomic<size_t> m_TotalEnqueued{0};
@@ -289,6 +296,7 @@ namespace Limitless
         void Initialize();
         void Shutdown();
         bool IsInitialized() const { return m_Initialized; }
+        bool IsShuttingDown() const { return m_ShuttingDown.load(std::memory_order_relaxed); }
 
         // Event dispatching
         void Dispatch(Event& event);
@@ -333,9 +341,25 @@ namespace Limitless
         EventSystem() = default;
         ~EventSystem() = default;
 
-        std::unique_ptr<EventDispatcher> m_Dispatcher;
-        std::unique_ptr<EventQueue> m_Queue;
-        bool m_Initialized = false;
+        friend class EventSystemOperationGuard;
+
+        // Shutdown/dispatch race handling.
+        bool BeginOperation() noexcept;
+        void EndOperation() noexcept;
+
+        // Shared ownership allows safe concurrent access during shutdown; callers take a local copy.
+        std::shared_ptr<EventDispatcher> m_Dispatcher;
+        std::shared_ptr<EventQueue> m_Queue;
+
+        std::atomic<bool> m_Initialized{false};
+        std::atomic<bool> m_ShuttingDown{false};
+
+        // In-flight operation tracking: Shutdown waits until operations complete so no callbacks run after Shutdown returns.
+        std::atomic<uint32_t> m_InFlightOperations{0};
+        mutable std::mutex m_ShutdownGateMutex;
+        mutable std::mutex m_ShutdownMutex;
+        mutable std::condition_variable m_ShutdownCondition;
+
         bool m_AsyncProcessingEnabled = false;
         mutable std::mutex m_Mutex;
     };

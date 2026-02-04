@@ -157,6 +157,35 @@ events.Dispatch(e);
 - Avoid allocating per-frame in event handlers; if you must, pool or reuse.
 - If an event is marked handled (`event.SetHandled(true)`), dispatch will stop propagating it to lower-priority handlers.
 
+## Correctness Contracts (Threading + Lifetime)
+
+This section is the “hard rules” version of the event system behavior.
+
+### Threading model
+
+- **Handler registration (`AddListener`, `AddCallback`, remove variants)**:
+  - Thread-safe with respect to concurrent dispatch: dispatch takes a snapshot of handlers under a mutex.
+  - Best practice is still to mutate handlers from a single “game thread” to keep mental models simple.
+- **Immediate dispatch (`Dispatch`, `DispatchImmediate`)**:
+  - The event is delivered **synchronously on the calling thread**.
+  - User callbacks/listeners must be thread-safe if you dispatch from multiple threads.
+- **Deferred dispatch (`DispatchDeferred`)**:
+  - Safe for **multiple producer threads** (MPMC enqueue).
+  - Events are delivered when `ProcessEvents()` runs.
+- **Processing (`ProcessEvents`)**:
+  - Intended to be called from **one thread** (the main/game thread) as part of the frame loop.
+  - Do not run `ProcessEvents()` concurrently from multiple threads.
+
+### Ownership / lifetime
+
+- **Immediate dispatch**: the caller retains ownership of the event object; it must remain alive for the duration of the call.
+- **Deferred dispatch**: ownership transfers into the event queue via `std::unique_ptr<Event>`.
+- **Shutdown safety**:
+  - `EventSystem::Shutdown()` is **race-safe** with other threads calling `Dispatch*()` / `ProcessEvents()`:
+    - Shutdown prevents new operations from starting.
+    - Shutdown **waits for in-flight operations to complete**, so **no callbacks/listeners will execute after `Shutdown()` returns**.
+  - Calls made after shutdown are treated as safe no-ops (with warnings).
+
 ## Troubleshooting
 
 - **No events are received**: Confirm `EventSystem::Initialize()` was called and `ProcessEvents()` is running each frame.

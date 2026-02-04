@@ -1,4 +1,5 @@
 #include "TestLayer.h"
+#include <algorithm>
 #include <cmath>
 
 namespace Limitless
@@ -29,19 +30,18 @@ namespace Limitless
     void TestLayer::OnUpdate(float deltaTime)
     {
         // Update the clear color over time to create a nice visual effect
-        static float time = 0.0f;
-        time += deltaTime;
+        m_TimeSeconds += deltaTime;
 
         // Create a smooth color transition using sine waves
-        m_ClearColor[0] = 0.5f + 0.3f * std::sin(time * m_ColorChangeSpeed);
-        m_ClearColor[1] = 0.5f + 0.3f * std::sin(time * m_ColorChangeSpeed + 2.0f);
-        m_ClearColor[2] = 0.5f + 0.3f * std::sin(time * m_ColorChangeSpeed + 4.0f);
+        m_ClearColor[0] = 0.5f + 0.3f * std::sin(m_TimeSeconds * m_ColorChangeSpeed);
+        m_ClearColor[1] = 0.5f + 0.3f * std::sin(m_TimeSeconds * m_ColorChangeSpeed + 2.0f);
+        m_ClearColor[2] = 0.5f + 0.3f * std::sin(m_TimeSeconds * m_ColorChangeSpeed + 4.0f);
         m_ClearColor[3] = 1.0f; // Keep alpha at 1.0
 
         // Clamp values to valid range
         for (int i = 0; i < 3; ++i)
         {
-            m_ClearColor[i] = std::max(0.0f, std::min(1.0f, m_ClearColor[i]));
+            m_ClearColor[i] = std::clamp(m_ClearColor[i], 0.0f, 1.0f);
         }
     }
 

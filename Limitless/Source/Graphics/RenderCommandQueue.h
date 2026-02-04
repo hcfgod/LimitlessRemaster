@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <mutex>
 
 namespace Limitless
 {
@@ -52,6 +53,8 @@ namespace Limitless
     class RenderCommandQueue
     {
     public:
+        static constexpr uint32_t kQueueCapacity = 16384; // Must match the LockFreeMPMCQueue template size below
+
         explicit RenderCommandQueue(const RenderQueueConfig& config = RenderQueueConfig{});
         ~RenderCommandQueue();
 
@@ -176,13 +179,14 @@ namespace Limitless
 
     private:
         // Lock-free queue for command storage
-        Concurrency::LockFreeMPMCQueue<QueuedCommand, 16384> m_Queue;
+        Concurrency::LockFreeMPMCQueue<QueuedCommand, kQueueCapacity> m_Queue;
+        std::atomic<uint32_t> m_ApproxSize{0};
         
         // Configuration
         RenderQueueConfig m_Config;
         
-        // Statistics (atomic for thread safety)
-        mutable std::atomic<RenderQueueStats> m_Stats;
+        // Statistics (mutex-protected; structure is not atomically updatable as a whole)
+        mutable RenderQueueStats m_Stats{};
         
         // Frame tracking
         std::atomic<uint64_t> m_CurrentFrameId{0};

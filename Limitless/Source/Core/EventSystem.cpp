@@ -6,6 +6,35 @@
 
 namespace Limitless
 {
+    // NOTE: This type is forward-declared in `EventSystem.h` and friended by `EventSystem`.
+    // It must live in the `Limitless` namespace (not an anonymous namespace) so friendship applies.
+    class EventSystemOperationGuard final
+    {
+    public:
+        explicit EventSystemOperationGuard(EventSystem& system) noexcept
+            : m_System(system)
+            , m_Active(m_System.BeginOperation())
+        {
+        }
+
+        ~EventSystemOperationGuard()
+        {
+            if (m_Active)
+            {
+                m_System.EndOperation();
+            }
+        }
+
+        EventSystemOperationGuard(const EventSystemOperationGuard&) = delete;
+        EventSystemOperationGuard& operator=(const EventSystemOperationGuard&) = delete;
+
+        bool IsActive() const noexcept { return m_Active; }
+
+    private:
+        EventSystem& m_System;
+        bool m_Active = false;
+    };
+
     // Event base class implementation
     Event::Event(EventType type, EventPriority priority)
         : m_Type(type), m_Priority(priority), m_Timestamp(std::chrono::system_clock::now())
@@ -42,12 +71,12 @@ namespace Limitless
         // Check if event filter exists and if it should filter this event
         if (eventFilter && !eventFilter(event))
         {
-            m_EventsFiltered++;
+            m_EventsFiltered.fetch_add(1, std::memory_order_relaxed);
             LT_CORE_DEBUG("Event filtered out: {}", event.ToString());
             return; // Event is filtered out, don't dispatch
         }
 
-        m_TotalEventsDispatched++;
+        m_TotalEventsDispatched.fetch_add(1, std::memory_order_relaxed);
         auto startTime = std::chrono::high_resolution_clock::now();
 
         // Dispatch to callbacks (priority order is maintained at registration time).
@@ -61,7 +90,7 @@ namespace Limitless
                 if (callback.first)
                 {
                     callback.first(event);
-                    m_EventsHandled++;
+                    m_EventsHandled.fetch_add(1, std::memory_order_relaxed);
                 }
             }
             catch (const std::exception& e)
@@ -84,7 +113,7 @@ namespace Limitless
                 if (listenerEntry.listener->ShouldReceiveEvent(event))
                 {
                     listenerEntry.listener->OnEvent(event);
-                    m_EventsHandled++;
+                    m_EventsHandled.fetch_add(1, std::memory_order_relaxed);
                 }
             }
             catch (const std::exception& e)
@@ -94,7 +123,8 @@ namespace Limitless
         }
 
         auto endTime = std::chrono::high_resolution_clock::now();
-        m_TotalDispatchTime += std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
+        const auto dispatchTime = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();
+        m_TotalDispatchTimeMicroseconds.fetch_add(dispatchTime, std::memory_order_relaxed);
     }
 
     void EventDispatcher::DispatchImmediate(Event& event)
@@ -175,22 +205,22 @@ namespace Limitless
     EventDispatcher::DispatchStats EventDispatcher::GetStats() const
     {
         DispatchStats stats;
-        stats.totalEventsDispatched = m_TotalEventsDispatched;
-        stats.eventsHandled = m_EventsHandled;
-        stats.eventsFiltered = m_EventsFiltered;
-        stats.totalDispatchTime = m_TotalDispatchTime;
-        stats.averageDispatchTime = m_TotalEventsDispatched > 0 
-            ? static_cast<double>(m_TotalDispatchTime.count()) / m_TotalEventsDispatched 
+        stats.totalEventsDispatched = m_TotalEventsDispatched.load(std::memory_order_relaxed);
+        stats.eventsHandled = m_EventsHandled.load(std::memory_order_relaxed);
+        stats.eventsFiltered = m_EventsFiltered.load(std::memory_order_relaxed);
+        stats.totalDispatchTime = std::chrono::microseconds{ m_TotalDispatchTimeMicroseconds.load(std::memory_order_relaxed) };
+        stats.averageDispatchTime = stats.totalEventsDispatched > 0 
+            ? static_cast<double>(stats.totalDispatchTime.count()) / static_cast<double>(stats.totalEventsDispatched) 
             : 0.0;
         return stats;
     }
 
     void EventDispatcher::ResetStats()
     {
-        m_TotalEventsDispatched = 0;
-        m_EventsHandled = 0;
-        m_EventsFiltered = 0;
-        m_TotalDispatchTime = std::chrono::microseconds{0};
+        m_TotalEventsDispatched.store(0, std::memory_order_relaxed);
+        m_EventsHandled.store(0, std::memory_order_relaxed);
+        m_EventsFiltered.store(0, std::memory_order_relaxed);
+        m_TotalDispatchTimeMicroseconds.store(0, std::memory_order_relaxed);
     }
 
     size_t EventDispatcher::GetListenerCount() const
@@ -212,16 +242,51 @@ namespace Limitless
 
     // EventQueue implementation with lock-free queue
     EventQueue::EventQueue(size_t maxSize)
-        : m_MaxSize(maxSize)
     {
+        // Note: the underlying queue has a fixed capacity (kQueueCapacity). The max size is an
+        // additional contract-level limit enforced via an atomic counter.
+        if (maxSize == 0 || maxSize > kQueueCapacity)
+        {
+            m_MaxSize = kQueueCapacity;
+        }
+        else
+        {
+            m_MaxSize = maxSize;
+        }
     }
 
     void EventQueue::Enqueue(std::unique_ptr<Event> event)
     {
+        if (!event)
+        {
+            return;
+        }
+
+        // Enforce the configured max size (bounded queue contract).
+        size_t size = m_ApproxSize.load(std::memory_order_relaxed);
+        for (;;)
+        {
+            if (size >= m_MaxSize)
+            {
+                m_TotalDropped.fetch_add(1, std::memory_order_relaxed);
+                LT_CORE_WARN("Event queue is full (maxSize={}): dropping event", m_MaxSize);
+                return;
+            }
+
+            if (m_ApproxSize.compare_exchange_weak(
+                    size, size + 1,
+                    std::memory_order_acq_rel,
+                    std::memory_order_relaxed))
+            {
+                break;
+            }
+        }
+
         QueuedEvent queuedEvent(std::move(event));
         
         if (!m_Queue.TryPush(std::move(queuedEvent)))
         {
+            m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
             m_TotalDropped.fetch_add(1, std::memory_order_relaxed);
             LT_CORE_WARN("Event queue is full, dropping event");
             return;
@@ -236,6 +301,7 @@ namespace Limitless
         if (!result)
             return nullptr;
         
+        m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
         m_TotalDequeued.fetch_add(1, std::memory_order_relaxed);
         return std::move(result->event);
     }
@@ -243,6 +309,7 @@ namespace Limitless
     void EventQueue::Clear()
     {
         m_Queue.Clear();
+        m_ApproxSize.store(0, std::memory_order_relaxed);
     }
 
     bool EventQueue::IsEmpty() const
@@ -257,7 +324,7 @@ namespace Limitless
 
     size_t EventQueue::GetSize() const
     {
-        return m_Queue.GetSize();
+        return m_ApproxSize.load(std::memory_order_relaxed);
     }
 
     void EventQueue::ProcessAll(EventDispatcher& dispatcher)
@@ -267,6 +334,7 @@ namespace Limitless
             auto result = m_Queue.TryPop();
             if (result && result->event)
             {
+                m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
                 m_TotalDequeued.fetch_add(1, std::memory_order_relaxed);
                 dispatcher.Dispatch(*result->event);
             }
@@ -281,6 +349,7 @@ namespace Limitless
             auto result = m_Queue.TryPop();
             if (result && result->event)
             {
+                m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
                 m_TotalDequeued.fetch_add(1, std::memory_order_relaxed);
                 dispatcher.Dispatch(*result->event);
                 processed++;
@@ -291,7 +360,7 @@ namespace Limitless
     EventQueue::QueueStats EventQueue::GetStats() const
     {
         QueueStats stats;
-        stats.currentSize = m_Queue.GetSize();
+        stats.currentSize = m_ApproxSize.load(std::memory_order_relaxed);
         stats.maxSize = m_MaxSize;
         stats.totalEnqueued = m_TotalEnqueued.load(std::memory_order_relaxed);
         stats.totalDequeued = m_TotalDequeued.load(std::memory_order_relaxed);
@@ -315,30 +384,69 @@ namespace Limitless
 
     void EventSystem::Initialize()
     {
-        if (m_Initialized)
+        if (m_Initialized.load(std::memory_order_acquire))
         {
             LT_CORE_WARN("EventSystem already initialized, skipping...");
             return;
         }
 
         LT_CORE_INFO("Initializing EventSystem");
-        m_Dispatcher = std::make_unique<EventDispatcher>();
-        m_Queue = std::make_unique<EventQueue>(1000);
-        m_Initialized = true;
+        m_ShuttingDown.store(false, std::memory_order_release);
+        m_Dispatcher = std::make_shared<EventDispatcher>();
+        m_Queue = std::make_shared<EventQueue>(1000);
+        m_Initialized.store(true, std::memory_order_release);
         LT_CORE_INFO("EventSystem initialized successfully with dispatcher and queue ready");
+    }
+
+    bool EventSystem::BeginOperation() noexcept
+    {
+        // Gate new operations during shutdown, without holding a lock during user code execution.
+        std::lock_guard<std::mutex> gateLock(m_ShutdownGateMutex);
+        if (!m_Initialized.load(std::memory_order_acquire) ||
+            m_ShuttingDown.load(std::memory_order_acquire))
+        {
+            return false;
+        }
+
+        m_InFlightOperations.fetch_add(1, std::memory_order_acq_rel);
+        return true;
+    }
+
+    void EventSystem::EndOperation() noexcept
+    {
+        const uint32_t remaining = m_InFlightOperations.fetch_sub(1, std::memory_order_acq_rel) - 1;
+        if (remaining == 0)
+        {
+            std::lock_guard<std::mutex> lock(m_ShutdownMutex);
+            m_ShutdownCondition.notify_all();
+        }
     }
 
     void EventSystem::Shutdown()
     {
-        if (!m_Initialized) {
+        if (!m_Initialized.load(std::memory_order_acquire))
+        {
             LT_CORE_DEBUG("EventSystem already shutdown, skipping...");
             return;
+        }
+
+        // Prevent new work from starting and wait until in-flight operations drain.
+        {
+            std::lock_guard<std::mutex> gateLock(m_ShutdownGateMutex);
+            m_ShuttingDown.store(true, std::memory_order_release);
+        }
+        {
+            std::unique_lock<std::mutex> lock(m_ShutdownMutex);
+            m_ShutdownCondition.wait(lock, [&]() {
+                return m_InFlightOperations.load(std::memory_order_acquire) == 0;
+            });
         }
 
         LT_CORE_INFO("Shutting down EventSystem...");
         
         // Get stats before shutdown
-        if (m_Dispatcher) {
+        if (m_Dispatcher)
+        {
             auto stats = m_Dispatcher->GetStats();
             LT_CORE_INFO("EventSystem shutdown stats - Events dispatched: {}, Events handled: {}, Events filtered: {}", 
                         stats.totalEventsDispatched, stats.eventsHandled, stats.eventsFiltered);
@@ -348,21 +456,23 @@ namespace Limitless
         LT_CORE_INFO("Clearing EventDispatcher and EventQueue...");
         m_Dispatcher.reset();
         m_Queue.reset();
-        m_Initialized = false;
+        m_Initialized.store(false, std::memory_order_release);
         
         LT_CORE_INFO("EventSystem shutdown complete");
     }
 
     void EventSystem::Dispatch(Event& event)
     {
-        if (!m_Initialized)
-        {
-            LT_CORE_WARN("Attempting to dispatch event when EventSystem is not initialized");
+        EventSystemOperationGuard op(*this);
+        if (!op.IsActive())
             return;
-        }
+
+        auto dispatcher = m_Dispatcher;
+        if (!dispatcher)
+            return;
 
         LT_CORE_DEBUG("Dispatching event: {} (Type: {})", event.GetName(), static_cast<int>(event.GetType()));
-        m_Dispatcher->Dispatch(event);
+        dispatcher->Dispatch(event);
     }
 
     void EventSystem::DispatchImmediate(Event& event)
@@ -372,78 +482,138 @@ namespace Limitless
 
     void EventSystem::DispatchDeferred(std::unique_ptr<Event> event)
     {
-        if (!m_Initialized)
-        {
-            LT_CORE_WARN("Attempting to dispatch deferred event when EventSystem is not initialized");
+        EventSystemOperationGuard op(*this);
+        if (!op.IsActive())
             return;
-        }
+
+        if (!event)
+            return;
+
+        auto queue = m_Queue;
+        if (!queue)
+            return;
 
         LT_CORE_DEBUG("Enqueuing deferred event: {} (Type: {})", event->GetName(), static_cast<int>(event->GetType()));
-        m_Queue->Enqueue(std::move(event));
+        queue->Enqueue(std::move(event));
     }
 
     void EventSystem::ProcessEvents()
     {
-        if (!m_Initialized) return;
+        EventSystemOperationGuard op(*this);
+        if (!op.IsActive())
+            return;
 
-        m_Queue->ProcessAll(*m_Dispatcher);
+        auto queue = m_Queue;
+        auto dispatcher = m_Dispatcher;
+        if (!queue || !dispatcher)
+            return;
+
+        queue->ProcessAll(*dispatcher);
     }
 
     void EventSystem::ProcessEvents(size_t maxEvents)
     {
-        if (!m_Initialized) return;
+        EventSystemOperationGuard op(*this);
+        if (!op.IsActive())
+            return;
 
-        m_Queue->ProcessBatch(*m_Dispatcher, maxEvents);
+        auto queue = m_Queue;
+        auto dispatcher = m_Dispatcher;
+        if (!queue || !dispatcher)
+            return;
+
+        queue->ProcessBatch(*dispatcher, maxEvents);
     }
 
     void EventSystem::AddListener(std::shared_ptr<EventListener> listener)
     {
-        if (!m_Initialized)
-        {
+        EventSystemOperationGuard op(*this);
+        if (!op.IsActive())
             return;
-        }
 
-        m_Dispatcher->AddListener(std::move(listener));
+        auto dispatcher = m_Dispatcher;
+        if (!dispatcher)
+            return;
+
+        dispatcher->AddListener(std::move(listener));
     }
 
     void EventSystem::RemoveListener(std::shared_ptr<EventListener> listener)
     {
-        if (!m_Initialized) return;
-        m_Dispatcher->RemoveListener(std::move(listener));
+        EventSystemOperationGuard op(*this);
+        if (!op.IsActive())
+            return;
+
+        auto dispatcher = m_Dispatcher;
+        if (!dispatcher)
+            return;
+
+        dispatcher->RemoveListener(std::move(listener));
     }
 
     void EventSystem::RemoveListener(const EventListener* listener)
     {
-        if (!m_Initialized) return;
-        m_Dispatcher->RemoveListener(listener);
+        EventSystemOperationGuard op(*this);
+        if (!op.IsActive())
+            return;
+
+        auto dispatcher = m_Dispatcher;
+        if (!dispatcher)
+            return;
+
+        dispatcher->RemoveListener(listener);
     }
 
     void EventSystem::AddCallback(EventType type, EventCallback callback, EventPriority priority)
     {
-        if (!m_Initialized)
-        {
+        EventSystemOperationGuard op(*this);
+        if (!op.IsActive())
             return;
-        }
 
-        m_Dispatcher->AddCallback(type, std::move(callback), priority);
+        auto dispatcher = m_Dispatcher;
+        if (!dispatcher)
+            return;
+
+        dispatcher->AddCallback(type, std::move(callback), priority);
     }
 
     void EventSystem::RemoveCallback(EventType type, const EventCallback& callback)
     {
-        if (!m_Initialized) return;
-        m_Dispatcher->RemoveCallback(type, callback);
+        EventSystemOperationGuard op(*this);
+        if (!op.IsActive())
+            return;
+
+        auto dispatcher = m_Dispatcher;
+        if (!dispatcher)
+            return;
+
+        dispatcher->RemoveCallback(type, callback);
     }
 
     void EventSystem::SetEventFilter(std::function<bool(const Event&)> filter)
     {
-        if (!m_Initialized) return;
-        m_Dispatcher->SetEventFilter(std::move(filter));
+        EventSystemOperationGuard op(*this);
+        if (!op.IsActive())
+            return;
+
+        auto dispatcher = m_Dispatcher;
+        if (!dispatcher)
+            return;
+
+        dispatcher->SetEventFilter(std::move(filter));
     }
 
     void EventSystem::ClearEventFilter()
     {
-        if (!m_Initialized) return;
-        m_Dispatcher->ClearEventFilter();
+        EventSystemOperationGuard op(*this);
+        if (!op.IsActive())
+            return;
+
+        auto dispatcher = m_Dispatcher;
+        if (!dispatcher)
+            return;
+
+        dispatcher->ClearEventFilter();
     }
 
     void EventSystem::SetMaxQueueSize(size_t maxSize)
@@ -463,24 +633,27 @@ namespace Limitless
     EventSystem::EventSystemStats EventSystem::GetStats() const
     {
         EventSystemStats stats;
-        if (m_Dispatcher)
+        auto dispatcher = m_Dispatcher;
+        auto queue = m_Queue;
+        if (dispatcher)
         {
-            stats.dispatchStats = m_Dispatcher->GetStats();
+            stats.dispatchStats = dispatcher->GetStats();
         }
-        if (m_Queue)
+        if (queue)
         {
-            stats.queueStats = m_Queue->GetStats();
+            stats.queueStats = queue->GetStats();
         }
-        stats.totalListeners = m_Dispatcher ? m_Dispatcher->GetListenerCount() : 0;
-        stats.totalCallbacks = m_Dispatcher ? m_Dispatcher->GetCallbackCount() : 0;
+        stats.totalListeners = dispatcher ? dispatcher->GetListenerCount() : 0;
+        stats.totalCallbacks = dispatcher ? dispatcher->GetCallbackCount() : 0;
         return stats;
     }
 
     void EventSystem::ResetStats()
     {
-        if (m_Dispatcher)
+        auto dispatcher = m_Dispatcher;
+        if (dispatcher)
         {
-            m_Dispatcher->ResetStats();
+            dispatcher->ResetStats();
         }
         // Queue stats would need to be reset separately
     }

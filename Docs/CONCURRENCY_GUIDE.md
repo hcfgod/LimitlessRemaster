@@ -157,6 +157,53 @@ for (auto& task : tasks)
 - AsyncIO’s internal work queue is a **bounded, blocking MPMC queue** (mutex + condition variable). This is an intentional correctness choice.
 - The engine also provides lock-free queues in `Core/Concurrency/LockFreeQueue.h` (SPSC + bounded MPMC ring buffer). These are used in some subsystems for fast producer/consumer handoff.
 
+## Correctness Contracts (Threading + Ownership Invariants)
+
+This section defines **hard invariants** for the concurrency primitives used by the engine. Treat these as API contracts.
+
+### `LockFreeSPSCQueue<T, Size>` (Single Producer / Single Consumer)
+
+File: `Limitless/Source/Core/Concurrency/LockFreeQueue.h`
+
+- **Thread model**
+  - Exactly **one producer thread** may call `TryPush()`.
+  - Exactly **one consumer thread** may call `TryPop()`.
+  - `IsEmpty()/IsFull()/GetSize()` are safe to call from either of those two threads, but the size is **approximate** under contention.
+- **Capacity**
+  - The effective capacity is **`Size - 1`** items (one slot is intentionally left empty to disambiguate full vs empty).
+- **Ownership**
+  - `TryPush(T&&)` moves `item` into the ring buffer.
+  - `TryPop()` moves an item out and returns it as `std::optional<T>`.
+- **Lifetime / safety**
+  - `Clear()` is **not thread-safe** and must only be called when neither producer nor consumer is operating.
+  - `T` must be nothrow-moveable (enforced via `static_assert`).
+
+### `LockFreeMPMCQueue<T, Size>` (Multiple Producer / Multiple Consumer)
+
+File: `Limitless/Source/Core/Concurrency/LockFreeQueue.h`
+
+- **Thread model**
+  - Multiple producers may call `TryPush()` concurrently.
+  - Multiple consumers may call `TryPop()` concurrently.
+- **Capacity**
+  - The queue is bounded to **`Size`** items (fixed ring buffer).
+  - `TryPush()` returns `false` when full; `TryPop()` returns `std::nullopt` when empty.
+- **Ownership**
+  - Items are moved into/out of the queue; `T` must be default constructible and nothrow-moveable (enforced).
+- **Lifetime / safety**
+  - `Clear()` is **not thread-safe** and must only be called when no other thread is pushing/popping.
+
+### Work-stealing queue (`WorkStealingQueue<T, Size>`)
+
+- **Thread model**
+  - `Push()` and `Pop()` are **owner-thread only**.
+  - `Steal()` may be called by other threads.
+
+### Where these queues are used
+
+- **Event queue**: `EventQueue` uses a bounded `LockFreeMPMCQueue` for `DispatchDeferred()` → `ProcessEvents()` handoff.
+- **Render queue**: `RenderCommandQueue` uses a bounded `LockFreeMPMCQueue` for multi-thread submit → single-thread execute.
+
 ## Integration Points
 
 ### ConfigManager Integration

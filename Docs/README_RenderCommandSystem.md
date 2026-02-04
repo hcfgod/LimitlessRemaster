@@ -229,7 +229,7 @@ commands.push_back(std::make_unique<PopDebugGroupCommand>());
 
 ### RenderQueueConfig
 
-- `maxQueueSize`: Maximum number of commands in the queue (must be power of 2)
+- `maxQueueSize`: Maximum number of commands allowed in the queue (**must be power of 2**). Note: the underlying ring buffer is currently a **fixed-capacity** queue (see Contracts below).
 - `maxCommandsPerFrame`: Maximum commands to process per frame
 - `maxExecutionTimePerFrame`: Maximum execution time per frame (microseconds)
 - `enableBatching`: Enable command batching
@@ -240,12 +240,24 @@ commands.push_back(std::make_unique<PopDebugGroupCommand>());
 
 ## Thread Safety
 
-The render command system is fully thread-safe:
+The render command system is thread-safe for *submission*, with strict rules for execution:
 
-- **Multiple producers**: Multiple threads can submit commands simultaneously
-- **Single consumer**: Commands are processed by a single thread (or multiple worker threads)
-- **Lock-free operations**: Uses lock-free queues for maximum performance
-- **Atomic statistics**: Performance statistics are updated atomically
+### Contracts (Hard invariants)
+
+- **Multiple producers**: `SubmitCommand*()` may be called concurrently from multiple threads (MPMC submit).
+- **Single consumer execution**: `ProcessCommands*()` must be called from a **single thread that owns the `GraphicsContext`** (OpenGL contexts are thread-affine).
+- **Bounded queue**:
+  - The underlying ring buffer has a fixed capacity (`RenderCommandQueue::kQueueCapacity`, currently **16384**).
+  - `maxQueueSize` can be set to a value **<=** that capacity to enforce a tighter bound; submissions beyond it return `false` and the commands are destroyed on the submitting thread.
+- **Ownership**:
+  - Submitting transfers ownership of the command via `std::unique_ptr` into the queue.
+  - If submission fails (queue full), the command is destroyed immediately on the submitting thread.
+- **Lifetime rule (critical)**:
+  - Any resources referenced by a queued command must remain valid until the command is executed on the consumer thread.
+
+### Notes about `RenderCommandExecutor`
+
+`RenderCommandExecutor` is experimental scaffolding. It is **not safe** to execute OpenGL commands from multiple threads against a single OpenGL context without explicit context sharing/ownership rules. Treat multi-threaded GPU execution as **not implemented** for OpenGL as of right now.
 
 ## Performance Considerations
 

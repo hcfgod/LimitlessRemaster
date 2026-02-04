@@ -12,13 +12,19 @@ namespace Limitless
     // RenderCommandQueue implementation
     RenderCommandQueue::RenderCommandQueue(const RenderQueueConfig& config)
         : m_Config(config)
-        , m_Stats{}
         , m_FrameStartTime(std::chrono::high_resolution_clock::now())
     {
         // Validate configuration
         if (m_Config.maxQueueSize == 0 || (m_Config.maxQueueSize & (m_Config.maxQueueSize - 1)) != 0)
         {
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Queue size must be a power of 2");
+        }
+
+        // Enforce the fixed underlying capacity at runtime. The queue's backing storage is a
+        // compile-time ring buffer; this contract prevents a config value that implies a larger capacity.
+        if (m_Config.maxQueueSize > kQueueCapacity)
+        {
+            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Queue maxQueueSize exceeds fixed capacity");
         }
     }
 
@@ -36,6 +42,30 @@ namespace Limitless
             return false;
         }
 
+        // Enforce configured maxQueueSize (which may be <= kQueueCapacity).
+        uint32_t size = m_ApproxSize.load(std::memory_order_relaxed);
+        for (;;)
+        {
+            if (size >= m_Config.maxQueueSize)
+            {
+                if (m_Config.enableStatistics)
+                {
+                    std::lock_guard<std::mutex> statsLock(m_StatsMutex);
+                    m_Stats.totalCommandsDropped++;
+                }
+                LT_CORE_WARN("Render command queue is full (maxQueueSize={}), command dropped", m_Config.maxQueueSize);
+                return false;
+            }
+
+            if (m_ApproxSize.compare_exchange_weak(
+                    size, size + 1,
+                    std::memory_order_acq_rel,
+                    std::memory_order_relaxed))
+            {
+                break;
+            }
+        }
+
         QueuedCommand queuedCommand(
             std::move(command), 
             RenderCommandPriority::Normal, 
@@ -46,20 +76,21 @@ namespace Limitless
         {
             if (m_Config.enableStatistics)
             {
-                auto stats = m_Stats.load();
-                stats.totalCommandsSubmitted++;
-                m_Stats.store(stats);
+                std::lock_guard<std::mutex> statsLock(m_StatsMutex);
+                m_Stats.totalCommandsSubmitted++;
             }
 
             return true;
         }
 
+        // If push failed, roll back our size reservation.
+        m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
+
         // Queue is full
         if (m_Config.enableStatistics)
         {
-            auto stats = m_Stats.load();
-            stats.totalCommandsDropped++;
-            m_Stats.store(stats);
+            std::lock_guard<std::mutex> statsLock(m_StatsMutex);
+            m_Stats.totalCommandsDropped++;
         }
         
         LT_CORE_WARN("Render command queue is full, command dropped");
@@ -89,6 +120,30 @@ namespace Limitless
             return false;
         }
 
+        // Enforce configured maxQueueSize (which may be <= kQueueCapacity).
+        uint32_t size = m_ApproxSize.load(std::memory_order_relaxed);
+        for (;;)
+        {
+            if (size >= m_Config.maxQueueSize)
+            {
+                if (m_Config.enableStatistics)
+                {
+                    std::lock_guard<std::mutex> statsLock(m_StatsMutex);
+                    m_Stats.totalCommandsDropped++;
+                }
+                LT_CORE_WARN("Render command queue is full (maxQueueSize={}), priority command dropped", m_Config.maxQueueSize);
+                return false;
+            }
+
+            if (m_ApproxSize.compare_exchange_weak(
+                    size, size + 1,
+                    std::memory_order_acq_rel,
+                    std::memory_order_relaxed))
+            {
+                break;
+            }
+        }
+
         QueuedCommand queuedCommand(
             std::move(command), 
             priority, 
@@ -99,19 +154,20 @@ namespace Limitless
         {
             if (m_Config.enableStatistics)
             {
-                auto stats = m_Stats.load();
-                stats.totalCommandsSubmitted++;
-                m_Stats.store(stats);
+                std::lock_guard<std::mutex> statsLock(m_StatsMutex);
+                m_Stats.totalCommandsSubmitted++;
             }
             return true;
         }
 
+        // If push failed, roll back our size reservation.
+        m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
+
         // Queue is full
         if (m_Config.enableStatistics)
         {
-            auto stats = m_Stats.load();
-            stats.totalCommandsDropped++;
-            m_Stats.store(stats);
+            std::lock_guard<std::mutex> statsLock(m_StatsMutex);
+            m_Stats.totalCommandsDropped++;
         }
         
         LT_CORE_WARN("Render command queue is full, priority command dropped");
@@ -136,10 +192,9 @@ namespace Limitless
             
             if (m_Config.enableStatistics)
             {
-                auto stats = m_Stats.load();
-                stats.totalCommandsExecuted++;
-                stats.totalExecutionTime += executionTime;
-                m_Stats.store(stats);
+                std::lock_guard<std::mutex> statsLock(m_StatsMutex);
+                m_Stats.totalCommandsExecuted++;
+                m_Stats.totalExecutionTime += executionTime;
             }
         }
         catch (const Error& error)
@@ -178,6 +233,7 @@ namespace Limitless
             if (!command)
                 break;
             
+            m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
             commands.push_back(std::make_unique<QueuedCommand>(std::move(command.value())));
         }
 
@@ -252,6 +308,7 @@ namespace Limitless
             if (!command)
                 break;
             
+            m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
             commands.push_back(std::make_unique<QueuedCommand>(std::move(command.value())));
         }
 
@@ -325,6 +382,8 @@ namespace Limitless
             if (!command)
                 break;
 
+            m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
+
             auto commandStartTime = std::chrono::high_resolution_clock::now();
             
             try
@@ -351,12 +410,12 @@ namespace Limitless
     void RenderCommandQueue::Clear()
     {
         m_Queue.Clear();
+        m_ApproxSize.store(0, std::memory_order_relaxed);
         
         if (m_Config.enableStatistics)
         {
-            auto stats = m_Stats.load();
-            stats.currentQueueSize = 0;
-            m_Stats.store(stats);
+            std::lock_guard<std::mutex> statsLock(m_StatsMutex);
+            m_Stats.currentQueueSize = 0;
         }
     }
 
@@ -368,6 +427,7 @@ namespace Limitless
             auto command = m_Queue.TryPop();
             if (command && command->command)
             {
+                m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
                 // Note: This requires a valid context, so it's up to the caller to ensure one is available
                 LT_CORE_WARN("Flushing command without context: {}", command->command->GetName());
             }
@@ -386,19 +446,21 @@ namespace Limitless
 
     uint32_t RenderCommandQueue::GetSize() const
     {
-        return static_cast<uint32_t>(m_Queue.GetSize());
+        return m_ApproxSize.load(std::memory_order_relaxed);
     }
 
     RenderQueueStats RenderCommandQueue::GetStats() const
     {
-        auto stats = m_Stats.load();
+        std::lock_guard<std::mutex> statsLock(m_StatsMutex);
+        RenderQueueStats stats = m_Stats;
         stats.currentQueueSize = GetSize();
         return stats;
     }
 
     void RenderCommandQueue::ResetStats()
     {
-        m_Stats.store(RenderQueueStats{});
+        std::lock_guard<std::mutex> statsLock(m_StatsMutex);
+        m_Stats = RenderQueueStats{};
     }
 
     void RenderCommandQueue::SetConfig(const RenderQueueConfig& config)
@@ -420,17 +482,15 @@ namespace Limitless
         
         if (m_Config.enableStatistics)
         {
-            auto stats = m_Stats.load();
-            stats.frameCount++;
-            stats.totalFrameTime += frameTime;
-            stats.averageFrameTime = static_cast<double>(stats.totalFrameTime) / stats.frameCount;
-            
-            if (frameTime < stats.minFrameTime)
-                stats.minFrameTime = frameTime;
-            if (frameTime > stats.maxFrameTime)
-                stats.maxFrameTime = frameTime;
-            
-            m_Stats.store(stats);
+            std::lock_guard<std::mutex> statsLock(m_StatsMutex);
+            m_Stats.frameCount++;
+            m_Stats.totalFrameTime += frameTime;
+            m_Stats.averageFrameTime = static_cast<double>(m_Stats.totalFrameTime) / static_cast<double>(m_Stats.frameCount);
+
+            if (static_cast<double>(frameTime) < m_Stats.minFrameTime)
+                m_Stats.minFrameTime = static_cast<double>(frameTime);
+            if (static_cast<double>(frameTime) > m_Stats.maxFrameTime)
+                m_Stats.maxFrameTime = static_cast<double>(frameTime);
         }
     }
 
@@ -476,16 +536,15 @@ namespace Limitless
         if (!m_Config.enableStatistics)
             return;
 
-        auto stats = m_Stats.load();
-        stats.totalCommandsExecuted++;
-        stats.totalExecutionTime += executionTime;
-        
-        if (stats.totalCommandsExecuted > 0)
+        std::lock_guard<std::mutex> statsLock(m_StatsMutex);
+        m_Stats.totalCommandsExecuted++;
+        m_Stats.totalExecutionTime += executionTime;
+
+        if (m_Stats.totalCommandsExecuted > 0)
         {
-            stats.averageExecutionTimePerCommand = static_cast<double>(stats.totalExecutionTime) / stats.totalCommandsExecuted;
+            m_Stats.averageExecutionTimePerCommand =
+                static_cast<double>(m_Stats.totalExecutionTime) / static_cast<double>(m_Stats.totalCommandsExecuted);
         }
-        
-        m_Stats.store(stats);
     }
 
     void RenderCommandQueue::SortCommandsByPriority(std::vector<std::unique_ptr<QueuedCommand>>& commands)
