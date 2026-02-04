@@ -623,9 +623,22 @@ namespace Limitless
         
         if (m_Window)
         {
-            // Note: VSync is typically handled by the renderer, not the window
-            m_Data.VSync = enabled;
-            LT_CORE_INFO("VSync set to: {}", enabled ? "enabled" : "disabled");
+            // In this engine, VSync is controlled via the active graphics context swap interval.
+            if (m_Context)
+            {
+                const bool ok = m_Context->SetVSync(enabled);
+                m_Data.VSync = ok ? m_Context->IsVSync() : enabled;
+                LT_CORE_INFO("VSync set to: {} (requested {}, applied {})",
+                    (m_Data.VSync ? "enabled" : "disabled"),
+                    (enabled ? "enabled" : "disabled"),
+                    (m_Data.VSync ? "enabled" : "disabled"));
+            }
+            else
+            {
+                // Fallback: store the requested value even if we can't apply it immediately.
+                m_Data.VSync = enabled;
+                LT_CORE_WARN("VSync requested but graphics context is not available yet");
+            }
         }
     }
 

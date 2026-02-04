@@ -155,6 +155,7 @@ events.Dispatch(e);
 - Keep callbacks small; hand off heavy work to jobs/tasks.
 - Use `ShouldReceiveEvent` for cheap filtering instead of doing it inside `OnEvent`.
 - Avoid allocating per-frame in event handlers; if you must, pool or reuse.
+- If an event is marked handled (`event.SetHandled(true)`), dispatch will stop propagating it to lower-priority handlers.
 
 ## Troubleshooting
 

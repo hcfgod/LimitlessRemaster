@@ -53,7 +53,7 @@ filter "system:windows"
 **Key Features:**
 - **C++20 Standard**: Full C++20 language support
 - **UTF-8 Support**: Proper Unicode handling
-- **Coroutine Support**: `/await` flag enables C++20 coroutines
+- **Coroutine Support**: C++20 coroutines are available when compiling in C++20 mode (no special MSVC flag required for standard C++20 coroutines).
 - **Static Runtime**: Self-contained executables
 - **Latest SDK**: Uses the latest Windows SDK
 
@@ -73,7 +73,7 @@ filter "system:macosx"
 
 **Key Features:**
 - **C++20 Standard**: Full C++20 language support
-- **Coroutine Support**: `-fcoroutines` flag enables C++20 coroutines
+- **Coroutine Support**: Standard C++20 coroutines are available in C++20 mode on modern Clang.
 - **Framework Integration**: Native macOS framework support
 - **ARM64 Support**: Native Apple Silicon support
 
@@ -93,79 +93,20 @@ filter "system:linux"
 
 **Key Features:**
 - **C++20 Standard**: Full C++20 language support
-- **Coroutine Support** Full coroutine support
+- **Coroutine Support**: Standard C++20 coroutines are available in C++20 mode on modern GCC/Clang.
 - **System Libraries**: Native Linux library integration
 - **Multi-architecture**: x64 and ARM64 support
 
-## C++20 Coroutine Support
+## C++20 Coroutine Status (Engine Reality)
 
-### Overview
+The project is compiled in **C++20 mode**, so client code may use standard C++20 coroutines where supported by the chosen compiler.
 
-The engine fully supports C++20 coroutines across all platforms with appropriate compiler flags:
+However:
 
-- **Windows (MSVC)**: `/await` flag
-
-### Usage Examples
-
-```cpp
-#include <coroutine>
-#include "Core/Concurrency/AsyncIO.h"
-
-using namespace Limitless::Async;
-
-// Coroutine-based async function
-Async::Task<std::string> LoadFileAsync(const std::string& path) {
-    // This runs in a background thread
-    auto content = co_await ReadFileAsync(path);
-    co_return content;
-}
-
-// Using coroutines in your application
-void ExampleUsage() {
-    auto task = LoadFileAsync("config.json");
-    auto content = task.Get(); // Wait for completion
-}
-```
-
-### Platform-Specific Implementation
-
-The coroutine support is implemented differently per platform:
-
-**Windows (MSVC):**
-```cpp
-// MSVC automatically supports coroutines with /await flag
-#include <coroutine>
-
-template<typename T>
-struct Task {
-    struct promise_type {
-        T value;
-        Task get_return_object() { return Task{}; }
-        std::suspend_never initial_suspend() { return {}; }
-        std::suspend_never final_suspend() noexcept { return {}; }
-        void return_value(T v) { value = v; }
-        void unhandled_exception() {}
-    };
-};
-```
-
-**macOS/Linux (GCC/Clang):**
-```cpp
-// GCC/Clang requires -fcoroutines flag
-#include <coroutine>
-
-template<typename T>
-struct Task {
-    struct promise_type {
-        T value;
-        Task get_return_object() { return Task{}; }
-        std::suspend_never initial_suspend() { return {}; }
-        std::suspend_never final_suspend() noexcept { return {}; }
-        void return_value(T v) { value = v; }
-        void unhandled_exception() {}
-    };
-};
-```
+- The engine’s current async primitives (`Limitless::Async::Task<T>`) are **future-backed** and are **not** coroutine-awaitable by default.
+- If you want coroutine-friendly tasks, you’ll need either:
+  - an awaiter wrapper around `std::shared_future`, or
+  - a dedicated coroutine `Task` type (future work).
 
 ## Build Configurations
 

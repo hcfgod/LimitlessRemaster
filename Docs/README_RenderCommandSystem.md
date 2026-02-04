@@ -1,17 +1,20 @@
 # Render Command System
 
-The Render Command System is a high-performance, thread-safe rendering architecture that uses lock-free queues for efficient command submission and execution. It provides a flexible and extensible framework for managing graphics rendering operations.
+The Render Command System is a **command submission + execution framework** intended to make rendering work explicit and schedulable. Today it is best understood as **infrastructure/scaffolding**: the queueing and prioritization exist, but many individual commands are still **API-stubbed** (OpenGL calls are only implemented for a small subset).
 
 ## Features
 
-- **Lock-Free Queue**: Uses the existing lock-free queue system for thread-safe command submission
-- **Priority-Based Execution**: Commands can be submitted with different priority levels
-- **Command Batching**: Efficient batching of similar commands for better performance
-- **Multi-Threaded Rendering**: Support for multi-threaded command execution
-- **Error Handling**: Comprehensive error handling using the existing error system
-- **Performance Monitoring**: Built-in statistics and performance metrics
-- **Debug Support**: Debug markers and groups for profiling
-- **Extensible**: Easy to add new command types
+- **Thread-safe submission**: Multiple threads can submit commands safely.
+- **Priority-based ordering**: Commands can be submitted with different priority levels.
+- **Basic batching pass**: A simple type-based reordering pass exists (clear → draw → other).
+- **Error handling hooks**: Command execution catches `Limitless::Error` and logs/report errors.
+- **Statistics**: Basic execution counters and timing stats exist.
+- **Extensible**: It’s straightforward to add new command types.
+
+### Current limitations (important)
+
+- Many commands (binds/draws/state) are currently **placeholders**: they log intent instead of issuing real graphics API calls.
+- The “multi-threaded executor” type exists, but **true multi-threaded GPU command execution is not implemented** and is not safe for OpenGL without explicit context ownership rules.
 
 ## Architecture
 
@@ -263,7 +266,10 @@ The render command system integrates seamlessly with existing Limitless engine c
 
 ## Example Usage
 
-See `RenderCommandExample.cpp` for comprehensive examples of how to use the render command system.
+The best practical examples right now are in:
+
+- `Limitless/Source/Graphics/Renderer.cpp` (queue setup + frame boundaries)
+- `Limitless/Source/Graphics/RenderCommandQueue.cpp` (submission, ordering, execution loop)
 
 ## Best Practices
 

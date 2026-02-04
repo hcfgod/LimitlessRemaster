@@ -150,44 +150,74 @@ namespace Limitless
         return Async::Task<void>([this, filename]() -> void {
             try
             {
-                std::shared_lock<std::shared_mutex> lock(m_ConfigMutex);
-
-                nlohmann::json config;
-                
-                // Convert flat configuration back to nested structure
-                for (const auto& [key, value] : m_Config)
+                // Take a snapshot of the flat map under a shared lock, then build JSON without holding the lock.
+                // This avoids long lock holds and ensures multi-dot keys like "window.position.x" are serialized properly.
+                std::unordered_map<std::string, ConfigValue> snapshot;
+                snapshot.reserve(m_Config.size());
                 {
-                    size_t dotPos = key.find('.');
-                    if (dotPos != std::string::npos)
-                    {
-                        // Nested key
-                        std::string parentKey = key.substr(0, dotPos);
-                        std::string childKey = key.substr(dotPos + 1);
-                        
-                        if (!config.contains(parentKey))
-                            config[parentKey] = nlohmann::json::object();
-                        
-                        std::visit([&config, &parentKey, &childKey](const auto& v) {
-                            config[parentKey][childKey] = v;
-                        }, value);
-                    }
-                    else
-                    {
-                        // Flat key
-                        std::visit([&config, &key](const auto& v) {
-                            config[key] = v;
-                        }, value);
-                    }
+                    std::shared_lock<std::shared_mutex> lock(m_ConfigMutex);
+                    snapshot = m_Config;
                 }
 
-                lock.unlock();
+                nlohmann::json config = nlohmann::json::object();
+
+                auto SetJsonAtPath = [&config](const std::string& dottedKey, const ConfigValue& value)
+                {
+                    std::vector<std::string> parts;
+                    parts.reserve(4);
+
+                    std::string current;
+                    current.reserve(dottedKey.size());
+                    for (char c : dottedKey)
+                    {
+                        if (c == '.')
+                        {
+                            if (!current.empty())
+                            {
+                                parts.push_back(std::move(current));
+                                current = {};
+                            }
+                        }
+                        else
+                        {
+                            current.push_back(c);
+                        }
+                    }
+                    if (!current.empty())
+                        parts.push_back(std::move(current));
+
+                    if (parts.empty())
+                        return;
+
+                    nlohmann::json* node = &config;
+                    for (size_t i = 0; i + 1 < parts.size(); ++i)
+                    {
+                        const auto& p = parts[i];
+                        if (!node->contains(p) || !(*node)[p].is_object())
+                        {
+                            (*node)[p] = nlohmann::json::object();
+                        }
+                        node = &(*node)[p];
+                    }
+
+                    const std::string& leaf = parts.back();
+                    std::visit([node, &leaf](const auto& v)
+                    {
+                        (*node)[leaf] = v;
+                    }, value);
+                };
+
+                for (const auto& [key, value] : snapshot)
+                {
+                    SetJsonAtPath(key, value);
+                }
 
                 auto saveTask = Async::SaveConfigAsync(filename.empty() ? m_ConfigFile : filename, config);
                 saveTask.Get();
 
                 m_TotalAsyncOperations.fetch_add(1, std::memory_order_relaxed);
                 LT_CORE_INFO("Configuration saved to file: {} ({} entries)", 
-                       filename.empty() ? m_ConfigFile : filename, m_Config.size());
+                       filename.empty() ? m_ConfigFile : filename, snapshot.size());
             }
             catch (const std::exception& e)
             {

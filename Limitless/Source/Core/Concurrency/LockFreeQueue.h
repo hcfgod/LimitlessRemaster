@@ -88,86 +88,143 @@ namespace Limitless
         class LockFreeMPMCQueue
         {
             static_assert(Size > 0 && ((Size & (Size - 1)) == 0), "Size must be a power of 2");
+            static_assert(std::is_default_constructible_v<T>, "T must be default constructible (queue uses a fixed ring buffer)");
             static_assert(std::is_nothrow_move_constructible_v<T>, "T must be nothrow move constructible");
             static_assert(std::is_nothrow_move_assignable_v<T>, "T must be nothrow move assignable");
 
         public:
-            LockFreeMPMCQueue() : m_Head(0), m_Tail(0) {}
+            LockFreeMPMCQueue()
+            {
+                for (size_t i = 0; i < Size; ++i)
+                {
+                    m_Buffer[i].sequence.store(i, std::memory_order_relaxed);
+                }
+            }
 
             // Try to push an item to the queue (thread-safe, multiple producers)
             bool TryPush(T&& item) noexcept
             {
-                size_t currentTail = m_Tail.load(std::memory_order_relaxed);
-                size_t nextTail = (currentTail + 1) & (Size - 1);
-                
-                // Check if queue is full
-                if (nextTail == m_Head.load(std::memory_order_acquire))
-                    return false;
-                
-                // Try to reserve the slot
-                if (!m_Tail.compare_exchange_weak(currentTail, nextTail, 
-                                                 std::memory_order_release, 
-                                                 std::memory_order_relaxed))
-                    return false;
-                
-                // Store the item
-                m_Buffer[currentTail] = std::move(item);
+                // Bounded MPMC ring buffer based on Dmitry Vyukov's algorithm:
+                // - Per-slot sequence numbers prevent consumers from reading slots before producers publish.
+                // - This avoids the "reservation before publish" race present in naive CAS-on-tail designs.
+                Cell* cell = nullptr;
+                size_t pos = m_EnqueuePos.load(std::memory_order_relaxed);
+                for (;;)
+                {
+                    cell = &m_Buffer[pos & (Size - 1)];
+                    const size_t seq = cell->sequence.load(std::memory_order_acquire);
+                    const intptr_t dif = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos);
+
+                    if (dif == 0)
+                    {
+                        if (m_EnqueuePos.compare_exchange_weak(
+                                pos, pos + 1,
+                                std::memory_order_relaxed,
+                                std::memory_order_relaxed))
+                        {
+                            break; // reserved slot at pos
+                        }
+                    }
+                    else if (dif < 0)
+                    {
+                        return false; // full
+                    }
+                    else
+                    {
+                        pos = m_EnqueuePos.load(std::memory_order_relaxed);
+                    }
+                }
+
+                cell->data = std::move(item);
+                cell->sequence.store(pos + 1, std::memory_order_release);
                 return true;
             }
 
             // Try to pop an item from the queue (thread-safe, multiple consumers)
             std::optional<T> TryPop() noexcept
             {
-                size_t currentHead = m_Head.load(std::memory_order_relaxed);
-                
-                // Check if queue is empty
-                if (currentHead == m_Tail.load(std::memory_order_acquire))
-                    return std::nullopt;
-                
-                // Try to reserve the slot
-                size_t nextHead = (currentHead + 1) & (Size - 1);
-                if (!m_Head.compare_exchange_weak(currentHead, nextHead,
-                                                 std::memory_order_release,
-                                                 std::memory_order_relaxed))
-                    return std::nullopt;
-                
-                // Load the item
-                T item = std::move(m_Buffer[currentHead]);
+                Cell* cell = nullptr;
+                size_t pos = m_DequeuePos.load(std::memory_order_relaxed);
+                for (;;)
+                {
+                    cell = &m_Buffer[pos & (Size - 1)];
+                    const size_t seq = cell->sequence.load(std::memory_order_acquire);
+                    const intptr_t dif = static_cast<intptr_t>(seq) - static_cast<intptr_t>(pos + 1);
+
+                    if (dif == 0)
+                    {
+                        if (m_DequeuePos.compare_exchange_weak(
+                                pos, pos + 1,
+                                std::memory_order_relaxed,
+                                std::memory_order_relaxed))
+                        {
+                            break; // reserved slot at pos
+                        }
+                    }
+                    else if (dif < 0)
+                    {
+                        return std::nullopt; // empty
+                    }
+                    else
+                    {
+                        pos = m_DequeuePos.load(std::memory_order_relaxed);
+                    }
+                }
+
+                T item = std::move(cell->data);
+                cell->sequence.store(pos + Size, std::memory_order_release);
                 return std::move(item);
             }
 
             // Check if queue is empty
             bool IsEmpty() const noexcept
             {
-                return m_Head.load(std::memory_order_acquire) == m_Tail.load(std::memory_order_acquire);
+                // Conservative check: if dequeue pos has caught up to enqueue pos, the queue is empty.
+                // This may transiently return false under contention, but will not incorrectly return true
+                // when items are available.
+                return m_DequeuePos.load(std::memory_order_acquire) == m_EnqueuePos.load(std::memory_order_acquire);
             }
 
             // Check if queue is full
             bool IsFull() const noexcept
             {
-                size_t nextTail = (m_Tail.load(std::memory_order_acquire) + 1) & (Size - 1);
-                return nextTail == m_Head.load(std::memory_order_acquire);
+                // Conservative check: queue is full if we have Size elements outstanding.
+                const size_t enq = m_EnqueuePos.load(std::memory_order_acquire);
+                const size_t deq = m_DequeuePos.load(std::memory_order_acquire);
+                return (enq - deq) >= Size;
             }
 
             // Get approximate size (not exact due to concurrent access)
             size_t GetSize() const noexcept
             {
-                size_t head = m_Head.load(std::memory_order_acquire);
-                size_t tail = m_Tail.load(std::memory_order_acquire);
-                return (tail - head) & (Size - 1);
+                const size_t enq = m_EnqueuePos.load(std::memory_order_acquire);
+                const size_t deq = m_DequeuePos.load(std::memory_order_acquire);
+                return (enq >= deq) ? (enq - deq) : 0;
             }
 
             // Clear the queue (not thread-safe, use with caution)
             void Clear() noexcept
             {
-                m_Head.store(0, std::memory_order_relaxed);
-                m_Tail.store(0, std::memory_order_relaxed);
+                // Not thread-safe: intended for single-threaded reset paths.
+                m_EnqueuePos.store(0, std::memory_order_relaxed);
+                m_DequeuePos.store(0, std::memory_order_relaxed);
+                for (size_t i = 0; i < Size; ++i)
+                {
+                    m_Buffer[i].data = T{};
+                    m_Buffer[i].sequence.store(i, std::memory_order_relaxed);
+                }
             }
 
         private:
-            alignas(64) std::array<T, Size> m_Buffer; // Cache line aligned
-            alignas(64) std::atomic<size_t> m_Head;   // Cache line aligned
-            alignas(64) std::atomic<size_t> m_Tail;   // Cache line aligned
+            struct Cell
+            {
+                std::atomic<size_t> sequence{0};
+                T data{};
+            };
+
+            alignas(64) std::array<Cell, Size> m_Buffer{};
+            alignas(64) std::atomic<size_t> m_EnqueuePos{0};
+            alignas(64) std::atomic<size_t> m_DequeuePos{0};
         };
 
         // Thread-safe object pool for frequently allocated objects

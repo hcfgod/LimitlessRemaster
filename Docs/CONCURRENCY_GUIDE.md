@@ -35,7 +35,7 @@ Add AsyncIO settings to your `config.json`:
 }
 ```
 
-Note: the internal queue capacity is currently a compile-time constant.  
+Note: the internal AsyncIO work queue capacity is currently a compile-time constant.
 
 ## File Operations
 
@@ -151,6 +151,12 @@ for (auto& task : tasks)
 }
 ```
 
+## Implementation Notes (What’s actually happening today)
+
+- AsyncIO executes work on a **dedicated thread pool** and returns future-backed `Task<T>` results.
+- AsyncIO’s internal work queue is a **bounded, blocking MPMC queue** (mutex + condition variable). This is an intentional correctness choice.
+- The engine also provides lock-free queues in `Core/Concurrency/LockFreeQueue.h` (SPSC + bounded MPMC ring buffer). These are used in some subsystems for fast producer/consumer handoff.
+
 ## Integration Points
 
 ### ConfigManager Integration
@@ -184,13 +190,7 @@ fileWatcher->StartWatching("config.json", [](const std::string& filepath) {
 
 ### Logging Integration
 
-The logging system uses AsyncIO for file operations when available:
-
-```cpp
-// Logging automatically uses AsyncIO for file operations
-LT_INFO("This log message will be written asynchronously");
-LT_ERROR("Error messages are also handled asynchronously");
-```
+The logging system uses **spdlog async logging** (its own internal async thread pool). It does not route log file writes through AsyncIO.
 
 ## Best Practices
 

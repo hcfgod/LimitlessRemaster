@@ -22,8 +22,25 @@ namespace Limitless
     // EventDispatcher implementation
     void EventDispatcher::Dispatch(Event& event)
     {
+        // Copy dispatch state under lock so we don't hold the mutex while invoking user code.
+        // This avoids deadlocks if callbacks/listeners register or remove handlers during dispatch.
+        std::function<bool(const Event&)> eventFilter;
+        std::vector<ListenerEntry> listeners;
+        std::vector<std::pair<EventCallback, EventPriority>> callbacks;
+        {
+            std::lock_guard<std::mutex> lock(m_Mutex);
+            eventFilter = m_EventFilter;
+            listeners = m_Listeners;
+
+            auto it = m_Callbacks.find(event.GetType());
+            if (it != m_Callbacks.end())
+            {
+                callbacks = it->second;
+            }
+        }
+
         // Check if event filter exists and if it should filter this event
-        if (m_EventFilter && !m_EventFilter(event))
+        if (eventFilter && !eventFilter(event))
         {
             m_EventsFiltered++;
             LT_CORE_DEBUG("Event filtered out: {}", event.ToString());
@@ -32,40 +49,50 @@ namespace Limitless
 
         m_TotalEventsDispatched++;
         auto startTime = std::chrono::high_resolution_clock::now();
-        
-        auto eventType = event.GetType();
-        auto it = m_Callbacks.find(eventType);
-        
-        if (it != m_Callbacks.end())
+
+        // Dispatch to callbacks (priority order is maintained at registration time).
+        for (auto& callback : callbacks)
         {
-            for (auto& callback : it->second)
+            if (event.IsHandled())
+                break;
+
+            try
             {
-                try
+                if (callback.first)
                 {
                     callback.first(event);
                     m_EventsHandled++;
                 }
-                catch (const std::exception& e)
-                {
-                    LT_CORE_ERROR("Exception in event callback: {}", e.what());
-                }
+            }
+            catch (const std::exception& e)
+            {
+                LT_CORE_ERROR("Exception in event callback: {}", e.what());
             }
         }
-        
-        // Also dispatch to listeners
-        for (auto& listener : m_Listeners)
+
+        // Dispatch to listeners (sorted by priority on insertion).
+        for (auto& listenerEntry : listeners)
         {
+            if (event.IsHandled())
+                break;
+
+            if (!listenerEntry.listener)
+                continue;
+
             try
             {
-                listener.listener->OnEvent(event); 
-                m_EventsHandled++;
+                if (listenerEntry.listener->ShouldReceiveEvent(event))
+                {
+                    listenerEntry.listener->OnEvent(event);
+                    m_EventsHandled++;
+                }
             }
             catch (const std::exception& e)
             {
                 LT_CORE_ERROR("Exception in event listener: {}", e.what());
             }
         }
-        
+
         auto endTime = std::chrono::high_resolution_clock::now();
         m_TotalDispatchTime += std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime);
     }
@@ -77,6 +104,7 @@ namespace Limitless
 
     void EventDispatcher::AddCallback(EventType type, EventCallback callback, EventPriority priority)
     {
+        std::lock_guard<std::mutex> lock(m_Mutex);
         m_Callbacks[type].push_back({std::move(callback), priority});
         
         // Sort callbacks by priority (higher priority first)
@@ -90,6 +118,7 @@ namespace Limitless
 
     void EventDispatcher::RemoveCallback(EventType type, const EventCallback& callback)
     {
+        std::lock_guard<std::mutex> lock(m_Mutex);
         auto it = m_Callbacks.find(type);
         if (it != m_Callbacks.end())
         {
@@ -106,6 +135,7 @@ namespace Limitless
 
     void EventDispatcher::AddListener(std::shared_ptr<EventListener> listener)
     {
+        std::lock_guard<std::mutex> lock(m_Mutex);
         ListenerEntry entry;
         entry.listener = std::move(listener);
         entry.priority = entry.listener->GetPriority();
@@ -120,6 +150,7 @@ namespace Limitless
 
     void EventDispatcher::RemoveListener(const EventListener* listener)
     {
+        std::lock_guard<std::mutex> lock(m_Mutex);
         m_Listeners.erase(
             std::remove_if(m_Listeners.begin(), m_Listeners.end(),
                 [listener](const ListenerEntry& entry) {
@@ -131,11 +162,13 @@ namespace Limitless
 
     void EventDispatcher::SetEventFilter(std::function<bool(const Event&)> filter)
     {
+        std::lock_guard<std::mutex> lock(m_Mutex);
         m_EventFilter = std::move(filter);
     }
 
     void EventDispatcher::ClearEventFilter()
     {
+        std::lock_guard<std::mutex> lock(m_Mutex);
         m_EventFilter = nullptr;
     }
 
@@ -158,6 +191,23 @@ namespace Limitless
         m_EventsHandled = 0;
         m_EventsFiltered = 0;
         m_TotalDispatchTime = std::chrono::microseconds{0};
+    }
+
+    size_t EventDispatcher::GetListenerCount() const
+    {
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        return m_Listeners.size();
+    }
+
+    size_t EventDispatcher::GetCallbackCount() const
+    {
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        size_t count = 0;
+        for (const auto& [_, vec] : m_Callbacks)
+        {
+            count += vec.size();
+        }
+        return count;
     }
 
     // EventQueue implementation with lock-free queue
@@ -421,8 +471,8 @@ namespace Limitless
         {
             stats.queueStats = m_Queue->GetStats();
         }
-        stats.totalListeners = m_Dispatcher ? m_Dispatcher->GetStats().totalEventsDispatched : 0;
-        stats.totalCallbacks = 0; // Would need to track this separately
+        stats.totalListeners = m_Dispatcher ? m_Dispatcher->GetListenerCount() : 0;
+        stats.totalCallbacks = m_Dispatcher ? m_Dispatcher->GetCallbackCount() : 0;
         return stats;
     }
 

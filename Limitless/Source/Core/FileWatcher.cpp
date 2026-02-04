@@ -73,7 +73,7 @@ namespace Limitless
     {
         auto& asyncIO = Limitless::Async::GetAsyncIO();
         
-        while (m_IsWatching)
+        while (m_IsWatching && !m_ShouldStop)
         {
             try
             {
@@ -113,8 +113,8 @@ namespace Limitless
                 LT_CORE_ERROR("FileWatcher: Error in watch loop: {}", e.what());
             }
             
-            // Sleep for a short interval before checking again
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            // Sleep for the configured polling interval before checking again
+            std::this_thread::sleep_for(m_PollInterval);
         }
     }
 

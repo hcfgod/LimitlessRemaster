@@ -625,7 +625,7 @@ namespace Limitless
         Limitless::ErrorHandling::Try([&]() { return expr; })
     
     #define LT_TRY_VOID(expr) \
-        Limitless::ErrorHandling::Try([&]() { expr(); })
+        Limitless::ErrorHandling::Try([&]() { expr; })
     
     #define LT_RETURN_IF_ERROR(result) \
         do { if ((result).IsFailure()) return std::decay_t<decltype(result)>((result).GetError()); } while (false)

@@ -189,6 +189,10 @@ namespace Limitless
         DispatchStats GetStats() const;
         void ResetStats();
 
+        // Introspection helpers (for reporting/debugging)
+        size_t GetListenerCount() const;
+        size_t GetCallbackCount() const;
+
     private:
         struct ListenerEntry
         {

@@ -9,7 +9,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/fmt/bundled/format.h>
 
-#if defined(LIMITLESS_PLATFORM_WINDOWS)
+#if defined(LT_PLATFORM_WINDOWS)
 #include <windows.h>
 #endif
 

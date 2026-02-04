@@ -87,6 +87,10 @@ saveTask.Wait();
 
 If you are using `Limitless::Application`, `AsyncIO` is initialized early using `system.max_threads`.
 
+## Environment Variables (Current Status)
+
+The `LoadFromEnvironment()` hook exists, but the current implementation is intentionally minimal and only reads a small fixed set of variables. Treat environment overrides as **experimental** until the variable → key mapping is expanded and documented.
+
 ## Hot Reload
 
 Hot reload watches the config file and reloads it when it changes:
