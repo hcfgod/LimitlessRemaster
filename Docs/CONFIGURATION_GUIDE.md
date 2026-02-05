@@ -11,6 +11,17 @@
 
 The default configuration file name is `config.json` in the working directory (customizable via `Initialize()`).
 
+## Guarantees (Current Behavior)
+
+| Area | Guarantee | Notes |
+|------|-----------|-------|
+| Thread safety | Reads are concurrent; writes are exclusive | Implemented with `std::shared_mutex`. |
+| Source precedence | Defaults → file → environment → command line → runtime writes | `EntryPoint.h` loads file first, then command line; `ConfigManager` loads environment during `Initialize()`. |
+| Key format | Keys are stored as dot-delimited strings | JSON nesting is flattened into dotted keys on load. |
+| Command-line format | `--key=value` overrides are supported | Hyphens in the key become dots. Value parsing is basic (bool / digits-only int / else string). |
+| Async I/O | Async load/save use the AsyncIO worker pool | Async operations return `Async::Task<void>`. |
+| Hot reload | File watcher callbacks run on a background thread; application of sensitive changes is main-threaded | Example: `HotReloadManager` applies window/logging changes on the main thread. |
+
 ## Quick Start
 
 ### Initialize

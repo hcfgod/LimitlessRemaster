@@ -25,6 +25,17 @@ The Limitless engine provides a comprehensive error handling system that include
 - **LT_TRY Macros**: Wrappers for exception-safe function calls
 - **Error Propagation**: Macros for clean error propagation
 
+## Guarantees (Current Behavior)
+
+| Area | Guarantee | Notes |
+|------|-----------|-------|
+| Exception type | Engine errors are represented by `Limitless::Error` (and derived types) | Most `LT_THROW_*` macros throw `Limitless::Error` subclasses. |
+| Assertions | `LT_ASSERT` throws `Limitless::Error` when the condition fails | In tests, this is validated via doctest `CHECK_THROWS_AS`. |
+| Verification | `LT_VERIFY` throws `Limitless::Error` when the condition fails | Intended for runtime/state checks that can fail in production. |
+| Result propagation | `Result<T>` carries either a value or a `Limitless::Error` | `GetValueOrThrow()` / `GetValue()` will throw on failure. |
+| Try wrappers | `LT_TRY` / `LT_TRY_VOID` evaluate the expression you pass | If you pass a lambda, you must **invoke** it (e.g. `([]{ ... })()`). |
+| Threading | Errors can be created and propagated across threads | Logging/reporting should respect the logging system shutdown ordering. |
+
 ## Error Class
 
 The `Error` class is the foundation of the error handling system:

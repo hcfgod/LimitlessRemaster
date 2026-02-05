@@ -16,6 +16,39 @@ The Render Command System is a **command submission + execution framework** inte
 - Many commands (binds/draws/state) are currently **placeholders**: they log intent instead of issuing real graphics API calls.
 - The “multi-threaded executor” type exists, but **true multi-threaded GPU command execution is not implemented** and is not safe for OpenGL without explicit context ownership rules.
 
+## Guarantees (Current Behavior)
+
+This table describes what the system **guarantees today** (not future intent).
+
+| Area | Guarantee | Notes |
+|------|-----------|-------|
+| Submission threading | `SubmitCommand*()` is safe for **multiple producer threads** | Uses a bounded lock-free MPMC ring + an atomic size gate for `maxQueueSize`. |
+| Execution threading | `ProcessCommands*()` must run on **one thread** that owns the `GraphicsContext` | Required for OpenGL context affinity. |
+| Ownership | Commands are transferred via `std::unique_ptr` into the queue | If submission fails, the command is destroyed on the submitting thread. |
+| Queue bounds | `maxQueueSize` is enforced | Underlying fixed capacity is `RenderCommandQueue::kQueueCapacity` (currently 16384). `maxQueueSize` must be <= that. |
+| Error behavior | Command execution catches `Limitless::Error` and `std::exception` | Errors are logged and optionally forwarded via the debug callback. |
+| Statistics | Stats are **thread-safe** | Stats are protected by an internal mutex (not “atomic struct writes”). |
+
+## Implementation Status (OpenGL backend)
+
+The OpenGL backend currently implements only a subset of commands “for real”. The rest are scaffolding and generally only log intent.
+
+- **Implemented (real OpenGL calls)**:
+  - `ClearCommand` (`glClearColor`, `glClear`)
+  - `SetViewportCommand` (`glViewport`)
+  - `SetScissorCommand` (`glEnable/glDisable(GL_SCISSOR_TEST)`, `glScissor`)
+  - `CustomCommand` (invokes user function; still requires non-null context)
+- **Stubbed (logs intent, no actual GL state change yet)**:
+  - `BindShaderCommand`, `BindVertexArrayCommand`, `BindIndexBufferCommand`, `BindVertexBufferCommand`
+  - `BindTextureCommand`, `BindFramebufferCommand`
+  - `DrawArraysCommand` (currently logs parameters)
+  - `SetBlendModeCommand`, `SetDepthTestCommand`, `SetCullFaceCommand`, `SetPolygonModeCommand`, `SetLineWidthCommand`, `SetPointSizeCommand`
+  - `PushDebugGroupCommand`, `PopDebugGroupCommand`, `InsertDebugMarkerCommand`
+- **Not implemented yet (TODO / no behavior)**:
+  - `DrawIndexedCommand`, `DrawInstancedCommand`, `DrawIndexedInstancedCommand`
+
+For a milestone-by-milestone plan, see `Docs/RENDERING_ROADMAP.md`.
+
 ## Architecture
 
 ### Core Components

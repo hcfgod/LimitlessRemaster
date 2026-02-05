@@ -23,8 +23,25 @@ namespace Limitless
     void ConfigManager::Initialize(const std::string& configFile)
     {
         LT_CORE_INFO("ConfigManager::Initialize called with configFile: {}", configFile);
-        
-        m_ConfigFile = configFile;
+
+        // Resolve to an absolute path so file I/O and hot reload are deterministic even when the
+        // process working directory differs between IDEs, scripts, and packaged builds.
+        std::filesystem::path resolved = configFile.empty() ? std::filesystem::path("config.json") : std::filesystem::path(configFile);
+        std::error_code ec;
+        if (resolved.is_relative())
+        {
+            resolved = std::filesystem::absolute(resolved, ec);
+            if (ec)
+                resolved = std::filesystem::absolute(configFile);
+        }
+        resolved = std::filesystem::weakly_canonical(resolved, ec);
+        if (ec)
+        {
+            // If canonicalization fails (e.g. file doesn't exist yet), keep the absolute form.
+            resolved = std::filesystem::absolute(resolved);
+        }
+
+        m_ConfigFile = resolved.string();
         m_Shutdown.store(false);
 
         LT_CORE_INFO("ConfigManager::Initialize: Config file set to: {}", m_ConfigFile);
@@ -36,22 +53,22 @@ namespace Limitless
         m_AsyncCallbackThread = std::thread(&ConfigManager::ProcessAsyncCallbacks, this);
 
         // Try to load from file if it exists
-        if (std::filesystem::exists(configFile))
+        if (std::filesystem::exists(m_ConfigFile))
         {
             LT_CORE_INFO("ConfigManager::Initialize: Config file exists, loading...");
             try
             {
-                LoadFromFileAsync(configFile).Get();
+                LoadFromFileAsync(m_ConfigFile).Get();
                 LT_CORE_INFO("ConfigManager::Initialize: Config file loaded successfully");
             }
             catch (const std::exception& e)
             {
-                LT_CORE_ERROR("Failed to load configuration from file: {} - {}", configFile, e.what());
+                LT_CORE_ERROR("Failed to load configuration from file: {} - {}", m_ConfigFile, e.what());
             }
         }
         else
         {
-            LT_CORE_INFO("Configuration file not found, using defaults: {}", configFile);
+            LT_CORE_INFO("Configuration file not found, using defaults: {}", m_ConfigFile);
         }
 
         // Load from environment variables

@@ -29,6 +29,20 @@ project "Sandbox"
         "Limitless"
     }
 
+    -- ----------------------------------------------------------------------------------
+    -- Runtime data
+    --
+    -- Visual Studio often runs Sandbox with working directory set to `Sandbox/`, while
+    -- double-clicking the built .exe runs with working directory set to the output folder.
+    --
+    -- To avoid "editing the wrong config.json", we copy the source-of-truth config next to
+    -- the built executable on every build.
+    -- ----------------------------------------------------------------------------------
+    postbuildcommands
+    {
+        "{COPY} \"%{wks.location}Sandbox/config.json\" \"%{cfg.targetdir}\""
+    }
+
     filter "system:windows"
         cppdialect "C++20"
         staticruntime "On"

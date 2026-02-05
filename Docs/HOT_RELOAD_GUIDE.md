@@ -214,6 +214,18 @@ HotReloadManager: Window config applied successfully: window.title
 2. **File Permissions**: Verify the application can read the config file
 3. **JSON Syntax**: Ensure the JSON is valid (use a JSON validator)
 
+#### Where is my `config.json` actually coming from?
+
+The engine prints the active config path at startup:
+
+- `[Limitless] Working directory: ...`
+- `[Limitless] Using config file: ...\config.json`
+
+When running from Visual Studio, the working directory is often `Sandbox/`, so `Sandbox/config.json` is used.
+When running the built executable directly, the working directory is usually the output folder, so the config next to the `.exe` is used.
+
+To reduce confusion, the `Sandbox` project copies `Sandbox/config.json` into the build output folder on every build so both locations stay in sync.
+
 ### Logging Changes Not Visible
 1. **Log Level**: Make sure the new log level is lower than the current messages
 2. **Console Output**: Check if console logging is enabled

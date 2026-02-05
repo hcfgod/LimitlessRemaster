@@ -1,6 +1,6 @@
 # LimitlessRemaster
 
-A modern, enterprise-grade C++ engine with comprehensive advanced systems, extended Window API, high-performance concurrency, and robust CI/CD setup.
+A modern C++20 engine project with a growing set of core systems (configuration, events, error handling, logging, concurrency), SDL-based windowing, and CI builds.
 
 ## 🚀 **What's New in This Version**
 
@@ -10,7 +10,7 @@ A modern, enterprise-grade C++ engine with comprehensive advanced systems, exten
 - **🪟 Extended Window API** - Comprehensive window management with advanced features and cross-platform support
 - **⚡ High-Performance Concurrency** - Lock-free queues, task-based async patterns, and thread-safe systems
 - **🛡️ Enhanced Error Handling** - Comprehensive error management with platform integration
-- **📊 Performance Monitoring** - Real-time performance tracking, frame timing, memory monitoring, and CPU/GPU metrics
+- **📊 Performance Monitoring** - Frame timing, memory tracking, and basic CPU monitoring (GPU metrics are not a focus yet)
 
 ### **Core Improvements:**
 - **🛡️ Enhanced Memory Safety** - Smart pointers throughout, RAII patterns, exception safety
@@ -74,8 +74,7 @@ LimitlessRemaster/
 ### **Development Tools**
 - **Comprehensive Testing** - Unit tests for all systems using doctest with proper isolation
 - **CI/CD Pipeline** - Automated builds and tests across all platforms with artifact preservation
-- **Code Quality** - Clang-format, clang-tidy, and static analysis integration
-- **Documentation** - Detailed guides, examples, and API documentation for all systems
+- **Documentation** - Detailed guides, examples, and API notes for the implemented systems
 
 ## 📦 **Dependencies**
 
@@ -124,6 +123,18 @@ make -j$(nproc) config=Debug_x64
 ./Build/Debug_x64/Test/Test --success --test-suite="Concurrency"
 ./Build/Debug_x64/Test/Test --success --test-suite="Advanced Systems Tests"
 ```
+
+## 📚 Documentation Index
+
+Start here:
+
+- `Docs/CONFIGURATION_GUIDE.md` (ConfigManager behavior + guarantees)
+- `Docs/EVENT_GUIDE.md` (event threading/lifetime/shutdown guarantees)
+- `Docs/ERROR_HANDLING_GUIDE.md` (exceptions vs Result, macros, guarantees)
+- `Docs/LOGGING_GUIDE.md` (config + CLI overrides, shutdown ordering)
+- `Docs/CONCURRENCY_GUIDE.md` (SPSC/MPMC contracts)
+- `Docs/README_RenderCommandSystem.md` (render command system guarantees + current limitations)
+- `Docs/RENDERING_ROADMAP.md` (what is implemented vs stubbed + next milestones)
 
 ### **Basic Usage**
 

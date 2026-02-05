@@ -2,7 +2,17 @@
 
 ## Overview
 
-The Limitless Engine logging system is now fully integrated with the ConfigManager, allowing you to configure logging behavior through the `config.json` file or command-line arguments.
+The Limitless Engine logging system is integrated with the ConfigManager. You can configure logging via `config.json`, and you can override specific keys at startup via command-line arguments (parsed by `ConfigManager::LoadFromCommandLine()` in `Core/EntryPoint.h`).
+
+## Guarantees (Current Behavior)
+
+| Area | Guarantee | Notes |
+|------|-----------|-------|
+| Initialization order | Config is initialized **before** logging | See `Limitless/Source/Core/EntryPoint.h`. |
+| Thread safety | Logging macros are safe from multiple threads **after** `Log::Init*()` | Backed by spdlog; keep shutdown ordering in mind. |
+| Shutdown ordering | Logging must outlive other systems that may still log | `EntryPoint.h` intentionally shuts down ConfigManager before Log. Do not log after `Log::Shutdown()`. |
+| Hot reload behavior | Logging config changes are applied on the **main thread** | `HotReloadManager` queues a reinitialize request to avoid reinit on the file watcher thread. |
+| Error behavior | Logging failures should not crash the engine | Errors are logged/warned when possible; treat file permission issues as a configuration problem. |
 
 ## Configuration Options
 
@@ -88,7 +98,14 @@ std::string logDir = config.GetValue<std::string>(Limitless::Config::Logging::DI
 
 ## Command Line Configuration
 
-You can override configuration values via command line:
+You can override configuration values via command line. Current parser rules:
+
+- Arguments must be in the form **`--key=value`**
+- Hyphens in the key are converted to dots (`window-width` → `window.width`)
+- Values are parsed as:
+  - `true`/`false` → boolean
+  - digits-only → integer
+  - otherwise → string
 
 ```bash
 # Set log level to debug

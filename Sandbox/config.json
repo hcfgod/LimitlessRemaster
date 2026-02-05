@@ -19,7 +19,7 @@
         "height": 720,
         "resizable": true,
         "title": "Limitless Engine",
-        "vsync": false,
+        "vsync": true,
         "width": 1280
     }
 }

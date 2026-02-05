@@ -3,6 +3,7 @@
 #include "ConfigManager.h"
 #include "Debug/Log.h"
 #include <iostream>
+#include <filesystem>
 
 // Prevent console window from appearing in Dist builds on Windows
 #if defined(LT_PLATFORM_WINDOWS) && defined(LT_CONFIG_DIST)
@@ -24,7 +25,44 @@ int main(int argc, char** argv)
 {
 	// Initialize configuration system first (before logging)
 	auto& configManager = Limitless::ConfigManager::GetInstance();
-	configManager.Initialize("config.json");
+
+    // ---------------------------------------------------------------------------------
+    // Config file resolution
+    //
+    // Many dev setups have multiple config.json files (project root, Sandbox/, build output).
+    // To make behavior deterministic, we pick the first existing path in this order:
+    // - Current working directory: ./config.json
+    // - Executable directory: <exeDir>/config.json
+    //
+    // We pass an absolute path to ConfigManager so hot reload watches the correct file.
+    // ---------------------------------------------------------------------------------
+    std::filesystem::path cwdConfig = std::filesystem::absolute("config.json");
+    std::filesystem::path exeConfig;
+    if (argc > 0 && argv && argv[0])
+    {
+        std::error_code ec;
+        std::filesystem::path exePath = std::filesystem::absolute(argv[0], ec);
+        if (!ec)
+        {
+            // weakly_canonical handles cases where parts of the path don't exist yet.
+            exePath = std::filesystem::weakly_canonical(exePath, ec);
+            if (ec)
+                exePath = std::filesystem::absolute(argv[0]);
+
+            exeConfig = exePath.parent_path() / "config.json";
+        }
+    }
+
+    std::filesystem::path chosenConfig =
+        std::filesystem::exists(cwdConfig) ? cwdConfig :
+        (!exeConfig.empty() && std::filesystem::exists(exeConfig)) ? exeConfig :
+        cwdConfig;
+
+    // Print before logging init so you can see it even if logging config is misconfigured.
+    std::cout << "[Limitless] Working directory: " << std::filesystem::current_path().string() << std::endl;
+    std::cout << "[Limitless] Using config file: " << chosenConfig.string() << std::endl;
+
+	configManager.Initialize(chosenConfig.string());
 	
 	// Load configuration from command line arguments
 	if (argc > 1) {
@@ -36,6 +74,8 @@ int main(int argc, char** argv)
 	
 	// Now we can start logging
 	LT_CORE_INFO("=== Limitless Engine Startup ===");
+    LT_CORE_INFO("Working directory: {}", std::filesystem::current_path().string());
+    LT_CORE_INFO("Using config file: {}", chosenConfig.string());
 	LT_CORE_INFO("Starting application with {} command line arguments", argc);
 	LT_CORE_INFO("ConfigManager initialized successfully");
 	if (argc > 1) {
