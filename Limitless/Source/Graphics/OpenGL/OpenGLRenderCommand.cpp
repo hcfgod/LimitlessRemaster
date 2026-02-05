@@ -1,5 +1,8 @@
 #include "Graphics/RenderCommand.h"
 #include "Graphics/GraphicsContext.h"
+#include "Graphics/Shader.h"
+#include "Graphics/VertexArray.h"
+#include "Graphics/Buffer.h"
 #include "Core/Error.h"
 #include "Core/Debug/Log.h"
 
@@ -98,13 +101,11 @@ namespace Limitless
 
         if (m_Shader)
         {
-            // This should be implemented by the specific render API implementation
-            LT_CORE_DEBUG("Binding shader: {}", m_Shader ? "valid" : "null");
+            m_Shader->Bind();
         }
         else
         {
-            // Unbind shader
-            LT_CORE_DEBUG("Unbinding shader");
+            LT_CORE_WARN("BindShaderCommand: shader was null (no-op)");
         }
     }
 
@@ -118,13 +119,11 @@ namespace Limitless
 
         if (m_VertexArray)
         {
-            // This should be implemented by the specific render API implementation
-            LT_CORE_DEBUG("Binding vertex array: {}", m_VertexArray ? "valid" : "null");
+            m_VertexArray->Bind();
         }
         else
         {
-            // Unbind vertex array
-            LT_CORE_DEBUG("Unbinding vertex array");
+            LT_CORE_WARN("BindVertexArrayCommand: vertex array was null (no-op)");
         }
     }
 
@@ -138,13 +137,11 @@ namespace Limitless
 
         if (m_IndexBuffer)
         {
-            // This should be implemented by the specific render API implementation
-            LT_CORE_DEBUG("Binding index buffer: {}", m_IndexBuffer ? "valid" : "null");
+            m_IndexBuffer->Bind();
         }
         else
         {
-            // Unbind index buffer
-            LT_CORE_DEBUG("Unbinding index buffer");
+            LT_CORE_WARN("BindIndexBufferCommand: index buffer was null (no-op)");
         }
     }
 
@@ -158,13 +155,11 @@ namespace Limitless
 
         if (m_VertexBuffer)
         {
-            // This should be implemented by the specific render API implementation
-            LT_CORE_DEBUG("Binding vertex buffer: {}", m_VertexBuffer ? "valid" : "null");
+            m_VertexBuffer->Bind();
         }
         else
         {
-            // Unbind vertex buffer
-            LT_CORE_DEBUG("Unbinding vertex buffer");
+            LT_CORE_WARN("BindVertexBufferCommand: vertex buffer was null (no-op)");
         }
     }
 
@@ -216,8 +211,8 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // This should be implemented by the specific render API implementation
-        LT_CORE_DEBUG("DrawArrays: mode={}, first={}, count={}", static_cast<uint32_t>(m_Mode), m_First, m_Count);
+        glDrawArrays(static_cast<GLenum>(m_Mode), m_First, static_cast<GLsizei>(m_Count));
+        CheckOpenGLError("glDrawArrays");
     }
 
     // DrawIndexedCommand Execute implementation
@@ -228,8 +223,18 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // This should be implemented by the specific render API implementation
-        // TODO: Implement actual OpenGL draw indexed command
+        if (m_BaseVertex != 0)
+        {
+            glDrawElementsBaseVertex(static_cast<GLenum>(m_Mode), static_cast<GLsizei>(m_Count),
+                                     static_cast<GLenum>(m_IndexType), m_Indices, m_BaseVertex);
+            CheckOpenGLError("glDrawElementsBaseVertex");
+        }
+        else
+        {
+            glDrawElements(static_cast<GLenum>(m_Mode), static_cast<GLsizei>(m_Count),
+                           static_cast<GLenum>(m_IndexType), m_Indices);
+            CheckOpenGLError("glDrawElements");
+        }
     }
 
     // DrawInstancedCommand Execute implementation

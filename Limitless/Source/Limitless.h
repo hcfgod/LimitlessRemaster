@@ -29,3 +29,6 @@
 #include "Graphics/RenderCommandQueue.h"
 #include "Graphics/GraphicsEnums.h"
 #include "Graphics/Renderer.h"
+#include "Graphics/Shader.h"
+#include "Graphics/Buffer.h"
+#include "Graphics/VertexArray.h"

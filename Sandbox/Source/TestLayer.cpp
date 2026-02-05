@@ -20,6 +20,59 @@ namespace Limitless
     void TestLayer::OnAttach()
     {
         LT_INFO("TestLayer attached");
+
+        // -----------------------------------------------------------------------------
+        // Triangle demo setup (VAO/VBO/IBO + shader)
+        // -----------------------------------------------------------------------------
+        struct Vertex
+        {
+            float position[3];
+            float color[3];
+        };
+
+        const Vertex vertices[3] =
+        {
+            { { -0.5f, -0.5f, 0.0f }, { 1.0f, 0.2f, 0.2f } },
+            { {  0.5f, -0.5f, 0.0f }, { 0.2f, 1.0f, 0.2f } },
+            { {  0.0f,  0.5f, 0.0f }, { 0.2f, 0.2f, 1.0f } },
+        };
+
+        const uint32_t indices[3] = { 0, 1, 2 };
+
+        m_TriangleVAO = VertexArray::Create();
+        m_TriangleVBO = VertexBuffer::Create(vertices, static_cast<uint32_t>(sizeof(vertices)));
+        m_TriangleVBO->SetLayout({
+            { ShaderDataType::Float3, "a_Position" },
+            { ShaderDataType::Float3, "a_Color" }
+        });
+        m_TriangleVAO->AddVertexBuffer(m_TriangleVBO);
+
+        m_TriangleIBO = IndexBuffer::Create(indices, 3);
+        m_TriangleVAO->SetIndexBuffer(m_TriangleIBO);
+
+        const std::string vertexSrc = R"(
+            #version 330 core
+            layout(location = 0) in vec3 a_Position;
+            layout(location = 1) in vec3 a_Color;
+            out vec3 v_Color;
+            void main()
+            {
+                v_Color = a_Color;
+                gl_Position = vec4(a_Position, 1.0);
+            }
+        )";
+
+        const std::string fragmentSrc = R"(
+            #version 330 core
+            in vec3 v_Color;
+            out vec4 FragColor;
+            void main()
+            {
+                FragColor = vec4(v_Color, 1.0);
+            }
+        )";
+
+        m_TriangleShader = Shader::CreateFromSource("TriangleShader", vertexSrc, fragmentSrc);
     }
 
     void TestLayer::OnDetach()
@@ -70,6 +123,19 @@ namespace Limitless
         if (!renderer.SubmitCommand(std::move(clearCommand)))
         {
             LT_WARN("Failed to submit clear command to renderer");
+        }
+
+        // Draw the triangle via render commands.
+        if (m_TriangleShader && m_TriangleVAO && m_TriangleIBO)
+        {
+            renderer.SubmitCommand(std::make_unique<BindShaderCommand>(m_TriangleShader));
+            renderer.SubmitCommand(std::make_unique<BindVertexArrayCommand>(m_TriangleVAO));
+            renderer.SubmitCommand(std::make_unique<DrawIndexedCommand>(
+                DrawMode::Triangles,
+                m_TriangleIBO->GetCount(),
+                IndexType::UnsignedInt,
+                nullptr,
+                0));
         }
     }
 } 
