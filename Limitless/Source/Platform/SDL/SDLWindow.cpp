@@ -76,6 +76,7 @@ namespace Limitless
         m_Data.Width = props.Width;
         m_Data.Height = props.Height;
         m_Data.Fullscreen = props.Fullscreen;
+        m_Data.FullscreenDesktop = (static_cast<uint32_t>(props.Flags) & static_cast<uint32_t>(WindowFlags::FullscreenDesktop)) != 0;
         m_Data.Resizable = props.Resizable;
         m_Data.PositionX = props.PositionX;
         m_Data.PositionY = props.PositionY;
@@ -393,8 +394,8 @@ namespace Limitless
         if (!m_Window) return WindowState::Normal;
         
         SDL_WindowFlags flags = SDL_GetWindowFlags(m_Window);
-        if (flags & SDL_WINDOW_FULLSCREEN) return WindowState::Fullscreen;
-        if (flags & SDL_WINDOW_FULLSCREEN) return WindowState::FullscreenDesktop; // SDL3 uses same flag
+        if (flags & SDL_WINDOW_FULLSCREEN)
+            return m_Data.FullscreenDesktop ? WindowState::FullscreenDesktop : WindowState::Fullscreen;
         if (flags & SDL_WINDOW_MINIMIZED) return WindowState::Minimized;
         if (flags & SDL_WINDOW_MAXIMIZED) return WindowState::Maximized;
         return WindowState::Normal;
@@ -498,6 +499,8 @@ namespace Limitless
             else
                 SDL_SetWindowFullscreen(m_Window, 0);
             m_Data.Fullscreen = fullscreen;
+            if (!fullscreen)
+                m_Data.FullscreenDesktop = false;
         }
     }
 
@@ -509,14 +512,16 @@ namespace Limitless
                 SDL_SetWindowFullscreen(m_Window, SDL_WINDOW_FULLSCREEN);
             else
                 SDL_SetWindowFullscreen(m_Window, 0);
+            m_Data.Fullscreen = fullscreen;
+            m_Data.FullscreenDesktop = fullscreen;
         }
     }
 
     bool SDLWindow::IsFullscreenDesktop() const
     {
-        if (!m_Window) return false;
+        if (!m_Window) return m_Data.FullscreenDesktop;
         SDL_WindowFlags flags = SDL_GetWindowFlags(m_Window);
-        return (flags & SDL_WINDOW_FULLSCREEN) != 0;
+        return ((flags & SDL_WINDOW_FULLSCREEN) != 0) && m_Data.FullscreenDesktop;
     }
 
     void SDLWindow::ToggleFullscreen()

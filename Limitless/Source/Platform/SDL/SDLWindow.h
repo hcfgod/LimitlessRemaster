@@ -160,6 +160,7 @@ namespace Limitless
             uint32_t Width, Height;
             bool VSync;
             bool Fullscreen;
+            bool FullscreenDesktop;
             bool Resizable;
             WindowFlags Flags;
             int PositionX, PositionY;
@@ -173,8 +174,8 @@ namespace Limitless
             Limitless::GraphicsAPI Api;
 
             WindowData()
-                : Title("Limitless Engine"), Width(1280), Height(720), VSync(false), 
-                  Fullscreen(false), Resizable(true), Flags(WindowFlags::Resizable),
+                : Title("Limitless Engine"), Width(1280), Height(720), VSync(false),
+                  Fullscreen(false), FullscreenDesktop(false), Resizable(true), Flags(WindowFlags::Resizable),
                   PositionX(0), PositionY(0), MinWidth(0), MinHeight(0), MaxWidth(0), MaxHeight(0),
                   Opacity(1.0f), Brightness(1.0f), HighDPI(true), Borderless(false), AlwaysOnTop(false)
             {

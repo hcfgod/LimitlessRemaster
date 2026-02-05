@@ -78,7 +78,7 @@ namespace Limitless
             props.Api = GraphicsAPIFromString(apiString);
             
             // Window flags
-            WindowFlags flags = WindowFlags::Resizable;
+            WindowFlags flags = WindowFlags::None;
             if (props.Resizable) flags |= WindowFlags::Resizable;
             if (props.Fullscreen) flags |= WindowFlags::Fullscreen;
             if (props.Borderless) flags |= WindowFlags::Borderless;

@@ -70,8 +70,9 @@ namespace Limitless
         bool SubmitCommandWithPriority(std::unique_ptr<RenderCommand> command, RenderCommandPriority priority);
         
         // Submit commands for immediate execution (bypasses queue)
-        void ExecuteImmediate(std::unique_ptr<RenderCommand> command);
-        void ExecuteImmediate(std::vector<std::unique_ptr<RenderCommand>> commands);
+        // NOTE: Requires a non-null GraphicsContext for APIs (like OpenGL) that enforce context affinity.
+        void ExecuteImmediate(GraphicsContext* context, std::unique_ptr<RenderCommand> command);
+        void ExecuteImmediate(GraphicsContext* context, std::vector<std::unique_ptr<RenderCommand>> commands);
 
         // Process and execute commands from the queue
         void ProcessCommands(GraphicsContext* context);

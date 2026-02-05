@@ -95,7 +95,13 @@ namespace Limitless
             return;
         }
 
-        m_RenderQueue->ExecuteImmediate(std::move(command));
+        if (!m_GraphicsContext)
+        {
+            LT_CORE_WARN("Cannot execute command immediately - graphics context is null");
+            return;
+        }
+
+        m_RenderQueue->ExecuteImmediate(m_GraphicsContext, std::move(command));
     }
 
     void Renderer::ProcessCommands()

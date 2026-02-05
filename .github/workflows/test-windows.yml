@@ -87,9 +87,13 @@ jobs:
         
     - name: Run tests
       run: |
-        $testExe = "Build\Debug-windows-x64\Test\Test.exe"
-        if (Test-Path $testExe) {
-          echo "Running tests..."
+        # Premake output directories use cfg.shortname (e.g. Build\debug_x64-windows-x64\...)
+        # so we locate the test exe rather than assuming a fixed folder name.
+        $testExe = Get-ChildItem -Path Build -Recurse -Filter "Test.exe" -ErrorAction SilentlyContinue |
+          Select-Object -First 1 -ExpandProperty FullName
+
+        if ($null -ne $testExe -and (Test-Path $testExe)) {
+          echo "Running tests: $testExe"
           & $testExe --success
           if ($LASTEXITCODE -ne 0) {
             echo "Warning: Some tests failed"
@@ -97,9 +101,10 @@ jobs:
             echo "All tests passed!"
           }
         } else {
-          echo "Test executable not found at: $testExe"
+          echo "Test executable not found under Build/"
           echo "Available executables:"
-          Get-ChildItem Build -Recurse -Name "*.exe"
+          Get-ChildItem Build -Recurse -Name "*.exe" -ErrorAction SilentlyContinue
+          exit 1
         }
         
     - name: Upload build artifacts

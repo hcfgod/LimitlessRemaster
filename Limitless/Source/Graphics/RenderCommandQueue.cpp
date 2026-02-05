@@ -174,7 +174,7 @@ namespace Limitless
         return false;
     }
 
-    void RenderCommandQueue::ExecuteImmediate(std::unique_ptr<RenderCommand> command)
+    void RenderCommandQueue::ExecuteImmediate(GraphicsContext* context, std::unique_ptr<RenderCommand> command)
     {
         if (!command)
         {
@@ -182,10 +182,16 @@ namespace Limitless
             return;
         }
 
+        if (!context)
+        {
+            LT_CORE_ERROR("Attempted to execute command immediately with null graphics context");
+            return;
+        }
+
         try
         {
             auto startTime = std::chrono::high_resolution_clock::now();
-            command->Execute(nullptr); // Context will be set by caller
+            command->Execute(context);
             auto endTime = std::chrono::high_resolution_clock::now();
             
             auto executionTime = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();
@@ -207,11 +213,11 @@ namespace Limitless
         }
     }
 
-    void RenderCommandQueue::ExecuteImmediate(std::vector<std::unique_ptr<RenderCommand>> commands)
+    void RenderCommandQueue::ExecuteImmediate(GraphicsContext* context, std::vector<std::unique_ptr<RenderCommand>> commands)
     {
         for (auto& command : commands)
         {
-            ExecuteImmediate(std::move(command));
+            ExecuteImmediate(context, std::move(command));
         }
     }
 
