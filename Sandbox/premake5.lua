@@ -40,7 +40,11 @@ project "Sandbox"
     -- ----------------------------------------------------------------------------------
     postbuildcommands
     {
-        "{COPY} \"%{wks.location}Sandbox/config.json\" \"%{cfg.targetdir}\""
+        -- NOTE:
+        -- `%{wks.location}` is relative to the project location for some generators (e.g. gmake2),
+        -- so we must include an explicit path separator. Without it, the path becomes `..Sandbox/...`
+        -- on Linux/macOS and the CI build fails.
+        "{COPY} \"%{wks.location}/Sandbox/config.json\" \"%{cfg.targetdir}\""
     }
 
     filter "system:windows"
