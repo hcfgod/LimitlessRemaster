@@ -1,6 +1,8 @@
 #include "Shader.h"
 #include "Graphics/GraphicsAPIDetector.h"
 #include "Graphics/OpenGL/OpenGLShader.h"
+#include "Graphics/Renderer.h"
+#include "Graphics/OpenGL/OpenGLContext.h"
 
 namespace Limitless
 {
@@ -12,8 +14,14 @@ namespace Limitless
         auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
         switch (api)
         {
-            case GraphicsAPI::OpenGL: return std::make_shared<OpenGLShader>(name, vertexSource, fragmentSource);
-            default:                  return std::make_shared<OpenGLShader>(name, vertexSource, fragmentSource);
+            case GraphicsAPI::OpenGL:
+            default:
+            {
+                auto& renderer = Renderer::GetInstance();
+                return renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<Shader> {
+                    return std::make_shared<OpenGLShader>(name, vertexSource, fragmentSource);
+                });
+            }
         }
     }
 }

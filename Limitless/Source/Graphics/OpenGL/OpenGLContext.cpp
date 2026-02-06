@@ -15,6 +15,17 @@ namespace Limitless {
         : m_Context(context)
         , m_Lock(context.m_ContextMutex)
     {
+        const std::thread::id thisThread = std::this_thread::get_id();
+
+        // Re-entrant behavior:
+        // If the context is already current on this thread due to an outer scope, do not call
+        // SDL_GL_MakeCurrent again and do not clear it on inner scope exit.
+        if (m_Context.m_CurrentDepth > 0 && m_Context.m_CurrentThread == thisThread)
+        {
+            m_Context.m_CurrentDepth++;
+            return;
+        }
+
         // SDL3 returns true on success, false on failure.
         if (!SDL_GL_MakeCurrent(m_Context.m_Window, m_Context.m_Context))
         {
@@ -22,14 +33,24 @@ namespace Limitless {
             throw std::runtime_error("Failed to make OpenGL context current");
         }
 
-        m_Context.m_CurrentThread = std::this_thread::get_id();
+        m_Context.m_CurrentThread = thisThread;
+        m_Context.m_CurrentDepth = 1;
     }
 
     OpenGLContext::ScopedCurrentContext::~ScopedCurrentContext()
     {
-        // Best-effort clear. If this fails we still release the mutex.
-        (void)SDL_GL_MakeCurrent(m_Context.m_Window, nullptr);
-        m_Context.m_CurrentThread = std::thread::id{};
+        if (m_Context.m_CurrentDepth == 0)
+        {
+            return;
+        }
+
+        m_Context.m_CurrentDepth--;
+        if (m_Context.m_CurrentDepth == 0)
+        {
+            // Best-effort clear. If this fails we still release the mutex.
+            (void)SDL_GL_MakeCurrent(m_Context.m_Window, nullptr);
+            m_Context.m_CurrentThread = std::thread::id{};
+        }
     }
 
     OpenGLContext::OpenGLContext() : m_Window(nullptr), m_Context(nullptr) {
@@ -212,10 +233,30 @@ namespace Limitless {
                          GLVersion.major, GLVersion.minor);
         }
 
+        // IMPORTANT: initialize viewport. Default OpenGL viewport is (0,0,0,0) on many drivers.
+        // Use the pixel size for correct HighDPI rendering.
+        int drawableWidth = 0;
+        int drawableHeight = 0;
+        if (SDL_GetWindowSizeInPixels(m_Window, &drawableWidth, &drawableHeight))
+        {
+            glViewport(0, 0, drawableWidth, drawableHeight);
+            LT_CORE_INFO("OpenGL viewport initialized to {}x{} pixels", drawableWidth, drawableHeight);
+        }
+        else
+        {
+            LT_CORE_WARN("Could not query drawable size for initial viewport: {}", SDL_GetError());
+        }
+
         // Default to VSync enabled as before (can be changed later)
         SetVSync(true);
         
         LT_CORE_INFO("OpenGL initialization completed successfully");
+
+        // IMPORTANT:
+        // Do not leave the OpenGL context current on the init thread. The renderer may choose to
+        // execute/present from a dedicated render thread, and OpenGL contexts cannot be current
+        // on multiple threads at the same time.
+        (void)SDL_GL_MakeCurrent(m_Window, nullptr);
     }
 
     void OpenGLContext::SwapBuffers() {
@@ -223,6 +264,11 @@ namespace Limitless {
     }
 
     bool OpenGLContext::SetVSync(bool enabled) {
+        // SDL swap interval requires a current context on the calling thread.
+        // With a render thread, the context is typically not left current on the main thread,
+        // so we acquire a scoped current context here.
+        ScopedCurrentContext scope(*this);
+
         bool result = SDL_GL_SetSwapInterval(enabled ? 1 : 0);
         if (!result) {
             LT_CORE_ERROR("Failed to set swap interval {}: {}", enabled, SDL_GetError());

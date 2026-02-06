@@ -2,8 +2,16 @@
 
 #include "GraphicsContext.h"
 #include "RenderCommandQueue.h"
+#include "RenderResourceCommandQueue.h"
 #include "Core/Debug/Log.h"
 #include <memory>
+#include <atomic>
+#include <condition_variable>
+#include <functional>
+#include <future>
+#include <mutex>
+#include <thread>
+#include <type_traits>
 
 namespace Limitless
 {
@@ -48,6 +56,95 @@ namespace Limitless
         // Swap buffers
         void SwapBuffers();
 
+        // Render thread control
+        // When enabled, the render thread owns "process commands + present" for each frame.
+        // The main thread still builds/submits commands. `SwapBuffers()` will block until the
+        // render thread completes the frame.
+        void EnableRenderThread(bool enable);
+        bool IsRenderThreadEnabled() const { return m_RenderThreadEnabled; }
+
+        // Resource command submission (GPU resource operations).
+        // If called from the render thread, the callable executes inline.
+        template<typename Func>
+        auto SubmitResourceAndWait(Func&& func) -> decltype(func(static_cast<GraphicsContext*>(nullptr)))
+        {
+            using ResultT = decltype(func(static_cast<GraphicsContext*>(nullptr)));
+            if (IsOnRenderThread())
+            {
+                if constexpr (std::is_void_v<ResultT>)
+                {
+                    func(m_GraphicsContext);
+                }
+                else
+                {
+                    return func(m_GraphicsContext);
+                }
+            }
+
+            if (!m_RenderThreadRunning.load(std::memory_order_relaxed))
+            {
+                throw std::runtime_error("SubmitResourceAndWait requires the render thread to be running");
+            }
+
+            struct SharedState
+            {
+                std::promise<ResultT> promise;
+                std::function<ResultT(GraphicsContext*)> function;
+            };
+
+            auto state = std::make_shared<SharedState>();
+            state->function = std::forward<Func>(func);
+            std::future<ResultT> future = state->promise.get_future();
+
+            class CommandImpl final : public RenderResourceCommandQueue::Command
+            {
+            public:
+                explicit CommandImpl(std::shared_ptr<SharedState> shared)
+                    : m_Shared(std::move(shared))
+                {
+                }
+
+                void Execute(GraphicsContext* context) override
+                {
+                    try
+                    {
+                        if constexpr (std::is_void_v<ResultT>)
+                        {
+                            m_Shared->function(context);
+                            m_Shared->promise.set_value();
+                        }
+                        else
+                        {
+                            m_Shared->promise.set_value(m_Shared->function(context));
+                        }
+                    }
+                    catch (...)
+                    {
+                        m_Shared->promise.set_exception(std::current_exception());
+                    }
+                }
+
+            private:
+                std::shared_ptr<SharedState> m_Shared;
+            };
+
+            if (!m_ResourceQueue.Submit(std::make_unique<CommandImpl>(state)))
+            {
+                throw std::runtime_error("RenderResourceCommandQueue is full");
+            }
+
+            NotifyRenderThreadResourceWorkAvailable();
+
+            if constexpr (std::is_void_v<ResultT>)
+            {
+                future.get();
+            }
+            else
+            {
+                return future.get();
+            }
+        }
+
     private:
         Renderer() = default;
         ~Renderer() = default;
@@ -59,5 +156,29 @@ namespace Limitless
         GraphicsContext* m_GraphicsContext = nullptr; // Borrowed, not owned
         std::unique_ptr<RenderCommandQueue> m_RenderQueue;
         bool m_Initialized = false;
+
+        // Dedicated render thread model (OpenGL-friendly):
+        // - Submission: any thread (RenderCommandQueue is MPMC)
+        // - Execution/present: render thread owns "frame execution + SwapBuffers"
+        std::atomic<bool> m_RenderThreadEnabled{false};
+        std::atomic<bool> m_RenderThreadRunning{false};
+        std::atomic<bool> m_RenderThreadShutdown{false};
+        std::thread m_RenderThread;
+
+        std::mutex m_RenderThreadMutex;
+        std::condition_variable m_RenderThreadCV;
+        bool m_FrameRequested = false;
+        uint64_t m_FrameRequestedId = 0;
+        uint64_t m_FrameCompletedId = 0;
+
+        void StartRenderThread();
+        void StopRenderThread();
+        void RenderThreadMain();
+
+        bool IsOnRenderThread() const { return m_RenderThreadRunning.load() && (std::this_thread::get_id() == m_RenderThreadId); }
+        void NotifyRenderThreadResourceWorkAvailable();
+
+        std::thread::id m_RenderThreadId{};
+        RenderResourceCommandQueue m_ResourceQueue;
     };
 } 

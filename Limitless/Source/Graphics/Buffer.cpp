@@ -4,6 +4,8 @@
 #include "Core/Error.h"
 
 #include "Graphics/OpenGL/OpenGLBuffer.h"
+#include "Graphics/Renderer.h"
+#include "Graphics/OpenGL/OpenGLContext.h"
 
 namespace Limitless
 {
@@ -12,8 +14,14 @@ namespace Limitless
         auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
         switch (api)
         {
-            case GraphicsAPI::OpenGL:  return std::make_shared<OpenGLVertexBuffer>(data, size);
-            default:                   return std::make_shared<OpenGLVertexBuffer>(data, size);
+            case GraphicsAPI::OpenGL:
+            default:
+            {
+                auto& renderer = Renderer::GetInstance();
+                return renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<VertexBuffer> {
+                    return std::make_shared<OpenGLVertexBuffer>(data, size);
+                });
+            }
         }
     }
 
@@ -22,8 +30,14 @@ namespace Limitless
         auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
         switch (api)
         {
-            case GraphicsAPI::OpenGL:  return std::make_shared<OpenGLVertexBuffer>(size);
-            default:                   return std::make_shared<OpenGLVertexBuffer>(size);
+            case GraphicsAPI::OpenGL:
+            default:
+            {
+                auto& renderer = Renderer::GetInstance();
+                return renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<VertexBuffer> {
+                    return std::make_shared<OpenGLVertexBuffer>(size);
+                });
+            }
         }
     }
 
@@ -32,8 +46,14 @@ namespace Limitless
         auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
         switch (api)
         {
-            case GraphicsAPI::OpenGL:  return std::make_shared<OpenGLIndexBuffer>(indices, count);
-            default:                   return std::make_shared<OpenGLIndexBuffer>(indices, count);
+            case GraphicsAPI::OpenGL:
+            default:
+            {
+                auto& renderer = Renderer::GetInstance();
+                return renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<IndexBuffer> {
+                    return std::make_shared<OpenGLIndexBuffer>(indices, count);
+                });
+            }
         }
     }
 }

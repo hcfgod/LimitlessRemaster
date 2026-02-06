@@ -1,6 +1,8 @@
 #include "OpenGLTexture.h"
 #include "Core/Error.h"
 #include "Core/Debug/Log.h"
+#include "Graphics/Renderer.h"
+#include "Graphics/OpenGL/OpenGLContext.h"
 
 #include "stb/stb_image/stb_image.h"
 #include <string>
@@ -118,7 +120,23 @@ namespace Limitless
     {
         if (m_RendererID)
         {
-            glDeleteTextures(1, &m_RendererID);
+            auto& renderer = Renderer::GetInstance();
+            const GLuint textureToDelete = m_RendererID;
+            if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
+            {
+                renderer.SubmitResourceAndWait([textureToDelete](GraphicsContext*) {
+                    GLuint id = textureToDelete;
+                    glDeleteTextures(1, &id);
+                });
+            }
+            else
+            {
+                if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
+                {
+                    OpenGLContext::ScopedCurrentContext scope(*glContext);
+                }
+                glDeleteTextures(1, &m_RendererID);
+            }
             m_RendererID = 0;
         }
     }

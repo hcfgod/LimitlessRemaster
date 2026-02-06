@@ -6,10 +6,18 @@ The Render Command System is a **command submission + execution framework** inte
 
 - **Thread-safe submission**: Multiple threads can submit commands safely.
 - **Priority-based ordering**: Commands can be submitted with different priority levels.
-- **Basic batching pass**: A simple type-based reordering pass exists (clear → draw → other).
+- **Basic batching pass**: A conservative reorder pass exists (clear commands are moved to the front; other commands keep their relative order).
 - **Error handling hooks**: Command execution catches `Limitless::Error` and logs/report errors.
 - **Statistics**: Basic execution counters and timing stats exist.
 - **Extensible**: It’s straightforward to add new command types.
+
+### GPU resource operations (RenderResourceCommandQueue)
+
+GPU resource operations (shader compile/link, buffer/texture creation, VAO attribute setup, and OpenGL deletes) are now routed through a dedicated queue that executes on the render thread:
+
+- **Type**: `Limitless::RenderResourceCommandQueue`
+- **Execution**: drained by the render thread before processing frame render commands
+- **Why**: OpenGL context affinity + avoiding “context thrash” across threads
 
 ### Current limitations (important)
 
@@ -23,7 +31,8 @@ This table describes what the system **guarantees today** (not future intent).
 | Area | Guarantee | Notes |
 |------|-----------|-------|
 | Submission threading | `SubmitCommand*()` is safe for **multiple producer threads** | Uses a bounded lock-free MPMC ring + an atomic size gate for `maxQueueSize`. |
-| Execution threading | `ProcessCommands*()` may be called from any thread, but **OpenGL execution is serialized** | The OpenGL context is made current inside a mutex-protected scope (`OpenGLContext::ScopedCurrentContext`). This is correct but not parallel. Prefer a dedicated render thread for performance. |
+| Execution threading | With the render thread enabled, **execution + present happen on the render thread** | The main thread typically only submits commands. `Renderer::EndFrame()` signals the render thread and `Renderer::SwapBuffers()` waits for completion. OpenGL context ownership is still serialized and correct. |
+| Resource threading | GPU resource operations are executed on the render thread | `Renderer::SubmitResourceAndWait()` schedules work on `RenderResourceCommandQueue` and blocks the caller until complete. |
 | Ownership | Commands are transferred via `std::unique_ptr` into the queue | If submission fails, the command is destroyed on the submitting thread. |
 | Queue bounds | `maxQueueSize` is enforced | Underlying fixed capacity is `RenderCommandQueue::kQueueCapacity` (currently 16384). `maxQueueSize` must be <= that. |
 | Error behavior | Command execution catches `Limitless::Error` and `std::exception` | Errors are logged and optionally forwarded via the debug callback. |

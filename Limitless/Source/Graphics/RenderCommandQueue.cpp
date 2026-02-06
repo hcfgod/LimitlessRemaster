@@ -555,7 +555,13 @@ namespace Limitless
 
     void RenderCommandQueue::SortCommandsByPriority(std::vector<std::unique_ptr<QueuedCommand>>& commands)
     {
-        std::sort(commands.begin(), commands.end(),
+        // IMPORTANT:
+        // Render commands are order-dependent. When priorities are equal, we MUST preserve
+        // the original relative order (bind/state must remain before draw calls).
+        //
+        // Using std::sort here can reorder equal-priority commands arbitrarily, which can
+        // produce invalid OpenGL state and even crash some drivers.
+        std::stable_sort(commands.begin(), commands.end(),
             [](const auto& a, const auto& b) {
                 return static_cast<int>(a->priority) > static_cast<int>(b->priority);
             });
@@ -563,51 +569,45 @@ namespace Limitless
 
     void RenderCommandQueue::BatchCommands(std::vector<std::unique_ptr<QueuedCommand>>& commands)
     {
-        // For now, we'll implement a simple batching approach that doesn't modify the original vector
-        // This prevents the null command issue while still allowing for future batching optimizations
-        
-        // Group commands by type for potential batching
+        // IMPORTANT:
+        // Render commands are stateful and order-dependent (e.g. binds must occur before draws).
+        // The previous implementation grouped Draw* commands ahead of bind/state commands, which
+        // can cause invalid OpenGL state (GL_INVALID_OPERATION) and even driver crashes.
+        //
+        // Current policy:
+        // - Move Clear commands to the front (safe)
+        // - Preserve relative order of everything else (stable)
         std::vector<std::unique_ptr<QueuedCommand>> clearCommands;
-        std::vector<std::unique_ptr<QueuedCommand>> drawCommands;
-        std::vector<std::unique_ptr<QueuedCommand>> otherCommands;
-        
-        for (auto& command : commands)
+        std::vector<std::unique_ptr<QueuedCommand>> rest;
+
+        clearCommands.reserve(commands.size());
+        rest.reserve(commands.size());
+
+        for (auto& queued : commands)
         {
-            if (!command || !command->command)
+            if (!queued || !queued->command)
+            {
                 continue;
-                
-            // Simple type-based batching - can be expanded later
-            if (command->command->GetName() == "Clear")
-            {
-                clearCommands.push_back(std::move(command));
             }
-            else if (command->command->GetName().find("Draw") != std::string::npos)
+
+            if (queued->command->GetName() == "Clear")
             {
-                drawCommands.push_back(std::move(command));
+                clearCommands.push_back(std::move(queued));
             }
             else
             {
-                otherCommands.push_back(std::move(command));
+                rest.push_back(std::move(queued));
             }
         }
-        
-        // Restore commands to original vector in batched order
+
         commands.clear();
-        
-        // Add clear commands first
+        commands.reserve(clearCommands.size() + rest.size());
+
         for (auto& cmd : clearCommands)
         {
             commands.push_back(std::move(cmd));
         }
-        
-        // Add draw commands
-        for (auto& cmd : drawCommands)
-        {
-            commands.push_back(std::move(cmd));
-        }
-        
-        // Add other commands
-        for (auto& cmd : otherCommands)
+        for (auto& cmd : rest)
         {
             commands.push_back(std::move(cmd));
         }

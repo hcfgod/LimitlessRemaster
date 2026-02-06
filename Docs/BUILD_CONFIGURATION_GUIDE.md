@@ -108,6 +108,30 @@ However:
   - an awaiter wrapper around `std::shared_future`, or
   - a dedicated coroutine `Task` type (future work).
 
+## Render Thread (OpenGL)
+
+The engine supports a dedicated render thread for OpenGL execution/present.
+
+- **Config key**: `graphics.render_thread_enabled` (boolean)
+- **Default**: `true`
+- **Behavior**:
+  - Main thread builds/submits render commands (MPMC submission).
+  - `Renderer::EndFrame()` signals the render thread that a frame is ready.
+  - `Renderer::SwapBuffers()` waits until the render thread completes the frame (process commands + present).
+
+This improves correctness and simplifies thread-affinity rules for OpenGL contexts. It does not make OpenGL GPU execution parallel; it ensures context ownership is explicit and safe.
+
+### GPU Resource Operations (OpenGL)
+
+When the render thread is enabled, GPU resource operations are executed on the render thread via an internal resource queue.
+
+- **Examples**:
+  - Shader compile/link
+  - Buffer/texture creation
+  - VAO attribute setup
+  - OpenGL deletes during teardown
+- **Behavior**: these operations may block the calling thread briefly (they are submitted and waited on).
+
 ## Build Configurations
 
 ### Debug Configuration

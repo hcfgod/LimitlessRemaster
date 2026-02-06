@@ -121,6 +121,16 @@ namespace Limitless
         if (m_VertexArray)
         {
             m_VertexArray->Bind();
+
+            // Defensive: ensure the VAO's index buffer is bound for indexed draws.
+            // In OpenGL core profile the element array buffer is part of VAO state, but making this
+            // explicit prevents subtle ordering/state issues and avoids driver crashes if the VAO
+            // was created without an element binding.
+            const auto& indexBuffer = m_VertexArray->GetIndexBuffer();
+            if (indexBuffer)
+            {
+                indexBuffer->Bind();
+            }
         }
         else
         {
@@ -211,6 +221,15 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
+        // Safety: OpenGL core profile requires a VAO to be bound for vertex specification.
+        GLint boundVAO = 0;
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &boundVAO);
+        if (boundVAO == 0)
+        {
+            LT_CORE_ERROR("DrawArraysCommand: no VAO bound (skipping draw)");
+            return;
+        }
+
         glDrawArrays(static_cast<GLenum>(m_Mode), m_First, static_cast<GLsizei>(m_Count));
         CheckOpenGLError("glDrawArrays");
     }
@@ -221,6 +240,27 @@ namespace Limitless
         if (!context)
         {
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
+        }
+
+        // Safety: In core profile, indexed drawing requires a VAO and an element array buffer
+        // unless the caller provides a valid client pointer (which we do not support here).
+        GLint boundVAO = 0;
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &boundVAO);
+
+        GLint boundEBO = 0;
+        glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &boundEBO);
+
+        if (boundVAO == 0)
+        {
+            LT_CORE_ERROR("DrawIndexedCommand: no VAO bound (skipping draw)");
+            return;
+        }
+
+        // If m_Indices is null, we expect an index buffer to be bound via the VAO state.
+        if (m_Indices == nullptr && boundEBO == 0)
+        {
+            LT_CORE_ERROR("DrawIndexedCommand: no index buffer bound and indices pointer is null (skipping draw)");
+            return;
         }
 
         if (m_BaseVertex != 0)

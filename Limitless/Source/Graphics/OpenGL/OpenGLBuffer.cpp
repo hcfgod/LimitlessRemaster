@@ -1,6 +1,8 @@
 #include "OpenGLBuffer.h"
 #include "Core/Error.h"
 #include "Core/Debug/Log.h"
+#include "Graphics/Renderer.h"
+#include "Graphics/OpenGL/OpenGLContext.h"
 
 namespace Limitless
 {
@@ -22,7 +24,23 @@ namespace Limitless
     {
         if (m_RendererID)
         {
-            glDeleteBuffers(1, &m_RendererID);
+            auto& renderer = Renderer::GetInstance();
+            const GLuint bufferToDelete = m_RendererID;
+            if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
+            {
+                renderer.SubmitResourceAndWait([bufferToDelete](GraphicsContext*) {
+                    GLuint id = bufferToDelete;
+                    glDeleteBuffers(1, &id);
+                });
+            }
+            else
+            {
+                if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
+                {
+                    OpenGLContext::ScopedCurrentContext scope(*glContext);
+                }
+                glDeleteBuffers(1, &m_RendererID);
+            }
             m_RendererID = 0;
         }
     }
@@ -55,7 +73,23 @@ namespace Limitless
     {
         if (m_RendererID)
         {
-            glDeleteBuffers(1, &m_RendererID);
+            auto& renderer = Renderer::GetInstance();
+            const GLuint bufferToDelete = m_RendererID;
+            if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
+            {
+                renderer.SubmitResourceAndWait([bufferToDelete](GraphicsContext*) {
+                    GLuint id = bufferToDelete;
+                    glDeleteBuffers(1, &id);
+                });
+            }
+            else
+            {
+                if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
+                {
+                    OpenGLContext::ScopedCurrentContext scope(*glContext);
+                }
+                glDeleteBuffers(1, &m_RendererID);
+            }
             m_RendererID = 0;
         }
     }

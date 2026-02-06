@@ -20,7 +20,7 @@ namespace Limitless {
 
         private:
             OpenGLContext& m_Context;
-            std::unique_lock<std::mutex> m_Lock;
+            std::unique_lock<std::recursive_mutex> m_Lock;
         };
 
         OpenGLContext();
@@ -47,8 +47,9 @@ namespace Limitless {
         // Context affinity/serialization for OpenGL:
         // OpenGL contexts are thread-affine; only one thread may have the context current at a time.
         // We serialize context usage with this mutex and explicitly make the context current in a scope.
-        std::mutex m_ContextMutex;
+        std::recursive_mutex m_ContextMutex;
         std::thread::id m_CurrentThread{};
+        uint32_t m_CurrentDepth = 0;
 
         // Requested GL version
         int m_RequestMajor{4};

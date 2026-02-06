@@ -1,5 +1,6 @@
 #include "Renderer.h"
 #include "Core/Debug/Log.h"
+#include "Core/ConfigManager.h"
 #include "Graphics/OpenGL/OpenGLContext.h"
 
 namespace Limitless
@@ -38,6 +39,12 @@ namespace Limitless
         
         m_Initialized = true;
         LT_CORE_INFO("Renderer initialized successfully");
+
+        // Default behavior: enable render thread for OpenGL unless explicitly disabled.
+        // This allows OpenGL work to be executed on a dedicated thread (context-affine) while
+        // still supporting multi-threaded submission.
+        const bool enableRenderThread = ConfigManager::GetInstance().GetValue<bool>("graphics.render_thread_enabled", true);
+        EnableRenderThread(enableRenderThread);
     }
 
     void Renderer::Shutdown()
@@ -46,6 +53,8 @@ namespace Limitless
         {
             return;
         }
+
+        StopRenderThread();
 
         // Process any remaining commands
         if (m_RenderQueue)
@@ -151,7 +160,17 @@ namespace Limitless
             return;
         }
 
-        // Process any remaining commands for this frame
+        if (m_RenderThreadEnabled.load(std::memory_order_relaxed) && m_RenderThreadRunning.load(std::memory_order_relaxed))
+        {
+            // Signal the render thread that a new frame is ready to execute/present.
+            std::lock_guard<std::mutex> lock(m_RenderThreadMutex);
+            m_FrameRequested = true;
+            m_FrameRequestedId++;
+            m_RenderThreadCV.notify_one();
+            return;
+        }
+
+        // Single-thread fallback: process any remaining commands for this frame on the calling thread.
         ProcessCommands();
     }
 
@@ -160,6 +179,17 @@ namespace Limitless
         if (!m_Initialized || !m_GraphicsContext)
         {
             LT_CORE_WARN("Cannot swap buffers - renderer not initialized");
+            return;
+        }
+
+        if (m_RenderThreadEnabled.load(std::memory_order_relaxed) && m_RenderThreadRunning.load(std::memory_order_relaxed))
+        {
+            // Wait until the render thread completes the most recently requested frame.
+            std::unique_lock<std::mutex> lock(m_RenderThreadMutex);
+            const uint64_t targetFrameId = m_FrameRequestedId;
+            m_RenderThreadCV.wait(lock, [this, targetFrameId]() {
+                return m_RenderThreadShutdown.load() || m_FrameCompletedId >= targetFrameId;
+            });
             return;
         }
 
@@ -172,5 +202,151 @@ namespace Limitless
 
         m_GraphicsContext->MakeCurrent();
         m_GraphicsContext->SwapBuffers();
+    }
+
+    void Renderer::EnableRenderThread(bool enable)
+    {
+        if (enable)
+        {
+            m_RenderThreadEnabled.store(true, std::memory_order_relaxed);
+            StartRenderThread();
+        }
+        else
+        {
+            m_RenderThreadEnabled.store(false, std::memory_order_relaxed);
+            StopRenderThread();
+        }
+    }
+
+    void Renderer::StartRenderThread()
+    {
+        if (!m_Initialized || !m_GraphicsContext || !m_RenderQueue)
+        {
+            return;
+        }
+
+        if (m_RenderThreadRunning.load(std::memory_order_relaxed))
+        {
+            return;
+        }
+
+        // Only enable for OpenGL today (context affinity model).
+        if (dynamic_cast<OpenGLContext*>(m_GraphicsContext) == nullptr)
+        {
+            LT_CORE_WARN("Renderer: render thread enabled, but graphics context is not OpenGL; disabling render thread");
+            m_RenderThreadEnabled.store(false, std::memory_order_relaxed);
+            return;
+        }
+
+        m_RenderThreadShutdown.store(false, std::memory_order_relaxed);
+        m_RenderThreadRunning.store(true, std::memory_order_relaxed);
+        m_RenderThread = std::thread(&Renderer::RenderThreadMain, this);
+        LT_CORE_INFO("Renderer: render thread started");
+    }
+
+    void Renderer::StopRenderThread()
+    {
+        if (!m_RenderThreadRunning.load(std::memory_order_relaxed))
+        {
+            return;
+        }
+
+        m_RenderThreadShutdown.store(true, std::memory_order_relaxed);
+
+        {
+            std::lock_guard<std::mutex> lock(m_RenderThreadMutex);
+            m_FrameRequested = true; // wake the render thread if it's waiting
+            m_RenderThreadCV.notify_all();
+        }
+
+        if (m_RenderThread.joinable())
+        {
+            m_RenderThread.join();
+        }
+
+        m_RenderThreadRunning.store(false, std::memory_order_relaxed);
+        LT_CORE_INFO("Renderer: render thread stopped");
+    }
+
+    void Renderer::NotifyRenderThreadResourceWorkAvailable()
+    {
+        if (!m_RenderThreadRunning.load(std::memory_order_relaxed))
+        {
+            return;
+        }
+
+        // Wake the render thread even if there is no pending frame request yet.
+        std::lock_guard<std::mutex> lock(m_RenderThreadMutex);
+        m_RenderThreadCV.notify_one();
+    }
+
+    void Renderer::RenderThreadMain()
+    {
+        auto* glContext = dynamic_cast<OpenGLContext*>(m_GraphicsContext);
+        if (!glContext)
+        {
+            return;
+        }
+
+        m_RenderThreadId = std::this_thread::get_id();
+
+        while (!m_RenderThreadShutdown.load(std::memory_order_relaxed))
+        {
+            uint64_t frameIdToComplete = 0;
+
+            // Wait for frame request.
+            {
+                std::unique_lock<std::mutex> lock(m_RenderThreadMutex);
+                m_RenderThreadCV.wait(lock, [this]() {
+                    return m_FrameRequested || m_RenderThreadShutdown.load() || !m_ResourceQueue.IsEmpty();
+                });
+                if (m_RenderThreadShutdown.load(std::memory_order_relaxed))
+                {
+                    break;
+                }
+
+                // Always process any pending resource work before frame execution.
+                // (We keep the lock only for the wait/flags; resource processing happens outside.)
+
+                // Consume the request.
+                if (m_FrameRequested)
+                {
+                    m_FrameRequested = false;
+                    frameIdToComplete = m_FrameRequestedId;
+                }
+            }
+
+            // Execute resource commands + frame commands under a context-current scope.
+            try
+            {
+                OpenGLContext::ScopedCurrentContext scope(*glContext);
+
+                // Drain resource work first.
+                m_ResourceQueue.Process(m_GraphicsContext, 2048);
+
+                if (frameIdToComplete != 0)
+                {
+                m_RenderQueue->ProcessCommands(m_GraphicsContext);
+                m_GraphicsContext->SwapBuffers();
+                }
+            }
+            catch (const std::exception& e)
+            {
+                LT_CORE_ERROR("Renderer render thread exception: {}", e.what());
+            }
+
+            // Mark completion and notify waiters (`SwapBuffers()`).
+            {
+                std::lock_guard<std::mutex> lock(m_RenderThreadMutex);
+                if (frameIdToComplete != 0 && frameIdToComplete > m_FrameCompletedId)
+                {
+                    m_FrameCompletedId = frameIdToComplete;
+                }
+            }
+
+            m_RenderThreadCV.notify_all();
+        }
+
+        m_RenderThreadId = std::thread::id{};
     }
 } 

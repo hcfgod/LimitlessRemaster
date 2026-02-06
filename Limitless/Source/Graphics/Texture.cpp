@@ -3,6 +3,9 @@
 #include "Core/Error.h"
 
 #include "Graphics/OpenGL/OpenGLTexture.h"
+#include "Graphics/Renderer.h"
+#include "Graphics/OpenGL/OpenGLContext.h"
+#include <vector>
 
 namespace Limitless
 {
@@ -11,8 +14,14 @@ namespace Limitless
         auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
         switch (api)
         {
-            case GraphicsAPI::OpenGL: return std::make_shared<OpenGLTexture2D>(path, specification);
-            default:                  return std::make_shared<OpenGLTexture2D>(path, specification);
+            case GraphicsAPI::OpenGL:
+            default:
+            {
+                auto& renderer = Renderer::GetInstance();
+                return renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<Texture2D> {
+                    return std::make_shared<OpenGLTexture2D>(path, specification);
+                });
+            }
         }
     }
 
@@ -25,8 +34,20 @@ namespace Limitless
         auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
         switch (api)
         {
-            case GraphicsAPI::OpenGL: return std::make_shared<OpenGLTexture2D>(width, height, rgbaPixels, specification);
-            default:                  return std::make_shared<OpenGLTexture2D>(width, height, rgbaPixels, specification);
+            case GraphicsAPI::OpenGL:
+            default:
+            {
+                auto& renderer = Renderer::GetInstance();
+                LT_VERIFY(rgbaPixels != nullptr, "Texture2D::CreateFromRGBA8: rgbaPixels is null");
+                LT_VERIFY(width > 0 && height > 0, "Texture2D::CreateFromRGBA8: texture size must be non-zero");
+
+                // Copy pixels for safety: caller memory may go out of scope before the render thread executes.
+                std::vector<uint8_t> pixelBytes(static_cast<const uint8_t*>(rgbaPixels),
+                                                static_cast<const uint8_t*>(rgbaPixels) + (width * height * 4));
+                return renderer.SubmitResourceAndWait([=](GraphicsContext*) mutable -> std::shared_ptr<Texture2D> {
+                    return std::make_shared<OpenGLTexture2D>(width, height, pixelBytes.data(), specification);
+                });
+            }
         }
     }
 }

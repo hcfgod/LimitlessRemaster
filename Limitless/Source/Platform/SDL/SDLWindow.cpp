@@ -178,7 +178,10 @@ namespace Limitless
         try
         {
             m_Context->Init(m_Window, m_Data.Api); // Create context, load functions, setup capabilities
-            m_Context->MakeCurrent();             // Make context current
+            // IMPORTANT:
+            // Do not force the context to remain current on the main thread here.
+            // The renderer may execute/present from a dedicated render thread; OpenGL contexts
+            // cannot be current on multiple threads at the same time.
             LT_CORE_INFO("Graphics context initialized successfully");
         }
         catch (const std::exception& e)

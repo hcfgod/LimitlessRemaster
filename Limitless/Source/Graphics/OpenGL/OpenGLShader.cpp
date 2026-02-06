@@ -1,6 +1,8 @@
 #include "OpenGLShader.h"
 #include "Core/Error.h"
 #include "Core/Debug/Log.h"
+#include "Graphics/Renderer.h"
+#include "Graphics/OpenGL/OpenGLContext.h"
 
 namespace Limitless
 {
@@ -79,7 +81,22 @@ namespace Limitless
     {
         if (m_RendererID)
         {
-            glDeleteProgram(m_RendererID);
+            auto& renderer = Renderer::GetInstance();
+            const GLuint programToDelete = m_RendererID;
+            if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
+            {
+                renderer.SubmitResourceAndWait([programToDelete](GraphicsContext*) {
+                    glDeleteProgram(programToDelete);
+                });
+            }
+            else
+            {
+                if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
+                {
+                    OpenGLContext::ScopedCurrentContext scope(*glContext);
+                }
+                glDeleteProgram(programToDelete);
+            }
             m_RendererID = 0;
         }
     }
@@ -96,6 +113,25 @@ namespace Limitless
 
     void OpenGLShader::SetInt(const std::string& name, int value)
     {
+        auto& renderer = Renderer::GetInstance();
+        if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
+        {
+            renderer.SubmitResourceAndWait([&](GraphicsContext*) {
+                glUseProgram(m_RendererID);
+                GLint location = GetUniformLocation(m_RendererID, name);
+                if (location != -1)
+                {
+                    glUniform1i(location, value);
+                }
+            });
+            return;
+        }
+
+        if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
+        {
+            OpenGLContext::ScopedCurrentContext scope(*glContext);
+        }
+
         glUseProgram(m_RendererID);
         GLint location = GetUniformLocation(m_RendererID, name);
         if (location != -1)
