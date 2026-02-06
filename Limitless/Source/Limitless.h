@@ -32,3 +32,4 @@
 #include "Graphics/Shader.h"
 #include "Graphics/Buffer.h"
 #include "Graphics/VertexArray.h"
+#include "Graphics/Texture.h"

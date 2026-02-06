@@ -28,5 +28,7 @@ namespace Limitless
         std::shared_ptr<VertexArray> m_TriangleVAO;
         std::shared_ptr<VertexBuffer> m_TriangleVBO;
         std::shared_ptr<IndexBuffer> m_TriangleIBO;
+
+        std::shared_ptr<Texture2D> m_CheckerboardTexture;
     };
 } 

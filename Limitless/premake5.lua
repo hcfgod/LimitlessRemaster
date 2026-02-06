@@ -12,6 +12,7 @@ project "Limitless"
     {
         "Source/**.h",
         "Source/**.cpp",
+        "Vendor/stb/stb_image/stb_image.cpp",
         "Vendor/glad/glad/glad.c"
     }
 

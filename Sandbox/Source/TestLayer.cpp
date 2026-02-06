@@ -22,19 +22,19 @@ namespace Limitless
         LT_INFO("TestLayer attached");
 
         // -----------------------------------------------------------------------------
-        // Triangle demo setup (VAO/VBO/IBO + shader)
+        // Textured triangle demo setup (VAO/VBO/IBO + shader + texture)
         // -----------------------------------------------------------------------------
         struct Vertex
         {
             float position[3];
-            float color[3];
+            float uv[2];
         };
 
         const Vertex vertices[3] =
         {
-            { { -0.5f, -0.5f, 0.0f }, { 1.0f, 0.2f, 0.2f } },
-            { {  0.5f, -0.5f, 0.0f }, { 0.2f, 1.0f, 0.2f } },
-            { {  0.0f,  0.5f, 0.0f }, { 0.2f, 0.2f, 1.0f } },
+            { { -0.5f, -0.5f, 0.0f }, { 0.0f, 0.0f } },
+            { {  0.5f, -0.5f, 0.0f }, { 1.0f, 0.0f } },
+            { {  0.0f,  0.5f, 0.0f }, { 0.5f, 1.0f } },
         };
 
         const uint32_t indices[3] = { 0, 1, 2 };
@@ -43,7 +43,7 @@ namespace Limitless
         m_TriangleVBO = VertexBuffer::Create(vertices, static_cast<uint32_t>(sizeof(vertices)));
         m_TriangleVBO->SetLayout({
             { ShaderDataType::Float3, "a_Position" },
-            { ShaderDataType::Float3, "a_Color" }
+            { ShaderDataType::Float2, "a_UV" }
         });
         m_TriangleVAO->AddVertexBuffer(m_TriangleVBO);
 
@@ -53,26 +53,43 @@ namespace Limitless
         const std::string vertexSrc = R"(
             #version 330 core
             layout(location = 0) in vec3 a_Position;
-            layout(location = 1) in vec3 a_Color;
-            out vec3 v_Color;
+            layout(location = 1) in vec2 a_UV;
+            out vec2 v_UV;
             void main()
             {
-                v_Color = a_Color;
+                v_UV = a_UV;
                 gl_Position = vec4(a_Position, 1.0);
             }
         )";
 
         const std::string fragmentSrc = R"(
             #version 330 core
-            in vec3 v_Color;
+            in vec2 v_UV;
             out vec4 FragColor;
+            uniform sampler2D u_Texture;
             void main()
             {
-                FragColor = vec4(v_Color, 1.0);
+                FragColor = texture(u_Texture, v_UV);
             }
         )";
 
         m_TriangleShader = Shader::CreateFromSource("TriangleShader", vertexSrc, fragmentSrc);
+        m_TriangleShader->SetInt("u_Texture", 0);
+
+        // Tiny 2x2 checkerboard (RGBA8) so we don't depend on external asset paths yet.
+        const uint32_t checkerRGBA[4] =
+        {
+            0xFFFFFFFFu, 0xFF000000u,
+            0xFF000000u, 0xFFFFFFFFu
+        };
+
+        TextureSpecification textureSpec{};
+        textureSpec.GenerateMipmaps = false;
+        textureSpec.MinFilter = TextureFilter::Nearest;
+        textureSpec.MagFilter = TextureFilter::Nearest;
+        textureSpec.WrapU = TextureWrap::Repeat;
+        textureSpec.WrapV = TextureWrap::Repeat;
+        m_CheckerboardTexture = Texture2D::CreateFromRGBA8(2, 2, checkerRGBA, textureSpec);
     }
 
     void TestLayer::OnDetach()
@@ -126,9 +143,10 @@ namespace Limitless
         }
 
         // Draw the triangle via render commands.
-        if (m_TriangleShader && m_TriangleVAO && m_TriangleIBO)
+        if (m_TriangleShader && m_TriangleVAO && m_TriangleIBO && m_CheckerboardTexture)
         {
             renderer.SubmitCommand(std::make_unique<BindShaderCommand>(m_TriangleShader));
+            renderer.SubmitCommand(std::make_unique<BindTextureCommand>(m_CheckerboardTexture, 0));
             renderer.SubmitCommand(std::make_unique<BindVertexArrayCommand>(m_TriangleVAO));
             renderer.SubmitCommand(std::make_unique<DrawIndexedCommand>(
                 DrawMode::Triangles,

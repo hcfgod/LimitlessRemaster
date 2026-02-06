@@ -4,6 +4,17 @@
 
 namespace Limitless
 {
+    static GLint GetUniformLocation(GLuint program, const std::string& name)
+    {
+        GLint location = glGetUniformLocation(program, name.c_str());
+        if (location == -1)
+        {
+            // Not all shaders use all uniforms; keep this as a debug hint, not a hard error.
+            LT_CORE_DEBUG("OpenGLShader: uniform '{}' not found in program {}", name, program);
+        }
+        return location;
+    }
+
     GLuint OpenGLShader::CompileShader(GLenum type, const std::string& source)
     {
         const char* src = source.c_str();
@@ -81,6 +92,16 @@ namespace Limitless
     void OpenGLShader::Unbind() const
     {
         glUseProgram(0);
+    }
+
+    void OpenGLShader::SetInt(const std::string& name, int value)
+    {
+        glUseProgram(m_RendererID);
+        GLint location = GetUniformLocation(m_RendererID, name);
+        if (location != -1)
+        {
+            glUniform1i(location, value);
+        }
     }
 }
 

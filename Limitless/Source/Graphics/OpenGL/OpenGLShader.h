@@ -18,6 +18,8 @@ namespace Limitless
         void Bind() const override;
         void Unbind() const override;
 
+        void SetInt(const std::string& name, int value) override;
+
         const std::string& GetName() const override { return m_Name; }
 
         GLuint GetRendererID() const { return m_RendererID; }

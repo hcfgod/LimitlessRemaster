@@ -3,6 +3,7 @@
 #include "Graphics/Shader.h"
 #include "Graphics/VertexArray.h"
 #include "Graphics/Buffer.h"
+#include "Graphics/Texture.h"
 #include "Core/Error.h"
 #include "Core/Debug/Log.h"
 
@@ -173,13 +174,12 @@ namespace Limitless
 
         if (m_Texture)
         {
-            // This should be implemented by the specific render API implementation
-            LT_CORE_DEBUG("Binding texture to slot {}: {}", m_Slot, m_Texture ? "valid" : "null");
+            m_Texture->Bind(m_Slot);
         }
         else
         {
-            // Unbind texture from slot
-            LT_CORE_DEBUG("Unbinding texture from slot {}", m_Slot);
+            glActiveTexture(GL_TEXTURE0 + m_Slot);
+            glBindTexture(GL_TEXTURE_2D, 0);
         }
     }
 
