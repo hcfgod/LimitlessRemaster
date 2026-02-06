@@ -132,6 +132,15 @@ When the render thread is enabled, GPU resource operations are executed on the r
   - OpenGL deletes during teardown
 - **Behavior**: these operations may block the calling thread briefly (they are submitted and waited on).
 
+### GPU Resource Lifetime Rule (Must-have)
+
+**Rule**: GPU resources must be destroyed **before** `Renderer::Shutdown()` tears down the graphics context.
+
+- The engine attempts to delete OpenGL objects on the render thread via the resource queue.
+- If a GPU resource is destroyed *after* the renderer/context are already gone, the engine will **not** call `glDelete*` (unsafe) and will instead **warn and leak** the GL handle.
+
+This is a deliberate correctness choice: leaking during shutdown is preferable to undefined behavior or driver crashes.
+
 ## Build Configurations
 
 ### Debug Configuration

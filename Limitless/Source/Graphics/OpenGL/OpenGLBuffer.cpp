@@ -38,8 +38,13 @@ namespace Limitless
                 if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
                 {
                     OpenGLContext::ScopedCurrentContext scope(*glContext);
+                    GLuint id = bufferToDelete;
+                    glDeleteBuffers(1, &id);
                 }
-                glDeleteBuffers(1, &m_RendererID);
+                else
+                {
+                    LT_CORE_WARN("OpenGLVertexBuffer destroyed after renderer/context teardown; leaking GL buffer {}", bufferToDelete);
+                }
             }
             m_RendererID = 0;
         }
@@ -87,8 +92,13 @@ namespace Limitless
                 if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
                 {
                     OpenGLContext::ScopedCurrentContext scope(*glContext);
+                    GLuint id = bufferToDelete;
+                    glDeleteBuffers(1, &id);
                 }
-                glDeleteBuffers(1, &m_RendererID);
+                else
+                {
+                    LT_CORE_WARN("OpenGLIndexBuffer destroyed after renderer/context teardown; leaking GL buffer {}", bufferToDelete);
+                }
             }
             m_RendererID = 0;
         }

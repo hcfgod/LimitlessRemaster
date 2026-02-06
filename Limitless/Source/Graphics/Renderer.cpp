@@ -54,6 +54,20 @@ namespace Limitless
             return;
         }
 
+        // Drain any pending resource work while the context is still valid.
+        // This ensures deletes/uploads complete before the render thread exits.
+        if (m_RenderThreadEnabled.load(std::memory_order_relaxed) && m_RenderThreadRunning.load(std::memory_order_relaxed))
+        {
+            try
+            {
+                SubmitResourceAndWait([](GraphicsContext*) { /* barrier */ });
+            }
+            catch (const std::exception& e)
+            {
+                LT_CORE_WARN("Renderer shutdown resource barrier failed: {}", e.what());
+            }
+        }
+
         StopRenderThread();
 
         // Process any remaining commands
@@ -95,6 +109,28 @@ namespace Limitless
         }
 
         return m_RenderQueue->SubmitCommandWithPriority(std::move(command), priority);
+    }
+
+    bool Renderer::SubmitResource(std::unique_ptr<RenderResourceCommandQueue::Command> command)
+    {
+        if (!command)
+        {
+            return false;
+        }
+
+        if (!m_RenderThreadRunning.load(std::memory_order_relaxed))
+        {
+            LT_CORE_WARN("Renderer::SubmitResource called while render thread is not running (dropping)");
+            return false;
+        }
+
+        if (!m_ResourceQueue.Submit(std::move(command)))
+        {
+            return false;
+        }
+
+        NotifyRenderThreadResourceWorkAvailable();
+        return true;
     }
 
     void Renderer::ExecuteImmediate(std::unique_ptr<RenderCommand> command)

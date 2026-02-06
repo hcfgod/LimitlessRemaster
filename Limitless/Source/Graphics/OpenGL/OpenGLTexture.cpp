@@ -134,8 +134,13 @@ namespace Limitless
                 if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
                 {
                     OpenGLContext::ScopedCurrentContext scope(*glContext);
+                    GLuint id = textureToDelete;
+                    glDeleteTextures(1, &id);
                 }
-                glDeleteTextures(1, &m_RendererID);
+                else
+                {
+                    LT_CORE_WARN("OpenGLTexture2D destroyed after renderer/context teardown; leaking GL texture {}", textureToDelete);
+                }
             }
             m_RendererID = 0;
         }

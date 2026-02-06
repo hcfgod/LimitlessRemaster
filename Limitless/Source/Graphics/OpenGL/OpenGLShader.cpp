@@ -91,11 +91,16 @@ namespace Limitless
             }
             else
             {
+                // Enforce: never call glDelete* without a valid current context.
                 if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
                 {
                     OpenGLContext::ScopedCurrentContext scope(*glContext);
+                    glDeleteProgram(programToDelete);
                 }
-                glDeleteProgram(programToDelete);
+                else
+                {
+                    LT_CORE_WARN("OpenGLShader '{}' destroyed after renderer/context teardown; leaking GL program {}", m_Name, programToDelete);
+                }
             }
             m_RendererID = 0;
         }

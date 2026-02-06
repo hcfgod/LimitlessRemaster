@@ -100,8 +100,13 @@ namespace Limitless
                 if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
                 {
                     OpenGLContext::ScopedCurrentContext scope(*glContext);
+                    GLuint id = vaoToDelete;
+                    glDeleteVertexArrays(1, &id);
                 }
-                glDeleteVertexArrays(1, &m_RendererID);
+                else
+                {
+                    LT_CORE_WARN("OpenGLVertexArray destroyed after renderer/context teardown; leaking GL VAO {}", vaoToDelete);
+                }
             }
             m_RendererID = 0;
         }

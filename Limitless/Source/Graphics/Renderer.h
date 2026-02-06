@@ -63,6 +63,94 @@ namespace Limitless
         void EnableRenderThread(bool enable);
         bool IsRenderThreadEnabled() const { return m_RenderThreadEnabled; }
 
+        // Non-blocking resource submissions.
+        // These enqueue work on the render thread resource queue and return immediately.
+        // Use these for large uploads to avoid stalling the calling thread.
+        bool SubmitResource(std::unique_ptr<RenderResourceCommandQueue::Command> command);
+
+        template<typename Func>
+        std::future<decltype(std::declval<Func>()(static_cast<GraphicsContext*>(nullptr)))> SubmitResourceAsync(Func&& func)
+        {
+            using ResultT = decltype(func(static_cast<GraphicsContext*>(nullptr)));
+
+            if (IsOnRenderThread())
+            {
+                std::promise<ResultT> promise;
+                auto fut = promise.get_future();
+                try
+                {
+                    if constexpr (std::is_void_v<ResultT>)
+                    {
+                        func(m_GraphicsContext);
+                        promise.set_value();
+                    }
+                    else
+                    {
+                        promise.set_value(func(m_GraphicsContext));
+                    }
+                }
+                catch (...)
+                {
+                    promise.set_exception(std::current_exception());
+                }
+                return fut;
+            }
+
+            if (!m_RenderThreadRunning.load(std::memory_order_relaxed))
+            {
+                throw std::runtime_error("SubmitResourceAsync requires the render thread to be running");
+            }
+
+            struct SharedState
+            {
+                std::promise<ResultT> promise;
+                std::function<ResultT(GraphicsContext*)> function;
+            };
+
+            auto state = std::make_shared<SharedState>();
+            state->function = std::forward<Func>(func);
+            std::future<ResultT> future = state->promise.get_future();
+
+            class CommandImpl final : public RenderResourceCommandQueue::Command
+            {
+            public:
+                explicit CommandImpl(std::shared_ptr<SharedState> shared)
+                    : m_Shared(std::move(shared))
+                {
+                }
+
+                void Execute(GraphicsContext* context) override
+                {
+                    try
+                    {
+                        if constexpr (std::is_void_v<ResultT>)
+                        {
+                            m_Shared->function(context);
+                            m_Shared->promise.set_value();
+                        }
+                        else
+                        {
+                            m_Shared->promise.set_value(m_Shared->function(context));
+                        }
+                    }
+                    catch (...)
+                    {
+                        m_Shared->promise.set_exception(std::current_exception());
+                    }
+                }
+
+            private:
+                std::shared_ptr<SharedState> m_Shared;
+            };
+
+            if (!SubmitResource(std::make_unique<CommandImpl>(state)))
+            {
+                throw std::runtime_error("RenderResourceCommandQueue is full");
+            }
+
+            return future;
+        }
+
         // Resource command submission (GPU resource operations).
         // If called from the render thread, the callable executes inline.
         template<typename Func>

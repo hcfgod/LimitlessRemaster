@@ -19,6 +19,17 @@ GPU resource operations (shader compile/link, buffer/texture creation, VAO attri
 - **Execution**: drained by the render thread before processing frame render commands
 - **Why**: OpenGL context affinity + avoiding “context thrash” across threads
 
+#### Avoiding stalls (large uploads)
+
+`Renderer::SubmitResourceAndWait()` is correct but **blocking**: the calling thread will wait until the render thread executes the work.
+
+For large uploads (big textures, mesh streaming), prefer:
+
+- `Renderer::SubmitResource(...)` (fire-and-forget)
+- `Renderer::SubmitResourceAsync(...)` (returns a `std::future`, non-blocking)
+
+Then poll or wait at a safe point (loading screens, frame boundaries, etc.).
+
 ### Current limitations (important)
 
 - Some commands (especially state-setting, framebuffer, instanced drawing, and debug marker commands) are still **placeholders**: they log intent instead of issuing real graphics API calls.
