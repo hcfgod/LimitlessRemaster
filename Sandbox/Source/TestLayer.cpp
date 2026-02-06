@@ -77,10 +77,11 @@ namespace Limitless
         m_TriangleShader->SetInt("u_Texture", 0);
 
         // Tiny 2x2 checkerboard (RGBA8) so we don't depend on external asset paths yet.
-        const uint32_t checkerRGBA[4] =
+        // Stored explicitly as RGBA bytes to avoid endianness assumptions.
+        const uint8_t checkerRGBA[2 * 2 * 4] =
         {
-            0xFFFFFFFFu, 0xFF000000u,
-            0xFF000000u, 0xFFFFFFFFu
+            255, 255, 255, 255,   0,   0,   0, 255,
+              0,   0,   0, 255, 255, 255, 255, 255
         };
 
         TextureSpecification textureSpec{};

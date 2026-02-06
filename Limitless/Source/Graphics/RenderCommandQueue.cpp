@@ -689,10 +689,8 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        if (threadCount == 0)
-        {
-            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Thread count must be greater than 0");
-        }
+        // NOTE: This type is intentionally restricted today. See header comments in RenderCommandQueue.h.
+        (void)threadCount;
     }
 
     RenderCommandExecutor::~RenderCommandExecutor()
@@ -702,38 +700,15 @@ namespace Limitless
 
     void RenderCommandExecutor::Start()
     {
-        if (m_Running.load())
-            return;
-
-        m_Running.store(true);
-        m_Shutdown.store(false);
-
-        // Start worker threads
-        for (uint32_t i = 0; i < m_WorkerThreads.size(); ++i)
-        {
-            m_WorkerThreads[i] = std::thread(&RenderCommandExecutor::WorkerThreadFunction, this, i);
-        }
+        LT_THROW_ERROR(
+            ErrorCode::PlatformNotSupported,
+            "RenderCommandExecutor is not supported for the current OpenGL-first backend. "
+            "Use RenderCommandQueue and process commands on the GraphicsContext-owning thread.");
     }
 
     void RenderCommandExecutor::Stop()
     {
-        if (!m_Running.load())
-            return;
-
-        m_Shutdown.store(true);
-        m_Running.store(false);
-
-        // Notify all worker threads
-        m_WorkerCondition.notify_all();
-
-        // Wait for all threads to finish
-        for (auto& thread : m_WorkerThreads)
-        {
-            if (thread.joinable())
-            {
-                thread.join();
-            }
-        }
+        // No-op: executor threads are disabled (see Start()).
     }
 
     void RenderCommandExecutor::SubmitCommands(std::vector<std::unique_ptr<RenderCommand>> commands)
@@ -744,7 +719,10 @@ namespace Limitless
 
     void RenderCommandExecutor::WaitForCompletion()
     {
-        m_Queue.Flush();
+        LT_THROW_ERROR(
+            ErrorCode::PlatformNotSupported,
+            "RenderCommandExecutor::WaitForCompletion is not supported while multi-threaded GPU execution is disabled. "
+            "Use RenderCommandQueue::Flush / ProcessCommands on the GraphicsContext-owning thread.");
     }
 
     RenderQueueStats RenderCommandExecutor::GetStats() const
@@ -754,26 +732,14 @@ namespace Limitless
 
     void RenderCommandExecutor::WorkerThreadFunction(uint32_t threadId)
     {
-        m_ActiveWorkers.fetch_add(1);
-
-        while (m_Running.load() && !m_Shutdown.load())
-        {
-            ProcessCommandsInThread(threadId);
-            
-            // Wait for more work
-            std::unique_lock<std::mutex> lock(m_WorkerMutex);
-            m_WorkerCondition.wait(lock, [this]() {
-                return m_Shutdown.load() || !m_Running.load() || !m_Queue.IsEmpty();
-            });
-        }
-
-        m_ActiveWorkers.fetch_sub(1);
+        (void)threadId;
+        LT_THROW_ERROR(ErrorCode::PlatformNotSupported, "RenderCommandExecutor worker threads are disabled");
     }
 
     void RenderCommandExecutor::ProcessCommandsInThread(uint32_t threadId)
     {
-        // Process commands in batches
-        m_Queue.ProcessCommandsBatch(m_Context, 100);
+        (void)threadId;
+        LT_THROW_ERROR(ErrorCode::PlatformNotSupported, "RenderCommandExecutor worker threads are disabled");
     }
 
     // RenderCommandBatch implementation

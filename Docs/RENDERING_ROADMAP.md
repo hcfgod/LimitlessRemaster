@@ -18,14 +18,14 @@ Source of truth: `Limitless/Source/Graphics/OpenGL/OpenGLRenderCommand.cpp`
 | `SetViewportCommand` | Implemented | `glViewport` |
 | `SetScissorCommand` | Implemented | `glEnable/Disable(GL_SCISSOR_TEST)`, `glScissor` |
 | `CustomCommand` | Implemented | Calls user function; still requires a non-null context |
-| `BindShaderCommand` | Stubbed | Logs only |
-| `BindVertexArrayCommand` | Stubbed | Logs only |
-| `BindIndexBufferCommand` | Stubbed | Logs only |
-| `BindVertexBufferCommand` | Stubbed | Logs only |
-| `BindTextureCommand` | Stubbed | Logs only |
+| `BindShaderCommand` | Implemented | `Shader::Bind()` (OpenGL `glUseProgram`) |
+| `BindVertexArrayCommand` | Implemented | `VertexArray::Bind()` (OpenGL VAO bind) |
+| `BindIndexBufferCommand` | Implemented | `IndexBuffer::Bind()` |
+| `BindVertexBufferCommand` | Implemented | `VertexBuffer::Bind()` |
+| `BindTextureCommand` | Implemented | `Texture::Bind(slot)` (`glActiveTexture` + `glBindTexture`) |
 | `BindFramebufferCommand` | Stubbed | Logs only |
-| `DrawArraysCommand` | Stubbed | Logs only |
-| `DrawIndexedCommand` | Not implemented | TODO |
+| `DrawArraysCommand` | Implemented | `glDrawArrays` |
+| `DrawIndexedCommand` | Implemented | `glDrawElements` / `glDrawElementsBaseVertex` |
 | `DrawInstancedCommand` | Not implemented | TODO |
 | `DrawIndexedInstancedCommand` | Not implemented | TODO |
 | `SetBlendModeCommand` | Stubbed | Logs only |
@@ -46,7 +46,7 @@ Source of truth: `Limitless/Source/Graphics/OpenGL/OpenGLRenderCommand.cpp`
 - Viewport/scissor work.
 - RenderCommandQueue supports multi-thread submission, single-thread execution, bounded overflow behavior.
 
-### Milestone 1 — “Triangle on screen”
+### Milestone 1 — “Triangle on screen” (DONE)
 
 Goal: submit a command sequence and reliably draw a triangle.
 
@@ -65,9 +65,9 @@ Acceptance criteria:
 Goal: draw a quad with a texture and basic blending.
 
 Deliverables:
-- Implement `BindTextureCommand`
+- Implement `BindTextureCommand` (DONE)
 - Implement `SetBlendModeCommand` and `SetDepthTestCommand` (real GL state changes)
-- Implement `DrawIndexedCommand` + `glDrawElements`
+- Implement `DrawIndexedCommand` + `glDrawElements` (DONE)
 
 Acceptance criteria:
 - Textured quad renders with deterministic output (basic pixel test optional).

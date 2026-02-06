@@ -40,7 +40,7 @@ LimitlessRemaster/
 ```lua
 filter "system:windows"
     cppdialect "C++20"
-    staticruntime "On"
+    staticruntime "Off"
     systemversion "latest"
     
     buildoptions
@@ -63,7 +63,7 @@ filter "system:windows"
 ```lua
 filter "system:macosx"
     cppdialect "C++20"
-    staticruntime "On"
+    staticruntime "Off"
     
     buildoptions
     {
@@ -83,7 +83,7 @@ filter "system:macosx"
 ```lua
 filter "system:linux"
     cppdialect "C++20"
-    staticruntime "On"
+    staticruntime "Off"
     
     buildoptions
     {

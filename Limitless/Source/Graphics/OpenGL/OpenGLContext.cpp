@@ -11,6 +11,27 @@
 #endif
 
 namespace Limitless {
+    OpenGLContext::ScopedCurrentContext::ScopedCurrentContext(OpenGLContext& context)
+        : m_Context(context)
+        , m_Lock(context.m_ContextMutex)
+    {
+        // SDL3 returns true on success, false on failure.
+        if (!SDL_GL_MakeCurrent(m_Context.m_Window, m_Context.m_Context))
+        {
+            LT_CORE_CRITICAL("Could not make GL context current: {}", SDL_GetError());
+            throw std::runtime_error("Failed to make OpenGL context current");
+        }
+
+        m_Context.m_CurrentThread = std::this_thread::get_id();
+    }
+
+    OpenGLContext::ScopedCurrentContext::~ScopedCurrentContext()
+    {
+        // Best-effort clear. If this fails we still release the mutex.
+        (void)SDL_GL_MakeCurrent(m_Context.m_Window, nullptr);
+        m_Context.m_CurrentThread = std::thread::id{};
+    }
+
     OpenGLContext::OpenGLContext() : m_Window(nullptr), m_Context(nullptr) {
         // Window will be set during Init()
     }
@@ -56,7 +77,7 @@ namespace Limitless {
         
         LT_CORE_INFO("Making OpenGL context current");
         
-        // SDL_GL_MakeCurrent returns 0 on success, non-zero on failure
+        // SDL3 returns true on success, false on failure.
         if (!SDL_GL_MakeCurrent(m_Window, m_Context)) {
             LT_CORE_CRITICAL("Could not make GL context current: {}", SDL_GetError());
             throw std::runtime_error("Failed to make OpenGL context current");

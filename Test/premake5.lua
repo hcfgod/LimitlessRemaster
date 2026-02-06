@@ -3,7 +3,7 @@ project "Test"
     kind "ConsoleApp"
     language "C++"
     cppdialect "C++20"
-    staticruntime "on"
+    staticruntime "off"
 
     targetdir ("../Build/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
     objdir ("../Build/Intermediates/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
@@ -31,7 +31,7 @@ project "Test"
 
     filter "system:windows"
         cppdialect "C++20"
-        staticruntime "On"
+        staticruntime "Off"
         systemversion "latest"
 
         defines
@@ -69,7 +69,7 @@ project "Test"
 
     filter "system:macosx"
         cppdialect "C++20"
-        staticruntime "On"
+        staticruntime "Off"
 
         defines
         {
@@ -112,7 +112,7 @@ project "Test"
             
     filter "system:linux"
         cppdialect "C++20"
-        staticruntime "On"
+        staticruntime "Off"
 
         defines
         {

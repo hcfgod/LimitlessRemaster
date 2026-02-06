@@ -203,6 +203,14 @@ namespace Limitless
     };
 
     // Render command executor for multi-threaded rendering
+    //
+    // IMPORTANT (current status):
+    // Multi-threaded GPU execution is not supported for the OpenGL backend in this repository yet.
+    // OpenGL contexts have strict thread-affinity; executing commands from worker threads requires an
+    // explicit context ownership / sharing model that we have not implemented.
+    //
+    // For now, treat this type as **experimental**. Prefer `RenderCommandQueue` and call
+    // `ProcessCommands*()` on the thread that owns the `GraphicsContext`.
     class RenderCommandExecutor
     {
     public:

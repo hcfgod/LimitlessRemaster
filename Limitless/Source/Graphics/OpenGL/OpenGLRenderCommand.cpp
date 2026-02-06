@@ -269,8 +269,16 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // This should be implemented by the specific render API implementation
-        LT_CORE_DEBUG("SetBlendMode: enable={}, src={}, dst={}", m_Enable ? "true" : "false", static_cast<uint32_t>(m_SrcFactor), static_cast<uint32_t>(m_DstFactor));
+        if (m_Enable)
+        {
+            glEnable(GL_BLEND);
+            glBlendFunc(static_cast<GLenum>(m_SrcFactor), static_cast<GLenum>(m_DstFactor));
+            CheckOpenGLError("glBlendFunc");
+        }
+        else
+        {
+            glDisable(GL_BLEND);
+        }
     }
 
     // SetDepthTestCommand Execute implementation
@@ -281,8 +289,16 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // This should be implemented by the specific render API implementation
-        LT_CORE_DEBUG("SetDepthTest: enable={}, func={}", m_Enable ? "true" : "false", static_cast<uint32_t>(m_Func));
+        if (m_Enable)
+        {
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(static_cast<GLenum>(m_Func));
+            CheckOpenGLError("glDepthFunc");
+        }
+        else
+        {
+            glDisable(GL_DEPTH_TEST);
+        }
     }
 
     // SetCullFaceCommand Execute implementation
@@ -293,8 +309,16 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // This should be implemented by the specific render API implementation
-        LT_CORE_DEBUG("SetCullFace: enable={}, face={}", m_Enable ? "true" : "false", static_cast<uint32_t>(m_Face));
+        if (m_Enable)
+        {
+            glEnable(GL_CULL_FACE);
+            glCullFace(static_cast<GLenum>(m_Face));
+            CheckOpenGLError("glCullFace");
+        }
+        else
+        {
+            glDisable(GL_CULL_FACE);
+        }
     }
 
     // SetPolygonModeCommand Execute implementation
@@ -305,8 +329,8 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // This should be implemented by the specific render API implementation
-        LT_CORE_DEBUG("SetPolygonMode: face={}, mode={}", static_cast<uint32_t>(m_Face), static_cast<uint32_t>(m_Mode));
+        glPolygonMode(static_cast<GLenum>(m_Face), static_cast<GLenum>(m_Mode));
+        CheckOpenGLError("glPolygonMode");
     }
 
     // SetLineWidthCommand Execute implementation
@@ -317,8 +341,8 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // This should be implemented by the specific render API implementation
-        LT_CORE_DEBUG("SetLineWidth: {}", m_Width);
+        glLineWidth(m_Width);
+        CheckOpenGLError("glLineWidth");
     }
 
     // SetPointSizeCommand Execute implementation
@@ -329,8 +353,8 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // This should be implemented by the specific render API implementation
-        LT_CORE_DEBUG("SetPointSize: {}", m_Size);
+        glPointSize(m_Size);
+        CheckOpenGLError("glPointSize");
     }
 
     // PushDebugGroupCommand Execute implementation

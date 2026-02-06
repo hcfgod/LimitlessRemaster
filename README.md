@@ -46,7 +46,7 @@ LimitlessRemaster/
 - **Cross-Platform** - Windows, macOS, Linux support with native optimizations
 - **Comprehensive Logging** - Multi-level logging with file rotation and conditional logging
 - **Error Handling** - Structured error management with custom exceptions and recovery
-- **Performance Monitoring** - Real-time performance tracking, frame timing, memory monitoring, CPU/GPU metrics, and profiling
+- **Performance Monitoring** - Real-time performance tracking, frame timing, memory monitoring, and CPU metrics. (GPU metrics are scaffolded but currently unavailable on Windows without additional vendor libraries like NVML/ADL.)
 
 ### **Advanced Systems**
 - **Configuration Management** - Type-safe configuration with validation, hot reloading, and environment/command-line support

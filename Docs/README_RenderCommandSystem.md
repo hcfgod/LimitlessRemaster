@@ -1,6 +1,6 @@
 # Render Command System
 
-The Render Command System is a **command submission + execution framework** intended to make rendering work explicit and schedulable. Today it is best understood as **infrastructure/scaffolding**: the queueing and prioritization exist, but many individual commands are still **API-stubbed** (OpenGL calls are only implemented for a small subset).
+The Render Command System is a **command submission + execution framework** intended to make rendering work explicit and schedulable. Today it is best understood as **infrastructure/scaffolding**: the queueing and prioritization exist, and the OpenGL backend now implements a small but useful subset of commands (enough to bind shaders/VAOs/buffers/textures and draw basic geometry). Many state-setting and advanced draw commands are still stubbed.
 
 ## Features
 
@@ -13,8 +13,8 @@ The Render Command System is a **command submission + execution framework** inte
 
 ### Current limitations (important)
 
-- Many commands (binds/draws/state) are currently **placeholders**: they log intent instead of issuing real graphics API calls.
-- The “multi-threaded executor” type exists, but **true multi-threaded GPU command execution is not implemented** and is not safe for OpenGL without explicit context ownership rules.
+- Some commands (especially state-setting, framebuffer, instanced drawing, and debug marker commands) are still **placeholders**: they log intent instead of issuing real graphics API calls.
+- The “multi-threaded executor” type exists but is currently **disabled** for the OpenGL-first backend. True multi-threaded GPU execution requires an explicit context ownership/sharing model that is not implemented yet.
 
 ## Guarantees (Current Behavior)
 
@@ -23,7 +23,7 @@ This table describes what the system **guarantees today** (not future intent).
 | Area | Guarantee | Notes |
 |------|-----------|-------|
 | Submission threading | `SubmitCommand*()` is safe for **multiple producer threads** | Uses a bounded lock-free MPMC ring + an atomic size gate for `maxQueueSize`. |
-| Execution threading | `ProcessCommands*()` must run on **one thread** that owns the `GraphicsContext` | Required for OpenGL context affinity. |
+| Execution threading | `ProcessCommands*()` may be called from any thread, but **OpenGL execution is serialized** | The OpenGL context is made current inside a mutex-protected scope (`OpenGLContext::ScopedCurrentContext`). This is correct but not parallel. Prefer a dedicated render thread for performance. |
 | Ownership | Commands are transferred via `std::unique_ptr` into the queue | If submission fails, the command is destroyed on the submitting thread. |
 | Queue bounds | `maxQueueSize` is enforced | Underlying fixed capacity is `RenderCommandQueue::kQueueCapacity` (currently 16384). `maxQueueSize` must be <= that. |
 | Error behavior | Command execution catches `Limitless::Error` and `std::exception` | Errors are logged and optionally forwarded via the debug callback. |
@@ -37,15 +37,20 @@ The OpenGL backend currently implements only a subset of commands “for real”
   - `ClearCommand` (`glClearColor`, `glClear`)
   - `SetViewportCommand` (`glViewport`)
   - `SetScissorCommand` (`glEnable/glDisable(GL_SCISSOR_TEST)`, `glScissor`)
+  - `BindShaderCommand` (`glUseProgram` via `Shader::Bind()`)
+  - `BindVertexArrayCommand` (`glBindVertexArray` via `VertexArray::Bind()`)
+  - `BindVertexBufferCommand` (`glBindBuffer(GL_ARRAY_BUFFER)` via `VertexBuffer::Bind()`)
+  - `BindIndexBufferCommand` (`glBindBuffer(GL_ELEMENT_ARRAY_BUFFER)` via `IndexBuffer::Bind()`)
+  - `BindTextureCommand` (`glActiveTexture`, `glBindTexture` via `Texture::Bind(slot)`)
+  - `DrawArraysCommand` (`glDrawArrays`)
+  - `DrawIndexedCommand` (`glDrawElements` / `glDrawElementsBaseVertex`)
   - `CustomCommand` (invokes user function; still requires non-null context)
 - **Stubbed (logs intent, no actual GL state change yet)**:
-  - `BindShaderCommand`, `BindVertexArrayCommand`, `BindIndexBufferCommand`, `BindVertexBufferCommand`
-  - `BindTextureCommand`, `BindFramebufferCommand`
-  - `DrawArraysCommand` (currently logs parameters)
+  - `BindFramebufferCommand`
   - `SetBlendModeCommand`, `SetDepthTestCommand`, `SetCullFaceCommand`, `SetPolygonModeCommand`, `SetLineWidthCommand`, `SetPointSizeCommand`
   - `PushDebugGroupCommand`, `PopDebugGroupCommand`, `InsertDebugMarkerCommand`
 - **Not implemented yet (TODO / no behavior)**:
-  - `DrawIndexedCommand`, `DrawInstancedCommand`, `DrawIndexedInstancedCommand`
+  - `DrawInstancedCommand`, `DrawIndexedInstancedCommand`
 
 For a milestone-by-milestone plan, see `Docs/RENDERING_ROADMAP.md`.
 
@@ -121,7 +126,7 @@ if (renderQueue->SubmitCommand(std::move(clearCommand)))
 // Submit multiple commands at once
 std::vector<std::unique_ptr<RenderCommand>> commands;
 commands.push_back(std::make_unique<SetViewportCommand>(0, 0, 1920, 1080));
-commands.push_back(std::make_unique<DrawArraysCommand>(GL_TRIANGLES, 0, 3));
+commands.push_back(std::make_unique<DrawArraysCommand>(Limitless::DrawMode::Triangles, 0, 3));
 
 renderQueue->SubmitCommands(std::move(commands));
 ```

@@ -67,22 +67,22 @@ namespace Limitless
 			const float deltaTime = Time::GetDeltaTimeSeconds();
 			const float fixedDeltaTime = Time::GetFixedDeltaTimeSeconds();
 
-			// FixedUpdate-style steps (deterministic simulation).
-			while (Time::TryConsumeFixedStep())
+			// Apply any pending hot reload diffs on the main thread
+            Limitless::HotReloadManager::GetInstance().Update();
+
+            m_Window->OnUpdate();
+
+            // Update layers
+            // FixedUpdate-style steps (deterministic simulation).
+            while (Time::TryConsumeFixedStep()) 
 			{
-				m_LayerStack.OnFixedUpdate(fixedDeltaTime);
-			}
+                m_LayerStack.OnFixedUpdate(fixedDeltaTime);
+            }
+
+            m_LayerStack.OnUpdate(deltaTime);
 
 			// Begin frame
 			Renderer::GetInstance().BeginFrame();
-
-			// Apply any pending hot reload diffs on the main thread
-			Limitless::HotReloadManager::GetInstance().Update();
-
-			m_Window->OnUpdate();
-			
-			// Update layers
-			m_LayerStack.OnUpdate(deltaTime);
 			
 			// Process events (this will also dispatch to layers)
 			GetEventSystem().ProcessEvents();

@@ -1,5 +1,6 @@
 #include "Renderer.h"
 #include "Core/Debug/Log.h"
+#include "Graphics/OpenGL/OpenGLContext.h"
 
 namespace Limitless
 {
@@ -101,6 +102,14 @@ namespace Limitless
             return;
         }
 
+        if (auto* glContext = dynamic_cast<OpenGLContext*>(m_GraphicsContext))
+        {
+            OpenGLContext::ScopedCurrentContext scope(*glContext);
+            m_RenderQueue->ExecuteImmediate(m_GraphicsContext, std::move(command));
+            return;
+        }
+
+        m_GraphicsContext->MakeCurrent();
         m_RenderQueue->ExecuteImmediate(m_GraphicsContext, std::move(command));
     }
 
@@ -112,6 +121,14 @@ namespace Limitless
             return;
         }
 
+        if (auto* glContext = dynamic_cast<OpenGLContext*>(m_GraphicsContext))
+        {
+            OpenGLContext::ScopedCurrentContext scope(*glContext);
+            m_RenderQueue->ProcessCommands(m_GraphicsContext);
+            return;
+        }
+
+        m_GraphicsContext->MakeCurrent();
         m_RenderQueue->ProcessCommands(m_GraphicsContext);
     }
 
@@ -146,6 +163,14 @@ namespace Limitless
             return;
         }
 
+        if (auto* glContext = dynamic_cast<OpenGLContext*>(m_GraphicsContext))
+        {
+            OpenGLContext::ScopedCurrentContext scope(*glContext);
+            m_GraphicsContext->SwapBuffers();
+            return;
+        }
+
+        m_GraphicsContext->MakeCurrent();
         m_GraphicsContext->SwapBuffers();
     }
 } 

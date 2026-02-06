@@ -4,6 +4,53 @@
 
 namespace Limitless
 {
+    static bool IsIntegerType(ShaderDataType type)
+    {
+        switch (type)
+        {
+            case ShaderDataType::Int:
+            case ShaderDataType::Int2:
+            case ShaderDataType::Int3:
+            case ShaderDataType::Int4:
+            case ShaderDataType::Bool:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    static bool IsMatrixType(ShaderDataType type)
+    {
+        switch (type)
+        {
+            case ShaderDataType::Mat3:
+            case ShaderDataType::Mat4:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    static uint32_t MatrixRowCount(ShaderDataType type)
+    {
+        switch (type)
+        {
+            case ShaderDataType::Mat3: return 3;
+            case ShaderDataType::Mat4: return 4;
+            default:                   return 0;
+        }
+    }
+
+    static uint32_t MatrixColumnCount(ShaderDataType type)
+    {
+        switch (type)
+        {
+            case ShaderDataType::Mat3: return 3;
+            case ShaderDataType::Mat4: return 4;
+            default:                   return 0;
+        }
+    }
+
     static GLenum ShaderDataTypeToOpenGLBaseType(ShaderDataType type)
     {
         switch (type)
@@ -21,7 +68,8 @@ namespace Limitless
             case ShaderDataType::Int4:
                 return GL_INT;
             case ShaderDataType::Bool:
-                return GL_BOOL;
+                // OpenGL vertex attributes do not have a true boolean attribute format; treat as uint8.
+                return GL_UNSIGNED_BYTE;
             default:
                 return GL_FLOAT;
         }
@@ -62,14 +110,53 @@ namespace Limitless
 
         for (const auto& element : layout)
         {
+            const GLenum baseType = ShaderDataTypeToOpenGLBaseType(element.Type);
+
+            if (IsMatrixType(element.Type))
+            {
+                // OpenGL matrix attributes are specified as N separate vecN attributes.
+                const uint32_t rows = MatrixRowCount(element.Type);
+                const uint32_t cols = MatrixColumnCount(element.Type);
+                LT_VERIFY(rows > 0 && cols > 0, "Invalid matrix shader data type");
+
+                for (uint32_t col = 0; col < cols; ++col)
+                {
+                    glEnableVertexAttribArray(m_VertexAttribIndex);
+                    glVertexAttribPointer(
+                        m_VertexAttribIndex,
+                        static_cast<GLint>(rows),
+                        GL_FLOAT,
+                        element.Normalized ? GL_TRUE : GL_FALSE,
+                        static_cast<GLsizei>(layout.GetStride()),
+                        reinterpret_cast<const void*>(static_cast<uintptr_t>(element.Offset + sizeof(float) * rows * col)));
+                    m_VertexAttribIndex++;
+                }
+
+                continue;
+            }
+
             glEnableVertexAttribArray(m_VertexAttribIndex);
-            glVertexAttribPointer(
-                m_VertexAttribIndex,
-                static_cast<GLint>(element.GetComponentCount()),
-                ShaderDataTypeToOpenGLBaseType(element.Type),
-                element.Normalized ? GL_TRUE : GL_FALSE,
-                static_cast<GLsizei>(layout.GetStride()),
-                reinterpret_cast<const void*>(static_cast<uintptr_t>(element.Offset)));
+
+            if (IsIntegerType(element.Type))
+            {
+                glVertexAttribIPointer(
+                    m_VertexAttribIndex,
+                    static_cast<GLint>(element.GetComponentCount()),
+                    baseType,
+                    static_cast<GLsizei>(layout.GetStride()),
+                    reinterpret_cast<const void*>(static_cast<uintptr_t>(element.Offset)));
+            }
+            else
+            {
+                glVertexAttribPointer(
+                    m_VertexAttribIndex,
+                    static_cast<GLint>(element.GetComponentCount()),
+                    baseType,
+                    element.Normalized ? GL_TRUE : GL_FALSE,
+                    static_cast<GLsizei>(layout.GetStride()),
+                    reinterpret_cast<const void*>(static_cast<uintptr_t>(element.Offset)));
+            }
+
             m_VertexAttribIndex++;
         }
 
