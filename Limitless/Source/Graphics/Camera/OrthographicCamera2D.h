@@ -11,11 +11,16 @@ namespace Limitless
     public:
         struct Settings
         {
-            float Zoom = 1.0f;      // 1.0 = default size
-            float NearPlane = -1.0f;
-            float FarPlane = 1.0f;
+            float Zoom;      // 1.0 = default size
+            float NearPlane;
+            float FarPlane;
 
-            Settings() = default;
+            constexpr Settings()
+                : Zoom(1.0f)
+                , NearPlane(-1.0f)
+                , FarPlane(1.0f)
+            {
+            }
         };
 
         // NOTE: Use `Settings{}` explicitly for default args to satisfy Clang/GCC on macOS/Linux.

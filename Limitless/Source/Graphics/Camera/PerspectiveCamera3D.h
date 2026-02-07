@@ -11,11 +11,16 @@ namespace Limitless
     public:
         struct Settings
         {
-            float FieldOfViewYDegrees = 60.0f;
-            float NearPlane = 0.1f;
-            float FarPlane = 1000.0f;
+            float FieldOfViewYDegrees;
+            float NearPlane;
+            float FarPlane;
 
-            Settings() = default;
+            constexpr Settings()
+                : FieldOfViewYDegrees(60.0f)
+                , NearPlane(0.1f)
+                , FarPlane(1000.0f)
+            {
+            }
         };
 
         // NOTE: Use `Settings{}` explicitly for default args to satisfy Clang/GCC on macOS/Linux.
