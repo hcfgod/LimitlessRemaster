@@ -1,5 +1,6 @@
 #include "Assets/AssetDatabase.h"
 
+#include "Assets/AssetBundle.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetUtils.h"
 
@@ -20,6 +21,17 @@ namespace Limitless::Assets
         std::lock_guard<std::mutex> lock(m_Mutex);
         if (m_Loaded)
         {
+            return;
+        }
+
+        // Bundle-only runtime:
+        // The persistent database is a tooling/import-time concept. In shipping/bundle scenarios the
+        // project root (and thus Build/AssetDatabase.json) may not exist, and we should not warn.
+        // Dependencies are expected to be satisfied via the bundle manifest.
+        const auto& bundle = AssetBundle::GetInstance();
+        if (bundle.IsEnabled() && bundle.IsLoaded())
+        {
+            m_Loaded = true;
             return;
         }
 

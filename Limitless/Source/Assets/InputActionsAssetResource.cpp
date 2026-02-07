@@ -1,5 +1,6 @@
 #include "Assets/InputActionsAssetResource.h"
 
+#include "Assets/AssetBundle.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetLoadCoordinator.h"
 #include "Assets/AssetManager.h"
@@ -25,25 +26,50 @@ namespace Limitless::Assets
                 return;
             }
 
-            const auto resolvedResult = ResolveAssetKeyToPath(key);
-            if (resolvedResult.IsFailure())
+            bool fromBundle = false;
+            std::string resolvedPath;
+            std::string guid;
+            std::string jsonText;
+
+            auto& bundle = AssetBundle::GetInstance();
+            if (bundle.IsEnabled() && bundle.IsLoaded())
             {
-                LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: failed to resolve key '{}': {}", key, resolvedResult.GetError().GetErrorMessage());
-                promise.set_value(nullptr);
-                return;
+                const auto entry = bundle.FindEntryByKey(key);
+                if (entry.has_value())
+                {
+                    const auto textResult = bundle.ReadAllTextByKey(key);
+                    if (textResult.IsSuccess())
+                    {
+                        fromBundle = true;
+                        guid = entry->Guid;
+                        resolvedPath = "<AssetBundle>";
+                        jsonText = textResult.GetValue();
+                    }
+                }
             }
 
-            const std::string resolvedPath = resolvedResult.GetValue().string();
-
-            const auto guidResult = LoadOrCreateGuid(resolvedPath, {{"key", key}, {"type", "InputActions"}});
-            if (guidResult.IsFailure())
+            if (!fromBundle)
             {
-                LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: meta GUID failed for '{}': {}", resolvedPath, guidResult.GetError().GetErrorMessage());
-                promise.set_value(nullptr);
-                return;
-            }
+                const auto resolvedResult = ResolveAssetKeyToPath(key);
+                if (resolvedResult.IsFailure())
+                {
+                    LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: failed to resolve key '{}': {}", key, resolvedResult.GetError().GetErrorMessage());
+                    promise.set_value(nullptr);
+                    return;
+                }
 
-            const std::string guid = guidResult.GetValue();
+                resolvedPath = resolvedResult.GetValue().string();
+
+                const auto guidResult = LoadOrCreateGuid(resolvedPath, {{"key", key}, {"type", "InputActions"}});
+                if (guidResult.IsFailure())
+                {
+                    LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: meta GUID failed for '{}': {}", resolvedPath, guidResult.GetError().GetErrorMessage());
+                    promise.set_value(nullptr);
+                    return;
+                }
+
+                guid = guidResult.GetValue();
+            }
 
             auto asset = AssetManager::GetOrLoad<InputActionsAssetResource>(key, [&]() -> Ptr {
                 // IMPORTANT:
@@ -51,10 +77,12 @@ namespace Limitless::Assets
                 // This allows InputSystem and other holders of shared_ptr<InputActionAsset> to see updates
                 // without pointer swaps.
                 auto stable = std::make_shared<Limitless::InputActionAsset>();
-                const auto loaded = Limitless::InputActionAssetSerializer::LoadInto(*stable, resolvedPath);
+                const auto loaded = fromBundle
+                    ? Limitless::InputActionAssetSerializer::LoadIntoFromString(*stable, jsonText, key)
+                    : Limitless::InputActionAssetSerializer::LoadInto(*stable, resolvedPath);
                 if (loaded.IsFailure())
                 {
-                    LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: load failed for '{}': {}", resolvedPath, loaded.GetError().GetErrorMessage());
+                    LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: load failed for '{}': {}", fromBundle ? key : resolvedPath, loaded.GetError().GetErrorMessage());
                     return nullptr;
                 }
 
@@ -79,19 +107,45 @@ namespace Limitless::Assets
 
     bool InputActionsAssetResource::Reload()
     {
-        const auto resolvedResult = ResolveAssetKeyToPath(GetKey());
-        if (resolvedResult.IsFailure())
+        const std::string key = GetKey();
+
+        bool fromBundle = false;
+        std::string jsonText;
+
+        auto& bundle = AssetBundle::GetInstance();
+        if (bundle.IsEnabled() && bundle.IsLoaded())
         {
-            return false;
+            const auto entry = bundle.FindEntryByKey(key);
+            if (entry.has_value())
+            {
+                const auto textResult = bundle.ReadAllTextByKey(key);
+                if (textResult.IsSuccess())
+                {
+                    fromBundle = true;
+                    m_ResolvedPath = "<AssetBundle>";
+                    jsonText = textResult.GetValue();
+                }
+            }
         }
-        m_ResolvedPath = resolvedResult.GetValue().string();
+
+        if (!fromBundle)
+        {
+            const auto resolvedResult = ResolveAssetKeyToPath(key);
+            if (resolvedResult.IsFailure())
+            {
+                return false;
+            }
+            m_ResolvedPath = resolvedResult.GetValue().string();
+        }
 
         if (!m_Value)
         {
             m_Value = std::make_shared<Limitless::InputActionAsset>();
         }
 
-        const auto loaded = Limitless::InputActionAssetSerializer::LoadInto(*m_Value, m_ResolvedPath);
+        const auto loaded = fromBundle
+            ? Limitless::InputActionAssetSerializer::LoadIntoFromString(*m_Value, jsonText, key)
+            : Limitless::InputActionAssetSerializer::LoadInto(*m_Value, m_ResolvedPath);
         if (loaded.IsFailure())
         {
             LT_CORE_ERROR("InputActionsAssetResource::Reload: load failed for '{}': {}", m_ResolvedPath, loaded.GetError().GetErrorMessage());

@@ -1,5 +1,6 @@
 #include "Assets/ShaderAsset.h"
 
+#include "Assets/AssetBundle.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetUtils.h"
 #include "Assets/AssetManager.h"
@@ -114,31 +115,53 @@ namespace Limitless::Assets
                     return;
                 }
 
-                const auto resolvedResult = ResolveAssetKeyToPath(key);
-                if (resolvedResult.IsFailure())
-                {
-                    LT_CORE_ERROR("ShaderAsset::LoadAsync: failed to resolve key '{}': {}",
-                                  key, resolvedResult.GetError().GetErrorMessage());
-                    promise.set_value(nullptr);
-                    return;
-                }
-
-                const std::string resolvedPath = resolvedResult.GetValue().string();
-
-                // Ensure GUID `.meta` next to real file.
-                const auto guidResult = LoadOrCreateGuid(resolvedPath, {{"key", key}, {"type", "Shader"}});
-                if (guidResult.IsFailure())
-                {
-                    LT_CORE_ERROR("ShaderAsset::LoadAsync: meta GUID failed for '{}': {}",
-                                  resolvedPath, guidResult.GetError().GetErrorMessage());
-                    promise.set_value(nullptr);
-                    return;
-                }
-                const std::string guid = guidResult.GetValue();
-
-                // Read file on this worker (simple).
+                bool fromBundle = false;
+                std::string resolvedPath;
+                std::string guid;
                 std::string fileText;
+
+                auto& bundle = AssetBundle::GetInstance();
+                if (bundle.IsEnabled() && bundle.IsLoaded())
                 {
+                    const auto entry = bundle.FindEntryByKey(key);
+                    if (entry.has_value())
+                    {
+                        const auto textResult = bundle.ReadAllTextByKey(key);
+                        if (textResult.IsSuccess())
+                        {
+                            fromBundle = true;
+                            guid = entry->Guid;
+                            resolvedPath = "<AssetBundle>";
+                            fileText = textResult.GetValue();
+                        }
+                    }
+                }
+
+                if (!fromBundle)
+                {
+                    const auto resolvedResult = ResolveAssetKeyToPath(key);
+                    if (resolvedResult.IsFailure())
+                    {
+                        LT_CORE_ERROR("ShaderAsset::LoadAsync: failed to resolve key '{}': {}",
+                                      key, resolvedResult.GetError().GetErrorMessage());
+                        promise.set_value(nullptr);
+                        return;
+                    }
+
+                    resolvedPath = resolvedResult.GetValue().string();
+
+                    // Ensure GUID `.meta` next to real file.
+                    const auto guidResult = LoadOrCreateGuid(resolvedPath, {{"key", key}, {"type", "Shader"}});
+                    if (guidResult.IsFailure())
+                    {
+                        LT_CORE_ERROR("ShaderAsset::LoadAsync: meta GUID failed for '{}': {}",
+                                      resolvedPath, guidResult.GetError().GetErrorMessage());
+                        promise.set_value(nullptr);
+                        return;
+                    }
+                    guid = guidResult.GetValue();
+
+                    // Read file on this worker.
                     std::ifstream in(resolvedPath, std::ios::in | std::ios::binary);
                     if (!in.is_open())
                     {
@@ -269,17 +292,37 @@ namespace Limitless::Assets
         // typically return this same instance without rebuilding GPU resources.
         const std::string key = GetKey();
 
-        const auto resolvedResult = ResolveAssetKeyToPath(key);
-        if (resolvedResult.IsFailure())
-        {
-            LT_CORE_ERROR("ShaderAsset::Reload: failed to resolve key '{}': {}", key, resolvedResult.GetError().GetErrorMessage());
-            return false;
-        }
-        const std::string resolvedPath = resolvedResult.GetValue().string();
-
-        // Read file (synchronous on the calling thread - ok for hot reload).
+        bool fromBundle = false;
+        std::string resolvedPath;
         std::string fileText;
+
+        auto& bundle = AssetBundle::GetInstance();
+        if (bundle.IsEnabled() && bundle.IsLoaded())
         {
+            const auto entry = bundle.FindEntryByKey(key);
+            if (entry.has_value())
+            {
+                const auto textResult = bundle.ReadAllTextByKey(key);
+                if (textResult.IsSuccess())
+                {
+                    fromBundle = true;
+                    resolvedPath = "<AssetBundle>";
+                    fileText = textResult.GetValue();
+                }
+            }
+        }
+
+        if (!fromBundle)
+        {
+            const auto resolvedResult = ResolveAssetKeyToPath(key);
+            if (resolvedResult.IsFailure())
+            {
+                LT_CORE_ERROR("ShaderAsset::Reload: failed to resolve key '{}': {}", key, resolvedResult.GetError().GetErrorMessage());
+                return false;
+            }
+            resolvedPath = resolvedResult.GetValue().string();
+
+            // Read file (synchronous on the calling thread - ok for hot reload).
             std::ifstream in(resolvedPath, std::ios::in | std::ios::binary);
             if (!in.is_open())
             {

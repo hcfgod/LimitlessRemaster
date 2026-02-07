@@ -19,8 +19,13 @@ namespace Limitless::Assets
     // working directory until we find a directory containing an `Assets/` folder.
     // -----------------------------------------------------------------------------
 
+    // Optional explicit override:
+    // - Set this at startup (from config/env/app) to avoid heuristics.
+    // - `rootDirectory` should be the directory that contains `Assets/`.
+    void SetAssetRootDirectory(const std::filesystem::path& rootDirectory);
+
     // Returns the inferred project root directory that contains the `Assets/` folder.
-    // This is discovered by walking up from std::filesystem::current_path().
+    // This is discovered by walking up from the working directory unless overridden.
     [[nodiscard]] Result<std::filesystem::path> FindProjectRootFromWorkingDirectory();
 
     // Resolve an asset key to an absolute filesystem path.

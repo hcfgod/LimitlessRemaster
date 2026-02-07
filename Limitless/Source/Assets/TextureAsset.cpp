@@ -1,4 +1,5 @@
 #include "Assets/TextureAsset.h"
+#include "Assets/AssetBundle.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetLoadCoordinator.h"
 
@@ -13,6 +14,7 @@
 #include <fstream>
 #include <cctype>
 #include <future>
+#include <sstream>
 
 namespace Limitless::Assets
 {
@@ -39,6 +41,45 @@ namespace Limitless::Assets
             if (data) stbi_image_free(data);
             const char* reason = stbi_failure_reason();
             std::string message = "Failed to decode image: " + path;
+            if (reason && reason[0] != '\0')
+            {
+                message += " (";
+                message += reason;
+                message += ")";
+            }
+            return Result<DecodedImageRGBA8>(ErrorCode::ResourceNotFound, message);
+        }
+
+        DecodedImageRGBA8 img;
+        img.Width = static_cast<uint32_t>(w);
+        img.Height = static_cast<uint32_t>(h);
+        img.Pixels.resize(static_cast<size_t>(img.Width) * static_cast<size_t>(img.Height) * 4u);
+        std::memcpy(img.Pixels.data(), data, img.Pixels.size());
+
+        stbi_image_free(data);
+        return img;
+    }
+
+    static Result<DecodedImageRGBA8> DecodeToRGBA8FromMemory(const uint8_t* bytes, size_t byteCount, const std::string& debugName, bool flipVertically)
+    {
+        if (!bytes || byteCount == 0)
+        {
+            return Result<DecodedImageRGBA8>(ErrorCode::InvalidArgument, "DecodeToRGBA8FromMemory: empty input: " + debugName);
+        }
+
+        // stb_image uses global state for vertical flip, so we serialize decode calls.
+        static std::mutex s_StbMutex;
+        std::lock_guard<std::mutex> lock(s_StbMutex);
+
+        stbi_set_flip_vertically_on_load(flipVertically ? 1 : 0);
+
+        int w = 0, h = 0, channels = 0;
+        stbi_uc* data = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(bytes), static_cast<int>(byteCount), &w, &h, &channels, 4);
+        if (!data || w <= 0 || h <= 0)
+        {
+            if (data) stbi_image_free(data);
+            const char* reason = stbi_failure_reason();
+            std::string message = "Failed to decode image from AssetBundle: " + debugName;
             if (reason && reason[0] != '\0')
             {
                 message += " (";
@@ -202,6 +243,73 @@ namespace Limitless::Assets
         return img;
     }
 
+    static Result<DecodedImageRGBA8> TryDecodePpmP3ToRGBA8FromMemory(const uint8_t* bytes, size_t byteCount, const std::string& debugName)
+    {
+        if (!bytes || byteCount == 0)
+        {
+            return Result<DecodedImageRGBA8>(ErrorCode::InvalidArgument, "PPM parse failed (empty input): " + debugName);
+        }
+
+        std::string text(reinterpret_cast<const char*>(bytes), byteCount);
+        std::istringstream in(text);
+
+        PpmTokenReader reader(in);
+
+        std::string token;
+        if (!reader.ReadToken(token))
+        {
+            return Result<DecodedImageRGBA8>(ErrorCode::FileAccessDenied, "PPM parse failed (empty stream): " + debugName);
+        }
+        if (token != "P3")
+        {
+            return Result<DecodedImageRGBA8>(ErrorCode::InvalidArgument, "PPM is not ASCII P3: " + debugName);
+        }
+
+        if (!reader.ReadToken(token)) return Result<DecodedImageRGBA8>(ErrorCode::FileAccessDenied, "PPM parse failed (missing width): " + debugName);
+        const int width = std::stoi(token);
+        if (!reader.ReadToken(token)) return Result<DecodedImageRGBA8>(ErrorCode::FileAccessDenied, "PPM parse failed (missing height): " + debugName);
+        const int height = std::stoi(token);
+        if (!reader.ReadToken(token)) return Result<DecodedImageRGBA8>(ErrorCode::FileAccessDenied, "PPM parse failed (missing max value): " + debugName);
+        const int maxValue = std::stoi(token);
+
+        if (width <= 0 || height <= 0) return Result<DecodedImageRGBA8>(ErrorCode::InvalidArgument, "PPM invalid dimensions: " + debugName);
+        if (maxValue <= 0 || maxValue > 255) return Result<DecodedImageRGBA8>(ErrorCode::InvalidArgument, "PPM maxValue must be 1..255: " + debugName);
+
+        DecodedImageRGBA8 img;
+        img.Width = static_cast<uint32_t>(width);
+        img.Height = static_cast<uint32_t>(height);
+        img.Pixels.resize(static_cast<size_t>(img.Width) * static_cast<size_t>(img.Height) * 4u);
+
+        const auto scale = [maxValue](int v) -> uint8_t {
+            if (v < 0) v = 0;
+            if (v > maxValue) v = maxValue;
+            const float f = static_cast<float>(v) / static_cast<float>(maxValue);
+            const int out = static_cast<int>(f * 255.0f + 0.5f);
+            return static_cast<uint8_t>(out < 0 ? 0 : (out > 255 ? 255 : out));
+        };
+
+        for (uint32_t i = 0; i < img.Width * img.Height; ++i)
+        {
+            std::string rTok, gTok, bTok;
+            if (!reader.ReadToken(rTok) || !reader.ReadToken(gTok) || !reader.ReadToken(bTok))
+            {
+                return Result<DecodedImageRGBA8>(ErrorCode::FileAccessDenied, "PPM parse failed (not enough pixel data): " + debugName);
+            }
+
+            const int r = std::stoi(rTok);
+            const int g = std::stoi(gTok);
+            const int b = std::stoi(bTok);
+
+            const size_t base = static_cast<size_t>(i) * 4u;
+            img.Pixels[base + 0] = scale(r);
+            img.Pixels[base + 1] = scale(g);
+            img.Pixels[base + 2] = scale(b);
+            img.Pixels[base + 3] = 255;
+        }
+
+        return img;
+    }
+
     Async::Task<TextureAsset::Ptr> TextureAsset::LoadAsync(const std::string& assetPath, const TextureSpecification& specification)
     {
         return LoadAsync(assetPath, specification, AssetLoadCoordinator::GetGeneration());
@@ -224,36 +332,67 @@ namespace Limitless::Assets
                     return;
                 }
 
-                const auto resolvedPathResult = ResolveAssetKeyToPath(assetPath);
-                if (resolvedPathResult.IsFailure())
+                // Bundle-first loading: allows shipped builds without `Assets/` source files.
+                bool fromBundle = false;
+                std::vector<uint8_t> bundleBytes;
+                std::string guid;
+                std::string resolvedPath;
+                std::string debugName = assetPath;
+
+                auto& bundle = AssetBundle::GetInstance();
+                if (bundle.IsEnabled() && bundle.IsLoaded())
                 {
-                    LT_CORE_ERROR("TextureAsset::LoadAsync: failed to resolve key '{}': {}",
-                                  assetPath, resolvedPathResult.GetError().GetErrorMessage());
-                    promise.set_value(nullptr);
-                    return;
+                    const auto entry = bundle.FindEntryByKey(assetPath);
+                    if (entry.has_value())
+                    {
+                        const auto bytesResult = bundle.ReadAllBytesByKey(assetPath);
+                        if (bytesResult.IsSuccess())
+                        {
+                            fromBundle = true;
+                            bundleBytes = bytesResult.GetValue();
+                            guid = entry->Guid;
+                        }
+                    }
                 }
 
-                const std::string resolvedPath = resolvedPathResult.GetValue().string();
-
-                // Unity-style: `.meta` lives next to the real asset on disk.
-                auto guidResult = LoadOrCreateGuid(resolvedPath);
-                if (guidResult.IsFailure())
+                if (!fromBundle)
                 {
-                    LT_CORE_ERROR("TextureAsset::LoadAsync: failed GUID/meta for '{}': {}",
-                                  resolvedPath, guidResult.GetError().GetErrorMessage());
-                    promise.set_value(nullptr);
-                    return;
-                }
+                    const auto resolvedPathResult = ResolveAssetKeyToPath(assetPath);
+                    if (resolvedPathResult.IsFailure())
+                    {
+                        LT_CORE_ERROR("TextureAsset::LoadAsync: failed to resolve key '{}': {}",
+                                      assetPath, resolvedPathResult.GetError().GetErrorMessage());
+                        promise.set_value(nullptr);
+                        return;
+                    }
 
-                const std::string guid = guidResult.GetValue();
+                    resolvedPath = resolvedPathResult.GetValue().string();
+                    debugName = resolvedPath;
+
+                    // Unity-style: `.meta` lives next to the real asset on disk.
+                    auto guidResult = LoadOrCreateGuid(resolvedPath);
+                    if (guidResult.IsFailure())
+                    {
+                        LT_CORE_ERROR("TextureAsset::LoadAsync: failed GUID/meta for '{}': {}",
+                                      resolvedPath, guidResult.GetError().GetErrorMessage());
+                        promise.set_value(nullptr);
+                        return;
+                    }
+
+                    guid = guidResult.GetValue();
+                }
 
                 // CPU decode on this AsyncIO worker thread.
-                auto decodedResult = DecodeToRGBA8(resolvedPath, specification.FlipVerticallyOnLoad);
+                auto decodedResult = fromBundle
+                    ? DecodeToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName, specification.FlipVerticallyOnLoad)
+                    : DecodeToRGBA8(resolvedPath, specification.FlipVerticallyOnLoad);
                 if (decodedResult.IsFailure())
                 {
                     // stb_image can't decode ASCII PPM (P3) reliably across builds.
                     // For our dev/test checkerboard, fall back to a tiny P3 parser.
-                    const auto ppmFallback = TryDecodePpmP3ToRGBA8(resolvedPath);
+                    const auto ppmFallback = fromBundle
+                        ? TryDecodePpmP3ToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName)
+                        : TryDecodePpmP3ToRGBA8(resolvedPath);
                     if (ppmFallback.IsSuccess())
                     {
                         decodedResult = ppmFallback;
@@ -262,7 +401,7 @@ namespace Limitless::Assets
                 if (decodedResult.IsFailure())
                 {
                     LT_CORE_ERROR("TextureAsset::LoadAsync: decode failed for '{}': {}",
-                                  resolvedPath, decodedResult.GetError().GetErrorMessage());
+                                  debugName, decodedResult.GetError().GetErrorMessage());
                     promise.set_value(nullptr);
                     return;
                 }
@@ -346,7 +485,7 @@ namespace Limitless::Assets
 
                 if (!renderer.SubmitResource(std::make_unique<Command>(state)))
                 {
-                    LT_CORE_ERROR("TextureAsset::LoadAsync: RenderResourceCommandQueue full while creating '{}'", resolvedPath);
+                    LT_CORE_ERROR("TextureAsset::LoadAsync: RenderResourceCommandQueue full while creating '{}'", debugName);
                     state->promise.set_value(nullptr);
                     return;
                 }
@@ -380,19 +519,46 @@ namespace Limitless::Assets
         // typically return this same instance without rebuilding GPU resources.
         const std::string key = GetKey();
 
-        const auto resolvedPathResult = ResolveAssetKeyToPath(key);
-        if (resolvedPathResult.IsFailure())
+        bool fromBundle = false;
+        std::vector<uint8_t> bundleBytes;
+        std::string resolvedPath;
+        std::string debugName = key;
+
+        auto& bundle = AssetBundle::GetInstance();
+        if (bundle.IsEnabled() && bundle.IsLoaded())
         {
-            LT_CORE_ERROR("TextureAsset::Reload: failed to resolve key '{}': {}", key, resolvedPathResult.GetError().GetErrorMessage());
-            return false;
+            const auto entry = bundle.FindEntryByKey(key);
+            if (entry.has_value())
+            {
+                const auto bytesResult = bundle.ReadAllBytesByKey(key);
+                if (bytesResult.IsSuccess())
+                {
+                    fromBundle = true;
+                    bundleBytes = bytesResult.GetValue();
+                }
+            }
         }
 
-        const std::string resolvedPath = resolvedPathResult.GetValue().string();
+        if (!fromBundle)
+        {
+            const auto resolvedPathResult = ResolveAssetKeyToPath(key);
+            if (resolvedPathResult.IsFailure())
+            {
+                LT_CORE_ERROR("TextureAsset::Reload: failed to resolve key '{}': {}", key, resolvedPathResult.GetError().GetErrorMessage());
+                return false;
+            }
+            resolvedPath = resolvedPathResult.GetValue().string();
+            debugName = resolvedPath;
+        }
 
-        auto decodedResult = DecodeToRGBA8(resolvedPath, m_Specification.FlipVerticallyOnLoad);
+        auto decodedResult = fromBundle
+            ? DecodeToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName, m_Specification.FlipVerticallyOnLoad)
+            : DecodeToRGBA8(resolvedPath, m_Specification.FlipVerticallyOnLoad);
         if (decodedResult.IsFailure())
         {
-            const auto ppmFallback = TryDecodePpmP3ToRGBA8(resolvedPath);
+            const auto ppmFallback = fromBundle
+                ? TryDecodePpmP3ToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName)
+                : TryDecodePpmP3ToRGBA8(resolvedPath);
             if (ppmFallback.IsSuccess())
             {
                 decodedResult = ppmFallback;
@@ -401,7 +567,7 @@ namespace Limitless::Assets
 
         if (decodedResult.IsFailure())
         {
-            LT_CORE_ERROR("TextureAsset::Reload: decode failed for '{}': {}", resolvedPath, decodedResult.GetError().GetErrorMessage());
+            LT_CORE_ERROR("TextureAsset::Reload: decode failed for '{}': {}", debugName, decodedResult.GetError().GetErrorMessage());
             return false;
         }
 
@@ -423,18 +589,18 @@ namespace Limitless::Assets
         }
         catch (const std::exception& e)
         {
-            LT_CORE_ERROR("TextureAsset::Reload: GPU upload threw for '{}': {}", resolvedPath, e.what());
+            LT_CORE_ERROR("TextureAsset::Reload: GPU upload threw for '{}': {}", debugName, e.what());
             return false;
         }
         catch (...)
         {
-            LT_CORE_ERROR("TextureAsset::Reload: GPU upload threw (unknown) for '{}'", resolvedPath);
+            LT_CORE_ERROR("TextureAsset::Reload: GPU upload threw (unknown) for '{}'", debugName);
             return false;
         }
 
         if (!created)
         {
-            LT_CORE_ERROR("TextureAsset::Reload: GPU upload failed for '{}'", resolvedPath);
+            LT_CORE_ERROR("TextureAsset::Reload: GPU upload failed for '{}'", debugName);
             return false;
         }
 

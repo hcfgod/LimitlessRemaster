@@ -2,6 +2,7 @@
 
 #include "Assets/AssetManager.h"
 #include "Assets/AssetPaths.h"
+#include "Assets/AssetBundle.h"
 
 #include "Core/Debug/Log.h"
 
@@ -34,6 +35,16 @@ namespace Limitless::Assets
             return;
         }
 
+        // Shipping/bundle mode: do not start file watchers or enqueue reloads.
+        // In bundle-only scenarios there may be no `Assets/` directory at all.
+        {
+            auto& bundle = AssetBundle::GetInstance();
+            if (bundle.IsEnabled() && bundle.IsLoaded())
+            {
+                return;
+            }
+        }
+
         auto recordResult = AssetDatabase::GetInstance().FindByKey(key);
         if (recordResult.IsFailure())
         {
@@ -62,8 +73,21 @@ namespace Limitless::Assets
                 else
                 {
                     assetsRoot = rootResult.GetValue() / "Assets";
-                    m_TreeWatcher = std::make_unique<AssetTreeWatcher>();
-                    shouldStartWatcher = true;
+                    std::error_code ec;
+                    if (std::filesystem::exists(assetsRoot, ec) && std::filesystem::is_directory(assetsRoot, ec))
+                    {
+                        m_TreeWatcher = std::make_unique<AssetTreeWatcher>();
+                        shouldStartWatcher = true;
+                    }
+                    else
+                    {
+                        static bool s_WarnedMissingAssets = false;
+                        if (!s_WarnedMissingAssets)
+                        {
+                            s_WarnedMissingAssets = true;
+                            LT_CORE_WARN("AssetHotReload: Assets directory not found; hot reload will remain disabled. AssetsRoot='{}'", assetsRoot.string());
+                        }
+                    }
                 }
             }
 

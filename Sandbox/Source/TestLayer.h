@@ -31,5 +31,7 @@ namespace Limitless
 
         std::unique_ptr<TexturedTriangleDemo> m_TriangleDemo;
         std::unique_ptr<EditorCameraController> m_EditorCameraController;
+
+        bool m_UsingAssetBundle = false;
     };
 } 

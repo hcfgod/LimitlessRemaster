@@ -10,6 +10,7 @@
 #include "Core/Concurrency/AsyncIO.h"
 #include "Assets/AssetHotReloadManager.h"
 #include "Assets/AssetLoadCoordinator.h"
+#include "Assets/AssetBundle.h"
 #include "Graphics/GraphicsAPIDetector.h"
 #include "Graphics/Renderer.h"
 #include "Core/Time.h"
@@ -136,6 +137,40 @@ namespace Limitless
 		
 		// Initialize platform detection first
 		PlatformDetection::Initialize();
+
+        // -----------------------------------------------------------------------------
+        // AssetBundle auto-load (shipping/bundle-only mode)
+        // Try to load a packaged bundle before any user layers attempt to load assets.
+        // Layouts checked (in order):
+        // - <exeDir>/AssetBundle/AssetBundleManifest.json
+        // - <workingDir>/AssetBundle/AssetBundleManifest.json
+        // -----------------------------------------------------------------------------
+        {
+            auto& bundle = Limitless::Assets::AssetBundle::GetInstance();
+
+            Result<void> loadResult(ErrorCode::ResourceNotFound, "AssetBundle not probed yet");
+            loadResult = bundle.LoadFromExecutableDirectory();
+            if (loadResult.IsFailure())
+            {
+                const std::filesystem::path workingDir = std::filesystem::path(PlatformDetection::GetWorkingDirectory());
+                if (!workingDir.empty())
+                {
+                    loadResult = bundle.LoadFromDirectory(workingDir / "AssetBundle");
+                }
+            }
+
+            if (loadResult.IsSuccess())
+            {
+                bundle.Enable(true);
+                Limitless::Assets::AssetHotReloadManager::GetInstance().Enable(false);
+                LT_CORE_INFO("AssetBundle: enabled (auto-loaded).");
+            }
+            else
+            {
+                // Dev default: source assets on disk, hot reload allowed if the app enables it.
+                LT_CORE_INFO("AssetBundle: not enabled (auto-load failed): {}", loadResult.GetError().GetErrorMessage());
+            }
+        }
 
 		// Initialize time system (must happen before the first frame)
 		Time::Initialize();

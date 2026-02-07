@@ -1,5 +1,6 @@
 #include "Assets/MaterialAsset.h"
 
+#include "Assets/AssetBundle.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetLoadCoordinator.h"
 #include "Assets/AssetManager.h"
@@ -14,6 +15,7 @@
 #include "Graphics/Renderer.h"
 
 #include <fstream>
+#include <sstream>
 
 namespace Limitless::Assets
 {
@@ -45,12 +47,23 @@ namespace Limitless::Assets
 
             // Otherwise find key in DB and load.
             const auto rec = AssetDatabase::GetInstance().FindByGuid(guid);
-            if (rec.IsFailure())
+            if (rec.IsSuccess())
             {
-                return Result<std::shared_ptr<ShaderAsset>>(rec.GetError());
+                return AssetManager::LoadBlocking<ShaderAsset>(rec.GetValue().Key);
             }
 
-            return AssetManager::LoadBlocking<ShaderAsset>(rec.GetValue().Key);
+            // Shipping/bundle mode: resolve GUID via AssetBundle manifest.
+            auto& bundle = AssetBundle::GetInstance();
+            if (bundle.IsEnabled() && bundle.IsLoaded())
+            {
+                const auto keyOpt = bundle.FindKeyByGuid(guid);
+                if (keyOpt.has_value())
+                {
+                    return AssetManager::LoadBlocking<ShaderAsset>(*keyOpt);
+                }
+            }
+
+            return Result<std::shared_ptr<ShaderAsset>>(rec.GetError());
         }
 
         // Convenience: key (path) during early iteration.
@@ -87,12 +100,22 @@ namespace Limitless::Assets
             }
 
             const auto rec = AssetDatabase::GetInstance().FindByGuid(guid);
-            if (rec.IsFailure())
+            if (rec.IsSuccess())
             {
-                return Result<std::shared_ptr<TextureAsset>>(rec.GetError());
+                return AssetManager::LoadBlocking<TextureAsset>(rec.GetValue().Key);
             }
 
-            return AssetManager::LoadBlocking<TextureAsset>(rec.GetValue().Key);
+            auto& bundle = AssetBundle::GetInstance();
+            if (bundle.IsEnabled() && bundle.IsLoaded())
+            {
+                const auto keyOpt = bundle.FindKeyByGuid(guid);
+                if (keyOpt.has_value())
+                {
+                    return AssetManager::LoadBlocking<TextureAsset>(*keyOpt);
+                }
+            }
+
+            return Result<std::shared_ptr<TextureAsset>>(rec.GetError());
         }
 
         if (ref.is_object() && ref.contains("key") && ref["key"].is_string())
@@ -159,25 +182,44 @@ namespace Limitless::Assets
 
             try
             {
-                const auto resolvedResult = ResolveAssetKeyToPath(key);
-                if (resolvedResult.IsFailure())
+                bool fromBundle = false;
+                std::string resolvedPath;
+                std::string guid;
+
+                auto& bundle = AssetBundle::GetInstance();
+                if (bundle.IsEnabled() && bundle.IsLoaded())
                 {
-                    LT_CORE_ERROR("MaterialAsset::LoadAsync: failed to resolve key '{}': {}", key, resolvedResult.GetError().GetErrorMessage());
-                    promise.set_value(nullptr);
-                    return;
+                    const auto entry = bundle.FindEntryByKey(key);
+                    if (entry.has_value())
+                    {
+                        fromBundle = true;
+                        guid = entry->Guid;
+                        resolvedPath = "<AssetBundle>";
+                    }
                 }
 
-                const std::string resolvedPath = resolvedResult.GetValue().string();
-
-                const auto guidResult = LoadOrCreateGuid(resolvedPath, {{"key", key}, {"type", "Material"}});
-                if (guidResult.IsFailure())
+                if (!fromBundle)
                 {
-                    LT_CORE_ERROR("MaterialAsset::LoadAsync: meta GUID failed for '{}': {}", resolvedPath, guidResult.GetError().GetErrorMessage());
-                    promise.set_value(nullptr);
-                    return;
-                }
+                    const auto resolvedResult = ResolveAssetKeyToPath(key);
+                    if (resolvedResult.IsFailure())
+                    {
+                        LT_CORE_ERROR("MaterialAsset::LoadAsync: failed to resolve key '{}': {}", key, resolvedResult.GetError().GetErrorMessage());
+                        promise.set_value(nullptr);
+                        return;
+                    }
 
-                const std::string guid = guidResult.GetValue();
+                    resolvedPath = resolvedResult.GetValue().string();
+
+                    const auto guidResult = LoadOrCreateGuid(resolvedPath, {{"key", key}, {"type", "Material"}});
+                    if (guidResult.IsFailure())
+                    {
+                        LT_CORE_ERROR("MaterialAsset::LoadAsync: meta GUID failed for '{}': {}", resolvedPath, guidResult.GetError().GetErrorMessage());
+                        promise.set_value(nullptr);
+                        return;
+                    }
+
+                    guid = guidResult.GetValue();
+                }
 
                 auto asset = AssetManager::GetOrLoad<MaterialAsset>(key, [&]() -> Ptr {
                     Ptr created(new MaterialAsset(key, guid, settings));
@@ -215,9 +257,70 @@ namespace Limitless::Assets
 
     bool MaterialAsset::LoadFromJsonFile()
     {
-        if (m_ResolvedPath.empty())
+        const std::string key = GetKey();
+
+        // Bundle-first: read JSON text from bundle if available.
+        auto& bundle = AssetBundle::GetInstance();
+        if (bundle.IsEnabled() && bundle.IsLoaded())
         {
-            const auto resolved = ResolveAssetKeyToPath(GetKey());
+            const auto entry = bundle.FindEntryByKey(key);
+            if (entry.has_value())
+            {
+                const auto textResult = bundle.ReadAllTextByKey(key);
+                if (textResult.IsSuccess())
+                {
+                    m_ResolvedPath = "<AssetBundle>";
+                    json root;
+                    try
+                    {
+                        root = json::parse(textResult.GetValue());
+                    }
+                    catch (const std::exception& e)
+                    {
+                        LT_CORE_ERROR("MaterialAsset: JSON parse error (bundle) '{}': {}", key, e.what());
+                        return false;
+                    }
+
+                    const auto shaderAssetResult = ResolveShaderAsset(root);
+                    if (shaderAssetResult.IsFailure())
+                    {
+                        LT_CORE_ERROR("MaterialAsset: {}", shaderAssetResult.GetError().GetErrorMessage());
+                        return false;
+                    }
+
+                    const auto texAssetResult = ResolveMainTextureAsset(root);
+                    if (texAssetResult.IsFailure())
+                    {
+                        LT_CORE_ERROR("MaterialAsset: {}", texAssetResult.GetError().GetErrorMessage());
+                        return false;
+                    }
+
+                    m_ShaderResolved = shaderAssetResult.GetValue();
+                    m_MainTextureResolved = texAssetResult.GetValue();
+
+                    m_Shader = m_ShaderResolved ? AssetHandle<ShaderAsset>(m_ShaderResolved) : AssetHandle<ShaderAsset>();
+                    m_MainTexture = m_MainTextureResolved ? AssetHandle<TextureAsset>(m_MainTextureResolved) : AssetHandle<TextureAsset>();
+
+                    const auto specOverride = ParseTextureSpecificationOverride(root);
+                    if (specOverride.IsSuccess())
+                    {
+                        m_HasMainTextureSpecOverride = true;
+                        m_MainTextureSpecOverride = specOverride.GetValue();
+                    }
+                    else
+                    {
+                        m_HasMainTextureSpecOverride = false;
+                    }
+
+                    return true;
+                }
+            }
+        }
+
+        // Source-assets path.
+        if (m_ResolvedPath.empty() || m_ResolvedPath == "<AssetBundle>")
+        {
+            const auto resolved = ResolveAssetKeyToPath(key);
             if (resolved.IsFailure())
             {
                 return false;

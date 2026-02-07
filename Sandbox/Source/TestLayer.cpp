@@ -3,6 +3,14 @@
 #include "Editor/EditorCameraController.h"
 #include "TexturedTriangleDemo.h"
 
+#include "Assets/AssetBundle.h"
+#include "Assets/AssetBundleBuilder.h"
+#include "Assets/AssetHotReloadManager.h"
+
+#include "Platform/Platform.h"
+
+#include <SDL3/SDL_keyboard.h>
+
 namespace Limitless
 {
     TestLayer::TestLayer()
@@ -16,6 +24,17 @@ namespace Limitless
     void TestLayer::OnAttach()
     {
         LT_INFO("TestLayer attached");
+
+        // Engine startup may have auto-enabled the AssetBundle already.
+        // If not, we keep dev hot reload enabled for source-asset workflows.
+        if (Assets::AssetBundle::GetInstance().IsEnabled())
+        {
+            m_UsingAssetBundle = true;
+        }
+        else
+        {
+            Assets::AssetHotReloadManager::GetInstance().Enable(true);
+        }
 
         // Load project-wide input actions from a Unity-style asset (JSON in Assets/).
         // EditorCameraController will still push its own override (Unity/editor style), but this validates the
@@ -70,6 +89,67 @@ namespace Limitless
 
     void TestLayer::OnUpdate(float deltaTime)
     {
+        // Press B to build a runtime AssetBundle and toggle loading from it.
+        // This simulates a "shipped build" where the source `Assets/` folder is not present.
+        if (GetInputSystem().WasKeyPressedThisFrame(SDL_SCANCODE_B))
+        {
+            if (!m_UsingAssetBundle)
+            {
+                const std::filesystem::path exeDir = std::filesystem::path(PlatformDetection::GetExecutablePath()).parent_path();
+                const std::filesystem::path outDir = exeDir / "AssetBundle";
+                const auto built = Assets::AssetBundleBuilder::BuildAssetBundleToDirectory(outDir);
+                if (built.IsFailure())
+                {
+                    LT_CORE_ERROR("AssetBundle build failed: {}", built.GetError().GetErrorMessage());
+                }
+                else
+                {
+                    auto& bundle = Assets::AssetBundle::GetInstance();
+                    const auto loaded = bundle.LoadFromDirectory(outDir);
+                    if (loaded.IsFailure())
+                    {
+                        LT_CORE_ERROR("AssetBundle load failed: {}", loaded.GetError().GetErrorMessage());
+                    }
+                    else
+                    {
+                        bundle.Enable(true);
+                        m_UsingAssetBundle = true;
+                        Assets::AssetHotReloadManager::GetInstance().Enable(false);
+                        LT_INFO("AssetBundle enabled (loading assets from bundle).");
+                    }
+                }
+            }
+            else
+            {
+                auto& bundle = Assets::AssetBundle::GetInstance();
+                bundle.Enable(false);
+                m_UsingAssetBundle = false;
+                Assets::AssetHotReloadManager::GetInstance().Enable(true);
+                LT_INFO("AssetBundle disabled (loading assets from source Assets/).");
+            }
+
+            // Reload demo and input assets so we prove the new source works.
+            GetInputSystem().SetProjectActionAssetFromKey("Assets/InputActions/Sandbox.inputactions.json");
+
+            if (m_TriangleDemo)
+            {
+                m_TriangleDemo->Shutdown();
+                m_TriangleDemo->Initialize();
+            }
+
+            if (m_EditorCameraController)
+            {
+                m_EditorCameraController->Shutdown();
+                m_EditorCameraController.reset();
+
+                m_EditorCameraController = std::make_unique<EditorCameraController>();
+                EditorCameraController::Settings editorCameraSettings{};
+                editorCameraSettings.InputActionsAssetKey = "Assets/InputActions/EditorCamera.inputactions.json";
+                editorCameraSettings.UseOverrideActionAsset = true;
+                m_EditorCameraController->Initialize(m_CameraManager, m_CameraId, editorCameraSettings);
+            }
+        }
+
         if (m_TriangleDemo)
         {
             m_TriangleDemo->Update(deltaTime);

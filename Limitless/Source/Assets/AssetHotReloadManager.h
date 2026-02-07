@@ -50,7 +50,10 @@ namespace Limitless::Assets
         void EnqueueReloadLocked(const std::string& key, const std::string& guid);
 
     private:
-        std::atomic<bool> m_Enabled{true};
+        // Default OFF:
+        // Hot reload is a development/editor feature. In shipping/bundle-only scenarios there may be
+        // no `Assets/` directory to watch, and any file watcher activity is undesirable.
+        std::atomic<bool> m_Enabled{false};
 
         struct WatchEntry
         {

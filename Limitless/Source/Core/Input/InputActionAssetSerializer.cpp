@@ -98,10 +98,15 @@ namespace Limitless
         std::stringstream buffer;
         buffer << file.rdbuf();
 
+        return LoadIntoFromString(outAsset, buffer.str(), path);
+    }
+
+    Result<void> InputActionAssetSerializer::LoadIntoFromString(InputActionAsset& outAsset, const std::string& jsonText, const std::string& debugName)
+    {
         json root;
         try
         {
-            root = json::parse(buffer.str());
+            root = json::parse(jsonText);
         }
         catch (const std::exception& e)
         {
@@ -213,7 +218,7 @@ namespace Limitless
                     }
                     else
                     {
-                        LT_CORE_WARN("InputActionAssetSerializer: unknown binding type '{}' in '{}::{}'", bindingType, mapName, actionName);
+                        LT_CORE_WARN("InputActionAssetSerializer: unknown binding type '{}' in '{}::{}' ({})", bindingType, mapName, actionName, debugName);
                     }
                 }
             }
