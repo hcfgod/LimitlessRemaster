@@ -81,6 +81,23 @@ Important properties:
 - File: `Limitless/Source/Assets/AssetDatabase.{h,cpp}`
 - Storage: `Build/AssetDatabase.json` (under project root)
 
+## Asset Hot Reload (Unity-style)
+
+Assets support hot reload for **source file changes** under `Assets/`.
+
+High-level behavior:
+
+- The engine watches the **entire** `Assets/` tree (single watcher) instead of one watcher per file.
+- Change events are **debounced/coalesced** to avoid re-import storms during rapid saves.
+- Reload cascades through dependencies tracked in `AssetDatabase` and `.meta` files (dependency graph).
+- Async loads can be cancelled via `AssetLoadCoordinator` (generation-based cancellation).
+
+Key files:
+
+- `Limitless/Source/Assets/AssetTreeWatcher.{h,cpp}`
+- `Limitless/Source/Assets/AssetHotReloadManager.{h,cpp}`
+- `Limitless/Source/Assets/AssetLoadCoordinator.{h,cpp}`
+
 ## P1 Assets
 
 ### `MaterialAsset`
@@ -92,6 +109,9 @@ Minimal Unity-style material stored as JSON:
 - Example: `Assets/Materials/TexturedTriangle.material.json`
 
 The material references other assets via `{ "guid": "..." }` (preferred) or `{ "key": "Assets/..." }` (convenience). When loaded, it writes dependency GUIDs into the database and `.meta`, enabling cascading hot reload.
+
+Materials can also specify runtime texture sampling overrides (e.g., nearest filtering for crisp pixel art).
+This is applied at bind time using a render command (`SetTextureSpecificationCommand`) so it is safe for the render thread.
 
 ### `InputActionsAssetResource`
 
@@ -134,14 +154,20 @@ File: `Limitless/Source/Assets/TextureAsset.{h,cpp}`
 
 ## Sandbox Proof
 
-The Sandbox demo now loads a texture from:
+The Sandbox demo now loads a **material asset** (and the material pulls in its shader + texture deps):
 
+- `Assets/Materials/TexturedTriangle.material.json`
+
+The material references:
+
+- `Assets/Shaders/TexturedTriangle.glsl`
 - `Assets/Textures/Checker.ppm`
 
-and logs the key + GUID when ready.
+and the asset system will create/update `.meta` files and dependency entries so shader/texture edits can cascade and hot reload correctly.
 
 Related files:
 
 - `Assets/Textures/Checker.ppm`
+- `Assets/Materials/TexturedTriangle.material.json`
 - `Sandbox/Source/TexturedTriangleDemo.{h,cpp}`
 

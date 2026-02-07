@@ -37,12 +37,35 @@ The engine supports two common patterns:
 - **Override**: `InputSystem::PushOverrideActionAsset(asset)` / `PopOverrideActionAsset(...)`
 - **Evaluation**: `InputSystem::UpdateActions()` uses the **top override** if present, otherwise the project default.
 
-`Sandbox/TestLayer` uses an override so it behaves like a self-contained tool context.
+`Sandbox/TestLayer` sets the **project** input actions from `Assets/InputActions/Sandbox.inputactions.json`.
+The engine-owned `EditorCameraController` pushes its own override so editor controls do not affect gameplay actions.
 
 ## Key Identifiers
 
 Bindings currently use **SDL scancodes** (`SDL_Scancode`) for keyboard keys (physical keys).
 This keeps controls stable across keyboard layouts.
+
+## Control Schemes (Keyboard+Mouse + Gamepad)
+
+Actions support **multiple bindings** at the same time. This is the intended approach for multiple control schemes:
+
+- Keyboard+mouse bindings and gamepad bindings can both feed the same `InputAction`.
+- `InputAction::EvaluateValue(...)` combines contributions from all bindings for that action.
+
+### Supported Binding Types
+
+The `InputBinding` variant currently supports:
+
+- `KeyboardButtonBinding`
+- `MouseButtonBinding`
+- `KeyboardAxis1DBinding`
+- `KeyboardAxis2DBinding`
+- `MouseDeltaBinding`
+- `GamepadButtonBinding`
+- `GamepadAxis1DBinding`
+- `GamepadAxis2DBinding`
+
+Gamepad support is currently “single primary gamepad” (first connected gamepad wins). This is intentionally minimal and can be extended later to support player indices.
 
 ## Action Value Types
 
@@ -63,11 +86,13 @@ Actions expose simplified Unity-like phases:
 
 This is exactly what `Sandbox/Source/TestLayer.cpp` does now:
 
+- Editor input is defined in `Assets/InputActions/EditorCamera.inputactions.json`
 - Map: `"Editor"`
 - Actions:
-  - `"Move"`: `Axis2D` with `KeyboardAxis2DBinding` (WASD)
-  - `"Look"`: `Axis2D` with `MouseDeltaBinding`
-  - `"Boost"`: `Button` with `KeyboardButtonBinding` (Shift)
+  - `"Move"`: `Axis2D` with `KeyboardAxis2DBinding` and `GamepadAxis2DBinding` (left stick)
+  - `"Look"`: `Axis2D` with `MouseDeltaBinding` and `GamepadAxis2DBinding` (right stick)
+  - `"Boost"`: `Button` with `KeyboardButtonBinding` (Shift) and `GamepadButtonBinding` (shoulder)
+  - `"LookEnable"`: `Button` with `MouseButtonBinding` (RMB) and `GamepadButtonBinding` (shoulder)
 
 At runtime:
 
@@ -75,8 +100,26 @@ At runtime:
 - `Look.ReadAxis2D()` drives yaw/pitch
 - `Boost.ReadButton()` increases speed
 
+## Runtime Rebinding (Capture Next Input + Save JSON)
+
+The engine provides a minimal runtime rebinding helper:
+
+- `Limitless/Source/Core/Input/InputRebinding.{h,cpp}`
+
+How it works:
+
+- You create an `InputRebinding` session.
+- You register it with `InputSystem` using `InputSystem::SetRebindingSession(...)`.
+- While active, the session can **consume the next SDL input event** and replace a specific binding slot.
+- If enabled, it persists the updated asset back to JSON via `InputActionAssetSerializer::SaveToFile(...)`.
+
+This is a low-level API intended for editor/UI code to build on top (no UI is provided by the engine).
+
 ## Files
 
 - `Limitless/Source/Core/Input/InputSystem.{h,cpp}`
 - `Limitless/Source/Core/Input/InputAction.{h,cpp}`
+- `Limitless/Source/Core/Input/InputActionAssetSerializer.{h,cpp}`
+- `Limitless/Source/Core/Input/InputRebinding.{h,cpp}`
+- `Limitless/Source/Editor/EditorCameraController.{h,cpp}`
 

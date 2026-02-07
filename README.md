@@ -135,6 +135,10 @@ Start here:
 - `Docs/CONCURRENCY_GUIDE.md` (SPSC/MPMC contracts)
 - `Docs/README_RenderCommandSystem.md` (render command system guarantees + current limitations)
 - `Docs/RENDERING_ROADMAP.md` (what is implemented vs stubbed + next milestones)
+- `Docs/ASSET_SYSTEM_GUIDE.md` (Unity-style GUID/.meta assets + Material/InputActions)
+- `Docs/ASSET_HOT_RELOAD_GUIDE.md` (Assets/ hot reload, debounce, dependency cascades)
+- `Docs/INPUT_GUIDE.md` (action assets, gamepad bindings, rebinding, override stack)
+- `Docs/EDITOR_CAMERA_CONTROLLER_GUIDE.md` (engine-owned editor camera module)
 
 ### **Basic Usage**
 
@@ -429,6 +433,10 @@ monitor.SaveMetricsToFile("performance_report.txt");
 - **[Concurrency Guide](Docs/CONCURRENCY_GUIDE.md)** - Lock-free queues and `AsyncIO` thread-pool tasks
 - **[Time Guide](Docs/TIME_GUIDE.md)** - Unity-style `Time` API (delta time, timeScale, fixed step)
 - **[Hot Reload Guide](Docs/HOT_RELOAD_GUIDE.md)** - Real-time configuration hot reloading
+- **[Asset System Guide](Docs/ASSET_SYSTEM_GUIDE.md)** - Unity-style GUID/.meta assets, async loading, Material/InputActions
+- **[Asset Hot Reload Guide](Docs/ASSET_HOT_RELOAD_GUIDE.md)** - Assets/ watcher, debounce/coalesce, dependency cascades
+- **[Input Guide](Docs/INPUT_GUIDE.md)** - Input action assets, gamepad bindings, rebinding, override stack
+- **[Editor Camera Controller Guide](Docs/EDITOR_CAMERA_CONTROLLER_GUIDE.md)** - Engine-owned editor camera module
 - **[Platform and Error Guide](Docs/PLATFORM_AND_ERROR_GUIDE.md)** - Platform detection and OS error integration
 - **[Platform Truth Table](Docs/PLATFORM_TRUTH_TABLE.md)** - What is implemented on Windows/macOS/Linux today
 - **[Build Configuration Guide](Docs/BUILD_CONFIGURATION_GUIDE.md)** - Premake targets, configs, and CI parity
