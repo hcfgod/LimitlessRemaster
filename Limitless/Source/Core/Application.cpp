@@ -8,6 +8,8 @@
 #include "Core/HotReloadManager.h"
 #include "Core/EventSystem.h"
 #include "Core/Concurrency/AsyncIO.h"
+#include "Assets/AssetHotReloadManager.h"
+#include "Assets/AssetLoadCoordinator.h"
 #include "Graphics/GraphicsAPIDetector.h"
 #include "Graphics/Renderer.h"
 #include "Core/Time.h"
@@ -203,6 +205,11 @@ namespace Limitless
 		
 		// Clear LayerStack (this will detach all layers)
 		m_LayerStack.Clear();
+
+        // Stop asset hot reload + cancel in-flight loads before tearing down renderer/window.
+        // This prevents background asset threads from running during CRT/static teardown.
+        Limitless::Assets::AssetLoadCoordinator::CancelAllInFlightLoads();
+        Limitless::Assets::AssetHotReloadManager::GetInstance().Enable(false);
 		
 		// Shutdown the renderer
 		Renderer::GetInstance().Shutdown();

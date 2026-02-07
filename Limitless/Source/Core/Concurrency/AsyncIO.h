@@ -144,6 +144,15 @@ namespace Limitless
             Task<size_t> GetFileSizeAsync(const std::string& path);
             Task<std::filesystem::file_time_type> GetFileModifiedTimeAsync(const std::string& path);
 
+            // General-purpose async execution on the AsyncIO worker pool.
+            // This is useful for CPU-side asset processing (decode, parsing) where you want
+            // the engine-managed worker threads (not std::async).
+            template<typename Func>
+            auto RunAsync(Func&& func) -> Task<std::invoke_result_t<Func>>
+            {
+                return Submit(std::forward<Func>(func));
+            }
+
             // Thread pool management
             size_t GetThreadCount() const { return m_Threads.size(); }
             bool IsInitialized() const { return m_Initialized.load(); }
