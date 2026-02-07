@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 namespace Limitless::Assets
@@ -8,7 +9,7 @@ namespace Limitless::Assets
     // AssetType
     // Minimal "engine types" set. Extend as importers are added.
     // -----------------------------------------------------------------------------
-    enum class AssetType : uint32_t
+    enum class AssetType : std::uint32_t
     {
         Unknown = 0,
         Texture2D = 1,
