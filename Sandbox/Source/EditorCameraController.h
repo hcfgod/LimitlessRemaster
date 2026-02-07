@@ -4,6 +4,11 @@
 
 namespace Limitless
 {
+    namespace Assets
+    {
+        class InputActionsAssetResource;
+    }
+
     // Small, reusable editor-style free-look camera controller:
     // - WASD moves
     // - RMB enables mouse-look and locks/hides cursor
@@ -32,8 +37,10 @@ namespace Limitless
 
     private:
         void EnsureInputAsset();
+        void RefreshInputAssetIfHotReloaded();
 
         std::shared_ptr<InputActionAsset> m_InputAsset;
+        std::shared_ptr<Assets::InputActionsAssetResource> m_InputAssetResource;
         InputAction* m_ActionMove = nullptr;
         InputAction* m_ActionLook = nullptr;
         InputAction* m_ActionBoost = nullptr;

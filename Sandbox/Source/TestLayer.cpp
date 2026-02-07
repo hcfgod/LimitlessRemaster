@@ -17,6 +17,11 @@ namespace Limitless
     {
         LT_INFO("TestLayer attached");
 
+        // Load project-wide input actions from a Unity-style asset (JSON in Assets/).
+        // EditorCameraController will still push its own override (Unity/editor style), but this validates the
+        // project-wide asset path and ensures gameplay code can rely on it.
+        GetInputSystem().SetProjectActionAssetFromKey("Assets/InputActions/Sandbox.inputactions.json");
+
         // Create an editor camera (3D) and make it active.
         CameraManager::Perspective3DCreateInfo cameraInfo{};
         cameraInfo.Name = "EditorCamera";

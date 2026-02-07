@@ -1,5 +1,8 @@
 #include "EditorCameraController.h"
 
+#include "Assets/AssetManager.h"
+#include "Assets/InputActionsAssetImporter.h"
+
 namespace Limitless
 {
     void EditorCameraController::Initialize(CameraManager& cameraManager, CameraId cameraId)
@@ -41,6 +44,8 @@ namespace Limitless
         {
             return;
         }
+
+        RefreshInputAssetIfHotReloaded();
 
         auto* camera = m_CameraManager->GetPerspective3D(m_CameraId);
         if (!camera || !m_ActionMove || !m_ActionLook)
@@ -96,34 +101,89 @@ namespace Limitless
             return;
         }
 
-        m_InputAsset = std::make_shared<InputActionAsset>();
-        auto& map = m_InputAsset->AddMap("Editor");
+        // Prefer Unity-style asset file so Sandbox can validate the full pipeline.
+        m_InputAssetResource = Assets::AssetManager::LoadBlocking<Assets::InputActionsAssetResource>("Assets/InputActions/Sandbox.inputactions.json");
+        if (m_InputAssetResource && m_InputAssetResource->GetValue())
+        {
+            m_InputAsset = m_InputAssetResource->GetValue();
+        }
+        else
+        {
+            // Fallback to hardcoded bindings (keeps controller usable even without assets).
+            m_InputAsset = std::make_shared<InputActionAsset>();
+            auto& map = m_InputAsset->AddMap("Editor");
 
-        auto& move = map.AddAction("Move", InputActionValueType::Axis2D);
-        move.AddBinding(KeyboardAxis2DBinding{
-            .Up = SDL_SCANCODE_W,
-            .Down = SDL_SCANCODE_S,
-            .Left = SDL_SCANCODE_A,
-            .Right = SDL_SCANCODE_D,
-            .Scale = 1.0f
-        });
+            auto& move = map.AddAction("Move", InputActionValueType::Axis2D);
+            move.AddBinding(KeyboardAxis2DBinding{
+                .Up = SDL_SCANCODE_W,
+                .Down = SDL_SCANCODE_S,
+                .Left = SDL_SCANCODE_A,
+                .Right = SDL_SCANCODE_D,
+                .Scale = 1.0f
+            });
 
-        auto& look = map.AddAction("Look", InputActionValueType::Axis2D);
-        look.AddBinding(MouseDeltaBinding{
-            .Sensitivity = 1.0f,
-            .InvertY = false
-        });
+            auto& look = map.AddAction("Look", InputActionValueType::Axis2D);
+            look.AddBinding(MouseDeltaBinding{
+                .Sensitivity = 1.0f,
+                .InvertY = false
+            });
 
-        auto& boost = map.AddAction("Boost", InputActionValueType::Button);
-        boost.AddBinding(KeyboardButtonBinding{ .Key = SDL_SCANCODE_LSHIFT });
+            auto& boost = map.AddAction("Boost", InputActionValueType::Button);
+            boost.AddBinding(KeyboardButtonBinding{ .Key = SDL_SCANCODE_LSHIFT });
 
-        auto& lookEnable = map.AddAction("LookEnable", InputActionValueType::Button);
-        lookEnable.AddBinding(MouseButtonBinding{ .Button = SDL_BUTTON_RIGHT });
+            auto& lookEnable = map.AddAction("LookEnable", InputActionValueType::Button);
+            lookEnable.AddBinding(MouseButtonBinding{ .Button = SDL_BUTTON_RIGHT });
+        }
 
-        m_ActionMove = map.FindAction("Move");
-        m_ActionLook = map.FindAction("Look");
-        m_ActionBoost = map.FindAction("Boost");
-        m_ActionLookEnable = map.FindAction("LookEnable");
+        // Bind action pointers from the loaded asset.
+        auto* map = m_InputAsset ? m_InputAsset->FindMap("Editor") : nullptr;
+        if (!map)
+        {
+            LT_CORE_ERROR("EditorCameraController: InputActionAsset missing map 'Editor'");
+            return;
+        }
+
+        m_ActionMove = map->FindAction("Move");
+        m_ActionLook = map->FindAction("Look");
+        m_ActionBoost = map->FindAction("Boost");
+        m_ActionLookEnable = map->FindAction("LookEnable");
+    }
+
+    void EditorCameraController::RefreshInputAssetIfHotReloaded()
+    {
+        if (!m_InputAssetResource)
+        {
+            return;
+        }
+
+        auto latest = m_InputAssetResource->GetValue();
+        if (!latest || latest == m_InputAsset)
+        {
+            return;
+        }
+
+        // Swap override asset reference.
+        if (m_InputAsset)
+        {
+            GetInputSystem().PopOverrideActionAsset(m_InputAsset);
+        }
+
+        m_InputAsset = latest;
+        GetInputSystem().PushOverrideActionAsset(m_InputAsset);
+
+        auto* map = m_InputAsset->FindMap("Editor");
+        if (!map)
+        {
+            LT_CORE_ERROR("EditorCameraController: hot reloaded InputActionAsset missing map 'Editor'");
+            return;
+        }
+
+        m_ActionMove = map->FindAction("Move");
+        m_ActionLook = map->FindAction("Look");
+        m_ActionBoost = map->FindAction("Boost");
+        m_ActionLookEnable = map->FindAction("LookEnable");
+
+        LT_INFO("EditorCameraController: input actions hot reloaded from asset");
     }
 }
 

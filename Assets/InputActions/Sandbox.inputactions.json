@@ -1,7 +1,7 @@
 {
   "maps": [
     {
-      "name": "Gameplay",
+      "name": "Editor",
       "enabled": true,
       "actions": [
         {
@@ -9,6 +9,27 @@
           "type": "Axis2D",
           "bindings": [
             { "binding": "KeyboardAxis2D", "up": "W", "down": "S", "left": "A", "right": "D", "scale": 1.0 }
+          ]
+        },
+        {
+          "name": "Look",
+          "type": "Axis2D",
+          "bindings": [
+            { "binding": "MouseDelta", "sensitivity": 1.0, "invert_y": false }
+          ]
+        },
+        {
+          "name": "Boost",
+          "type": "Button",
+          "bindings": [
+            { "binding": "KeyboardButton", "key": "Left Shift" }
+          ]
+        },
+        {
+          "name": "LookEnable",
+          "type": "Button",
+          "bindings": [
+            { "binding": "MouseButton", "button": 3 }
           ]
         }
       ]
