@@ -5,9 +5,9 @@
 
 namespace Limitless
 {
-    void EditorCameraController::Initialize(CameraManager& cameraManager, CameraId cameraId, const Settings& settings)
+    void EditorCameraController::Initialize(CameraManager& cameraManager, CameraId cameraId, Settings settings)
     {
-        m_Settings = settings;
+        m_Settings = std::move(settings);
         m_CameraManager = &cameraManager;
         m_CameraId = cameraId;
         EnsureInputAsset();
@@ -41,7 +41,7 @@ namespace Limitless
         m_ActionLookEnable = nullptr;
         m_InputAsset.reset();
         m_InputAssetResource.reset();
-        m_Settings = {};
+        m_Settings = Settings{};
     }
 
     void EditorCameraController::Update(float deltaTime)

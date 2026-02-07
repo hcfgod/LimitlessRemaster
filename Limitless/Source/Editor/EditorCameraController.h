@@ -33,16 +33,22 @@ namespace Limitless
             // - Look (Axis2D)
             // - Boost (Button)
             // - LookEnable (Button)
-            std::string InputActionsAssetKey = "Assets/InputActions/EditorCamera.inputactions.json";
+            std::string InputActionsAssetKey;
 
             // If true, the controller pushes an override asset while active.
-            bool UseOverrideActionAsset = true;
+            bool UseOverrideActionAsset;
+
+            Settings()
+                : InputActionsAssetKey("Assets/InputActions/EditorCamera.inputactions.json")
+                , UseOverrideActionAsset(true)
+            {
+            }
         };
 
         EditorCameraController() = default;
         ~EditorCameraController() = default;
 
-        void Initialize(CameraManager& cameraManager, CameraId cameraId, const Settings& settings = Settings{});
+        void Initialize(CameraManager& cameraManager, CameraId cameraId, Settings settings = Settings{});
         void Shutdown();
 
         void Update(float deltaTime);
