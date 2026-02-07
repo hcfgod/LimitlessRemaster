@@ -43,6 +43,10 @@ namespace Limitless
 
         std::shared_ptr<InputActionAsset> GetActiveActionAsset() const;
 
+        // Unity-style convenience: set project-wide input actions from an asset key.
+        // (Loads through the engine asset system.)
+        void SetProjectActionAssetFromKey(const std::string& key);
+
         // Backward compatible aliases (previous API was "global action asset").
         void SetActionAsset(std::shared_ptr<InputActionAsset> asset) { SetProjectActionAsset(std::move(asset)); }
         std::shared_ptr<InputActionAsset> GetActionAsset() const { return GetProjectActionAsset(); }

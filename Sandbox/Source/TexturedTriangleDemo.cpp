@@ -13,14 +13,11 @@ namespace Limitless
 
     void TexturedTriangleDemo::Shutdown()
     {
-        m_ShaderAsset.reset();
-        m_Shader.reset();
         m_VAO.reset();
         m_VBO.reset();
         m_IBO.reset();
-        m_CheckerboardTextureAsset.reset();
-        m_CheckerboardTexture.reset();
-        m_CheckerboardTextureAssetTask = Async::Task<Assets::TextureAsset::Ptr>();
+        m_Material.reset();
+        m_LoggedMaterialReady = false;
     }
 
     void TexturedTriangleDemo::Update(float deltaTime)
@@ -38,31 +35,7 @@ namespace Limitless
             m_ClearColor[i] = std::clamp(m_ClearColor[i], 0.0f, 1.0f);
         }
 
-        PollAsyncTextureAsset();
-
-        // Hot reload support:
-        // If the asset updated its internal GPU object, refresh our local pointers.
-        if (m_ShaderAsset)
-        {
-            auto current = m_ShaderAsset->GetShader();
-            if (current && current != m_Shader)
-            {
-                m_Shader = current;
-                // Re-apply required uniforms after shader recompiles.
-                m_Shader->SetInt("u_Texture", 0);
-                LT_INFO("Shader hot reloaded: '{}'", m_ShaderAsset->GetKey());
-            }
-        }
-
-        if (m_CheckerboardTextureAsset)
-        {
-            auto current = m_CheckerboardTextureAsset->GetTexture();
-            if (current && current != m_CheckerboardTexture)
-            {
-                m_CheckerboardTexture = current;
-                LT_INFO("Texture hot reloaded: '{}'", m_CheckerboardTextureAsset->GetKey());
-            }
-        }
+        PollMaterialReadiness();
     }
 
     void TexturedTriangleDemo::Render(const CameraManager& cameraManager) const
@@ -81,7 +54,7 @@ namespace Limitless
         auto clear = std::make_unique<ClearCommand>(flags, m_ClearColor[0], m_ClearColor[1], m_ClearColor[2], m_ClearColor[3]);
         renderer.SubmitCommand(std::move(clear));
 
-        if (!m_Shader || !m_VAO || !m_IBO || !m_CheckerboardTexture)
+        if (!m_VAO || !m_IBO || !m_Material)
         {
             return;
         }
@@ -94,10 +67,13 @@ namespace Limitless
 
         const glm::mat4 model(1.0f);
 
-        renderer.SubmitCommand(std::make_unique<BindShaderCommand>(m_Shader));
-        renderer.SubmitCommand(std::make_unique<SetShaderMat4Command>(m_Shader, "u_ViewProjection", viewProjection));
-        renderer.SubmitCommand(std::make_unique<SetShaderMat4Command>(m_Shader, "u_Model", model));
-        renderer.SubmitCommand(std::make_unique<BindTextureCommand>(m_CheckerboardTexture, 0));
+        // Only draw when material deps are ready; otherwise we could draw with a stale previously-bound shader.
+        if (!m_Material->GetShader() || !m_Material->GetMainTexture())
+        {
+            return;
+        }
+
+        m_Material->SubmitBind(renderer, viewProjection, model);
         renderer.SubmitCommand(std::make_unique<BindVertexArrayCommand>(m_VAO));
         renderer.SubmitCommand(std::make_unique<DrawIndexedCommand>(DrawMode::Triangles, m_IBO->GetCount(), IndexType::UnsignedInt, nullptr, 0));
     }
@@ -130,58 +106,32 @@ namespace Limitless
         m_IBO = IndexBuffer::Create(indices, 3);
         m_VAO->SetIndexBuffer(m_IBO);
 
-        m_ShaderAsset = Assets::AssetManager::LoadBlocking<Assets::ShaderAsset>("Assets/Shaders/TexturedTriangle.glsl");
-        if (!m_ShaderAsset || !m_ShaderAsset->GetShader())
+        // Material (Unity-style): shader+texture refs live in a single .material.json asset.
+        m_Material = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>("Assets/Materials/TexturedTriangle.material.json");
+        if (!m_Material)
         {
-            LT_CORE_ERROR("Failed to load shader asset for textured triangle");
-            return;
+            LT_CORE_ERROR("Failed to load material asset for textured triangle");
         }
-        m_Shader = m_ShaderAsset->GetShader();
-        m_Shader->SetInt("u_Texture", 0);
-
-        TextureSpecification textureSpec{};
-        textureSpec.GenerateMipmaps = false;
-        textureSpec.MinFilter = TextureFilter::Nearest;
-        textureSpec.MagFilter = TextureFilter::Nearest;
-        textureSpec.WrapU = TextureWrap::Repeat;
-        textureSpec.WrapV = TextureWrap::Repeat;
-
-        // Unity-style asset load: file in `Assets/` folder. stb_image supports ASCII PPM, so this is text-only.
-        m_CheckerboardTextureAssetTask = Assets::AssetManager::LoadAsync<Assets::TextureAsset>("Assets/Textures/Checker.ppm", textureSpec);
     }
 
-    void TexturedTriangleDemo::PollAsyncTextureAsset()
+    void TexturedTriangleDemo::PollMaterialReadiness()
     {
-        if (!m_CheckerboardTexture && m_CheckerboardTextureAssetTask.IsValid() && m_CheckerboardTextureAssetTask.IsDone())
+        if (!m_Material)
         {
-            Assets::TextureAsset::Ptr asset;
-            try
-            {
-                asset = m_CheckerboardTextureAssetTask.Get();
-            }
-            catch (const std::exception& e)
-            {
-                LT_CORE_ERROR("TextureAsset task threw while resolving checkerboard texture: {}", e.what());
-                m_CheckerboardTextureAssetTask = Async::Task<Assets::TextureAsset::Ptr>();
-                return;
-            }
-            catch (...)
-            {
-                LT_CORE_ERROR("TextureAsset task threw (unknown) while resolving checkerboard texture");
-                m_CheckerboardTextureAssetTask = Async::Task<Assets::TextureAsset::Ptr>();
-                return;
-            }
+            return;
+        }
 
-            if (asset && asset->GetTexture())
+        if (!m_LoggedMaterialReady)
+        {
+            auto shader = m_Material->GetShader();
+            auto tex = m_Material->GetMainTexture();
+            if (shader && tex)
             {
-                m_CheckerboardTextureAsset = asset;
-                m_CheckerboardTexture = asset->GetTexture();
-                LT_INFO("TextureAsset ready: key='{}' guid='{}' ({}x{}, id={})",
-                        asset->GetKey(),
-                        asset->GetGuid(),
-                        m_CheckerboardTexture->GetWidth(),
-                        m_CheckerboardTexture->GetHeight(),
-                        m_CheckerboardTexture->GetRendererID());
+                m_LoggedMaterialReady = true;
+                LT_INFO("Material ready: key='{}' (shader='{}', textureId={})",
+                        m_Material->GetKey(),
+                        shader->GetName(),
+                        tex->GetRendererID());
             }
         }
     }

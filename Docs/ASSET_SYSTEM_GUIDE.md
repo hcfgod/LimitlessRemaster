@@ -81,6 +81,30 @@ Important properties:
 - File: `Limitless/Source/Assets/AssetDatabase.{h,cpp}`
 - Storage: `Build/AssetDatabase.json` (under project root)
 
+## P1 Assets
+
+### `MaterialAsset`
+
+Minimal Unity-style material stored as JSON:
+
+- File: `Limitless/Source/Assets/MaterialAsset.{h,cpp}`
+- Importer: `Limitless/Source/Assets/MaterialAssetImporter.h`
+- Example: `Assets/Materials/TexturedTriangle.material.json`
+
+The material references other assets via `{ "guid": "..." }` (preferred) or `{ "key": "Assets/..." }` (convenience). When loaded, it writes dependency GUIDs into the database and `.meta`, enabling cascading hot reload.
+
+### `InputActionsAssetResource`
+
+Unity-style input actions as a first-class Asset:
+
+- File: `Limitless/Source/Assets/InputActionsAssetResource.{h,cpp}`
+- Importer: `Limitless/Source/Assets/InputActionsAssetImporter.h`
+- Example: `Assets/InputActions/Sandbox.inputactions.json`
+
+To set project-wide actions from a key:
+
+- `InputSystem::SetProjectActionAssetFromKey("Assets/InputActions/Sandbox.inputactions.json")`
+
 ### `.meta` utilities (`AssetUtils`)
 
 File: `Limitless/Source/Assets/AssetUtils.{h,cpp}`

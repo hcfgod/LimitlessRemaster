@@ -209,6 +209,23 @@ namespace Limitless
         }
     }
 
+    void SetTextureSpecificationCommand::Execute(GraphicsContext* context)
+    {
+        if (!context)
+        {
+            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
+        }
+
+        if (m_Texture)
+        {
+            m_Texture->ApplySpecification(m_Specification);
+        }
+        else
+        {
+            LT_CORE_WARN("SetTextureSpecificationCommand: texture was null (no-op)");
+        }
+    }
+
     // BindFramebufferCommand Execute implementation
     void BindFramebufferCommand::Execute(GraphicsContext* context)
     {

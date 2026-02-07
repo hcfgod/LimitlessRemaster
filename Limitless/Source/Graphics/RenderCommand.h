@@ -4,6 +4,7 @@
 #include "Core/Concurrency/LockFreeQueue.h"
 #include "Core/Debug/Log.h"
 #include "Graphics/GraphicsEnums.h"
+#include "Graphics/Texture.h"
 #include <memory>
 #include <functional>
 #include <variant>
@@ -34,6 +35,7 @@ namespace Limitless
         BindIndexBuffer,
         BindVertexBuffer,
         BindTexture,
+        SetTextureSpecification,
         BindFramebuffer,
         DrawArrays,
         DrawIndexed,
@@ -221,6 +223,21 @@ namespace Limitless
     private:
         std::shared_ptr<Texture> m_Texture;
         uint32_t m_Slot;
+    };
+
+    // Set texture sampler parameters (filtering/wrapping/mips).
+    class SetTextureSpecificationCommand : public RenderCommand
+    {
+    public:
+        SetTextureSpecificationCommand(std::shared_ptr<Texture> texture, const TextureSpecification& specification);
+
+        void Execute(GraphicsContext* context) override;
+        RenderCommandType GetType() const override { return RenderCommandType::SetTextureSpecification; }
+        std::string GetName() const override { return "SetTextureSpecification"; }
+
+    private:
+        std::shared_ptr<Texture> m_Texture;
+        TextureSpecification m_Specification{};
     };
 
     // Bind framebuffer command

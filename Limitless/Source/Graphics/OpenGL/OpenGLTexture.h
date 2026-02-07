@@ -17,6 +17,7 @@ namespace Limitless
         ~OpenGLTexture2D() override;
 
         void Bind(uint32_t slot) const override;
+        void ApplySpecification(const TextureSpecification& specification) override;
 
         uint32_t GetWidth() const override { return m_Width; }
         uint32_t GetHeight() const override { return m_Height; }

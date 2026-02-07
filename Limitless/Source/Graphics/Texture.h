@@ -40,6 +40,10 @@ namespace Limitless
 
         // Renderer handle (OpenGL texture ID, etc.) for debugging and low-level bridging.
         virtual uint32_t GetRendererID() const = 0;
+
+        // Update sampler-like parameters (filtering/wrapping/mips) for this texture.
+        // This is intended to be called from the render thread (via render commands).
+        virtual void ApplySpecification(const TextureSpecification& specification) = 0;
     };
 
     class Texture2D : public Texture

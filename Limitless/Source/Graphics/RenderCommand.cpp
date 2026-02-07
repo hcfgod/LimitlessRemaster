@@ -65,6 +65,12 @@ namespace Limitless
     {
     }
 
+    SetTextureSpecificationCommand::SetTextureSpecificationCommand(std::shared_ptr<Texture> texture, const TextureSpecification& specification)
+        : m_Texture(std::move(texture))
+        , m_Specification(specification)
+    {
+    }
+
     // BindFramebufferCommand implementation
     BindFramebufferCommand::BindFramebufferCommand(std::shared_ptr<Framebuffer> framebuffer)
         : m_Framebuffer(std::move(framebuffer))

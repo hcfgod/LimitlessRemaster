@@ -1,0 +1,17 @@
+{
+  "maps": [
+    {
+      "name": "Gameplay",
+      "enabled": true,
+      "actions": [
+        {
+          "name": "Move",
+          "type": "Axis2D",
+          "bindings": [
+            { "binding": "KeyboardAxis2D", "up": "W", "down": "S", "left": "A", "right": "D", "scale": 1.0 }
+          ]
+        }
+      ]
+    }
+  ]
+}

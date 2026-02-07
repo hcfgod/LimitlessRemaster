@@ -16,7 +16,8 @@ namespace Limitless::Assets
         Shader = 2,
         Material = 3,
         Mesh = 4,
-        Scene = 5
+        Scene = 5,
+        InputActions = 6
     };
 
     [[nodiscard]] const char* ToString(AssetType type);

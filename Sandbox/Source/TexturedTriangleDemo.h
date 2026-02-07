@@ -2,9 +2,7 @@
 
 #include "Limitless.h"
 
-#include "Assets/TextureAsset.h"
-#include "Assets/TextureAssetImporter.h"
-#include "Assets/ShaderAssetImporter.h"
+#include "Assets/MaterialAssetImporter.h"
 
 #include <future>
 #include <memory>
@@ -23,23 +21,18 @@ namespace Limitless
         void Update(float deltaTime);
         void Render(const CameraManager& cameraManager) const;
 
-        bool IsTextureReady() const { return m_CheckerboardTexture != nullptr; }
+        bool IsMaterialReady() const { return m_Material && m_Material->GetShader() && m_Material->GetMainTexture(); }
 
     private:
         void CreateResources();
-        void PollAsyncTextureAsset();
+        void PollMaterialReadiness();
 
-        // Keep asset objects alive so hot reload can update them in-place.
-        Assets::ShaderAsset::Ptr m_ShaderAsset;
-        std::shared_ptr<Shader> m_Shader;
-
-        Assets::TextureAsset::Ptr m_CheckerboardTextureAsset;
         std::shared_ptr<VertexArray> m_VAO;
         std::shared_ptr<VertexBuffer> m_VBO;
         std::shared_ptr<IndexBuffer> m_IBO;
 
-        std::shared_ptr<Texture2D> m_CheckerboardTexture;
-        Async::Task<Assets::TextureAsset::Ptr> m_CheckerboardTextureAssetTask;
+        Assets::MaterialAsset::Ptr m_Material;
+        bool m_LoggedMaterialReady = false;
 
         float m_ClearColor[4] = { 0.2f, 0.3f, 0.8f, 1.0f };
         float m_ColorChangeSpeed = 0.5f;

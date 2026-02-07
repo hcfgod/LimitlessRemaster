@@ -29,10 +29,19 @@ namespace Limitless
         }
     }
 
+    static GLint ToOpenGLMinFilter(const TextureSpecification& spec)
+    {
+        if (spec.GenerateMipmaps)
+        {
+            // Respect user's preference for nearest vs linear when mipmaps are enabled.
+            return (spec.MinFilter == TextureFilter::Nearest) ? GL_NEAREST_MIPMAP_NEAREST : GL_LINEAR_MIPMAP_LINEAR;
+        }
+        return ToOpenGLFilter(spec.MinFilter);
+    }
+
     void OpenGLTexture2D::ApplyParameters() const
     {
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
-                        m_Specification.GenerateMipmaps ? GL_LINEAR_MIPMAP_LINEAR : ToOpenGLFilter(m_Specification.MinFilter));
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, ToOpenGLMinFilter(m_Specification));
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, ToOpenGLFilter(m_Specification.MagFilter));
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, ToOpenGLWrap(m_Specification.WrapU));
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, ToOpenGLWrap(m_Specification.WrapV));
@@ -150,6 +159,19 @@ namespace Limitless
     {
         glActiveTexture(GL_TEXTURE0 + slot);
         glBindTexture(GL_TEXTURE_2D, m_RendererID);
+    }
+
+    void OpenGLTexture2D::ApplySpecification(const TextureSpecification& specification)
+    {
+        m_Specification = specification;
+
+        glBindTexture(GL_TEXTURE_2D, m_RendererID);
+        ApplyParameters();
+
+        if (m_Specification.GenerateMipmaps)
+        {
+            glGenerateMipmap(GL_TEXTURE_2D);
+        }
     }
 }
 

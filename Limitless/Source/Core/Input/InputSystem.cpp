@@ -2,6 +2,9 @@
 
 #include "Core/Debug/Log.h"
 
+#include "Assets/AssetManager.h"
+#include "Assets/InputActionsAssetImporter.h"
+
 namespace Limitless
 {
     InputSystem& InputSystem::GetInstance()
@@ -100,6 +103,18 @@ namespace Limitless
             return m_ActionAssetOverrideStack.back();
         }
         return m_ProjectActionAsset;
+    }
+
+    void InputSystem::SetProjectActionAssetFromKey(const std::string& key)
+    {
+        auto asset = Assets::AssetManager::LoadBlocking<Assets::InputActionsAssetResource>(key);
+        if (!asset || !asset->GetValue())
+        {
+            LT_CORE_ERROR("InputSystem: failed to load InputActions asset key='{}'", key);
+            return;
+        }
+
+        SetProjectActionAsset(asset->GetValue());
     }
 
     bool InputSystem::IsKeyDown(SDL_Scancode scancode) const

@@ -11,6 +11,7 @@ namespace Limitless::Assets
             case AssetType::Material:  return "Material";
             case AssetType::Mesh:      return "Mesh";
             case AssetType::Scene:     return "Scene";
+            case AssetType::InputActions: return "InputActions";
             case AssetType::Unknown:
             default:                   return "Unknown";
         }
@@ -23,6 +24,7 @@ namespace Limitless::Assets
         if (s == "Material") return AssetType::Material;
         if (s == "Mesh") return AssetType::Mesh;
         if (s == "Scene") return AssetType::Scene;
+        if (s == "InputActions") return AssetType::InputActions;
         return AssetType::Unknown;
     }
 }

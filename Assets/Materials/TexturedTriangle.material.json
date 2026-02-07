@@ -1,0 +1,11 @@
+{
+  "shader": { "key": "Assets/Shaders/TexturedTriangle.glsl" },
+  "mainTexture": { "key": "Assets/Textures/Checker.ppm" },
+  "mainTextureSpec": {
+    "minFilter": "Nearest",
+    "magFilter": "Nearest",
+    "wrapU": "Repeat",
+    "wrapV": "Repeat",
+    "generateMipmaps": false
+  }
+}
