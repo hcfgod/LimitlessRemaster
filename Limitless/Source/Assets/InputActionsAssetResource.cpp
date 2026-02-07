@@ -45,17 +45,22 @@ namespace Limitless::Assets
 
             const std::string guid = guidResult.GetValue();
 
-            const auto loaded = Limitless::InputActionAssetSerializer::LoadFromFile(resolvedPath);
-            if (loaded.IsFailure())
-            {
-                LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: load failed for '{}': {}", resolvedPath, loaded.GetError().GetErrorMessage());
-                promise.set_value(nullptr);
-                return;
-            }
-
             auto asset = AssetManager::GetOrLoad<InputActionsAssetResource>(key, [&]() -> Ptr {
-                Ptr created(new InputActionsAssetResource(key, guid, loaded.GetValue(), settings));
+                // IMPORTANT:
+                // Keep a stable InputActionAsset instance (Unity-style) and rebuild it in-place on reload.
+                // This allows InputSystem and other holders of shared_ptr<InputActionAsset> to see updates
+                // without pointer swaps.
+                auto stable = std::make_shared<Limitless::InputActionAsset>();
+                const auto loaded = Limitless::InputActionAssetSerializer::LoadInto(*stable, resolvedPath);
+                if (loaded.IsFailure())
+                {
+                    LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: load failed for '{}': {}", resolvedPath, loaded.GetError().GetErrorMessage());
+                    return nullptr;
+                }
+
+                Ptr created(new InputActionsAssetResource(key, guid, stable, settings));
                 created->m_ResolvedPath = resolvedPath;
+                created->m_Revision.fetch_add(1, std::memory_order_relaxed);
                 return created;
             });
 
@@ -81,14 +86,19 @@ namespace Limitless::Assets
         }
         m_ResolvedPath = resolvedResult.GetValue().string();
 
-        const auto loaded = Limitless::InputActionAssetSerializer::LoadFromFile(m_ResolvedPath);
+        if (!m_Value)
+        {
+            m_Value = std::make_shared<Limitless::InputActionAsset>();
+        }
+
+        const auto loaded = Limitless::InputActionAssetSerializer::LoadInto(*m_Value, m_ResolvedPath);
         if (loaded.IsFailure())
         {
             LT_CORE_ERROR("InputActionsAssetResource::Reload: load failed for '{}': {}", m_ResolvedPath, loaded.GetError().GetErrorMessage());
             return false;
         }
 
-        m_Value = loaded.GetValue();
+        m_Revision.fetch_add(1, std::memory_order_relaxed);
 
         // No deps for now.
         (void)AssetDatabase::GetInstance().SetDependencies(GetGuid(), {});

@@ -41,6 +41,7 @@ namespace Limitless
         m_ActionLookEnable = nullptr;
         m_InputAsset.reset();
         m_InputAssetResource.reset();
+        m_InputAssetRevision = 0;
         m_Settings = Settings{};
     }
 
@@ -157,6 +158,9 @@ namespace Limitless
         m_ActionLook = map->FindAction("Look");
         m_ActionBoost = map->FindAction("Boost");
         m_ActionLookEnable = map->FindAction("LookEnable");
+
+        // Seed revision tracking for hot reload.
+        m_InputAssetRevision = m_InputAssetResource ? m_InputAssetResource->GetRevision() : 0;
     }
 
     void EditorCameraController::RefreshInputAssetIfHotReloaded()
@@ -166,24 +170,14 @@ namespace Limitless
             return;
         }
 
-        auto latest = m_InputAssetResource->GetValue();
-        if (!latest || latest == m_InputAsset)
+        const uint64_t latestRevision = m_InputAssetResource->GetRevision();
+        if (latestRevision == m_InputAssetRevision)
         {
             return;
         }
 
-        // Swap override asset reference.
-        if (m_Settings.UseOverrideActionAsset && m_InputAsset)
-        {
-            GetInputSystem().PopOverrideActionAsset(m_InputAsset);
-        }
-
-        m_InputAsset = latest;
-
-        if (m_Settings.UseOverrideActionAsset && m_InputAsset)
-        {
-            GetInputSystem().PushOverrideActionAsset(m_InputAsset);
-        }
+        // Pointer is stable (reloaded in-place). We only need to refresh cached action pointers.
+        m_InputAssetRevision = latestRevision;
 
         auto* map = m_InputAsset->FindMap("Editor");
         if (!map)

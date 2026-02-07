@@ -15,6 +15,15 @@ namespace Limitless::Assets
         return assetPath + ".meta";
     }
 
+    static std::string MakeTempMetaPath(const std::string& metaPath)
+    {
+        // Keep temp in same directory for maximum rename compatibility.
+        // This does not need to be cryptographically random; it's a best-effort collision avoider.
+        static std::atomic<uint64_t> s_Counter{1};
+        const uint64_t n = s_Counter.fetch_add(1, std::memory_order_relaxed);
+        return metaPath + ".tmp." + std::to_string(n);
+    }
+
     static std::string RandomHex(uint32_t byteCount)
     {
         static std::random_device rd;
@@ -82,11 +91,10 @@ namespace Limitless::Assets
             }
         }
 
-        // Create new meta.
-        std::string guid = GenerateGuid();
-        nlohmann::json j = extraMeta;
-        j["guid"] = guid;
-
+        // Create new meta (race-safe):
+        // - Write a temp file
+        // - Attempt rename temp -> metaPath (fails if another thread created it first)
+        // - On failure due to existing, re-read the winner meta.
         try
         {
             const std::filesystem::path metaFsPath(metaPath);
@@ -95,20 +103,49 @@ namespace Limitless::Assets
                 std::filesystem::create_directories(metaFsPath.parent_path());
             }
 
-            std::ofstream out(metaPath, std::ios::out | std::ios::binary);
-            if (!out.is_open())
+            const std::string guid = GenerateGuid();
+            nlohmann::json j = extraMeta;
+            j["guid"] = guid;
+
+            const std::string tempPath = MakeTempMetaPath(metaPath);
             {
-                return Result<std::string>(ErrorCode::FileAccessDenied, "Failed to create meta file: " + metaPath);
+                std::ofstream out(tempPath, std::ios::out | std::ios::binary | std::ios::trunc);
+                if (!out.is_open())
+                {
+                    return Result<std::string>(ErrorCode::FileAccessDenied, "Failed to create temp meta file: " + tempPath);
+                }
+                out << j.dump(4);
             }
 
-            out << j.dump(4);
+            std::error_code ec;
+            std::filesystem::rename(tempPath, metaPath, ec);
+            if (!ec)
+            {
+                return guid;
+            }
+
+            // Another thread likely won the race. Remove temp and re-read.
+            std::filesystem::remove(tempPath, ec);
+            (void)ec;
+
+            // Re-read.
+            std::ifstream in(metaPath, std::ios::in | std::ios::binary);
+            if (in.is_open())
+            {
+                nlohmann::json winner;
+                in >> winner;
+                if (winner.contains("guid") && winner["guid"].is_string())
+                {
+                    return winner["guid"].get<std::string>();
+                }
+            }
+
+            return Result<std::string>(ErrorCode::FileCorrupted, "Meta file created but GUID missing: " + metaPath);
         }
         catch (const std::exception& e)
         {
-            return Result<std::string>(ErrorCode::FileAccessDenied, std::string("Failed to write meta file: ") + e.what());
+            return Result<std::string>(ErrorCode::FileAccessDenied, std::string("Failed to create meta file: ") + e.what());
         }
-
-        return guid;
     }
 
     Result<void> WriteDependencies(const std::string& assetPath, const std::vector<std::string>& dependencies)

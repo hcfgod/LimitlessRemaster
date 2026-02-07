@@ -138,6 +138,7 @@ namespace Limitless
         const std::vector<InputBinding>& GetBindings() const { return m_Bindings; }
         size_t GetBindingCount() const { return m_Bindings.size(); }
         bool SetBinding(size_t index, InputBinding binding);
+        void ClearBindings() { m_Bindings.clear(); }
 
         void SetEnabled(bool enabled);
         bool IsEnabled() const { return m_Enabled; }
@@ -190,6 +191,13 @@ namespace Limitless
 
         void Update(const InputSystem& input);
 
+        // Clear all actions. Any raw `InputAction*` pointers cached by callers become invalid.
+        void ClearActions()
+        {
+            m_Actions.clear();
+            m_ActionByName.clear();
+        }
+
     private:
         std::string m_Name;
         bool m_Enabled = true;
@@ -209,6 +217,13 @@ namespace Limitless
         const std::vector<std::unique_ptr<InputActionMap>>& GetMaps() const { return m_Maps; }
 
         void Update(const InputSystem& input);
+
+        // Clear all maps. Any raw `InputActionMap*` pointers cached by callers become invalid.
+        void ClearMaps()
+        {
+            m_Maps.clear();
+            m_MapByName.clear();
+        }
 
     private:
         std::vector<std::unique_ptr<InputActionMap>> m_Maps;

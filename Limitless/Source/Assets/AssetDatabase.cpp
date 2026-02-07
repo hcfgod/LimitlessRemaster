@@ -299,13 +299,41 @@ namespace Limitless::Assets
                 root["records"].push_back(RecordToJson(record));
             }
 
-            std::ofstream out(dbPath, std::ios::out | std::ios::binary);
-            if (!out.is_open())
+            // Atomic save (best-effort):
+            // - Write to temp file in the same directory
+            // - Replace the destination with a rename
+            //
+            // Notes:
+            // - On POSIX, rename() is atomic and replaces.
+            // - On Windows, std::filesystem::rename fails if destination exists, so we do a remove+rename.
+            //   This is not perfectly atomic on Windows, but it prevents partial writes and is much more robust
+            //   than writing directly to the destination.
+            const std::filesystem::path tmpPath = dbPath.string() + ".tmp";
             {
-                return Result<void>(ErrorCode::FileAccessDenied, "Failed to write AssetDatabase: " + dbPath.string());
+                std::ofstream out(tmpPath, std::ios::out | std::ios::binary | std::ios::trunc);
+                if (!out.is_open())
+                {
+                    return Result<void>(ErrorCode::FileAccessDenied, "Failed to write AssetDatabase temp: " + tmpPath.string());
+                }
+                out << root.dump(4);
+                out.flush();
             }
 
-            out << root.dump(4);
+            std::error_code ec;
+            std::filesystem::rename(tmpPath, dbPath, ec);
+            if (ec)
+            {
+                // Windows replacement path.
+                ec.clear();
+                std::filesystem::remove(dbPath, ec);
+                ec.clear();
+                std::filesystem::rename(tmpPath, dbPath, ec);
+                if (ec)
+                {
+                    // Leave temp for debugging if rename fails.
+                    return Result<void>(ErrorCode::FileAccessDenied, "Failed to replace AssetDatabase: " + ec.message());
+                }
+            }
         }
         catch (const std::exception& e)
         {

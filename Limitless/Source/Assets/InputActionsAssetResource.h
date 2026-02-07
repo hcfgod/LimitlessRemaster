@@ -5,6 +5,7 @@
 #include "Core/Concurrency/AsyncIO.h"
 #include "Core/Input/InputAction.h"
 
+#include <atomic>
 #include <memory>
 #include <string>
 
@@ -32,6 +33,7 @@ namespace Limitless::Assets
         bool Reload() override;
 
         const std::shared_ptr<Limitless::InputActionAsset>& GetValue() const { return m_Value; }
+        uint64_t GetRevision() const { return m_Revision.load(std::memory_order_relaxed); }
 
     private:
         InputActionsAssetResource(std::string key, std::string guid, std::shared_ptr<Limitless::InputActionAsset> value, Settings settings)
@@ -44,6 +46,7 @@ namespace Limitless::Assets
         std::string m_ResolvedPath;
         std::shared_ptr<Limitless::InputActionAsset> m_Value;
         Settings m_Settings{};
+        std::atomic<uint64_t> m_Revision{0};
     };
 }
 

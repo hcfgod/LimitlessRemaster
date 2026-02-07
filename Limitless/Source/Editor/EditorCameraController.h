@@ -72,6 +72,7 @@ namespace Limitless
 
         std::shared_ptr<InputActionAsset> m_InputAsset;
         std::shared_ptr<Assets::InputActionsAssetResource> m_InputAssetResource;
+        uint64_t m_InputAssetRevision = 0;
 
         InputAction* m_ActionMove = nullptr;
         InputAction* m_ActionLook = nullptr;

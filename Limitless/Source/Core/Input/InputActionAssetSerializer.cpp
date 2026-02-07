@@ -78,10 +78,21 @@ namespace Limitless
 
     Result<std::shared_ptr<InputActionAsset>> InputActionAssetSerializer::LoadFromFile(const std::string& path)
     {
+        auto asset = std::make_shared<InputActionAsset>();
+        const auto loaded = LoadInto(*asset, path);
+        if (loaded.IsFailure())
+        {
+            return Result<std::shared_ptr<InputActionAsset>>(loaded.GetError());
+        }
+        return asset;
+    }
+
+    Result<void> InputActionAssetSerializer::LoadInto(InputActionAsset& outAsset, const std::string& path)
+    {
         std::ifstream file(path, std::ios::in | std::ios::binary);
         if (!file.is_open())
         {
-            return Result<std::shared_ptr<InputActionAsset>>(ErrorCode::FileNotFound, "InputActionAsset file not found: " + path);
+            return Result<void>(ErrorCode::FileNotFound, "InputActionAsset file not found: " + path);
         }
 
         std::stringstream buffer;
@@ -94,20 +105,23 @@ namespace Limitless
         }
         catch (const std::exception& e)
         {
-            return Result<std::shared_ptr<InputActionAsset>>(ErrorCode::ConfigParseError, std::string("Failed to parse input action asset JSON: ") + e.what());
+            return Result<void>(ErrorCode::ConfigParseError, std::string("Failed to parse input action asset JSON: ") + e.what());
         }
-
-        auto asset = std::make_shared<InputActionAsset>();
 
         if (!root.contains("maps") || !root["maps"].is_array())
         {
-            return Result<std::shared_ptr<InputActionAsset>>(ErrorCode::InputConfigurationError, "InputActionAsset JSON missing 'maps' array");
+            return Result<void>(ErrorCode::InputConfigurationError, "InputActionAsset JSON missing 'maps' array");
         }
+
+        // IMPORTANT:
+        // This function intentionally rebuilds the asset in-place so existing shared_ptr owners
+        // keep a stable pointer. Any raw InputAction*/InputActionMap* cached by callers becomes invalid.
+        outAsset.ClearMaps();
 
         for (const auto& mapJson : root["maps"])
         {
             const std::string mapName = mapJson.value("name", "Default");
-            auto& map = asset->AddMap(mapName);
+            auto& map = outAsset.AddMap(mapName);
 
             const bool mapEnabled = mapJson.value("enabled", true);
             map.SetEnabled(mapEnabled);
@@ -123,6 +137,7 @@ namespace Limitless
                 const std::string actionName = actionJson.value("name", "Action");
                 const std::string typeStr = actionJson.value("type", "Button");
                 auto& action = map.AddAction(actionName, ParseValueType(typeStr));
+                action.ClearBindings();
 
                 const auto bindingsIt = actionJson.find("bindings");
                 if (bindingsIt == actionJson.end() || !bindingsIt->is_array())
@@ -204,7 +219,7 @@ namespace Limitless
             }
         }
 
-        return asset;
+        return Result<void>();
     }
 
     Result<void> InputActionAssetSerializer::SaveToFile(const InputActionAsset& asset, const std::string& path)
