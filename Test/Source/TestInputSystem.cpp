@@ -53,6 +53,10 @@ TEST_SUITE("Input System")
     {
         auto& input = Limitless::GetInputSystem();
 
+        // Ensure deterministic starting state (singleton persists across test cases).
+        input.OnSdlEvent(MakeKeyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_W, false, false));
+        input.OnSdlEvent(MakeMouseButtonEvent(SDL_EVENT_MOUSE_BUTTON_UP, SDL_BUTTON_RIGHT, false));
+
         input.BeginFrame();
         CHECK(input.GetMouseDelta().x == doctest::Approx(0.0f));
         CHECK(input.GetMouseWheelDelta().y == doctest::Approx(0.0f));
@@ -73,6 +77,8 @@ TEST_SUITE("Input System")
     TEST_CASE("Keyboard pressed/released flags are per-frame and repeat is ignored")
     {
         auto& input = Limitless::GetInputSystem();
+        // Ensure key starts released (singleton persists across test cases).
+        input.OnSdlEvent(MakeKeyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_W, false, false));
         input.BeginFrame();
 
         // Press W
@@ -96,11 +102,16 @@ TEST_SUITE("Input System")
         input.OnSdlEvent(MakeKeyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_W, false, false));
         CHECK(!input.IsKeyDown(SDL_SCANCODE_W));
         CHECK(input.WasKeyReleasedThisFrame(SDL_SCANCODE_W));
+
+        // Leave singleton in a clean state for following tests.
+        input.BeginFrame();
     }
 
     TEST_CASE("Mouse button state and pressed/released flags")
     {
         auto& input = Limitless::GetInputSystem();
+        // Ensure button starts released (singleton persists across test cases).
+        input.OnSdlEvent(MakeMouseButtonEvent(SDL_EVENT_MOUSE_BUTTON_UP, SDL_BUTTON_RIGHT, false));
         input.BeginFrame();
 
         input.OnSdlEvent(MakeMouseButtonEvent(SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_BUTTON_RIGHT, true));
@@ -114,6 +125,9 @@ TEST_SUITE("Input System")
         input.OnSdlEvent(MakeMouseButtonEvent(SDL_EVENT_MOUSE_BUTTON_UP, SDL_BUTTON_RIGHT, false));
         CHECK(!input.IsMouseButtonDown(SDL_BUTTON_RIGHT));
         CHECK(input.WasMouseButtonReleasedThisFrame(SDL_BUTTON_RIGHT));
+
+        // Leave singleton in a clean state for following tests.
+        input.BeginFrame();
     }
 }
 

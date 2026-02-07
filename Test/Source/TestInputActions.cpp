@@ -32,6 +32,8 @@ TEST_SUITE("Input Actions")
     TEST_CASE("Button action phase transitions: Started -> Performed -> Canceled")
     {
         auto& input = Limitless::GetInputSystem();
+        // Ensure deterministic starting state (singleton persists across test cases).
+        input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_SPACE));
 
         auto asset = std::make_shared<Limitless::InputActionAsset>();
         auto& map = asset->AddMap("Gameplay");
@@ -59,11 +61,18 @@ TEST_SUITE("Input Actions")
         input.UpdateActions();
         CHECK(jump.WasCanceledThisFrame());
         CHECK(jump.ReadButton() == false);
+
+        input.BeginFrame();
     }
 
     TEST_CASE("Axis2D from WASD evaluates as expected")
     {
         auto& input = Limitless::GetInputSystem();
+        // Ensure deterministic starting state (singleton persists across test cases).
+        input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_W));
+        input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_A));
+        input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_S));
+        input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_D));
 
         auto asset = std::make_shared<Limitless::InputActionAsset>();
         auto& map = asset->AddMap("Editor");
@@ -86,11 +95,20 @@ TEST_SUITE("Input Actions")
         const glm::vec2 v = move.ReadAxis2D();
         CHECK(v.x == doctest::Approx(1.0f));
         CHECK(v.y == doctest::Approx(1.0f));
+
+        // Cleanup
+        input.BeginFrame();
+        input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_W));
+        input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_D));
+        input.UpdateActions();
     }
 
     TEST_CASE("Override asset stack takes precedence over project asset")
     {
         auto& input = Limitless::GetInputSystem();
+        // Ensure deterministic starting state.
+        input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_A));
+        input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_B));
 
         auto project = std::make_shared<Limitless::InputActionAsset>();
         auto& projectMap = project->AddMap("Gameplay");
@@ -115,6 +133,12 @@ TEST_SUITE("Input Actions")
         CHECK(actionB.ReadButton() == true);
 
         CHECK(input.PopOverrideActionAsset(overrideAsset));
+
+        // Cleanup
+        input.BeginFrame();
+        input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_A));
+        input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_B));
+        input.UpdateActions();
     }
 }
 
