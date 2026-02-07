@@ -24,6 +24,21 @@ The engine runs input in a Unity-like frame order:
 
 This means Layers can **poll actions** during `Layer::OnUpdate()`.
 
+## Project-wide asset vs overrides (Unity-style)
+
+The engine supports two common patterns:
+
+- **Project-wide default action asset**: set once for the game/project and used everywhere.
+- **Override action asset (stack)**: temporary override (e.g., editor viewport, menu, modal UI) without changing the project default.
+
+### APIs
+
+- **Project-wide**: `InputSystem::SetProjectActionAsset(asset)`
+- **Override**: `InputSystem::PushOverrideActionAsset(asset)` / `PopOverrideActionAsset(...)`
+- **Evaluation**: `InputSystem::UpdateActions()` uses the **top override** if present, otherwise the project default.
+
+`Sandbox/TestLayer` uses an override so it behaves like a self-contained tool context.
+
 ## Key Identifiers
 
 Bindings currently use **SDL scancodes** (`SDL_Scancode`) for keyboard keys (physical keys).

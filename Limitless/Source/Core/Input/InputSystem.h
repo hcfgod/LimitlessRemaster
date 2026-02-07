@@ -31,8 +31,21 @@ namespace Limitless
         // Evaluate enabled action maps (should be called once per frame after events are pumped).
         void UpdateActions();
 
-        void SetActionAsset(std::shared_ptr<InputActionAsset> asset) { m_ActionAsset = std::move(asset); }
-        std::shared_ptr<InputActionAsset> GetActionAsset() const { return m_ActionAsset; }
+        // Unity-style ownership model:
+        // - Project-wide default action asset (used when there are no overrides).
+        // - Optional override stack (editor/gameplay layers can temporarily override without affecting the project).
+        void SetProjectActionAsset(std::shared_ptr<InputActionAsset> asset) { m_ProjectActionAsset = std::move(asset); }
+        std::shared_ptr<InputActionAsset> GetProjectActionAsset() const { return m_ProjectActionAsset; }
+
+        void PushOverrideActionAsset(std::shared_ptr<InputActionAsset> asset);
+        bool PopOverrideActionAsset(); // Pops the most recent override (if any).
+        bool PopOverrideActionAsset(const std::shared_ptr<InputActionAsset>& expectedTop); // Safer pop.
+
+        std::shared_ptr<InputActionAsset> GetActiveActionAsset() const;
+
+        // Backward compatible aliases (previous API was "global action asset").
+        void SetActionAsset(std::shared_ptr<InputActionAsset> asset) { SetProjectActionAsset(std::move(asset)); }
+        std::shared_ptr<InputActionAsset> GetActionAsset() const { return GetProjectActionAsset(); }
 
         // Device state polling
         bool IsKeyDown(SDL_Scancode scancode) const;
@@ -67,7 +80,8 @@ namespace Limitless
         glm::vec2 m_MouseDelta{0.0f, 0.0f};
         glm::vec2 m_MouseWheelDelta{0.0f, 0.0f};
 
-        std::shared_ptr<InputActionAsset> m_ActionAsset;
+        std::shared_ptr<InputActionAsset> m_ProjectActionAsset;
+        std::vector<std::shared_ptr<InputActionAsset>> m_ActionAssetOverrideStack;
     };
 
     inline InputSystem& GetInputSystem() { return InputSystem::GetInstance(); }

@@ -128,6 +128,9 @@ namespace Limitless
         float ReadAxis1D() const { return m_Value.AsAxis1D(); }
         glm::vec2 ReadAxis2D() const { return m_Value.AsAxis2D(); }
 
+        // Debug / tooling
+        std::string DebugDump() const;
+
     private:
         InputActionValue EvaluateValue(const InputSystem& input) const;
 

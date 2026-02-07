@@ -30,6 +30,12 @@ For large uploads (big textures, mesh streaming), prefer:
 
 Then poll or wait at a safe point (loading screens, frame boundaries, etc.).
 
+#### Uniform updates (current vs future)
+
+`SetShaderMat4Command` exists today as a **transitional** mechanism for demos and early engine bring-up.
+
+Long-term, the engine should move toward a **Material/Pipeline** model where per-frame/per-draw parameters are owned by a pipeline state object (or material instance), rather than calling `Shader::Set*` during render command execution.
+
 Example (async texture creation):
 
 ```cpp

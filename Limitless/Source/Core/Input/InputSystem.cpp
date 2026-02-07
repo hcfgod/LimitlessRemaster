@@ -48,10 +48,58 @@ namespace Limitless
 
     void InputSystem::UpdateActions()
     {
-        if (m_ActionAsset)
+        if (auto asset = GetActiveActionAsset())
         {
-            m_ActionAsset->Update(*this);
+            asset->Update(*this);
         }
+    }
+
+    void InputSystem::PushOverrideActionAsset(std::shared_ptr<InputActionAsset> asset)
+    {
+        if (!asset)
+        {
+            LT_CORE_WARN("InputSystem: PushOverrideActionAsset called with null asset (ignored)");
+            return;
+        }
+
+        m_ActionAssetOverrideStack.push_back(std::move(asset));
+    }
+
+    bool InputSystem::PopOverrideActionAsset()
+    {
+        if (m_ActionAssetOverrideStack.empty())
+        {
+            return false;
+        }
+
+        m_ActionAssetOverrideStack.pop_back();
+        return true;
+    }
+
+    bool InputSystem::PopOverrideActionAsset(const std::shared_ptr<InputActionAsset>& expectedTop)
+    {
+        if (m_ActionAssetOverrideStack.empty())
+        {
+            return false;
+        }
+
+        if (expectedTop && m_ActionAssetOverrideStack.back() != expectedTop)
+        {
+            LT_CORE_WARN("InputSystem: override asset pop mismatch (expected top does not match). Not popping.");
+            return false;
+        }
+
+        m_ActionAssetOverrideStack.pop_back();
+        return true;
+    }
+
+    std::shared_ptr<InputActionAsset> InputSystem::GetActiveActionAsset() const
+    {
+        if (!m_ActionAssetOverrideStack.empty())
+        {
+            return m_ActionAssetOverrideStack.back();
+        }
+        return m_ProjectActionAsset;
     }
 
     bool InputSystem::IsKeyDown(SDL_Scancode scancode) const

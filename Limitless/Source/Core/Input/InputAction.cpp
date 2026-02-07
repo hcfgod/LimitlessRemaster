@@ -3,10 +3,47 @@
 #include "Core/Debug/Log.h"
 #include "Core/Input/InputSystem.h"
 
+#include <SDL3/SDL_keyboard.h>
 #include <cmath>
+#include <sstream>
 
 namespace Limitless
 {
+    static const char* PhaseToString(InputActionPhase phase)
+    {
+        switch (phase)
+        {
+            case InputActionPhase::Disabled: return "Disabled";
+            case InputActionPhase::Waiting: return "Waiting";
+            case InputActionPhase::Started: return "Started";
+            case InputActionPhase::Performed: return "Performed";
+            case InputActionPhase::Canceled: return "Canceled";
+            default: return "Unknown";
+        }
+    }
+
+    static const char* ValueTypeToString(InputActionValueType type)
+    {
+        switch (type)
+        {
+            case InputActionValueType::Button: return "Button";
+            case InputActionValueType::Axis1D: return "Axis1D";
+            case InputActionValueType::Axis2D: return "Axis2D";
+            default: return "Unknown";
+        }
+    }
+
+    static std::string ScancodeToString(SDL_Scancode scancode)
+    {
+        // SDL returns a stable human-readable name for known scancodes.
+        const char* name = SDL_GetScancodeName(scancode);
+        if (name && name[0] != '\0')
+        {
+            return std::string(name);
+        }
+        return std::to_string(static_cast<int>(scancode));
+    }
+
     bool InputActionValue::AsButton() const
     {
         if (m_Type == InputActionValueType::Button)
@@ -253,6 +290,69 @@ namespace Limitless
                 return InputActionValue::Axis2D(v);
             }
         }
+    }
+
+    std::string InputAction::DebugDump() const
+    {
+        std::ostringstream ss;
+        ss << "InputAction '" << m_Name << "'"
+           << " type=" << ValueTypeToString(m_ValueType)
+           << " phase=" << PhaseToString(m_Phase)
+           << " enabled=" << (m_Enabled ? "true" : "false");
+
+        // Value
+        if (m_ValueType == InputActionValueType::Button)
+        {
+            ss << " value=" << (m_Value.AsButton() ? "true" : "false");
+        }
+        else if (m_ValueType == InputActionValueType::Axis1D)
+        {
+            ss << " value=" << m_Value.AsAxis1D();
+        }
+        else
+        {
+            const glm::vec2 v = m_Value.AsAxis2D();
+            ss << " value=(" << v.x << "," << v.y << ")";
+        }
+
+        // Bindings
+        ss << " bindings=[";
+        for (size_t i = 0; i < m_Bindings.size(); ++i)
+        {
+            const auto& b = m_Bindings[i];
+            if (i > 0) ss << ", ";
+
+            if (const auto* kb = std::get_if<KeyboardButtonBinding>(&b))
+            {
+                ss << "KeyboardButton(" << ScancodeToString(kb->Key) << ")";
+            }
+            else if (const auto* mb = std::get_if<MouseButtonBinding>(&b))
+            {
+                ss << "MouseButton(" << static_cast<int>(mb->Button) << ")";
+            }
+            else if (const auto* a1 = std::get_if<KeyboardAxis1DBinding>(&b))
+            {
+                ss << "KeyboardAxis1D(neg=" << ScancodeToString(a1->Negative) << ",pos=" << ScancodeToString(a1->Positive) << ")";
+            }
+            else if (const auto* a2 = std::get_if<KeyboardAxis2DBinding>(&b))
+            {
+                ss << "KeyboardAxis2D(U=" << ScancodeToString(a2->Up)
+                   << ",D=" << ScancodeToString(a2->Down)
+                   << ",L=" << ScancodeToString(a2->Left)
+                   << ",R=" << ScancodeToString(a2->Right) << ")";
+            }
+            else if (const auto* md = std::get_if<MouseDeltaBinding>(&b))
+            {
+                ss << "MouseDelta(sens=" << md->Sensitivity << ",invertY=" << (md->InvertY ? "true" : "false") << ")";
+            }
+            else
+            {
+                ss << "UnknownBinding";
+            }
+        }
+        ss << "]";
+
+        return ss.str();
     }
 
     InputActionMap::InputActionMap(std::string name)

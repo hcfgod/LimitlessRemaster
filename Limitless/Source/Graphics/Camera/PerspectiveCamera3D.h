@@ -14,9 +14,12 @@ namespace Limitless
             float FieldOfViewYDegrees = 60.0f;
             float NearPlane = 0.1f;
             float FarPlane = 1000.0f;
+
+            Settings() = default;
         };
 
-        PerspectiveCamera3D(CameraId id, std::string name, CameraUsage usage, uint32_t widthPixels, uint32_t heightPixels, Settings settings = {});
+        // NOTE: Use `Settings{}` explicitly for default args to satisfy Clang/GCC on macOS/Linux.
+        PerspectiveCamera3D(CameraId id, std::string name, CameraUsage usage, uint32_t widthPixels, uint32_t heightPixels, Settings settings = Settings{});
 
         void SetViewportSize(uint32_t widthPixels, uint32_t heightPixels) override;
 

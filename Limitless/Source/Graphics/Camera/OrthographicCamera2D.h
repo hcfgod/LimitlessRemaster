@@ -14,9 +14,12 @@ namespace Limitless
             float Zoom = 1.0f;      // 1.0 = default size
             float NearPlane = -1.0f;
             float FarPlane = 1.0f;
+
+            Settings() = default;
         };
 
-        OrthographicCamera2D(CameraId id, std::string name, CameraUsage usage, uint32_t widthPixels, uint32_t heightPixels, Settings settings = {});
+        // NOTE: Use `Settings{}` explicitly for default args to satisfy Clang/GCC on macOS/Linux.
+        OrthographicCamera2D(CameraId id, std::string name, CameraUsage usage, uint32_t widthPixels, uint32_t heightPixels, Settings settings = Settings{});
 
         void SetViewportSize(uint32_t widthPixels, uint32_t heightPixels) override;
 
