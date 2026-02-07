@@ -15,6 +15,7 @@
 // SDL scancodes are currently the engine-wide key identifier (physical keys).
 // This keeps bindings stable across keyboard layouts.
 #include <SDL3/SDL_scancode.h>
+#include <SDL3/SDL_gamepad.h>
 
 namespace Limitless
 {
@@ -94,12 +95,36 @@ namespace Limitless
         bool InvertY = false;
     };
 
+    struct GamepadButtonBinding
+    {
+        SDL_GamepadButton Button = SDL_GAMEPAD_BUTTON_INVALID;
+    };
+
+    struct GamepadAxis1DBinding
+    {
+        SDL_GamepadAxis Axis = SDL_GAMEPAD_AXIS_INVALID;
+        float Scale = 1.0f;
+        float Deadzone = 0.15f;
+    };
+
+    struct GamepadAxis2DBinding
+    {
+        SDL_GamepadAxis XAxis = SDL_GAMEPAD_AXIS_INVALID;
+        SDL_GamepadAxis YAxis = SDL_GAMEPAD_AXIS_INVALID;
+        float Scale = 1.0f;
+        float Deadzone = 0.15f;
+        bool InvertY = false;
+    };
+
     using InputBinding = std::variant<
         KeyboardButtonBinding,
         MouseButtonBinding,
         KeyboardAxis1DBinding,
         KeyboardAxis2DBinding,
-        MouseDeltaBinding>;
+        MouseDeltaBinding,
+        GamepadButtonBinding,
+        GamepadAxis1DBinding,
+        GamepadAxis2DBinding>;
 
     class InputAction final
     {
@@ -110,6 +135,9 @@ namespace Limitless
         InputActionValueType GetValueType() const { return m_ValueType; }
 
         void AddBinding(InputBinding binding);
+        const std::vector<InputBinding>& GetBindings() const { return m_Bindings; }
+        size_t GetBindingCount() const { return m_Bindings.size(); }
+        bool SetBinding(size_t index, InputBinding binding);
 
         void SetEnabled(bool enabled);
         bool IsEnabled() const { return m_Enabled; }
@@ -158,6 +186,8 @@ namespace Limitless
         InputAction* FindAction(std::string_view name);
         const InputAction* FindAction(std::string_view name) const;
 
+        const std::vector<std::unique_ptr<InputAction>>& GetActions() const { return m_Actions; }
+
         void Update(const InputSystem& input);
 
     private:
@@ -175,6 +205,8 @@ namespace Limitless
         InputActionMap& AddMap(const std::string& name);
         InputActionMap* FindMap(std::string_view name);
         const InputActionMap* FindMap(std::string_view name) const;
+
+        const std::vector<std::unique_ptr<InputActionMap>>& GetMaps() const { return m_Maps; }
 
         void Update(const InputSystem& input);
 

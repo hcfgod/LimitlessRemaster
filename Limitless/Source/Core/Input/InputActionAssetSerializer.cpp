@@ -4,6 +4,7 @@
 #include "Core/Input/InputAction.h"
 
 #include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_gamepad.h>
 
 #include <nlohmann/json.hpp>
 
@@ -45,6 +46,34 @@ namespace Limitless
             return SDL_GetScancodeFromName(name.c_str());
         }
         return SDL_SCANCODE_UNKNOWN;
+    }
+
+    static SDL_GamepadButton ParseGamepadButton(const json& obj, const char* buttonKey, const char* nameKey)
+    {
+        if (obj.contains(buttonKey))
+        {
+            return static_cast<SDL_GamepadButton>(obj[buttonKey].get<int>());
+        }
+        if (obj.contains(nameKey))
+        {
+            const std::string name = obj[nameKey].get<std::string>();
+            return SDL_GetGamepadButtonFromString(name.c_str());
+        }
+        return SDL_GAMEPAD_BUTTON_INVALID;
+    }
+
+    static SDL_GamepadAxis ParseGamepadAxis(const json& obj, const char* axisKey, const char* nameKey)
+    {
+        if (obj.contains(axisKey))
+        {
+            return static_cast<SDL_GamepadAxis>(obj[axisKey].get<int>());
+        }
+        if (obj.contains(nameKey))
+        {
+            const std::string name = obj[nameKey].get<std::string>();
+            return SDL_GetGamepadAxisFromString(name.c_str());
+        }
+        return SDL_GAMEPAD_AXIS_INVALID;
     }
 
     Result<std::shared_ptr<InputActionAsset>> InputActionAssetSerializer::LoadFromFile(const std::string& path)
@@ -143,6 +172,30 @@ namespace Limitless
                         b.InvertY = bindingJson.value("invert_y", false);
                         action.AddBinding(b);
                     }
+                    else if (bindingType == "GamepadButton")
+                    {
+                        GamepadButtonBinding b{};
+                        b.Button = ParseGamepadButton(bindingJson, "button_id", "button");
+                        action.AddBinding(b);
+                    }
+                    else if (bindingType == "GamepadAxis1D")
+                    {
+                        GamepadAxis1DBinding b{};
+                        b.Axis = ParseGamepadAxis(bindingJson, "axis_id", "axis");
+                        b.Scale = bindingJson.value("scale", 1.0f);
+                        b.Deadzone = bindingJson.value("deadzone", 0.15f);
+                        action.AddBinding(b);
+                    }
+                    else if (bindingType == "GamepadAxis2D")
+                    {
+                        GamepadAxis2DBinding b{};
+                        b.XAxis = ParseGamepadAxis(bindingJson, "x_axis_id", "x_axis");
+                        b.YAxis = ParseGamepadAxis(bindingJson, "y_axis_id", "y_axis");
+                        b.Scale = bindingJson.value("scale", 1.0f);
+                        b.Deadzone = bindingJson.value("deadzone", 0.15f);
+                        b.InvertY = bindingJson.value("invert_y", false);
+                        action.AddBinding(b);
+                    }
                     else
                     {
                         LT_CORE_WARN("InputActionAssetSerializer: unknown binding type '{}' in '{}::{}'", bindingType, mapName, actionName);
@@ -156,11 +209,125 @@ namespace Limitless
 
     Result<void> InputActionAssetSerializer::SaveToFile(const InputActionAsset& asset, const std::string& path)
     {
-        // Minimal: serialization is not yet required by the engine runtime.
-        // Implement when you introduce an editor tool that writes assets.
-        (void)asset;
-        (void)path;
-        return Result<void>(ErrorCode::NotSupported, "InputActionAssetSerializer::SaveToFile is not implemented yet");
+        json root;
+        root["maps"] = json::array();
+
+        for (const auto& mapPtr : asset.GetMaps())
+        {
+            if (!mapPtr)
+            {
+                continue;
+            }
+
+            json mapJson;
+            mapJson["name"] = mapPtr->GetName();
+            mapJson["enabled"] = mapPtr->IsEnabled();
+            mapJson["actions"] = json::array();
+
+            for (const auto& actionPtr : mapPtr->GetActions())
+            {
+                if (!actionPtr)
+                {
+                    continue;
+                }
+
+                json actionJson;
+                actionJson["name"] = actionPtr->GetName();
+                actionJson["type"] = ToString(actionPtr->GetValueType());
+                actionJson["bindings"] = json::array();
+
+                for (const auto& binding : actionPtr->GetBindings())
+                {
+                    json b;
+
+                    if (const auto* kb = std::get_if<KeyboardButtonBinding>(&binding))
+                    {
+                        b["binding"] = "KeyboardButton";
+                        b["key"] = std::string(SDL_GetScancodeName(kb->Key));
+                        b["scancode"] = static_cast<int>(kb->Key);
+                    }
+                    else if (const auto* mb = std::get_if<MouseButtonBinding>(&binding))
+                    {
+                        b["binding"] = "MouseButton";
+                        b["button"] = static_cast<int>(mb->Button);
+                    }
+                    else if (const auto* a1 = std::get_if<KeyboardAxis1DBinding>(&binding))
+                    {
+                        b["binding"] = "KeyboardAxis1D";
+                        b["negative"] = std::string(SDL_GetScancodeName(a1->Negative));
+                        b["positive"] = std::string(SDL_GetScancodeName(a1->Positive));
+                        b["negative_scancode"] = static_cast<int>(a1->Negative);
+                        b["positive_scancode"] = static_cast<int>(a1->Positive);
+                        b["negative_scale"] = a1->NegativeScale;
+                        b["positive_scale"] = a1->PositiveScale;
+                    }
+                    else if (const auto* a2 = std::get_if<KeyboardAxis2DBinding>(&binding))
+                    {
+                        b["binding"] = "KeyboardAxis2D";
+                        b["up"] = std::string(SDL_GetScancodeName(a2->Up));
+                        b["down"] = std::string(SDL_GetScancodeName(a2->Down));
+                        b["left"] = std::string(SDL_GetScancodeName(a2->Left));
+                        b["right"] = std::string(SDL_GetScancodeName(a2->Right));
+                        b["up_scancode"] = static_cast<int>(a2->Up);
+                        b["down_scancode"] = static_cast<int>(a2->Down);
+                        b["left_scancode"] = static_cast<int>(a2->Left);
+                        b["right_scancode"] = static_cast<int>(a2->Right);
+                        b["scale"] = a2->Scale;
+                    }
+                    else if (const auto* md = std::get_if<MouseDeltaBinding>(&binding))
+                    {
+                        b["binding"] = "MouseDelta";
+                        b["sensitivity"] = md->Sensitivity;
+                        b["invert_y"] = md->InvertY;
+                    }
+                    else if (const auto* gb = std::get_if<GamepadButtonBinding>(&binding))
+                    {
+                        b["binding"] = "GamepadButton";
+                        b["button"] = std::string(SDL_GetGamepadStringForButton(gb->Button));
+                        b["button_id"] = static_cast<int>(gb->Button);
+                    }
+                    else if (const auto* g1 = std::get_if<GamepadAxis1DBinding>(&binding))
+                    {
+                        b["binding"] = "GamepadAxis1D";
+                        b["axis"] = std::string(SDL_GetGamepadStringForAxis(g1->Axis));
+                        b["axis_id"] = static_cast<int>(g1->Axis);
+                        b["scale"] = g1->Scale;
+                        b["deadzone"] = g1->Deadzone;
+                    }
+                    else if (const auto* g2 = std::get_if<GamepadAxis2DBinding>(&binding))
+                    {
+                        b["binding"] = "GamepadAxis2D";
+                        b["x_axis"] = std::string(SDL_GetGamepadStringForAxis(g2->XAxis));
+                        b["y_axis"] = std::string(SDL_GetGamepadStringForAxis(g2->YAxis));
+                        b["x_axis_id"] = static_cast<int>(g2->XAxis);
+                        b["y_axis_id"] = static_cast<int>(g2->YAxis);
+                        b["scale"] = g2->Scale;
+                        b["deadzone"] = g2->Deadzone;
+                        b["invert_y"] = g2->InvertY;
+                    }
+
+                    if (!b.empty())
+                    {
+                        actionJson["bindings"].push_back(std::move(b));
+                    }
+                }
+
+                mapJson["actions"].push_back(std::move(actionJson));
+            }
+
+            root["maps"].push_back(std::move(mapJson));
+        }
+
+        std::ofstream file(path, std::ios::out | std::ios::binary | std::ios::trunc);
+        if (!file.is_open())
+        {
+            return Result<void>(ErrorCode::FileNotFound, "Failed to open input action asset for writing: " + path);
+        }
+
+        file << root.dump(2);
+        file.close();
+
+        return Result<void>();
     }
 }
 

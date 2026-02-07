@@ -1,23 +1,27 @@
-#include "EditorCameraController.h"
+#include "Editor/EditorCameraController.h"
 
 #include "Assets/AssetManager.h"
 #include "Assets/InputActionsAssetImporter.h"
 
 namespace Limitless
 {
-    void EditorCameraController::Initialize(CameraManager& cameraManager, CameraId cameraId)
+    void EditorCameraController::Initialize(CameraManager& cameraManager, CameraId cameraId, const Settings& settings)
     {
+        m_Settings = settings;
         m_CameraManager = &cameraManager;
         m_CameraId = cameraId;
         EnsureInputAsset();
 
         // Non-project-wide override: editor camera input should not overwrite the project default.
-        GetInputSystem().PushOverrideActionAsset(m_InputAsset);
+        if (m_Settings.UseOverrideActionAsset && m_InputAsset)
+        {
+            GetInputSystem().PushOverrideActionAsset(m_InputAsset);
+        }
     }
 
     void EditorCameraController::Shutdown()
     {
-        if (m_InputAsset)
+        if (m_Settings.UseOverrideActionAsset && m_InputAsset)
         {
             GetInputSystem().PopOverrideActionAsset(m_InputAsset);
         }
@@ -36,6 +40,8 @@ namespace Limitless
         m_ActionBoost = nullptr;
         m_ActionLookEnable = nullptr;
         m_InputAsset.reset();
+        m_InputAssetResource.reset();
+        m_Settings = {};
     }
 
     void EditorCameraController::Update(float deltaTime)
@@ -101,13 +107,17 @@ namespace Limitless
             return;
         }
 
-        // Prefer Unity-style asset file so Sandbox can validate the full pipeline.
-        m_InputAssetResource = Assets::AssetManager::LoadBlocking<Assets::InputActionsAssetResource>("Assets/InputActions/Sandbox.inputactions.json");
-        if (m_InputAssetResource && m_InputAssetResource->GetValue())
+        // Prefer Unity-style asset file so editor tools validate the full pipeline.
+        if (!m_Settings.InputActionsAssetKey.empty())
         {
-            m_InputAsset = m_InputAssetResource->GetValue();
+            m_InputAssetResource = Assets::AssetManager::LoadBlocking<Assets::InputActionsAssetResource>(m_Settings.InputActionsAssetKey);
+            if (m_InputAssetResource && m_InputAssetResource->GetValue())
+            {
+                m_InputAsset = m_InputAssetResource->GetValue();
+            }
         }
-        else
+
+        if (!m_InputAsset)
         {
             // Fallback to hardcoded bindings (keeps controller usable even without assets).
             m_InputAsset = std::make_shared<InputActionAsset>();
@@ -139,7 +149,7 @@ namespace Limitless
         auto* map = m_InputAsset ? m_InputAsset->FindMap("Editor") : nullptr;
         if (!map)
         {
-            LT_CORE_ERROR("EditorCameraController: InputActionAsset missing map 'Editor'");
+            LT_CORE_ERROR("EditorCameraController: InputActionAsset missing map 'Editor' (assetKey='{}')", m_Settings.InputActionsAssetKey);
             return;
         }
 
@@ -163,13 +173,17 @@ namespace Limitless
         }
 
         // Swap override asset reference.
-        if (m_InputAsset)
+        if (m_Settings.UseOverrideActionAsset && m_InputAsset)
         {
             GetInputSystem().PopOverrideActionAsset(m_InputAsset);
         }
 
         m_InputAsset = latest;
-        GetInputSystem().PushOverrideActionAsset(m_InputAsset);
+
+        if (m_Settings.UseOverrideActionAsset && m_InputAsset)
+        {
+            GetInputSystem().PushOverrideActionAsset(m_InputAsset);
+        }
 
         auto* map = m_InputAsset->FindMap("Editor");
         if (!map)

@@ -2,6 +2,9 @@
 
 #include "Limitless.h"
 
+#include <memory>
+#include <string>
+
 namespace Limitless
 {
     namespace Assets
@@ -9,17 +12,37 @@ namespace Limitless
         class InputActionsAssetResource;
     }
 
-    // Small, reusable editor-style free-look camera controller:
-    // - WASD moves
-    // - RMB enables mouse-look and locks/hides cursor
+    // -----------------------------------------------------------------------------
+    // EditorCameraController
+    // Reusable editor-style free-look camera controller for tools/editor runtime:
+    // - WASD moves (keyboard)
+    // - Mouse delta controls look (when LookEnable is held, e.g., RMB)
     // - Shift boosts movement speed
+    // - Optional gamepad bindings can be provided via the same actions asset.
+    //
+    // The controller uses an InputActionAsset override (Unity-style) so editor input
+    // never overwrites the project-wide gameplay input actions.
+    // -----------------------------------------------------------------------------
     class EditorCameraController final
     {
     public:
+        struct Settings
+        {
+            // Unity-style input actions asset file containing an "Editor" map with:
+            // - Move (Axis2D)
+            // - Look (Axis2D)
+            // - Boost (Button)
+            // - LookEnable (Button)
+            std::string InputActionsAssetKey = "Assets/InputActions/EditorCamera.inputactions.json";
+
+            // If true, the controller pushes an override asset while active.
+            bool UseOverrideActionAsset = true;
+        };
+
         EditorCameraController() = default;
         ~EditorCameraController() = default;
 
-        void Initialize(CameraManager& cameraManager, CameraId cameraId);
+        void Initialize(CameraManager& cameraManager, CameraId cameraId, const Settings& settings = Settings{});
         void Shutdown();
 
         void Update(float deltaTime);
@@ -39,8 +62,11 @@ namespace Limitless
         void EnsureInputAsset();
         void RefreshInputAssetIfHotReloaded();
 
+        Settings m_Settings{};
+
         std::shared_ptr<InputActionAsset> m_InputAsset;
         std::shared_ptr<Assets::InputActionsAssetResource> m_InputAssetResource;
+
         InputAction* m_ActionMove = nullptr;
         InputAction* m_ActionLook = nullptr;
         InputAction* m_ActionBoost = nullptr;

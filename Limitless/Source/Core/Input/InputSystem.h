@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 
 #include <SDL3/SDL_events.h>
+#include <SDL3/SDL_gamepad.h>
 
 #include <array>
 #include <cstdint>
@@ -12,6 +13,8 @@
 
 namespace Limitless
 {
+    class InputRebinding;
+
     class InputSystem final
     {
     public:
@@ -64,6 +67,15 @@ namespace Limitless
         glm::vec2 GetMouseDelta() const { return m_MouseDelta; }
         glm::vec2 GetMouseWheelDelta() const { return m_MouseWheelDelta; }
 
+        // Gamepad (single "primary" gamepad for now; extend to player indexing later).
+        bool HasGamepad() const { return m_Gamepad != nullptr; }
+        bool IsGamepadButtonDown(SDL_GamepadButton button) const;
+        float GetGamepadAxis(SDL_GamepadAxis axis) const;
+
+        // Runtime rebinding support (optional).
+        void SetRebindingSession(std::shared_ptr<InputRebinding> session) { m_RebindingSession = std::move(session); }
+        std::shared_ptr<InputRebinding> GetRebindingSession() const { return m_RebindingSession; }
+
     private:
         static constexpr size_t kMaxMouseButtons = 8;
 
@@ -71,6 +83,11 @@ namespace Limitless
         void OnMouseMotion(float x, float y, float dx, float dy);
         void OnMouseButton(uint8_t button, bool down);
         void OnMouseWheel(float x, float y);
+
+        void OnGamepadAdded(SDL_JoystickID which);
+        void OnGamepadRemoved(SDL_JoystickID which);
+        void OnGamepadAxis(SDL_JoystickID which, SDL_GamepadAxis axis, int16_t value);
+        void OnGamepadButton(SDL_JoystickID which, SDL_GamepadButton button, bool down);
 
         std::array<uint8_t, SDL_SCANCODE_COUNT> m_KeyDown{};
         std::array<uint8_t, SDL_SCANCODE_COUNT> m_KeyPressedThisFrame{};
@@ -84,8 +101,17 @@ namespace Limitless
         glm::vec2 m_MouseDelta{0.0f, 0.0f};
         glm::vec2 m_MouseWheelDelta{0.0f, 0.0f};
 
+        SDL_JoystickID m_GamepadId = 0;
+        SDL_Gamepad* m_Gamepad = nullptr;
+        std::array<int16_t, SDL_GAMEPAD_AXIS_COUNT> m_GamepadAxis{};
+        std::array<uint8_t, SDL_GAMEPAD_BUTTON_COUNT> m_GamepadButtonDown{};
+        std::array<uint8_t, SDL_GAMEPAD_BUTTON_COUNT> m_GamepadButtonPressedThisFrame{};
+        std::array<uint8_t, SDL_GAMEPAD_BUTTON_COUNT> m_GamepadButtonReleasedThisFrame{};
+
         std::shared_ptr<InputActionAsset> m_ProjectActionAsset;
         std::vector<std::shared_ptr<InputActionAsset>> m_ActionAssetOverrideStack;
+
+        std::shared_ptr<InputRebinding> m_RebindingSession;
     };
 
     inline InputSystem& GetInputSystem() { return InputSystem::GetInstance(); }

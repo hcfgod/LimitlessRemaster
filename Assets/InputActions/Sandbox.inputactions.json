@@ -15,7 +15,7 @@
           "name": "Look",
           "type": "Axis2D",
           "bindings": [
-            { "binding": "MouseDelta", "sensitivity": 1.0, "invert_y": false }
+            { "binding": "MouseDelta", "sensitivity": 0.5, "invert_y": false }
           ]
         },
         {

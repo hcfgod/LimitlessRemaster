@@ -1,6 +1,6 @@
 #include "TestLayer.h"
 
-#include "EditorCameraController.h"
+#include "Editor/EditorCameraController.h"
 #include "TexturedTriangleDemo.h"
 
 namespace Limitless
@@ -45,7 +45,10 @@ namespace Limitless
         m_TriangleDemo->Initialize();
 
         m_EditorCameraController = std::make_unique<EditorCameraController>();
-        m_EditorCameraController->Initialize(m_CameraManager, m_CameraId);
+        EditorCameraController::Settings editorCameraSettings{};
+        editorCameraSettings.InputActionsAssetKey = "Assets/InputActions/EditorCamera.inputactions.json";
+        editorCameraSettings.UseOverrideActionAsset = true;
+        m_EditorCameraController->Initialize(m_CameraManager, m_CameraId, editorCameraSettings);
     }
 
     void TestLayer::OnDetach()

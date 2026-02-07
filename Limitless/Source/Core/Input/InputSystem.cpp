@@ -5,6 +5,10 @@
 #include "Assets/AssetManager.h"
 #include "Assets/InputActionsAssetImporter.h"
 
+#include "Core/Input/InputRebinding.h"
+
+#include <algorithm>
+
 namespace Limitless
 {
     InputSystem& InputSystem::GetInstance()
@@ -21,12 +25,24 @@ namespace Limitless
         m_MousePressedThisFrame.fill(0);
         m_MouseReleasedThisFrame.fill(0);
 
+        m_GamepadButtonPressedThisFrame.fill(0);
+        m_GamepadButtonReleasedThisFrame.fill(0);
+
         m_MouseDelta = glm::vec2(0.0f);
         m_MouseWheelDelta = glm::vec2(0.0f);
     }
 
     void InputSystem::OnSdlEvent(const SDL_Event& event)
     {
+        // Optional: allow an active rebinding session to capture the next input.
+        if (m_RebindingSession && m_RebindingSession->IsActive())
+        {
+            if (m_RebindingSession->TryConsumeEvent(event))
+            {
+                return;
+            }
+        }
+
         switch (event.type)
         {
             case SDL_EVENT_KEY_DOWN:
@@ -45,6 +61,23 @@ namespace Limitless
 
             case SDL_EVENT_MOUSE_WHEEL:
                 OnMouseWheel(event.wheel.x, event.wheel.y);
+                break;
+
+            case SDL_EVENT_GAMEPAD_ADDED:
+                OnGamepadAdded(event.gdevice.which);
+                break;
+
+            case SDL_EVENT_GAMEPAD_REMOVED:
+                OnGamepadRemoved(event.gdevice.which);
+                break;
+
+            case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+                OnGamepadAxis(event.gaxis.which, static_cast<SDL_GamepadAxis>(event.gaxis.axis), event.gaxis.value);
+                break;
+
+            case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+            case SDL_EVENT_GAMEPAD_BUTTON_UP:
+                OnGamepadButton(event.gbutton.which, static_cast<SDL_GamepadButton>(event.gbutton.button), event.gbutton.down);
                 break;
         }
     }
@@ -169,6 +202,122 @@ namespace Limitless
             return false;
         }
         return m_MouseReleasedThisFrame[button] != 0;
+    }
+
+    bool InputSystem::IsGamepadButtonDown(SDL_GamepadButton button) const
+    {
+        if (button < 0 || button >= SDL_GAMEPAD_BUTTON_COUNT)
+        {
+            return false;
+        }
+        return m_GamepadButtonDown[static_cast<size_t>(button)] != 0;
+    }
+
+    float InputSystem::GetGamepadAxis(SDL_GamepadAxis axis) const
+    {
+        if (axis < 0 || axis >= SDL_GAMEPAD_AXIS_COUNT)
+        {
+            return 0.0f;
+        }
+
+        const int16_t v = m_GamepadAxis[static_cast<size_t>(axis)];
+
+        // Triggers are typically [0..32767], sticks are [-32768..32767].
+        if (axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)
+        {
+            return std::clamp(static_cast<float>(v) / 32767.0f, 0.0f, 1.0f);
+        }
+        return std::clamp(static_cast<float>(v) / 32767.0f, -1.0f, 1.0f);
+    }
+
+    void InputSystem::OnGamepadAdded(SDL_JoystickID which)
+    {
+        if (m_Gamepad != nullptr)
+        {
+            // Keep current primary gamepad.
+            return;
+        }
+
+        if (!SDL_IsGamepad(which))
+        {
+            return;
+        }
+
+        SDL_Gamepad* opened = SDL_OpenGamepad(which);
+        if (!opened)
+        {
+            LT_CORE_WARN("InputSystem: SDL_OpenGamepad failed (which={})", static_cast<int>(which));
+            return;
+        }
+
+        m_GamepadId = which;
+        m_Gamepad = opened;
+        m_GamepadAxis.fill(0);
+        m_GamepadButtonDown.fill(0);
+        m_GamepadButtonPressedThisFrame.fill(0);
+        m_GamepadButtonReleasedThisFrame.fill(0);
+
+        const char* name = SDL_GetGamepadName(m_Gamepad);
+        LT_INFO("InputSystem: gamepad connected (id={}, name='{}')", static_cast<int>(which), (name ? name : "Unknown"));
+    }
+
+    void InputSystem::OnGamepadRemoved(SDL_JoystickID which)
+    {
+        if (m_Gamepad == nullptr || which != m_GamepadId)
+        {
+            return;
+        }
+
+        SDL_CloseGamepad(m_Gamepad);
+        m_Gamepad = nullptr;
+        m_GamepadId = 0;
+        m_GamepadAxis.fill(0);
+        m_GamepadButtonDown.fill(0);
+        m_GamepadButtonPressedThisFrame.fill(0);
+        m_GamepadButtonReleasedThisFrame.fill(0);
+
+        LT_INFO("InputSystem: gamepad disconnected (id={})", static_cast<int>(which));
+    }
+
+    void InputSystem::OnGamepadAxis(SDL_JoystickID which, SDL_GamepadAxis axis, int16_t value)
+    {
+        if (m_Gamepad == nullptr || which != m_GamepadId)
+        {
+            return;
+        }
+
+        if (axis < 0 || axis >= SDL_GAMEPAD_AXIS_COUNT)
+        {
+            return;
+        }
+
+        m_GamepadAxis[static_cast<size_t>(axis)] = value;
+    }
+
+    void InputSystem::OnGamepadButton(SDL_JoystickID which, SDL_GamepadButton button, bool down)
+    {
+        if (m_Gamepad == nullptr || which != m_GamepadId)
+        {
+            return;
+        }
+
+        if (button < 0 || button >= SDL_GAMEPAD_BUTTON_COUNT)
+        {
+            return;
+        }
+
+        const size_t idx = static_cast<size_t>(button);
+        const bool wasDown = (m_GamepadButtonDown[idx] != 0);
+        m_GamepadButtonDown[idx] = down ? 1 : 0;
+
+        if (!wasDown && down)
+        {
+            m_GamepadButtonPressedThisFrame[idx] = 1;
+        }
+        else if (wasDown && !down)
+        {
+            m_GamepadButtonReleasedThisFrame[idx] = 1;
+        }
     }
 
     void InputSystem::OnKey(SDL_Scancode scancode, bool down, bool repeat)

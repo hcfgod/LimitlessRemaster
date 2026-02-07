@@ -4,6 +4,7 @@
 #include "Core/Input/InputSystem.h"
 
 #include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_gamepad.h>
 #include <cmath>
 #include <sstream>
 
@@ -42,6 +43,50 @@ namespace Limitless
             return std::string(name);
         }
         return std::to_string(static_cast<int>(scancode));
+    }
+
+    static std::string GamepadButtonToString(SDL_GamepadButton button)
+    {
+        const char* s = SDL_GetGamepadStringForButton(button);
+        if (s && s[0] != '\0')
+        {
+            return std::string(s);
+        }
+        return std::to_string(static_cast<int>(button));
+    }
+
+    static std::string GamepadAxisToString(SDL_GamepadAxis axis)
+    {
+        const char* s = SDL_GetGamepadStringForAxis(axis);
+        if (s && s[0] != '\0')
+        {
+            return std::string(s);
+        }
+        return std::to_string(static_cast<int>(axis));
+    }
+
+    static float ApplyDeadzone1D(float v, float deadzone)
+    {
+        if (deadzone < 0.0f) { deadzone = 0.0f; }
+        if (std::abs(v) <= deadzone)
+        {
+            return 0.0f;
+        }
+        const float sign = (v < 0.0f) ? -1.0f : 1.0f;
+        const float mag = (std::abs(v) - deadzone) / (1.0f - deadzone);
+        return sign * std::clamp(mag, 0.0f, 1.0f);
+    }
+
+    static glm::vec2 ApplyDeadzone2D(const glm::vec2& v, float deadzone)
+    {
+        if (deadzone < 0.0f) { deadzone = 0.0f; }
+        const float len = glm::length(v);
+        if (len <= deadzone)
+        {
+            return glm::vec2(0.0f);
+        }
+        const float scaled = (len - deadzone) / (1.0f - deadzone);
+        return glm::normalize(v) * std::clamp(scaled, 0.0f, 1.0f);
     }
 
     bool InputActionValue::AsButton() const
@@ -153,6 +198,16 @@ namespace Limitless
         m_Bindings.push_back(std::move(binding));
     }
 
+    bool InputAction::SetBinding(size_t index, InputBinding binding)
+    {
+        if (index >= m_Bindings.size())
+        {
+            return false;
+        }
+        m_Bindings[index] = std::move(binding);
+        return true;
+    }
+
     void InputAction::SetEnabled(bool enabled)
     {
         m_Enabled = enabled;
@@ -244,6 +299,10 @@ namespace Limitless
                     {
                         down = down || input.IsMouseButtonDown(mouse->Button);
                     }
+                    else if (const auto* pad = std::get_if<GamepadButtonBinding>(&b))
+                    {
+                        down = down || input.IsGamepadButtonDown(pad->Button);
+                    }
                 }
                 return InputActionValue::Button(down);
             }
@@ -256,6 +315,11 @@ namespace Limitless
                     {
                         if (input.IsKeyDown(axis->Negative)) { v += axis->NegativeScale; }
                         if (input.IsKeyDown(axis->Positive)) { v += axis->PositiveScale; }
+                    }
+                    else if (const auto* pad = std::get_if<GamepadAxis1DBinding>(&b))
+                    {
+                        const float raw = input.GetGamepadAxis(pad->Axis);
+                        v += ApplyDeadzone1D(raw, pad->Deadzone) * pad->Scale;
                     }
                 }
                 // Clamp to [-1, 1] for keyboard axes.
@@ -284,6 +348,16 @@ namespace Limitless
                             d.y = -d.y;
                         }
                         v += d;
+                    }
+                    else if (const auto* pad = std::get_if<GamepadAxis2DBinding>(&b))
+                    {
+                        glm::vec2 stick(input.GetGamepadAxis(pad->XAxis), input.GetGamepadAxis(pad->YAxis));
+                        if (pad->InvertY)
+                        {
+                            stick.y = -stick.y;
+                        }
+                        stick = ApplyDeadzone2D(stick, pad->Deadzone) * pad->Scale;
+                        v += stick;
                     }
                 }
 
@@ -344,6 +418,22 @@ namespace Limitless
             else if (const auto* md = std::get_if<MouseDeltaBinding>(&b))
             {
                 ss << "MouseDelta(sens=" << md->Sensitivity << ",invertY=" << (md->InvertY ? "true" : "false") << ")";
+            }
+            else if (const auto* gb = std::get_if<GamepadButtonBinding>(&b))
+            {
+                ss << "GamepadButton(" << GamepadButtonToString(gb->Button) << ")";
+            }
+            else if (const auto* g1 = std::get_if<GamepadAxis1DBinding>(&b))
+            {
+                ss << "GamepadAxis1D(axis=" << GamepadAxisToString(g1->Axis) << ",deadzone=" << g1->Deadzone << ",scale=" << g1->Scale << ")";
+            }
+            else if (const auto* g2 = std::get_if<GamepadAxis2DBinding>(&b))
+            {
+                ss << "GamepadAxis2D(x=" << GamepadAxisToString(g2->XAxis)
+                   << ",y=" << GamepadAxisToString(g2->YAxis)
+                   << ",deadzone=" << g2->Deadzone
+                   << ",scale=" << g2->Scale
+                   << ",invertY=" << (g2->InvertY ? "true" : "false") << ")";
             }
             else
             {
