@@ -82,6 +82,7 @@ project "Limitless"
         {
             "SDL3",
             "Cocoa.framework",
+            "CoreServices.framework",
             "IOKit.framework",
             "CoreAudio.framework",
             "AudioToolbox.framework",

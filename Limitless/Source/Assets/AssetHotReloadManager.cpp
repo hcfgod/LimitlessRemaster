@@ -5,6 +5,9 @@
 
 #include "Core/Debug/Log.h"
 
+#include <deque>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Limitless::Assets
@@ -226,6 +229,29 @@ namespace Limitless::Assets
                 }
             }
 
+            // Coalesce jobs and cascades:
+            // - Build a reverse-dependency BFS starting from all changed assets.
+            // - Guard against dependency cycles.
+            //
+            // NOTE:
+            // AssetDatabase::GetDependentsOf is O(N) today (scan). We cache per GUID in this batch.
+            std::unordered_map<std::string, std::vector<AssetDatabase::Record>> dependentsCache;
+            auto getDependentsCached = [&](const std::string& guid) -> const std::vector<AssetDatabase::Record>&
+            {
+                auto it = dependentsCache.find(guid);
+                if (it != dependentsCache.end())
+                {
+                    return it->second;
+                }
+                auto deps = AssetDatabase::GetInstance().GetDependentsOf(guid);
+                auto [insIt, _] = dependentsCache.emplace(guid, std::move(deps));
+                return insIt->second;
+            };
+
+            std::deque<AssetDatabase::Record> queue;
+            std::unordered_set<std::string> visitedGuids;
+            visitedGuids.reserve(256);
+
             for (const auto& job : ready)
             {
                 auto recordResult = AssetDatabase::GetInstance().FindByKey(job.key);
@@ -235,33 +261,44 @@ namespace Limitless::Assets
                 }
 
                 const auto record = recordResult.GetValue();
-                LT_CORE_INFO("AssetHotReload: reimporting key='{}'", record.Key);
 
+                // Root asset: reimport its metadata (source changed).
+                LT_CORE_INFO("AssetHotReload: reimporting key='{}'", record.Key);
                 const auto reimportResult = AssetDatabase::GetInstance().ImportOrUpdate(record.Key, record.Type, record.ImporterSettings);
                 if (reimportResult.IsFailure())
                 {
                     LT_CORE_WARN("AssetHotReload: reimport failed for '{}': {}", record.Key, reimportResult.GetError().GetErrorMessage());
                 }
 
-                const std::shared_ptr<Asset> cached = AssetManager::GetCachedByKey(record.Key);
-                if (cached)
+                queue.push_back(record);
+            }
+
+            while (!queue.empty())
+            {
+                const auto current = queue.front();
+                queue.pop_front();
+
+                if (current.Guid.empty() || current.Key.empty())
                 {
-                    const bool ok = cached->Reload();
-                    LT_CORE_INFO("AssetHotReload: reload key='{}' result={}", record.Key, ok ? "success" : "no-op");
-                }
-                else
-                {
-                    LT_CORE_INFO("AssetHotReload: key='{}' not currently loaded (no cached instance to reload)", record.Key);
+                    continue;
                 }
 
-                const auto dependents = AssetDatabase::GetInstance().GetDependentsOf(record.Guid);
+                if (!visitedGuids.emplace(current.Guid).second)
+                {
+                    continue; // cycle guard + coalescing
+                }
+
+                if (const std::shared_ptr<Asset> cached = AssetManager::GetCachedByKey(current.Key))
+                {
+                    const bool ok = cached->Reload();
+                    LT_CORE_INFO("AssetHotReload: reload key='{}' result={}", current.Key, ok ? "success" : "no-op");
+                }
+
+                // Cascade to dependents.
+                const auto& dependents = getDependentsCached(current.Guid);
                 for (const auto& dep : dependents)
                 {
-                    std::shared_ptr<Asset> depCached = AssetManager::GetCachedByKey(dep.Key);
-                    if (depCached)
-                    {
-                        (void)depCached->Reload();
-                    }
+                    queue.push_back(dep);
                 }
             }
         }

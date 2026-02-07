@@ -4,20 +4,24 @@
 #include <chrono>
 #include <filesystem>
 #include <functional>
-#include <mutex>
+#include <memory>
 #include <string>
 #include <thread>
-#include <unordered_map>
 
 namespace Limitless::Assets
 {
+    struct AssetTreeWatcherBackend;
+
     // -----------------------------------------------------------------------------
     // AssetTreeWatcher
     // One watcher for the whole Assets/ directory tree.
     //
-    // Implementation: polling scan using std::filesystem::recursive_directory_iterator.
-    // This is portable and keeps the codebase simple. For AAA-grade performance later,
-    // we can swap the backend with platform native file notifications.
+    // Implementation: platform-native directory notifications when available:
+    // - Windows: ReadDirectoryChangesW
+    // - Linux: inotify
+    // - macOS: FSEvents
+    //
+    // Fallback: portable polling scan using std::filesystem::recursive_directory_iterator.
     //
     // Callback: called on the watch thread when a file is added/modified/removed.
     // -----------------------------------------------------------------------------
@@ -41,7 +45,7 @@ namespace Limitless::Assets
 
     private:
         void ThreadMain();
-        void ScanOnce();
+        void EmitPathIfRelevant(const std::filesystem::path& path);
 
     private:
         std::filesystem::path m_Root;
@@ -53,9 +57,7 @@ namespace Limitless::Assets
         std::atomic<bool> m_StopRequested{false};
         std::thread m_Thread;
 
-        // path -> last_write_time (or missing)
-        std::mutex m_StateMutex;
-        std::unordered_map<std::string, std::filesystem::file_time_type> m_LastWriteTimes;
+        std::unique_ptr<AssetTreeWatcherBackend> m_Backend;
     };
 }
 

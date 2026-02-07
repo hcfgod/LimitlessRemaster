@@ -1,4 +1,5 @@
 #pragma once
+#include "Core/Error.h"
 #include "Core/Debug/Log.h"
 #include <atomic>
 #include <future>
@@ -130,6 +131,12 @@ namespace Limitless
             Task<std::vector<std::string>> ReadLinesAsync(const std::string& path);
             Task<void> AppendFileAsync(const std::string& path, const std::string& content);
 
+            // Result-returning variants (preferred for engine code).
+            // These never throw across the async boundary; failures are returned as Result<T>.
+            Task<Result<std::string>> ReadFileAsyncResult(const std::string& path);
+            Task<Result<void>> WriteFileAsyncResult(const std::string& path, const std::string& content);
+            Task<Result<void>> AppendFileAsyncResult(const std::string& path, const std::string& content);
+
             // Directory operations
             Task<std::vector<std::string>> ListDirectoryAsync(const std::string& path);
             Task<bool> CreateDirectoryAsync(const std::string& path);
@@ -139,6 +146,9 @@ namespace Limitless
             // Configuration operations
             Task<void> SaveConfigAsync(const std::string& path, const nlohmann::json& config);
             Task<nlohmann::json> LoadConfigAsync(const std::string& path);
+
+            Task<Result<void>> SaveConfigAsyncResult(const std::string& path, const nlohmann::json& config);
+            Task<Result<nlohmann::json>> LoadConfigAsyncResult(const std::string& path);
 
             // Utility operations
             Task<size_t> GetFileSizeAsync(const std::string& path);

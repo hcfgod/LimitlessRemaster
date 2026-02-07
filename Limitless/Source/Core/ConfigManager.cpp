@@ -139,109 +139,105 @@ namespace Limitless
     Async::Task<void> ConfigManager::LoadFromFileAsync(const std::string& filename)
     {
         return Async::Task<void>([this, filename]() -> void {
-            try
+            auto configTask = Async::GetAsyncIO().LoadConfigAsyncResult(filename);
+            const auto configResult = configTask.Get();
+            if (configResult.IsFailure())
             {
-                auto configTask = Async::LoadConfigAsync(filename);
-                auto config = configTask.Get();
-
-                std::unique_lock<std::shared_mutex> lock(m_ConfigMutex);
-                m_Config.clear();
-
-                // Flatten nested JSON of arbitrary depth into "dot" keys.
-                // This keeps hot reload stable for nested structures (e.g. window.position.x/y).
-                ProcessJsonObject(config, "");
-
-                m_TotalAsyncOperations.fetch_add(1, std::memory_order_relaxed);
-                LT_CORE_INFO("Configuration loaded from file: {} ({} entries)", filename, m_Config.size());
+                LT_CORE_ERROR("Failed to load configuration from file: {} - {}", filename, configResult.GetError().GetErrorMessage());
+                return;
             }
-            catch (const std::exception& e)
-            {
-                LT_CORE_ERROR("Failed to load configuration from file: {} - {}", filename, e.what());
-                throw;
-            }
+
+            const auto& config = configResult.GetValue();
+
+            std::unique_lock<std::shared_mutex> lock(m_ConfigMutex);
+            m_Config.clear();
+
+            // Flatten nested JSON of arbitrary depth into "dot" keys.
+            // This keeps hot reload stable for nested structures (e.g. window.position.x/y).
+            ProcessJsonObject(config, "");
+
+            m_TotalAsyncOperations.fetch_add(1, std::memory_order_relaxed);
+            LT_CORE_INFO("Configuration loaded from file: {} ({} entries)", filename, m_Config.size());
         });
     }
 
     Async::Task<void> ConfigManager::SaveToFileAsync(const std::string& filename)
     {
         return Async::Task<void>([this, filename]() -> void {
-            try
+            // Take a snapshot of the flat map under a shared lock, then build JSON without holding the lock.
+            // This avoids long lock holds and ensures multi-dot keys like "window.position.x" are serialized properly.
+            std::unordered_map<std::string, ConfigValue> snapshot;
+            snapshot.reserve(m_Config.size());
             {
-                // Take a snapshot of the flat map under a shared lock, then build JSON without holding the lock.
-                // This avoids long lock holds and ensures multi-dot keys like "window.position.x" are serialized properly.
-                std::unordered_map<std::string, ConfigValue> snapshot;
-                snapshot.reserve(m_Config.size());
+                std::shared_lock<std::shared_mutex> lock(m_ConfigMutex);
+                snapshot = m_Config;
+            }
+
+            nlohmann::json config = nlohmann::json::object();
+
+            auto SetJsonAtPath = [&config](const std::string& dottedKey, const ConfigValue& value)
+            {
+                std::vector<std::string> parts;
+                parts.reserve(4);
+
+                std::string current;
+                current.reserve(dottedKey.size());
+                for (char c : dottedKey)
                 {
-                    std::shared_lock<std::shared_mutex> lock(m_ConfigMutex);
-                    snapshot = m_Config;
-                }
-
-                nlohmann::json config = nlohmann::json::object();
-
-                auto SetJsonAtPath = [&config](const std::string& dottedKey, const ConfigValue& value)
-                {
-                    std::vector<std::string> parts;
-                    parts.reserve(4);
-
-                    std::string current;
-                    current.reserve(dottedKey.size());
-                    for (char c : dottedKey)
+                    if (c == '.')
                     {
-                        if (c == '.')
+                        if (!current.empty())
                         {
-                            if (!current.empty())
-                            {
-                                parts.push_back(std::move(current));
-                                current = {};
-                            }
-                        }
-                        else
-                        {
-                            current.push_back(c);
+                            parts.push_back(std::move(current));
+                            current = {};
                         }
                     }
-                    if (!current.empty())
-                        parts.push_back(std::move(current));
-
-                    if (parts.empty())
-                        return;
-
-                    nlohmann::json* node = &config;
-                    for (size_t i = 0; i + 1 < parts.size(); ++i)
+                    else
                     {
-                        const auto& p = parts[i];
-                        if (!node->contains(p) || !(*node)[p].is_object())
-                        {
-                            (*node)[p] = nlohmann::json::object();
-                        }
-                        node = &(*node)[p];
+                        current.push_back(c);
                     }
+                }
+                if (!current.empty())
+                    parts.push_back(std::move(current));
 
-                    const std::string& leaf = parts.back();
-                    std::visit([node, &leaf](const auto& v)
-                    {
-                        (*node)[leaf] = v;
-                    }, value);
-                };
+                if (parts.empty())
+                    return;
 
-                for (const auto& [key, value] : snapshot)
+                nlohmann::json* node = &config;
+                for (size_t i = 0; i + 1 < parts.size(); ++i)
                 {
-                    SetJsonAtPath(key, value);
+                    const auto& p = parts[i];
+                    if (!node->contains(p) || !(*node)[p].is_object())
+                    {
+                        (*node)[p] = nlohmann::json::object();
+                    }
+                    node = &(*node)[p];
                 }
 
-                auto saveTask = Async::SaveConfigAsync(filename.empty() ? m_ConfigFile : filename, config);
-                saveTask.Get();
+                const std::string& leaf = parts.back();
+                std::visit([node, &leaf](const auto& v)
+                {
+                    (*node)[leaf] = v;
+                }, value);
+            };
 
-                m_TotalAsyncOperations.fetch_add(1, std::memory_order_relaxed);
-                LT_CORE_INFO("Configuration saved to file: {} ({} entries)", 
-                       filename.empty() ? m_ConfigFile : filename, snapshot.size());
-            }
-            catch (const std::exception& e)
+            for (const auto& [key, value] : snapshot)
             {
-                LT_CORE_ERROR("Failed to save configuration to file: {} - {}", 
-                        filename.empty() ? m_ConfigFile : filename, e.what());
-                throw;
+                SetJsonAtPath(key, value);
             }
+
+            auto saveTask = Async::GetAsyncIO().SaveConfigAsyncResult(filename.empty() ? m_ConfigFile : filename, config);
+            const auto saveResult = saveTask.Get();
+            if (saveResult.IsFailure())
+            {
+                LT_CORE_ERROR("Failed to save configuration to file: {} - {}",
+                    filename.empty() ? m_ConfigFile : filename, saveResult.GetError().GetErrorMessage());
+                return;
+            }
+
+            m_TotalAsyncOperations.fetch_add(1, std::memory_order_relaxed);
+            LT_CORE_INFO("Configuration saved to file: {} ({} entries)",
+                   filename.empty() ? m_ConfigFile : filename, snapshot.size());
         });
     }
 

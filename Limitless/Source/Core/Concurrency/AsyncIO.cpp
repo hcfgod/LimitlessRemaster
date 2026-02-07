@@ -139,6 +139,21 @@ namespace Limitless
             });
         }
 
+        Task<Result<std::string>> AsyncIO::ReadFileAsyncResult(const std::string& path)
+        {
+            return Submit([path]() -> Result<std::string> {
+                std::ifstream file(path, std::ios::binary);
+                if (!file.is_open())
+                {
+                    return Result<std::string>(ErrorCode::FileNotFound, "Failed to open file: " + path);
+                }
+
+                std::stringstream buffer;
+                buffer << file.rdbuf();
+                return buffer.str();
+            });
+        }
+
         Task<void> AsyncIO::WriteFileAsync(const std::string& path, const std::string& content)
         {
             return Submit([path, content]() -> void {
@@ -153,6 +168,25 @@ namespace Limitless
                 {
                     throw std::runtime_error("Failed to write to file: " + path);
                 }
+            });
+        }
+
+        Task<Result<void>> AsyncIO::WriteFileAsyncResult(const std::string& path, const std::string& content)
+        {
+            return Submit([path, content]() -> Result<void> {
+                std::ofstream file(path, std::ios::binary);
+                if (!file.is_open())
+                {
+                    return Result<void>(ErrorCode::FileAccessDenied, "Failed to create file: " + path);
+                }
+
+                file.write(content.data(), static_cast<std::streamsize>(content.size()));
+                if (!file.good())
+                {
+                    return Result<void>(ErrorCode::FileAccessDenied, "Failed to write to file: " + path);
+                }
+
+                return Result<void>();
             });
         }
 
@@ -197,6 +231,25 @@ namespace Limitless
                 {
                     throw std::runtime_error("Failed to append to file: " + path);
                 }
+            });
+        }
+
+        Task<Result<void>> AsyncIO::AppendFileAsyncResult(const std::string& path, const std::string& content)
+        {
+            return Submit([path, content]() -> Result<void> {
+                std::ofstream file(path, std::ios::app | std::ios::binary);
+                if (!file.is_open())
+                {
+                    return Result<void>(ErrorCode::FileAccessDenied, "Failed to open file for appending: " + path);
+                }
+
+                file.write(content.data(), static_cast<std::streamsize>(content.size()));
+                if (!file.good())
+                {
+                    return Result<void>(ErrorCode::FileAccessDenied, "Failed to append to file: " + path);
+                }
+
+                return Result<void>();
             });
         }
 
@@ -280,6 +333,25 @@ namespace Limitless
             });
         }
 
+        Task<Result<void>> AsyncIO::SaveConfigAsyncResult(const std::string& path, const nlohmann::json& config)
+        {
+            return Submit([path, config]() -> Result<void> {
+                std::ofstream file(path);
+                if (!file.is_open())
+                {
+                    return Result<void>(ErrorCode::FileAccessDenied, "Failed to create config file: " + path);
+                }
+
+                file << config.dump(4);
+                if (!file.good())
+                {
+                    return Result<void>(ErrorCode::FileAccessDenied, "Failed to write config file: " + path);
+                }
+
+                return Result<void>();
+            });
+        }
+
         Task<nlohmann::json> AsyncIO::LoadConfigAsync(const std::string& path)
         {
             return Submit([path]() -> nlohmann::json {
@@ -292,6 +364,28 @@ namespace Limitless
                 nlohmann::json config;
                 file >> config;
                 return config;
+            });
+        }
+
+        Task<Result<nlohmann::json>> AsyncIO::LoadConfigAsyncResult(const std::string& path)
+        {
+            return Submit([path]() -> Result<nlohmann::json> {
+                std::ifstream file(path);
+                if (!file.is_open())
+                {
+                    return Result<nlohmann::json>(ErrorCode::FileNotFound, "Failed to open config file: " + path);
+                }
+
+                try
+                {
+                    nlohmann::json config;
+                    file >> config;
+                    return config;
+                }
+                catch (const std::exception& e)
+                {
+                    return Result<nlohmann::json>(ErrorCode::ConfigParseError, std::string("Failed to parse config file: ") + e.what());
+                }
             });
         }
 
