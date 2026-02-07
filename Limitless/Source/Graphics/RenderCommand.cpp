@@ -34,6 +34,13 @@ namespace Limitless
     {
     }
 
+    SetShaderMat4Command::SetShaderMat4Command(std::shared_ptr<Shader> shader, std::string uniformName, const glm::mat4& value)
+        : m_Shader(std::move(shader))
+        , m_UniformName(std::move(uniformName))
+        , m_Value(value)
+    {
+    }
+
     // BindVertexArrayCommand implementation
     BindVertexArrayCommand::BindVertexArrayCommand(std::shared_ptr<VertexArray> vertexArray)
         : m_VertexArray(std::move(vertexArray))

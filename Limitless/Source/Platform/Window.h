@@ -241,6 +241,13 @@ namespace Limitless
         virtual void SetCursor(void* cursor) = 0;
         virtual void SetCursorVisible(bool visible) = 0;
         virtual bool IsCursorVisible() const = 0;
+
+        // Cursor locking (Unity/FPS-style):
+        // When locked, the cursor is constrained to the window and treated as relative motion.
+        // This effectively keeps the cursor at the center and provides mouse delta each frame.
+        virtual void SetCursorLocked(bool locked) = 0;
+        virtual bool IsCursorLocked() const = 0;
+
         virtual void SetCursorPosition(int x, int y) = 0;
         virtual void GetCursorPosition(int& x, int& y) const = 0;
 

@@ -11,12 +11,29 @@
 #include "Graphics/GraphicsAPIDetector.h"
 #include "Graphics/Renderer.h"
 #include "Core/Time.h"
+#include "Core/Input/InputSystem.h"
 #include <chrono>
 
 namespace Limitless
 {
+    static Application* s_ApplicationInstance = nullptr;
+
+    Application& Application::GetInstance()
+    {
+        LT_VERIFY(s_ApplicationInstance != nullptr, "Application instance not available");
+        return *s_ApplicationInstance;
+    }
+
+    bool Application::HasInstance()
+    {
+        return s_ApplicationInstance != nullptr;
+    }
+
 	Application::Application()
 	{
+        LT_VERIFY(s_ApplicationInstance == nullptr, "Only one Application instance is supported");
+        s_ApplicationInstance = this;
+
 		LT_CORE_INFO("Application constructor starting...");
 		
 		// Initialize AsyncIO system with thread count from config
@@ -46,6 +63,11 @@ namespace Limitless
         asyncIO.Shutdown();
         
         LT_CORE_INFO("Application destructor completed");
+
+        if (s_ApplicationInstance == this)
+        {
+            s_ApplicationInstance = nullptr;
+        }
 	}
 
 	void Application::Run()
@@ -67,10 +89,16 @@ namespace Limitless
 			const float deltaTime = Time::GetDeltaTimeSeconds();
 			const float fixedDeltaTime = Time::GetFixedDeltaTimeSeconds();
 
+            // Begin input frame: clears per-frame deltas (mouse, wheel) and pressed/released flags.
+            GetInputSystem().BeginFrame();
+
 			// Apply any pending hot reload diffs on the main thread
             Limitless::HotReloadManager::GetInstance().Update();
 
             m_Window->OnUpdate();
+
+            // Update input actions after pumping events so Layers can poll action values during OnUpdate.
+            GetInputSystem().UpdateActions();
 
             // Update layers
             // FixedUpdate-style steps (deterministic simulation).

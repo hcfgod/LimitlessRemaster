@@ -3,6 +3,7 @@
 #include "Core/Debug/Log.h"
 #include "Graphics/Renderer.h"
 #include "Graphics/OpenGL/OpenGLContext.h"
+#include <glm/gtc/type_ptr.hpp>
 
 namespace Limitless
 {
@@ -142,6 +143,35 @@ namespace Limitless
         if (location != -1)
         {
             glUniform1i(location, value);
+        }
+    }
+
+    void OpenGLShader::SetMat4(const std::string& name, const glm::mat4& value)
+    {
+        auto& renderer = Renderer::GetInstance();
+        if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
+        {
+            renderer.SubmitResourceAndWait([&](GraphicsContext*) {
+                glUseProgram(m_RendererID);
+                GLint location = GetUniformLocation(m_RendererID, name);
+                if (location != -1)
+                {
+                    glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(value));
+                }
+            });
+            return;
+        }
+
+        if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
+        {
+            OpenGLContext::ScopedCurrentContext scope(*glContext);
+        }
+
+        glUseProgram(m_RendererID);
+        GLint location = GetUniformLocation(m_RendererID, name);
+        if (location != -1)
+        {
+            glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(value));
         }
     }
 }

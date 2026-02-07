@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <string>
 
@@ -49,6 +50,18 @@ namespace Limitless
             const TextureSpecification& specification = {});
 
         static std::shared_ptr<Texture2D> CreateFromRGBA8(
+            uint32_t width,
+            uint32_t height,
+            const void* rgbaPixels,
+            const TextureSpecification& specification = {});
+
+        // Async variants (non-blocking): schedule GPU work on the render thread resource queue.
+        // The returned future completes when the texture has been created/uploaded on the GPU.
+        static std::future<std::shared_ptr<Texture2D>> CreateFromFileAsync(
+            const std::string& path,
+            const TextureSpecification& specification = {});
+
+        static std::future<std::shared_ptr<Texture2D>> CreateFromRGBA8Async(
             uint32_t width,
             uint32_t height,
             const void* rgbaPixels,

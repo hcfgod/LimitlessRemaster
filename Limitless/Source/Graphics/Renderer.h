@@ -162,6 +162,7 @@ namespace Limitless
                 if constexpr (std::is_void_v<ResultT>)
                 {
                     func(m_GraphicsContext);
+                    return;
                 }
                 else
                 {

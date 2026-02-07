@@ -11,6 +11,9 @@ namespace Limitless
 	class Application
 	{
 	public:
+        static Application& GetInstance();
+        static bool HasInstance();
+
 		Application();
 		virtual ~Application();
 

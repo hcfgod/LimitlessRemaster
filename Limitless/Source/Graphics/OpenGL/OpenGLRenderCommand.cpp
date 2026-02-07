@@ -110,6 +110,22 @@ namespace Limitless
         }
     }
 
+    void SetShaderMat4Command::Execute(GraphicsContext* context)
+    {
+        if (!context)
+        {
+            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
+        }
+
+        if (!m_Shader)
+        {
+            LT_CORE_WARN("SetShaderMat4Command: shader was null (no-op)");
+            return;
+        }
+
+        m_Shader->SetMat4(m_UniformName, m_Value);
+    }
+
     // BindVertexArrayCommand Execute implementation
     void BindVertexArrayCommand::Execute(GraphicsContext* context)
     {

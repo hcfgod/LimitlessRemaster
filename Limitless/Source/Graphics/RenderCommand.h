@@ -9,6 +9,7 @@
 #include <variant>
 #include <vector>
 #include <string>
+#include <glm/glm.hpp>
 
 namespace Limitless
 {
@@ -28,6 +29,7 @@ namespace Limitless
         SetViewport,
         SetScissor,
         BindShader,
+        SetShaderMat4,
         BindVertexArray,
         BindIndexBuffer,
         BindVertexBuffer,
@@ -146,6 +148,22 @@ namespace Limitless
 
     private:
         std::shared_ptr<Shader> m_Shader;
+    };
+
+    // Set shader mat4 uniform command (intended for per-frame camera/model matrices).
+    class SetShaderMat4Command : public RenderCommand
+    {
+    public:
+        SetShaderMat4Command(std::shared_ptr<Shader> shader, std::string uniformName, const glm::mat4& value);
+
+        void Execute(GraphicsContext* context) override;
+        RenderCommandType GetType() const override { return RenderCommandType::SetShaderMat4; }
+        std::string GetName() const override { return "SetShaderMat4"; }
+
+    private:
+        std::shared_ptr<Shader> m_Shader;
+        std::string m_UniformName;
+        glm::mat4 m_Value{1.0f};
     };
 
     // Bind vertex array command

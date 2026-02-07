@@ -1,6 +1,7 @@
 #include "SDLWindow.h"
 #include "Core/Debug/Log.h"
 #include "Core/ConfigManager.h"
+#include "Core/Input/InputSystem.h"
 #include "Core/Error.h"
 #include <SDL3/SDL.h>
 #include <spdlog/fmt/fmt.h>
@@ -214,6 +215,9 @@ namespace Limitless
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
+            // Feed the Unity-style input system immediately (same-frame polling).
+            GetInputSystem().OnSdlEvent(event);
+
             switch (event.type)
             {
                 case SDL_EVENT_QUIT:
@@ -231,6 +235,26 @@ namespace Limitless
                 case SDL_EVENT_WINDOW_SHOWN:
                 case SDL_EVENT_WINDOW_HIDDEN:
                     HandleWindowEvent(event);
+                    break;
+
+                // Input events (deferred) so Layers can handle them through EventSystem.
+                case SDL_EVENT_KEY_DOWN:
+                    LT_DISPATCH_DEFERRED(std::make_unique<Events::KeyPressedEvent>(static_cast<int>(event.key.key), event.key.repeat));
+                    break;
+                case SDL_EVENT_KEY_UP:
+                    LT_DISPATCH_DEFERRED(std::make_unique<Events::KeyReleasedEvent>(static_cast<int>(event.key.key)));
+                    break;
+                case SDL_EVENT_MOUSE_MOTION:
+                    LT_DISPATCH_DEFERRED(std::make_unique<Events::MouseMovedEvent>(event.motion.x, event.motion.y));
+                    break;
+                case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                    LT_DISPATCH_DEFERRED(std::make_unique<Events::MouseButtonPressedEvent>(static_cast<int>(event.button.button)));
+                    break;
+                case SDL_EVENT_MOUSE_BUTTON_UP:
+                    LT_DISPATCH_DEFERRED(std::make_unique<Events::MouseButtonReleasedEvent>(static_cast<int>(event.button.button)));
+                    break;
+                case SDL_EVENT_MOUSE_WHEEL:
+                    LT_DISPATCH_DEFERRED(std::make_unique<Events::MouseScrolledEvent>(event.wheel.x, event.wheel.y));
                     break;
             }
         }
@@ -900,6 +924,14 @@ namespace Limitless
 
     void SDLWindow::SetCursorVisible(bool visible)
     {
+        m_DesiredCursorVisible = visible;
+        if (m_CursorLocked)
+        {
+            // Relative mouse mode effectively hides the cursor. Keep user intent for unlock.
+            SDL_HideCursor();
+            return;
+        }
+
         if (visible)
             SDL_ShowCursor();
         else
@@ -909,6 +941,48 @@ namespace Limitless
     bool SDLWindow::IsCursorVisible() const
     {
         return SDL_CursorVisible();
+    }
+
+    void SDLWindow::SetCursorLocked(bool locked)
+    {
+        LT_VERIFY(m_Window, "Window not initialized");
+
+        // SDL relative mouse mode constrains the cursor and reports relative movement.
+        // SDL also hides the cursor in this mode (see SDL docs).
+        const bool ok = SDL_SetWindowRelativeMouseMode(m_Window, locked);
+        if (!ok)
+        {
+            LT_CORE_WARN("Failed to set relative mouse mode to {} (cursor lock)", locked ? "enabled" : "disabled");
+            return;
+        }
+
+        m_CursorLocked = locked;
+
+        if (m_CursorLocked)
+        {
+            // Warp to center as a convenience so the transition feels immediate.
+            const int centerX = static_cast<int>(m_Data.Width / 2);
+            const int centerY = static_cast<int>(m_Data.Height / 2);
+            SDL_WarpMouseInWindow(m_Window, static_cast<float>(centerX), static_cast<float>(centerY));
+
+            SDL_HideCursor();
+        }
+        else
+        {
+            // Restore desired visibility state.
+            SetCursorVisible(m_DesiredCursorVisible);
+        }
+    }
+
+    bool SDLWindow::IsCursorLocked() const
+    {
+        if (!m_Window)
+        {
+            return m_CursorLocked;
+        }
+
+        // SDL is the source of truth when initialized.
+        return SDL_GetWindowRelativeMouseMode(m_Window);
     }
 
     void SDLWindow::SetCursorPosition(int x, int y)

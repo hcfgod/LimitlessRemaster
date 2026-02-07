@@ -132,6 +132,8 @@ namespace Limitless
         void SetCursor(void* cursor) override;
         void SetCursorVisible(bool visible) override;
         bool IsCursorVisible() const override;
+        void SetCursorLocked(bool locked) override;
+        bool IsCursorLocked() const override;
         void SetCursorPosition(int x, int y) override;
         void GetCursorPosition(int& x, int& y) const override;
 
@@ -189,5 +191,10 @@ namespace Limitless
         std::function<void(bool)> m_FocusCallback;
         std::function<void(WindowState)> m_StateChangeCallback;
         std::function<void(WindowEventType)> m_EventCallback;
+
+        // Cursor state tracking:
+        // - Relative mouse mode hides/grabs cursor; we preserve user's desired visibility for unlock.
+        bool m_CursorLocked = false;
+        bool m_DesiredCursorVisible = true;
     };
 } 

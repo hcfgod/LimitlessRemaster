@@ -30,6 +30,22 @@ For large uploads (big textures, mesh streaming), prefer:
 
 Then poll or wait at a safe point (loading screens, frame boundaries, etc.).
 
+Example (async texture creation):
+
+```cpp
+Limitless::TextureSpecification spec{};
+spec.GenerateMipmaps = true;
+
+auto textureFuture = Limitless::Texture2D::CreateFromFileAsync("Assets/Textures/Albedo.png", spec);
+
+// Later (e.g. in Update):
+if (textureFuture.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+{
+    std::shared_ptr<Limitless::Texture2D> texture = textureFuture.get();
+    // safe to submit draw that binds this texture
+}
+```
+
 ### Current limitations (important)
 
 - Some commands (especially state-setting, framebuffer, instanced drawing, and debug marker commands) are still **placeholders**: they log intent instead of issuing real graphics API calls.
