@@ -54,7 +54,7 @@ filter "system:windows"
 - **C++20 Standard**: Full C++20 language support
 - **UTF-8 Support**: Proper Unicode handling
 - **Coroutine Support**: C++20 coroutines are available when compiling in C++20 mode (no special MSVC flag required for standard C++20 coroutines).
-- **Static Runtime**: Self-contained executables
+- **Runtime Library**: `staticruntime "Off"` (dynamic runtime). Binaries are smaller and link consistently across projects; you may need the MSVC runtime redistributable on target machines.
 - **Latest SDK**: Uses the latest Windows SDK
 
 ### macOS (GCC/Clang)

@@ -65,6 +65,7 @@ namespace Limitless::Assets
             bool fromBundle = false;
             bool fromOverride = false;
             std::string resolvedPath;
+            std::string sourceResolvedPath;
             std::string guid;
             std::string jsonText;
 
@@ -116,6 +117,18 @@ namespace Limitless::Assets
                 }
 
                 resolvedPath = resolvedResult.GetValue().string();
+                sourceResolvedPath = resolvedPath;
+            }
+            else
+            {
+                // Even when loading content from an override file, asset identity must come from the base asset.
+                // Try to resolve the source asset path so GUID comes from `Assets/.../*.meta`, not from a new
+                // `.meta` created next to the user override file.
+                const auto resolvedResult = ResolveAssetKeyToPath(key);
+                if (resolvedResult.IsSuccess())
+                {
+                    sourceResolvedPath = resolvedResult.GetValue().string();
+                }
             }
 
             // GUID resolution:
@@ -124,10 +137,20 @@ namespace Limitless::Assets
             // - Override files do not define identity; they simply override the asset contents for this key.
             if (guid.empty())
             {
-                const auto guidResult = LoadOrCreateGuid(resolvedPath, {{"key", key}, {"type", "InputActions"}});
+                if (sourceResolvedPath.empty())
+                {
+                    LT_CORE_ERROR(
+                        "InputActionsAssetResource::LoadAsync: cannot determine GUID for '{}' (override present={}, bundle enabled={}). "
+                        "Identity must come from the base asset (.meta or bundle entry), not from an override file.",
+                        key, fromOverride, (bundle.IsEnabled() && bundle.IsLoaded()));
+                    promise.set_value(nullptr);
+                    return;
+                }
+
+                const auto guidResult = LoadOrCreateGuid(sourceResolvedPath, {{"key", key}, {"type", "InputActions"}});
                 if (guidResult.IsFailure())
                 {
-                    LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: meta GUID failed for '{}': {}", resolvedPath, guidResult.GetError().GetErrorMessage());
+                    LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: meta GUID failed for '{}': {}", sourceResolvedPath, guidResult.GetError().GetErrorMessage());
                     promise.set_value(nullptr);
                     return;
                 }
@@ -219,6 +242,19 @@ namespace Limitless::Assets
                 return false;
             }
             m_ResolvedPath = resolvedResult.GetValue().string();
+        }
+
+        // Keep identity stable across reloads:
+        // - If the bundle is providing a GUID, `Asset` identity is already stable.
+        // - Otherwise, ensure the base `.meta` exists for the source asset key (do NOT create `.meta` next to overrides).
+        if (!fromBundle)
+        {
+            const auto resolvedResult = ResolveAssetKeyToPath(key);
+            if (resolvedResult.IsSuccess())
+            {
+                const std::string sourceResolvedPath = resolvedResult.GetValue().string();
+                (void)LoadOrCreateGuid(sourceResolvedPath, {{"key", key}, {"type", "InputActions"}});
+            }
         }
 
         if (!m_Value)

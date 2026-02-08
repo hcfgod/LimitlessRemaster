@@ -209,7 +209,9 @@ namespace Limitless
             
             bool operator<(const ListenerEntry& other) const
             {
-                return static_cast<int>(priority) > static_cast<int>(other.priority);
+                // EventPriority: lower numeric value means higher priority (Critical = 0).
+                // Sort so higher priority listeners are dispatched first.
+                return static_cast<int>(priority) < static_cast<int>(other.priority);
             }
         };
 

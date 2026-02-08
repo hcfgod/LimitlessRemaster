@@ -70,6 +70,53 @@ TEST_SUITE("Event System")
         
         eventSystem.Shutdown();
     }
+
+    TEST_CASE("Event Listener Priority Ordering (Critical first)")
+    {
+        auto& eventSystem = Limitless::GetEventSystem();
+        eventSystem.Initialize();
+
+        struct RecordingListener final : public Limitless::EventListener
+        {
+            explicit RecordingListener(Limitless::EventPriority prio, std::vector<int>& out, int id)
+                : m_Priority(prio), m_Out(out), m_Id(id)
+            {
+            }
+
+            void OnEvent(Limitless::Event& event) override
+            {
+                if (event.GetType() == Limitless::EventType::AppTick)
+                {
+                    m_Out.push_back(m_Id);
+                }
+            }
+
+            bool ShouldReceiveEvent(const Limitless::Event&) const override { return true; }
+            Limitless::EventPriority GetPriority() const override { return m_Priority; }
+
+            Limitless::EventPriority m_Priority;
+            std::vector<int>& m_Out;
+            int m_Id = 0;
+        };
+
+        std::vector<int> order;
+        auto critical = std::make_shared<RecordingListener>(Limitless::EventPriority::Critical, order, 1);
+        auto background = std::make_shared<RecordingListener>(Limitless::EventPriority::Background, order, 2);
+
+        // Add in reverse order to ensure sorting is what determines dispatch order.
+        eventSystem.AddListener(background);
+        eventSystem.AddListener(critical);
+
+        auto tickEvent = std::make_unique<Limitless::Events::AppTickEvent>(0.016f);
+        eventSystem.Dispatch(*tickEvent);
+        eventSystem.ProcessEvents();
+
+        CHECK(order.size() == 2);
+        CHECK(order[0] == 1); // Critical first
+        CHECK(order[1] == 2); // Background last
+
+        eventSystem.Shutdown();
+    }
     
     TEST_CASE("Event Filtering")
     {

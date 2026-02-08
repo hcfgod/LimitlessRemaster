@@ -143,9 +143,10 @@ namespace Limitless
 
         m_Callbacks[type].push_back(std::move(entry));
         
-        // Sort callbacks by priority (higher priority first)
+        // Sort callbacks by priority (higher priority first).
+        // Determinism contract: callbacks of the same priority execute in registration order.
         auto& callbacks = m_Callbacks[type];
-        std::sort(callbacks.begin(), callbacks.end(),
+        std::stable_sort(callbacks.begin(), callbacks.end(),
             [](const CallbackEntry& a, const CallbackEntry& b) {
                 return static_cast<int>(a.Priority) < static_cast<int>(b.Priority);
             });
@@ -180,7 +181,8 @@ namespace Limitless
         entry.listener = std::move(listener);
         entry.priority = entry.listener->GetPriority();
         m_Listeners.push_back(std::move(entry));
-        std::sort(m_Listeners.begin(), m_Listeners.end());
+        // Determinism contract: listeners of the same priority execute in registration order.
+        std::stable_sort(m_Listeners.begin(), m_Listeners.end());
     }
 
     void EventDispatcher::RemoveListener(std::shared_ptr<EventListener> listener)
