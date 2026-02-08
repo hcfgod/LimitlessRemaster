@@ -35,7 +35,17 @@ Add AsyncIO settings to your `config.json`:
 }
 ```
 
-Note: the internal AsyncIO work queue capacity is currently a compile-time constant.
+Note: the internal AsyncIO work queue capacity is currently a runtime limit (bounded queue) and may be adjusted in code.
+
+### Result-returning APIs (recommended)
+
+AsyncIO provides `Task<Result<T>>` variants for engine code so failures are returned explicitly instead of throwing across the async boundary:
+
+- `ReadFileAsyncResult`
+- `WriteFileAsyncResult`
+- `AppendFileAsyncResult`
+- `LoadConfigAsyncResult`
+- `SaveConfigAsyncResult`
 
 ## File Operations
 

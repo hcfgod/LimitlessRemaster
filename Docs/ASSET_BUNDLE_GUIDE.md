@@ -27,7 +27,8 @@ The build entry point is:
 
 At runtime:
 
-- `Limitless::Assets::AssetBundle::LoadFromProjectBuildOutput()` loads the bundle from the default build output path.
+- `Limitless::Assets::AssetBundle::LoadFromProjectBuildOutput()` loads the bundle from the default project build output path.
+- `Limitless::Assets::AssetBundle::LoadFromExecutableDirectory()` loads the bundle from the packaged layout next to the executable.
 - `Limitless::Assets::AssetBundle::Enable(true)` enables bundle-first loading.
 
 When enabled, supported asset loaders will attempt to read from the bundle **before** reading from disk.
@@ -38,7 +39,7 @@ In Sandbox:
 
 - Press **B** to:
   - Build the bundle
-  - Load it
+  - Load it (from the executable directory layout)
   - Toggle bundle loading **on/off**
   - Reinitialize the demo material + input actions to prove it works
 

@@ -1,0 +1,7 @@
+#
+# Git Attributes
+# --------------
+# Keep Unity-style `.meta` sidecar files consistent across platforms.
+# This prevents CRLF/LF churn when contributors have different `core.autocrlf` settings.
+#
+*.meta text eol=lf

@@ -6,6 +6,8 @@ This document describes the **Unity-style asset system** in LimitlessRemaster:
 - Each asset has a sidecar **`.meta`** file containing a stable **GUID**
 - Runtime code references assets using **GUID-based handles** (`AssetHandle<T>`)
 
+Important: `.meta` files are part of the source-of-truth for stable GUID identity. They must be **tracked by git** and committed alongside their assets (do not ignore `*.meta`).
+
 ## Goals
 
 - Stable identity (GUID) independent of file paths.
@@ -23,7 +25,11 @@ The `.meta` file is created automatically when you first load an asset through t
 
 ### Working directory independence
 
-Unity-style keys like `Assets/...` are resolved by walking up from the current working directory until a directory containing an `Assets/` folder is found.
+Unity-style keys like `Assets/...` are resolved using `AssetPaths`:
+
+- Preferred: set an explicit asset root directory at startup via `Assets::SetAssetRootDirectory(...)`.
+- Optional: set the environment variable `LIMITLESS_ASSET_ROOT` to a directory that contains `Assets/`.
+- Fallback (development convenience): walk up from the current working directory until a directory containing an `Assets/` folder is found.
 
 Implementation:
 

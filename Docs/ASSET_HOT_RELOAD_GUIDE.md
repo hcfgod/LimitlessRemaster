@@ -29,6 +29,11 @@ Files:
 - Maps file changes → asset keys → reload calls.
 - Uses the dependency graph to cascade reloads.
 
+Default behavior:
+
+- Asset hot reload is a **development feature** and is **disabled by default** in the engine.
+- In **AssetBundle** (bundle-only / shipping) mode, asset hot reload is automatically treated as disabled (no file watchers are started).
+
 Files:
 
 - `Limitless/Source/Assets/AssetHotReloadManager.{h,cpp}`

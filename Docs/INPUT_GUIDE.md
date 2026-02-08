@@ -113,6 +113,11 @@ How it works:
 - While active, the session can **consume the next SDL input event** and replace a specific binding slot.
 - If enabled, it persists the updated asset back to JSON via `InputActionAssetSerializer::SaveToFile(...)`.
 
+Important shipping note:
+
+- Saving back to `Assets/...` requires the source `Assets/` tree to exist (development/editor workflow).
+- In bundle-only/shipping builds, rebinding should typically persist to a **user-writable override file** (example: under the platform user data directory) rather than attempting to write into `Assets/`.
+
 This is a low-level API intended for editor/UI code to build on top (no UI is provided by the engine).
 
 ## Files

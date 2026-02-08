@@ -1,0 +1,9 @@
+{
+    "deps": [
+        "adb458a6-e7ee-452d-8394-9b9611a13053",
+        "5b5a13a7-ab2d-4947-974a-af21398cf103"
+    ],
+    "guid": "0767dc1d-bcff-4ed2-9eaa-a87ae66ecf8a",
+    "key": "Assets/Materials/TexturedTriangle.material.json",
+    "type": "Material"
+}

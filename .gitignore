@@ -21,7 +21,6 @@ out/
 *_i.c
 *_p.c
 *.ilk
-*.meta
 *.obj
 *.pdb
 *.pgc
@@ -40,6 +39,10 @@ out/
 *.pidb
 *.svclog
 *.scc
+
+# NOTE: Do NOT ignore Unity-style `.meta` files.
+# The asset system uses `.meta` as the stable GUID source-of-truth.
+# Ignoring them guarantees GUID churn across machines and breaks GUID-based references.
 
 # Premake generated files
 *.workspace
