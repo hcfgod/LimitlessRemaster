@@ -5,11 +5,34 @@
 #include "Assets/InputActionsAssetImporter.h"
 #include "Core/Debug/Log.h"
 #include "Core/Input/InputActionAssetSerializer.h"
+#include "Platform/Platform.h"
 
 #include <SDL3/SDL_gamepad.h>
+#include <filesystem>
 
 namespace Limitless
 {
+    static std::filesystem::path GetInputActionsUserOverridePathForKey(const std::string& assetKey)
+    {
+        const std::string userData = PlatformDetection::GetUserDataPath();
+        if (userData.empty())
+        {
+            return {};
+        }
+
+        std::filesystem::path root(userData);
+        root /= "InputActionsOverrides";
+
+        // Preserve the key's folder layout under the override root so multiple assets can't collide.
+        std::filesystem::path rel(assetKey);
+        if (rel.is_absolute())
+        {
+            rel = rel.filename();
+        }
+
+        return root / rel;
+    }
+
     void InputRebinding::Start(Request request, CompletionCallback onComplete)
     {
         m_Request = std::move(request);
@@ -82,17 +105,58 @@ namespace Limitless
             return Result<void>();
         }
 
-        const auto resolved = ResolveAssetKeyToPath(request.AssetKey);
-        if (resolved.IsFailure())
-        {
-            return Result<void>(resolved.GetError());
-        }
+        // Shipping-safe persistence:
+        // - Dist builds should not attempt to write into `Assets/...` (source tree may not exist / may be read-only).
+        // - Persist into a user-writable override file instead.
+        //
+        // Dev-friendly behavior:
+        // - In non-Dist builds we still TRY to write back to the source asset path (nice for iteration),
+        //   but we fall back to the user override path if saving fails.
+        const std::filesystem::path userOverridePath = GetInputActionsUserOverridePathForKey(request.AssetKey);
 
-        const auto saved = InputActionAssetSerializer::SaveToFile(*asset, resolved.GetValue().string());
+        auto SaveToPath = [&](const std::filesystem::path& path) -> Result<void>
+        {
+            if (path.empty())
+            {
+                return Result<void>(ErrorCode::InvalidState, "InputRebinding: save path is empty");
+            }
+
+            std::error_code ec;
+            std::filesystem::create_directories(path.parent_path(), ec);
+            if (ec)
+            {
+                return Result<void>(ErrorCode::FileAccessDenied, "InputRebinding: failed to create directories: " + path.parent_path().string());
+            }
+
+            return InputActionAssetSerializer::SaveToFile(*asset, path.string());
+        };
+
+#if defined(LT_CONFIG_DIST)
+        const auto saved = SaveToPath(userOverridePath);
         if (saved.IsFailure())
         {
             return Result<void>(saved.GetError());
         }
+#else
+        const auto resolved = ResolveAssetKeyToPath(request.AssetKey);
+        if (resolved.IsSuccess())
+        {
+            const auto saved = SaveToPath(resolved.GetValue());
+            if (saved.IsSuccess())
+            {
+                return Result<void>();
+            }
+
+            LT_CORE_WARN("InputRebinding: failed to save back to asset path '{}': {}. Falling back to user override.",
+                resolved.GetValue().string(), saved.GetError().GetErrorMessage());
+        }
+
+        const auto savedOverride = SaveToPath(userOverridePath);
+        if (savedOverride.IsFailure())
+        {
+            return Result<void>(savedOverride.GetError());
+        }
+#endif
 
         return Result<void>();
     }

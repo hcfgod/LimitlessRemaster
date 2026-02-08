@@ -9,9 +9,45 @@
 
 #include "Core/Debug/Log.h"
 #include "Core/Input/InputActionAssetSerializer.h"
+#include "Platform/Platform.h"
+
+#include <filesystem>
+#include <fstream>
 
 namespace Limitless::Assets
 {
+    static std::filesystem::path GetInputActionsUserOverridePathForKey(const std::string& key)
+    {
+        const std::string userData = Limitless::PlatformDetection::GetUserDataPath();
+        if (userData.empty())
+        {
+            return {};
+        }
+
+        std::filesystem::path root(userData);
+        root /= "InputActionsOverrides";
+
+        std::filesystem::path rel(key);
+        if (rel.is_absolute())
+        {
+            rel = rel.filename();
+        }
+
+        return root / rel;
+    }
+
+    static bool TryReadAllTextFile(const std::filesystem::path& path, std::string& outText)
+    {
+        std::ifstream in(path, std::ios::in | std::ios::binary);
+        if (!in.is_open())
+        {
+            return false;
+        }
+
+        outText.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        return true;
+    }
+
     Async::Task<InputActionsAssetResource::Ptr> InputActionsAssetResource::LoadAsync(const std::string& key, Settings settings)
     {
         const uint64_t generation = AssetLoadCoordinator::GetGeneration();
@@ -27,28 +63,49 @@ namespace Limitless::Assets
             }
 
             bool fromBundle = false;
+            bool fromOverride = false;
             std::string resolvedPath;
             std::string guid;
             std::string jsonText;
 
             auto& bundle = AssetBundle::GetInstance();
+
+            // Shipping-safe override: if a user override file exists, it wins over both bundle and source assets.
+            // This allows runtime rebinding persistence without writing into `Assets/...`.
+            {
+                const std::filesystem::path overridePath = GetInputActionsUserOverridePathForKey(key);
+                if (!overridePath.empty() && std::filesystem::exists(overridePath))
+                {
+                    if (TryReadAllTextFile(overridePath, jsonText))
+                    {
+                        fromOverride = true;
+                        resolvedPath = overridePath.string();
+                    }
+                }
+            }
+
             if (bundle.IsEnabled() && bundle.IsLoaded())
             {
                 const auto entry = bundle.FindEntryByKey(key);
                 if (entry.has_value())
                 {
-                    const auto textResult = bundle.ReadAllTextByKey(key);
-                    if (textResult.IsSuccess())
+                    // Prefer bundle GUID even if we load JSON from a user override.
+                    guid = entry->Guid;
+
+                    if (!fromOverride)
                     {
-                        fromBundle = true;
-                        guid = entry->Guid;
-                        resolvedPath = "<AssetBundle>";
-                        jsonText = textResult.GetValue();
+                        const auto textResult = bundle.ReadAllTextByKey(key);
+                        if (textResult.IsSuccess())
+                        {
+                            fromBundle = true;
+                            resolvedPath = "<AssetBundle>";
+                            jsonText = textResult.GetValue();
+                        }
                     }
                 }
             }
 
-            if (!fromBundle)
+            if (!fromBundle && !fromOverride)
             {
                 const auto resolvedResult = ResolveAssetKeyToPath(key);
                 if (resolvedResult.IsFailure())
@@ -59,7 +116,14 @@ namespace Limitless::Assets
                 }
 
                 resolvedPath = resolvedResult.GetValue().string();
+            }
 
+            // GUID resolution:
+            // - Bundle provides GUID directly.
+            // - Otherwise, source assets provide GUID via `.meta`.
+            // - Override files do not define identity; they simply override the asset contents for this key.
+            if (guid.empty())
+            {
                 const auto guidResult = LoadOrCreateGuid(resolvedPath, {{"key", key}, {"type", "InputActions"}});
                 if (guidResult.IsFailure())
                 {
@@ -77,12 +141,13 @@ namespace Limitless::Assets
                 // This allows InputSystem and other holders of shared_ptr<InputActionAsset> to see updates
                 // without pointer swaps.
                 auto stable = std::make_shared<Limitless::InputActionAsset>();
-                const auto loaded = fromBundle
-                    ? Limitless::InputActionAssetSerializer::LoadIntoFromString(*stable, jsonText, key)
+                const auto loaded = (fromBundle || fromOverride)
+                    ? Limitless::InputActionAssetSerializer::LoadIntoFromString(*stable, jsonText, fromOverride ? resolvedPath : key)
                     : Limitless::InputActionAssetSerializer::LoadInto(*stable, resolvedPath);
                 if (loaded.IsFailure())
                 {
-                    LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: load failed for '{}': {}", fromBundle ? key : resolvedPath, loaded.GetError().GetErrorMessage());
+                    LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: load failed for '{}': {}",
+                        (fromBundle ? key : resolvedPath), loaded.GetError().GetErrorMessage());
                     return nullptr;
                 }
 
@@ -110,25 +175,43 @@ namespace Limitless::Assets
         const std::string key = GetKey();
 
         bool fromBundle = false;
+        bool fromOverride = false;
         std::string jsonText;
 
         auto& bundle = AssetBundle::GetInstance();
+
+        // User override wins over bundle/source.
+        {
+            const std::filesystem::path overridePath = GetInputActionsUserOverridePathForKey(key);
+            if (!overridePath.empty() && std::filesystem::exists(overridePath))
+            {
+                if (TryReadAllTextFile(overridePath, jsonText))
+                {
+                    fromOverride = true;
+                    m_ResolvedPath = overridePath.string();
+                }
+            }
+        }
+
         if (bundle.IsEnabled() && bundle.IsLoaded())
         {
             const auto entry = bundle.FindEntryByKey(key);
             if (entry.has_value())
             {
-                const auto textResult = bundle.ReadAllTextByKey(key);
-                if (textResult.IsSuccess())
+                if (!fromOverride)
                 {
-                    fromBundle = true;
-                    m_ResolvedPath = "<AssetBundle>";
-                    jsonText = textResult.GetValue();
+                    const auto textResult = bundle.ReadAllTextByKey(key);
+                    if (textResult.IsSuccess())
+                    {
+                        fromBundle = true;
+                        m_ResolvedPath = "<AssetBundle>";
+                        jsonText = textResult.GetValue();
+                    }
                 }
             }
         }
 
-        if (!fromBundle)
+        if (!fromBundle && !fromOverride)
         {
             const auto resolvedResult = ResolveAssetKeyToPath(key);
             if (resolvedResult.IsFailure())
@@ -143,8 +226,8 @@ namespace Limitless::Assets
             m_Value = std::make_shared<Limitless::InputActionAsset>();
         }
 
-        const auto loaded = fromBundle
-            ? Limitless::InputActionAssetSerializer::LoadIntoFromString(*m_Value, jsonText, key)
+        const auto loaded = (fromBundle || fromOverride)
+            ? Limitless::InputActionAssetSerializer::LoadIntoFromString(*m_Value, jsonText, fromOverride ? m_ResolvedPath : key)
             : Limitless::InputActionAssetSerializer::LoadInto(*m_Value, m_ResolvedPath);
         if (loaded.IsFailure())
         {

@@ -219,8 +219,15 @@ setup_premake() {
     # Create directory if it doesn't exist
     mkdir -p "$premake_dir"
     
-    # Download premake5 for Linux
-    local premake_url="https://github.com/premake/premake-core/releases/download/v5.0.0-alpha16/premake-5.0.0-alpha16-linux.tar.gz"
+    # Download premake5 (keep in sync with Windows bootstrap + CI)
+    local premake_version="5.0.0-beta2"
+    local system_name="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    local premake_platform="linux"
+    if [[ "$system_name" == "darwin" ]]; then
+        premake_platform="macosx"
+    fi
+
+    local premake_url="https://github.com/premake/premake-core/releases/download/v${premake_version}/premake-${premake_version}-${premake_platform}.tar.gz"
     local temp_file="premake5.tar.gz"
     
     echo "Downloading premake5 from $premake_url..."

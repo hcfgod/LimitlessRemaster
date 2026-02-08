@@ -30,8 +30,15 @@ namespace Limitless
 
     RenderCommandQueue::~RenderCommandQueue()
     {
-        // Ensure all commands are processed
-        Flush();
+        // At destruction time we cannot assume a valid GraphicsContext is available, so we
+        // cannot safely execute queued GPU commands here. Instead, discard any remaining work
+        // loudly so shutdown bugs don't get hidden.
+        const uint32_t pending = GetSize();
+        if (pending != 0)
+        {
+            LT_CORE_ERROR("RenderCommandQueue destroyed with {} pending command(s). Pending commands will be discarded.", pending);
+        }
+        Clear();
     }
 
     bool RenderCommandQueue::SubmitCommand(std::unique_ptr<RenderCommand> command)
@@ -246,6 +253,8 @@ namespace Limitless
         if (commands.empty())
             return;
 
+        m_InFlightExecutions.fetch_add(static_cast<uint32_t>(commands.size()), std::memory_order_relaxed);
+
         // Sort by priority if enabled
         if (m_Config.enablePrioritySorting)
         {
@@ -265,12 +274,14 @@ namespace Limitless
             if (!queuedCommand)
             {
                 LT_CORE_WARN("Encountered null queuedCommand in ProcessCommands");
+                m_InFlightExecutions.fetch_sub(1, std::memory_order_relaxed);
                 continue;
             }
             
             if (!queuedCommand->command)
             {
                 LT_CORE_WARN("Encountered queuedCommand with null command in ProcessCommands");
+                m_InFlightExecutions.fetch_sub(1, std::memory_order_relaxed);
                 continue;
             }
 
@@ -293,6 +304,17 @@ namespace Limitless
             auto executionTime = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();
             
             UpdateStatistics(*queuedCommand, executionTime);
+
+            // Mark one command as fully executed.
+            m_InFlightExecutions.fetch_sub(1, std::memory_order_relaxed);
+        }
+
+        // If we became idle, wake any Flush() waiters.
+        if (m_Queue.IsEmpty() && m_ApproxSize.load(std::memory_order_relaxed) == 0 &&
+            m_InFlightExecutions.load(std::memory_order_relaxed) == 0)
+        {
+            std::lock_guard<std::mutex> lock(m_IdleMutex);
+            m_IdleCV.notify_all();
         }
     }
 
@@ -321,6 +343,8 @@ namespace Limitless
         if (commands.empty())
             return;
 
+        m_InFlightExecutions.fetch_add(static_cast<uint32_t>(commands.size()), std::memory_order_relaxed);
+
         // Sort by priority if enabled
         if (m_Config.enablePrioritySorting)
         {
@@ -334,12 +358,14 @@ namespace Limitless
             if (!queuedCommand)
             {
                 LT_CORE_WARN("Encountered null queuedCommand in ProcessCommandsBatch");
+                m_InFlightExecutions.fetch_sub(1, std::memory_order_relaxed);
                 continue;
             }
             
             if (!queuedCommand->command)
             {
                 LT_CORE_WARN("Encountered queuedCommand with null command in ProcessCommandsBatch");
+                m_InFlightExecutions.fetch_sub(1, std::memory_order_relaxed);
                 continue;
             }
 
@@ -362,6 +388,17 @@ namespace Limitless
             auto executionTime = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();
             
             UpdateStatistics(*queuedCommand, executionTime);
+
+            // Mark one command as fully executed.
+            m_InFlightExecutions.fetch_sub(1, std::memory_order_relaxed);
+        }
+
+        // If we became idle, wake any Flush() waiters.
+        if (m_Queue.IsEmpty() && m_ApproxSize.load(std::memory_order_relaxed) == 0 &&
+            m_InFlightExecutions.load(std::memory_order_relaxed) == 0)
+        {
+            std::lock_guard<std::mutex> lock(m_IdleMutex);
+            m_IdleCV.notify_all();
         }
     }
 
@@ -389,6 +426,7 @@ namespace Limitless
                 break;
 
             m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
+            m_InFlightExecutions.fetch_add(1, std::memory_order_relaxed);
 
             auto commandStartTime = std::chrono::high_resolution_clock::now();
             
@@ -409,7 +447,16 @@ namespace Limitless
             auto executionTime = std::chrono::duration_cast<std::chrono::microseconds>(commandEndTime - commandStartTime).count();
             
             UpdateStatistics(*command, executionTime);
+            m_InFlightExecutions.fetch_sub(1, std::memory_order_relaxed);
             processedCommands++;
+        }
+
+        // If we became idle, wake any Flush() waiters.
+        if (m_Queue.IsEmpty() && m_ApproxSize.load(std::memory_order_relaxed) == 0 &&
+            m_InFlightExecutions.load(std::memory_order_relaxed) == 0)
+        {
+            std::lock_guard<std::mutex> lock(m_IdleMutex);
+            m_IdleCV.notify_all();
         }
     }
 
@@ -423,21 +470,25 @@ namespace Limitless
             std::lock_guard<std::mutex> statsLock(m_StatsMutex);
             m_Stats.currentQueueSize = 0;
         }
+
+        // Clearing discards work; if callers are waiting in Flush(), unblock them.
+        {
+            std::lock_guard<std::mutex> lock(m_IdleMutex);
+            m_IdleCV.notify_all();
+        }
     }
 
     void RenderCommandQueue::Flush()
     {
-        // Process all remaining commands
-        while (!m_Queue.IsEmpty())
-        {
-            auto command = m_Queue.TryPop();
-            if (command && command->command)
-            {
-                m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
-                // Note: This requires a valid context, so it's up to the caller to ensure one is available
-                LT_CORE_WARN("Flushing command without context: {}", command->command->GetName());
-            }
-        }
+        // Contract: wait until the queue becomes idle (empty + nothing executing).
+        // NOTE: Flush does NOT execute commands by itself; it relies on the context-owning thread
+        // (or the render thread) continuing to call ProcessCommands*().
+        std::unique_lock<std::mutex> lock(m_IdleMutex);
+        m_IdleCV.wait(lock, [this]() {
+            return m_Queue.IsEmpty() &&
+                   m_ApproxSize.load(std::memory_order_relaxed) == 0 &&
+                   m_InFlightExecutions.load(std::memory_order_relaxed) == 0;
+        });
     }
 
     bool RenderCommandQueue::IsEmpty() const

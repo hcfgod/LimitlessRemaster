@@ -54,27 +54,37 @@ namespace Limitless
             return;
         }
 
-        // Drain any pending resource work while the context is still valid.
-        // This ensures deletes/uploads complete before the render thread exits.
+        // Drain any pending GPU work while the context is still valid.
+        // This ensures deletes/uploads and queued render commands complete before the render thread exits.
         if (m_RenderThreadEnabled.load(std::memory_order_relaxed) && m_RenderThreadRunning.load(std::memory_order_relaxed))
         {
             try
             {
-                SubmitResourceAndWait([](GraphicsContext*) { /* barrier */ });
+                // Run the drain on the render thread (context-affine).
+                SubmitResourceAndWait([this](GraphicsContext* context) {
+                    // Drain render commands until the queue is empty. ProcessCommands has a per-call
+                    // cap (maxCommandsPerFrame), so loop to guarantee we fully drain during shutdown.
+                    while (m_RenderQueue && m_RenderQueue->GetSize() != 0)
+                    {
+                        m_RenderQueue->ProcessCommands(context);
+                    }
+                });
             }
             catch (const std::exception& e)
             {
-                LT_CORE_WARN("Renderer shutdown resource barrier failed: {}", e.what());
+                LT_CORE_WARN("Renderer shutdown GPU drain failed: {}", e.what());
             }
         }
-
-        StopRenderThread();
-
-        // Process any remaining commands
-        if (m_RenderQueue)
+        else
         {
-            m_RenderQueue->Flush();
+            // Single-thread fallback: process queued commands directly on the calling thread.
+            // (Requires a valid context; ProcessCommands performs its own checks.)
+            ProcessCommands();
         }
+
+        // At this point, the render command queue should be idle. Stopping the render thread after
+        // draining avoids the "Flush() drops commands because there is no context" failure mode.
+        StopRenderThread();
 
         m_RenderQueue.reset();
         m_GraphicsContext = nullptr; // Don't delete, we don't own it

@@ -55,7 +55,7 @@ namespace Limitless
         // This avoids deadlocks if callbacks/listeners register or remove handlers during dispatch.
         std::function<bool(const Event&)> eventFilter;
         std::vector<ListenerEntry> listeners;
-        std::vector<std::pair<EventCallback, EventPriority>> callbacks;
+        std::vector<CallbackEntry> callbacks;
         {
             std::lock_guard<std::mutex> lock(m_Mutex);
             eventFilter = m_EventFilter;
@@ -80,16 +80,16 @@ namespace Limitless
         auto startTime = std::chrono::high_resolution_clock::now();
 
         // Dispatch to callbacks (priority order is maintained at registration time).
-        for (auto& callback : callbacks)
+        for (auto& callbackEntry : callbacks)
         {
             if (event.IsHandled())
                 break;
 
             try
             {
-                if (callback.first)
+                if (callbackEntry.Callback)
                 {
-                    callback.first(event);
+                    callbackEntry.Callback(event);
                     m_EventsHandled.fetch_add(1, std::memory_order_relaxed);
                 }
             }
@@ -132,35 +132,45 @@ namespace Limitless
         Dispatch(event);
     }
 
-    void EventDispatcher::AddCallback(EventType type, EventCallback callback, EventPriority priority)
+    EventCallbackToken EventDispatcher::AddCallback(EventType type, EventCallback callback, EventPriority priority)
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
-        m_Callbacks[type].push_back({std::move(callback), priority});
+
+        CallbackEntry entry;
+        entry.Token = m_NextCallbackToken.fetch_add(1, std::memory_order_relaxed);
+        entry.Callback = std::move(callback);
+        entry.Priority = priority;
+
+        m_Callbacks[type].push_back(std::move(entry));
         
         // Sort callbacks by priority (higher priority first)
         auto& callbacks = m_Callbacks[type];
         std::sort(callbacks.begin(), callbacks.end(),
-            [](const std::pair<EventCallback, EventPriority>& a, 
-               const std::pair<EventCallback, EventPriority>& b) {
-                return static_cast<int>(a.second) < static_cast<int>(b.second);
+            [](const CallbackEntry& a, const CallbackEntry& b) {
+                return static_cast<int>(a.Priority) < static_cast<int>(b.Priority);
             });
+
+        return entry.Token;
     }
 
-    void EventDispatcher::RemoveCallback(EventType type, const EventCallback& callback)
+    bool EventDispatcher::RemoveCallback(EventType type, EventCallbackToken token)
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
         auto it = m_Callbacks.find(type);
         if (it != m_Callbacks.end())
         {
             auto& callbacks = it->second;
+            const size_t oldSize = callbacks.size();
             callbacks.erase(
                 std::remove_if(callbacks.begin(), callbacks.end(),
-                    [&callback](const std::pair<EventCallback, EventPriority>& entry) {
-                        return entry.first.target_type() == callback.target_type();
+                    [token](const CallbackEntry& entry) {
+                        return entry.Token == token;
                     }),
                 callbacks.end()
             );
+            return callbacks.size() != oldSize;
         }
+        return false;
     }
 
     void EventDispatcher::AddListener(std::shared_ptr<EventListener> listener)
@@ -564,30 +574,30 @@ namespace Limitless
         dispatcher->RemoveListener(listener);
     }
 
-    void EventSystem::AddCallback(EventType type, EventCallback callback, EventPriority priority)
+    EventCallbackToken EventSystem::AddCallback(EventType type, EventCallback callback, EventPriority priority)
     {
         EventSystemOperationGuard op(*this);
         if (!op.IsActive())
-            return;
+            return 0;
 
         auto dispatcher = m_Dispatcher;
         if (!dispatcher)
-            return;
+            return 0;
 
-        dispatcher->AddCallback(type, std::move(callback), priority);
+        return dispatcher->AddCallback(type, std::move(callback), priority);
     }
 
-    void EventSystem::RemoveCallback(EventType type, const EventCallback& callback)
+    bool EventSystem::RemoveCallback(EventType type, EventCallbackToken token)
     {
         EventSystemOperationGuard op(*this);
         if (!op.IsActive())
-            return;
+            return false;
 
         auto dispatcher = m_Dispatcher;
         if (!dispatcher)
-            return;
+            return false;
 
-        dispatcher->RemoveCallback(type, callback);
+        return dispatcher->RemoveCallback(type, token);
     }
 
     void EventSystem::SetEventFilter(std::function<bool(const Event&)> filter)

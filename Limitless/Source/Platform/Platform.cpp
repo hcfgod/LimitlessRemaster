@@ -24,6 +24,8 @@
     #include <sys/types.h>
     #include <sys/stat.h>
     #include <unistd.h>
+    #include <limits.h>
+    #include <mach-o/dyld.h>
     #include <mach/mach.h>
     #include <mach/mach_host.h>
     #include <mach/mach_time.h>
@@ -38,6 +40,7 @@
     #include <sys/sysinfo.h>
     #include <sys/stat.h>
     #include <unistd.h>
+    #include <limits.h>
     #include <dlfcn.h>
     #include <pwd.h>
     #include <sys/utsname.h>
@@ -287,39 +290,94 @@ namespace Limitless
         #endif
 
         // CPU instruction set detection
-        #ifdef LT_PLATFORM_WINDOWS
-            int cpuInfo[4];
-            __cpuid(cpuInfo, 1);
-            
-            s_PlatformInfo.capabilities.hasSSE2 = (cpuInfo[3] & (1 << 26)) != 0;
-            s_PlatformInfo.capabilities.hasSSE3 = (cpuInfo[2] & (1 << 0)) != 0;
-            s_PlatformInfo.capabilities.hasSSE4_1 = (cpuInfo[2] & (1 << 19)) != 0;
-            s_PlatformInfo.capabilities.hasSSE4_2 = (cpuInfo[2] & (1 << 20)) != 0;
-            
-            // Check for AVX
-            __cpuid(cpuInfo, 7);
-            s_PlatformInfo.capabilities.hasAVX = (cpuInfo[1] & (1 << 5)) != 0;
-            s_PlatformInfo.capabilities.hasAVX2 = (cpuInfo[1] & (1 << 28)) != 0;
-            s_PlatformInfo.capabilities.hasAVX512 = (cpuInfo[1] & (1 << 16)) != 0;
-            
-        #elif defined(LT_PLATFORM_LINUX)
-            unsigned int eax, ebx, ecx, edx;
-            
-            if (__get_cpuid(1, &eax, &ebx, &ecx, &edx))
-            {
-                s_PlatformInfo.capabilities.hasSSE2 = (edx & (1 << 26)) != 0;
-                s_PlatformInfo.capabilities.hasSSE3 = (ecx & (1 << 0)) != 0;
-                s_PlatformInfo.capabilities.hasSSE4_1 = (ecx & (1 << 19)) != 0;
-                s_PlatformInfo.capabilities.hasSSE4_2 = (ecx & (1 << 20)) != 0;
-            }
-            
-            if (__get_cpuid(7, &eax, &ebx, &ecx, &edx))
-            {
-                s_PlatformInfo.capabilities.hasAVX = (ebx & (1 << 5)) != 0;
-                s_PlatformInfo.capabilities.hasAVX2 = (ebx & (1 << 28)) != 0;
-                s_PlatformInfo.capabilities.hasAVX512 = (ebx & (1 << 16)) != 0;
-            }
-        #endif
+        #if defined(LT_ARCHITECTURE_X64) || defined(LT_ARCHITECTURE_X86)
+            // Correct AVX-family detection requires BOTH:
+            // - CPU support bits (CPUID)
+            // - OS support for saving YMM/ZMM state (OSXSAVE + XGETBV(XCR0))
+            //
+            // References:
+            // - AVX: CPUID.(EAX=1):ECX.AVX[bit 28] + OSXSAVE[bit 27] + XCR0[1:2] == 11b
+            // - AVX2: CPUID.(EAX=7,ECX=0):EBX.AVX2[bit 5] + AVX usable
+            // - AVX-512F: CPUID.(EAX=7,ECX=0):EBX.AVX512F[bit 16] + XCR0 enables Opmask/ZMM state
+            #if defined(LT_PLATFORM_WINDOWS)
+                int cpuInfo[4] = {};
+                __cpuid(cpuInfo, 1);
+
+                s_PlatformInfo.capabilities.hasSSE2 = (cpuInfo[3] & (1 << 26)) != 0;
+                s_PlatformInfo.capabilities.hasSSE3 = (cpuInfo[2] & (1 << 0)) != 0;
+                s_PlatformInfo.capabilities.hasSSE4_1 = (cpuInfo[2] & (1 << 19)) != 0;
+                s_PlatformInfo.capabilities.hasSSE4_2 = (cpuInfo[2] & (1 << 20)) != 0;
+
+                const bool cpuHasXSAVE   = (cpuInfo[2] & (1 << 26)) != 0;
+                const bool cpuHasOSXSAVE = (cpuInfo[2] & (1 << 27)) != 0;
+                const bool cpuHasAVX     = (cpuInfo[2] & (1 << 28)) != 0;
+
+                uint64_t xcr0 = 0;
+                if (cpuHasXSAVE && cpuHasOSXSAVE)
+                {
+                    xcr0 = _xgetbv(0);
+                }
+
+                // XCR0 bit 1 = XMM state, bit 2 = YMM state
+                const bool osHasAVXState = (xcr0 & 0x6) == 0x6;
+                s_PlatformInfo.capabilities.hasAVX = cpuHasAVX && cpuHasXSAVE && cpuHasOSXSAVE && osHasAVXState;
+
+                // Leaf 7 feature bits
+                __cpuidex(cpuInfo, 7, 0);
+                const bool cpuHasAVX2     = (cpuInfo[1] & (1 << 5)) != 0;   // EBX bit 5
+                const bool cpuHasAVX512F  = (cpuInfo[1] & (1 << 16)) != 0;  // EBX bit 16
+
+                s_PlatformInfo.capabilities.hasAVX2 = s_PlatformInfo.capabilities.hasAVX && cpuHasAVX2;
+
+                // XCR0 bits required for AVX-512: XMM(1), YMM(2), Opmask(5), ZMM_hi256(6), Hi16_ZMM(7)
+                const bool osHasAVX512State = (xcr0 & 0xE6) == 0xE6;
+                s_PlatformInfo.capabilities.hasAVX512 = s_PlatformInfo.capabilities.hasAVX && cpuHasAVX512F && osHasAVX512State;
+
+            #elif defined(LT_PLATFORM_LINUX)
+                // Local helper: XGETBV is required to validate OS support for AVX/AVX-512 state.
+                auto XGetBV = [](uint32_t index) -> uint64_t
+                {
+                    uint32_t eax = 0;
+                    uint32_t edx = 0;
+                    __asm__ volatile("xgetbv" : "=a"(eax), "=d"(edx) : "c"(index));
+                    return (static_cast<uint64_t>(edx) << 32) | eax;
+                };
+
+                unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
+                if (__get_cpuid(1, &eax, &ebx, &ecx, &edx))
+                {
+                    s_PlatformInfo.capabilities.hasSSE2 = (edx & (1 << 26)) != 0;
+                    s_PlatformInfo.capabilities.hasSSE3 = (ecx & (1 << 0)) != 0;
+                    s_PlatformInfo.capabilities.hasSSE4_1 = (ecx & (1 << 19)) != 0;
+                    s_PlatformInfo.capabilities.hasSSE4_2 = (ecx & (1 << 20)) != 0;
+
+                    const bool cpuHasXSAVE   = (ecx & (1 << 26)) != 0;
+                    const bool cpuHasOSXSAVE = (ecx & (1 << 27)) != 0;
+                    const bool cpuHasAVX     = (ecx & (1 << 28)) != 0;
+
+                    uint64_t xcr0 = 0;
+                    if (cpuHasXSAVE && cpuHasOSXSAVE)
+                    {
+                        xcr0 = XGetBV(0);
+                    }
+
+                    const bool osHasAVXState = (xcr0 & 0x6) == 0x6;
+                    s_PlatformInfo.capabilities.hasAVX = cpuHasAVX && cpuHasXSAVE && cpuHasOSXSAVE && osHasAVXState;
+
+                    // CPUID leaf 7 is queried via __get_cpuid_count(7, 0, ...)
+                    if (__get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx))
+                    {
+                        const bool cpuHasAVX2    = (ebx & (1 << 5)) != 0;   // EBX bit 5
+                        const bool cpuHasAVX512F = (ebx & (1 << 16)) != 0;  // EBX bit 16
+
+                        s_PlatformInfo.capabilities.hasAVX2 = s_PlatformInfo.capabilities.hasAVX && cpuHasAVX2;
+
+                        const bool osHasAVX512State = (xcr0 & 0xE6) == 0xE6;
+                        s_PlatformInfo.capabilities.hasAVX512 = s_PlatformInfo.capabilities.hasAVX && cpuHasAVX512F && osHasAVX512State;
+                    }
+                }
+            #endif
+        #endif // x86/x64
 
         // ARM-specific capabilities
         #if defined(LT_ARCHITECTURE_ARM64) || defined(LT_ARCHITECTURE_ARM32)
@@ -339,10 +397,48 @@ namespace Limitless
             char path[MAX_PATH];
             GetModuleFileNameA(nullptr, path, MAX_PATH);
             s_PlatformInfo.executablePath = path;
-        #elif defined(LT_PLATFORM_MACOS) || defined(LT_PLATFORM_LINUX)
+        #elif defined(LT_PLATFORM_MACOS)
+            // macOS does not provide /proc/self/exe. Use the dyld API to locate the current executable.
             char path[PATH_MAX];
-            ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
-            if (len != -1)
+            uint32_t size = sizeof(path);
+            if (_NSGetExecutablePath(path, &size) == 0)
+            {
+                // _NSGetExecutablePath may return a path containing symlinks or relative components.
+                // Resolve it to an absolute canonical path when possible.
+                char resolved[PATH_MAX];
+                if (realpath(path, resolved) != nullptr)
+                {
+                    s_PlatformInfo.executablePath = resolved;
+                }
+                else
+                {
+                    // Fall back to the dyld path if realpath fails (should be rare).
+                    s_PlatformInfo.executablePath = path;
+                }
+            }
+            else if (size > 0)
+            {
+                // Buffer was too small; allocate the requested size and retry.
+                std::string tmp;
+                tmp.resize(size);
+                if (_NSGetExecutablePath(tmp.data(), &size) == 0)
+                {
+                    char resolved[PATH_MAX];
+                    if (realpath(tmp.c_str(), resolved) != nullptr)
+                    {
+                        s_PlatformInfo.executablePath = resolved;
+                    }
+                    else
+                    {
+                        s_PlatformInfo.executablePath = tmp.c_str();
+                    }
+                }
+            }
+        #elif defined(LT_PLATFORM_LINUX)
+            // Linux: /proc/self/exe points to the running executable.
+            char path[PATH_MAX];
+            const ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
+            if (len > 0)
             {
                 path[len] = '\0';
                 s_PlatformInfo.executablePath = path;

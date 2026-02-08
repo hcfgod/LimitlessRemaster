@@ -192,6 +192,9 @@ namespace Limitless
         std::function<void(WindowState)> m_StateChangeCallback;
         std::function<void(WindowEventType)> m_EventCallback;
 
+        // Event callback tokens (identity-safe removal)
+        Limitless::EventCallbackToken m_WindowConfigChangedCallbackToken = 0;
+
         // Cursor state tracking:
         // - Relative mouse mode hides/grabs cursor; we preserve user's desired visibility for unlock.
         bool m_CursorLocked = false;

@@ -10,6 +10,7 @@
 #include <chrono>
 #include <functional>
 #include <mutex>
+#include <condition_variable>
 
 namespace Limitless
 {
@@ -200,6 +201,14 @@ namespace Limitless
         // Thread safety
         mutable std::mutex m_StatsMutex;
         mutable std::mutex m_ConfigMutex;
+
+        // Flush/idle tracking:
+        // `Flush()` waits until the queue is empty AND no command is currently executing.
+        // The thread that owns a valid `GraphicsContext` must continue calling `ProcessCommands*()`
+        // (directly or via the render thread) for `Flush()` to make forward progress.
+        mutable std::mutex m_IdleMutex;
+        mutable std::condition_variable m_IdleCV;
+        std::atomic<uint32_t> m_InFlightExecutions{0};
     };
 
     // Render command executor for multi-threaded rendering

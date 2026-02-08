@@ -27,12 +27,20 @@ events.Initialize();
 ### Register a callback
 
 ```cpp
-events.AddCallback(Limitless::EventType::KeyPressed,
+Limitless::EventCallbackToken token = events.AddCallback(Limitless::EventType::KeyPressed,
     [](Limitless::Event& event)
     {
         LT_INFO("Key pressed: {}", event.ToString());
     },
     Limitless::EventPriority::High);
+```
+
+### Remove a callback (identity-safe)
+
+Callbacks must be removed by token (AAA-grade identity safety):
+
+```cpp
+events.RemoveCallback(Limitless::EventType::KeyPressed, token);
 ```
 
 ### Dispatch events

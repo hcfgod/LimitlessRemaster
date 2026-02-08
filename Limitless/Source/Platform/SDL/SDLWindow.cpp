@@ -27,8 +27,9 @@ namespace Limitless
             if (GetEventSystem().IsInitialized())
             {
                 // Use callbacks instead of listeners to avoid shared_ptr issues
-                GetEventSystem().AddCallback(EventType::WindowConfigChanged, 
-                    [this](Event& event) { OnWindowConfigChangedCallback(event); });
+                m_WindowConfigChangedCallbackToken =
+                    GetEventSystem().AddCallback(EventType::WindowConfigChanged,
+                        [this](Event& event) { OnWindowConfigChangedCallback(event); });
             }
         }
         catch (...)
@@ -45,8 +46,11 @@ namespace Limitless
         {
             if (GetEventSystem().IsInitialized())
             {
-                // Note: EventSystem doesn't have a way to remove callbacks by function
-                // This is a limitation, but it's safer than the shared_ptr approach
+                if (m_WindowConfigChangedCallbackToken != 0)
+                {
+                    GetEventSystem().RemoveCallback(EventType::WindowConfigChanged, m_WindowConfigChangedCallbackToken);
+                    m_WindowConfigChangedCallbackToken = 0;
+                }
             }
         }
         catch (...)

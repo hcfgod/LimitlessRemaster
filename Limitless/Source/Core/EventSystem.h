@@ -156,6 +156,7 @@ namespace Limitless
 
     // Event callback type
     using EventCallback = std::function<void(Event&)>;
+    using EventCallbackToken = uint64_t;
 
     // Event dispatcher
     class EventDispatcher
@@ -174,8 +175,10 @@ namespace Limitless
         void RemoveListener(const EventListener* listener);
         
         // Callback management
-        void AddCallback(EventType type, EventCallback callback, EventPriority priority = EventPriority::Normal);
-        void RemoveCallback(EventType type, const EventCallback& callback);
+        // AAA-grade callback identity: Add returns a token, removal is by token.
+        // This avoids `std::function` type-erasure pitfalls where two different lambdas can share a target_type().
+        EventCallbackToken AddCallback(EventType type, EventCallback callback, EventPriority priority = EventPriority::Normal);
+        bool RemoveCallback(EventType type, EventCallbackToken token);
         
         // Event filtering
         void SetEventFilter(std::function<bool(const Event&)> filter);
@@ -211,10 +214,19 @@ namespace Limitless
         };
 
         std::vector<ListenerEntry> m_Listeners;
-        std::unordered_map<EventType, std::vector<std::pair<EventCallback, EventPriority>>> m_Callbacks;
+        struct CallbackEntry
+        {
+            EventCallbackToken Token = 0;
+            EventCallback Callback;
+            EventPriority Priority = EventPriority::Normal;
+        };
+
+        std::unordered_map<EventType, std::vector<CallbackEntry>> m_Callbacks;
         std::function<bool(const Event&)> m_EventFilter;
         
         mutable std::mutex m_Mutex;
+
+        std::atomic<EventCallbackToken> m_NextCallbackToken{1};
         
         // Statistics
         std::atomic<size_t> m_TotalEventsDispatched{0};
@@ -313,8 +325,8 @@ namespace Limitless
         void RemoveListener(const EventListener* listener);
         
         // Callback management
-        void AddCallback(EventType type, EventCallback callback, EventPriority priority = EventPriority::Normal);
-        void RemoveCallback(EventType type, const EventCallback& callback);
+        EventCallbackToken AddCallback(EventType type, EventCallback callback, EventPriority priority = EventPriority::Normal);
+        bool RemoveCallback(EventType type, EventCallbackToken token);
         
         // Event filtering
         void SetEventFilter(std::function<bool(const Event&)> filter);
@@ -633,9 +645,9 @@ namespace Limitless
 
     // Event callback registration helper
     template<typename EventType>
-    void AddEventCallback(std::function<void(EventType&)> callback, EventPriority priority = EventPriority::Normal)
+    EventCallbackToken AddEventCallback(std::function<void(EventType&)> callback, EventPriority priority = EventPriority::Normal)
     {
         EventCallbackWrapper<EventType> wrapper(std::move(callback));
-        GetEventSystem().AddCallback(EventType::GetStaticType(), wrapper, priority);
+        return GetEventSystem().AddCallback(EventType::GetStaticType(), wrapper, priority);
     }
 }
