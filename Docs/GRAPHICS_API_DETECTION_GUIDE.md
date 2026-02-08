@@ -50,7 +50,7 @@ This document describes the engine's **graphics API selection framework**, and i
 
 | API | Platform Support | Minimum Version | Status |
 |-----|-----------------|-----------------|---------|
-| OpenGL | All Platforms | 3.3+ | ✅ Production Ready |
+| OpenGL | All Platforms | 3.3+ | ✅ Implemented (context creation) / ⚠️ detection is conservative until a real context exists |
 | Vulkan | Windows, Linux | 1.0+ | 🚧 Future (Detection + Context not implemented yet) |
 | DirectX | Windows | 12+ | 🚧 Future (Detection + Context not implemented yet) |
 | Metal | macOS | 2.0+ | 🚧 Future (Detection + Context not implemented yet) |
@@ -157,6 +157,12 @@ The system will:
 4. Fall back to OpenGL if no other APIs are available
 5. Provide detailed logging about the selection process
 
+Important reality check:
+
+- `GraphicsAPIDetector` does **not** create a graphics context during detection.
+- For OpenGL, the detector provides **conservative defaults**; **successful context creation** is the real verification step.
+- For Vulkan/DirectX/Metal, detection currently returns **unsupported** with an explicit reason (until real probing/backends are implemented).
+
 ## OpenGL Context Creation
 
 The OpenGL context creation now includes robust fallback logic:
@@ -201,22 +207,22 @@ if (!GraphicsAPIDetector::IsAPISupported(GraphicsAPI::Vulkan)) {
 
 ## Performance Considerations
 
-- The detection system is designed to be fast and lightweight
-- Results are cached after initialization
-- Detection only occurs once unless explicitly refreshed
-- Temporary windows are created and destroyed quickly for OpenGL testing
-- Thread-safe operations use minimal locking
+- The detection system is designed to be fast and lightweight.
+- Results are cached after initialization.
+- Detection only occurs once unless explicitly refreshed.
+- Detection does **not** require SDL video/window creation.
+- Thread-safe operations use minimal locking.
 
 ## Production Readiness
 
 ### ✅ Production Ready Features
 
-1. **Thread Safety**: All operations are thread-safe
-2. **Error Recovery**: Robust fallback logic for context creation
-3. **Configuration**: User can override automatic selection
-4. **Debugging**: Comprehensive diagnostic information
-5. **OpenGL Support**: Full production-ready OpenGL detection and context creation
-6. **Initialization**: Proper initialization at application startup
+1. **Thread Safety**: All operations are thread-safe.
+2. **Error Recovery**: Robust fallback logic for context creation.
+3. **Configuration**: User can override automatic selection.
+4. **Debugging**: Diagnostic report + explicit unsupported reasons for future APIs.
+5. **OpenGL Support**: Production-ready OpenGL **context creation** (capability details are finalized after context creation).
+6. **Initialization**: Proper initialization at application startup.
 
 ### 🚧 Future Enhancements
 

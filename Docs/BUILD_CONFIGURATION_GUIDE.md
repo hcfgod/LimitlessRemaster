@@ -329,8 +329,10 @@ make -j$(nproc) config=Debug_x64
 
 ### Common Build Issues
 
-1. **Coroutine Support**: Ensure `/await` or `-fcoroutines` flags are set
-2. **C++20 Support**: Verify compiler supports C++20 standard
+1. **Coroutine Support (C++20)**: Ensure you are compiling in **C++20 mode** and your compiler version supports standard coroutines.
+   - MSVC: no special `/await` flag is required for standard C++20 coroutines.
+   - GCC/Clang: standard C++20 coroutines work in C++20 mode on modern toolchains. (Older toolchains may require extra flags; upgrade if possible.)
+2. **C++20 Support**: Verify your compiler supports the C++20 standard library features you use (not just the language mode).
 3. **Library Dependencies**: Check all required libraries are available
 4. **Platform SDK**: Ensure latest platform SDK is installed
 
@@ -346,4 +348,4 @@ make -j$(nproc) config=Debug_x64
 2. **macOS**: Verify Xcode command line tools installation
 3. **Linux**: Ensure development libraries are installed
 
-This comprehensive build configuration ensures optimal performance and compatibility across all supported platforms while providing full C++20 coroutine support. 
+This build configuration targets the engine's **implemented platforms today** (Windows/macOS/Linux) while keeping future platform expansion in mind, and provides C++20 build settings across those targets.

@@ -43,14 +43,16 @@ namespace Limitless
 
         m_ConfigFile = resolved.string();
         m_Shutdown.store(false);
+        m_AsyncCallbackThreadStarted.store(false, std::memory_order_relaxed);
 
         LT_CORE_INFO("ConfigManager::Initialize: Config file set to: {}", m_ConfigFile);
 
         // Load defaults first
         LoadDefaults();
 
-        // Start async callback processing thread (only in non-test mode)
-        m_AsyncCallbackThread = std::thread(&ConfigManager::ProcessAsyncCallbacks, this);
+        // Async callback processing thread is started lazily on-demand:
+        // - It is only needed if async change callbacks are registered.
+        // - Avoiding a background thread by default improves determinism in tests/standalone tools.
 
         // Try to load from file if it exists
         if (std::filesystem::exists(m_ConfigFile))
@@ -99,6 +101,7 @@ namespace Limitless
         {
             m_AsyncCallbackThread.join();
         }
+        m_AsyncCallbackThreadStarted.store(false, std::memory_order_relaxed);
 
         // Save current configuration
         if (!m_ConfigFile.empty())
@@ -423,6 +426,9 @@ namespace Limitless
     {
         std::unique_lock<std::shared_mutex> lock(m_ConfigMutex);
         m_AsyncCallbacks[key].push_back(std::move(callback));
+
+        // Ensure the worker exists once async callbacks are used.
+        EnsureAsyncCallbackThreadRunning();
     }
 
     void ConfigManager::UnregisterAsyncChangeCallback(const std::string& key)
@@ -750,6 +756,7 @@ namespace Limitless
         auto asyncIt = m_AsyncCallbacks.find(key);
         if (asyncIt != m_AsyncCallbacks.end())
         {
+            EnsureAsyncCallbackThreadRunning();
             for (const auto& callback : asyncIt->second)
             {
                 // Queue callback for async execution
@@ -825,6 +832,29 @@ namespace Limitless
 
             waitLock.lock();
         }
+    }
+
+    void ConfigManager::EnsureAsyncCallbackThreadRunning()
+    {
+        if (m_Shutdown.load(std::memory_order_relaxed))
+        {
+            return;
+        }
+
+        bool expected = false;
+        if (!m_AsyncCallbackThreadStarted.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+        {
+            return; // already started
+        }
+
+        // If we're re-initializing after a shutdown, the old thread was joined and no longer joinable.
+        // If a thread is still joinable here, do not replace it.
+        if (m_AsyncCallbackThread.joinable())
+        {
+            return;
+        }
+
+        m_AsyncCallbackThread = std::thread(&ConfigManager::ProcessAsyncCallbacks, this);
     }
 
     void ConfigManager::UpdateStats(bool isRead, double duration) const

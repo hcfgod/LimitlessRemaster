@@ -236,12 +236,14 @@ TEST_SUITE("Event System")
         Limitless::EventCallback callback1 = [&callbackCount](Limitless::Event& event) {
             callbackCount++;
         };
-        eventSystem.AddCallback(Limitless::EventType::AppTick, callback1);
+        const Limitless::EventCallbackToken token1 =
+            eventSystem.AddCallback(Limitless::EventType::AppTick, callback1);
         
         Limitless::EventCallback callback2 = [&callbackCount](Limitless::Event& event) {
             callbackCount++;
         };
-        eventSystem.AddCallback(Limitless::EventType::AppTick, callback2);
+        const Limitless::EventCallbackToken token2 =
+            eventSystem.AddCallback(Limitless::EventType::AppTick, callback2);
         
         // Dispatch event - both callbacks should be called
         auto tickEvent = std::make_unique<Limitless::Events::AppTickEvent>(0.016f);
@@ -251,7 +253,7 @@ TEST_SUITE("Event System")
         CHECK(callbackCount == 2);
         
         // Remove first callback
-        eventSystem.RemoveCallback(Limitless::EventType::AppTick, callback1);
+        eventSystem.RemoveCallback(Limitless::EventType::AppTick, token1);
         
         callbackCount = 0;
         
@@ -262,7 +264,7 @@ TEST_SUITE("Event System")
         CHECK(callbackCount == 1);
         
         // Remove second callback
-        eventSystem.RemoveCallback(Limitless::EventType::AppTick, callback2);
+        eventSystem.RemoveCallback(Limitless::EventType::AppTick, token2);
         
         callbackCount = 0;
         

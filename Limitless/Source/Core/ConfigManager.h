@@ -177,6 +177,7 @@ namespace Limitless
         // Internal helper methods
         void NotifyAsyncChangeCallbacks(const std::string& key, const ConfigValue& value);
         void ProcessAsyncCallbacks();
+        void EnsureAsyncCallbackThreadRunning();
         void UpdateStats(bool isRead, double duration) const;
         void LoadDefaults();
         void ProcessJsonObject(const nlohmann::json& json, const std::string& prefix);
@@ -207,6 +208,7 @@ namespace Limitless
 
         // Background processing
         std::thread m_AsyncCallbackThread;
+        std::atomic<bool> m_AsyncCallbackThreadStarted{false};
         std::atomic<bool> m_Shutdown{false};
         std::mutex m_AsyncCallbackMutex;
         std::condition_variable m_AsyncCallbackCondition;
