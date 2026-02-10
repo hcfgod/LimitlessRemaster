@@ -13,7 +13,9 @@ project "Sandbox"
     pchheader "PrecompiledHeader.h"
     pchsource "Source/PrecompiledHeader.cpp"
 
-    forceincludes { "PrecompiledHeader.h" }
+    filter "files:Source/**.cpp"
+        forceincludes { "PrecompiledHeader.h" }
+    filter {}
 
     files
     {
@@ -34,7 +36,6 @@ project "Sandbox"
     links
     {
         "Limitless",
-        "LimitlessVendor"
     }
 
     -- ----------------------------------------------------------------------------------

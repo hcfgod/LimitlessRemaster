@@ -16,18 +16,31 @@ project "Limitless"
     -- -----------------------------------------------------------------------------
     -- Precompiled Header (PCH)
     -- - Enabled for engine C++ translation units for faster iteration
-    -- - Third-party compilation units are built in a separate project (`LimitlessVendor`)
+    -- - Disabled for vendor code and all C files (e.g. glad.c)
     -- -----------------------------------------------------------------------------
     pchheader "PrecompiledHeader.h"
     pchsource "Source/PrecompiledHeader.cpp"
 
-    forceincludes { "PrecompiledHeader.h" }
+    -- Force-include PCH only for engine translation units.
+    filter "files:Source/**.cpp"
+        forceincludes { "PrecompiledHeader.h" }
+    filter {}
 
     files
     {
         "Source/**.h",
         "Source/**.cpp",
+        "Vendor/stb/stb_image/stb_image.cpp",
+        "Vendor/glad/glad/glad.c"
     }
+
+    filter "files:Vendor/**"
+        flags { "NoPCH" }
+    filter "files:**.c"
+        flags { "NoPCH" }
+        language "C"
+        cdialect "C11"
+    filter {}
 
     includedirs
     {
@@ -51,8 +64,6 @@ project "Limitless"
     {
         -- Build SPIRV-Cross from source as a normal static library project.
         "VendorSpirvCross",
-        -- Compile stb_image + glad in a separate project without PCH.
-        "LimitlessVendor"
     }
 
     filter "system:windows"
@@ -219,37 +230,5 @@ project "Limitless"
     -- Configuration-specific defines are provided by the workspace `premake5.lua`
 
 group "Dependencies"
-    project "LimitlessVendor"
-        location "Vendor/LimitlessVendor"
-        kind "StaticLib"
-        language "C++"
-        cppdialect "C++20"
-        staticruntime "off"
-
-        targetdir ("%{wks.location}/Build/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
-        objdir ("%{wks.location}/Build/Intermediates/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
-
-        -- Vendor project must never use the engine PCH.
-        flags { "NoPCH" }
-
-        files
-        {
-            "Vendor/stb/stb_image/stb_image.cpp",
-            "Vendor/glad/glad/glad.c"
-        }
-
-        includedirs
-        {
-            "Vendor/",
-            "Vendor/glad",
-            "Vendor/stb"
-        }
-
-        -- Ensure C sources are treated as C (not C++).
-        filter "files:**.c"
-            language "C"
-            cdialect "C11"
-        filter {}
-
     include "Vendor/SPIRV-Cross"
 group ""

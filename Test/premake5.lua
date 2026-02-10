@@ -13,7 +13,9 @@ project "Test"
     pchheader "PrecompiledHeader.h"
     pchsource "Source/PrecompiledHeader.cpp"
 
-    forceincludes { "PrecompiledHeader.h" }
+    filter "files:Source/**.cpp"
+        forceincludes { "PrecompiledHeader.h" }
+    filter {}
 
     files
     {
@@ -34,7 +36,6 @@ project "Test"
     links
     {
         "Limitless",
-        "LimitlessVendor"
     }
 
     filter "system:windows"
