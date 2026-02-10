@@ -9,6 +9,7 @@
 #include <functional>
 #include <variant>
 #include <vector>
+#include <array>
 #include <string>
 #include <glm/glm.hpp>
 
@@ -113,6 +114,57 @@ namespace Limitless
     };
 
     using UniqueRenderCommand = std::unique_ptr<RenderCommand, RenderCommandDeleter>;
+
+    // -----------------------------------------------------------------------------
+    // Renderer2DFlushCommand
+    // Upload vertices + bind state + bind textures + issue draw in one command.
+    //
+    // This significantly reduces render queue pressure compared to submitting many
+    // small bind/uniform/draw commands per Renderer2D batch flush.
+    // -----------------------------------------------------------------------------
+    class Renderer2DFlushCommand final : public RenderCommand
+    {
+    public:
+        static constexpr uint32_t kMaxTextureSlots = 16;
+
+        struct KeepAlive
+        {
+            std::shared_ptr<VertexBuffer> VertexBuffer;
+            std::shared_ptr<VertexArray> VertexArray;
+            std::shared_ptr<Shader> ShaderProgram;
+            std::array<std::shared_ptr<Texture>, kMaxTextureSlots> Textures{};
+        };
+
+        Renderer2DFlushCommand(
+            KeepAlive&& keepAlive,
+            const void* vertexBytes,
+            uint32_t vertexByteCount,
+            const glm::mat4& viewProjection,
+            uint32_t indexCount,
+            IndexType indexType,
+            uint32_t textureCount);
+
+        void Execute(GraphicsContext* context) override;
+        RenderCommandType GetType() const override { return RenderCommandType::Custom; }
+        std::string GetName() const override { return "Renderer2DFlush"; }
+        bool CanBatch() const override { return false; }
+
+    private:
+        KeepAlive m_KeepAlive{};
+        const uint8_t* m_VertexBytes = nullptr;
+        uint32_t m_VertexByteCount = 0;
+
+        glm::mat4 m_ViewProjection{1.0f};
+
+        uint32_t m_IndexCount = 0;
+        IndexType m_IndexType = IndexType::UnsignedShort;
+
+        uint32_t m_TextureCount = 0;
+
+        // Cached native IDs for fast-path execution (OpenGL).
+        // KeepAlive ensures lifetimes; Execute can bind using these IDs without touching shared_ptr refcounts.
+        std::array<uint32_t, kMaxTextureSlots> m_TextureRendererIds{};
+    };
 
     // Clear command
     class ClearCommand : public RenderCommand

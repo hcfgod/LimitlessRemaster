@@ -24,6 +24,8 @@ namespace Limitless
         const std::vector<std::shared_ptr<VertexBuffer>>& GetVertexBuffers() const override { return m_VertexBuffers; }
         const std::shared_ptr<IndexBuffer>& GetIndexBuffer() const override { return m_IndexBuffer; }
 
+        GLuint GetRendererID() const { return m_RendererID; }
+
     private:
         GLuint m_RendererID = 0;
         GLuint m_VertexAttribIndex = 0;

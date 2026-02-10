@@ -87,6 +87,36 @@ namespace Limitless
         m_SizeBytes = sizeBytes;
     }
 
+    Renderer2DFlushCommand::Renderer2DFlushCommand(
+        KeepAlive&& keepAlive,
+        const void* vertexBytes,
+        uint32_t vertexByteCount,
+        const glm::mat4& viewProjection,
+        uint32_t indexCount,
+        IndexType indexType,
+        uint32_t textureCount)
+        : m_KeepAlive(std::move(keepAlive))
+        , m_VertexBytes(static_cast<const uint8_t*>(vertexBytes))
+        , m_VertexByteCount(vertexByteCount)
+        , m_ViewProjection(viewProjection)
+        , m_IndexCount(indexCount)
+        , m_IndexType(indexType)
+        , m_TextureCount(textureCount)
+    {
+        // Cache texture renderer IDs for faster binds in the hot execution path.
+        for (uint32_t i = 0; i < kMaxTextureSlots; ++i)
+        {
+            if (m_KeepAlive.Textures[i])
+            {
+                m_TextureRendererIds[i] = m_KeepAlive.Textures[i]->GetRendererID();
+            }
+            else
+            {
+                m_TextureRendererIds[i] = 0;
+            }
+        }
+    }
+
     // BindTextureCommand implementation
     BindTextureCommand::BindTextureCommand(std::shared_ptr<Texture> texture, uint32_t slot)
         : m_Texture(std::move(texture)), m_Slot(slot)

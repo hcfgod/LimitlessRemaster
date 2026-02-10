@@ -4,6 +4,9 @@
 #include "Graphics/VertexArray.h"
 #include "Graphics/Buffer.h"
 #include "Graphics/Texture.h"
+#include "Graphics/OpenGL/OpenGLBuffer.h"
+#include "Graphics/OpenGL/OpenGLShader.h"
+#include "Graphics/OpenGL/OpenGLVertexArray.h"
 #include "Core/Error.h"
 #include "Core/Debug/Log.h"
 
@@ -13,6 +16,8 @@
 #ifdef LT_USE_GLAD
 #include <glad/glad.h>
 #endif
+
+#include <cstring>
 
 namespace {
     // Check for OpenGL errors
@@ -26,6 +31,99 @@ namespace {
 
 namespace Limitless
 {
+    namespace
+    {
+        // Render-thread OpenGL state tracker.
+        // Commands that mutate tracked state MUST update this cache.
+        // CustomCommand MUST invalidate it (unknown GL calls).
+        struct OpenGLStateCache
+        {
+            GLuint Program = 0;
+            GLuint VertexArray = 0;
+
+            uint32_t ActiveTextureUnit = 0;
+            std::array<GLuint, 32> BoundTexture2D{};
+
+            void InvalidateAll()
+            {
+                Program = 0;
+                VertexArray = 0;
+                ActiveTextureUnit = 0;
+                BoundTexture2D.fill(0);
+            }
+
+            void UseProgram(GLuint program)
+            {
+                if (Program != program)
+                {
+                    glUseProgram(program);
+                    Program = program;
+                }
+            }
+
+            void BindVertexArray(GLuint vao)
+            {
+                if (VertexArray != vao)
+                {
+                    glBindVertexArray(vao);
+                    VertexArray = vao;
+                }
+            }
+
+            void SetActiveTextureUnit(uint32_t unit)
+            {
+                if (ActiveTextureUnit != unit)
+                {
+                    glActiveTexture(GL_TEXTURE0 + unit);
+                    ActiveTextureUnit = unit;
+                }
+            }
+
+            void BindTexture2D(uint32_t unit, GLuint textureId)
+            {
+                SetActiveTextureUnit(unit);
+                if (unit < BoundTexture2D.size())
+                {
+                    if (BoundTexture2D[unit] != textureId)
+                    {
+                        glBindTexture(GL_TEXTURE_2D, textureId);
+                        BoundTexture2D[unit] = textureId;
+                    }
+                    return;
+                }
+
+                // Fallback: no caching for high slots.
+                glBindTexture(GL_TEXTURE_2D, textureId);
+            }
+        };
+
+        // Render thread only.
+        static OpenGLStateCache s_GLState;
+
+        struct Renderer2DUniformCache
+        {
+            GLuint Program = 0;
+            GLint ViewProjectionLocation = -2; // -2 = unknown, -1 = not found
+            GLint ModelLocation = -2;          // -2 = unknown, -1 = not found
+
+            glm::mat4 LastViewProjection{1.0f};
+            bool HasViewProjection = false;
+
+            void OnProgramBound(GLuint program)
+            {
+                if (Program != program)
+                {
+                    Program = program;
+                    ViewProjectionLocation = -2;
+                    ModelLocation = -2;
+                    HasViewProjection = false;
+                }
+            }
+        };
+
+        static Renderer2DUniformCache s_Renderer2DUniforms;
+    }
+
     // ClearCommand Execute implementation
     void ClearCommand::Execute(GraphicsContext* context)
     {
@@ -102,7 +200,15 @@ namespace Limitless
 
         if (m_Shader)
         {
-            m_Shader->Bind();
+            if (auto* glShader = dynamic_cast<OpenGLShader*>(m_Shader.get()))
+            {
+                s_GLState.UseProgram(glShader->GetRendererID());
+            }
+            else
+            {
+                m_Shader->Bind();
+                s_GLState.Program = 0;
+            }
         }
         else
         {
@@ -123,6 +229,19 @@ namespace Limitless
             return;
         }
 
+        if (auto* glShader = dynamic_cast<OpenGLShader*>(m_Shader.get()))
+        {
+            const GLuint program = glShader->GetRendererID();
+            s_GLState.UseProgram(program);
+
+            const GLint loc = glGetUniformLocation(program, m_UniformName.c_str());
+            if (loc != -1)
+            {
+                glUniformMatrix4fv(loc, 1, GL_FALSE, &m_Value[0][0]);
+            }
+            return;
+        }
+
         m_Shader->SetMat4(m_UniformName, m_Value);
     }
 
@@ -136,7 +255,15 @@ namespace Limitless
 
         if (m_VertexArray)
         {
-            m_VertexArray->Bind();
+            if (auto* glVAO = dynamic_cast<OpenGLVertexArray*>(m_VertexArray.get()))
+            {
+                s_GLState.BindVertexArray(glVAO->GetRendererID());
+            }
+            else
+            {
+                m_VertexArray->Bind();
+                s_GLState.VertexArray = 0;
+            }
 
             // Defensive: ensure the VAO's index buffer is bound for indexed draws.
             // In OpenGL core profile the element array buffer is part of VAO state, but making this
@@ -212,6 +339,107 @@ namespace Limitless
         m_VertexBuffer->SetData(m_DataPtr, m_SizeBytes);
     }
 
+    void Renderer2DFlushCommand::Execute(GraphicsContext* context)
+    {
+        if (!context)
+        {
+            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
+        }
+
+        if (!m_KeepAlive.VertexArray || !m_KeepAlive.VertexBuffer || !m_KeepAlive.ShaderProgram)
+        {
+            LT_CORE_WARN("Renderer2DFlushCommand: missing resources (VAO/VBO/Shader), skipping");
+            return;
+        }
+
+        if (m_VertexBytes == nullptr || m_VertexByteCount == 0 || m_IndexCount == 0)
+        {
+            // Allow no-op flushes (defensive).
+            return;
+        }
+
+        // Upload vertices (streaming).
+        m_KeepAlive.VertexBuffer->SetData(m_VertexBytes, m_VertexByteCount);
+
+        // Bind shader + uniforms (OpenGL fast path when possible).
+        if (auto* glShader = dynamic_cast<OpenGLShader*>(m_KeepAlive.ShaderProgram.get()))
+        {
+            const GLuint program = glShader->GetRendererID();
+            s_GLState.UseProgram(program);
+            s_Renderer2DUniforms.OnProgramBound(program);
+
+            if (s_Renderer2DUniforms.ViewProjectionLocation == -2)
+            {
+                s_Renderer2DUniforms.ViewProjectionLocation = glGetUniformLocation(program, "u_ViewProjection");
+            }
+
+            if (s_Renderer2DUniforms.ViewProjectionLocation != -1)
+            {
+                if (!s_Renderer2DUniforms.HasViewProjection ||
+                    std::memcmp(&s_Renderer2DUniforms.LastViewProjection[0][0], &m_ViewProjection[0][0], sizeof(glm::mat4)) != 0)
+                {
+                    glUniformMatrix4fv(s_Renderer2DUniforms.ViewProjectionLocation, 1, GL_FALSE, &m_ViewProjection[0][0]);
+                    s_Renderer2DUniforms.LastViewProjection = m_ViewProjection;
+                    s_Renderer2DUniforms.HasViewProjection = true;
+                }
+            }
+
+            if (s_Renderer2DUniforms.ModelLocation == -2)
+            {
+                s_Renderer2DUniforms.ModelLocation = glGetUniformLocation(program, "u_Model");
+            }
+
+            if (s_Renderer2DUniforms.ModelLocation != -1)
+            {
+                static constexpr glm::mat4 kIdentity(1.0f);
+                glUniformMatrix4fv(s_Renderer2DUniforms.ModelLocation, 1, GL_FALSE, &kIdentity[0][0]);
+            }
+        }
+        else
+        {
+            m_KeepAlive.ShaderProgram->Bind();
+            m_KeepAlive.ShaderProgram->SetMat4("u_ViewProjection", m_ViewProjection);
+            m_KeepAlive.ShaderProgram->SetMat4("u_Model", glm::mat4(1.0f));
+            s_GLState.Program = 0;
+            s_Renderer2DUniforms.OnProgramBound(0);
+        }
+
+        // Bind textures (multi-texture batching) using cached renderer IDs.
+        const uint32_t count = (m_TextureCount > kMaxTextureSlots) ? kMaxTextureSlots : m_TextureCount;
+        for (uint32_t slot = 0; slot < count; ++slot)
+        {
+            s_GLState.BindTexture2D(slot, static_cast<GLuint>(m_TextureRendererIds[slot]));
+        }
+
+        // Bind geometry and issue draw.
+        if (auto* glVAO = dynamic_cast<OpenGLVertexArray*>(m_KeepAlive.VertexArray.get()))
+        {
+            const GLuint vao = glVAO->GetRendererID();
+            s_GLState.BindVertexArray(vao);
+        }
+        else
+        {
+            m_KeepAlive.VertexArray->Bind();
+            s_GLState.VertexArray = 0;
+        }
+
+        // Safety: in core profile, indexed drawing requires VAO + EBO.
+        GLint boundVAO = 0;
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &boundVAO);
+        GLint boundEBO = 0;
+        glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &boundEBO);
+
+        if (boundVAO == 0 || boundEBO == 0)
+        {
+            LT_CORE_ERROR("Renderer2DFlushCommand: invalid VAO/EBO binding (VAO={}, EBO={}), skipping draw", boundVAO, boundEBO);
+            return;
+        }
+
+        glDrawElements(static_cast<GLenum>(DrawMode::Triangles), static_cast<GLsizei>(m_IndexCount),
+                       static_cast<GLenum>(m_IndexType), nullptr);
+        CheckOpenGLError("Renderer2DFlushCommand glDrawElements");
+    }
+
     // BindTextureCommand Execute implementation
     void BindTextureCommand::Execute(GraphicsContext* context)
     {
@@ -220,15 +448,8 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        if (m_Texture)
-        {
-            m_Texture->Bind(m_Slot);
-        }
-        else
-        {
-            glActiveTexture(GL_TEXTURE0 + m_Slot);
-            glBindTexture(GL_TEXTURE_2D, 0);
-        }
+        const GLuint id = m_Texture ? static_cast<GLuint>(m_Texture->GetRendererID()) : 0;
+        s_GLState.BindTexture2D(m_Slot, id);
     }
 
     void SetTextureSpecificationCommand::Execute(GraphicsContext* context)
@@ -500,6 +721,10 @@ namespace Limitless
         {
             m_Function(context);
         }
+
+        // Custom code can mutate any OpenGL state. Invalidate cached state for correctness.
+        s_GLState.InvalidateAll();
+        s_Renderer2DUniforms.OnProgramBound(0);
         
         LT_CORE_DEBUG("CustomCommand: {}", m_Name);
     }

@@ -401,25 +401,30 @@ namespace Limitless
         }
 
         std::memcpy(uploadBytes, g_Data.VertexBufferBase.get(), dataSizeBytes);
-        renderer.SubmitCommandArena<SetVertexBufferDataCommand>(
-            SetVertexBufferDataCommand::ExternalDataTag{},
-            g_Data.QuadVertexBuffer,
-            uploadBytes,
-            dataSizeBytes);
-
-        // Bind pipeline state and issue a single indexed draw.
-        renderer.SubmitCommandArena<BindShaderCommand>(g_Data.ShaderProgram);
-        renderer.SubmitCommandArena<SetShaderMat4Command>(g_Data.ShaderProgram, "u_ViewProjection", g_Data.ViewProjection);
-        renderer.SubmitCommandArena<SetShaderMat4Command>(g_Data.ShaderProgram, "u_Model", glm::mat4(1.0f));
-        for (uint32_t slot = 0; slot < g_Data.TextureSlotCount; ++slot)
+        std::array<std::shared_ptr<Texture>, Renderer2DData::kMaxTextureSlots> textures{};
+        for (uint32_t slot = 0; slot < g_Data.TextureSlotCount && slot < Renderer2DData::kMaxTextureSlots; ++slot)
         {
-            if (g_Data.TextureSlots[slot])
-            {
-                renderer.SubmitCommandArena<BindTextureCommand>(g_Data.TextureSlots[slot], slot);
-            }
+            // Move shared_ptr ownership into the flush packet so we avoid additional refcount churn.
+            // `TextureSlots` are reset right after submission anyway.
+            textures[slot] = std::move(g_Data.TextureSlots[slot]);
         }
-        renderer.SubmitCommandArena<BindVertexArrayCommand>(g_Data.QuadVertexArray);
-        renderer.SubmitCommandArena<DrawIndexedCommand>(DrawMode::Triangles, g_Data.IndexCount, IndexType::UnsignedShort, nullptr, 0);
+
+        Renderer2DFlushCommand::KeepAlive keepAlive{};
+        // These are long-lived renderer resources; copying the shared_ptr here is fine.
+        // (Texture handles are moved above to avoid per-flush refcount churn.)
+        keepAlive.VertexBuffer = g_Data.QuadVertexBuffer;
+        keepAlive.VertexArray = g_Data.QuadVertexArray;
+        keepAlive.ShaderProgram = g_Data.ShaderProgram;
+        keepAlive.Textures = std::move(textures);
+
+        renderer.SubmitCommandArena<Renderer2DFlushCommand>(
+            std::move(keepAlive),
+            uploadBytes,
+            dataSizeBytes,
+            g_Data.ViewProjection,
+            g_Data.IndexCount,
+            IndexType::UnsignedShort,
+            g_Data.TextureSlotCount);
 
         g_Data.Stats.DrawCalls += 1;
         g_Data.Stats.Batches += 1;
