@@ -4,6 +4,20 @@
 
 namespace Limitless
 {
+    namespace
+    {
+        static glm::vec4 MakeDeterministicTint(uint32_t x, uint32_t y)
+        {
+            // Tiny hash to produce stable, human-checkable variation without RNG.
+            uint32_t h = x * 73856093u ^ y * 19349663u ^ 0x9E3779B9u;
+            h ^= (h >> 16);
+            const float r = 0.55f + 0.45f * (static_cast<float>((h >> 0) & 255u) / 255.0f);
+            const float g = 0.55f + 0.45f * (static_cast<float>((h >> 8) & 255u) / 255.0f);
+            const float b = 0.55f + 0.45f * (static_cast<float>((h >> 16) & 255u) / 255.0f);
+            return glm::vec4(r, g, b, 1.0f);
+        }
+    }
+
     void Renderer2DDemo::Initialize(uint32_t viewportWidthPixels, uint32_t viewportHeightPixels)
     {
         (void)viewportWidthPixels;
@@ -43,18 +57,73 @@ namespace Limitless
         }
     }
 
+    void Renderer2DDemo::SetStressTestSettings(const StressTestSettings& settings)
+    {
+        m_StressTest = settings;
+
+        // Keep values sane so a bad hot-reload doesn't allocate extreme work.
+        m_StressTest.GridWidth = std::max(1u, m_StressTest.GridWidth);
+        m_StressTest.GridHeight = std::max(1u, m_StressTest.GridHeight);
+        m_StressTest.Spacing = std::max(0.01f, m_StressTest.Spacing);
+        m_StressTest.AlternateTextureStride = std::max(1u, m_StressTest.AlternateTextureStride);
+    }
+
+    void Renderer2DDemo::ApplyStressPreset(uint32_t presetIndex)
+    {
+        // These values are picked so you can quickly hit:
+        // - below one batch (sanity)
+        // - around one batch (10k)
+        // - multiple batches
+        // without needing to edit code.
+        StressTestSettings preset = m_StressTest;
+        preset.Enabled = true;
+
+        switch (presetIndex)
+        {
+            case 1:
+                preset.GridWidth = 48;
+                preset.GridHeight = 30; // 1,440
+                preset.Spacing = 0.20f;
+                break;
+            case 2:
+                preset.GridWidth = 125;
+                preset.GridHeight = 80; // 10,000
+                preset.Spacing = 0.11f;
+                break;
+            case 3:
+                preset.GridWidth = 200;
+                preset.GridHeight = 100; // 20,000
+                preset.Spacing = 0.10f;
+                break;
+            case 4:
+                preset.GridWidth = 250;
+                preset.GridHeight = 200; // 50,000
+                preset.Spacing = 0.08f;
+                break;
+            default:
+                // Unknown preset -> no-op.
+                return;
+        }
+
+        SetStressTestSettings(preset);
+        LT_INFO("Renderer2DDemo stress preset {} applied (Grid={}x{}, AlternateTextures={}, Stride={}, Spacing={})",
+                presetIndex, preset.GridWidth, preset.GridHeight, preset.AlternateTextures, preset.AlternateTextureStride, preset.Spacing);
+    }
+
     void Renderer2DDemo::Shutdown()
     {
         m_CheckerTexture.reset();
         m_SissyTexture.reset();
         m_TimeSeconds = 0.0f;
         m_StatsLogAccumulatorSeconds = 0.0f;
+        m_FramesSinceLastStatsLog = 0;
         m_LoggedReadyOnce = false;
     }
 
     void Renderer2DDemo::Update(float deltaTime)
     {
         m_TimeSeconds += deltaTime;
+        ++m_FramesSinceLastStatsLog;
 
         EnsureAssetsReady();
 
@@ -62,9 +131,21 @@ namespace Limitless
         m_StatsLogAccumulatorSeconds += deltaTime;
         if (m_StatsLogAccumulatorSeconds >= 1.0f)
         {
+            const float intervalSeconds = m_StatsLogAccumulatorSeconds;
             m_StatsLogAccumulatorSeconds = 0.0f;
+
+            const uint64_t frames = m_FramesSinceLastStatsLog;
+            m_FramesSinceLastStatsLog = 0;
+
             const auto& stats = Renderer2D::GetStatistics();
-            LT_INFO("Renderer2D Stats: DrawCalls={}, Batches={}, Quads={}", stats.DrawCalls, stats.Batches, stats.QuadCount);
+
+            const float fps = (intervalSeconds > 0.0f) ? (static_cast<float>(frames) / intervalSeconds) : 0.0f;
+            const float quadsPerFrame = (frames > 0) ? (static_cast<float>(stats.QuadCount) / static_cast<float>(frames)) : 0.0f;
+            const float drawCallsPerFrame = (frames > 0) ? (static_cast<float>(stats.DrawCalls) / static_cast<float>(frames)) : 0.0f;
+            const float batchesPerFrame = (frames > 0) ? (static_cast<float>(stats.Batches) / static_cast<float>(frames)) : 0.0f;
+
+            LT_INFO("Renderer2D Stats: FPS={:.1f}, DrawCalls={} ({:.2f}/frame), Batches={} ({:.2f}/frame), Quads={} ({:.0f}/frame)",
+                    fps, stats.DrawCalls, drawCallsPerFrame, stats.Batches, batchesPerFrame, stats.QuadCount, quadsPerFrame);
             Renderer2D::ResetStatistics();
         }
     }
@@ -90,40 +171,65 @@ namespace Limitless
 
         Renderer2D::BeginScene(camera);
 
-        // A small grid that should batch into a single draw call (same texture).
-        // Keep the scene deterministic so draw-call/batch counts are stable frame-to-frame.
-        const int gridWidth = 20;
-        const int gridHeight = 12;
-        const float spacing = 0.55f;
-
-        for (int y = 0; y < gridHeight; ++y)
+        if (m_StressTest.Enabled)
         {
-            for (int x = 0; x < gridWidth; ++x)
+            // Performance stress test:
+            // - GridWidth * GridHeight quads on Z=0 plane.
+            // - Uses either one texture (best-case batching) or periodic texture swaps (stress-case batching).
+            const uint32_t gridWidth = m_StressTest.GridWidth;
+            const uint32_t gridHeight = m_StressTest.GridHeight;
+            const float spacing = m_StressTest.Spacing;
+            const glm::vec2 quadSize = glm::vec2(spacing * 0.92f, spacing * 0.92f);
+
+            // Center the grid around the origin so it behaves well with either camera type.
+            const float totalWidth = (gridWidth > 1) ? (static_cast<float>(gridWidth - 1) * spacing) : 0.0f;
+            const float totalHeight = (gridHeight > 1) ? (static_cast<float>(gridHeight - 1) * spacing) : 0.0f;
+            const float startX = -0.5f * totalWidth;
+            const float startY = -0.5f * totalHeight;
+
+            const uint32_t centerX = gridWidth / 2;
+            const uint32_t centerY = gridHeight / 2;
+            const uint32_t stride = std::max(1u, m_StressTest.AlternateTextureStride);
+
+            for (uint32_t y = 0; y < gridHeight; ++y)
             {
-                // These world units work in both orthographic and perspective cameras.
-                // For perspective cameras, you can fly the editor camera and see the grid on the Z=0 plane.
-                const glm::vec2 pos = glm::vec2(-5.0f + x * spacing, -3.0f + y * spacing);
-                const glm::vec2 size = glm::vec2(0.5f, 0.5f);
-
-                // Gentle tint variation so you can visually confirm it is not a single quad.
-                const float t = 0.5f + 0.5f * std::sin(m_TimeSeconds + (x + y) * 0.15f);
-                const glm::vec4 tint = glm::vec4(0.6f + 0.4f * t, 0.6f, 0.9f, 1.0f);
-
-                // Use the new JPG on one quad as a visual sanity check.
-                if (x == gridWidth / 2 && y == gridHeight / 2)
+                for (uint32_t x = 0; x < gridWidth; ++x)
                 {
-                    Renderer2D::DrawQuad(pos, size, m_SissyTexture, glm::vec4(1.0f));
-                }
-                else
-                {
-                    Renderer2D::DrawQuad(pos, size, m_CheckerTexture, tint);
+                    const glm::vec2 pos = glm::vec2(startX + static_cast<float>(x) * spacing,
+                                                    startY + static_cast<float>(y) * spacing);
+
+                    // Put the JPG at the center as a persistent “orientation / sampling” sanity check.
+                    if (x == centerX && y == centerY)
+                    {
+                        Renderer2D::DrawQuad(pos, quadSize, m_SissyTexture, glm::vec4(1.0f));
+                        continue;
+                    }
+
+                    // Stable tint so it’s easy to see the grid and detect if quads are collapsing.
+                    const glm::vec4 tint = MakeDeterministicTint(x, y);
+
+                    if (m_StressTest.AlternateTextures)
+                    {
+                        // Swap texture periodically to intentionally create more batches.
+                        // This is a good way to see how much state changes cost on your machine.
+                        const uint32_t linearIndex = x + y * gridWidth;
+                        const bool usePhoto = ((linearIndex / stride) & 1u) != 0u;
+                        Renderer2D::DrawQuad(pos, quadSize, usePhoto ? m_SissyTexture : m_CheckerTexture, tint);
+                    }
+                    else
+                    {
+                        Renderer2D::DrawQuad(pos, quadSize, m_CheckerTexture, tint);
+                    }
                 }
             }
         }
-
-        // A couple of solid-color quads.
-        Renderer2D::DrawQuad(glm::vec2(1.5f, 1.5f), glm::vec2(1.25f, 0.35f), glm::vec4(0.1f, 0.9f, 0.2f, 1.0f));
-        Renderer2D::DrawQuad(glm::vec2(1.5f, 1.0f), glm::vec2(1.25f, 0.35f), glm::vec4(0.9f, 0.2f, 0.2f, 0.8f));
+        else
+        {
+            // Minimal scene for quick sanity checks.
+            Renderer2D::DrawQuad(glm::vec2(-0.6f, 0.0f), glm::vec2(1.0f, 1.0f), m_CheckerTexture, glm::vec4(1.0f));
+            Renderer2D::DrawQuad(glm::vec2(0.6f, 0.0f), glm::vec2(1.0f, 1.0f), m_SissyTexture, glm::vec4(1.0f));
+            Renderer2D::DrawQuad(glm::vec2(0.0f, -1.25f), glm::vec2(2.0f, 0.35f), glm::vec4(0.15f, 0.85f, 0.25f, 1.0f));
+        }
 
         Renderer2D::EndScene();
     }

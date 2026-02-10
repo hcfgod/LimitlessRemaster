@@ -13,6 +13,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <array>
+#include <cstring>
 #include <vector>
 
 namespace Limitless
@@ -24,6 +25,7 @@ namespace Limitless
             glm::vec3 Position{0.0f};
             glm::vec2 UV{0.0f};
             glm::vec4 Color{1.0f};
+            int32_t TexIndex = 0;
         };
 
         struct Renderer2DData
@@ -31,6 +33,7 @@ namespace Limitless
             static constexpr uint32_t kMaxQuads = 10000;
             static constexpr uint32_t kMaxVertices = kMaxQuads * 4;
             static constexpr uint32_t kMaxIndices = kMaxQuads * 6;
+            static constexpr uint32_t kMaxTextureSlots = 16;
 
             bool Initialized = false;
 
@@ -41,11 +44,14 @@ namespace Limitless
             Assets::MaterialAsset::Ptr Material;
             std::shared_ptr<Shader> ShaderProgram;
 
-            std::shared_ptr<Texture2D> CurrentTexture;
+            std::shared_ptr<Texture2D> WhiteTexture;
+            std::array<std::shared_ptr<Texture2D>, kMaxTextureSlots> TextureSlots{};
+            uint32_t TextureSlotCount = 0;
 
             glm::mat4 ViewProjection{1.0f};
 
-            std::vector<QuadVertex> VertexStaging;
+            std::unique_ptr<QuadVertex[]> VertexBufferBase;
+            QuadVertex* VertexBufferPtr = nullptr;
             uint32_t IndexCount = 0;
 
             Renderer2D::Statistics Stats{};
@@ -90,28 +96,40 @@ namespace Limitless
         g_Data.QuadVertexBuffer->SetLayout({
             { ShaderDataType::Float3, "a_Position" },
             { ShaderDataType::Float2, "a_UV" },
-            { ShaderDataType::Float4, "a_Color" }
+            { ShaderDataType::Float4, "a_Color" },
+            { ShaderDataType::Int,    "a_TexIndex" }
         });
         g_Data.QuadVertexArray->AddVertexBuffer(g_Data.QuadVertexBuffer);
 
-        std::vector<uint32_t> indices;
+        std::vector<uint16_t> indices;
         indices.resize(Renderer2DData::kMaxIndices);
-        uint32_t offset = 0;
+        uint16_t offset = 0;
         for (uint32_t i = 0; i < Renderer2DData::kMaxIndices; i += 6)
         {
-            indices[i + 0] = offset + 0;
-            indices[i + 1] = offset + 1;
-            indices[i + 2] = offset + 2;
+            indices[i + 0] = static_cast<uint16_t>(offset + 0);
+            indices[i + 1] = static_cast<uint16_t>(offset + 1);
+            indices[i + 2] = static_cast<uint16_t>(offset + 2);
 
-            indices[i + 3] = offset + 2;
-            indices[i + 4] = offset + 3;
-            indices[i + 5] = offset + 0;
+            indices[i + 3] = static_cast<uint16_t>(offset + 2);
+            indices[i + 4] = static_cast<uint16_t>(offset + 3);
+            indices[i + 5] = static_cast<uint16_t>(offset + 0);
 
-            offset += 4;
+            offset = static_cast<uint16_t>(offset + 4);
         }
 
         g_Data.QuadIndexBuffer = IndexBuffer::Create(indices.data(), static_cast<uint32_t>(indices.size()));
         g_Data.QuadVertexArray->SetIndexBuffer(g_Data.QuadIndexBuffer);
+
+        // 1x1 white texture for untextured (color-only) quads and as a guaranteed slot 0.
+        // This keeps the shader sampling path uniform and makes batching rules deterministic.
+        const uint32_t whitePixelRGBA8 = 0xFFFFFFFFu;
+        TextureSpecification whiteSpec{};
+        whiteSpec.GenerateMipmaps = false;
+        whiteSpec.MinFilter = TextureFilter::Nearest;
+        whiteSpec.MagFilter = TextureFilter::Nearest;
+        whiteSpec.WrapU = TextureWrap::ClampToEdge;
+        whiteSpec.WrapV = TextureWrap::ClampToEdge;
+        g_Data.WhiteTexture = Texture2D::CreateFromRGBA8(1, 1, &whitePixelRGBA8, whiteSpec);
 
         // Default 2D material (shader + placeholder texture ref).
         g_Data.Material = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>("Assets/Materials/Renderer2D_TexturedQuad.material.json");
@@ -129,17 +147,21 @@ namespace Limitless
         }
         else
         {
-            // Be explicit: sampler is bound to texture unit 0.
-            g_Data.ShaderProgram->SetInt("u_Texture", 0);
+            // Bind sampler array once: u_Textures[i] -> texture unit i.
+            std::array<int, Renderer2DData::kMaxTextureSlots> samplers{};
+            for (uint32_t i = 0; i < Renderer2DData::kMaxTextureSlots; ++i)
+            {
+                samplers[i] = static_cast<int>(i);
+            }
+            g_Data.ShaderProgram->SetIntArray("u_Textures", samplers.data(), static_cast<uint32_t>(samplers.size()));
         }
 
-        // Default texture (from material). This is used when DrawQuad is called without a texture.
-        g_Data.CurrentTexture = g_Data.Material->GetMainTexture();
-
-        g_Data.VertexStaging.reserve(Renderer2DData::kMaxVertices);
+        g_Data.VertexBufferBase = std::make_unique<QuadVertex[]>(Renderer2DData::kMaxVertices);
+        g_Data.VertexBufferPtr = g_Data.VertexBufferBase.get();
         g_Data.Initialized = true;
 
-        LT_CORE_INFO("Renderer2D initialized (MaxQuadsPerBatch={})", Renderer2DData::kMaxQuads);
+        LT_CORE_INFO("Renderer2D initialized (MaxQuadsPerBatch={}, MaxTextureSlotsPerBatch={})",
+                     Renderer2DData::kMaxQuads, Renderer2DData::kMaxTextureSlots);
     }
 
     void Renderer2D::Shutdown()
@@ -168,13 +190,17 @@ namespace Limitless
 
         g_Data.ViewProjection = viewProjection;
         g_Data.IndexCount = 0;
-        g_Data.VertexStaging.clear();
+        g_Data.VertexBufferPtr = g_Data.VertexBufferBase.get();
+
+        // Reset texture slots for the new scene.
+        g_Data.TextureSlotCount = 1;
+        g_Data.TextureSlots[0] = g_Data.WhiteTexture;
 
         // Typical 2D defaults: alpha blending on, depth/cull off.
         auto& renderer = Renderer::GetInstance();
-        renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::SrcAlpha, BlendFactor::OneMinusSrcAlpha, true));
-        renderer.SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
-        renderer.SubmitCommand(std::make_unique<SetCullFaceCommand>(false));
+        renderer.SubmitCommandArena<SetBlendModeCommand>(BlendFactor::SrcAlpha, BlendFactor::OneMinusSrcAlpha, true);
+        renderer.SubmitCommandArena<SetDepthTestCommand>(false);
+        renderer.SubmitCommandArena<SetCullFaceCommand>(false);
     }
 
     void Renderer2D::EndScene()
@@ -205,16 +231,6 @@ namespace Limitless
             return;
         }
 
-        // If we have no texture at all, there is nothing to sample. Keep it obvious in logs.
-        if (!g_Data.CurrentTexture)
-        {
-            // Try to recover from material readiness changes.
-            if (g_Data.Material)
-            {
-                g_Data.CurrentTexture = g_Data.Material->GetMainTexture();
-            }
-        }
-
         // Batch overflow guard.
         if (g_Data.IndexCount + 6 > Renderer2DData::kMaxIndices)
         {
@@ -235,14 +251,19 @@ namespace Limitless
             glm::vec2(0.0f, 1.0f),
         };
 
+        // Slot 0 is always the white texture for color-only quads.
+        constexpr int32_t texIndex = 0;
+
+        QuadVertex* v = g_Data.VertexBufferPtr;
         for (size_t i = 0; i < 4; ++i)
         {
-            QuadVertex v;
-            v.Position = glm::vec3(transform * kQuadPositions[i]);
-            v.UV = kUVs[i];
-            v.Color = color;
-            g_Data.VertexStaging.push_back(v);
+            v->Position = glm::vec3(transform * kQuadPositions[i]);
+            v->UV = kUVs[i];
+            v->Color = color;
+            v->TexIndex = texIndex;
+            ++v;
         }
+        g_Data.VertexBufferPtr = v;
 
         g_Data.IndexCount += 6;
         g_Data.Stats.QuadCount += 1;
@@ -264,14 +285,66 @@ namespace Limitless
             return;
         }
 
-        // Texture batching: one draw call per texture per scene in this MVP.
-        if (g_Data.CurrentTexture && g_Data.CurrentTexture != tex && g_Data.IndexCount != 0)
+        // Batch overflow guard: ensure there is room for this quad before we compute texture slot indices.
+        if (g_Data.IndexCount + 6 > Renderer2DData::kMaxIndices)
         {
             Flush();
         }
 
-        g_Data.CurrentTexture = tex;
-        DrawQuad(transform, tintColor);
+        // Find or allocate a texture slot for this batch.
+        int32_t texIndex = -1;
+        for (uint32_t i = 0; i < g_Data.TextureSlotCount; ++i)
+        {
+            if (g_Data.TextureSlots[i] == tex)
+            {
+                texIndex = static_cast<int32_t>(i);
+                break;
+            }
+        }
+
+        if (texIndex < 0)
+        {
+            // Not found in current batch.
+            if (g_Data.TextureSlotCount >= Renderer2DData::kMaxTextureSlots)
+            {
+                // Texture slot overflow -> flush and start a new batch.
+                Flush();
+            }
+
+            // After a flush, a new batch starts with only the white texture in slot 0.
+            // Allocate the next slot for this texture.
+            texIndex = static_cast<int32_t>(g_Data.TextureSlotCount);
+            g_Data.TextureSlots[g_Data.TextureSlotCount] = tex;
+            g_Data.TextureSlotCount++;
+        }
+
+        constexpr std::array<glm::vec4, 4> kQuadPositions = {
+            glm::vec4(-0.5f, -0.5f, 0.0f, 1.0f),
+            glm::vec4( 0.5f, -0.5f, 0.0f, 1.0f),
+            glm::vec4( 0.5f,  0.5f, 0.0f, 1.0f),
+            glm::vec4(-0.5f,  0.5f, 0.0f, 1.0f),
+        };
+
+        constexpr std::array<glm::vec2, 4> kUVs = {
+            glm::vec2(0.0f, 0.0f),
+            glm::vec2(1.0f, 0.0f),
+            glm::vec2(1.0f, 1.0f),
+            glm::vec2(0.0f, 1.0f),
+        };
+
+        QuadVertex* v = g_Data.VertexBufferPtr;
+        for (size_t i = 0; i < 4; ++i)
+        {
+            v->Position = glm::vec3(transform * kQuadPositions[i]);
+            v->UV = kUVs[i];
+            v->Color = tintColor;
+            v->TexIndex = texIndex;
+            ++v;
+        }
+        g_Data.VertexBufferPtr = v;
+
+        g_Data.IndexCount += 6;
+        g_Data.Stats.QuadCount += 1;
     }
 
     void Renderer2D::Flush()
@@ -281,7 +354,8 @@ namespace Limitless
             return;
         }
 
-        if (g_Data.IndexCount == 0 || g_Data.VertexStaging.empty())
+        const uint32_t vertexCount = static_cast<uint32_t>(g_Data.VertexBufferPtr - g_Data.VertexBufferBase.get());
+        if (g_Data.IndexCount == 0 || vertexCount == 0)
         {
             return;
         }
@@ -292,7 +366,12 @@ namespace Limitless
             g_Data.ShaderProgram = g_Data.Material->GetShader();
             if (g_Data.ShaderProgram)
             {
-                g_Data.ShaderProgram->SetInt("u_Texture", 0);
+                std::array<int, Renderer2DData::kMaxTextureSlots> samplers{};
+                for (uint32_t i = 0; i < Renderer2DData::kMaxTextureSlots; ++i)
+                {
+                    samplers[i] = static_cast<int>(i);
+                }
+                g_Data.ShaderProgram->SetIntArray("u_Textures", samplers.data(), static_cast<uint32_t>(samplers.size()));
             }
         }
 
@@ -300,30 +379,56 @@ namespace Limitless
         {
             LT_CORE_WARN("Renderer2D::Flush: shader not ready (dropping {} quads)", g_Data.IndexCount / 6);
             g_Data.IndexCount = 0;
-            g_Data.VertexStaging.clear();
+            g_Data.VertexBufferPtr = g_Data.VertexBufferBase.get();
+            g_Data.TextureSlotCount = 1;
+            g_Data.TextureSlots[0] = g_Data.WhiteTexture;
             return;
         }
 
         auto& renderer = Renderer::GetInstance();
 
         // Upload CPU-staged vertices to the GPU buffer on the render thread.
-        const uint32_t dataSizeBytes = static_cast<uint32_t>(g_Data.VertexStaging.size() * sizeof(QuadVertex));
-        renderer.SubmitCommand(std::make_unique<SetVertexBufferDataCommand>(g_Data.QuadVertexBuffer, g_Data.VertexStaging.data(), dataSizeBytes));
+        const uint32_t dataSizeBytes = vertexCount * static_cast<uint32_t>(sizeof(QuadVertex));
+        void* uploadBytes = renderer.AllocateFrameUpload(dataSizeBytes, alignof(QuadVertex));
+        if (!uploadBytes)
+        {
+            LT_CORE_WARN("Renderer2D::Flush: frame upload allocator out of memory (dropping {} quads)", g_Data.IndexCount / 6);
+            g_Data.IndexCount = 0;
+            g_Data.VertexBufferPtr = g_Data.VertexBufferBase.get();
+            g_Data.TextureSlotCount = 1;
+            g_Data.TextureSlots[0] = g_Data.WhiteTexture;
+            return;
+        }
+
+        std::memcpy(uploadBytes, g_Data.VertexBufferBase.get(), dataSizeBytes);
+        renderer.SubmitCommandArena<SetVertexBufferDataCommand>(
+            SetVertexBufferDataCommand::ExternalDataTag{},
+            g_Data.QuadVertexBuffer,
+            uploadBytes,
+            dataSizeBytes);
 
         // Bind pipeline state and issue a single indexed draw.
-        renderer.SubmitCommand(std::make_unique<BindShaderCommand>(g_Data.ShaderProgram));
-        renderer.SubmitCommand(std::make_unique<SetShaderMat4Command>(g_Data.ShaderProgram, "u_ViewProjection", g_Data.ViewProjection));
-        renderer.SubmitCommand(std::make_unique<SetShaderMat4Command>(g_Data.ShaderProgram, "u_Model", glm::mat4(1.0f)));
-        renderer.SubmitCommand(std::make_unique<BindTextureCommand>(g_Data.CurrentTexture, 0));
-        renderer.SubmitCommand(std::make_unique<BindVertexArrayCommand>(g_Data.QuadVertexArray));
-        renderer.SubmitCommand(std::make_unique<DrawIndexedCommand>(DrawMode::Triangles, g_Data.IndexCount, IndexType::UnsignedInt, nullptr, 0));
+        renderer.SubmitCommandArena<BindShaderCommand>(g_Data.ShaderProgram);
+        renderer.SubmitCommandArena<SetShaderMat4Command>(g_Data.ShaderProgram, "u_ViewProjection", g_Data.ViewProjection);
+        renderer.SubmitCommandArena<SetShaderMat4Command>(g_Data.ShaderProgram, "u_Model", glm::mat4(1.0f));
+        for (uint32_t slot = 0; slot < g_Data.TextureSlotCount; ++slot)
+        {
+            if (g_Data.TextureSlots[slot])
+            {
+                renderer.SubmitCommandArena<BindTextureCommand>(g_Data.TextureSlots[slot], slot);
+            }
+        }
+        renderer.SubmitCommandArena<BindVertexArrayCommand>(g_Data.QuadVertexArray);
+        renderer.SubmitCommandArena<DrawIndexedCommand>(DrawMode::Triangles, g_Data.IndexCount, IndexType::UnsignedShort, nullptr, 0);
 
         g_Data.Stats.DrawCalls += 1;
         g_Data.Stats.Batches += 1;
 
         // Reset batch.
         g_Data.IndexCount = 0;
-        g_Data.VertexStaging.clear();
+        g_Data.VertexBufferPtr = g_Data.VertexBufferBase.get();
+        g_Data.TextureSlotCount = 1;
+        g_Data.TextureSlots[0] = g_Data.WhiteTexture;
     }
 
     const Renderer2D::Statistics& Renderer2D::GetStatistics()

@@ -65,15 +65,20 @@ namespace Limitless
 
         // Submit commands to the queue
         bool SubmitCommand(std::unique_ptr<RenderCommand> command);
+        bool SubmitCommand(UniqueRenderCommand command);
         bool SubmitCommands(std::vector<std::unique_ptr<RenderCommand>> commands);
+        bool SubmitCommands(std::vector<UniqueRenderCommand> commands);
         
         // Submit commands with priority
         bool SubmitCommandWithPriority(std::unique_ptr<RenderCommand> command, RenderCommandPriority priority);
+        bool SubmitCommandWithPriority(UniqueRenderCommand command, RenderCommandPriority priority);
         
         // Submit commands for immediate execution (bypasses queue)
         // NOTE: Requires a non-null GraphicsContext for APIs (like OpenGL) that enforce context affinity.
         void ExecuteImmediate(GraphicsContext* context, std::unique_ptr<RenderCommand> command);
+        void ExecuteImmediate(GraphicsContext* context, UniqueRenderCommand command);
         void ExecuteImmediate(GraphicsContext* context, std::vector<std::unique_ptr<RenderCommand>> commands);
+        void ExecuteImmediate(GraphicsContext* context, std::vector<UniqueRenderCommand> commands);
 
         // Process and execute commands from the queue
         void ProcessCommands(GraphicsContext* context);
@@ -113,14 +118,14 @@ namespace Limitless
         // Command wrapper for queue storage
         struct QueuedCommand
         {
-            std::unique_ptr<RenderCommand> command;
+            UniqueRenderCommand command;
             RenderCommandPriority priority;
             std::chrono::high_resolution_clock::time_point submissionTime;
             uint64_t frameId;
             
             QueuedCommand() = default;
             
-            QueuedCommand(std::unique_ptr<RenderCommand> cmd, RenderCommandPriority prio, uint64_t frame)
+            QueuedCommand(UniqueRenderCommand cmd, RenderCommandPriority prio, uint64_t frame)
                 : command(std::move(cmd))
                 , priority(prio)
                 , submissionTime(std::chrono::high_resolution_clock::now())

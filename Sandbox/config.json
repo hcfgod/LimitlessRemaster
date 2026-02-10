@@ -19,7 +19,7 @@
         "height": 720,
         "resizable": true,
         "title": "LimitLess Engine",
-        "vsync": true,
+        "vsync": false,
         "width": 1280
     }
 }

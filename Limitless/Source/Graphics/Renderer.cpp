@@ -40,6 +40,10 @@ namespace Limitless
         m_Initialized = true;
         LT_CORE_INFO("Renderer initialized successfully");
 
+        // Upload staging allocator (frame-local). This is purely CPU memory.
+        m_FrameUploadAllocator.Initialize();
+        m_FrameCommandArena.Initialize();
+
         // Default behavior: enable render thread for OpenGL unless explicitly disabled.
         // This allows OpenGL work to be executed on a dedicated thread (context-affine) while
         // still supporting multi-threaded submission.
@@ -87,6 +91,8 @@ namespace Limitless
         StopRenderThread();
 
         m_RenderQueue.reset();
+        m_FrameUploadAllocator.Shutdown();
+        m_FrameCommandArena.Shutdown();
         m_GraphicsContext = nullptr; // Don't delete, we don't own it
         m_Initialized = false;
         
@@ -107,10 +113,40 @@ namespace Limitless
             return false;
         }
 
+        RenderCommand* raw = command.release();
+        return SubmitCommand(UniqueRenderCommand(raw, RenderCommandDeleter{ [](RenderCommand* c) { delete c; } }));
+    }
+
+    bool Renderer::SubmitCommand(UniqueRenderCommand command)
+    {
+        if (!m_Initialized || !m_RenderQueue)
+        {
+            LT_CORE_WARN("Cannot submit command - renderer not initialized");
+            return false;
+        }
+
+        if (!command)
+        {
+            LT_CORE_WARN("Attempted to submit null command to renderer");
+            return false;
+        }
+
         return m_RenderQueue->SubmitCommand(std::move(command));
     }
 
     bool Renderer::SubmitCommandWithPriority(std::unique_ptr<RenderCommand> command, RenderCommandPriority priority)
+    {
+        if (!m_Initialized || !m_RenderQueue)
+        {
+            LT_CORE_WARN("Cannot submit priority command - renderer not initialized");
+            return false;
+        }
+
+        RenderCommand* raw = command.release();
+        return SubmitCommandWithPriority(UniqueRenderCommand(raw, RenderCommandDeleter{ [](RenderCommand* c) { delete c; } }), priority);
+    }
+
+    bool Renderer::SubmitCommandWithPriority(UniqueRenderCommand command, RenderCommandPriority priority)
     {
         if (!m_Initialized || !m_RenderQueue)
         {
@@ -148,6 +184,36 @@ namespace Limitless
         if (!m_Initialized || !m_RenderQueue)
         {
             LT_CORE_WARN("Cannot execute command immediately - renderer not initialized");
+            return;
+        }
+
+        if (!command)
+        {
+            LT_CORE_WARN("Attempted to execute null command immediately");
+            return;
+        }
+
+        if (!m_GraphicsContext)
+        {
+            LT_CORE_WARN("Cannot execute command immediately - graphics context is null");
+            return;
+        }
+
+        RenderCommand* raw = command.release();
+        ExecuteImmediate(UniqueRenderCommand(raw, RenderCommandDeleter{ [](RenderCommand* c) { delete c; } }));
+    }
+
+    void Renderer::ExecuteImmediate(UniqueRenderCommand command)
+    {
+        if (!m_Initialized || !m_RenderQueue)
+        {
+            LT_CORE_WARN("Cannot execute command immediately - renderer not initialized");
+            return;
+        }
+
+        if (!command)
+        {
+            LT_CORE_WARN("Attempted to execute null command immediately");
             return;
         }
 
@@ -195,7 +261,20 @@ namespace Limitless
             return;
         }
 
+        // Reset frame-local upload allocator. This must happen on the submission thread,
+        // and the allocator must not reuse memory still referenced by in-flight commands.
+        // The current engine frame model blocks in SwapBuffers(), so there is only one
+        // frame in flight; the allocator remains triple-buffered defensively.
+        m_FrameUploadFrameId++;
+        m_FrameUploadAllocator.BeginFrame(m_FrameUploadFrameId);
+        m_FrameCommandArena.BeginFrame(m_FrameUploadFrameId);
+
         m_RenderQueue->BeginFrame();
+    }
+
+    void* Renderer::AllocateFrameUpload(size_t sizeBytes, size_t alignment)
+    {
+        return m_FrameUploadAllocator.Allocate(sizeBytes, alignment);
     }
 
     void Renderer::EndFrame()

@@ -18,6 +18,24 @@ namespace Limitless
         return location;
     }
 
+    static GLint GetUniformLocationWithArrayFallback(GLuint program, const std::string& name)
+    {
+        GLint location = glGetUniformLocation(program, name.c_str());
+        if (location != -1)
+        {
+            return location;
+        }
+
+        // For uniform arrays, OpenGL commonly expects the base element syntax: "u_Textures[0]".
+        const std::string withZero = name + "[0]";
+        location = glGetUniformLocation(program, withZero.c_str());
+        if (location == -1)
+        {
+            LT_CORE_DEBUG("OpenGLShader: uniform '{}' (or '{}') not found in program {}", name, withZero, program);
+        }
+        return location;
+    }
+
     GLuint OpenGLShader::CompileShader(GLenum type, const std::string& source)
     {
         const char* src = source.c_str();
@@ -143,6 +161,35 @@ namespace Limitless
         if (location != -1)
         {
             glUniform1i(location, value);
+        }
+    }
+
+    void OpenGLShader::SetIntArray(const std::string& name, const int* values, uint32_t count)
+    {
+        auto& renderer = Renderer::GetInstance();
+        if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
+        {
+            renderer.SubmitResourceAndWait([&](GraphicsContext*) {
+                glUseProgram(m_RendererID);
+                GLint location = GetUniformLocationWithArrayFallback(m_RendererID, name);
+                if (location != -1)
+                {
+                    glUniform1iv(location, static_cast<GLsizei>(count), values);
+                }
+            });
+            return;
+        }
+
+        if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
+        {
+            OpenGLContext::ScopedCurrentContext scope(*glContext);
+        }
+
+        glUseProgram(m_RendererID);
+        GLint location = GetUniformLocationWithArrayFallback(m_RendererID, name);
+        if (location != -1)
+        {
+            glUniform1iv(location, static_cast<GLsizei>(count), values);
         }
     }
 

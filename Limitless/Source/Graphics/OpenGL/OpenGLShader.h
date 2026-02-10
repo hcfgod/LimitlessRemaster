@@ -19,6 +19,7 @@ namespace Limitless
         void Unbind() const override;
 
         void SetInt(const std::string& name, int value) override;
+        void SetIntArray(const std::string& name, const int* values, uint32_t count) override;
         void SetMat4(const std::string& name, const glm::mat4& value) override;
 
         const std::string& GetName() const override { return m_Name; }

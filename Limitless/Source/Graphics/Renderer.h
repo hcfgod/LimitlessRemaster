@@ -3,6 +3,8 @@
 #include "GraphicsContext.h"
 #include "RenderCommandQueue.h"
 #include "RenderResourceCommandQueue.h"
+#include "FrameUploadAllocator.h"
+#include "FrameCommandArena.h"
 #include "Core/Debug/Log.h"
 #include <memory>
 #include <atomic>
@@ -37,12 +39,15 @@ namespace Limitless
         
         // Submit a render command
         bool SubmitCommand(std::unique_ptr<RenderCommand> command);
+        bool SubmitCommand(UniqueRenderCommand command);
         
         // Submit a render command with priority
         bool SubmitCommandWithPriority(std::unique_ptr<RenderCommand> command, RenderCommandPriority priority);
+        bool SubmitCommandWithPriority(UniqueRenderCommand command, RenderCommandPriority priority);
         
         // Execute a command immediately
         void ExecuteImmediate(std::unique_ptr<RenderCommand> command);
+        void ExecuteImmediate(UniqueRenderCommand command);
         
         // Process all queued commands
         void ProcessCommands();
@@ -55,6 +60,18 @@ namespace Limitless
         
         // Swap buffers
         void SwapBuffers();
+
+        // Allocate CPU-side upload staging bytes for this frame.
+        // Intended for render-command payloads that must outlive the submission thread until execution.
+        void* AllocateFrameUpload(size_t sizeBytes, size_t alignment = 16);
+
+        // Submit a command allocated from the renderer's frame command arena.
+        // This avoids per-command heap allocations in hot paths.
+        template<typename TCommand, typename... Args>
+        bool SubmitCommandArena(Args&&... args)
+        {
+            return SubmitCommand(m_FrameCommandArena.Make<TCommand>(std::forward<Args>(args)...));
+        }
 
         // Render thread control
         // When enabled, the render thread owns "process commands + present" for each frame.
@@ -269,5 +286,11 @@ namespace Limitless
 
         std::thread::id m_RenderThreadId{};
         RenderResourceCommandQueue m_ResourceQueue;
+
+        // Frame-local upload staging (reduces per-upload heap allocations).
+        FrameUploadAllocator m_FrameUploadAllocator;
+        uint64_t m_FrameUploadFrameId = 0;
+
+        FrameCommandArena m_FrameCommandArena;
     };
 } 

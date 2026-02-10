@@ -27,6 +27,7 @@ namespace Limitless
 
     private:
         GLuint m_RendererID = 0;
+        uint32_t m_SizeBytes = 0;
         BufferLayout m_Layout;
     };
 
@@ -34,6 +35,7 @@ namespace Limitless
     {
     public:
         OpenGLIndexBuffer(const uint32_t* indices, uint32_t count);
+        OpenGLIndexBuffer(const uint16_t* indices, uint32_t count);
         ~OpenGLIndexBuffer() override;
 
         void Bind() const override;

@@ -69,8 +69,22 @@ namespace Limitless
             return;
         }
 
-        m_Data.resize(sizeBytes);
-        std::memcpy(m_Data.data(), data, sizeBytes);
+        m_OwnedData.resize(sizeBytes);
+        std::memcpy(m_OwnedData.data(), data, sizeBytes);
+        m_DataPtr = m_OwnedData.data();
+        m_SizeBytes = sizeBytes;
+    }
+
+    SetVertexBufferDataCommand::SetVertexBufferDataCommand(ExternalDataTag, std::shared_ptr<VertexBuffer> vertexBuffer, const void* data, uint32_t sizeBytes)
+        : m_VertexBuffer(std::move(vertexBuffer))
+    {
+        if (sizeBytes == 0 || data == nullptr)
+        {
+            return;
+        }
+
+        m_DataPtr = static_cast<const uint8_t*>(data);
+        m_SizeBytes = sizeBytes;
     }
 
     // BindTextureCommand implementation

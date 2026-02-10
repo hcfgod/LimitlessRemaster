@@ -49,6 +49,18 @@ namespace Limitless
             return false;
         }
 
+        RenderCommand* raw = command.release();
+        return SubmitCommand(UniqueRenderCommand(raw, RenderCommandDeleter{ [](RenderCommand* c) { delete c; } }));
+    }
+
+    bool RenderCommandQueue::SubmitCommand(UniqueRenderCommand command)
+    {
+        if (!command)
+        {
+            LT_CORE_WARN("Attempted to submit null command");
+            return false;
+        }
+
         // Enforce configured maxQueueSize (which may be <= kQueueCapacity).
         uint32_t size = m_ApproxSize.load(std::memory_order_relaxed);
         for (;;)
@@ -74,7 +86,7 @@ namespace Limitless
         }
 
         QueuedCommand queuedCommand(
-            std::move(command), 
+            std::move(command),
             RenderCommandPriority::Normal, 
             m_CurrentFrameId.load()
         );
@@ -119,7 +131,34 @@ namespace Limitless
         return allSubmitted;
     }
 
+    bool RenderCommandQueue::SubmitCommands(std::vector<UniqueRenderCommand> commands)
+    {
+        bool allSubmitted = true;
+
+        for (auto& command : commands)
+        {
+            if (!SubmitCommand(std::move(command)))
+            {
+                allSubmitted = false;
+            }
+        }
+
+        return allSubmitted;
+    }
+
     bool RenderCommandQueue::SubmitCommandWithPriority(std::unique_ptr<RenderCommand> command, RenderCommandPriority priority)
+    {
+        if (!command)
+        {
+            LT_CORE_WARN("Attempted to submit null command with priority");
+            return false;
+        }
+
+        RenderCommand* raw = command.release();
+        return SubmitCommandWithPriority(UniqueRenderCommand(raw, RenderCommandDeleter{ [](RenderCommand* c) { delete c; } }), priority);
+    }
+
+    bool RenderCommandQueue::SubmitCommandWithPriority(UniqueRenderCommand command, RenderCommandPriority priority)
     {
         if (!command)
         {
@@ -152,7 +191,7 @@ namespace Limitless
         }
 
         QueuedCommand queuedCommand(
-            std::move(command), 
+            std::move(command),
             priority, 
             m_CurrentFrameId.load()
         );
@@ -220,7 +259,54 @@ namespace Limitless
         }
     }
 
+    void RenderCommandQueue::ExecuteImmediate(GraphicsContext* context, UniqueRenderCommand command)
+    {
+        if (!command)
+        {
+            LT_CORE_WARN("Attempted to execute null command immediately");
+            return;
+        }
+
+        if (!context)
+        {
+            LT_CORE_ERROR("Attempted to execute command immediately with null graphics context");
+            return;
+        }
+
+        try
+        {
+            auto startTime = std::chrono::high_resolution_clock::now();
+            command->Execute(context);
+            auto endTime = std::chrono::high_resolution_clock::now();
+
+            auto executionTime = std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count();
+
+            if (m_Config.enableStatistics)
+            {
+                std::lock_guard<std::mutex> statsLock(m_StatsMutex);
+                m_Stats.totalCommandsExecuted++;
+                m_Stats.totalExecutionTime += executionTime;
+            }
+        }
+        catch (const Error& error)
+        {
+            HandleCommandError(command.get(), error);
+        }
+        catch (const std::exception& e)
+        {
+            LT_CORE_ERROR("Exception during immediate command execution: {}", e.what());
+        }
+    }
+
     void RenderCommandQueue::ExecuteImmediate(GraphicsContext* context, std::vector<std::unique_ptr<RenderCommand>> commands)
+    {
+        for (auto& command : commands)
+        {
+            ExecuteImmediate(context, std::move(command));
+        }
+    }
+
+    void RenderCommandQueue::ExecuteImmediate(GraphicsContext* context, std::vector<UniqueRenderCommand> commands)
     {
         for (auto& command : commands)
         {

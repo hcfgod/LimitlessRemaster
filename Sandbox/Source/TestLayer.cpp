@@ -150,6 +150,44 @@ namespace Limitless
             }
         }
 
+        // Renderer2D performance stress test controls (demo-only).
+        // - 1/2/3/4: apply quad-count presets
+        // - T: toggle texture alternation (best-case batching vs state-change stress)
+        // - G: toggle stress test grid on/off (fallback minimal scene)
+        if (m_Renderer2DDemo)
+        {
+            if (GetInputSystem().WasKeyPressedThisFrame(SDL_SCANCODE_1))
+            {
+                m_Renderer2DDemo->ApplyStressPreset(1);
+            }
+            else if (GetInputSystem().WasKeyPressedThisFrame(SDL_SCANCODE_2))
+            {
+                m_Renderer2DDemo->ApplyStressPreset(2);
+            }
+            else if (GetInputSystem().WasKeyPressedThisFrame(SDL_SCANCODE_3))
+            {
+                m_Renderer2DDemo->ApplyStressPreset(3);
+            }
+            else if (GetInputSystem().WasKeyPressedThisFrame(SDL_SCANCODE_4))
+            {
+                m_Renderer2DDemo->ApplyStressPreset(4);
+            }
+            else if (GetInputSystem().WasKeyPressedThisFrame(SDL_SCANCODE_T))
+            {
+                auto settings = m_Renderer2DDemo->GetStressTestSettings();
+                settings.AlternateTextures = !settings.AlternateTextures;
+                m_Renderer2DDemo->SetStressTestSettings(settings);
+                LT_INFO("Renderer2DDemo: AlternateTextures={}", settings.AlternateTextures);
+            }
+            else if (GetInputSystem().WasKeyPressedThisFrame(SDL_SCANCODE_G))
+            {
+                auto settings = m_Renderer2DDemo->GetStressTestSettings();
+                settings.Enabled = !settings.Enabled;
+                m_Renderer2DDemo->SetStressTestSettings(settings);
+                LT_INFO("Renderer2DDemo: Stress grid Enabled={}", settings.Enabled);
+            }
+        }
+
         if (m_Renderer2DDemo)
         {
             m_Renderer2DDemo->Update(deltaTime);

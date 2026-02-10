@@ -203,13 +203,13 @@ namespace Limitless
             return;
         }
 
-        if (m_Data.empty())
+        if (m_DataPtr == nullptr || m_SizeBytes == 0)
         {
             // Allow no-op uploads (useful for defensive code paths).
             return;
         }
 
-        m_VertexBuffer->SetData(m_Data.data(), static_cast<uint32_t>(m_Data.size()));
+        m_VertexBuffer->SetData(m_DataPtr, m_SizeBytes);
     }
 
     // BindTextureCommand Execute implementation

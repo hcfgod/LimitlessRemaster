@@ -88,6 +88,32 @@ namespace Limitless
         virtual uint32_t GetEstimatedCost() const { return 1; }
     };
 
+    // -----------------------------------------------------------------------------
+    // RenderCommand ownership model
+    //
+    // The render queue stores commands as `UniqueRenderCommand`, which supports:
+    // - Normal heap allocation (deleter calls delete)
+    // - Arena allocation (deleter calls destructor only; memory is reclaimed by a frame arena)
+    //
+    // This allows hot paths (Renderer2D) to avoid per-command heap allocations.
+    // -----------------------------------------------------------------------------
+    using RenderCommandDeleterFn = void(*)(RenderCommand*);
+
+    struct RenderCommandDeleter
+    {
+        RenderCommandDeleterFn Fn = nullptr;
+
+        void operator()(RenderCommand* command) const
+        {
+            if (Fn && command)
+            {
+                Fn(command);
+            }
+        }
+    };
+
+    using UniqueRenderCommand = std::unique_ptr<RenderCommand, RenderCommandDeleter>;
+
     // Clear command
     class ClearCommand : public RenderCommand
     {
@@ -216,6 +242,15 @@ namespace Limitless
     class SetVertexBufferDataCommand : public RenderCommand
     {
     public:
+        struct ExternalDataTag
+        {
+        };
+
+        // External data constructor:
+        // The caller guarantees that `data` remains valid until command execution on the render thread.
+        // Use this with a renderer-owned frame upload allocator to avoid per-command heap allocations.
+        SetVertexBufferDataCommand(ExternalDataTag, std::shared_ptr<VertexBuffer> vertexBuffer, const void* data, uint32_t sizeBytes);
+
         SetVertexBufferDataCommand(std::shared_ptr<VertexBuffer> vertexBuffer, const void* data, uint32_t sizeBytes);
 
         void Execute(GraphicsContext* context) override;
@@ -225,7 +260,9 @@ namespace Limitless
 
     private:
         std::shared_ptr<VertexBuffer> m_VertexBuffer;
-        std::vector<uint8_t> m_Data;
+        const uint8_t* m_DataPtr = nullptr;
+        uint32_t m_SizeBytes = 0;
+        std::vector<uint8_t> m_OwnedData;
     };
 
     // Bind texture command

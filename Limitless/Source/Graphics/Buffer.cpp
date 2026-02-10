@@ -56,5 +56,21 @@ namespace Limitless
             }
         }
     }
+
+    std::shared_ptr<IndexBuffer> IndexBuffer::Create(const uint16_t* indices, uint32_t count)
+    {
+        auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        switch (api)
+        {
+            case GraphicsAPI::OpenGL:
+            default:
+            {
+                auto& renderer = Renderer::GetInstance();
+                return renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<IndexBuffer> {
+                    return std::make_shared<OpenGLIndexBuffer>(indices, count);
+                });
+            }
+        }
+    }
 }
 
