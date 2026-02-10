@@ -8,12 +8,25 @@ project "Limitless"
     targetdir ("../Build/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
     objdir ("../Build/Intermediates/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
 
+    -- Place the compiler PDB in the intermediate directory.
+    -- This avoids failures when the output directory does not exist yet (common on clean builds)
+    -- and reduces contention with other processes that may touch output folders.
+    symbolspath ("%{cfg.objdir}/%{prj.name}.pdb")
+
+    -- -----------------------------------------------------------------------------
+    -- Precompiled Header (PCH)
+    -- - Enabled for engine C++ translation units for faster iteration
+    -- - Third-party compilation units are built in a separate project (`LimitlessVendor`)
+    -- -----------------------------------------------------------------------------
+    pchheader "PrecompiledHeader.h"
+    pchsource "Source/PrecompiledHeader.cpp"
+
+    forceincludes { "PrecompiledHeader.h" }
+
     files
     {
         "Source/**.h",
         "Source/**.cpp",
-        "Vendor/stb/stb_image/stb_image.cpp",
-        "Vendor/glad/glad/glad.c"
     }
 
     includedirs
@@ -37,7 +50,9 @@ project "Limitless"
     links
     {
         -- Build SPIRV-Cross from source as a normal static library project.
-        "VendorSpirvCross"
+        "VendorSpirvCross",
+        -- Compile stb_image + glad in a separate project without PCH.
+        "LimitlessVendor"
     }
 
     filter "system:windows"
@@ -204,5 +219,37 @@ project "Limitless"
     -- Configuration-specific defines are provided by the workspace `premake5.lua`
 
 group "Dependencies"
+    project "LimitlessVendor"
+        location "Vendor/LimitlessVendor"
+        kind "StaticLib"
+        language "C++"
+        cppdialect "C++20"
+        staticruntime "off"
+
+        targetdir ("%{wks.location}/Build/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
+        objdir ("%{wks.location}/Build/Intermediates/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
+
+        -- Vendor project must never use the engine PCH.
+        flags { "NoPCH" }
+
+        files
+        {
+            "Vendor/stb/stb_image/stb_image.cpp",
+            "Vendor/glad/glad/glad.c"
+        }
+
+        includedirs
+        {
+            "Vendor/",
+            "Vendor/glad",
+            "Vendor/stb"
+        }
+
+        -- Ensure C sources are treated as C (not C++).
+        filter "files:**.c"
+            language "C"
+            cdialect "C11"
+        filter {}
+
     include "Vendor/SPIRV-Cross"
 group ""

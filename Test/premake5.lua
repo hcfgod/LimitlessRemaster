@@ -8,6 +8,13 @@ project "Test"
     targetdir ("../Build/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
     objdir ("../Build/Intermediates/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
 
+    -- Use the engine precompiled header for faster iteration builds.
+    -- Note: The header lives in ../Limitless/Source, which is already in includedirs.
+    pchheader "PrecompiledHeader.h"
+    pchsource "Source/PrecompiledHeader.cpp"
+
+    forceincludes { "PrecompiledHeader.h" }
+
     files
     {
         "Source/**.h",
@@ -26,7 +33,8 @@ project "Test"
 
     links
     {
-        "Limitless"
+        "Limitless",
+        "LimitlessVendor"
     }
 
     filter "system:windows"

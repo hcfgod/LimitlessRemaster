@@ -13,11 +13,13 @@ namespace Limitless
 
         // Use existing TextureAsset type (async-ready, hot-reload friendly).
         TextureSpecification checkerSpec{};
-        checkerSpec.GenerateMipmaps = true;
-        checkerSpec.MinFilter = TextureFilter::Linear;
-        checkerSpec.MagFilter = TextureFilter::Linear;
-        checkerSpec.WrapU = TextureWrap::ClampToEdge;
-        checkerSpec.WrapV = TextureWrap::ClampToEdge;
+        // For a debug checker, prefer crisp texels over stability.
+        // (Linear+mips is "correct" but makes small checker textures look smeared.)
+        checkerSpec.GenerateMipmaps = false;
+        checkerSpec.MinFilter = TextureFilter::Nearest;
+        checkerSpec.MagFilter = TextureFilter::Nearest;
+        checkerSpec.WrapU = TextureWrap::Repeat;
+        checkerSpec.WrapV = TextureWrap::Repeat;
 
         m_CheckerTexture = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>("Assets/Textures/Checker.ppm", checkerSpec);
         if (!m_CheckerTexture)
@@ -26,8 +28,15 @@ namespace Limitless
         }
 
         // Load your new JPG for a single showcase quad.
-        // Keep sampler settings consistent with the checker texture for now.
-        m_SissyTexture = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>("Assets/Textures/sissy.jpg", checkerSpec);
+        // For photographs, prefer stability and smoother reconstruction.
+        TextureSpecification photoSpec{};
+        photoSpec.GenerateMipmaps = true;
+        photoSpec.MinFilter = TextureFilter::Linear;
+        photoSpec.MagFilter = TextureFilter::Linear;
+        photoSpec.WrapU = TextureWrap::ClampToEdge;
+        photoSpec.WrapV = TextureWrap::ClampToEdge;
+
+        m_SissyTexture = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>("Assets/Textures/sissy.jpg", photoSpec);
         if (!m_SissyTexture)
         {
             LT_CORE_ERROR("Renderer2DDemo: failed to load sissy texture asset");
