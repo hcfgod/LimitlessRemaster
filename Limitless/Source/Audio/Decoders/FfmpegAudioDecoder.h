@@ -29,8 +29,14 @@ namespace Limitless::Audio::Decoders
             uint32_t TargetChannelCount = 2;
         };
 
-        static Result<std::shared_ptr<AudioClip>> DecodeFromFile(const std::string& absolutePath, const DecodeSettings& settings = {});
-        static Result<std::shared_ptr<AudioClip>> DecodeFromMemory(const uint8_t* bytes, size_t byteCount, const std::string& debugName, const DecodeSettings& settings = {});
+        // NOTE(macOS/Clang):
+        // Avoid default arguments like `const DecodeSettings& settings = {}` for nested settings types
+        // with default member initializers. Prefer overloads for portability.
+        static Result<std::shared_ptr<AudioClip>> DecodeFromFile(const std::string& absolutePath);
+        static Result<std::shared_ptr<AudioClip>> DecodeFromFile(const std::string& absolutePath, const DecodeSettings& settings);
+
+        static Result<std::shared_ptr<AudioClip>> DecodeFromMemory(const uint8_t* bytes, size_t byteCount, const std::string& debugName);
+        static Result<std::shared_ptr<AudioClip>> DecodeFromMemory(const uint8_t* bytes, size_t byteCount, const std::string& debugName, const DecodeSettings& settings);
     };
 }
 

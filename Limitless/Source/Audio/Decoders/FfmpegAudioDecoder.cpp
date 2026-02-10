@@ -330,6 +330,11 @@ namespace Limitless::Audio::Decoders
         }
     }
 
+    Result<std::shared_ptr<AudioClip>> FfmpegAudioDecoder::DecodeFromFile(const std::string& absolutePath)
+    {
+        return DecodeFromFile(absolutePath, DecodeSettings{});
+    }
+
     Result<std::shared_ptr<AudioClip>> FfmpegAudioDecoder::DecodeFromFile(const std::string& absolutePath, const DecodeSettings& settings)
     {
         if (absolutePath.empty())
@@ -358,6 +363,11 @@ namespace Limitless::Audio::Decoders
         auto decoded = DecodeInternal(fmt, absolutePath, settings);
         cleanupFmt();
         return decoded;
+    }
+
+    Result<std::shared_ptr<AudioClip>> FfmpegAudioDecoder::DecodeFromMemory(const uint8_t* bytes, size_t byteCount, const std::string& debugName)
+    {
+        return DecodeFromMemory(bytes, byteCount, debugName, DecodeSettings{});
     }
 
     Result<std::shared_ptr<AudioClip>> FfmpegAudioDecoder::DecodeFromMemory(const uint8_t* bytes, size_t byteCount, const std::string& debugName, const DecodeSettings& settings)
@@ -427,7 +437,17 @@ namespace Limitless::Audio::Decoders
 
 namespace Limitless::Audio::Decoders
 {
+    Result<std::shared_ptr<AudioClip>> FfmpegAudioDecoder::DecodeFromFile(const std::string&)
+    {
+        return Result<std::shared_ptr<AudioClip>>(ErrorCode::NotSupported, "FFmpeg decoding not enabled in this build (LT_ENABLE_FFMPEG not defined)");
+    }
+
     Result<std::shared_ptr<AudioClip>> FfmpegAudioDecoder::DecodeFromFile(const std::string&, const DecodeSettings&)
+    {
+        return Result<std::shared_ptr<AudioClip>>(ErrorCode::NotSupported, "FFmpeg decoding not enabled in this build (LT_ENABLE_FFMPEG not defined)");
+    }
+
+    Result<std::shared_ptr<AudioClip>> FfmpegAudioDecoder::DecodeFromMemory(const uint8_t*, size_t, const std::string&)
     {
         return Result<std::shared_ptr<AudioClip>>(ErrorCode::NotSupported, "FFmpeg decoding not enabled in this build (LT_ENABLE_FFMPEG not defined)");
     }

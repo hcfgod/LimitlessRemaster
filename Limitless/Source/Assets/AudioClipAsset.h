@@ -33,9 +33,16 @@ namespace Limitless::Assets
             uint32_t TargetChannelCount = 2;
         };
 
-        static Async::Task<Ptr> LoadAsync(const std::string& assetPath, const Settings& settings = {});
+        // NOTE(macOS/Clang):
+        // Avoid default arguments like `const Settings& settings = {}` for nested types that rely on
+        // default member initializers. Clang may reject this pattern because the default constructor
+        // for the nested type is implicitly defined only after the enclosing class is complete.
+        // Use overloads instead for maximum portability.
+        static Async::Task<Ptr> LoadAsync(const std::string& assetPath);
+        static Async::Task<Ptr> LoadAsync(const std::string& assetPath, const Settings& settings);
         static Async::Task<Ptr> LoadAsync(const std::string& assetPath, const Settings& settings, uint64_t generation);
-        static Ptr LoadBlocking(const std::string& assetPath, const Settings& settings = {});
+        static Ptr LoadBlocking(const std::string& assetPath);
+        static Ptr LoadBlocking(const std::string& assetPath, const Settings& settings);
 
         std::shared_ptr<const Audio::AudioClip> GetClip() const { return m_Clip; }
 

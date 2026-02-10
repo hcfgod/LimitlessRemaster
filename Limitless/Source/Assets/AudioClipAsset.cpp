@@ -14,6 +14,11 @@
 
 namespace Limitless::Assets
 {
+    Async::Task<AudioClipAsset::Ptr> AudioClipAsset::LoadAsync(const std::string& assetPath)
+    {
+        return LoadAsync(assetPath, Settings{});
+    }
+
     Async::Task<AudioClipAsset::Ptr> AudioClipAsset::LoadAsync(const std::string& assetPath, const Settings& settings)
     {
         return LoadAsync(assetPath, settings, AssetLoadCoordinator::GetGeneration());
@@ -135,6 +140,11 @@ namespace Limitless::Assets
         auto task = LoadAsync(assetPath, settings);
         task.Wait();
         return task.Get();
+    }
+
+    AudioClipAsset::Ptr AudioClipAsset::LoadBlocking(const std::string& assetPath)
+    {
+        return LoadBlocking(assetPath, Settings{});
     }
 
     bool AudioClipAsset::Reload()
