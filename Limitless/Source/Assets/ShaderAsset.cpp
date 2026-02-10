@@ -7,7 +7,9 @@
 #include "Assets/AssetLoadCoordinator.h"
 
 #include "Core/Debug/Log.h"
+#include "Graphics/GraphicsAPIDetector.h"
 #include "Graphics/Renderer.h"
+#include "Graphics/ShaderCompilation/ShaderCompiler.h"
 
 #include <filesystem>
 #include <future>
@@ -91,6 +93,55 @@ namespace Limitless::Assets
         }
 
         return out;
+    }
+
+    static Result<ParsedShaderStages> PrepareShaderStagesForActiveGraphicsAPI(ParsedShaderStages parsed, const std::string& debugPath)
+    {
+#if defined(LT_ENABLE_SHADERC)
+        // Today we only have an OpenGL runtime backend. We still run the source through
+        // shaderc to compile GLSL -> SPIR-V on the CPU, then use SPIRV-Cross to reflect.
+        //
+        // IMPORTANT:
+        // We intentionally do NOT feed SPIRV-Cross-generated GLSL back into the OpenGL runtime
+        // compiler yet. The material/shader system relies on stable uniform names (e.g.
+        // "u_ViewProjection", "u_Model") and SPIRV-Cross output can restructure/rename uniforms
+        // (UBOs, flattened structs, etc.), causing silent "uniform not found" behavior.
+        //
+        // The runtime backend still consumes the *authored* GLSL, while SPIR-V is used for:
+        // - validation (catching mistakes earlier)
+        // - reflection/tooling (resource summaries today; pipeline layout later)
+        const GraphicsAPI api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        if (api == GraphicsAPI::OpenGL)
+        {
+            const std::string vertexName = parsed.Name + " (vertex) " + debugPath;
+            const std::string fragmentName = parsed.Name + " (fragment) " + debugPath;
+
+            const auto vertexSpirvResult = ShaderCompilation::CompileGlslToSpirv(
+                ShaderCompilation::ShaderStage::Vertex,
+                parsed.Vertex,
+                vertexName);
+            if (vertexSpirvResult.IsFailure())
+            {
+                return Result<ParsedShaderStages>(vertexSpirvResult.GetError());
+            }
+
+            const auto fragmentSpirvResult = ShaderCompilation::CompileGlslToSpirv(
+                ShaderCompilation::ShaderStage::Fragment,
+                parsed.Fragment,
+                fragmentName);
+            if (fragmentSpirvResult.IsFailure())
+            {
+                return Result<ParsedShaderStages>(fragmentSpirvResult.GetError());
+            }
+
+            ShaderCompilation::DebugLogSpirvResourceSummary(vertexSpirvResult.GetValue(), vertexName);
+            ShaderCompilation::DebugLogSpirvResourceSummary(fragmentSpirvResult.GetValue(), fragmentName);
+        }
+#else
+        (void)debugPath;
+#endif
+
+        return parsed;
     }
 
     Async::Task<ShaderAsset::Ptr> ShaderAsset::LoadAsync(const std::string& key, Settings settings)
@@ -185,6 +236,17 @@ namespace Limitless::Assets
                 }
 
                 ParsedShaderStages parsed = parsedResult.GetValue();
+
+                const auto preparedResult = PrepareShaderStagesForActiveGraphicsAPI(std::move(parsed), resolvedPath);
+                if (preparedResult.IsFailure())
+                {
+                    LT_CORE_ERROR("ShaderAsset::LoadAsync: shaderc/SPIRV-Cross preparation failed for '{}': {}",
+                                  resolvedPath, preparedResult.GetError().GetErrorMessage());
+                    promise.set_value(nullptr);
+                    return;
+                }
+
+                parsed = preparedResult.GetValue();
 
                 auto& renderer = Renderer::GetInstance();
                 if (!renderer.IsRenderThreadEnabled())
@@ -341,7 +403,16 @@ namespace Limitless::Assets
             return false;
         }
 
-        const ParsedShaderStages parsed = parsedResult.GetValue();
+        ParsedShaderStages parsed = parsedResult.GetValue();
+
+        const auto preparedResult = PrepareShaderStagesForActiveGraphicsAPI(std::move(parsed), resolvedPath);
+        if (preparedResult.IsFailure())
+        {
+            LT_CORE_ERROR("ShaderAsset::Reload: shaderc/SPIRV-Cross preparation failed for '{}': {}",
+                          resolvedPath, preparedResult.GetError().GetErrorMessage());
+            return false;
+        }
+        parsed = preparedResult.GetValue();
 
         auto& renderer = Renderer::GetInstance();
         if (!renderer.IsRenderThreadEnabled())

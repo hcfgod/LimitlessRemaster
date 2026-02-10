@@ -6,7 +6,7 @@
 namespace Limitless
 {
     class EditorCameraController;
-    class TexturedTriangleDemo;
+    class Renderer2DDemo;
 
     class TestLayer : public Layer
     {
@@ -26,10 +26,13 @@ namespace Limitless
         void OnWindowResize(Events::WindowResizeEvent& event) override;
 
     private:
+        uint32_t m_ViewportWidthPixels = 1280;
+        uint32_t m_ViewportHeightPixels = 720;
+
         CameraManager m_CameraManager;
         CameraId m_CameraId{};
 
-        std::unique_ptr<TexturedTriangleDemo> m_TriangleDemo;
+        std::unique_ptr<Renderer2DDemo> m_Renderer2DDemo;
         std::unique_ptr<EditorCameraController> m_EditorCameraController;
 
         bool m_UsingAssetBundle = false;

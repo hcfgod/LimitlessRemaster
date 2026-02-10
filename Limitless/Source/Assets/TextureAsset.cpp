@@ -25,13 +25,327 @@ namespace Limitless::Assets
         std::vector<uint8_t> Pixels; // RGBA8
     };
 
+    // -----------------------------------------------------------------------------
+    // JPEG EXIF orientation handling (minimum viable, professional behavior)
+    //
+    // Many JPEGs captured/edited on phones are stored "sideways" and rely on an EXIF
+    // orientation tag to tell viewers how to rotate/mirror the image. stb_image does
+    // not apply EXIF orientation for you, so we fix it at decode time.
+    //
+    // Supported orientations: 1..8 (including mirror/transpose variants).
+    // If parsing fails, we default to 1 (no transform).
+    // -----------------------------------------------------------------------------
+    static bool EndsWithCaseInsensitive(const std::string& s, const char* suffix)
+    {
+        if (!suffix)
+        {
+            return false;
+        }
+
+        const size_t suffixLen = std::strlen(suffix);
+        if (s.size() < suffixLen)
+        {
+            return false;
+        }
+
+        const size_t start = s.size() - suffixLen;
+        for (size_t i = 0; i < suffixLen; ++i)
+        {
+            const char a = static_cast<char>(std::tolower(static_cast<unsigned char>(s[start + i])));
+            const char b = static_cast<char>(std::tolower(static_cast<unsigned char>(suffix[i])));
+            if (a != b)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static bool IsJpegPath(const std::string& path)
+    {
+        return EndsWithCaseInsensitive(path, ".jpg") || EndsWithCaseInsensitive(path, ".jpeg");
+    }
+
+    static bool LooksLikeJpeg(const uint8_t* bytes, size_t byteCount)
+    {
+        return bytes && byteCount >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8;
+    }
+
+    static uint16_t ReadBE16(const uint8_t* p)
+    {
+        return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 8) | static_cast<uint16_t>(p[1]));
+    }
+
+    static uint16_t ReadLE16(const uint8_t* p)
+    {
+        return static_cast<uint16_t>((static_cast<uint16_t>(p[1]) << 8) | static_cast<uint16_t>(p[0]));
+    }
+
+    static uint32_t ReadBE32(const uint8_t* p)
+    {
+        return (static_cast<uint32_t>(p[0]) << 24) |
+               (static_cast<uint32_t>(p[1]) << 16) |
+               (static_cast<uint32_t>(p[2]) << 8)  |
+               (static_cast<uint32_t>(p[3]) << 0);
+    }
+
+    static uint32_t ReadLE32(const uint8_t* p)
+    {
+        return (static_cast<uint32_t>(p[3]) << 24) |
+               (static_cast<uint32_t>(p[2]) << 16) |
+               (static_cast<uint32_t>(p[1]) << 8)  |
+               (static_cast<uint32_t>(p[0]) << 0);
+    }
+
+    static int ReadExifOrientationFromJpegBytes(const uint8_t* bytes, size_t byteCount)
+    {
+        if (!LooksLikeJpeg(bytes, byteCount))
+        {
+            return 1;
+        }
+
+        // Walk JPEG segments: SOI (FFD8), then [marker][len][payload]...
+        size_t pos = 2;
+        while (pos + 4 <= byteCount)
+        {
+            if (bytes[pos] != 0xFF)
+            {
+                break;
+            }
+
+            const uint8_t marker = bytes[pos + 1];
+            pos += 2;
+
+            // Start of Scan / End of Image: segment parsing stops here.
+            if (marker == 0xDA || marker == 0xD9)
+            {
+                break;
+            }
+
+            if (pos + 2 > byteCount)
+            {
+                break;
+            }
+
+            const uint16_t segLen = ReadBE16(bytes + pos);
+            pos += 2;
+            if (segLen < 2)
+            {
+                break;
+            }
+
+            const size_t segPayloadStart = pos;
+            const size_t segPayloadEnd = pos + (static_cast<size_t>(segLen) - 2u);
+            if (segPayloadEnd > byteCount)
+            {
+                break;
+            }
+
+            // APP1 = EXIF
+            if (marker == 0xE1 && (segPayloadEnd - segPayloadStart) >= 6)
+            {
+                const uint8_t* payload = bytes + segPayloadStart;
+                const size_t payloadSize = segPayloadEnd - segPayloadStart;
+
+                if (payloadSize >= 6 &&
+                    payload[0] == 'E' && payload[1] == 'x' && payload[2] == 'i' && payload[3] == 'f' &&
+                    payload[4] == 0x00 && payload[5] == 0x00)
+                {
+                    // TIFF header starts immediately after "Exif\0\0"
+                    const uint8_t* tiff = payload + 6;
+                    const size_t tiffSize = payloadSize - 6;
+                    if (tiffSize < 8)
+                    {
+                        return 1;
+                    }
+
+                    const bool littleEndian = (tiff[0] == 'I' && tiff[1] == 'I');
+                    const bool bigEndian = (tiff[0] == 'M' && tiff[1] == 'M');
+                    if (!littleEndian && !bigEndian)
+                    {
+                        return 1;
+                    }
+
+                    const auto read16 = littleEndian ? ReadLE16 : ReadBE16;
+                    const auto read32 = littleEndian ? ReadLE32 : ReadBE32;
+
+                    const uint16_t magic = read16(tiff + 2);
+                    if (magic != 42)
+                    {
+                        return 1;
+                    }
+
+                    const uint32_t ifd0Offset = read32(tiff + 4);
+                    if (ifd0Offset >= tiffSize || (tiffSize - ifd0Offset) < 2)
+                    {
+                        return 1;
+                    }
+
+                    const uint8_t* ifd0 = tiff + ifd0Offset;
+                    const uint16_t entryCount = read16(ifd0);
+
+                    const size_t entriesBytes = static_cast<size_t>(entryCount) * 12u;
+                    if ((tiffSize - ifd0Offset) < (2u + entriesBytes))
+                    {
+                        return 1;
+                    }
+
+                    for (uint16_t i = 0; i < entryCount; ++i)
+                    {
+                        const uint8_t* entry = ifd0 + 2u + static_cast<size_t>(i) * 12u;
+                        const uint16_t tag = read16(entry + 0);
+                        const uint16_t type = read16(entry + 2);
+                        const uint32_t count = read32(entry + 4);
+
+                        // Orientation: tag 0x0112, type SHORT (3), count 1.
+                        if (tag == 0x0112 && type == 3 && count == 1)
+                        {
+                            const uint16_t value = read16(entry + 8);
+                            if (value >= 1 && value <= 8)
+                            {
+                                return static_cast<int>(value);
+                            }
+                            return 1;
+                        }
+                    }
+
+                    return 1;
+                }
+            }
+
+            pos = segPayloadEnd;
+        }
+
+        return 1;
+    }
+
+    static void ApplyExifOrientationRGBA8(DecodedImageRGBA8& img, int orientation)
+    {
+        if (orientation <= 1 || orientation > 8)
+        {
+            return;
+        }
+        if (img.Width == 0 || img.Height == 0 || img.Pixels.empty())
+        {
+            return;
+        }
+
+        const uint32_t srcW = img.Width;
+        const uint32_t srcH = img.Height;
+        const uint8_t* src = img.Pixels.data();
+
+        const bool swapWH = (orientation == 5 || orientation == 6 || orientation == 7 || orientation == 8);
+        const uint32_t dstW = swapWH ? srcH : srcW;
+        const uint32_t dstH = swapWH ? srcW : srcH;
+
+        std::vector<uint8_t> dstPixels(static_cast<size_t>(dstW) * static_cast<size_t>(dstH) * 4u);
+
+        auto srcIndex = [srcW](uint32_t x, uint32_t y) -> size_t {
+            return (static_cast<size_t>(y) * static_cast<size_t>(srcW) + static_cast<size_t>(x)) * 4u;
+        };
+        auto dstIndex = [dstW](uint32_t x, uint32_t y) -> size_t {
+            return (static_cast<size_t>(y) * static_cast<size_t>(dstW) + static_cast<size_t>(x)) * 4u;
+        };
+
+        for (uint32_t y = 0; y < dstH; ++y)
+        {
+            for (uint32_t x = 0; x < dstW; ++x)
+            {
+                uint32_t sx = 0;
+                uint32_t sy = 0;
+
+                switch (orientation)
+                {
+                    case 2: // Mirror horizontal
+                        sx = (srcW - 1u) - x; sy = y;
+                        break;
+                    case 3: // Rotate 180
+                        sx = (srcW - 1u) - x; sy = (srcH - 1u) - y;
+                        break;
+                    case 4: // Mirror vertical
+                        sx = x; sy = (srcH - 1u) - y;
+                        break;
+                    case 5: // Transpose
+                        sx = y; sy = x;
+                        break;
+                    case 6: // Rotate 90 CW
+                        sx = y; sy = (srcH - 1u) - x;
+                        break;
+                    case 7: // Transverse
+                        sx = (srcW - 1u) - y; sy = (srcH - 1u) - x;
+                        break;
+                    case 8: // Rotate 90 CCW
+                        sx = (srcW - 1u) - y; sy = x;
+                        break;
+                    default:
+                        sx = x; sy = y;
+                        break;
+                }
+
+                const size_t si = srcIndex(sx, sy);
+                const size_t di = dstIndex(x, y);
+                dstPixels[di + 0] = src[si + 0];
+                dstPixels[di + 1] = src[si + 1];
+                dstPixels[di + 2] = src[si + 2];
+                dstPixels[di + 3] = src[si + 3];
+            }
+        }
+
+        img.Width = dstW;
+        img.Height = dstH;
+        img.Pixels = std::move(dstPixels);
+    }
+
+    static void FlipVerticalRGBA8(DecodedImageRGBA8& img)
+    {
+        if (img.Width == 0 || img.Height == 0 || img.Pixels.empty())
+        {
+            return;
+        }
+
+        const uint32_t w = img.Width;
+        const uint32_t h = img.Height;
+        const size_t rowBytes = static_cast<size_t>(w) * 4u;
+
+        std::vector<uint8_t> tempRow(rowBytes);
+        for (uint32_t y = 0; y < h / 2u; ++y)
+        {
+            uint8_t* rowA = img.Pixels.data() + static_cast<size_t>(y) * rowBytes;
+            uint8_t* rowB = img.Pixels.data() + static_cast<size_t>(h - 1u - y) * rowBytes;
+
+            std::memcpy(tempRow.data(), rowA, rowBytes);
+            std::memcpy(rowA, rowB, rowBytes);
+            std::memcpy(rowB, tempRow.data(), rowBytes);
+        }
+    }
+
     static Result<DecodedImageRGBA8> DecodeToRGBA8(const std::string& path, bool flipVertically)
     {
         // stb_image uses global state for vertical flip, so we serialize decode calls.
         static std::mutex s_StbMutex;
         std::lock_guard<std::mutex> lock(s_StbMutex);
 
-        stbi_set_flip_vertically_on_load(flipVertically ? 1 : 0);
+        // Decode unflipped first; we apply EXIF orientation + flip ourselves on the CPU so
+        // behavior is deterministic and does not depend on stb's global flip state.
+        stbi_set_flip_vertically_on_load(0);
+
+        int exifOrientation = 1;
+        if (IsJpegPath(path))
+        {
+            // Parse only a small prefix; EXIF lives near the start.
+            std::ifstream in(path, std::ios::in | std::ios::binary);
+            if (in.is_open())
+            {
+                std::vector<uint8_t> header;
+                header.resize(64u * 1024u);
+                in.read(reinterpret_cast<char*>(header.data()), static_cast<std::streamsize>(header.size()));
+                const std::streamsize got = in.gcount();
+                if (got > 0)
+                {
+                    exifOrientation = ReadExifOrientationFromJpegBytes(header.data(), static_cast<size_t>(got));
+                }
+            }
+        }
 
         int w = 0, h = 0, channels = 0;
         // Force 4 channels so GPU upload path is consistent.
@@ -57,6 +371,12 @@ namespace Limitless::Assets
         std::memcpy(img.Pixels.data(), data, img.Pixels.size());
 
         stbi_image_free(data);
+
+        ApplyExifOrientationRGBA8(img, exifOrientation);
+        if (flipVertically)
+        {
+            FlipVerticalRGBA8(img);
+        }
         return img;
     }
 
@@ -71,7 +391,11 @@ namespace Limitless::Assets
         static std::mutex s_StbMutex;
         std::lock_guard<std::mutex> lock(s_StbMutex);
 
-        stbi_set_flip_vertically_on_load(flipVertically ? 1 : 0);
+        stbi_set_flip_vertically_on_load(0);
+
+        const int exifOrientation = LooksLikeJpeg(bytes, byteCount)
+            ? ReadExifOrientationFromJpegBytes(bytes, byteCount)
+            : 1;
 
         int w = 0, h = 0, channels = 0;
         stbi_uc* data = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(bytes), static_cast<int>(byteCount), &w, &h, &channels, 4);
@@ -96,6 +420,12 @@ namespace Limitless::Assets
         std::memcpy(img.Pixels.data(), data, img.Pixels.size());
 
         stbi_image_free(data);
+
+        ApplyExifOrientationRGBA8(img, exifOrientation);
+        if (flipVertically)
+        {
+            FlipVerticalRGBA8(img);
+        }
         return img;
     }
 
@@ -390,11 +720,17 @@ namespace Limitless::Assets
                 {
                     // stb_image can't decode ASCII PPM (P3) reliably across builds.
                     // For our dev/test checkerboard, fall back to a tiny P3 parser.
-                    const auto ppmFallback = fromBundle
+                    auto ppmFallback = fromBundle
                         ? TryDecodePpmP3ToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName)
                         : TryDecodePpmP3ToRGBA8(resolvedPath);
                     if (ppmFallback.IsSuccess())
                     {
+                        if (specification.FlipVerticallyOnLoad)
+                        {
+                            auto img = ppmFallback.GetValue();
+                            FlipVerticalRGBA8(img);
+                            ppmFallback = img;
+                        }
                         decodedResult = ppmFallback;
                     }
                 }
@@ -556,11 +892,17 @@ namespace Limitless::Assets
             : DecodeToRGBA8(resolvedPath, m_Specification.FlipVerticallyOnLoad);
         if (decodedResult.IsFailure())
         {
-            const auto ppmFallback = fromBundle
+            auto ppmFallback = fromBundle
                 ? TryDecodePpmP3ToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName)
                 : TryDecodePpmP3ToRGBA8(resolvedPath);
             if (ppmFallback.IsSuccess())
             {
+                if (m_Specification.FlipVerticallyOnLoad)
+                {
+                    auto img = ppmFallback.GetValue();
+                    FlipVerticalRGBA8(img);
+                    ppmFallback = img;
+                }
                 decodedResult = ppmFallback;
             }
         }

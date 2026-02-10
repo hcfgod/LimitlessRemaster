@@ -19,21 +19,24 @@ Source of truth: `Limitless/Source/Graphics/OpenGL/OpenGLRenderCommand.cpp`
 | `SetScissorCommand` | Implemented | `glEnable/Disable(GL_SCISSOR_TEST)`, `glScissor` |
 | `CustomCommand` | Implemented | Calls user function; still requires a non-null context |
 | `BindShaderCommand` | Implemented | `Shader::Bind()` (OpenGL `glUseProgram`) |
+| `SetShaderMat4Command` | Implemented | Uniform update via `Shader::SetMat4()` (transitional) |
 | `BindVertexArrayCommand` | Implemented | `VertexArray::Bind()` (OpenGL VAO bind) |
 | `BindIndexBufferCommand` | Implemented | `IndexBuffer::Bind()` |
 | `BindVertexBufferCommand` | Implemented | `VertexBuffer::Bind()` |
+| `SetVertexBufferDataCommand` | Implemented | Dynamic streaming uploads via `VertexBuffer::SetData()` |
 | `BindTextureCommand` | Implemented | `Texture::Bind(slot)` (`glActiveTexture` + `glBindTexture`) |
+| `SetTextureSpecificationCommand` | Implemented | Sampler-like state via `Texture::ApplySpecification()` |
 | `BindFramebufferCommand` | Stubbed | Logs only |
 | `DrawArraysCommand` | Implemented | `glDrawArrays` |
 | `DrawIndexedCommand` | Implemented | `glDrawElements` / `glDrawElementsBaseVertex` |
 | `DrawInstancedCommand` | Not implemented | TODO |
 | `DrawIndexedInstancedCommand` | Not implemented | TODO |
-| `SetBlendModeCommand` | Stubbed | Logs only |
-| `SetDepthTestCommand` | Stubbed | Logs only |
-| `SetCullFaceCommand` | Stubbed | Logs only |
-| `SetPolygonModeCommand` | Stubbed | Logs only |
-| `SetLineWidthCommand` | Stubbed | Logs only |
-| `SetPointSizeCommand` | Stubbed | Logs only |
+| `SetBlendModeCommand` | Implemented | `glEnable/Disable(GL_BLEND)`, `glBlendFunc` |
+| `SetDepthTestCommand` | Implemented | `glEnable/Disable(GL_DEPTH_TEST)`, `glDepthFunc` |
+| `SetCullFaceCommand` | Implemented | `glEnable/Disable(GL_CULL_FACE)`, `glCullFace` |
+| `SetPolygonModeCommand` | Implemented | `glPolygonMode` |
+| `SetLineWidthCommand` | Implemented | `glLineWidth` |
+| `SetPointSizeCommand` | Implemented | `glPointSize` |
 | `PushDebugGroupCommand` | Stubbed | Logs only |
 | `PopDebugGroupCommand` | Stubbed | Logs only |
 | `InsertDebugMarkerCommand` | Stubbed | Logs only |
@@ -66,7 +69,7 @@ Goal: draw a quad with a texture and basic blending.
 
 Deliverables:
 - Implement `BindTextureCommand` (DONE)
-- Implement `SetBlendModeCommand` and `SetDepthTestCommand` (real GL state changes)
+- Implement `SetBlendModeCommand` and `SetDepthTestCommand` (DONE — real GL state changes)
 - Implement `DrawIndexedCommand` + `glDrawElements` (DONE)
 
 Acceptance criteria:

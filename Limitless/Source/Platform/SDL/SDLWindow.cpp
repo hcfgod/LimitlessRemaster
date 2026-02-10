@@ -3,6 +3,8 @@
 #include "Core/ConfigManager.h"
 #include "Core/Input/InputSystem.h"
 #include "Core/Error.h"
+#include "Graphics/RenderCommand.h"
+#include "Graphics/Renderer.h"
 #include <SDL3/SDL.h>
 #include <spdlog/fmt/fmt.h>
 
@@ -270,13 +272,44 @@ namespace Limitless
         {
             case SDL_EVENT_WINDOW_RESIZED:
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                m_Data.Width = event.window.data1;
-                m_Data.Height = event.window.data2;
+            {
+                // For correctness with HighDPI, always treat the "drawable size" (pixel size)
+                // as the source of truth for the rendering viewport.
+                int drawableWidth = 0;
+                int drawableHeight = 0;
+                if (!SDL_GetWindowSizeInPixels(m_Window, &drawableWidth, &drawableHeight))
+                {
+                    LT_CORE_WARN("SDLWindow: SDL_GetWindowSizeInPixels failed during resize: {}", SDL_GetError());
+                    drawableWidth = event.window.data1;
+                    drawableHeight = event.window.data2;
+                }
+
+                const uint32_t widthPixels = drawableWidth > 0 ? static_cast<uint32_t>(drawableWidth) : 0u;
+                const uint32_t heightPixels = drawableHeight > 0 ? static_cast<uint32_t>(drawableHeight) : 0u;
+
+                m_Data.Width = widthPixels;
+                m_Data.Height = heightPixels;
+
                 if (m_ResizeCallback)
-                    m_ResizeCallback(event.window.data1, event.window.data2);
+                {
+                    m_ResizeCallback(widthPixels, heightPixels);
+                }
+
+                // Keep the render viewport in sync with the window size.
+                // Note: During minimize some platforms report 0x0; avoid submitting a 0-sized viewport.
+                auto& renderer = Renderer::GetInstance();
+                if (renderer.IsInitialized() && widthPixels > 0 && heightPixels > 0)
+                {
+                    renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(widthPixels), static_cast<int>(heightPixels)));
+                }
+
+                // Notify the engine-side event system so layers/cameras can react.
+                LT_DISPATCH_DEFERRED(std::make_unique<Events::WindowResizeEvent>(widthPixels, heightPixels));
+
                 if (m_EventCallback)
                     m_EventCallback(WindowEventType::Resized);
                 break;
+            }
             case SDL_EVENT_WINDOW_MOVED:
                 m_Data.PositionX = event.window.data1;
                 m_Data.PositionY = event.window.data2;

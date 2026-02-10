@@ -1,0 +1,12 @@
+{
+  "shader": { "key": "Assets/Shaders/Renderer2D_TexturedQuad.glsl" },
+  "mainTexture": { "key": "Assets/Textures/Checker.ppm" },
+  "mainTextureSpec": {
+    "minFilter": "Linear",
+    "magFilter": "Linear",
+    "wrapU": "ClampToEdge",
+    "wrapV": "ClampToEdge",
+    "generateMipmaps": true
+  }
+}
+

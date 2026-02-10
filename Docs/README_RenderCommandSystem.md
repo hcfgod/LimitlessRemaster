@@ -1,6 +1,6 @@
 # Render Command System
 
-The Render Command System is a **command submission + execution framework** intended to make rendering work explicit and schedulable. Today it is best understood as **infrastructure/scaffolding**: the queueing and prioritization exist, and the OpenGL backend now implements a small but useful subset of commands (enough to bind shaders/VAOs/buffers/textures and draw basic geometry). Many state-setting and advanced draw commands are still stubbed.
+The Render Command System is a **command submission + execution framework** intended to make rendering work explicit and schedulable. Today it is best understood as **infrastructure/scaffolding**: the queueing and prioritization exist, and the OpenGL backend now implements a small but useful subset of commands (enough to bind shaders/VAOs/buffers/textures and draw basic geometry). Several common state commands (blend/depth/cull/polygon/line/point) are now implemented in the OpenGL backend, but framebuffer and debug-marker commands are still stubbed.
 
 ## Features
 
@@ -54,7 +54,7 @@ if (textureFuture.wait_for(std::chrono::milliseconds(0)) == std::future_status::
 
 ### Current limitations (important)
 
-- Some commands (especially state-setting, framebuffer, instanced drawing, and debug marker commands) are still **placeholders**: they log intent instead of issuing real graphics API calls.
+- Some commands (especially framebuffer, instanced drawing, and debug marker commands) are still **placeholders**: they log intent instead of issuing real graphics API calls.
 - The “multi-threaded executor” type exists but is currently **disabled** for the OpenGL-first backend. True multi-threaded GPU execution requires an explicit context ownership/sharing model that is not implemented yet.
 
 ## Guarantees (Current Behavior)
@@ -80,21 +80,38 @@ The OpenGL backend currently implements only a subset of commands “for real”
   - `SetViewportCommand` (`glViewport`)
   - `SetScissorCommand` (`glEnable/glDisable(GL_SCISSOR_TEST)`, `glScissor`)
   - `BindShaderCommand` (`glUseProgram` via `Shader::Bind()`)
+  - `SetShaderMat4Command` (uniform update via `Shader::SetMat4()`; transitional)
   - `BindVertexArrayCommand` (`glBindVertexArray` via `VertexArray::Bind()`)
   - `BindVertexBufferCommand` (`glBindBuffer(GL_ARRAY_BUFFER)` via `VertexBuffer::Bind()`)
   - `BindIndexBufferCommand` (`glBindBuffer(GL_ELEMENT_ARRAY_BUFFER)` via `IndexBuffer::Bind()`)
+  - `SetVertexBufferDataCommand` (`glBufferSubData` via `VertexBuffer::SetData()`; dynamic streaming uploads)
   - `BindTextureCommand` (`glActiveTexture`, `glBindTexture` via `Texture::Bind(slot)`)
+  - `SetTextureSpecificationCommand` (sampler-like state via `Texture::ApplySpecification()`)
   - `DrawArraysCommand` (`glDrawArrays`)
   - `DrawIndexedCommand` (`glDrawElements` / `glDrawElementsBaseVertex`)
+  - `SetBlendModeCommand` (`glEnable/Disable(GL_BLEND)`, `glBlendFunc`)
+  - `SetDepthTestCommand` (`glEnable/Disable(GL_DEPTH_TEST)`, `glDepthFunc`)
+  - `SetCullFaceCommand` (`glEnable/Disable(GL_CULL_FACE)`, `glCullFace`)
+  - `SetPolygonModeCommand` (`glPolygonMode`)
+  - `SetLineWidthCommand` (`glLineWidth`)
+  - `SetPointSizeCommand` (`glPointSize`)
   - `CustomCommand` (invokes user function; still requires non-null context)
 - **Stubbed (logs intent, no actual GL state change yet)**:
   - `BindFramebufferCommand`
-  - `SetBlendModeCommand`, `SetDepthTestCommand`, `SetCullFaceCommand`, `SetPolygonModeCommand`, `SetLineWidthCommand`, `SetPointSizeCommand`
   - `PushDebugGroupCommand`, `PopDebugGroupCommand`, `InsertDebugMarkerCommand`
 - **Not implemented yet (TODO / no behavior)**:
   - `DrawInstancedCommand`, `DrawIndexedInstancedCommand`
 
 For a milestone-by-milestone plan, see `Docs/RENDERING_ROADMAP.md`.
+
+## Viewport updates (window resize)
+
+For OpenGL correctness, the viewport must match the window's **drawable pixel size**. The SDL window layer keeps this in sync:
+
+- `SDL_EVENT_WINDOW_RESIZED` / `SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED`
+  - queries `SDL_GetWindowSizeInPixels`
+  - submits `SetViewportCommand(0,0,width,height)`
+  - dispatches `WindowResizeEvent(width,height)` so cameras/UI can react
 
 ## Architecture
 
@@ -113,10 +130,13 @@ The system includes a comprehensive set of pre-defined render commands:
 - **SetViewportCommand**: Set viewport dimensions
 - **SetScissorCommand**: Set scissor test region
 - **BindShaderCommand**: Bind/unbind shaders
+- **SetShaderMat4Command**: Set a `mat4` uniform on a bound shader (transitional)
 - **BindVertexArrayCommand**: Bind/unbind vertex arrays
 - **BindIndexBufferCommand**: Bind/unbind index buffers
 - **BindVertexBufferCommand**: Bind/unbind vertex buffers
+- **SetVertexBufferDataCommand**: Upload bytes into a vertex buffer (dynamic streaming)
 - **BindTextureCommand**: Bind/unbind textures
+- **SetTextureSpecificationCommand**: Apply sampler-like filtering/wrap/mip settings to a texture
 - **BindFramebufferCommand**: Bind/unbind framebuffers
 - **DrawArraysCommand**: Draw arrays of vertices
 - **DrawIndexedCommand**: Draw indexed vertices

@@ -34,6 +34,7 @@ namespace Limitless
         BindVertexArray,
         BindIndexBuffer,
         BindVertexBuffer,
+        SetVertexBufferData,
         BindTexture,
         SetTextureSpecification,
         BindFramebuffer,
@@ -208,6 +209,23 @@ namespace Limitless
 
     private:
         std::shared_ptr<VertexBuffer> m_VertexBuffer;
+    };
+
+    // Upload new data into an existing vertex buffer (dynamic streaming).
+    // The command owns a CPU-side copy of the bytes until execution on the render thread.
+    class SetVertexBufferDataCommand : public RenderCommand
+    {
+    public:
+        SetVertexBufferDataCommand(std::shared_ptr<VertexBuffer> vertexBuffer, const void* data, uint32_t sizeBytes);
+
+        void Execute(GraphicsContext* context) override;
+        RenderCommandType GetType() const override { return RenderCommandType::SetVertexBufferData; }
+        std::string GetName() const override { return "SetVertexBufferData"; }
+        bool CanBatch() const override { return false; } // Upload order matters relative to subsequent draws.
+
+    private:
+        std::shared_ptr<VertexBuffer> m_VertexBuffer;
+        std::vector<uint8_t> m_Data;
     };
 
     // Bind texture command

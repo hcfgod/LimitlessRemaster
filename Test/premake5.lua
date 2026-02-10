@@ -41,12 +41,18 @@ project "Test"
 
         libdirs
         {
-            "../Limitless/Vendor/SDL3/SDL3Libs"
+            "../Limitless/Vendor/SDL3/SDL3Libs",
+
+            -- Shader toolchain libraries (vendored).
+            "../Limitless/Vendor/shaderc/libs",
+            "../Limitless/Vendor/VulkanSDK/lib"
         }
 
         links
         {
             "SDL3-static",
+            "VendorSpirvCross",
+            "vulkan-1",
             "user32",
             "gdi32",
             "winmm",
@@ -61,11 +67,29 @@ project "Test"
             "psapi"
         }
 
+        -- Select the correct shaderc library for each configuration.
+        filter { "system:windows", "configurations:Debug" }
+            links { "shaderc_sharedd" }
+
+        filter { "system:windows", "configurations:Release or Dist" }
+            links { "shaderc_shared" }
+
+        filter "system:windows"
         buildoptions
         {
             "/utf-8",
             "/FS" -- Prevent PDB contention in parallel builds
         }
+
+        -- Copy shaderc runtime DLLs next to the built executable.
+        -- Users can drop the required binaries into `Limitless/Vendor/shaderc/dlls`.
+        local shadercDllDir = "../Limitless/Vendor/shaderc/dlls"
+        if os.isdir(shadercDllDir) then
+            postbuildcommands
+            {
+                "{COPYDIR} \"" .. shadercDllDir .. "\" \"%{cfg.targetdir}\""
+            }
+        end
 
     filter "system:macosx"
         cppdialect "C++20"

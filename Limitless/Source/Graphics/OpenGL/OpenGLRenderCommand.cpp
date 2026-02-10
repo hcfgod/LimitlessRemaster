@@ -190,6 +190,28 @@ namespace Limitless
         }
     }
 
+    void SetVertexBufferDataCommand::Execute(GraphicsContext* context)
+    {
+        if (!context)
+        {
+            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
+        }
+
+        if (!m_VertexBuffer)
+        {
+            LT_CORE_WARN("SetVertexBufferDataCommand: vertex buffer was null (no-op)");
+            return;
+        }
+
+        if (m_Data.empty())
+        {
+            // Allow no-op uploads (useful for defensive code paths).
+            return;
+        }
+
+        m_VertexBuffer->SetData(m_Data.data(), static_cast<uint32_t>(m_Data.size()));
+    }
+
     // BindTextureCommand Execute implementation
     void BindTextureCommand::Execute(GraphicsContext* context)
     {

@@ -1,7 +1,7 @@
 #include "TestLayer.h"
 
 #include "Editor/EditorCameraController.h"
-#include "TexturedTriangleDemo.h"
+#include "Renderer2DDemo.h"
 
 #include "Assets/AssetBundle.h"
 #include "Assets/AssetBundleBuilder.h"
@@ -45,8 +45,8 @@ namespace Limitless
         CameraManager::Perspective3DCreateInfo cameraInfo{};
         cameraInfo.Name = "EditorCamera";
         cameraInfo.Usage = CameraUsage::Editor;
-        cameraInfo.ViewportWidthPixels = 1280;
-        cameraInfo.ViewportHeightPixels = 720;
+        cameraInfo.ViewportWidthPixels = m_ViewportWidthPixels;
+        cameraInfo.ViewportHeightPixels = m_ViewportHeightPixels;
         cameraInfo.FieldOfViewYDegrees = 60.0f;
         cameraInfo.NearPlane = 0.1f;
         cameraInfo.FarPlane = 1000.0f;
@@ -60,8 +60,8 @@ namespace Limitless
             camera->SetYawPitchDegrees(-90.0f, 0.0f);
         }
 
-        m_TriangleDemo = std::make_unique<TexturedTriangleDemo>();
-        m_TriangleDemo->Initialize();
+        m_Renderer2DDemo = std::make_unique<Renderer2DDemo>();
+        m_Renderer2DDemo->Initialize(m_ViewportWidthPixels, m_ViewportHeightPixels);
 
         m_EditorCameraController = std::make_unique<EditorCameraController>();
         EditorCameraController::Settings editorCameraSettings{};
@@ -80,10 +80,10 @@ namespace Limitless
             m_EditorCameraController.reset();
         }
 
-        if (m_TriangleDemo)
+        if (m_Renderer2DDemo)
         {
-            m_TriangleDemo->Shutdown();
-            m_TriangleDemo.reset();
+            m_Renderer2DDemo->Shutdown();
+            m_Renderer2DDemo.reset();
         }
     }
 
@@ -131,10 +131,10 @@ namespace Limitless
             // Reload demo and input assets so we prove the new source works.
             GetInputSystem().SetProjectActionAssetFromKey("Assets/InputActions/Sandbox.inputactions.json");
 
-            if (m_TriangleDemo)
+            if (m_Renderer2DDemo)
             {
-                m_TriangleDemo->Shutdown();
-                m_TriangleDemo->Initialize();
+                m_Renderer2DDemo->Shutdown();
+                m_Renderer2DDemo->Initialize(m_ViewportWidthPixels, m_ViewportHeightPixels);
             }
 
             if (m_EditorCameraController)
@@ -150,9 +150,9 @@ namespace Limitless
             }
         }
 
-        if (m_TriangleDemo)
+        if (m_Renderer2DDemo)
         {
-            m_TriangleDemo->Update(deltaTime);
+            m_Renderer2DDemo->Update(deltaTime);
         }
 
         if (m_EditorCameraController)
@@ -163,14 +163,20 @@ namespace Limitless
 
     void TestLayer::OnRender()
     {
-        if (m_TriangleDemo)
+        if (m_Renderer2DDemo)
         {
-            m_TriangleDemo->Render(m_CameraManager);
+            if (const auto* camera = m_CameraManager.GetCamera(m_CameraId))
+            {
+                m_Renderer2DDemo->Render(*camera);
+            }
         }
     }
 
     void TestLayer::OnWindowResize(Events::WindowResizeEvent& event)
     {
+        m_ViewportWidthPixels = event.GetWidth();
+        m_ViewportHeightPixels = event.GetHeight();
+
         if (m_EditorCameraController)
         {
             m_EditorCameraController->OnWindowResize(event.GetWidth(), event.GetHeight());

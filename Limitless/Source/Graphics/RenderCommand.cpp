@@ -4,6 +4,8 @@
 #include "Core/Error.h"
 #include "Core/Debug/Log.h"
 
+#include <cstring>
+
 namespace Limitless
 {
     // ClearCommand implementation
@@ -57,6 +59,18 @@ namespace Limitless
     BindVertexBufferCommand::BindVertexBufferCommand(std::shared_ptr<VertexBuffer> vertexBuffer)
         : m_VertexBuffer(std::move(vertexBuffer))
     {
+    }
+
+    SetVertexBufferDataCommand::SetVertexBufferDataCommand(std::shared_ptr<VertexBuffer> vertexBuffer, const void* data, uint32_t sizeBytes)
+        : m_VertexBuffer(std::move(vertexBuffer))
+    {
+        if (sizeBytes == 0 || data == nullptr)
+        {
+            return;
+        }
+
+        m_Data.resize(sizeBytes);
+        std::memcpy(m_Data.data(), data, sizeBytes);
     }
 
     // BindTextureCommand implementation

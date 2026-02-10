@@ -23,7 +23,21 @@ project "Limitless"
         "Vendor/glad",
         "Vendor/spdlog",
         "Vendor/doctest",
-        "Vendor/SDL3"
+        "Vendor/SDL3",
+
+        -- Shader toolchain (vendored). These are used by the shader system for
+        -- compilation (shaderc) and reflection/transpilation (SPIRV-Cross).
+        "Vendor/shaderc/libshaderc/include",
+        "Vendor/SPIRV-Cross",
+
+        -- Vulkan headers + loader import library (vendored).
+        "Vendor/VulkanSDK/include"
+    }
+
+    links
+    {
+        -- Build SPIRV-Cross from source as a normal static library project.
+        "VendorSpirvCross"
     }
 
     filter "system:windows"
@@ -34,16 +48,25 @@ project "Limitless"
         defines
         {
             "LT_PLATFORM_WINDOWS",
+            -- Enable shaderc-based compilation on Windows where we vendor prebuilt libs.
+            "LT_ENABLE_SHADERC"
         }
 
         libdirs
         {
-            "Vendor/SDL3/SDL3Libs"
+            "Vendor/SDL3/SDL3Libs",
+
+            -- shaderc ships prebuilt .lib files in this folder in our vendor drop.
+            "Vendor/shaderc/libs",
+
+            -- Vulkan loader import library.
+            "Vendor/VulkanSDK/lib"
         }
 
         links
         {
             "SDL3-static",
+            "vulkan-1",
             "user32",
             "gdi32",
             "winmm",
@@ -58,11 +81,19 @@ project "Limitless"
             "psapi"
         }
 
-        buildoptions
-        {
-            "/utf-8",
-            "/FS" -- Prevent PDB contention in parallel builds
-        }
+        -- Select the correct shaderc library for each configuration.
+        filter { "system:windows", "configurations:Debug" }
+            links { "shaderc_sharedd" }
+
+        filter { "system:windows", "configurations:Release or Dist" }
+            links { "shaderc_shared" }
+
+        filter "system:windows"
+            buildoptions
+            {
+                "/utf-8",
+                "/FS" -- Prevent PDB contention in parallel builds
+            }
 
     filter "system:macosx"
         cppdialect "C++20"
@@ -171,3 +202,7 @@ project "Limitless"
         defines { "LT_COMPILER_CLANG" }
 
     -- Configuration-specific defines are provided by the workspace `premake5.lua`
+
+group "Dependencies"
+    include "Vendor/SPIRV-Cross"
+group ""

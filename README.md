@@ -135,6 +135,7 @@ Start here:
 - `Docs/CONCURRENCY_GUIDE.md` (SPSC/MPMC contracts)
 - `Docs/README_RenderCommandSystem.md` (render command system guarantees + current limitations)
 - `Docs/RENDERING_ROADMAP.md` (what is implemented vs stubbed + next milestones)
+- `Docs/RENDERER2D_GUIDE.md` (Renderer2D API, batching model, stats)
 - `Docs/ASSET_SYSTEM_GUIDE.md` (Unity-style GUID/.meta assets + Material/InputActions)
 - `Docs/ASSET_HOT_RELOAD_GUIDE.md` (Assets/ hot reload, debounce, dependency cascades)
 - `Docs/INPUT_GUIDE.md` (action assets, gamepad bindings, rebinding, override stack)
