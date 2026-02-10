@@ -39,7 +39,7 @@ namespace Limitless
             std::shared_ptr<IndexBuffer> QuadIndexBuffer;
 
             Assets::MaterialAsset::Ptr Material;
-            std::shared_ptr<Shader> Shader;
+            std::shared_ptr<Shader> ShaderProgram;
 
             std::shared_ptr<Texture2D> CurrentTexture;
 
@@ -121,8 +121,8 @@ namespace Limitless
             return;
         }
 
-        g_Data.Shader = g_Data.Material->GetShader();
-        if (!g_Data.Shader)
+        g_Data.ShaderProgram = g_Data.Material->GetShader();
+        if (!g_Data.ShaderProgram)
         {
             LT_CORE_ERROR("Renderer2D: default material shader is not ready yet");
             // Keep initialized; the shader can arrive later via the asset system.
@@ -130,7 +130,7 @@ namespace Limitless
         else
         {
             // Be explicit: sampler is bound to texture unit 0.
-            g_Data.Shader->SetInt("u_Texture", 0);
+            g_Data.ShaderProgram->SetInt("u_Texture", 0);
         }
 
         // Default texture (from material). This is used when DrawQuad is called without a texture.
@@ -287,16 +287,16 @@ namespace Limitless
         }
 
         // Re-fetch shader in case the asset became ready after initialization.
-        if (g_Data.Material && !g_Data.Shader)
+        if (g_Data.Material && !g_Data.ShaderProgram)
         {
-            g_Data.Shader = g_Data.Material->GetShader();
-            if (g_Data.Shader)
+            g_Data.ShaderProgram = g_Data.Material->GetShader();
+            if (g_Data.ShaderProgram)
             {
-                g_Data.Shader->SetInt("u_Texture", 0);
+                g_Data.ShaderProgram->SetInt("u_Texture", 0);
             }
         }
 
-        if (!g_Data.Shader)
+        if (!g_Data.ShaderProgram)
         {
             LT_CORE_WARN("Renderer2D::Flush: shader not ready (dropping {} quads)", g_Data.IndexCount / 6);
             g_Data.IndexCount = 0;
@@ -311,9 +311,9 @@ namespace Limitless
         renderer.SubmitCommand(std::make_unique<SetVertexBufferDataCommand>(g_Data.QuadVertexBuffer, g_Data.VertexStaging.data(), dataSizeBytes));
 
         // Bind pipeline state and issue a single indexed draw.
-        renderer.SubmitCommand(std::make_unique<BindShaderCommand>(g_Data.Shader));
-        renderer.SubmitCommand(std::make_unique<SetShaderMat4Command>(g_Data.Shader, "u_ViewProjection", g_Data.ViewProjection));
-        renderer.SubmitCommand(std::make_unique<SetShaderMat4Command>(g_Data.Shader, "u_Model", glm::mat4(1.0f)));
+        renderer.SubmitCommand(std::make_unique<BindShaderCommand>(g_Data.ShaderProgram));
+        renderer.SubmitCommand(std::make_unique<SetShaderMat4Command>(g_Data.ShaderProgram, "u_ViewProjection", g_Data.ViewProjection));
+        renderer.SubmitCommand(std::make_unique<SetShaderMat4Command>(g_Data.ShaderProgram, "u_Model", glm::mat4(1.0f)));
         renderer.SubmitCommand(std::make_unique<BindTextureCommand>(g_Data.CurrentTexture, 0));
         renderer.SubmitCommand(std::make_unique<BindVertexArrayCommand>(g_Data.QuadVertexArray));
         renderer.SubmitCommand(std::make_unique<DrawIndexedCommand>(DrawMode::Triangles, g_Data.IndexCount, IndexType::UnsignedInt, nullptr, 0));
