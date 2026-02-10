@@ -31,6 +31,7 @@ project "Sandbox"
         "../Limitless/Vendor/doctest",
         "../Limitless/Vendor/nlohmann",
         "../Limitless/Vendor/SDL3",
+        "../Limitless/Vendor/ffmpeg/include",
     }
 
     links
@@ -75,6 +76,15 @@ project "Sandbox"
             "../Limitless/Vendor/VulkanSDK/lib"
         }
 
+        -- FFmpeg (optional): drop import libs into `Limitless/Vendor/ffmpeg/libs` and DLLs into `Limitless/Vendor/ffmpeg/dlls`.
+        local ffmpegLibDir = "../Limitless/Vendor/ffmpeg/libs"
+        local ffmpegLibs = os.matchfiles(ffmpegLibDir .. "/*.lib")
+        if #ffmpegLibs > 0 then
+            defines { "LT_ENABLE_FFMPEG" }
+            libdirs { ffmpegLibDir }
+            links { "avcodec", "avformat", "avutil", "swresample" }
+        end
+
         links
         {
             "SDL3-static",
@@ -115,6 +125,15 @@ project "Sandbox"
             postbuildcommands
             {
                 "{COPYDIR} \"" .. shadercDllDir .. "\" \"%{cfg.targetdir}\""
+            }
+        end
+
+        -- Copy FFmpeg runtime DLLs next to the built executable.
+        local ffmpegDllDir = "../Limitless/Vendor/ffmpeg/dlls"
+        if os.isdir(ffmpegDllDir) then
+            postbuildcommands
+            {
+                "{COPYDIR} \"" .. ffmpegDllDir .. "\" \"%{cfg.targetdir}\""
             }
         end
 

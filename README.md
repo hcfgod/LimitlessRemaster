@@ -136,6 +136,7 @@ Start here:
 - `Docs/README_RenderCommandSystem.md` (render command system guarantees + current limitations)
 - `Docs/RENDERING_ROADMAP.md` (what is implemented vs stubbed + next milestones)
 - `Docs/RENDERER2D_GUIDE.md` (Renderer2D API, batching model, stats)
+- `Docs/AUDIO_SYSTEM_GUIDE.md` (Unity-style AudioEngine/AudioSource/AudioClip + FFmpeg decode)
 - `Docs/ASSET_SYSTEM_GUIDE.md` (Unity-style GUID/.meta assets + Material/InputActions)
 - `Docs/ASSET_HOT_RELOAD_GUIDE.md` (Assets/ hot reload, debounce, dependency cascades)
 - `Docs/INPUT_GUIDE.md` (action assets, gamepad bindings, rebinding, override stack)
@@ -445,6 +446,7 @@ monitor.SaveMetricsToFile("performance_report.txt");
 - **[Event System Guide](Docs/EVENT_GUIDE.md)** - Event-driven architecture and patterns
 - **[Window API Guide](Docs/WINDOW_API_GUIDE.md)** - Window creation and advanced behaviors
 - **[Graphics API Detection Guide](Docs/GRAPHICS_API_DETECTION_GUIDE.md)** - Implemented OpenGL path vs future backends
+- **[Audio System Guide](Docs/AUDIO_SYSTEM_GUIDE.md)** - Unity-style audio (AudioClip assets, AudioSource, AudioEngine) with FFmpeg decoding
 
 ## 🔧 **Continuous Integration**
 

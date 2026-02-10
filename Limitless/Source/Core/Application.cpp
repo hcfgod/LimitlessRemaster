@@ -11,6 +11,7 @@
 #include "Assets/AssetHotReloadManager.h"
 #include "Assets/AssetLoadCoordinator.h"
 #include "Assets/AssetBundle.h"
+#include "Audio/AudioEngine.h"
 #include "Graphics/GraphicsAPIDetector.h"
 #include "Graphics/Renderer.h"
 #include "Core/Time.h"
@@ -185,6 +186,13 @@ namespace Limitless
 			return false;
 		}
 
+        // Initialize global audio engine (Unity-style).
+        // This requires SDL_INIT_AUDIO (enabled in SDLManager::Initialize).
+        if (!Audio::AudioEngine::GetInstance().Initialize())
+        {
+            LT_CORE_WARN("AudioEngine failed to initialize. Audio playback will be disabled for this session.");
+        }
+
 		// Initialize graphics API detection system
 		GraphicsAPIDetector::Initialize();
 
@@ -253,6 +261,7 @@ namespace Limitless
 		m_Window.reset();
 		
 		// Shutdown SDL
+        Audio::AudioEngine::GetInstance().Shutdown();
 		SDLManager::GetInstance().Shutdown();
 		
 		// Shutdown event system AFTER window is destroyed

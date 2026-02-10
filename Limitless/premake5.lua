@@ -50,6 +50,7 @@ project "Limitless"
         "Vendor/spdlog",
         "Vendor/doctest",
         "Vendor/SDL3",
+        "Vendor/ffmpeg/include",
 
         -- Shader toolchain (vendored). These are used by the shader system for
         -- compilation (shaderc) and reflection/transpilation (SPIRV-Cross).
@@ -88,6 +89,15 @@ project "Limitless"
             -- Vulkan loader import library.
             "Vendor/VulkanSDK/lib"
         }
+
+        -- FFmpeg (optional): drop import libs into `Vendor/ffmpeg/libs` and DLLs into `Vendor/ffmpeg/dlls`.
+        local ffmpegLibDir = "Vendor/ffmpeg/libs"
+        local ffmpegLibs = os.matchfiles(ffmpegLibDir .. "/*.lib")
+        if #ffmpegLibs > 0 then
+            defines { "LT_ENABLE_FFMPEG" }
+            libdirs { ffmpegLibDir }
+            links { "avcodec", "avformat", "avutil", "swresample" }
+        end
 
         links
         {

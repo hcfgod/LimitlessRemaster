@@ -7,6 +7,7 @@ namespace Limitless
 {
     class EditorCameraController;
     class Renderer2DDemo;
+    class AudioDemo;
 
     class TestLayer : public Layer
     {
@@ -34,6 +35,7 @@ namespace Limitless
 
         std::unique_ptr<Renderer2DDemo> m_Renderer2DDemo;
         std::unique_ptr<EditorCameraController> m_EditorCameraController;
+        std::unique_ptr<AudioDemo> m_AudioDemo;
 
         bool m_UsingAssetBundle = false;
     };

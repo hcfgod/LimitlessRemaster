@@ -2,6 +2,7 @@
 
 #include "Editor/EditorCameraController.h"
 #include "Renderer2DDemo.h"
+#include "AudioDemo.h"
 
 #include "Assets/AssetBundle.h"
 #include "Assets/AssetBundleBuilder.h"
@@ -63,6 +64,9 @@ namespace Limitless
         m_Renderer2DDemo = std::make_unique<Renderer2DDemo>();
         m_Renderer2DDemo->Initialize(m_ViewportWidthPixels, m_ViewportHeightPixels);
 
+        m_AudioDemo = std::make_unique<AudioDemo>();
+        m_AudioDemo->Initialize();
+
         m_EditorCameraController = std::make_unique<EditorCameraController>();
         EditorCameraController::Settings editorCameraSettings{};
         editorCameraSettings.InputActionsAssetKey = "Assets/InputActions/EditorCamera.inputactions.json";
@@ -84,6 +88,12 @@ namespace Limitless
         {
             m_Renderer2DDemo->Shutdown();
             m_Renderer2DDemo.reset();
+        }
+
+        if (m_AudioDemo)
+        {
+            m_AudioDemo->Shutdown();
+            m_AudioDemo.reset();
         }
     }
 
@@ -185,6 +195,21 @@ namespace Limitless
                 settings.Enabled = !settings.Enabled;
                 m_Renderer2DDemo->SetStressTestSettings(settings);
                 LT_INFO("Renderer2DDemo: Stress grid Enabled={}", settings.Enabled);
+            }
+        }
+
+        // Audio demo controls:
+        // - P: play clip (Assets/Audio/Example.wav by default)
+        // - O: stop clip
+        if (m_AudioDemo)
+        {
+            if (GetInputSystem().WasKeyPressedThisFrame(SDL_SCANCODE_P))
+            {
+                m_AudioDemo->Play();
+            }
+            else if (GetInputSystem().WasKeyPressedThisFrame(SDL_SCANCODE_O))
+            {
+                m_AudioDemo->Stop();
             }
         }
 
