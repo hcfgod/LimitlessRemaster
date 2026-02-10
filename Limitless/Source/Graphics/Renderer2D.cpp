@@ -412,10 +412,10 @@ namespace Limitless
         Renderer2DFlushCommand::KeepAlive keepAlive{};
         // These are long-lived renderer resources; copying the shared_ptr here is fine.
         // (Texture handles are moved above to avoid per-flush refcount churn.)
-        keepAlive.VertexBuffer = g_Data.QuadVertexBuffer;
-        keepAlive.VertexArray = g_Data.QuadVertexArray;
-        keepAlive.ShaderProgram = g_Data.ShaderProgram;
-        keepAlive.Textures = std::move(textures);
+        keepAlive.VertexBufferHandle = g_Data.QuadVertexBuffer;
+        keepAlive.VertexArrayHandle = g_Data.QuadVertexArray;
+        keepAlive.ShaderProgramHandle = g_Data.ShaderProgram;
+        keepAlive.TextureHandles = std::move(textures);
 
         renderer.SubmitCommandArena<Renderer2DFlushCommand>(
             std::move(keepAlive),

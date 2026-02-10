@@ -346,7 +346,7 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        if (!m_KeepAlive.VertexArray || !m_KeepAlive.VertexBuffer || !m_KeepAlive.ShaderProgram)
+        if (!m_KeepAlive.VertexArrayHandle || !m_KeepAlive.VertexBufferHandle || !m_KeepAlive.ShaderProgramHandle)
         {
             LT_CORE_WARN("Renderer2DFlushCommand: missing resources (VAO/VBO/Shader), skipping");
             return;
@@ -359,10 +359,10 @@ namespace Limitless
         }
 
         // Upload vertices (streaming).
-        m_KeepAlive.VertexBuffer->SetData(m_VertexBytes, m_VertexByteCount);
+        m_KeepAlive.VertexBufferHandle->SetData(m_VertexBytes, m_VertexByteCount);
 
         // Bind shader + uniforms (OpenGL fast path when possible).
-        if (auto* glShader = dynamic_cast<OpenGLShader*>(m_KeepAlive.ShaderProgram.get()))
+        if (auto* glShader = dynamic_cast<OpenGLShader*>(m_KeepAlive.ShaderProgramHandle.get()))
         {
             const GLuint program = glShader->GetRendererID();
             s_GLState.UseProgram(program);
@@ -397,9 +397,9 @@ namespace Limitless
         }
         else
         {
-            m_KeepAlive.ShaderProgram->Bind();
-            m_KeepAlive.ShaderProgram->SetMat4("u_ViewProjection", m_ViewProjection);
-            m_KeepAlive.ShaderProgram->SetMat4("u_Model", glm::mat4(1.0f));
+            m_KeepAlive.ShaderProgramHandle->Bind();
+            m_KeepAlive.ShaderProgramHandle->SetMat4("u_ViewProjection", m_ViewProjection);
+            m_KeepAlive.ShaderProgramHandle->SetMat4("u_Model", glm::mat4(1.0f));
             s_GLState.Program = 0;
             s_Renderer2DUniforms.OnProgramBound(0);
         }
@@ -412,14 +412,14 @@ namespace Limitless
         }
 
         // Bind geometry and issue draw.
-        if (auto* glVAO = dynamic_cast<OpenGLVertexArray*>(m_KeepAlive.VertexArray.get()))
+        if (auto* glVAO = dynamic_cast<OpenGLVertexArray*>(m_KeepAlive.VertexArrayHandle.get()))
         {
             const GLuint vao = glVAO->GetRendererID();
             s_GLState.BindVertexArray(vao);
         }
         else
         {
-            m_KeepAlive.VertexArray->Bind();
+            m_KeepAlive.VertexArrayHandle->Bind();
             s_GLState.VertexArray = 0;
         }
 

@@ -106,9 +106,9 @@ namespace Limitless
         // Cache texture renderer IDs for faster binds in the hot execution path.
         for (uint32_t i = 0; i < kMaxTextureSlots; ++i)
         {
-            if (m_KeepAlive.Textures[i])
+            if (m_KeepAlive.TextureHandles[i])
             {
-                m_TextureRendererIds[i] = m_KeepAlive.Textures[i]->GetRendererID();
+                m_TextureRendererIds[i] = m_KeepAlive.TextureHandles[i]->GetRendererID();
             }
             else
             {

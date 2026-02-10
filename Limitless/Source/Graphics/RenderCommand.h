@@ -129,10 +129,10 @@ namespace Limitless
 
         struct KeepAlive
         {
-            std::shared_ptr<VertexBuffer> VertexBuffer;
-            std::shared_ptr<VertexArray> VertexArray;
-            std::shared_ptr<Shader> ShaderProgram;
-            std::array<std::shared_ptr<Texture>, kMaxTextureSlots> Textures{};
+            std::shared_ptr<VertexBuffer> VertexBufferHandle;
+            std::shared_ptr<VertexArray> VertexArrayHandle;
+            std::shared_ptr<Shader> ShaderProgramHandle;
+            std::array<std::shared_ptr<Texture>, kMaxTextureSlots> TextureHandles{};
         };
 
         Renderer2DFlushCommand(
