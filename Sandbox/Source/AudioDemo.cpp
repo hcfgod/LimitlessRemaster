@@ -7,6 +7,11 @@
 
 namespace Limitless
 {
+    void AudioDemo::Initialize()
+    {
+        Initialize(Settings{});
+    }
+
     void AudioDemo::Initialize(const Settings& settings)
     {
         m_Settings = settings;

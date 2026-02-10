@@ -24,7 +24,12 @@ namespace Limitless
             std::string ClipKey = "Assets/Audio/test.wav";
         };
 
-        void Initialize(const Settings& settings = Settings{});
+        // NOTE(macOS/Clang):
+        // Avoid default arguments like `const Settings& settings = Settings{}` for nested types that
+        // rely on default member initializers (like ClipKey above). Some Clang versions reject this
+        // while the enclosing class is still being defined. Overloads are portable.
+        void Initialize();
+        void Initialize(const Settings& settings);
         void Shutdown();
 
         void Play();
