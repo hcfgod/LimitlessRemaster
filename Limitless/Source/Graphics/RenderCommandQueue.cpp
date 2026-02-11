@@ -707,47 +707,12 @@ namespace Limitless
     void RenderCommandQueue::BatchCommands(std::vector<std::unique_ptr<QueuedCommand>>& commands)
     {
         // IMPORTANT:
-        // Render commands are stateful and order-dependent (e.g. binds must occur before draws).
-        // The previous implementation grouped Draw* commands ahead of bind/state commands, which
-        // can cause invalid OpenGL state (GL_INVALID_OPERATION) and even driver crashes.
-        //
-        // Current policy:
-        // - Move Clear commands to the front (safe)
-        // - Preserve relative order of everything else (stable)
-        std::vector<std::unique_ptr<QueuedCommand>> clearCommands;
-        std::vector<std::unique_ptr<QueuedCommand>> rest;
-
-        clearCommands.reserve(commands.size());
-        rest.reserve(commands.size());
-
-        for (auto& queued : commands)
-        {
-            if (!queued || !queued->command)
-            {
-                continue;
-            }
-
-            if (queued->command->GetName() == "Clear")
-            {
-                clearCommands.push_back(std::move(queued));
-            }
-            else
-            {
-                rest.push_back(std::move(queued));
-            }
-        }
-
-        commands.clear();
-        commands.reserve(clearCommands.size() + rest.size());
-
-        for (auto& cmd : clearCommands)
-        {
-            commands.push_back(std::move(cmd));
-        }
-        for (auto& cmd : rest)
-        {
-            commands.push_back(std::move(cmd));
-        }
+        // Render commands are stateful and order-dependent. Clear operates on the currently
+        // bound framebuffer, so it must execute AFTER BindFramebuffer, not before. Reordering
+        // Clear to the front would clear the default framebuffer (0) instead of the target FBO,
+        // causing accumulation (e.g. EditorLayer viewport quads multiplying when moving camera).
+        // Preserve original submission order - no reordering.
+        (void)commands;
     }
 
     void RenderCommandQueue::ExecuteCommand(RenderCommand* command, GraphicsContext* context)

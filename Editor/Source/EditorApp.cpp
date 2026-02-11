@@ -1,7 +1,7 @@
 #include "EditorApp.h"
+#include "EditorLayer.h"
 #include "ImGui/ImGuiLayer.h"
 #include "Core/Debug/Log.h"
-#include "imgui/imgui.h"
 
 // CreateApplication is defined here; main() comes from Limitless.h via LT_ENABLE_ENTRYPOINT
 
@@ -11,10 +11,13 @@ namespace Limitless
     {
         LT_INFO("EditorApp Initialize");
 
-        // Push ImGui overlay first so it renders on top of all layers.
-        PushOverlay(CreateLayer<ImGuiLayer>());
+        // ImGui layer first (dockspace) - must run before panels per ImGui docs.
+        PushLayer(CreateLayer<ImGuiLayer>());
 
-        LT_INFO("ImGuiLayer pushed to layer stack");
+        // Editor layer (viewport, scene, inspector, project panels).
+        PushLayer(CreateLayer<EditorLayer>());
+
+        LT_INFO("Editor layers pushed to layer stack");
 
         return true;
     }

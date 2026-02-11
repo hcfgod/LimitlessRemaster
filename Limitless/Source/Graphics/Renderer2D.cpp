@@ -142,7 +142,7 @@ namespace Limitless
         g_Data.ShaderProgram = g_Data.Material->GetShader();
         if (!g_Data.ShaderProgram)
         {
-            LT_CORE_ERROR("Renderer2D: default material shader is not ready yet");
+            LT_CORE_INFO("Renderer2D: default material shader loading (view on-screen progress in viewport)");
             // Keep initialized; the shader can arrive later via the asset system.
         }
         else
@@ -377,7 +377,7 @@ namespace Limitless
 
         if (!g_Data.ShaderProgram)
         {
-            LT_CORE_WARN("Renderer2D::Flush: shader not ready (dropping {} quads)", g_Data.IndexCount / 6);
+            // Shader still loading; drop quads silently. Caller shows loading progress in UI.
             g_Data.IndexCount = 0;
             g_Data.VertexBufferPtr = g_Data.VertexBufferBase.get();
             g_Data.TextureSlotCount = 1;
@@ -439,6 +439,33 @@ namespace Limitless
     const Renderer2D::Statistics& Renderer2D::GetStatistics()
     {
         return g_Data.Stats;
+    }
+
+    bool Renderer2D::IsShaderReady()
+    {
+        if (!g_Data.Initialized)
+        {
+            return false;
+        }
+        if (g_Data.ShaderProgram)
+        {
+            return true;
+        }
+        if (g_Data.Material)
+        {
+            g_Data.ShaderProgram = g_Data.Material->GetShader();
+            if (g_Data.ShaderProgram)
+            {
+                std::array<int, Renderer2DData::kMaxTextureSlots> samplers{};
+                for (uint32_t i = 0; i < Renderer2DData::kMaxTextureSlots; ++i)
+                {
+                    samplers[i] = static_cast<int>(i);
+                }
+                g_Data.ShaderProgram->SetIntArray("u_Textures", samplers.data(), static_cast<uint32_t>(samplers.size()));
+                return true;
+            }
+        }
+        return false;
     }
 
     void Renderer2D::ResetStatistics()

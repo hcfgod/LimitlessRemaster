@@ -34,7 +34,7 @@ namespace Limitless
 
         bool m_Initialized = false;
         GraphicsAPI m_GraphicsAPI = GraphicsAPI::OpenGL;  ///< Active backend (set at attach).
-        bool m_ShowDemoWindow = true;  ///< Toggle ImGui demo window (helpful during development).
+        bool m_ShowDemoWindow = false;  ///< Toggle ImGui demo window (EditorLayer provides its own via menu).
         bool m_ShowDockspace = true;  ///< Toggle default dockspace (enabled by default).
     };
 

@@ -21,10 +21,11 @@ namespace Limitless
 
     void EditorCameraController::Shutdown()
     {
-        if (m_Settings.UseOverrideActionAsset && m_InputAsset)
+        if (m_InputEnabled && m_Settings.UseOverrideActionAsset && m_InputAsset)
         {
             GetInputSystem().PopOverrideActionAsset(m_InputAsset);
         }
+        m_InputEnabled = false;
 
         if (Application::HasInstance())
         {
@@ -45,9 +46,38 @@ namespace Limitless
         m_Settings = Settings{};
     }
 
+    void EditorCameraController::SetInputEnabled(bool enabled)
+    {
+        if (m_InputEnabled == enabled)
+            return;
+
+        m_InputEnabled = enabled;
+
+        if (!enabled)
+        {
+            if (m_Settings.UseOverrideActionAsset && m_InputAsset)
+            {
+                GetInputSystem().PopOverrideActionAsset(m_InputAsset);
+            }
+            if (Application::HasInstance())
+            {
+                auto& window = Application::GetInstance().GetWindow();
+                window.SetCursorLocked(false);
+                window.SetCursorVisible(true);
+            }
+        }
+        else
+        {
+            if (m_Settings.UseOverrideActionAsset && m_InputAsset)
+            {
+                GetInputSystem().PushOverrideActionAsset(m_InputAsset);
+            }
+        }
+    }
+
     void EditorCameraController::Update(float deltaTime)
     {
-        if (!m_CameraManager || !m_CameraId)
+        if (!m_CameraManager || !m_CameraId || !m_InputEnabled)
         {
             return;
         }

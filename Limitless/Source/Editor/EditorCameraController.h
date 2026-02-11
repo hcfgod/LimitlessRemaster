@@ -54,6 +54,10 @@ namespace Limitless
         void Update(float deltaTime);
         void OnWindowResize(uint32_t widthPixels, uint32_t heightPixels);
 
+        /// When false, input is ignored and cursor is restored. Use when viewport is not focused.
+        void SetInputEnabled(bool enabled);
+        bool IsInputEnabled() const { return m_InputEnabled; }
+
         // Expose action debug for tooling
         const InputAction* GetMoveAction() const { return m_ActionMove; }
         const InputAction* GetLookAction() const { return m_ActionLook; }
@@ -81,6 +85,7 @@ namespace Limitless
 
         CameraManager* m_CameraManager = nullptr;
         CameraId m_CameraId{};
+        bool m_InputEnabled = true;  ///< When false, Update ignores input and cursor is restored.
     };
 }
 

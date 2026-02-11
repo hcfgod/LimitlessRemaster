@@ -147,6 +147,10 @@ namespace Limitless
 			// Render layers
 			m_LayerStack.OnRender();
 
+			// Process render commands before ImGui so viewport framebuffers are ready
+			// when ImGui draws (e.g. EditorLayer viewport texture).
+			Renderer::GetInstance().ProcessCommands();
+
 			// ImGui end frame (render ImGui on top of all layers).
 			if (m_ImGuiEndFrame)
 				m_ImGuiEndFrame();

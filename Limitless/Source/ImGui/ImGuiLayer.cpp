@@ -73,8 +73,8 @@ namespace Limitless
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;  // Docking enabled by default
-        // Disable automatic .ini file I/O to avoid MSVC CRT "buffer != nullptr" assertion
-        io.IniFilename = nullptr;
+        // Persist layout (docking, window positions) to imgui.ini in working directory.
+        io.IniFilename = "imgui.ini";
 
         if (!ImGui_ImplSDL3_InitForOpenGL(sdlWindow, glContext))
         {
@@ -205,6 +205,9 @@ namespace Limitless
                 if (auto* glContext = dynamic_cast<OpenGLContext*>(app.GetWindow().GetGraphicsContext()))
                 {
                     OpenGLContext::ScopedCurrentContext scope(*glContext);
+                    // Ensure we're on the default framebuffer before clear (avoids GL_INVALID_OPERATION
+                    // when ProcessCommands left a custom framebuffer bound).
+                    glBindFramebuffer(GL_FRAMEBUFFER, 0);
                     // Clear the framebuffer before drawing. The Editor has no game layer that clears;
                     // without this, previous frames persist and cause ghosting when moving the window.
                     glClearColor(0.15f, 0.15f, 0.18f, 1.0f);

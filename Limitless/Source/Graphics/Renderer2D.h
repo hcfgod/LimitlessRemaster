@@ -64,6 +64,10 @@ namespace Limitless
         static const Statistics& GetStatistics();
         static void ResetStatistics();
 
+        /// Returns true when the default material shader is loaded and ready for rendering.
+        /// While false, DrawQuad calls are dropped silently and the caller may show a loading UI.
+        static bool IsShaderReady();
+
     private:
         static void Flush();
     };
