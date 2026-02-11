@@ -430,7 +430,7 @@ namespace Limitless::Assets
         std::shared_ptr<Shader> compiled;
         try
         {
-            compiled = renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<Shader> {
+            compiled = renderer.SubmitResourceAndWait("ShaderAsset/Reload/CreateShader", [&](GraphicsContext*) -> std::shared_ptr<Shader> {
                 return Shader::CreateFromSource(parsed.Name, parsed.Vertex, parsed.Fragment);
             });
         }

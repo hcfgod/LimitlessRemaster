@@ -146,7 +146,7 @@ namespace Limitless
             try
             {
                 // Run the drain on the render thread (context-affine).
-                SubmitResourceAndWait([this](GraphicsContext* context) {
+                SubmitResourceAndWait("Renderer/Shutdown/DrainRenderCommands", [this](GraphicsContext* context) {
                     // Drain render commands until the queue is empty. ProcessCommands has a per-call
                     // cap (maxCommandsPerFrame), so loop to guarantee we fully drain during shutdown.
                     while (m_RenderQueue && m_RenderQueue->GetSize() != 0)
