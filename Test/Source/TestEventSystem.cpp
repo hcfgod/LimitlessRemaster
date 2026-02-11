@@ -324,6 +324,35 @@ TEST_SUITE("Event System")
         eventSystem.Shutdown();
     }
 
+    TEST_CASE("AddListenerNonOwned registers stack-allocated listener")
+    {
+        auto& eventSystem = Limitless::GetEventSystem();
+        eventSystem.Initialize();
+
+        struct StackListener final : public Limitless::EventListener
+        {
+            int m_Count = 0;
+            void OnEvent(Limitless::Event& event) override
+            {
+                if (event.GetType() == Limitless::EventType::AppTick)
+                    m_Count++;
+            }
+            bool ShouldReceiveEvent(const Limitless::Event&) const override { return true; }
+        };
+
+        StackListener listener;
+        eventSystem.AddListenerNonOwned(&listener);
+
+        auto tickEvent = std::make_unique<Limitless::Events::AppTickEvent>(0.016f);
+        eventSystem.Dispatch(*tickEvent);
+        eventSystem.ProcessEvents();
+
+        CHECK(listener.m_Count == 1);
+
+        eventSystem.RemoveListener(&listener);
+        eventSystem.Shutdown();
+    }
+
     TEST_CASE("AddEventCallback typed API")
     {
         auto& eventSystem = Limitless::GetEventSystem();

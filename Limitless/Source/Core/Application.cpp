@@ -1,4 +1,6 @@
 #include "Application.h"
+#include "Core/EventSystem.h"
+#include "Core/Input/InputSystem.h"
 #include "Platform/Window.h"
 #include "Platform/SDL/SDLWindow.h"
 #include "Platform/SDL/SDLManager.h"
@@ -52,6 +54,16 @@ namespace Limitless
 		hotReloadManager.EnableHotReload(true);
 
 		LT_CORE_INFO("Application constructor completed successfully");
+	}
+
+	EventSystem& Application::GetEventSystem()
+	{
+		return ::Limitless::GetEventSystem();
+	}
+
+	InputSystem& Application::GetInputSystem()
+	{
+		return ::Limitless::GetInputSystem();
 	}
 
 	Application::~Application()
@@ -227,9 +239,8 @@ namespace Limitless
 			m_IsRunning = false;
 		});
 
-		// Register LayerStack with event system
-		auto& eventSystem = GetEventSystem();
-		eventSystem.AddListener(std::shared_ptr<EventListener>(&m_LayerStack, [](EventListener*){}));
+		// Register LayerStack with event system (non-owned: we own m_LayerStack)
+		GetEventSystem().AddListenerNonOwned(&m_LayerStack);
 
 		if (!Initialize())
 		{

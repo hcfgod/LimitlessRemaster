@@ -7,6 +7,8 @@
 namespace Limitless
 {
     class Window;
+    class EventSystem;
+    class InputSystem;
 
 	class Application
 	{
@@ -27,6 +29,8 @@ namespace Limitless
 		void SetRunning(bool running) { m_IsRunning = running; }
 
         Window& GetWindow() { return *m_Window; }
+        EventSystem& GetEventSystem();
+        InputSystem& GetInputSystem();
         LayerStack& GetLayerStack() { return m_LayerStack; }
 
         // Layer management convenience methods

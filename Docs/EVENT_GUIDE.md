@@ -109,6 +109,17 @@ auto listener = std::make_shared<MyListener>();
 events.AddListener(listener);
 ```
 
+## Non-owned listeners
+
+When the listener is owned elsewhere (e.g. a member of `Application`), use `AddListenerNonOwned`:
+
+```cpp
+// m_LayerStack is owned by Application; we register it as non-owned
+GetEventSystem().AddListenerNonOwned(&m_LayerStack);
+```
+
+`AddListenerNonOwned` does not take ownership. Call `RemoveListener` before the listener is destroyed.
+
 ## Priorities
 
 Both callbacks and listeners can have priorities:

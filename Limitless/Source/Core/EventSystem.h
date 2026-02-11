@@ -171,6 +171,9 @@ namespace Limitless
         
         // Listener management
         void AddListener(std::shared_ptr<EventListener> listener);
+        /// Registers a listener that is not owned by the event system. Caller must ensure the listener
+        /// outlives the event system and call RemoveListener before the listener is destroyed.
+        void AddListenerNonOwned(EventListener* listener);
         void RemoveListener(std::shared_ptr<EventListener> listener);
         void RemoveListener(const EventListener* listener);
         
@@ -323,6 +326,9 @@ namespace Limitless
         
         // Listener management
         void AddListener(std::shared_ptr<EventListener> listener);
+        /// Registers a listener that is not owned by the event system. Caller must ensure the listener
+        /// outlives the event system and call RemoveListener before the listener is destroyed.
+        void AddListenerNonOwned(EventListener* listener);
         void RemoveListener(std::shared_ptr<EventListener> listener);
         void RemoveListener(const EventListener* listener);
         

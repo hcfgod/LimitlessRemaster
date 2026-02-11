@@ -185,6 +185,13 @@ namespace Limitless
         std::stable_sort(m_Listeners.begin(), m_Listeners.end());
     }
 
+    void EventDispatcher::AddListenerNonOwned(EventListener* listener)
+    {
+        if (!listener)
+            return;
+        AddListener(std::shared_ptr<EventListener>(listener, [](EventListener*) {}));
+    }
+
     void EventDispatcher::RemoveListener(std::shared_ptr<EventListener> listener)
     {
         RemoveListener(listener.get());
@@ -548,6 +555,19 @@ namespace Limitless
             return;
 
         dispatcher->AddListener(std::move(listener));
+    }
+
+    void EventSystem::AddListenerNonOwned(EventListener* listener)
+    {
+        EventSystemOperationGuard op(*this);
+        if (!op.IsActive())
+            return;
+
+        auto dispatcher = m_Dispatcher;
+        if (!dispatcher)
+            return;
+
+        dispatcher->AddListenerNonOwned(listener);
     }
 
     void EventSystem::RemoveListener(std::shared_ptr<EventListener> listener)
