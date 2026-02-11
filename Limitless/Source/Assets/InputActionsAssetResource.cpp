@@ -3,6 +3,7 @@
 #include "Assets/AssetBundle.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetLoadCoordinator.h"
+#include "Assets/AssetLoadProgress.h"
 #include "Assets/AssetManager.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetUtils.h"
@@ -56,8 +57,11 @@ namespace Limitless::Assets
         std::shared_future<Ptr> shared = promise.get_future().share();
 
         Async::GetAsyncIO().RunAsync([key, settings, generation, promise = std::move(promise)]() mutable -> void {
+            AssetLoadProgress::SetProgress(key, 0.05f, "Resolving...");
+
             if (!AssetLoadCoordinator::IsGenerationCurrent(generation))
             {
+                AssetLoadProgress::ClearProgress(key);
                 promise.set_value(nullptr);
                 return;
             }
@@ -101,6 +105,7 @@ namespace Limitless::Assets
                             fromBundle = true;
                             resolvedPath = "<AssetBundle>";
                             jsonText = textResult.GetValue();
+                            AssetLoadProgress::SetProgress(key, 0.25f, "Reading from bundle...");
                         }
                     }
                 }
@@ -111,6 +116,7 @@ namespace Limitless::Assets
                 const auto resolvedResult = ResolveAssetKeyToPath(key);
                 if (resolvedResult.IsFailure())
                 {
+                    AssetLoadProgress::ClearProgress(key);
                     LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: failed to resolve key '{}': {}", key, resolvedResult.GetError().GetErrorMessage());
                     promise.set_value(nullptr);
                     return;
@@ -118,6 +124,7 @@ namespace Limitless::Assets
 
                 resolvedPath = resolvedResult.GetValue().string();
                 sourceResolvedPath = resolvedPath;
+                AssetLoadProgress::SetProgress(key, 0.25f, "Reading...");
             }
             else
             {
@@ -139,6 +146,7 @@ namespace Limitless::Assets
             {
                 if (sourceResolvedPath.empty())
                 {
+                    AssetLoadProgress::ClearProgress(key);
                     LT_CORE_ERROR(
                         "InputActionsAssetResource::LoadAsync: cannot determine GUID for '{}' (override present={}, bundle enabled={}). "
                         "Identity must come from the base asset (.meta or bundle entry), not from an override file.",
@@ -150,6 +158,7 @@ namespace Limitless::Assets
                 const auto guidResult = LoadOrCreateGuid(sourceResolvedPath, {{"key", key}, {"type", "InputActions"}});
                 if (guidResult.IsFailure())
                 {
+                    AssetLoadProgress::ClearProgress(key);
                     LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: meta GUID failed for '{}': {}", sourceResolvedPath, guidResult.GetError().GetErrorMessage());
                     promise.set_value(nullptr);
                     return;
@@ -157,6 +166,8 @@ namespace Limitless::Assets
 
                 guid = guidResult.GetValue();
             }
+
+            AssetLoadProgress::SetProgress(key, 0.60f, "Parsing...");
 
             auto asset = AssetManager::GetOrLoad<InputActionsAssetResource>(key, [&]() -> Ptr {
                 // IMPORTANT:
@@ -169,11 +180,13 @@ namespace Limitless::Assets
                     : Limitless::InputActionAssetSerializer::LoadInto(*stable, resolvedPath);
                 if (loaded.IsFailure())
                 {
+                    AssetLoadProgress::ClearProgress(key);
                     LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: load failed for '{}': {}",
                         (fromBundle ? key : resolvedPath), loaded.GetError().GetErrorMessage());
                     return nullptr;
                 }
 
+                AssetLoadProgress::ClearProgress(key);
                 Ptr created(new InputActionsAssetResource(key, guid, stable, settings));
                 created->m_ResolvedPath = resolvedPath;
                 created->m_Revision.fetch_add(1, std::memory_order_relaxed);

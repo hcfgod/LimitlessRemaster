@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace Limitless::Assets
 {
@@ -34,6 +35,9 @@ namespace Limitless::Assets
 
         /// Get current progress if the asset is still loading. Returns nullopt when complete.
         static std::optional<Info> GetProgress(const std::string& key);
+
+        /// Get all asset keys currently being loaded. Useful for generic loading UIs.
+        static std::vector<std::string> GetActiveKeys();
 
     private:
         static std::mutex s_Mutex;

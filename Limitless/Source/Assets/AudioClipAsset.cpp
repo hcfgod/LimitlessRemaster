@@ -1,6 +1,7 @@
 #include "Assets/AudioClipAsset.h"
 
 #include "Assets/AssetBundle.h"
+#include "Assets/AssetLoadProgress.h"
 #include "Assets/AssetLoadCoordinator.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetUtils.h"
@@ -33,8 +34,11 @@ namespace Limitless::Assets
         Async::GetAsyncIO().RunAsync([assetPath, settings, generation, promise = std::move(promise)]() mutable -> void {
             try
             {
+                AssetLoadProgress::SetProgress(assetPath, 0.05f, "Resolving...");
+
                 if (!AssetLoadCoordinator::IsGenerationCurrent(generation))
                 {
+                    AssetLoadProgress::ClearProgress(assetPath);
                     promise.set_value(nullptr);
                     return;
                 }
@@ -58,6 +62,7 @@ namespace Limitless::Assets
                             fromBundle = true;
                             bundleBytes = bytesResult.GetValue();
                             guid = entry->Guid;
+                            AssetLoadProgress::SetProgress(assetPath, 0.15f, "Reading from bundle...");
                         }
                     }
                 }
@@ -67,6 +72,7 @@ namespace Limitless::Assets
                     const auto resolvedPathResult = ResolveAssetKeyToPath(assetPath);
                     if (resolvedPathResult.IsFailure())
                     {
+                        AssetLoadProgress::ClearProgress(assetPath);
                         LT_CORE_ERROR("AudioClipAsset::LoadAsync: failed to resolve key '{}': {}",
                                       assetPath, resolvedPathResult.GetError().GetErrorMessage());
                         promise.set_value(nullptr);
@@ -74,11 +80,13 @@ namespace Limitless::Assets
                     }
 
                     resolvedPath = resolvedPathResult.GetValue().string();
+                    AssetLoadProgress::SetProgress(assetPath, 0.15f, "Reading...");
                     debugName = resolvedPath;
 
                     auto guidResult = LoadOrCreateGuid(resolvedPath);
                     if (guidResult.IsFailure())
                     {
+                        AssetLoadProgress::ClearProgress(assetPath);
                         LT_CORE_ERROR("AudioClipAsset::LoadAsync: failed GUID/meta for '{}': {}",
                                       resolvedPath, guidResult.GetError().GetErrorMessage());
                         promise.set_value(nullptr);
@@ -87,6 +95,8 @@ namespace Limitless::Assets
 
                     guid = guidResult.GetValue();
                 }
+
+                AssetLoadProgress::SetProgress(assetPath, 0.40f, "Decoding audio...");
 
                 Audio::Decoders::FfmpegAudioDecoder::DecodeSettings decodeSettings{};
                 decodeSettings.TargetSampleRateHz = settings.TargetSampleRateHz;
@@ -104,6 +114,7 @@ namespace Limitless::Assets
 
                 if (decodedResult.IsFailure())
                 {
+                    AssetLoadProgress::ClearProgress(assetPath);
                     LT_CORE_ERROR("AudioClipAsset::LoadAsync: decode failed for '{}': {}", debugName, decodedResult.GetError().GetErrorMessage());
                     promise.set_value(nullptr);
                     return;
@@ -112,21 +123,25 @@ namespace Limitless::Assets
                 auto clip = decodedResult.GetValue();
                 if (!clip)
                 {
+                    AssetLoadProgress::ClearProgress(assetPath);
                     LT_CORE_ERROR("AudioClipAsset::LoadAsync: decode returned null for '{}'", debugName);
                     promise.set_value(nullptr);
                     return;
                 }
 
+                AssetLoadProgress::ClearProgress(assetPath);
                 Ptr created(new AudioClipAsset(assetPath, guid, clip, settings));
                 promise.set_value(created);
             }
             catch (const std::exception& e)
             {
+                AssetLoadProgress::ClearProgress(assetPath);
                 LT_CORE_ERROR("AudioClipAsset::LoadAsync: exception while loading '{}': {}", assetPath, e.what());
                 try { promise.set_value(nullptr); } catch (...) {}
             }
             catch (...)
             {
+                AssetLoadProgress::ClearProgress(assetPath);
                 LT_CORE_ERROR("AudioClipAsset::LoadAsync: unknown exception while loading '{}'", assetPath);
                 try { promise.set_value(nullptr); } catch (...) {}
             }

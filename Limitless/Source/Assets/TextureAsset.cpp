@@ -1,5 +1,6 @@
 #include "Assets/TextureAsset.h"
 #include "Assets/AssetBundle.h"
+#include "Assets/AssetLoadProgress.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetLoadCoordinator.h"
 #include "Assets/ImageDecode.h"
@@ -659,8 +660,11 @@ namespace Limitless::Assets
         Async::GetAsyncIO().RunAsync([assetPath, specification, generation, promise = std::move(promise)]() mutable -> void {
             try
             {
+                AssetLoadProgress::SetProgress(assetPath, 0.05f, "Resolving...");
+
                 if (!AssetLoadCoordinator::IsGenerationCurrent(generation))
                 {
+                    AssetLoadProgress::ClearProgress(assetPath);
                     promise.set_value(nullptr);
                     return;
                 }
@@ -686,6 +690,7 @@ namespace Limitless::Assets
                             bundleBytes = bytesResult.GetValue();
                             guid = entry->Guid;
                             bundlePayloadFormat = entry->PayloadFormat;
+                            AssetLoadProgress::SetProgress(assetPath, 0.15f, "Reading from bundle...");
                         }
                     }
                 }
@@ -695,6 +700,7 @@ namespace Limitless::Assets
                     const auto resolvedPathResult = ResolveAssetKeyToPath(assetPath);
                     if (resolvedPathResult.IsFailure())
                     {
+                        AssetLoadProgress::ClearProgress(assetPath);
                         LT_CORE_ERROR("TextureAsset::LoadAsync: failed to resolve key '{}': {}",
                                       assetPath, resolvedPathResult.GetError().GetErrorMessage());
                         promise.set_value(nullptr);
@@ -702,12 +708,14 @@ namespace Limitless::Assets
                     }
 
                     resolvedPath = resolvedPathResult.GetValue().string();
+                    AssetLoadProgress::SetProgress(assetPath, 0.15f, "Reading...");
                     debugName = resolvedPath;
 
                     // Unity-style: `.meta` lives next to the real asset on disk.
                     auto guidResult = LoadOrCreateGuid(resolvedPath);
                     if (guidResult.IsFailure())
                     {
+                        AssetLoadProgress::ClearProgress(assetPath);
                         LT_CORE_ERROR("TextureAsset::LoadAsync: failed GUID/meta for '{}': {}",
                                       resolvedPath, guidResult.GetError().GetErrorMessage());
                         promise.set_value(nullptr);
@@ -716,6 +724,8 @@ namespace Limitless::Assets
 
                     guid = guidResult.GetValue();
                 }
+
+                AssetLoadProgress::SetProgress(assetPath, 0.35f, "Decoding...");
 
                 const bool isCookedTexture2DFromBundle =
                     fromBundle && (bundlePayloadFormat == AssetBundlePayloadFormat::CookedTexture2D);
@@ -747,6 +757,7 @@ namespace Limitless::Assets
                     }
                     if (decodedResult.IsFailure())
                     {
+                        AssetLoadProgress::ClearProgress(assetPath);
                         LT_CORE_ERROR("TextureAsset::LoadAsync: decode failed for '{}': {}",
                                       debugName, decodedResult.GetError().GetErrorMessage());
                         promise.set_value(nullptr);
@@ -756,10 +767,13 @@ namespace Limitless::Assets
                     decoded = decodedResult.GetValue();
                 }
 
+                AssetLoadProgress::SetProgress(assetPath, 0.75f, "Uploading to GPU...");
+
                 // GPU stage: create texture + asset on render thread without blocking this AsyncIO worker.
                 auto& renderer = Renderer::GetInstance();
                 if (!renderer.IsRenderThreadEnabled())
                 {
+                    AssetLoadProgress::ClearProgress(assetPath);
                     LT_CORE_ERROR("TextureAsset::LoadAsync: render thread must be enabled for GPU texture creation");
                     promise.set_value(nullptr);
                     return;
@@ -809,6 +823,7 @@ namespace Limitless::Assets
                         {
                             if (!AssetLoadCoordinator::IsGenerationCurrent(m_State->generation))
                             {
+                                AssetLoadProgress::ClearProgress(m_State->key);
                                 m_State->promise.set_value(nullptr);
                                 return;
                             }
@@ -825,6 +840,7 @@ namespace Limitless::Assets
                                 const auto cookedViewResult = ::Limitless::Assets::Cooking::ParseCookedTexture2DView(m_State->cookedBytes.data(), m_State->cookedBytes.size());
                                 if (cookedViewResult.IsFailure())
                                 {
+                                    AssetLoadProgress::ClearProgress(m_State->key);
                                     LT_CORE_ERROR("TextureAsset::LoadAsync: cooked texture parse failed for '{}': {}",
                                         m_State->key, cookedViewResult.GetError().GetErrorMessage());
                                     m_State->promise.set_value(nullptr);
@@ -860,6 +876,7 @@ namespace Limitless::Assets
 
                             if (!texture)
                             {
+                                AssetLoadProgress::ClearProgress(m_State->key);
                                 m_State->promise.set_value(nullptr);
                                 return;
                             }
@@ -869,10 +886,12 @@ namespace Limitless::Assets
                                 return Ptr(new TextureAsset(m_State->key, m_State->guid, std::move(texture), m_State->spec));
                             });
 
+                            AssetLoadProgress::ClearProgress(m_State->key);
                             m_State->promise.set_value(std::move(asset));
                         }
                         catch (...)
                         {
+                            AssetLoadProgress::ClearProgress(m_State->key);
                             try { m_State->promise.set_value(nullptr); } catch (...) {}
                         }
                     }
@@ -883,6 +902,7 @@ namespace Limitless::Assets
 
                 if (!renderer.SubmitResource(std::make_unique<Command>(state)))
                 {
+                    AssetLoadProgress::ClearProgress(assetPath);
                     LT_CORE_ERROR("TextureAsset::LoadAsync: RenderResourceCommandQueue full while creating '{}'", debugName);
                     state->promise.set_value(nullptr);
                     return;
@@ -890,11 +910,13 @@ namespace Limitless::Assets
             }
             catch (const std::exception& e)
             {
+                AssetLoadProgress::ClearProgress(assetPath);
                 LT_CORE_ERROR("TextureAsset::LoadAsync: exception while loading '{}': {}", assetPath, e.what());
                 try { promise.set_value(nullptr); } catch (...) {}
             }
             catch (...)
             {
+                AssetLoadProgress::ClearProgress(assetPath);
                 LT_CORE_ERROR("TextureAsset::LoadAsync: unknown exception while loading '{}'", assetPath);
                 try { promise.set_value(nullptr); } catch (...) {}
             }

@@ -2,6 +2,7 @@
 
 #include "Assets/AssetBundle.h"
 #include "Assets/AssetDatabase.h"
+#include "Assets/AssetLoadProgress.h"
 #include "Assets/AssetLoadCoordinator.h"
 #include "Assets/AssetManager.h"
 #include "Assets/AssetPaths.h"
@@ -174,8 +175,11 @@ namespace Limitless::Assets
         std::shared_future<Ptr> shared = promise.get_future().share();
 
         Async::GetAsyncIO().RunAsync([key, settings, generation, promise = std::move(promise)]() mutable -> void {
+            AssetLoadProgress::SetProgress(key, 0.05f, "Resolving...");
+
             if (!AssetLoadCoordinator::IsGenerationCurrent(generation))
             {
+                AssetLoadProgress::ClearProgress(key);
                 promise.set_value(nullptr);
                 return;
             }
@@ -203,6 +207,7 @@ namespace Limitless::Assets
                     const auto resolvedResult = ResolveAssetKeyToPath(key);
                     if (resolvedResult.IsFailure())
                     {
+                        AssetLoadProgress::ClearProgress(key);
                         LT_CORE_ERROR("MaterialAsset::LoadAsync: failed to resolve key '{}': {}", key, resolvedResult.GetError().GetErrorMessage());
                         promise.set_value(nullptr);
                         return;
@@ -213,6 +218,7 @@ namespace Limitless::Assets
                     const auto guidResult = LoadOrCreateGuid(resolvedPath, {{"key", key}, {"type", "Material"}});
                     if (guidResult.IsFailure())
                     {
+                        AssetLoadProgress::ClearProgress(key);
                         LT_CORE_ERROR("MaterialAsset::LoadAsync: meta GUID failed for '{}': {}", resolvedPath, guidResult.GetError().GetErrorMessage());
                         promise.set_value(nullptr);
                         return;
@@ -221,25 +227,32 @@ namespace Limitless::Assets
                     guid = guidResult.GetValue();
                 }
 
+                AssetLoadProgress::SetProgress(key, 0.30f, "Loading dependencies...");
+
                 auto asset = AssetManager::GetOrLoad<MaterialAsset>(key, [&]() -> Ptr {
                     Ptr created(new MaterialAsset(key, guid, settings));
                     created->m_ResolvedPath = resolvedPath;
                     if (!created->LoadFromJsonFile())
                     {
+                        AssetLoadProgress::ClearProgress(key);
                         return nullptr;
                     }
+                    AssetLoadProgress::ClearProgress(key);
                     return created;
                 });
 
+                AssetLoadProgress::ClearProgress(key);
                 promise.set_value(std::move(asset));
             }
             catch (const std::exception& e)
             {
+                AssetLoadProgress::ClearProgress(key);
                 LT_CORE_ERROR("MaterialAsset::LoadAsync: exception while loading '{}': {}", key, e.what());
                 try { promise.set_value(nullptr); } catch (...) {}
             }
             catch (...)
             {
+                AssetLoadProgress::ClearProgress(key);
                 LT_CORE_ERROR("MaterialAsset::LoadAsync: unknown exception while loading '{}'", key);
                 try { promise.set_value(nullptr); } catch (...) {}
             }

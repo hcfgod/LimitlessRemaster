@@ -44,4 +44,16 @@ namespace Limitless::Assets
         }
         return it->second;
     }
+
+    std::vector<std::string> AssetLoadProgress::GetActiveKeys()
+    {
+        std::lock_guard<std::mutex> lock(s_Mutex);
+        std::vector<std::string> keys;
+        keys.reserve(s_Progress.size());
+        for (const auto& [key, _] : s_Progress)
+        {
+            keys.push_back(key);
+        }
+        return keys;
+    }
 }
