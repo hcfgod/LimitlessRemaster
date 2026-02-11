@@ -31,7 +31,7 @@ namespace Limitless
             const GLuint bufferToDelete = m_RendererID;
             if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
             {
-                renderer.SubmitResourceAndWait([bufferToDelete](GraphicsContext*) {
+                renderer.SubmitResourceAndWait("OpenGLBuffer/DeleteBuffer", [bufferToDelete](GraphicsContext*) {
                     GLuint id = bufferToDelete;
                     glDeleteBuffers(1, &id);
                 });
@@ -115,7 +115,7 @@ namespace Limitless
             const GLuint bufferToDelete = m_RendererID;
             if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
             {
-                renderer.SubmitResourceAndWait([bufferToDelete](GraphicsContext*) {
+                renderer.SubmitResourceAndWait("OpenGLBuffer/DeleteBuffer", [bufferToDelete](GraphicsContext*) {
                     GLuint id = bufferToDelete;
                     glDeleteBuffers(1, &id);
                 });

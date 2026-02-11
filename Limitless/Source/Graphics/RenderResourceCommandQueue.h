@@ -8,6 +8,8 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <array>
+#include <cstring>
 #include <stdexcept>
 #include <type_traits>
 
@@ -32,11 +34,15 @@ namespace Limitless
         public:
             virtual ~Command() = default;
             virtual void Execute(GraphicsContext* context) = 0;
+
+            // Optional debug label used for resource telemetry.
+            // Prefer passing a string literal with static storage lifetime.
+            virtual const char* GetDebugName() const { return "UnnamedResourceCommand"; }
         };
 
         static constexpr uint32_t kQueueCapacity = 4096;
 
-        RenderResourceCommandQueue() = default;
+        RenderResourceCommandQueue();
         ~RenderResourceCommandQueue() = default;
 
         RenderResourceCommandQueue(const RenderResourceCommandQueue&) = delete;
@@ -62,6 +68,24 @@ namespace Limitless
         // Monotonic counters (debug/telemetry). Useful for per-frame deltas.
         uint64_t GetTotalSubmitted() const { return m_TotalSubmitted.load(std::memory_order_relaxed); }
         uint64_t GetTotalProcessed() const { return m_TotalProcessed.load(std::memory_order_relaxed); }
+
+        static constexpr uint32_t kMaxDebugLabels = 64;
+
+        struct DebugLabelEntry
+        {
+            const char* Name = nullptr;
+            uint64_t Submitted = 0;
+            uint64_t Processed = 0;
+        };
+
+        struct DebugLabelSnapshot
+        {
+            uint32_t Count = 0;
+            std::array<DebugLabelEntry, kMaxDebugLabels> Entries{};
+        };
+
+        // Thread-safe, allocation-free snapshot of per-label totals.
+        DebugLabelSnapshot GetDebugLabelSnapshot() const;
 
         template<typename Func>
         auto SubmitAndWait(Func&& func) -> decltype(func(static_cast<GraphicsContext*>(nullptr)))
@@ -135,6 +159,17 @@ namespace Limitless
         std::atomic<uint32_t> m_ApproxSize{0};
         std::atomic<uint64_t> m_TotalSubmitted{0};
         std::atomic<uint64_t> m_TotalProcessed{0};
+
+        // Debug label telemetry.
+        // Multiple threads may submit and multiple threads may process (render thread + resource thread),
+        // so label registration uses a mutex and counters are atomic.
+        uint32_t FindOrAddDebugLabelIndex(const char* name);
+
+        mutable std::mutex m_DebugLabelMutex;
+        std::atomic<uint32_t> m_DebugLabelCount{0};
+        std::array<const char*, kMaxDebugLabels> m_DebugLabelNames{};
+        std::array<std::atomic<uint64_t>, kMaxDebugLabels> m_DebugLabelSubmitted{};
+        std::array<std::atomic<uint64_t>, kMaxDebugLabels> m_DebugLabelProcessed{};
     };
 }
 

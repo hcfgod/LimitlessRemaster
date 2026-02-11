@@ -1,6 +1,8 @@
 #include "Renderer2DDemo.h"
 
 #include <cmath>
+#include <algorithm>
+#include <vector>
 
 namespace Limitless
 {
@@ -269,6 +271,38 @@ namespace Limitless
                     resourceStats.PrimaryTotalProcessed,
                     resourceStats.SharedTotalSubmitted,
                     resourceStats.SharedTotalProcessed);
+
+            // One-time labeled histogram: which resource commands actually ran.
+            auto LogTopLabels = [](const char* queueName, const RenderResourceCommandQueue::DebugLabelSnapshot& snap) {
+                struct Item { const char* Name; uint64_t Processed; uint64_t Submitted; };
+                std::vector<Item> items;
+                items.reserve(snap.Count);
+                for (uint32_t i = 0; i < snap.Count; ++i)
+                {
+                    const auto& e = snap.Entries[i];
+                    if (!e.Name)
+                    {
+                        continue;
+                    }
+                    if (e.Processed == 0 && e.Submitted == 0)
+                    {
+                        continue;
+                    }
+                    items.push_back(Item{e.Name, e.Processed, e.Submitted});
+                }
+
+                std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.Processed > b.Processed; });
+
+                LT_INFO("{} Resource Histogram (top):", queueName);
+                const size_t topN = std::min<size_t>(10, items.size());
+                for (size_t i = 0; i < topN; ++i)
+                {
+                    LT_INFO("  - {}: processed={}, submitted={}", items[i].Name, items[i].Processed, items[i].Submitted);
+                }
+            };
+
+            LogTopLabels("Primary", Renderer::GetInstance().GetPrimaryResourceDebugLabelSnapshot());
+            LogTopLabels("Shared", Renderer::GetInstance().GetSharedResourceDebugLabelSnapshot());
         }
     }
 }

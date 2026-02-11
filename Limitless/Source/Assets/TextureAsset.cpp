@@ -779,6 +779,11 @@ namespace Limitless::Assets
                     {
                     }
 
+                    const char* GetDebugName() const override
+                    {
+                        return "TextureAsset/CreateTexture2D";
+                    }
+
                     void Execute(GraphicsContext*) override
                     {
                         try
@@ -925,7 +930,7 @@ namespace Limitless::Assets
         std::shared_ptr<Texture2D> created;
         try
         {
-            created = renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<Texture2D> {
+            created = renderer.SubmitResourceAndWait("TextureAsset/Reload/CreateTexture2D", [&](GraphicsContext*) -> std::shared_ptr<Texture2D> {
                 return Texture2D::CreateFromRGBA8(decoded.Width, decoded.Height, decoded.Pixels.data(), m_Specification);
             });
         }

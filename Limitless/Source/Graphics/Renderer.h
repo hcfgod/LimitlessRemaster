@@ -95,7 +95,7 @@ namespace Limitless
         // Any GPU work that creates/modifies such objects must be executed on the **primary** OpenGL context,
         // which this engine owns on the render thread.
         template<typename Func>
-        auto SubmitPrimaryResourceAndWait(Func&& func) -> decltype(func(static_cast<GraphicsContext*>(nullptr)))
+        auto SubmitPrimaryResourceAndWait(const char* debugName, Func&& func) -> decltype(func(static_cast<GraphicsContext*>(nullptr)))
         {
             using ResultT = decltype(func(static_cast<GraphicsContext*>(nullptr)));
 
@@ -121,10 +121,12 @@ namespace Limitless
             {
                 std::promise<ResultT> promise;
                 std::function<ResultT(GraphicsContext*)> function;
+                const char* debugName = "PrimaryResource";
             };
 
             auto state = std::make_shared<SharedState>();
             state->function = std::forward<Func>(func);
+            state->debugName = (debugName && debugName[0] != '\0') ? debugName : "PrimaryResource";
             std::future<ResultT> future = state->promise.get_future();
 
             class CommandImpl final : public RenderResourceCommandQueue::Command
@@ -133,6 +135,11 @@ namespace Limitless
                 explicit CommandImpl(std::shared_ptr<SharedState> shared)
                     : m_Shared(std::move(shared))
                 {
+                }
+
+                const char* GetDebugName() const override
+                {
+                    return m_Shared->debugName;
                 }
 
                 void Execute(GraphicsContext* context) override
@@ -178,6 +185,12 @@ namespace Limitless
             }
         }
 
+        template<typename Func>
+        auto SubmitPrimaryResourceAndWait(Func&& func) -> decltype(func(static_cast<GraphicsContext*>(nullptr)))
+        {
+            return SubmitPrimaryResourceAndWait("PrimaryResource", std::forward<Func>(func));
+        }
+
         // Returns true when the OpenGL shared-context resource thread is active.
         // When enabled, GPU resource work executes on a dedicated thread with its own shared
         // OpenGL context (in parallel with frame rendering on the render thread).
@@ -206,8 +219,12 @@ namespace Limitless
         // Thread-safe snapshot of last-frame resource work.
         ResourceQueueStatistics GetLastFrameResourceQueueStatistics() const;
 
+        // Per-label telemetry snapshots (allocation-free).
+        RenderResourceCommandQueue::DebugLabelSnapshot GetPrimaryResourceDebugLabelSnapshot() const;
+        RenderResourceCommandQueue::DebugLabelSnapshot GetSharedResourceDebugLabelSnapshot() const;
+
         template<typename Func>
-        std::future<decltype(std::declval<Func>()(static_cast<GraphicsContext*>(nullptr)))> SubmitResourceAsync(Func&& func)
+        std::future<decltype(std::declval<Func>()(static_cast<GraphicsContext*>(nullptr)))> SubmitResourceAsync(const char* debugName, Func&& func)
         {
             using ResultT = decltype(func(static_cast<GraphicsContext*>(nullptr)));
 
@@ -244,11 +261,13 @@ namespace Limitless
                 std::promise<ResultT> promise;
                 std::function<ResultT(GraphicsContext*)> function;
                 bool RequiresCrossContextSynchronization = false;
+                const char* debugName = "Resource";
             };
 
             auto state = std::make_shared<SharedState>();
             state->function = std::forward<Func>(func);
             state->RequiresCrossContextSynchronization = IsOpenGLResourceThreadEnabled();
+            state->debugName = (debugName && debugName[0] != '\0') ? debugName : "Resource";
             std::future<ResultT> future = state->promise.get_future();
 
             class CommandImpl final : public RenderResourceCommandQueue::Command
@@ -257,6 +276,11 @@ namespace Limitless
                 explicit CommandImpl(std::shared_ptr<SharedState> shared)
                     : m_Shared(std::move(shared))
                 {
+                }
+
+                const char* GetDebugName() const override
+                {
+                    return m_Shared->debugName;
                 }
 
                 void Execute(GraphicsContext* context) override
@@ -300,10 +324,16 @@ namespace Limitless
             return future;
         }
 
+        template<typename Func>
+        std::future<decltype(std::declval<Func>()(static_cast<GraphicsContext*>(nullptr)))> SubmitResourceAsync(Func&& func)
+        {
+            return SubmitResourceAsync("Resource", std::forward<Func>(func));
+        }
+
         // Resource command submission (GPU resource operations).
         // If called from the render thread, the callable executes inline.
         template<typename Func>
-        auto SubmitResourceAndWait(Func&& func) -> decltype(func(static_cast<GraphicsContext*>(nullptr)))
+        auto SubmitResourceAndWait(const char* debugName, Func&& func) -> decltype(func(static_cast<GraphicsContext*>(nullptr)))
         {
             using ResultT = decltype(func(static_cast<GraphicsContext*>(nullptr)));
             if (IsOnRenderThread())
@@ -329,11 +359,13 @@ namespace Limitless
                 std::promise<ResultT> promise;
                 std::function<ResultT(GraphicsContext*)> function;
                 bool RequiresCrossContextSynchronization = false;
+                const char* debugName = "Resource";
             };
 
             auto state = std::make_shared<SharedState>();
             state->function = std::forward<Func>(func);
             state->RequiresCrossContextSynchronization = IsOpenGLResourceThreadEnabled();
+            state->debugName = (debugName && debugName[0] != '\0') ? debugName : "Resource";
             std::future<ResultT> future = state->promise.get_future();
 
             class CommandImpl final : public RenderResourceCommandQueue::Command
@@ -342,6 +374,11 @@ namespace Limitless
                 explicit CommandImpl(std::shared_ptr<SharedState> shared)
                     : m_Shared(std::move(shared))
                 {
+                }
+
+                const char* GetDebugName() const override
+                {
+                    return m_Shared->debugName;
                 }
 
                 void Execute(GraphicsContext* context) override
@@ -392,6 +429,12 @@ namespace Limitless
             {
                 return future.get();
             }
+        }
+
+        template<typename Func>
+        auto SubmitResourceAndWait(Func&& func) -> decltype(func(static_cast<GraphicsContext*>(nullptr)))
+        {
+            return SubmitResourceAndWait("Resource", std::forward<Func>(func));
         }
 
     private:

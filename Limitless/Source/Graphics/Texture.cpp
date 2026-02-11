@@ -18,7 +18,7 @@ namespace Limitless
             default:
             {
                 auto& renderer = Renderer::GetInstance();
-                return renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<Texture2D> {
+                return renderer.SubmitResourceAndWait("CreateTexture2D/FromFile", [&](GraphicsContext*) -> std::shared_ptr<Texture2D> {
                     return std::make_shared<OpenGLTexture2D>(path, specification);
                 });
             }
@@ -44,7 +44,7 @@ namespace Limitless
                 // Copy pixels for safety: caller memory may go out of scope before the render thread executes.
                 std::vector<uint8_t> pixelBytes(static_cast<const uint8_t*>(rgbaPixels),
                                                 static_cast<const uint8_t*>(rgbaPixels) + (width * height * 4));
-                return renderer.SubmitResourceAndWait([=](GraphicsContext*) mutable -> std::shared_ptr<Texture2D> {
+                return renderer.SubmitResourceAndWait("CreateTexture2D/FromRGBA8", [=](GraphicsContext*) mutable -> std::shared_ptr<Texture2D> {
                     return std::make_shared<OpenGLTexture2D>(width, height, pixelBytes.data(), specification);
                 });
             }
@@ -62,7 +62,7 @@ namespace Limitless
             default:
             {
                 auto& renderer = Renderer::GetInstance();
-                return renderer.SubmitResourceAsync([path, specification](GraphicsContext*) -> std::shared_ptr<Texture2D> {
+                return renderer.SubmitResourceAsync("CreateTexture2DAsync/FromFile", [path, specification](GraphicsContext*) -> std::shared_ptr<Texture2D> {
                     return std::make_shared<OpenGLTexture2D>(path, specification);
                 });
             }
@@ -89,7 +89,7 @@ namespace Limitless
                 std::vector<uint8_t> pixelBytes(static_cast<const uint8_t*>(rgbaPixels),
                                                 static_cast<const uint8_t*>(rgbaPixels) + (width * height * 4));
 
-                return renderer.SubmitResourceAsync([width, height, specification, pixels = std::move(pixelBytes)](GraphicsContext*) mutable
+                return renderer.SubmitResourceAsync("CreateTexture2DAsync/FromRGBA8", [width, height, specification, pixels = std::move(pixelBytes)](GraphicsContext*) mutable
                     -> std::shared_ptr<Texture2D>
                 {
                     return std::make_shared<OpenGLTexture2D>(width, height, pixels.data(), specification);

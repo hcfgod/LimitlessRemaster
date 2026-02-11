@@ -282,6 +282,11 @@ namespace Limitless::Assets
                     {
                     }
 
+                    const char* GetDebugName() const override
+                    {
+                        return "ShaderAsset/CreateShader";
+                    }
+
                     void Execute(GraphicsContext*) override
                     {
                         try

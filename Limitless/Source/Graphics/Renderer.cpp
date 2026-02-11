@@ -636,4 +636,14 @@ namespace Limitless
         s.SharedTotalProcessed = m_ResourceQueue.GetTotalProcessed();
         return s;
     }
+
+    RenderResourceCommandQueue::DebugLabelSnapshot Renderer::GetPrimaryResourceDebugLabelSnapshot() const
+    {
+        return m_PrimaryResourceQueue.GetDebugLabelSnapshot();
+    }
+
+    RenderResourceCommandQueue::DebugLabelSnapshot Renderer::GetSharedResourceDebugLabelSnapshot() const
+    {
+        return m_ResourceQueue.GetDebugLabelSnapshot();
+    }
 } 

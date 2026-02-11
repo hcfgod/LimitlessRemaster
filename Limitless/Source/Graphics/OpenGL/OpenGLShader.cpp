@@ -104,7 +104,7 @@ namespace Limitless
             const GLuint programToDelete = m_RendererID;
             if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
             {
-                renderer.SubmitResourceAndWait([programToDelete](GraphicsContext*) {
+                renderer.SubmitResourceAndWait("OpenGLShader/DeleteProgram", [programToDelete](GraphicsContext*) {
                     glDeleteProgram(programToDelete);
                 });
             }
@@ -140,7 +140,7 @@ namespace Limitless
         auto& renderer = Renderer::GetInstance();
         if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
         {
-            renderer.SubmitResourceAndWait([&](GraphicsContext*) {
+            renderer.SubmitResourceAndWait("OpenGLShader/SetInt", [&](GraphicsContext*) {
                 glUseProgram(m_RendererID);
                 GLint location = GetUniformLocation(m_RendererID, name);
                 if (location != -1)
@@ -169,7 +169,7 @@ namespace Limitless
         auto& renderer = Renderer::GetInstance();
         if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
         {
-            renderer.SubmitResourceAndWait([&](GraphicsContext*) {
+            renderer.SubmitResourceAndWait("OpenGLShader/SetIntArray", [&](GraphicsContext*) {
                 glUseProgram(m_RendererID);
                 GLint location = GetUniformLocationWithArrayFallback(m_RendererID, name);
                 if (location != -1)
@@ -198,7 +198,7 @@ namespace Limitless
         auto& renderer = Renderer::GetInstance();
         if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
         {
-            renderer.SubmitResourceAndWait([&](GraphicsContext*) {
+            renderer.SubmitResourceAndWait("OpenGLShader/SetMat4", [&](GraphicsContext*) {
                 glUseProgram(m_RendererID);
                 GLint location = GetUniformLocation(m_RendererID, name);
                 if (location != -1)

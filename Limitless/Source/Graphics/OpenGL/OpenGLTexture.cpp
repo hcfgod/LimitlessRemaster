@@ -133,7 +133,7 @@ namespace Limitless
             const GLuint textureToDelete = m_RendererID;
             if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
             {
-                renderer.SubmitResourceAndWait([textureToDelete](GraphicsContext*) {
+                renderer.SubmitResourceAndWait("OpenGLTexture/DeleteTexture", [textureToDelete](GraphicsContext*) {
                     GLuint id = textureToDelete;
                     glDeleteTextures(1, &id);
                 });

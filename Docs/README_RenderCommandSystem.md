@@ -35,6 +35,15 @@ Because VAOs are not shared, the engine maintains **two resource queues**:
 
 This avoids “black screen / VAO=0” failures when enabling the shared context path.
 
+#### Resource queue debug labels (telemetry)
+
+Resource commands can optionally provide a debug label (`RenderResourceCommandQueue::Command::GetDebugName()`).
+The engine tracks per-label totals (submitted/processed) for both the primary and shared resource queues.
+
+This is primarily intended for:
+- understanding “what actually ran” during startup
+- catching accidental per-frame resource churn
+
 #### Avoiding stalls (large uploads)
 
 `Renderer::SubmitResourceAndWait()` is correct but **blocking**: the calling thread will wait until the render thread executes the work.

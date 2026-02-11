@@ -18,7 +18,7 @@ namespace Limitless
             default:
             {
                 auto& renderer = Renderer::GetInstance();
-                return renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<Shader> {
+                return renderer.SubmitResourceAndWait("CreateShader/FromSource", [&](GraphicsContext*) -> std::shared_ptr<Shader> {
                     return std::make_shared<OpenGLShader>(name, vertexSource, fragmentSource);
                 });
             }

@@ -90,7 +90,7 @@ namespace Limitless
             const GLuint vaoToDelete = m_RendererID;
             if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
             {
-                renderer.SubmitPrimaryResourceAndWait([vaoToDelete](GraphicsContext*) {
+                renderer.SubmitPrimaryResourceAndWait("DeleteVertexArray", [vaoToDelete](GraphicsContext*) {
                     GLuint id = vaoToDelete;
                     glDeleteVertexArrays(1, &id);
                 });
@@ -128,7 +128,7 @@ namespace Limitless
         auto& renderer = Renderer::GetInstance();
         if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
         {
-            renderer.SubmitPrimaryResourceAndWait([&](GraphicsContext*) {
+            renderer.SubmitPrimaryResourceAndWait("ConfigureVertexArray/AddVertexBuffer", [&](GraphicsContext*) {
                 LT_VERIFY(vertexBuffer != nullptr, "VertexBuffer cannot be null");
                 const auto& layout = vertexBuffer->GetLayout();
                 LT_VERIFY(layout.GetElements().size() > 0, "VertexBuffer has no layout");
@@ -267,7 +267,7 @@ namespace Limitless
         if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
         {
             // VAO state is NOT shared across OpenGL contexts; this must be executed on the primary context.
-            renderer.SubmitPrimaryResourceAndWait([&](GraphicsContext*) {
+            renderer.SubmitPrimaryResourceAndWait("ConfigureVertexArray/SetIndexBuffer", [&](GraphicsContext*) {
                 LT_VERIFY(indexBuffer != nullptr, "IndexBuffer cannot be null");
 
                 Bind();

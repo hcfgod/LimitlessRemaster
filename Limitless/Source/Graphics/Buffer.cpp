@@ -18,7 +18,7 @@ namespace Limitless
             default:
             {
                 auto& renderer = Renderer::GetInstance();
-                return renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<VertexBuffer> {
+                return renderer.SubmitResourceAndWait("CreateVertexBuffer", [&](GraphicsContext*) -> std::shared_ptr<VertexBuffer> {
                     return std::make_shared<OpenGLVertexBuffer>(data, size);
                 });
             }
@@ -34,7 +34,7 @@ namespace Limitless
             default:
             {
                 auto& renderer = Renderer::GetInstance();
-                return renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<VertexBuffer> {
+                return renderer.SubmitResourceAndWait("CreateVertexBuffer", [&](GraphicsContext*) -> std::shared_ptr<VertexBuffer> {
                     return std::make_shared<OpenGLVertexBuffer>(size);
                 });
             }
@@ -50,7 +50,7 @@ namespace Limitless
             default:
             {
                 auto& renderer = Renderer::GetInstance();
-                return renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<IndexBuffer> {
+                return renderer.SubmitResourceAndWait("CreateIndexBuffer", [&](GraphicsContext*) -> std::shared_ptr<IndexBuffer> {
                     return std::make_shared<OpenGLIndexBuffer>(indices, count);
                 });
             }
@@ -66,7 +66,7 @@ namespace Limitless
             default:
             {
                 auto& renderer = Renderer::GetInstance();
-                return renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<IndexBuffer> {
+                return renderer.SubmitResourceAndWait("CreateIndexBuffer", [&](GraphicsContext*) -> std::shared_ptr<IndexBuffer> {
                     return std::make_shared<OpenGLIndexBuffer>(indices, count);
                 });
             }
