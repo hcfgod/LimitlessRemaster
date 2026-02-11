@@ -183,6 +183,29 @@ namespace Limitless
         // OpenGL context (in parallel with frame rendering on the render thread).
         bool IsOpenGLResourceThreadEnabled() const { return m_OpenGLResourceThreadEnabled.load(std::memory_order_relaxed); }
 
+        // -------------------------------------------------------------------------
+        // Resource queue statistics (debug/telemetry)
+        // -------------------------------------------------------------------------
+        struct ResourceQueueStatistics
+        {
+            // Processed during the most recently completed frame on the render thread.
+            uint32_t PrimaryProcessedLastFrame = 0;
+            uint32_t SharedProcessedLastFrame = 0;
+
+            // Approx queue depths at the time the frame completed.
+            uint32_t PrimaryApproxSize = 0;
+            uint32_t SharedApproxSize = 0;
+
+            // Totals since startup (monotonic).
+            uint64_t PrimaryTotalSubmitted = 0;
+            uint64_t PrimaryTotalProcessed = 0;
+            uint64_t SharedTotalSubmitted = 0;
+            uint64_t SharedTotalProcessed = 0;
+        };
+
+        // Thread-safe snapshot of last-frame resource work.
+        ResourceQueueStatistics GetLastFrameResourceQueueStatistics() const;
+
         template<typename Func>
         std::future<decltype(std::declval<Func>()(static_cast<GraphicsContext*>(nullptr)))> SubmitResourceAsync(Func&& func)
         {
@@ -413,6 +436,16 @@ namespace Limitless
         std::thread::id m_RenderThreadId{};
         RenderResourceCommandQueue m_PrimaryResourceQueue;
         RenderResourceCommandQueue m_ResourceQueue;
+
+        // Last-frame resource stats (written by render thread, read by others).
+        std::atomic<uint32_t> m_PrimaryProcessedLastFrame{0};
+        std::atomic<uint32_t> m_SharedProcessedLastFrame{0};
+        std::atomic<uint32_t> m_PrimaryApproxSizeLastFrame{0};
+        std::atomic<uint32_t> m_SharedApproxSizeLastFrame{0};
+
+        // Totals used to compute per-frame deltas.
+        uint64_t m_PrimaryProcessedTotalAtFrameStart = 0;
+        uint64_t m_SharedProcessedTotalAtFrameStart = 0;
 
         // Optional OpenGL shared-context resource thread (multi-threaded GPU resource execution).
         std::atomic<bool> m_OpenGLResourceThreadEnabled{false};

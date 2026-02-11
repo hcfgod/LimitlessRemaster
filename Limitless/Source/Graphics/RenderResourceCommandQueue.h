@@ -45,7 +45,8 @@ namespace Limitless
         bool Submit(std::unique_ptr<Command> command);
 
         // Drain queued resource commands. Must be called on the context-owning thread.
-        void Process(GraphicsContext* context, uint32_t maxCommands = 1024);
+        // Returns the number of commands processed.
+        uint32_t Process(GraphicsContext* context, uint32_t maxCommands = 1024);
 
         // IMPORTANT:
         // Do not rely on the underlying MPMC queue's IsEmpty() as a wake predicate.
@@ -57,6 +58,10 @@ namespace Limitless
         // - avoiding "sleep forever with work queued" deadlocks
         bool IsEmpty() const { return m_ApproxSize.load(std::memory_order_relaxed) == 0; }
         uint32_t GetApproxSize() const { return m_ApproxSize.load(std::memory_order_relaxed); }
+
+        // Monotonic counters (debug/telemetry). Useful for per-frame deltas.
+        uint64_t GetTotalSubmitted() const { return m_TotalSubmitted.load(std::memory_order_relaxed); }
+        uint64_t GetTotalProcessed() const { return m_TotalProcessed.load(std::memory_order_relaxed); }
 
         template<typename Func>
         auto SubmitAndWait(Func&& func) -> decltype(func(static_cast<GraphicsContext*>(nullptr)))
@@ -128,6 +133,8 @@ namespace Limitless
 
         Concurrency::LockFreeMPMCQueue<QueuedCommand, kQueueCapacity> m_Queue;
         std::atomic<uint32_t> m_ApproxSize{0};
+        std::atomic<uint64_t> m_TotalSubmitted{0};
+        std::atomic<uint64_t> m_TotalProcessed{0};
     };
 }
 

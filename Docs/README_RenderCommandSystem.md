@@ -19,6 +19,22 @@ GPU resource operations (shader compile/link, buffer/texture creation, VAO attri
 - **Execution**: drained by the render thread before processing frame render commands
 - **Why**: OpenGL context affinity + avoiding “context thrash” across threads
 
+#### OpenGL shared-context resource thread (advanced, optional)
+
+The engine can optionally start a dedicated **OpenGL resource thread** that owns a **shared OpenGL context** and drains a resource queue in parallel with frame rendering.
+
+Important correctness rule (OpenGL):
+
+- **Shareable across contexts**: buffers, textures, shader/program objects
+- **Not shareable across contexts**: **VAOs** (and generally FBO-related state)
+
+Because VAOs are not shared, the engine maintains **two resource queues**:
+
+- **Primary resource queue**: executed only on the render thread with the primary context current (for VAOs, etc.)
+- **Shared resource queue**: may be executed on the resource thread (buffers/textures/programs)
+
+This avoids “black screen / VAO=0” failures when enabling the shared context path.
+
 #### Avoiding stalls (large uploads)
 
 `Renderer::SubmitResourceAndWait()` is correct but **blocking**: the calling thread will wait until the render thread executes the work.

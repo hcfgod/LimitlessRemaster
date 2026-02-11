@@ -146,6 +146,18 @@ namespace Limitless
 
             LT_INFO("Renderer2D Stats: FPS={:.1f}, DrawCalls={} ({:.2f}/frame), Batches={} ({:.2f}/frame), Quads={} ({:.0f}/frame)",
                     fps, stats.DrawCalls, drawCallsPerFrame, stats.Batches, batchesPerFrame, stats.QuadCount, quadsPerFrame);
+
+            const auto resourceStats = Renderer::GetInstance().GetLastFrameResourceQueueStatistics();
+            LT_INFO("Resource Queues: PrimaryProcessed={} SharedProcessed={} (PrimaryApproxSize={} SharedApproxSize={}) Totals: Primary(Sub={}, Proc={}) Shared(Sub={}, Proc={})",
+                    resourceStats.PrimaryProcessedLastFrame,
+                    resourceStats.SharedProcessedLastFrame,
+                    resourceStats.PrimaryApproxSize,
+                    resourceStats.SharedApproxSize,
+                    resourceStats.PrimaryTotalSubmitted,
+                    resourceStats.PrimaryTotalProcessed,
+                    resourceStats.SharedTotalSubmitted,
+                    resourceStats.SharedTotalProcessed);
+
             Renderer2D::ResetStatistics();
         }
     }
@@ -249,6 +261,14 @@ namespace Limitless
             LT_INFO("Renderer2DDemo: assets ready (checkerTextureId={}, sissyTextureId={})",
                     m_CheckerTexture->GetTexture()->GetRendererID(),
                     m_SissyTexture->GetTexture()->GetRendererID());
+
+            // One-time startup resource summary (useful because most resource work happens before steady-state frames).
+            const auto resourceStats = Renderer::GetInstance().GetLastFrameResourceQueueStatistics();
+            LT_INFO("Startup Resource Totals: Primary(Sub={}, Proc={}) Shared(Sub={}, Proc={})",
+                    resourceStats.PrimaryTotalSubmitted,
+                    resourceStats.PrimaryTotalProcessed,
+                    resourceStats.SharedTotalSubmitted,
+                    resourceStats.SharedTotalProcessed);
         }
     }
 }

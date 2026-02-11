@@ -527,6 +527,7 @@ namespace Limitless
         while (!m_RenderThreadShutdown.load(std::memory_order_relaxed))
         {
             uint64_t frameIdToComplete = 0;
+            bool executingAFrame = false;
 
             // Wait for frame request.
             {
@@ -556,6 +557,11 @@ namespace Limitless
                 {
                     m_FrameRequested = false;
                     frameIdToComplete = m_FrameRequestedId;
+                    executingAFrame = true;
+
+                    // Snapshot processed totals so we can compute per-frame deltas.
+                    m_PrimaryProcessedTotalAtFrameStart = m_PrimaryResourceQueue.GetTotalProcessed();
+                    m_SharedProcessedTotalAtFrameStart = m_ResourceQueue.GetTotalProcessed();
                 }
             }
 
@@ -580,6 +586,21 @@ namespace Limitless
                 m_RenderQueue->ProcessCommands(m_GraphicsContext);
                 m_GraphicsContext->SwapBuffers();
                 }
+
+                // Record last-frame resource stats when we actually executed/presented a frame.
+                if (executingAFrame)
+                {
+                    const uint64_t primaryProcessedNow = m_PrimaryResourceQueue.GetTotalProcessed();
+                    const uint64_t sharedProcessedNow = m_ResourceQueue.GetTotalProcessed();
+
+                    const uint32_t primaryDelta = static_cast<uint32_t>(primaryProcessedNow - m_PrimaryProcessedTotalAtFrameStart);
+                    const uint32_t sharedDelta = static_cast<uint32_t>(sharedProcessedNow - m_SharedProcessedTotalAtFrameStart);
+
+                    m_PrimaryProcessedLastFrame.store(primaryDelta, std::memory_order_relaxed);
+                    m_SharedProcessedLastFrame.store(sharedDelta, std::memory_order_relaxed);
+                    m_PrimaryApproxSizeLastFrame.store(m_PrimaryResourceQueue.GetApproxSize(), std::memory_order_relaxed);
+                    m_SharedApproxSizeLastFrame.store(m_ResourceQueue.GetApproxSize(), std::memory_order_relaxed);
+                }
             }
             catch (const std::exception& e)
             {
@@ -599,5 +620,20 @@ namespace Limitless
         }
 
         m_RenderThreadId = std::thread::id{};
+    }
+
+    Renderer::ResourceQueueStatistics Renderer::GetLastFrameResourceQueueStatistics() const
+    {
+        ResourceQueueStatistics s{};
+        s.PrimaryProcessedLastFrame = m_PrimaryProcessedLastFrame.load(std::memory_order_relaxed);
+        s.SharedProcessedLastFrame = m_SharedProcessedLastFrame.load(std::memory_order_relaxed);
+        s.PrimaryApproxSize = m_PrimaryApproxSizeLastFrame.load(std::memory_order_relaxed);
+        s.SharedApproxSize = m_SharedApproxSizeLastFrame.load(std::memory_order_relaxed);
+
+        s.PrimaryTotalSubmitted = m_PrimaryResourceQueue.GetTotalSubmitted();
+        s.PrimaryTotalProcessed = m_PrimaryResourceQueue.GetTotalProcessed();
+        s.SharedTotalSubmitted = m_ResourceQueue.GetTotalSubmitted();
+        s.SharedTotalProcessed = m_ResourceQueue.GetTotalProcessed();
+        return s;
     }
 } 

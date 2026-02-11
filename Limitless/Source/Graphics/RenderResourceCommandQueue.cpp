@@ -33,6 +33,7 @@ namespace Limitless
         queued.command = std::move(command);
         if (m_Queue.TryPush(std::move(queued)))
         {
+            m_TotalSubmitted.fetch_add(1, std::memory_order_relaxed);
             return true;
         }
 
@@ -41,11 +42,11 @@ namespace Limitless
         return false;
     }
 
-    void RenderResourceCommandQueue::Process(GraphicsContext* context, uint32_t maxCommands)
+    uint32_t RenderResourceCommandQueue::Process(GraphicsContext* context, uint32_t maxCommands)
     {
         if (!context)
         {
-            return;
+            return 0;
         }
 
         uint32_t processed = 0;
@@ -66,6 +67,13 @@ namespace Limitless
 
             processed++;
         }
+
+        if (processed > 0)
+        {
+            m_TotalProcessed.fetch_add(processed, std::memory_order_relaxed);
+        }
+
+        return processed;
     }
 }
 
