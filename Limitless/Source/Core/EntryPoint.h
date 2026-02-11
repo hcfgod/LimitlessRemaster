@@ -4,6 +4,7 @@
 #include "Debug/Log.h"
 #include <iostream>
 #include <filesystem>
+#include <memory>
 
 // Prevent console window from appearing in Dist builds on Windows
 #if defined(LT_PLATFORM_WINDOWS) && defined(LT_CONFIG_DIST)
@@ -18,8 +19,9 @@
     #endif
 #endif
 
-// This function must be defined by the client application
-extern Limitless::Application* CreateApplication();
+// This function must be defined by the client application.
+// Returns unique_ptr so main() can take ownership and avoid leaks on exceptions.
+extern std::unique_ptr<Limitless::Application> CreateApplication();
 
 int main(int argc, char** argv)
 {
@@ -84,16 +86,13 @@ int main(int argc, char** argv)
 	LT_CORE_INFO("Logging system initialized successfully");
 
 	LT_CORE_INFO("Creating application instance...");
-	Limitless::Application* app = CreateApplication();
+	std::unique_ptr<Limitless::Application> app = CreateApplication();
 
 	if (app)
 	{
 		LT_CORE_INFO("Application created successfully, starting main loop...");
 		app->Run();
 		LT_CORE_INFO("Application main loop completed");
-		
-		LT_CORE_INFO("Destroying application instance...");
-		delete app;
 		LT_CORE_INFO("Application destroyed successfully");
 	}
 	else

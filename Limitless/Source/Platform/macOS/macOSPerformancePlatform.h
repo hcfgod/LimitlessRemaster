@@ -30,13 +30,13 @@ namespace Limitless {
         void SetUpdateInterval(double intervalSeconds) override;
 
     private:
-        host_t m_host;
-        mach_msg_type_number_t m_count;
-        double m_currentUsage;
-        double m_averageUsage;
-        uint32_t m_coreCount;
-        double m_updateInterval;
-        std::chrono::high_resolution_clock::time_point m_lastUpdate;
+        host_t m_Host;
+        mach_msg_type_number_t m_Count;
+        double m_CurrentUsage;
+        double m_AverageUsage;
+        uint32_t m_CoreCount;
+        double m_UpdateInterval;
+        std::chrono::high_resolution_clock::time_point m_LastUpdate;
     };
 
     /**
@@ -59,12 +59,12 @@ namespace Limitless {
         void SetUpdateInterval(double intervalSeconds) override;
 
     private:
-        bool m_available;
-        double m_usage;
-        double m_memoryUsage;
-        double m_temperature;
-        double m_updateInterval;
-        std::chrono::high_resolution_clock::time_point m_lastUpdate;
+        bool m_Available;
+        double m_Usage;
+        double m_MemoryUsage;
+        double m_Temperature;
+        double m_UpdateInterval;
+        std::chrono::high_resolution_clock::time_point m_LastUpdate;
     };
 
     /**
@@ -86,11 +86,11 @@ namespace Limitless {
         uint32_t GetThreadId() const override;
 
     private:
-        uint64_t m_totalMemory;
-        uint64_t m_availableMemory;
-        uint64_t m_processMemory;
-        uint32_t m_processId;
-        uint32_t m_threadId;
+        uint64_t m_TotalMemory;
+        uint64_t m_AvailableMemory;
+        uint64_t m_ProcessMemory;
+        uint32_t m_ProcessId;
+        uint32_t m_ThreadId;
     };
 
 #endif // LT_PLATFORM_MACOS

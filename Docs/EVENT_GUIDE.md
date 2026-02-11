@@ -26,6 +26,8 @@ events.Initialize();
 
 ### Register a callback
 
+**Option A: Raw callback (manual enum + cast)**
+
 ```cpp
 Limitless::EventCallbackToken token = events.AddCallback(Limitless::EventType::KeyPressed,
     [](Limitless::Event& event)
@@ -34,6 +36,19 @@ Limitless::EventCallbackToken token = events.AddCallback(Limitless::EventType::K
     },
     Limitless::EventPriority::High);
 ```
+
+**Option B: Typed callback via `AddEventCallback` (no cast needed)**
+
+```cpp
+Limitless::EventCallbackToken token = Limitless::AddEventCallback<Limitless::Events::KeyPressedEvent>(
+    [](Limitless::Events::KeyPressedEvent& event)
+    {
+        LT_INFO("Key pressed: {}", event.GetKeyCode());
+    },
+    Limitless::EventPriority::High);
+```
+
+`AddEventCallback<EventClass>` registers a callback that receives the strongly-typed event directly. Each event class must provide `static EventType GetStaticType()` for this to work (all built-in events do).
 
 ### Remove a callback (identity-safe)
 
@@ -124,6 +139,7 @@ Create a derived event type that implements:
 - `GetCategory()`
 - `GetName()`
 - `Clone()` for safe queuing/copying
+- `static EventType GetStaticType()` (required if you want to use `AddEventCallback<YourEvent>`)
 
 ```cpp
 class PlayerDiedEvent final : public Limitless::Event
@@ -134,6 +150,8 @@ public:
         , m_PlayerId(playerId)
     {
     }
+
+    static Limitless::EventType GetStaticType() { return Limitless::EventType::Custom; }
 
     int GetPlayerId() const { return m_PlayerId; }
 

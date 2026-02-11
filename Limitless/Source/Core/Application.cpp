@@ -86,7 +86,7 @@ namespace Limitless
 
 		LT_CORE_INFO("Application internal initialization completed, entering main loop...");
 
-		while(m_isRunning)
+		while(m_IsRunning)
 		{
 			// Update engine time once per frame (Unity-style)
 			Time::Update();
@@ -223,8 +223,8 @@ namespace Limitless
 		// Set up close callback
 		m_Window->SetCloseCallback([this]() 
 		{
-			LT_CORE_INFO("Window close callback triggered, setting m_isRunning = false");
-			m_isRunning = false;
+			LT_CORE_INFO("Window close callback triggered, setting m_IsRunning = false");
+			m_IsRunning = false;
 		});
 
 		// Register LayerStack with event system

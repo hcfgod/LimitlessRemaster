@@ -175,8 +175,8 @@ public:
     }
 };
 
-Limitless::Application* CreateApplication() {
-    return new MyApp();
+std::unique_ptr<Limitless::Application> CreateApplication() {
+    return std::make_unique<MyApp>();
 }
 ```
 

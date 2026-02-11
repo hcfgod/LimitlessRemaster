@@ -399,6 +399,8 @@ namespace Limitless
         {
         public:
             WindowResizeEvent(uint32_t width, uint32_t height);
+
+            static EventType GetStaticType() { return EventType::WindowResize; }
             
             uint32_t GetWidth() const { return m_Width; }
             uint32_t GetHeight() const { return m_Height; }
@@ -416,6 +418,8 @@ namespace Limitless
         {
         public:
             WindowCloseEvent();
+
+            static EventType GetStaticType() { return EventType::WindowClose; }
             
             std::string GetCategory() const override { return "Window"; }
             std::string GetName() const override { return "WindowClose"; }
@@ -427,6 +431,8 @@ namespace Limitless
         {
         public:
             KeyPressedEvent(int keyCode, bool isRepeat = false);
+
+            static EventType GetStaticType() { return EventType::KeyPressed; }
             
             int GetKeyCode() const { return m_KeyCode; }
             bool IsRepeat() const { return m_IsRepeat; }
@@ -444,6 +450,8 @@ namespace Limitless
         {
         public:
             KeyReleasedEvent(int keyCode);
+
+            static EventType GetStaticType() { return EventType::KeyReleased; }
             
             int GetKeyCode() const { return m_KeyCode; }
             
@@ -459,6 +467,8 @@ namespace Limitless
         {
         public:
             MouseMovedEvent(float x, float y);
+
+            static EventType GetStaticType() { return EventType::MouseMoved; }
             
             float GetX() const { return m_X; }
             float GetY() const { return m_Y; }
@@ -476,6 +486,8 @@ namespace Limitless
         {
         public:
             MouseButtonPressedEvent(int button);
+
+            static EventType GetStaticType() { return EventType::MouseButtonPressed; }
             
             int GetButton() const { return m_Button; }
             
@@ -491,6 +503,8 @@ namespace Limitless
         {
         public:
             MouseButtonReleasedEvent(int button);
+
+            static EventType GetStaticType() { return EventType::MouseButtonReleased; }
             
             int GetButton() const { return m_Button; }
             
@@ -506,6 +520,8 @@ namespace Limitless
         {
         public:
             MouseScrolledEvent(float xOffset, float yOffset);
+
+            static EventType GetStaticType() { return EventType::MouseScrolled; }
             
             float GetXOffset() const { return m_XOffset; }
             float GetYOffset() const { return m_YOffset; }
@@ -524,6 +540,8 @@ namespace Limitless
         {
         public:
             AppTickEvent(float deltaTime);
+
+            static EventType GetStaticType() { return EventType::AppTick; }
             
             float GetDeltaTime() const { return m_DeltaTime; }
             
@@ -539,6 +557,8 @@ namespace Limitless
         {
         public:
             AppUpdateEvent(float deltaTime);
+
+            static EventType GetStaticType() { return EventType::AppUpdate; }
             
             float GetDeltaTime() const { return m_DeltaTime; }
             
@@ -554,6 +574,8 @@ namespace Limitless
         {
         public:
             AppRenderEvent();
+
+            static EventType GetStaticType() { return EventType::AppRender; }
             
             std::string GetCategory() const override { return "Application"; }
             std::string GetName() const override { return "AppRender"; }
@@ -565,6 +587,8 @@ namespace Limitless
         {
         public:
             ConfigReloadedEvent(const std::string& configFile);
+
+            static EventType GetStaticType() { return EventType::ConfigReloaded; }
             
             const std::string& GetConfigFile() const { return m_ConfigFile; }
             
@@ -580,6 +604,8 @@ namespace Limitless
         {
         public:
             LoggingConfigChangedEvent(const std::string& changedKey, const ConfigValue& newValue);
+
+            static EventType GetStaticType() { return EventType::LoggingConfigChanged; }
             
             const std::string& GetChangedKey() const { return m_ChangedKey; }
             const ConfigValue& GetNewValue() const { return m_NewValue; }
@@ -597,6 +623,8 @@ namespace Limitless
         {
         public:
             WindowConfigChangedEvent(const std::string& changedKey, const ConfigValue& newValue);
+
+            static EventType GetStaticType() { return EventType::WindowConfigChanged; }
             
             const std::string& GetChangedKey() const { return m_ChangedKey; }
             const ConfigValue& GetNewValue() const { return m_NewValue; }

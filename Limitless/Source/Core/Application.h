@@ -23,8 +23,8 @@ namespace Limitless
 		virtual bool Initialize() = 0; // Called to initialize the application
 		virtual void Shutdown() = 0;  // Called to clean up resources before exiting
 
-		bool IsRunning() const { return m_isRunning; }
-		void SetRunning(bool running) { m_isRunning = running; }
+		bool IsRunning() const { return m_IsRunning; }
+		void SetRunning(bool running) { m_IsRunning = running; }
 
         Window& GetWindow() { return *m_Window; }
         LayerStack& GetLayerStack() { return m_LayerStack; }
@@ -36,7 +36,7 @@ namespace Limitless
         void PopOverlay(LayerRef overlay) { m_LayerStack.PopOverlay(overlay); }
 
 	private:
-		bool m_isRunning = true;
+		bool m_IsRunning = true;
 		std::unique_ptr<Window> m_Window;
 		LayerStack m_LayerStack;
  
@@ -44,6 +44,7 @@ namespace Limitless
 		void InternalShutdown();
 	};
 
-	// To be defined by the client application
-	Application* CreateApplication();
+	// To be defined by the client application.
+	// Returns unique_ptr so main() can take ownership and avoid leaks on exceptions.
+	std::unique_ptr<Application> CreateApplication();
 }

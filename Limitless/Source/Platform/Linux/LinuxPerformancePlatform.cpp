@@ -18,12 +18,12 @@ namespace Limitless {
 
     // LinuxCPUPlatform Implementation
     LinuxCPUPlatform::LinuxCPUPlatform()
-        : m_lastTotalTime(0)
-        , m_currentUsage(0.0)
-        , m_averageUsage(0.0)
-        , m_coreCount(0)
-        , m_updateInterval(1.0)
-        , m_lastUpdate(std::chrono::high_resolution_clock::now()) {
+        : m_LastTotalTime(0)
+        , m_CurrentUsage(0.0)
+        , m_AverageUsage(0.0)
+        , m_CoreCount(0)
+        , m_UpdateInterval(1.0)
+        , m_LastUpdate(std::chrono::high_resolution_clock::now()) {
     }
 
     LinuxCPUPlatform::~LinuxCPUPlatform() {
@@ -32,9 +32,9 @@ namespace Limitless {
 
     bool LinuxCPUPlatform::Initialize() {
         // Use sysconf for core count as get_nprocs() is not available on all systems
-        m_coreCount = static_cast<uint32_t>(sysconf(_SC_NPROCESSORS_ONLN));
+        m_CoreCount = static_cast<uint32_t>(sysconf(_SC_NPROCESSORS_ONLN));
         UpdateCpuTimes();
-        LT_CORE_INFO("Linux CPU Platform initialized with {} cores", m_coreCount);
+        LT_CORE_INFO("Linux CPU Platform initialized with {} cores", m_CoreCount);
         return true;
     }
 
@@ -54,66 +54,66 @@ namespace Limitless {
                 unsigned long long user, nice, system, idle, iowait, irq, softirq, steal;
                 iss >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal;
                 
-                m_lastCpuTimes = {user, nice, system, idle, iowait, irq, softirq, steal};
-                m_lastTotalTime = user + nice + system + idle + iowait + irq + softirq + steal;
+                m_LastCpuTimes = {user, nice, system, idle, iowait, irq, softirq, steal};
+                m_LastTotalTime = user + nice + system + idle + iowait + irq + softirq + steal;
             }
         }
     }
 
     void LinuxCPUPlatform::Update() {
         auto now = std::chrono::high_resolution_clock::now();
-        auto elapsed = std::chrono::duration<double>(now - m_lastUpdate).count();
+        auto elapsed = std::chrono::duration<double>(now - m_LastUpdate).count();
         
-        if (elapsed < m_updateInterval) {
+        if (elapsed < m_UpdateInterval) {
             return;
         }
 
-        std::vector<unsigned long long> currentCpuTimes = m_lastCpuTimes;
-        unsigned long long currentTotalTime = m_lastTotalTime;
+        std::vector<unsigned long long> currentCpuTimes = m_LastCpuTimes;
+        unsigned long long currentTotalTime = m_LastTotalTime;
         
         UpdateCpuTimes();
         
-        unsigned long long totalDiff = m_lastTotalTime - currentTotalTime;
-        unsigned long long idleDiff = m_lastCpuTimes[3] - currentCpuTimes[3];
+        unsigned long long totalDiff = m_LastTotalTime - currentTotalTime;
+        unsigned long long idleDiff = m_LastCpuTimes[3] - currentCpuTimes[3];
         
         if (totalDiff > 0) {
-            m_currentUsage = 100.0 * (1.0 - static_cast<double>(idleDiff) / totalDiff);
-            m_averageUsage = (m_averageUsage + m_currentUsage) * 0.5;
+            m_CurrentUsage = 100.0 * (1.0 - static_cast<double>(idleDiff) / totalDiff);
+            m_AverageUsage = (m_AverageUsage + m_CurrentUsage) * 0.5;
         }
 
-        m_lastUpdate = now;
+        m_LastUpdate = now;
     }
 
     void LinuxCPUPlatform::Reset() {
-        m_currentUsage = 0.0;
-        m_averageUsage = 0.0;
-        m_lastUpdate = std::chrono::high_resolution_clock::now();
+        m_CurrentUsage = 0.0;
+        m_AverageUsage = 0.0;
+        m_LastUpdate = std::chrono::high_resolution_clock::now();
     }
 
     double LinuxCPUPlatform::GetCurrentUsage() const {
-        return m_currentUsage;
+        return m_CurrentUsage;
     }
 
     double LinuxCPUPlatform::GetAverageUsage() const {
-        return m_averageUsage;
+        return m_AverageUsage;
     }
 
     uint32_t LinuxCPUPlatform::GetCoreCount() const {
-        return m_coreCount;
+        return m_CoreCount;
     }
 
     void LinuxCPUPlatform::SetUpdateInterval(double intervalSeconds) {
-        m_updateInterval = intervalSeconds;
+        m_UpdateInterval = intervalSeconds;
     }
 
     // LinuxGPUPlatform Implementation
     LinuxGPUPlatform::LinuxGPUPlatform()
-        : m_available(false)
-        , m_usage(0.0)
-        , m_memoryUsage(0.0)
-        , m_temperature(0.0)
-        , m_updateInterval(1.0)
-        , m_lastUpdate(std::chrono::high_resolution_clock::now()) {
+        : m_Available(false)
+        , m_Usage(0.0)
+        , m_MemoryUsage(0.0)
+        , m_Temperature(0.0)
+        , m_UpdateInterval(1.0)
+        , m_LastUpdate(std::chrono::high_resolution_clock::now()) {
     }
 
     LinuxGPUPlatform::~LinuxGPUPlatform() {
@@ -123,67 +123,67 @@ namespace Limitless {
     bool LinuxGPUPlatform::Initialize() {
         // GPU monitoring requires additional libraries like NVML
         // For now, we'll mark it as unavailable
-        m_available = false;
+        m_Available = false;
         LT_CORE_WARN("Linux GPU Platform not available - requires NVML library");
         return false;
     }
 
     void LinuxGPUPlatform::Shutdown() {
-        m_available = false;
+        m_Available = false;
     }
 
     void LinuxGPUPlatform::Update() {
-        if (!m_available) {
+        if (!m_Available) {
             return;
         }
 
         auto now = std::chrono::high_resolution_clock::now();
-        auto elapsed = std::chrono::duration<double>(now - m_lastUpdate).count();
+        auto elapsed = std::chrono::duration<double>(now - m_LastUpdate).count();
         
-        if (elapsed < m_updateInterval) {
+        if (elapsed < m_UpdateInterval) {
             return;
         }
 
         // GPU monitoring implementation would go here
         // This requires platform-specific GPU monitoring libraries
         
-        m_lastUpdate = now;
+        m_LastUpdate = now;
     }
 
     void LinuxGPUPlatform::Reset() {
-        m_usage = 0.0;
-        m_memoryUsage = 0.0;
-        m_temperature = 0.0;
-        m_lastUpdate = std::chrono::high_resolution_clock::now();
+        m_Usage = 0.0;
+        m_MemoryUsage = 0.0;
+        m_Temperature = 0.0;
+        m_LastUpdate = std::chrono::high_resolution_clock::now();
     }
 
     double LinuxGPUPlatform::GetUsage() const {
-        return m_usage;
+        return m_Usage;
     }
 
     double LinuxGPUPlatform::GetMemoryUsage() const {
-        return m_memoryUsage;
+        return m_MemoryUsage;
     }
 
     double LinuxGPUPlatform::GetTemperature() const {
-        return m_temperature;
+        return m_Temperature;
     }
 
     bool LinuxGPUPlatform::IsAvailable() const {
-        return m_available;
+        return m_Available;
     }
 
     void LinuxGPUPlatform::SetUpdateInterval(double intervalSeconds) {
-        m_updateInterval = intervalSeconds;
+        m_UpdateInterval = intervalSeconds;
     }
 
     // LinuxSystemPlatform Implementation
     LinuxSystemPlatform::LinuxSystemPlatform()
-        : m_totalMemory(0)
-        , m_availableMemory(0)
-        , m_processMemory(0)
-        , m_processId(0)
-        , m_threadId(0) {
+        : m_TotalMemory(0)
+        , m_AvailableMemory(0)
+        , m_ProcessMemory(0)
+        , m_ProcessId(0)
+        , m_ThreadId(0) {
     }
 
     LinuxSystemPlatform::~LinuxSystemPlatform() {
@@ -191,9 +191,9 @@ namespace Limitless {
     }
 
     bool LinuxSystemPlatform::Initialize() {
-        m_processId = getpid();
+        m_ProcessId = getpid();
         // Use syscall for thread ID as gettid() is not available on all systems
-        m_threadId = static_cast<uint32_t>(syscall(SYS_gettid));
+        m_ThreadId = static_cast<uint32_t>(syscall(SYS_gettid));
         Update();
         return true;
     }
@@ -206,8 +206,8 @@ namespace Limitless {
         // Get system memory information
         struct sysinfo si;
         if (sysinfo(&si) == 0) {
-            m_totalMemory = si.totalram * si.mem_unit;
-            m_availableMemory = si.freeram * si.mem_unit;
+            m_TotalMemory = si.totalram * si.mem_unit;
+            m_AvailableMemory = si.freeram * si.mem_unit;
         }
 
         // Get process memory information
@@ -217,8 +217,8 @@ namespace Limitless {
             while (std::getline(file, line)) {
                 if (line.substr(0, 6) == "VmRSS:") {
                     std::istringstream iss(line.substr(6));
-                    iss >> m_processMemory;
-                    m_processMemory *= 1024; // Convert KB to bytes
+                    iss >> m_ProcessMemory;
+                    m_ProcessMemory *= 1024; // Convert KB to bytes
                     break;
                 }
             }
@@ -226,23 +226,23 @@ namespace Limitless {
     }
 
     uint64_t LinuxSystemPlatform::GetTotalMemory() const {
-        return m_totalMemory;
+        return m_TotalMemory;
     }
 
     uint64_t LinuxSystemPlatform::GetAvailableMemory() const {
-        return m_availableMemory;
+        return m_AvailableMemory;
     }
 
     uint64_t LinuxSystemPlatform::GetProcessMemory() const {
-        return m_processMemory;
+        return m_ProcessMemory;
     }
 
     uint32_t LinuxSystemPlatform::GetProcessId() const {
-        return m_processId;
+        return m_ProcessId;
     }
 
     uint32_t LinuxSystemPlatform::GetThreadId() const {
-        return m_threadId;
+        return m_ThreadId;
     }
 
 #endif // LT_PLATFORM_LINUX

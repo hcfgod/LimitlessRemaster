@@ -73,18 +73,18 @@ namespace Limitless {
         double GetMaxValue() const;
         uint64_t GetSampleCount() const;
         
-        const std::string& GetName() const { return m_name; }
+        const std::string& GetName() const { return m_Name; }
 
     private:
-        std::string m_name;
-        std::chrono::high_resolution_clock::time_point m_startTime;
-        double m_lastValue;
-        double m_totalValue;
-        double m_minValue;
-        double m_maxValue;
-        uint64_t m_sampleCount;
-        bool m_isRunning;
-        mutable std::mutex m_mutex;
+        std::string m_Name;
+        std::chrono::high_resolution_clock::time_point m_StartTime;
+        double m_LastValue;
+        double m_TotalValue;
+        double m_MinValue;
+        double m_MaxValue;
+        uint64_t m_SampleCount;
+        bool m_IsRunning;
+        mutable std::mutex m_Mutex;
     };
 
     /**
@@ -102,12 +102,12 @@ namespace Limitless {
         double GetElapsedMicroseconds() const;
         double GetElapsedNanoseconds() const;
         
-        bool IsRunning() const { return m_isRunning; }
+        bool IsRunning() const { return m_IsRunning; }
 
     private:
-        std::chrono::high_resolution_clock::time_point m_startTime;
-        std::chrono::high_resolution_clock::time_point m_endTime;
-        bool m_isRunning;
+        std::chrono::high_resolution_clock::time_point m_StartTime;
+        std::chrono::high_resolution_clock::time_point m_EndTime;
+        bool m_IsRunning;
     };
 
     /**
@@ -130,11 +130,11 @@ namespace Limitless {
         void UpdateSystemMemory();
 
     private:
-        std::atomic<uint64_t> m_currentMemory;
-        std::atomic<uint64_t> m_peakMemory;
-        std::atomic<uint64_t> m_totalMemory;
-        std::atomic<uint32_t> m_allocationCount;
-        std::mutex m_mutex;
+        std::atomic<uint64_t> m_CurrentMemory;
+        std::atomic<uint64_t> m_PeakMemory;
+        std::atomic<uint64_t> m_TotalMemory;
+        std::atomic<uint32_t> m_AllocationCount;
+        std::mutex m_Mutex;
     };
 
     /**
@@ -155,14 +155,14 @@ namespace Limitless {
         void SetUpdateInterval(double intervalSeconds);
 
     private:
-        double m_currentUsage;
-        double m_averageUsage;
-        uint32_t m_coreCount;
-        double m_updateInterval;
-        std::chrono::high_resolution_clock::time_point m_lastUpdate;
+        double m_CurrentUsage;
+        double m_AverageUsage;
+        uint32_t m_CoreCount;
+        double m_UpdateInterval;
+        std::chrono::high_resolution_clock::time_point m_LastUpdate;
         
         // Platform-specific implementation
-        std::unique_ptr<ICPUPlatform> m_platform;
+        std::unique_ptr<ICPUPlatform> m_Platform;
     };
 
     /**
@@ -184,15 +184,15 @@ namespace Limitless {
         void SetUpdateInterval(double intervalSeconds);
 
     private:
-        double m_usage;
-        double m_memoryUsage;
-        double m_temperature;
-        bool m_isAvailable;
-        double m_updateInterval;
-        std::chrono::high_resolution_clock::time_point m_lastUpdate;
+        double m_Usage;
+        double m_MemoryUsage;
+        double m_Temperature;
+        bool m_IsAvailable;
+        double m_UpdateInterval;
+        std::chrono::high_resolution_clock::time_point m_LastUpdate;
         
         // Platform-specific implementation
-        std::unique_ptr<IGPUPlatform> m_platform;
+        std::unique_ptr<IGPUPlatform> m_Platform;
     };
 
     /**
@@ -205,7 +205,7 @@ namespace Limitless {
         // Initialization and shutdown
         void Initialize();
         void Shutdown();
-        bool IsInitialized() const { return m_initialized; }
+        bool IsInitialized() const { return m_Initialized; }
         
         // Frame timing
         void BeginFrame();
@@ -225,7 +225,7 @@ namespace Limitless {
         // Memory tracking
         void TrackMemoryAllocation(size_t size);
         void TrackMemoryDeallocation(size_t size);
-        MemoryTracker* GetMemoryTracker() { return &m_memoryTracker; }
+        MemoryTracker* GetMemoryTracker() { return &m_MemoryTracker; }
         
         // Metrics collection
         PerformanceMetrics CollectMetrics();
@@ -236,11 +236,11 @@ namespace Limitless {
         void SetMetricsCallback(MetricsCallback callback);
         
         // Configuration
-        void SetEnabled(bool enabled) { m_enabled = enabled; }
-        bool IsEnabled() const { return m_enabled; }
+        void SetEnabled(bool enabled) { m_Enabled = enabled; }
+        bool IsEnabled() const { return m_Enabled; }
         
-        void SetLoggingEnabled(bool enabled) { m_loggingEnabled = enabled; }
-        bool IsLoggingEnabled() const { return m_loggingEnabled; }
+        void SetLoggingEnabled(bool enabled) { m_LoggingEnabled = enabled; }
+        bool IsLoggingEnabled() const { return m_LoggingEnabled; }
         
         // Utility methods
         void LogMetrics();
@@ -263,37 +263,37 @@ namespace Limitless {
         double GetFPSInternal() const;
         double GetAverageFPSInternal() const;
 
-        bool m_initialized;
-        bool m_enabled;
-        bool m_loggingEnabled;
+        bool m_Initialized;
+        bool m_Enabled;
+        bool m_LoggingEnabled;
         
         // Frame timing
-        PerformanceTimer m_frameTimer;
-        std::vector<double> m_frameTimes;
-        size_t m_frameTimeIndex;
-        uint32_t m_frameCount;
-        std::chrono::high_resolution_clock::time_point m_lastFrameTime;
+        PerformanceTimer m_FrameTimer;
+        std::vector<double> m_FrameTimes;
+        size_t m_FrameTimeIndex;
+        uint32_t m_FrameCount;
+        std::chrono::high_resolution_clock::time_point m_LastFrameTime;
         
         // Performance counters
-        std::unordered_map<std::string, std::unique_ptr<PerformanceCounter>> m_counters;
-        std::mutex m_countersMutex;
+        std::unordered_map<std::string, std::unique_ptr<PerformanceCounter>> m_Counters;
+        std::mutex m_CountersMutex;
         
         // Memory tracking
-        MemoryTracker m_memoryTracker;
+        MemoryTracker m_MemoryTracker;
         
         // Platform-specific monitoring
-        std::unique_ptr<ICPUPlatform> m_cpuPlatform;
-        std::unique_ptr<IGPUPlatform> m_gpuPlatform;
-        std::unique_ptr<ISystemPlatform> m_systemPlatform;
+        std::unique_ptr<ICPUPlatform> m_CpuPlatform;
+        std::unique_ptr<IGPUPlatform> m_GpuPlatform;
+        std::unique_ptr<ISystemPlatform> m_SystemPlatform;
         
         // Metrics collection
-        PerformanceMetrics m_currentMetrics;
-        double m_metricsCollectionInterval;
-        std::chrono::high_resolution_clock::time_point m_lastMetricsUpdate;
-        MetricsCallback m_metricsCallback;
+        PerformanceMetrics m_CurrentMetrics;
+        double m_MetricsCollectionInterval;
+        std::chrono::high_resolution_clock::time_point m_LastMetricsUpdate;
+        MetricsCallback m_MetricsCallback;
         
         // Thread safety
-        mutable std::mutex m_mutex;
+        mutable std::mutex m_Mutex;
     };
 
     // Convenience macros for performance monitoring

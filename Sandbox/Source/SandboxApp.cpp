@@ -35,7 +35,7 @@ namespace Limitless
 }
 
 // Define the CreateApplication function that the entry point expects
-Limitless::Application* CreateApplication()
+std::unique_ptr<Limitless::Application> CreateApplication()
 {
-	return new Limitless::SandboxApp();
+	return std::make_unique<Limitless::SandboxApp>();
 }

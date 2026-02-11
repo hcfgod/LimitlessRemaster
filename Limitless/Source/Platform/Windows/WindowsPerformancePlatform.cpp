@@ -14,12 +14,12 @@ namespace Limitless {
 
     // WindowsCPUPlatform Implementation
     WindowsCPUPlatform::WindowsCPUPlatform()
-        : m_initialized(false)
-        , m_currentUsage(0.0)
-        , m_averageUsage(0.0)
-        , m_coreCount(0)
-        , m_updateInterval(1.0)
-        , m_lastUpdate(std::chrono::high_resolution_clock::now()) {
+        : m_Initialized(false)
+        , m_CurrentUsage(0.0)
+        , m_AverageUsage(0.0)
+        , m_CoreCount(0)
+        , m_UpdateInterval(1.0)
+        , m_LastUpdate(std::chrono::high_resolution_clock::now()) {
     }
 
     WindowsCPUPlatform::~WindowsCPUPlatform() {
@@ -27,25 +27,25 @@ namespace Limitless {
     }
 
     bool WindowsCPUPlatform::Initialize() {
-        LT_VERIFY(!m_initialized, "Windows CPU Platform already initialized");
+        LT_VERIFY(!m_Initialized, "Windows CPU Platform already initialized");
         
-        if (m_initialized) {
+        if (m_Initialized) {
             return true;
         }
 
         // Get CPU core count
         SYSTEM_INFO sysInfo;
         GetSystemInfo(&sysInfo);
-        m_coreCount = sysInfo.dwNumberOfProcessors;
+        m_CoreCount = sysInfo.dwNumberOfProcessors;
         
-        LT_VERIFY(m_coreCount > 0, "Invalid CPU core count");
+        LT_VERIFY(m_CoreCount > 0, "Invalid CPU core count");
 
         // Initialize PDH for CPU monitoring
-        if (PdhOpenQuery(nullptr, 0, &m_query) == ERROR_SUCCESS) {
-            if (PdhAddCounter(m_query, L"\\Processor(_Total)\\% Processor Time", 0, &m_counter) == ERROR_SUCCESS) {
-                PdhCollectQueryData(m_query);
-                m_initialized = true;
-                LT_CORE_INFO("Windows CPU Platform initialized with {} cores", m_coreCount);
+        if (PdhOpenQuery(nullptr, 0, &m_Query) == ERROR_SUCCESS) {
+            if (PdhAddCounter(m_Query, L"\\Processor(_Total)\\% Processor Time", 0, &m_Counter) == ERROR_SUCCESS) {
+                PdhCollectQueryData(m_Query);
+                m_Initialized = true;
+                LT_CORE_INFO("Windows CPU Platform initialized with {} cores", m_CoreCount);
                 return true;
             }
         }
@@ -55,7 +55,7 @@ namespace Limitless {
         error.SetFunctionName("WindowsCPUPlatform::Initialize");
         error.SetClassName("WindowsCPUPlatform");
         error.SetModuleName("Platform/Windows");
-        error.AddContext("core_count", std::to_string(m_coreCount));
+        error.AddContext("core_count", std::to_string(m_CoreCount));
         
         LT_CORE_ERROR("{}", errorMsg);
         Error::LogError(error);
@@ -63,31 +63,31 @@ namespace Limitless {
     }
 
     void WindowsCPUPlatform::Shutdown() {
-        if (m_initialized) {
-            PdhCloseQuery(m_query);
-            m_initialized = false;
+        if (m_Initialized) {
+            PdhCloseQuery(m_Query);
+            m_Initialized = false;
         }
     }
 
     void WindowsCPUPlatform::Update() {
-        LT_VERIFY(m_initialized, "Windows CPU Platform not initialized");
+        LT_VERIFY(m_Initialized, "Windows CPU Platform not initialized");
         
-        if (!m_initialized) {
+        if (!m_Initialized) {
             return;
         }
 
         auto now = std::chrono::high_resolution_clock::now();
-        auto elapsed = std::chrono::duration<double>(now - m_lastUpdate).count();
+        auto elapsed = std::chrono::duration<double>(now - m_LastUpdate).count();
         
-        if (elapsed < m_updateInterval) {
+        if (elapsed < m_UpdateInterval) {
             return;
         }
 
         PDH_FMT_COUNTERVALUE value;
-        if (PdhCollectQueryData(m_query) == ERROR_SUCCESS) {
-            if (PdhGetFormattedCounterValue(m_counter, PDH_FMT_DOUBLE, nullptr, &value) == ERROR_SUCCESS) {
-                m_currentUsage = value.doubleValue;
-                m_averageUsage = (m_averageUsage + m_currentUsage) * 0.5; // Simple moving average
+        if (PdhCollectQueryData(m_Query) == ERROR_SUCCESS) {
+            if (PdhGetFormattedCounterValue(m_Counter, PDH_FMT_DOUBLE, nullptr, &value) == ERROR_SUCCESS) {
+                m_CurrentUsage = value.doubleValue;
+                m_AverageUsage = (m_AverageUsage + m_CurrentUsage) * 0.5; // Simple moving average
             }
             else
             {
@@ -96,8 +96,8 @@ namespace Limitless {
                 error.SetFunctionName("WindowsCPUPlatform::Update");
                 error.SetClassName("WindowsCPUPlatform");
                 error.SetModuleName("Platform/Windows");
-                error.AddContext("current_usage", std::to_string(m_currentUsage));
-                error.AddContext("average_usage", std::to_string(m_averageUsage));
+                error.AddContext("current_usage", std::to_string(m_CurrentUsage));
+                error.AddContext("average_usage", std::to_string(m_AverageUsage));
                 
                 LT_CORE_ERROR("{}", errorMsg);
                 Error::LogError(error);
@@ -117,39 +117,39 @@ namespace Limitless {
             LT_THROW_PLATFORM_ERROR(errorMsg);
         }
 
-        m_lastUpdate = now;
+        m_LastUpdate = now;
     }
 
     void WindowsCPUPlatform::Reset() {
-        m_currentUsage = 0.0;
-        m_averageUsage = 0.0;
-        m_lastUpdate = std::chrono::high_resolution_clock::now();
+        m_CurrentUsage = 0.0;
+        m_AverageUsage = 0.0;
+        m_LastUpdate = std::chrono::high_resolution_clock::now();
     }
 
     double WindowsCPUPlatform::GetCurrentUsage() const {
-        return m_currentUsage;
+        return m_CurrentUsage;
     }
 
     double WindowsCPUPlatform::GetAverageUsage() const {
-        return m_averageUsage;
+        return m_AverageUsage;
     }
 
     uint32_t WindowsCPUPlatform::GetCoreCount() const {
-        return m_coreCount;
+        return m_CoreCount;
     }
 
     void WindowsCPUPlatform::SetUpdateInterval(double intervalSeconds) {
-        m_updateInterval = intervalSeconds;
+        m_UpdateInterval = intervalSeconds;
     }
 
     // WindowsGPUPlatform Implementation
     WindowsGPUPlatform::WindowsGPUPlatform()
-        : m_available(false)
-        , m_usage(0.0)
-        , m_memoryUsage(0.0)
-        , m_temperature(0.0)
-        , m_updateInterval(1.0)
-        , m_lastUpdate(std::chrono::high_resolution_clock::now()) {
+        : m_Available(false)
+        , m_Usage(0.0)
+        , m_MemoryUsage(0.0)
+        , m_Temperature(0.0)
+        , m_UpdateInterval(1.0)
+        , m_LastUpdate(std::chrono::high_resolution_clock::now()) {
     }
 
     WindowsGPUPlatform::~WindowsGPUPlatform() {
@@ -159,67 +159,67 @@ namespace Limitless {
     bool WindowsGPUPlatform::Initialize() {
         // GPU monitoring requires additional libraries like NVML or AMD ADL
         // For now, we'll mark it as unavailable
-        m_available = false;
+        m_Available = false;
         LT_CORE_WARN("Windows GPU Platform not available - requires NVML or AMD ADL libraries");
         return false;
     }
 
     void WindowsGPUPlatform::Shutdown() {
-        m_available = false;
+        m_Available = false;
     }
 
     void WindowsGPUPlatform::Update() {
-        if (!m_available) {
+        if (!m_Available) {
             return;
         }
 
         auto now = std::chrono::high_resolution_clock::now();
-        auto elapsed = std::chrono::duration<double>(now - m_lastUpdate).count();
+        auto elapsed = std::chrono::duration<double>(now - m_LastUpdate).count();
         
-        if (elapsed < m_updateInterval) {
+        if (elapsed < m_UpdateInterval) {
             return;
         }
 
         // GPU monitoring implementation would go here
         // This requires platform-specific GPU monitoring libraries
         
-        m_lastUpdate = now;
+        m_LastUpdate = now;
     }
 
     void WindowsGPUPlatform::Reset() {
-        m_usage = 0.0;
-        m_memoryUsage = 0.0;
-        m_temperature = 0.0;
-        m_lastUpdate = std::chrono::high_resolution_clock::now();
+        m_Usage = 0.0;
+        m_MemoryUsage = 0.0;
+        m_Temperature = 0.0;
+        m_LastUpdate = std::chrono::high_resolution_clock::now();
     }
 
     double WindowsGPUPlatform::GetUsage() const {
-        return m_usage;
+        return m_Usage;
     }
 
     double WindowsGPUPlatform::GetMemoryUsage() const {
-        return m_memoryUsage;
+        return m_MemoryUsage;
     }
 
     double WindowsGPUPlatform::GetTemperature() const {
-        return m_temperature;
+        return m_Temperature;
     }
 
     bool WindowsGPUPlatform::IsAvailable() const {
-        return m_available;
+        return m_Available;
     }
 
     void WindowsGPUPlatform::SetUpdateInterval(double intervalSeconds) {
-        m_updateInterval = intervalSeconds;
+        m_UpdateInterval = intervalSeconds;
     }
 
     // WindowsSystemPlatform Implementation
     WindowsSystemPlatform::WindowsSystemPlatform()
-        : m_totalMemory(0)
-        , m_availableMemory(0)
-        , m_processMemory(0)
-        , m_processId(0)
-        , m_threadId(0) {
+        : m_TotalMemory(0)
+        , m_AvailableMemory(0)
+        , m_ProcessMemory(0)
+        , m_ProcessId(0)
+        , m_ThreadId(0) {
     }
 
     WindowsSystemPlatform::~WindowsSystemPlatform() {
@@ -227,8 +227,8 @@ namespace Limitless {
     }
 
     bool WindowsSystemPlatform::Initialize() {
-        m_processId = GetCurrentProcessId();
-        m_threadId = GetCurrentThreadId();
+        m_ProcessId = GetCurrentProcessId();
+        m_ThreadId = GetCurrentThreadId();
         Update();
         return true;
     }
@@ -242,35 +242,35 @@ namespace Limitless {
         MEMORYSTATUSEX memInfo;
         memInfo.dwLength = sizeof(MEMORYSTATUSEX);
         if (GlobalMemoryStatusEx(&memInfo)) {
-            m_totalMemory = memInfo.ullTotalPhys;
-            m_availableMemory = memInfo.ullAvailPhys;
+            m_TotalMemory = memInfo.ullTotalPhys;
+            m_AvailableMemory = memInfo.ullAvailPhys;
         }
 
         // Get process memory information
         PROCESS_MEMORY_COUNTERS_EX pmc;
         if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
-            m_processMemory = pmc.WorkingSetSize;
+            m_ProcessMemory = pmc.WorkingSetSize;
         }
     }
 
     uint64_t WindowsSystemPlatform::GetTotalMemory() const {
-        return m_totalMemory;
+        return m_TotalMemory;
     }
 
     uint64_t WindowsSystemPlatform::GetAvailableMemory() const {
-        return m_availableMemory;
+        return m_AvailableMemory;
     }
 
     uint64_t WindowsSystemPlatform::GetProcessMemory() const {
-        return m_processMemory;
+        return m_ProcessMemory;
     }
 
     uint32_t WindowsSystemPlatform::GetProcessId() const {
-        return m_processId;
+        return m_ProcessId;
     }
 
     uint32_t WindowsSystemPlatform::GetThreadId() const {
-        return m_threadId;
+        return m_ThreadId;
     }
 
 #endif // LT_PLATFORM_WINDOWS

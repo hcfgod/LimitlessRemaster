@@ -323,6 +323,49 @@ TEST_SUITE("Event System")
         
         eventSystem.Shutdown();
     }
+
+    TEST_CASE("AddEventCallback typed API")
+    {
+        auto& eventSystem = Limitless::GetEventSystem();
+        eventSystem.Initialize();
+
+        float receivedX = 0.0f;
+        float receivedY = 0.0f;
+        int receivedKeyCode = 0;
+
+        // Use AddEventCallback with strongly-typed event classes (no manual cast needed)
+        auto token1 = Limitless::AddEventCallback<Limitless::Events::MouseMovedEvent>(
+            [&receivedX, &receivedY](Limitless::Events::MouseMovedEvent& event) {
+                receivedX = event.GetX();
+                receivedY = event.GetY();
+            });
+
+        auto token2 = Limitless::AddEventCallback<Limitless::Events::KeyPressedEvent>(
+            [&receivedKeyCode](Limitless::Events::KeyPressedEvent& event) {
+                receivedKeyCode = event.GetKeyCode();
+            });
+
+        // Dispatch MouseMovedEvent
+        auto mouseEvent = std::make_unique<Limitless::Events::MouseMovedEvent>(42.5f, 99.0f);
+        eventSystem.Dispatch(*mouseEvent);
+        eventSystem.ProcessEvents();
+
+        CHECK(receivedX == 42.5f);
+        CHECK(receivedY == 99.0f);
+
+        // Dispatch KeyPressedEvent
+        auto keyEvent = std::make_unique<Limitless::Events::KeyPressedEvent>(77, false);
+        eventSystem.Dispatch(*keyEvent);
+        eventSystem.ProcessEvents();
+
+        CHECK(receivedKeyCode == 77);
+
+        // Remove callbacks by token
+        eventSystem.RemoveCallback(Limitless::EventType::MouseMoved, token1);
+        eventSystem.RemoveCallback(Limitless::EventType::KeyPressed, token2);
+
+        eventSystem.Shutdown();
+    }
      
     TEST_CASE("Event System Performance")
     {
