@@ -120,6 +120,14 @@ namespace Limitless::Assets
             if (auto it = m_ByGuid.find(record.Guid); it != m_ByGuid.end())
             {
                 record.Dependencies = it->second.Dependencies;
+
+                // Preserve importer settings unless explicitly overridden.
+                // This is critical because many tooling paths (bundle discovery, watchers, etc.)
+                // may call ImportOrUpdate with an empty object just to ensure a GUID exists.
+                if (record.ImporterSettings.is_object() && record.ImporterSettings.empty())
+                {
+                    record.ImporterSettings = it->second.ImporterSettings;
+                }
             }
 
             m_ByGuid[record.Guid] = record;

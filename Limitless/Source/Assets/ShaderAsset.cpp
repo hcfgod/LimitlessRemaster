@@ -5,6 +5,8 @@
 #include "Assets/AssetUtils.h"
 #include "Assets/AssetManager.h"
 #include "Assets/AssetLoadCoordinator.h"
+#include "Assets/ShaderStageParsing.h"
+#include "Assets/Cooking/CookedShaderStagesFormat.h"
 
 #include "Core/Debug/Log.h"
 #include "Graphics/GraphicsAPIDetector.h"
@@ -12,12 +14,15 @@
 #include "Graphics/ShaderCompilation/ShaderCompiler.h"
 
 #include <filesystem>
+#include <atomic>
 #include <future>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 namespace Limitless::Assets
 {
+#if 0
     struct ParsedShaderStages
     {
         std::string Name;
@@ -143,6 +148,7 @@ namespace Limitless::Assets
 
         return parsed;
     }
+#endif
 
     Async::Task<ShaderAsset::Ptr> ShaderAsset::LoadAsync(const std::string& key, Settings settings)
     {
@@ -167,9 +173,12 @@ namespace Limitless::Assets
                 }
 
                 bool fromBundle = false;
+                AssetBundlePayloadFormat bundlePayloadFormat = AssetBundlePayloadFormat::Raw;
+                std::vector<uint8_t> bundleBytes;
                 std::string resolvedPath;
                 std::string guid;
                 std::string fileText;
+                ParsedShaderStages parsed{};
 
                 auto& bundle = AssetBundle::GetInstance();
                 if (bundle.IsEnabled() && bundle.IsLoaded())
@@ -177,13 +186,28 @@ namespace Limitless::Assets
                     const auto entry = bundle.FindEntryByKey(key);
                     if (entry.has_value())
                     {
-                        const auto textResult = bundle.ReadAllTextByKey(key);
-                        if (textResult.IsSuccess())
+                        bundlePayloadFormat = entry->PayloadFormat;
+                        if (bundlePayloadFormat == AssetBundlePayloadFormat::CookedShaderStages)
                         {
-                            fromBundle = true;
-                            guid = entry->Guid;
-                            resolvedPath = "<AssetBundle>";
-                            fileText = textResult.GetValue();
+                            const auto bytesResult = bundle.ReadAllBytesByKey(key);
+                            if (bytesResult.IsSuccess())
+                            {
+                                fromBundle = true;
+                                guid = entry->Guid;
+                                resolvedPath = "<AssetBundle>";
+                                bundleBytes = bytesResult.GetValue();
+                            }
+                        }
+                        else
+                        {
+                            const auto textResult = bundle.ReadAllTextByKey(key);
+                            if (textResult.IsSuccess())
+                            {
+                                fromBundle = true;
+                                guid = entry->Guid;
+                                resolvedPath = "<AssetBundle>";
+                                fileText = textResult.GetValue();
+                            }
                         }
                     }
                 }
@@ -226,16 +250,41 @@ namespace Limitless::Assets
                     fileText = ss.str();
                 }
 
-                const auto parsedResult = ParseCombinedGlsl(key, resolvedPath, fileText, settings);
-                if (parsedResult.IsFailure())
+                if (fromBundle && bundlePayloadFormat == AssetBundlePayloadFormat::CookedShaderStages)
                 {
-                    LT_CORE_ERROR("ShaderAsset::LoadAsync: parse failed for '{}': {}",
-                                  resolvedPath, parsedResult.GetError().GetErrorMessage());
-                    promise.set_value(nullptr);
-                    return;
-                }
+                    static std::atomic<bool> s_LoggedCookedShaderOnce{ false };
+                    if (!s_LoggedCookedShaderOnce.exchange(true))
+                    {
+                        LT_CORE_INFO("ShaderAsset: using cooked shader stage payloads from AssetBundle (pre-split vertex/fragment)");
+                    }
 
-                ParsedShaderStages parsed = parsedResult.GetValue();
+                    const auto cookedResult = ::Limitless::Assets::Cooking::ParseCookedShaderStages(bundleBytes.data(), bundleBytes.size());
+                    if (cookedResult.IsFailure())
+                    {
+                        LT_CORE_ERROR("ShaderAsset::LoadAsync: cooked shader parse failed for '{}': {}",
+                                      key, cookedResult.GetError().GetErrorMessage());
+                        promise.set_value(nullptr);
+                        return;
+                    }
+
+                    const auto cooked = cookedResult.GetValue();
+                    parsed.Name = cooked.Name.empty() ? settings.Name : cooked.Name;
+                    parsed.Vertex = cooked.Vertex;
+                    parsed.Fragment = cooked.Fragment;
+                }
+                else
+                {
+                    const auto parsedResult = ParseCombinedGlsl(key, resolvedPath, fileText, settings.Name);
+                    if (parsedResult.IsFailure())
+                    {
+                        LT_CORE_ERROR("ShaderAsset::LoadAsync: parse failed for '{}': {}",
+                                      resolvedPath, parsedResult.GetError().GetErrorMessage());
+                        promise.set_value(nullptr);
+                        return;
+                    }
+
+                    parsed = parsedResult.GetValue();
+                }
 
                 const auto preparedResult = PrepareShaderStagesForActiveGraphicsAPI(std::move(parsed), resolvedPath);
                 if (preparedResult.IsFailure())
@@ -360,8 +409,10 @@ namespace Limitless::Assets
         const std::string key = GetKey();
 
         bool fromBundle = false;
+        AssetBundlePayloadFormat bundlePayloadFormat = AssetBundlePayloadFormat::Raw;
         std::string resolvedPath;
         std::string fileText;
+        std::vector<uint8_t> bundleBytes;
 
         auto& bundle = AssetBundle::GetInstance();
         if (bundle.IsEnabled() && bundle.IsLoaded())
@@ -369,12 +420,26 @@ namespace Limitless::Assets
             const auto entry = bundle.FindEntryByKey(key);
             if (entry.has_value())
             {
-                const auto textResult = bundle.ReadAllTextByKey(key);
-                if (textResult.IsSuccess())
+                bundlePayloadFormat = entry->PayloadFormat;
+                if (bundlePayloadFormat == AssetBundlePayloadFormat::CookedShaderStages)
                 {
-                    fromBundle = true;
-                    resolvedPath = "<AssetBundle>";
-                    fileText = textResult.GetValue();
+                    const auto bytesResult = bundle.ReadAllBytesByKey(key);
+                    if (bytesResult.IsSuccess())
+                    {
+                        fromBundle = true;
+                        resolvedPath = "<AssetBundle>";
+                        bundleBytes = bytesResult.GetValue();
+                    }
+                }
+                else
+                {
+                    const auto textResult = bundle.ReadAllTextByKey(key);
+                    if (textResult.IsSuccess())
+                    {
+                        fromBundle = true;
+                        resolvedPath = "<AssetBundle>";
+                        fileText = textResult.GetValue();
+                    }
                 }
             }
         }
@@ -401,14 +466,30 @@ namespace Limitless::Assets
             fileText = ss.str();
         }
 
-        const auto parsedResult = ParseCombinedGlsl(key, resolvedPath, fileText, m_Settings);
-        if (parsedResult.IsFailure())
+        ParsedShaderStages parsed{};
+        if (fromBundle && bundlePayloadFormat == AssetBundlePayloadFormat::CookedShaderStages)
         {
-            LT_CORE_ERROR("ShaderAsset::Reload: parse failed for '{}': {}", resolvedPath, parsedResult.GetError().GetErrorMessage());
-            return false;
+            const auto cookedResult = ::Limitless::Assets::Cooking::ParseCookedShaderStages(bundleBytes.data(), bundleBytes.size());
+            if (cookedResult.IsFailure())
+            {
+                LT_CORE_ERROR("ShaderAsset::Reload: cooked shader parse failed for '{}': {}", key, cookedResult.GetError().GetErrorMessage());
+                return false;
+            }
+            const auto cooked = cookedResult.GetValue();
+            parsed.Name = cooked.Name.empty() ? m_Settings.Name : cooked.Name;
+            parsed.Vertex = cooked.Vertex;
+            parsed.Fragment = cooked.Fragment;
         }
-
-        ParsedShaderStages parsed = parsedResult.GetValue();
+        else
+        {
+            const auto parsedResult = ParseCombinedGlsl(key, resolvedPath, fileText, m_Settings.Name);
+            if (parsedResult.IsFailure())
+            {
+                LT_CORE_ERROR("ShaderAsset::Reload: parse failed for '{}': {}", resolvedPath, parsedResult.GetError().GetErrorMessage());
+                return false;
+            }
+            parsed = parsedResult.GetValue();
+        }
 
         const auto preparedResult = PrepareShaderStagesForActiveGraphicsAPI(std::move(parsed), resolvedPath);
         if (preparedResult.IsFailure())

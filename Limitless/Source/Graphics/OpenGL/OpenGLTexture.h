@@ -14,6 +14,7 @@ namespace Limitless
     public:
         OpenGLTexture2D(const std::string& path, TextureSpecification specification);
         OpenGLTexture2D(uint32_t width, uint32_t height, const void* rgbaPixels, TextureSpecification specification);
+        OpenGLTexture2D(std::span<const TextureMipLevelRGBA8View> mipLevels, TextureSpecification specification);
         ~OpenGLTexture2D() override;
 
         void Bind(uint32_t slot) const override;

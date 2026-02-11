@@ -193,6 +193,11 @@ namespace Limitless::Assets
 
         static void GetCacheStats(size_t& keyCacheSize, size_t& guidCacheSize);
 
+        // Clears key+GUID weak caches. This does not destroy assets (weak references only),
+        // but it forces future loads to resolve through importers instead of returning
+        // previously-cached instances.
+        static void ClearCaches();
+
     private:
         static std::unordered_map<std::string, std::weak_ptr<Asset>> s_KeyCache;
         static std::unordered_map<std::string, std::weak_ptr<Asset>> s_GuidCache;

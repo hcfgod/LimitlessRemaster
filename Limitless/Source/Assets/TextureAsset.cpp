@@ -2,22 +2,24 @@
 #include "Assets/AssetBundle.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetLoadCoordinator.h"
+#include "Assets/ImageDecode.h"
+#include "Assets/Cooking/CookedTexture2DFormat.h"
 
 #include "Core/Debug/Log.h"
 #include "Graphics/Renderer.h"
-
-#include "stb/stb_image/stb_image.h"
 
 #include <vector>
 #include <cstring>
 #include <mutex>
 #include <fstream>
 #include <cctype>
+#include <atomic>
 #include <future>
 #include <sstream>
 
 namespace Limitless::Assets
 {
+#if 0
     struct DecodedImageRGBA8
     {
         uint32_t Width = 0;
@@ -639,6 +641,7 @@ namespace Limitless::Assets
 
         return img;
     }
+#endif
 
     Async::Task<TextureAsset::Ptr> TextureAsset::LoadAsync(const std::string& assetPath, const TextureSpecification& specification)
     {
@@ -668,6 +671,7 @@ namespace Limitless::Assets
                 std::string guid;
                 std::string resolvedPath;
                 std::string debugName = assetPath;
+                AssetBundlePayloadFormat bundlePayloadFormat = AssetBundlePayloadFormat::Raw;
 
                 auto& bundle = AssetBundle::GetInstance();
                 if (bundle.IsEnabled() && bundle.IsLoaded())
@@ -681,6 +685,7 @@ namespace Limitless::Assets
                             fromBundle = true;
                             bundleBytes = bytesResult.GetValue();
                             guid = entry->Guid;
+                            bundlePayloadFormat = entry->PayloadFormat;
                         }
                     }
                 }
@@ -712,37 +717,44 @@ namespace Limitless::Assets
                     guid = guidResult.GetValue();
                 }
 
-                // CPU decode on this AsyncIO worker thread.
-                auto decodedResult = fromBundle
-                    ? DecodeToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName, specification.FlipVerticallyOnLoad)
-                    : DecodeToRGBA8(resolvedPath, specification.FlipVerticallyOnLoad);
-                if (decodedResult.IsFailure())
-                {
-                    // stb_image can't decode ASCII PPM (P3) reliably across builds.
-                    // For our dev/test checkerboard, fall back to a tiny P3 parser.
-                    auto ppmFallback = fromBundle
-                        ? TryDecodePpmP3ToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName)
-                        : TryDecodePpmP3ToRGBA8(resolvedPath);
-                    if (ppmFallback.IsSuccess())
-                    {
-                        if (specification.FlipVerticallyOnLoad)
-                        {
-                            auto img = ppmFallback.GetValue();
-                            FlipVerticalRGBA8(img);
-                            ppmFallback = img;
-                        }
-                        decodedResult = ppmFallback;
-                    }
-                }
-                if (decodedResult.IsFailure())
-                {
-                    LT_CORE_ERROR("TextureAsset::LoadAsync: decode failed for '{}': {}",
-                                  debugName, decodedResult.GetError().GetErrorMessage());
-                    promise.set_value(nullptr);
-                    return;
-                }
+                const bool isCookedTexture2DFromBundle =
+                    fromBundle && (bundlePayloadFormat == AssetBundlePayloadFormat::CookedTexture2D);
 
-                DecodedImageRGBA8 decoded = decodedResult.GetValue();
+                DecodedImageRGBA8 decoded{};
+                if (!isCookedTexture2DFromBundle)
+                {
+                    // CPU decode on this AsyncIO worker thread.
+                    auto decodedResult = fromBundle
+                        ? DecodeToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName, specification.FlipVerticallyOnLoad)
+                        : DecodeToRGBA8(resolvedPath, specification.FlipVerticallyOnLoad);
+                    if (decodedResult.IsFailure())
+                    {
+                        // stb_image can't decode ASCII PPM (P3) reliably across builds.
+                        // For our dev/test checkerboard, fall back to a tiny P3 parser.
+                        auto ppmFallback = fromBundle
+                            ? TryDecodePpmP3ToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName)
+                            : TryDecodePpmP3ToRGBA8(resolvedPath);
+                        if (ppmFallback.IsSuccess())
+                        {
+                            if (specification.FlipVerticallyOnLoad)
+                            {
+                                auto img = ppmFallback.GetValue();
+                                FlipVerticalRGBA8(img);
+                                ppmFallback = img;
+                            }
+                            decodedResult = ppmFallback;
+                        }
+                    }
+                    if (decodedResult.IsFailure())
+                    {
+                        LT_CORE_ERROR("TextureAsset::LoadAsync: decode failed for '{}': {}",
+                                      debugName, decodedResult.GetError().GetErrorMessage());
+                        promise.set_value(nullptr);
+                        return;
+                    }
+
+                    decoded = decodedResult.GetValue();
+                }
 
                 // GPU stage: create texture + asset on render thread without blocking this AsyncIO worker.
                 auto& renderer = Renderer::GetInstance();
@@ -760,6 +772,8 @@ namespace Limitless::Assets
                     std::string guid;
                     TextureSpecification spec;
                     DecodedImageRGBA8 decoded;
+                    std::vector<uint8_t> cookedBytes;
+                    bool isCookedTexture2D = false;
                     uint64_t generation = 0;
                 };
 
@@ -769,6 +783,11 @@ namespace Limitless::Assets
                 state->guid = guid;
                 state->spec = specification;
                 state->decoded = std::move(decoded);
+                state->isCookedTexture2D = isCookedTexture2DFromBundle;
+                if (state->isCookedTexture2D)
+                {
+                    state->cookedBytes = std::move(bundleBytes);
+                }
                 state->generation = generation;
 
                 class Command final : public RenderResourceCommandQueue::Command
@@ -794,12 +813,50 @@ namespace Limitless::Assets
                                 return;
                             }
 
-                            // NOTE: Texture2D factory will run inline when called from the render thread.
-                            auto texture = Texture2D::CreateFromRGBA8(
-                                m_State->decoded.Width,
-                                m_State->decoded.Height,
-                                m_State->decoded.Pixels.data(),
-                                m_State->spec);
+                            std::shared_ptr<Texture2D> texture;
+                            if (m_State->isCookedTexture2D)
+                            {
+                                static std::atomic<bool> s_LoggedCookedTextureOnce{ false };
+                                if (!s_LoggedCookedTextureOnce.exchange(true))
+                                {
+                                    LT_CORE_INFO("TextureAsset: using cooked Texture2D payloads from AssetBundle (RGBA8 + mip chain)");
+                                }
+
+                                const auto cookedViewResult = ::Limitless::Assets::Cooking::ParseCookedTexture2DView(m_State->cookedBytes.data(), m_State->cookedBytes.size());
+                                if (cookedViewResult.IsFailure())
+                                {
+                                    LT_CORE_ERROR("TextureAsset::LoadAsync: cooked texture parse failed for '{}': {}",
+                                        m_State->key, cookedViewResult.GetError().GetErrorMessage());
+                                    m_State->promise.set_value(nullptr);
+                                    return;
+                                }
+
+                                const auto cookedView = cookedViewResult.GetValue();
+                                m_State->spec = cookedView.Specification;
+                                std::vector<TextureMipLevelRGBA8View> mipViews;
+                                mipViews.reserve(cookedView.MipLevels.size());
+                                for (const auto& mip : cookedView.MipLevels)
+                                {
+                                    TextureMipLevelRGBA8View v;
+                                    v.Width = mip.Width;
+                                    v.Height = mip.Height;
+                                    v.PixelsRGBA8 = mip.PixelsRGBA8;
+                                    mipViews.push_back(v);
+                                }
+
+                                texture = Texture2D::CreateFromRGBA8MipChain(
+                                    std::span<const TextureMipLevelRGBA8View>(mipViews.data(), mipViews.size()),
+                                    cookedView.Specification);
+                            }
+                            else
+                            {
+                                // NOTE: Texture2D factory will run inline when called from the render thread.
+                                texture = Texture2D::CreateFromRGBA8(
+                                    m_State->decoded.Width,
+                                    m_State->decoded.Height,
+                                    m_State->decoded.Pixels.data(),
+                                    m_State->spec);
+                            }
 
                             if (!texture)
                             {
@@ -864,6 +921,7 @@ namespace Limitless::Assets
         std::vector<uint8_t> bundleBytes;
         std::string resolvedPath;
         std::string debugName = key;
+        AssetBundlePayloadFormat bundlePayloadFormat = AssetBundlePayloadFormat::Raw;
 
         auto& bundle = AssetBundle::GetInstance();
         if (bundle.IsEnabled() && bundle.IsLoaded())
@@ -876,6 +934,7 @@ namespace Limitless::Assets
                 {
                     fromBundle = true;
                     bundleBytes = bytesResult.GetValue();
+                    bundlePayloadFormat = entry->PayloadFormat;
                 }
             }
         }
@@ -892,33 +951,40 @@ namespace Limitless::Assets
             debugName = resolvedPath;
         }
 
-        auto decodedResult = fromBundle
-            ? DecodeToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName, m_Specification.FlipVerticallyOnLoad)
-            : DecodeToRGBA8(resolvedPath, m_Specification.FlipVerticallyOnLoad);
-        if (decodedResult.IsFailure())
+        const bool isCookedTexture2DFromBundle =
+            fromBundle && (bundlePayloadFormat == AssetBundlePayloadFormat::CookedTexture2D);
+
+        DecodedImageRGBA8 decoded{};
+        if (!isCookedTexture2DFromBundle)
         {
-            auto ppmFallback = fromBundle
-                ? TryDecodePpmP3ToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName)
-                : TryDecodePpmP3ToRGBA8(resolvedPath);
-            if (ppmFallback.IsSuccess())
+            auto decodedResult = fromBundle
+                ? DecodeToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName, m_Specification.FlipVerticallyOnLoad)
+                : DecodeToRGBA8(resolvedPath, m_Specification.FlipVerticallyOnLoad);
+            if (decodedResult.IsFailure())
             {
-                if (m_Specification.FlipVerticallyOnLoad)
+                auto ppmFallback = fromBundle
+                    ? TryDecodePpmP3ToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName)
+                    : TryDecodePpmP3ToRGBA8(resolvedPath);
+                if (ppmFallback.IsSuccess())
                 {
-                    auto img = ppmFallback.GetValue();
-                    FlipVerticalRGBA8(img);
-                    ppmFallback = img;
+                    if (m_Specification.FlipVerticallyOnLoad)
+                    {
+                        auto img = ppmFallback.GetValue();
+                        FlipVerticalRGBA8(img);
+                        ppmFallback = img;
+                    }
+                    decodedResult = ppmFallback;
                 }
-                decodedResult = ppmFallback;
             }
-        }
 
-        if (decodedResult.IsFailure())
-        {
-            LT_CORE_ERROR("TextureAsset::Reload: decode failed for '{}': {}", debugName, decodedResult.GetError().GetErrorMessage());
-            return false;
-        }
+            if (decodedResult.IsFailure())
+            {
+                LT_CORE_ERROR("TextureAsset::Reload: decode failed for '{}': {}", debugName, decodedResult.GetError().GetErrorMessage());
+                return false;
+            }
 
-        const DecodedImageRGBA8 decoded = decodedResult.GetValue();
+            decoded = decodedResult.GetValue();
+        }
 
         auto& renderer = Renderer::GetInstance();
         if (!renderer.IsRenderThreadEnabled())
@@ -931,6 +997,33 @@ namespace Limitless::Assets
         try
         {
             created = renderer.SubmitResourceAndWait("TextureAsset/Reload/CreateTexture2D", [&](GraphicsContext*) -> std::shared_ptr<Texture2D> {
+                if (isCookedTexture2DFromBundle)
+                {
+                    const auto cookedViewResult = ::Limitless::Assets::Cooking::ParseCookedTexture2DView(bundleBytes.data(), bundleBytes.size());
+                    if (cookedViewResult.IsFailure())
+                    {
+                        LT_CORE_ERROR("TextureAsset::Reload: cooked texture parse failed for '{}': {}", key, cookedViewResult.GetError().GetErrorMessage());
+                        return nullptr;
+                    }
+
+                    const auto cookedView = cookedViewResult.GetValue();
+                    std::vector<TextureMipLevelRGBA8View> mipViews;
+                    mipViews.reserve(cookedView.MipLevels.size());
+                    for (const auto& mip : cookedView.MipLevels)
+                    {
+                        TextureMipLevelRGBA8View v;
+                        v.Width = mip.Width;
+                        v.Height = mip.Height;
+                        v.PixelsRGBA8 = mip.PixelsRGBA8;
+                        mipViews.push_back(v);
+                    }
+
+                    m_Specification = cookedView.Specification;
+                    return Texture2D::CreateFromRGBA8MipChain(
+                        std::span<const TextureMipLevelRGBA8View>(mipViews.data(), mipViews.size()),
+                        m_Specification);
+                }
+
                 return Texture2D::CreateFromRGBA8(decoded.Width, decoded.Height, decoded.Pixels.data(), m_Specification);
             });
         }

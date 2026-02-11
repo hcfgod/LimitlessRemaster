@@ -41,5 +41,12 @@ namespace Limitless::Assets
         keyCacheSize = s_KeyCache.size();
         guidCacheSize = s_GuidCache.size();
     }
+
+    void AssetManager::ClearCaches()
+    {
+        std::unique_lock<std::shared_mutex> lock(s_Mutex);
+        s_KeyCache.clear();
+        s_GuidCache.clear();
+    }
 }
 

@@ -177,3 +177,21 @@ Related files:
 - `Assets/Materials/TexturedTriangle.material.json`
 - `Sandbox/Source/TexturedTriangleDemo.{h,cpp}`
 
+## Current limitations / next steps
+
+### Current limitations
+
+- **No compression (yet)**: AssetBundles currently store raw bytes; shipped bundles are not compressed.
+- **No per-type cooked formats (yet)**:
+  - Textures are still decoded at runtime into RGBA8 (then uploaded).
+  - Shaders are still compiled at runtime.
+- **Asset discovery targets a known set of types**: Today, the engine only treats a small, explicit set of assets as first-class types (via importer specializations).
+
+### Next steps
+
+- **Incremental builds**: Hash-based change detection so bundling/cooking can avoid rebuilding unchanged assets.
+- **Compression**: Bundle compression and optional per-asset compression strategies.
+- **Cooked formats**:
+  - Platform-specific texture cooking (mips + block compression where appropriate).
+  - Platform-specific shader cooking (precompiled binaries, reflection caches).
+

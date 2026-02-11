@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <future>
 #include <memory>
+#include <span>
 #include <string>
 
 namespace Limitless
@@ -27,6 +28,13 @@ namespace Limitless
         TextureWrap WrapV = TextureWrap::Repeat;
         bool GenerateMipmaps = true;
         bool FlipVerticallyOnLoad = true;
+    };
+
+    struct TextureMipLevelRGBA8View
+    {
+        uint32_t Width = 0;
+        uint32_t Height = 0;
+        const void* PixelsRGBA8 = nullptr;
     };
 
     class Texture
@@ -57,6 +65,14 @@ namespace Limitless
             uint32_t width,
             uint32_t height,
             const void* rgbaPixels,
+            const TextureSpecification& specification = {});
+
+        // Creates a texture from a full RGBA8 mip chain.
+        // - mipLevels[0] must be the base level.
+        // - If specification.GenerateMipmaps == true, the mip chain should include all levels needed by the sampler.
+        // - This path does NOT call glGenerateMipmap; it uploads each provided level.
+        static std::shared_ptr<Texture2D> CreateFromRGBA8MipChain(
+            std::span<const TextureMipLevelRGBA8View> mipLevels,
             const TextureSpecification& specification = {});
 
         // Async variants (non-blocking): schedule GPU work on the render thread resource queue.

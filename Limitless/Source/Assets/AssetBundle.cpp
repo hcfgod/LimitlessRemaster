@@ -2,15 +2,58 @@
 
 #include "Assets/AssetPaths.h"
 #include "Core/Debug/Log.h"
+#include "Core/Compression/ZstdCompression.h"
 #include "Platform/Platform.h"
 
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <fstream>
 
 namespace Limitless::Assets
 {
     using json = nlohmann::json;
+
+    namespace
+    {
+        static std::atomic<bool> s_LoggedZstdDecompressionOnce{ false };
+
+        AssetBundleCompression AssetBundleCompressionFromString(const std::string& value)
+        {
+            if (value == "Zstd")
+            {
+                return AssetBundleCompression::Zstd;
+            }
+            return AssetBundleCompression::None;
+        }
+
+        AssetBundlePayloadFormat AssetBundlePayloadFormatFromString(const std::string& value)
+        {
+            if (value == "CookedTexture2D")
+            {
+                return AssetBundlePayloadFormat::CookedTexture2D;
+            }
+            if (value == "CookedShaderStages")
+            {
+                return AssetBundlePayloadFormat::CookedShaderStages;
+            }
+            return AssetBundlePayloadFormat::Raw;
+        }
+
+        Result<std::vector<uint8_t>> DecompressZstd(const std::vector<uint8_t>& storedBytes, const uint64_t uncompressedSize)
+        {
+            if (!s_LoggedZstdDecompressionOnce.exchange(true))
+            {
+                LT_CORE_INFO("AssetBundle: using Zstd-compressed payloads (runtime decompression enabled)");
+            }
+
+            // Signature is kept local to keep the public AssetBundle API independent of compression libraries.
+            return ::Limitless::Compression::ZstdCompression::Decompress(
+                storedBytes.data(),
+                storedBytes.size(),
+                static_cast<size_t>(uncompressedSize));
+        }
+    }
 
     AssetBundle& AssetBundle::GetInstance()
     {
@@ -70,6 +113,8 @@ namespace Limitless::Assets
             return Result<void>(ErrorCode::FileCorrupted, "AssetBundle: manifest missing 'entries' array");
         }
 
+        const uint32_t manifestVersion = root.value("version", 1u);
+
         const std::filesystem::path dataFile = root["dataFile"].get<std::string>();
         const std::filesystem::path baseDir = manifestPath.parent_path();
         const std::filesystem::path dataPath = baseDir / dataFile;
@@ -95,6 +140,26 @@ namespace Limitless::Assets
             if (e.contains("type") && e["type"].is_string()) entry.Type = AssetTypeFromString(e["type"].get<std::string>());
             if (e.contains("offset") && e["offset"].is_number_unsigned()) entry.Offset = e["offset"].get<uint64_t>();
             if (e.contains("size") && e["size"].is_number_unsigned()) entry.Size = e["size"].get<uint64_t>();
+
+            if (manifestVersion >= 2)
+            {
+                if (e.contains("payloadFormat") && e["payloadFormat"].is_string()) entry.PayloadFormat = AssetBundlePayloadFormatFromString(e["payloadFormat"].get<std::string>());
+                if (e.contains("compression") && e["compression"].is_string()) entry.Compression = AssetBundleCompressionFromString(e["compression"].get<std::string>());
+                if (e.contains("uncompressedSize") && e["uncompressedSize"].is_number_unsigned()) entry.UncompressedSize = e["uncompressedSize"].get<uint64_t>();
+                if (e.contains("contentHash64") && e["contentHash64"].is_number_unsigned()) entry.ContentHash64 = e["contentHash64"].get<uint64_t>();
+            }
+            else
+            {
+                entry.PayloadFormat = AssetBundlePayloadFormat::Raw;
+                entry.Compression = AssetBundleCompression::None;
+                entry.UncompressedSize = entry.Size;
+                entry.ContentHash64 = 0;
+            }
+
+            if (entry.UncompressedSize == 0)
+            {
+                entry.UncompressedSize = entry.Size;
+            }
 
             if (entry.Guid.empty() || entry.Key.empty() || entry.Size == 0)
             {
@@ -220,8 +285,8 @@ namespace Limitless::Assets
             return Result<std::vector<uint8_t>>(ErrorCode::InvalidArgument, "AssetBundle: entry size is zero");
         }
 
-        std::vector<uint8_t> bytes;
-        bytes.resize(static_cast<size_t>(entry.Size));
+        std::vector<uint8_t> storedBytes;
+        storedBytes.resize(static_cast<size_t>(entry.Size));
 
         m_DataStream.clear();
         m_DataStream.seekg(static_cast<std::streamoff>(entry.Offset), std::ios::beg);
@@ -230,13 +295,23 @@ namespace Limitless::Assets
             return Result<std::vector<uint8_t>>(ErrorCode::FileCorrupted, "AssetBundle: seek failed");
         }
 
-        m_DataStream.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        m_DataStream.read(reinterpret_cast<char*>(storedBytes.data()), static_cast<std::streamsize>(storedBytes.size()));
         if (!m_DataStream.good())
         {
             return Result<std::vector<uint8_t>>(ErrorCode::FileCorrupted, "AssetBundle: read failed");
         }
 
-        return bytes;
+        if (entry.Compression == AssetBundleCompression::None)
+        {
+            return storedBytes;
+        }
+
+        if (entry.Compression == AssetBundleCompression::Zstd)
+        {
+            return DecompressZstd(storedBytes, entry.UncompressedSize);
+        }
+
+        return Result<std::vector<uint8_t>>(ErrorCode::NotSupported, "AssetBundle: unsupported compression");
     }
 
     Result<std::vector<uint8_t>> AssetBundle::ReadAllBytesByKey(const std::string& key)

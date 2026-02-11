@@ -6,6 +6,7 @@
 #include "Assets/AssetLoadCoordinator.h"
 
 #include "Graphics/Texture.h"
+#include "Assets/TextureSpecificationJson.h"
 
 namespace Limitless::Assets
 {
@@ -33,7 +34,16 @@ namespace Limitless::Assets
         static Async::Task<Ptr> LoadAsync(const std::string& key, const Settings& settings = Settings{}, uint64_t generation = AssetLoadCoordinator::GetGeneration())
         {
             // Register/import metadata.
-            const auto recordResult = AssetDatabase::GetInstance().ImportOrUpdate(key, Type, SettingsToJson(settings));
+            // IMPORTANT:
+            // Treat default settings as "no explicit importer override".
+            // This prevents incidental loads (example: a Material resolving its mainTexture)
+            // from overwriting a texture's canonical importer settings stored in the database.
+            const bool isDefaultSettings = IsDefaultTextureSpecification(settings);
+
+            const auto recordResult = AssetDatabase::GetInstance().ImportOrUpdate(
+                key,
+                Type,
+                isDefaultSettings ? nlohmann::json::object() : SettingsToJson(settings));
             if (recordResult.IsSuccess())
             {
                 // No deps for textures, but make sure we clear the field for correctness.

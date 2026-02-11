@@ -125,6 +125,42 @@ namespace Limitless
         }
     }
 
+    OpenGLTexture2D::OpenGLTexture2D(std::span<const TextureMipLevelRGBA8View> mipLevels, TextureSpecification specification)
+        : m_Specification(specification)
+    {
+        LT_VERIFY(!mipLevels.empty(), "OpenGLTexture2D: mipLevels is empty");
+        LT_VERIFY(mipLevels[0].PixelsRGBA8 != nullptr, "OpenGLTexture2D: base mip pixels are null");
+        LT_VERIFY(mipLevels[0].Width > 0 && mipLevels[0].Height > 0, "OpenGLTexture2D: base mip size must be non-zero");
+
+        m_Width = mipLevels[0].Width;
+        m_Height = mipLevels[0].Height;
+
+        glGenTextures(1, &m_RendererID);
+        glBindTexture(GL_TEXTURE_2D, m_RendererID);
+        ApplyParameters();
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(mipLevels.size() - 1u));
+
+        for (size_t level = 0; level < mipLevels.size(); ++level)
+        {
+            const auto& mip = mipLevels[level];
+            LT_VERIFY(mip.PixelsRGBA8 != nullptr, "OpenGLTexture2D: mip pixels are null");
+            LT_VERIFY(mip.Width > 0 && mip.Height > 0, "OpenGLTexture2D: mip dimensions must be non-zero");
+
+            glTexImage2D(
+                GL_TEXTURE_2D,
+                static_cast<GLint>(level),
+                GL_RGBA8,
+                static_cast<GLsizei>(mip.Width),
+                static_cast<GLsizei>(mip.Height),
+                0,
+                GL_RGBA,
+                GL_UNSIGNED_BYTE,
+                mip.PixelsRGBA8);
+        }
+    }
+
     OpenGLTexture2D::~OpenGLTexture2D()
     {
         if (m_RendererID)

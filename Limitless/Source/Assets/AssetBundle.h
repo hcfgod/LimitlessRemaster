@@ -13,6 +13,19 @@
 
 namespace Limitless::Assets
 {
+    enum class AssetBundleCompression : uint32_t
+    {
+        None = 0,
+        Zstd = 1
+    };
+
+    enum class AssetBundlePayloadFormat : uint32_t
+    {
+        Raw = 0,
+        CookedTexture2D = 1,
+        CookedShaderStages = 2
+    };
+
     // -----------------------------------------------------------------------------
     // AssetBundle
     //
@@ -36,8 +49,18 @@ namespace Limitless::Assets
             std::string Guid;
             std::string Key;
             AssetType Type = AssetType::Unknown;
+
+            // How the payload bytes are stored in the bundle.
+            AssetBundlePayloadFormat PayloadFormat = AssetBundlePayloadFormat::Raw;
+            AssetBundleCompression Compression = AssetBundleCompression::None;
+
+            // Data file location.
             uint64_t Offset = 0;
-            uint64_t Size = 0;
+            uint64_t Size = 0;             // Stored payload size (compressed if Compression != None)
+            uint64_t UncompressedSize = 0; // Uncompressed payload size (required for decompression)
+
+            // Build-time content hash used for incremental builds.
+            uint64_t ContentHash64 = 0;
         };
 
         static AssetBundle& GetInstance();

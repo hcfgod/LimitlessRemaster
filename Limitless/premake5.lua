@@ -46,6 +46,7 @@ project "Limitless"
     {
         "Source",
         "Vendor/",
+        "Vendor/Zstd/include",
         "Vendor/glad",
         "Vendor/spdlog",
         "Vendor/doctest",
@@ -65,6 +66,8 @@ project "Limitless"
     {
         -- Build SPIRV-Cross from source as a normal static library project.
         "VendorSpirvCross",
+        -- Build Zstd from source as a normal static library project.
+        "VendorZstd",
     }
 
     filter "system:windows"
@@ -76,7 +79,8 @@ project "Limitless"
         {
             "LT_PLATFORM_WINDOWS",
             -- Enable shaderc-based compilation on Windows where we vendor prebuilt libs.
-            "LT_ENABLE_SHADERC"
+            "LT_ENABLE_SHADERC",
+            "LT_ENABLE_ZSTD"
         }
 
         libdirs
@@ -98,6 +102,8 @@ project "Limitless"
             libdirs { ffmpegLibDir }
             links { "avcodec", "avformat", "avutil", "swresample" }
         end
+
+        -- Zstd is built from source via VendorZstd.
 
         links
         {
@@ -137,7 +143,8 @@ project "Limitless"
 
         defines
         {
-            "LT_PLATFORM_MACOS"
+            "LT_PLATFORM_MACOS",
+            "LT_ENABLE_ZSTD"
         }
 
         libdirs
@@ -181,7 +188,8 @@ project "Limitless"
 
         defines
         {
-            "LT_PLATFORM_LINUX"
+            "LT_PLATFORM_LINUX",
+            "LT_ENABLE_ZSTD"
         }
 
         libdirs
@@ -241,4 +249,5 @@ project "Limitless"
 
 group "Dependencies"
     include "Vendor/SPIRV-Cross"
+    include "Vendor/Zstd"
 group ""

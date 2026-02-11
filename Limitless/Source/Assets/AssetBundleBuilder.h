@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Assets/AssetBundle.h"
 #include "Core/Error.h"
 
 #include <filesystem>
@@ -20,10 +21,12 @@ namespace Limitless::Assets
     public:
         struct Settings
         {
-            // Reserved for future:
-            // - incremental builds
-            // - compression
-            // - cooked formats per type
+            // Per-entry compression for stored payloads.
+            // When set to Zstd but the build does not have Zstd enabled, the builder will fall back to None.
+            AssetBundleCompression Compression = AssetBundleCompression::Zstd;
+
+            // Zstd compression level (only used when Compression == Zstd).
+            int ZstdCompressionLevel = 3;
         };
 
         static Result<void> BuildProjectAssetBundle(Settings settings = Settings{});

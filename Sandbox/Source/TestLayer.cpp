@@ -6,6 +6,8 @@
 
 #include "Assets/AssetBundle.h"
 #include "Assets/AssetBundleBuilder.h"
+#include "Assets/AssetLoadCoordinator.h"
+#include "Assets/AssetManager.h"
 #include "Assets/AssetHotReloadManager.h"
 
 #include "Platform/Platform.h"
@@ -137,6 +139,10 @@ namespace Limitless
                 Assets::AssetHotReloadManager::GetInstance().Enable(true);
                 LT_INFO("AssetBundle disabled (loading assets from source Assets/).");
             }
+
+            // Cancel in-flight loads and clear caches so subsequent loads come from the new source.
+            Assets::AssetLoadCoordinator::CancelAllInFlightLoads();
+            Assets::AssetManager::ClearCaches();
 
             // Reload demo and input assets so we prove the new source works.
             GetInputSystem().SetProjectActionAssetFromKey("Assets/InputActions/Sandbox.inputactions.json");
