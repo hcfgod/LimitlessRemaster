@@ -17,8 +17,10 @@ namespace Limitless
             case GraphicsAPI::OpenGL:
             default:
             {
+                // FBO-related state must be created on the primary OpenGL context (render thread),
+                // not the shared resource thread. See Renderer.h documentation.
                 auto& renderer = Renderer::GetInstance();
-                return renderer.SubmitResourceAndWait("CreateFramebuffer", [specification](GraphicsContext*) -> std::shared_ptr<Framebuffer> {
+                return renderer.SubmitPrimaryResourceAndWait("CreateFramebuffer", [specification](GraphicsContext*) -> std::shared_ptr<Framebuffer> {
                     return std::make_shared<OpenGLFramebuffer>(specification);
                 });
             }

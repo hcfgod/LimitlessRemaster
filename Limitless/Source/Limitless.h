@@ -39,3 +39,7 @@
 #include "Graphics/Camera/CameraManager.h"
 #include "Graphics/Camera/OrthographicCamera2D.h"
 #include "Graphics/Camera/PerspectiveCamera3D.h"
+
+// Scene / ECS
+#include "Scene/Components.h"
+#include "Scene/Scene.h"

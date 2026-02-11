@@ -29,7 +29,8 @@ namespace Limitless
 
             if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
             {
-                renderer.SubmitResourceAndWait("OpenGLFramebuffer/Delete", [fboToDelete, depthToDelete](GraphicsContext*) {
+                // FBO deletion must happen on primary context (same as creation).
+                renderer.SubmitPrimaryResourceAndWait("OpenGLFramebuffer/Delete", [fboToDelete, depthToDelete](GraphicsContext*) {
                     if (depthToDelete != 0)
                     {
                         glDeleteRenderbuffers(1, &depthToDelete);

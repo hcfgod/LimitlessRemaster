@@ -8,6 +8,7 @@ namespace Limitless
 {
     class EditorCameraController;
     class Framebuffer;
+    class Scene;
 
     /**
      * @brief Editor layer with viewport, scene hierarchy, inspector, and project panels.
@@ -48,6 +49,9 @@ namespace Limitless
         CameraManager m_CameraManager;
         CameraId m_CameraId{};
         std::unique_ptr<EditorCameraController> m_EditorCameraController;
+
+        std::unique_ptr<Scene> m_Scene;
+        entt::entity m_SelectedEntity = entt::null;
 
         bool m_ShowDemoWindow = false;
     };

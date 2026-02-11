@@ -2,8 +2,7 @@
 #include "Assets/AssetLoadProgress.h"
 #include "Editor/EditorCameraController.h"
 #include "Graphics/Framebuffer.h"
-#include "Graphics/RenderCommand.h"
-#include "Graphics/Renderer.h"
+#include "Scene/Scene.h"
 #include "Graphics/Renderer2D.h"
 #include "ImGui/ImGuiLayer.h"
 #include "imgui/imgui.h"
@@ -22,6 +21,15 @@ namespace Limitless
     void EditorLayer::OnAttach()
     {
         Renderer2D::Initialize();
+
+        m_Scene = std::make_unique<Scene>();
+        auto quadEntity = m_Scene->CreateEntity("Quad (Test)");
+        auto& transform = m_Scene->GetRegistry().emplace<TransformComponent>(quadEntity);
+        transform.Position = glm::vec3(-0.5f, -0.5f, 0.0f);
+        transform.Scale = glm::vec3(1.0f, 1.0f, 1.0f);
+        auto& quad = m_Scene->GetRegistry().emplace<QuadRendererComponent>(quadEntity);
+        quad.Size = glm::vec2(1.0f, 1.0f);
+        quad.Color = glm::vec4(0.2f, 0.6f, 0.9f, 1.0f);
 
         // Create editor camera (3D perspective).
         CameraManager::Perspective3DCreateInfo cameraInfo{};
@@ -62,6 +70,7 @@ namespace Limitless
             m_EditorCameraController.reset();
         }
 
+        m_Scene.reset();
         m_ViewportFramebuffer.reset();
         Renderer2D::Shutdown();
 
@@ -78,38 +87,6 @@ namespace Limitless
     void EditorLayer::OnRender()
     {
         DrawMenuBar();
-
-        // Render scene to viewport framebuffer, then draw to ImGui.
-        if (m_ViewportFramebuffer && m_ViewportWidthPixels > 0 && m_ViewportHeightPixels > 0)
-        {
-            auto& renderer = Renderer::GetInstance();
-            if (renderer.IsInitialized())
-            {
-                // Bind viewport framebuffer, set viewport, clear, draw scene.
-                renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(m_ViewportFramebuffer));
-                renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(m_ViewportWidthPixels), static_cast<int>(m_ViewportHeightPixels)));
-
-                ClearCommand::ClearFlags clearFlags;
-                clearFlags.color = true;
-                clearFlags.depth = true;
-                clearFlags.stencil = false;
-                renderer.SubmitCommand(std::make_unique<ClearCommand>(clearFlags, 0.12f, 0.12f, 0.14f, 1.0f));
-
-                const Camera* camera = m_CameraManager.GetCamera(m_CameraId);
-                if (camera)
-                {
-                    Renderer2D::BeginScene(*camera);
-
-                    // Draw a single quad at origin (visible in perspective).
-                    Renderer2D::DrawQuad(glm::vec2(-0.5f, -0.5f), glm::vec2(1.0f, 1.0f), glm::vec4(0.2f, 0.6f, 0.9f, 1.0f));
-
-                    Renderer2D::EndScene();
-                }
-
-                renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(nullptr));
-            }
-        }
-
         DrawViewportPanel();
         DrawScenePanel();
         DrawInspectorPanel();
@@ -196,6 +173,12 @@ namespace Limitless
                 m_EditorCameraController->OnWindowResize(width, height);
             }
 
+            const Camera* camera = m_CameraManager.GetCamera(m_CameraId);
+            if (camera && m_Scene && m_ViewportFramebuffer)
+            {
+                SceneRenderer::RenderToViewport(*m_Scene, *camera, m_ViewportFramebuffer, width, height);
+            }
+
             if (m_ViewportFramebuffer && m_ViewportFramebuffer->GetColorAttachment())
             {
                 ImGui::Image(
@@ -249,11 +232,24 @@ namespace Limitless
     {
         ImGui::Begin("Scene");
 
-        if (ImGui::TreeNodeEx("Scene Root", ImGuiTreeNodeFlags_DefaultOpen))
+        if (m_Scene)
         {
-            if (ImGui::TreeNodeEx("Quad (Preview)", ImGuiTreeNodeFlags_Leaf))
+            if (ImGui::TreeNodeEx("Scene Root", ImGuiTreeNodeFlags_DefaultOpen))
+            {
+                auto view = m_Scene->GetRegistry().view<TagComponent>();
+                for (entt::entity entity : view)
+                {
+                    const auto& tag = view.get<TagComponent>(entity);
+                    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                    if (m_SelectedEntity == entity)
+                        flags |= ImGuiTreeNodeFlags_Selected;
+                    ImGui::TreeNodeEx(tag.Tag.c_str(), flags);
+                    if (ImGui::IsItemClicked())
+                        m_SelectedEntity = entity;
+                    // No TreePop for leaf nodes: NoTreePushOnOpen means they don't push to the stack.
+                }
                 ImGui::TreePop();
-            ImGui::TreePop();
+            }
         }
 
         ImGui::End();
@@ -263,10 +259,40 @@ namespace Limitless
     {
         ImGui::Begin("Inspector");
 
-        ImGui::Text("Select an object to edit.");
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Text("No selection.");
+        if (!m_Scene || m_SelectedEntity == entt::null || !m_Scene->IsValid(m_SelectedEntity))
+        {
+            ImGui::Text("Select an object to edit.");
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Text("No selection.");
+        }
+        else
+        {
+            auto& registry = m_Scene->GetRegistry();
+            if (auto* tag = registry.try_get<TagComponent>(m_SelectedEntity))
+            {
+                ImGui::Text("Tag: %s", tag->Tag.c_str());
+            }
+            if (auto* transform = registry.try_get<TransformComponent>(m_SelectedEntity))
+            {
+                if (ImGui::TreeNodeEx("Transform", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    ImGui::DragFloat3("Position", &transform->Position.x, 0.1f);
+                    ImGui::DragFloat3("Rotation", &transform->Rotation.x, 1.0f);
+                    ImGui::DragFloat3("Scale", &transform->Scale.x, 0.1f);
+                    ImGui::TreePop();
+                }
+            }
+            if (auto* quad = registry.try_get<QuadRendererComponent>(m_SelectedEntity))
+            {
+                if (ImGui::TreeNodeEx("Quad Renderer", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    ImGui::DragFloat2("Size", &quad->Size.x, 0.1f);
+                    ImGui::ColorEdit4("Color", &quad->Color.r);
+                    ImGui::TreePop();
+                }
+            }
+        }
 
         ImGui::End();
     }
