@@ -1,0 +1,45 @@
+#include "Framebuffer.h"
+#include "Graphics/GraphicsAPIDetector.h"
+#include "Graphics/Renderer.h"
+#include "Core/Error.h"
+
+#include "Graphics/OpenGL/OpenGLFramebuffer.h"
+
+namespace Limitless
+{
+    std::shared_ptr<Framebuffer> Framebuffer::Create(const FramebufferSpecification& specification)
+    {
+        LT_VERIFY(specification.Width > 0 && specification.Height > 0, "Framebuffer dimensions must be non-zero");
+
+        auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        switch (api)
+        {
+            case GraphicsAPI::OpenGL:
+            default:
+            {
+                auto& renderer = Renderer::GetInstance();
+                return renderer.SubmitResourceAndWait("CreateFramebuffer", [specification](GraphicsContext*) -> std::shared_ptr<Framebuffer> {
+                    return std::make_shared<OpenGLFramebuffer>(specification);
+                });
+            }
+        }
+    }
+
+    std::future<std::shared_ptr<Framebuffer>> Framebuffer::CreateAsync(const FramebufferSpecification& specification)
+    {
+        LT_VERIFY(specification.Width > 0 && specification.Height > 0, "Framebuffer dimensions must be non-zero");
+
+        auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        switch (api)
+        {
+            case GraphicsAPI::OpenGL:
+            default:
+            {
+                auto& renderer = Renderer::GetInstance();
+                return renderer.SubmitResourceAsync("CreateFramebufferAsync", [specification](GraphicsContext*) -> std::shared_ptr<Framebuffer> {
+                    return std::make_shared<OpenGLFramebuffer>(specification);
+                });
+            }
+        }
+    }
+} // namespace Limitless

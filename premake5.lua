@@ -1,5 +1,5 @@
 workspace "LimitlessRemaster"
-    startproject "Sandbox"
+    startproject "Editor"
 
     configurations
     {
@@ -78,4 +78,5 @@ workspace "LimitlessRemaster"
 -- Include sub-projects
 include "Limitless"
 include "Sandbox"
+include "Editor"
 include "Test"

@@ -221,6 +221,10 @@ namespace Limitless
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
+            // Feed external event handlers first (e.g. ImGui) before internal handling.
+            if (m_SdlEventCallback)
+                m_SdlEventCallback(event);
+
             // Feed the Unity-style input system immediately (same-frame polling).
             GetInputSystem().OnSdlEvent(event);
 

@@ -29,6 +29,12 @@ public:
     // Swap the backbuffer to the screen
     virtual void SwapBuffers() = 0;
 
+    /// Returns the native graphics context (e.g. SDL_GLContext for OpenGL). May be null for APIs that do not expose it.
+    virtual void* GetNativeContext() { return nullptr; }
+
+    /// Returns the graphics API this context was created with.
+    virtual GraphicsAPI GetAPI() const = 0;
+
     // VSync control
     virtual bool SetVSync(bool enabled) = 0; // returns true if succeeded
     virtual bool IsVSync() const = 0;

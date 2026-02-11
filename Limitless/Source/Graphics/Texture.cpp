@@ -161,5 +161,23 @@ namespace Limitless
             }
         }
     }
+
+    std::shared_ptr<Texture2D> Texture2D::CreateForRenderTarget(uint32_t width, uint32_t height)
+    {
+        LT_VERIFY(width > 0 && height > 0, "Texture2D::CreateForRenderTarget: dimensions must be non-zero");
+
+        auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        switch (api)
+        {
+            case GraphicsAPI::OpenGL:
+            default:
+            {
+                auto& renderer = Renderer::GetInstance();
+                return renderer.SubmitResourceAndWait("CreateTexture2D/ForRenderTarget", [width, height](GraphicsContext*) -> std::shared_ptr<Texture2D> {
+                    return std::make_shared<OpenGLTexture2D>(width, height);
+                });
+            }
+        }
+    }
 }
 

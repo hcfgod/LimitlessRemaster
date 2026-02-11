@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <functional>
 #include "Error.h"
 #include "LayerStack.h"
 
@@ -39,10 +40,15 @@ namespace Limitless
         void PopLayer(LayerRef layer) { m_LayerStack.PopLayer(layer); }
         void PopOverlay(LayerRef overlay) { m_LayerStack.PopOverlay(overlay); }
 
+        /// Registers ImGui lifecycle callbacks. Called before layer updates (begin) and after layer render (end).
+        void SetImGuiCallbacks(std::function<void()> beginFrame, std::function<void()> endFrame);
+
 	private:
 		bool m_IsRunning = true;
 		std::unique_ptr<Window> m_Window;
 		LayerStack m_LayerStack;
+		std::function<void()> m_ImGuiBeginFrame;
+		std::function<void()> m_ImGuiEndFrame;
  
 		bool InternalInitialize();
 		void InternalShutdown();

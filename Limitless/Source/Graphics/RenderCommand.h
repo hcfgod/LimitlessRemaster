@@ -5,6 +5,7 @@
 #include "Core/Debug/Log.h"
 #include "Graphics/GraphicsEnums.h"
 #include "Graphics/Texture.h"
+#include "Graphics/Framebuffer.h"
 #include <memory>
 #include <functional>
 #include <variant>

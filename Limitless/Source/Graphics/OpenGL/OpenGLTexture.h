@@ -15,6 +15,8 @@ namespace Limitless
         OpenGLTexture2D(const std::string& path, TextureSpecification specification);
         OpenGLTexture2D(uint32_t width, uint32_t height, const void* rgbaPixels, TextureSpecification specification);
         OpenGLTexture2D(std::span<const TextureMipLevelRGBA8View> mipLevels, TextureSpecification specification);
+        /// Creates an empty texture for framebuffer color attachment (render target).
+        OpenGLTexture2D(uint32_t width, uint32_t height);
         ~OpenGLTexture2D() override;
 
         void Bind(uint32_t slot) const override;

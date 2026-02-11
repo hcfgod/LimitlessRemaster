@@ -35,6 +35,8 @@ namespace Limitless {
         void MakeCurrent() override;
         void Init(void* nativeWindow, GraphicsAPI api) override;
         void SwapBuffers() override;
+        void* GetNativeContext() override { return m_Context; }
+        GraphicsAPI GetAPI() const override { return GraphicsAPI::OpenGL; }
 
         bool SetVSync(bool enabled) override;
         bool IsVSync() const override {

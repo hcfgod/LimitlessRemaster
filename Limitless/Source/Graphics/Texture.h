@@ -86,6 +86,10 @@ namespace Limitless
             uint32_t height,
             const void* rgbaPixels,
             const TextureSpecification& specification = {});
+
+        /// Creates an empty RGBA8 texture for use as a render target (e.g. framebuffer color attachment).
+        /// No mipmaps, linear filter, clamp-to-edge. Must be created on the render thread.
+        static std::shared_ptr<Texture2D> CreateForRenderTarget(uint32_t width, uint32_t height);
     };
 }
 

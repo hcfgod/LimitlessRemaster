@@ -5,6 +5,7 @@
 #include "Core/Error.h"
 #include <SDL3/SDL.h>
 #include <vector>
+#include <functional>
 #include "Graphics/GraphicsContext.h"
 
 namespace Limitless
@@ -95,6 +96,9 @@ namespace Limitless
 
         // Native window access
         void* GetNativeWindow() const override { return m_Window; }
+
+        /// Callback invoked for each SDL event before internal handling (e.g. for ImGui).
+        void SetSdlEventCallback(std::function<void(const SDL_Event&)> callback) { m_SdlEventCallback = callback; }
         void* GetNativeWindowHandle() const override { return m_Window; }
         void GetWindowSize(int* width, int* height) const override;
         
@@ -191,6 +195,7 @@ namespace Limitless
         std::function<void(bool)> m_FocusCallback;
         std::function<void(WindowState)> m_StateChangeCallback;
         std::function<void(WindowEventType)> m_EventCallback;
+        std::function<void(const SDL_Event&)> m_SdlEventCallback;
 
         // Event callback tokens (identity-safe removal)
         Limitless::EventCallbackToken m_WindowConfigChangedCallbackToken = 0;

@@ -31,8 +31,21 @@ project "Limitless"
         "Source/**.h",
         "Source/**.cpp",
         "Vendor/stb/stb_image/stb_image.cpp",
-        "Vendor/glad/glad/glad.c"
+        "Vendor/glad/glad/glad.c",
+        "Vendor/imgui/imgui.cpp",
+        "Vendor/imgui/imgui_demo.cpp",
+        "Vendor/imgui/imgui_draw.cpp",
+        "Vendor/imgui/imgui_tables.cpp",
+        "Vendor/imgui/imgui_widgets.cpp",
+        "Vendor/imgui/backends/imgui_impl_sdl3.cpp",
+        "Vendor/imgui/backends/imgui_impl_opengl3.cpp"
     }
+
+    filter "files:Vendor/imgui/**"
+        flags { "NoPCH" }
+
+    filter "files:Vendor/imgui/backends/imgui_impl_opengl3.cpp"
+        forceincludes { "glad/glad.h" }
 
     filter "files:Vendor/**"
         flags { "NoPCH" }
@@ -52,6 +65,7 @@ project "Limitless"
         "Vendor/doctest",
         "Vendor/SDL3",
         "Vendor/ffmpeg/include",
+        "Vendor/imgui",
 
         -- Shader toolchain (vendored). These are used by the shader system for
         -- compilation (shaderc) and reflection/transpilation (SPIRV-Cross).

@@ -26,7 +26,7 @@ Source of truth: `Limitless/Source/Graphics/OpenGL/OpenGLRenderCommand.cpp`
 | `SetVertexBufferDataCommand` | Implemented | Dynamic streaming uploads via `VertexBuffer::SetData()` |
 | `BindTextureCommand` | Implemented | `Texture::Bind(slot)` (`glActiveTexture` + `glBindTexture`) |
 | `SetTextureSpecificationCommand` | Implemented | Sampler-like state via `Texture::ApplySpecification()` |
-| `BindFramebufferCommand` | Stubbed | Logs only |
+| `BindFramebufferCommand` | Implemented | `glBindFramebuffer`, `Framebuffer::Bind()` |
 | `DrawArraysCommand` | Implemented | `glDrawArrays` |
 | `DrawIndexedCommand` | Implemented | `glDrawElements` / `glDrawElementsBaseVertex` |
 | `DrawInstancedCommand` | Not implemented | TODO |
@@ -37,9 +37,9 @@ Source of truth: `Limitless/Source/Graphics/OpenGL/OpenGLRenderCommand.cpp`
 | `SetPolygonModeCommand` | Implemented | `glPolygonMode` |
 | `SetLineWidthCommand` | Implemented | `glLineWidth` |
 | `SetPointSizeCommand` | Implemented | `glPointSize` |
-| `PushDebugGroupCommand` | Stubbed | Logs only |
-| `PopDebugGroupCommand` | Stubbed | Logs only |
-| `InsertDebugMarkerCommand` | Stubbed | Logs only |
+| `PushDebugGroupCommand` | Implemented | `glPushDebugGroup` / `glPushDebugGroupKHR` when available |
+| `PopDebugGroupCommand` | Implemented | `glPopDebugGroup` / `glPopDebugGroupKHR` when available |
+| `InsertDebugMarkerCommand` | Implemented | `glInsertDebugMarker` / `glInsertDebugMarkerKHR` when available |
 
 ## Milestones (Product-Focused)
 

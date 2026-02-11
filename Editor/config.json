@@ -1,0 +1,25 @@
+{
+    "logging": {
+        "console_enabled": true,
+        "directory": "logs",
+        "file_enabled": true,
+        "level": "info",
+        "max_file_size": 52428800,
+        "max_files": 10,
+        "pattern": "[%T] [%l] %n: %v"
+    },
+    "system": {
+        "log_directory": "logs",
+        "max_threads": 20,
+        "temp_directory": "temp",
+        "working_directory": "."
+    },
+    "window": {
+        "fullscreen": false,
+        "height": 720,
+        "resizable": true,
+        "title": "Limitless Editor",
+        "vsync": false,
+        "width": 1280
+    }
+}

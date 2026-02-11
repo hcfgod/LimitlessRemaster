@@ -4,6 +4,7 @@
 #include "Graphics/VertexArray.h"
 #include "Graphics/Buffer.h"
 #include "Graphics/Texture.h"
+#include "Graphics/Framebuffer.h"
 #include "Graphics/OpenGL/OpenGLBuffer.h"
 #include "Graphics/OpenGL/OpenGLShader.h"
 #include "Graphics/OpenGL/OpenGLVertexArray.h"
@@ -17,6 +18,7 @@
 #include <glad/glad.h>
 #endif
 
+#include <SDL3/SDL.h>
 #include <cstring>
 
 namespace {
@@ -26,6 +28,36 @@ namespace {
         if (error != GL_NO_ERROR) {
             LT_CORE_ERROR("OpenGL error in {}: 0x{:x}", operation, error);
         }
+    }
+
+    // GL_KHR_debug / GL 4.3 debug group functions. Loaded at runtime when available.
+    using PFNGLPUSHDEBUGGROUPPROC = void (*)(GLenum source, GLuint id, GLsizei length, const GLchar* message);
+    using PFNGLPOPDEBUGGROUPPROC = void (*)();
+    using PFNGLINSERTDEBUGMARKERPROC = void (*)(GLenum source, GLuint id, GLsizei length, const GLchar* message);
+
+    static PFNGLPUSHDEBUGGROUPPROC s_glPushDebugGroup = nullptr;
+    static PFNGLPOPDEBUGGROUPPROC s_glPopDebugGroup = nullptr;
+    static PFNGLINSERTDEBUGMARKERPROC s_glInsertDebugMarker = nullptr;
+    static bool s_DebugFunctionsLoaded = false;
+
+    // GL_KHR_debug constants (may not be in GLAD 3.3 headers)
+    static constexpr GLenum kGLDebugSourceApplication = 0x824A;
+
+    static void LoadDebugFunctions()
+    {
+        if (s_DebugFunctionsLoaded)
+            return;
+        s_DebugFunctionsLoaded = true;
+
+        s_glPushDebugGroup = reinterpret_cast<PFNGLPUSHDEBUGGROUPPROC>(SDL_GL_GetProcAddress("glPushDebugGroup"));
+        if (!s_glPushDebugGroup)
+            s_glPushDebugGroup = reinterpret_cast<PFNGLPUSHDEBUGGROUPPROC>(SDL_GL_GetProcAddress("glPushDebugGroupKHR"));
+        s_glPopDebugGroup = reinterpret_cast<PFNGLPOPDEBUGGROUPPROC>(SDL_GL_GetProcAddress("glPopDebugGroup"));
+        if (!s_glPopDebugGroup)
+            s_glPopDebugGroup = reinterpret_cast<PFNGLPOPDEBUGGROUPPROC>(SDL_GL_GetProcAddress("glPopDebugGroupKHR"));
+        s_glInsertDebugMarker = reinterpret_cast<PFNGLINSERTDEBUGMARKERPROC>(SDL_GL_GetProcAddress("glInsertDebugMarker"));
+        if (!s_glInsertDebugMarker)
+            s_glInsertDebugMarker = reinterpret_cast<PFNGLINSERTDEBUGMARKERPROC>(SDL_GL_GetProcAddress("glInsertDebugMarkerKHR"));
     }
 }
 
@@ -479,14 +511,13 @@ namespace Limitless
 
         if (m_Framebuffer)
         {
-            // This should be implemented by the specific render API implementation
-            LT_CORE_DEBUG("Binding framebuffer: {}", m_Framebuffer ? "valid" : "null");
+            m_Framebuffer->Bind();
         }
         else
         {
-            // Bind default framebuffer
-            LT_CORE_DEBUG("Binding default framebuffer");
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
         }
+        CheckOpenGLError("BindFramebufferCommand::Execute");
     }
 
     // DrawArraysCommand Execute implementation
@@ -681,8 +712,11 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // This should be implemented by the specific render API implementation
-        LT_CORE_DEBUG("PushDebugGroup: {}", m_GroupName);
+        LoadDebugFunctions();
+        if (s_glPushDebugGroup)
+        {
+            s_glPushDebugGroup(kGLDebugSourceApplication, 0, static_cast<GLsizei>(m_GroupName.size()), m_GroupName.c_str());
+        }
     }
 
     // PopDebugGroupCommand Execute implementation
@@ -693,8 +727,11 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // This should be implemented by the specific render API implementation
-        LT_CORE_DEBUG("PopDebugGroup");
+        LoadDebugFunctions();
+        if (s_glPopDebugGroup)
+        {
+            s_glPopDebugGroup();
+        }
     }
 
     // InsertDebugMarkerCommand Execute implementation
@@ -705,8 +742,11 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // This should be implemented by the specific render API implementation
-        LT_CORE_DEBUG("InsertDebugMarker: {}", m_MarkerName);
+        LoadDebugFunctions();
+        if (s_glInsertDebugMarker)
+        {
+            s_glInsertDebugMarker(kGLDebugSourceApplication, 0, static_cast<GLsizei>(m_MarkerName.size()), m_MarkerName.c_str());
+        }
     }
 
     // CustomCommand Execute implementation

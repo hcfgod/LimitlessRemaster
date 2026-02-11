@@ -129,6 +129,10 @@
 //#define IM_DEBUG_BREAK  IM_ASSERT(0)
 //#define IM_DEBUG_BREAK  __debugbreak()
 
+//---- Use GLAD (Limitless engine) instead of ImGui's embedded loader.
+// Prevents symbol conflicts when linking with glad.c.
+#define IMGUI_IMPL_OPENGL_LOADER_CUSTOM
+
 //---- Debug Tools: Enable slower asserts
 //#define IMGUI_DEBUG_PARANOID
 

@@ -66,6 +66,12 @@ namespace Limitless
 		return ::Limitless::GetInputSystem();
 	}
 
+	void Application::SetImGuiCallbacks(std::function<void()> beginFrame, std::function<void()> endFrame)
+	{
+		m_ImGuiBeginFrame = std::move(beginFrame);
+		m_ImGuiEndFrame = std::move(endFrame);
+	}
+
 	Application::~Application()
 	{
 		LT_CORE_INFO("Application destructor starting...");
@@ -78,7 +84,10 @@ namespace Limitless
         auto& asyncIO = Limitless::Async::GetAsyncIO();
         asyncIO.Shutdown();
         
-        LT_CORE_INFO("Application destructor completed");
+		LT_CORE_INFO("Application destructor completed");
+
+        m_ImGuiBeginFrame = nullptr;
+        m_ImGuiEndFrame = nullptr;
 
         if (s_ApplicationInstance == this)
         {
@@ -116,6 +125,10 @@ namespace Limitless
             // Update input actions after pumping events so Layers can poll action values during OnUpdate.
             GetInputSystem().UpdateActions();
 
+            // ImGui begin frame (before any layer may call ImGui::Begin).
+            if (m_ImGuiBeginFrame)
+                m_ImGuiBeginFrame();
+
             // Update layers
             // FixedUpdate-style steps (deterministic simulation).
             while (Time::TryConsumeFixedStep()) 
@@ -133,6 +146,10 @@ namespace Limitless
 			
 			// Render layers
 			m_LayerStack.OnRender();
+
+			// ImGui end frame (render ImGui on top of all layers).
+			if (m_ImGuiEndFrame)
+				m_ImGuiEndFrame();
 			
 			// End frame and swap buffers
 			Renderer::GetInstance().EndFrame();

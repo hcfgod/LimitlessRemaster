@@ -125,6 +125,27 @@ namespace Limitless
         }
     }
 
+    OpenGLTexture2D::OpenGLTexture2D(uint32_t width, uint32_t height)
+        : m_Width(width)
+        , m_Height(height)
+    {
+        LT_VERIFY(width > 0 && height > 0, "Render target texture size must be non-zero");
+
+        m_Specification.GenerateMipmaps = false;
+        m_Specification.MinFilter = TextureFilter::Linear;
+        m_Specification.MagFilter = TextureFilter::Linear;
+        m_Specification.WrapU = TextureWrap::ClampToEdge;
+        m_Specification.WrapV = TextureWrap::ClampToEdge;
+
+        glGenTextures(1, &m_RendererID);
+        glBindTexture(GL_TEXTURE_2D, m_RendererID);
+        ApplyParameters();
+
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8,
+                     static_cast<GLsizei>(m_Width), static_cast<GLsizei>(m_Height),
+                     0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    }
+
     OpenGLTexture2D::OpenGLTexture2D(std::span<const TextureMipLevelRGBA8View> mipLevels, TextureSpecification specification)
         : m_Specification(specification)
     {
