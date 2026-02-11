@@ -277,6 +277,11 @@ namespace Limitless::Assets
         return root;
     }
 
+    Result<void> AssetBundleBuilder::BuildProjectAssetBundle()
+    {
+        return BuildProjectAssetBundle(Settings{});
+    }
+
     Result<void> AssetBundleBuilder::BuildProjectAssetBundle(Settings settings)
     {
         const auto rootResult = FindProjectRootFromWorkingDirectory();
@@ -288,6 +293,11 @@ namespace Limitless::Assets
         const std::filesystem::path root = rootResult.GetValue();
         const std::filesystem::path outDir = root / "Build" / "AssetBundle";
         return BuildAtOutputDirectory(outDir, settings);
+    }
+
+    Result<void> AssetBundleBuilder::BuildAssetBundleToDirectory(const std::filesystem::path& outputDirectory)
+    {
+        return BuildAssetBundleToDirectory(outputDirectory, Settings{});
     }
 
     Result<void> AssetBundleBuilder::BuildAssetBundleToDirectory(const std::filesystem::path& outputDirectory, Settings settings)

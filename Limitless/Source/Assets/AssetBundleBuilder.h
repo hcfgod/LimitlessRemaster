@@ -29,8 +29,15 @@ namespace Limitless::Assets
             int ZstdCompressionLevel = 3;
         };
 
-        static Result<void> BuildProjectAssetBundle(Settings settings = Settings{});
-        static Result<void> BuildAssetBundleToDirectory(const std::filesystem::path& outputDirectory, Settings settings = Settings{});
+        // NOTE:
+        // We intentionally provide overloads instead of default-argument `Settings{}` here.
+        // Some toolchains (notably GCC/Clang in certain modes) reject default arguments for
+        // nested types with default member initializers.
+        static Result<void> BuildProjectAssetBundle();
+        static Result<void> BuildProjectAssetBundle(Settings settings);
+
+        static Result<void> BuildAssetBundleToDirectory(const std::filesystem::path& outputDirectory);
+        static Result<void> BuildAssetBundleToDirectory(const std::filesystem::path& outputDirectory, Settings settings);
 
     private:
         static Result<void> BuildAtOutputDirectory(const std::filesystem::path& outputDirectory, Settings settings);
