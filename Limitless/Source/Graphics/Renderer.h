@@ -3,6 +3,7 @@
 #include "GraphicsContext.h"
 #include "RenderCommandQueue.h"
 #include "RenderResourceCommandQueue.h"
+#include "RenderResourceThread.h"
 #include "FrameUploadAllocator.h"
 #include "FrameCommandArena.h"
 #include "Core/Debug/Log.h"
@@ -85,6 +86,11 @@ namespace Limitless
         // Use these for large uploads to avoid stalling the calling thread.
         bool SubmitResource(std::unique_ptr<RenderResourceCommandQueue::Command> command);
 
+        // Returns true when the OpenGL shared-context resource thread is active.
+        // When enabled, GPU resource work executes on a dedicated thread with its own shared
+        // OpenGL context (in parallel with frame rendering on the render thread).
+        bool IsOpenGLResourceThreadEnabled() const { return m_OpenGLResourceThreadEnabled.load(std::memory_order_relaxed); }
+
         template<typename Func>
         std::future<decltype(std::declval<Func>()(static_cast<GraphicsContext*>(nullptr)))> SubmitResourceAsync(Func&& func)
         {
@@ -122,10 +128,12 @@ namespace Limitless
             {
                 std::promise<ResultT> promise;
                 std::function<ResultT(GraphicsContext*)> function;
+                bool RequiresCrossContextSynchronization = false;
             };
 
             auto state = std::make_shared<SharedState>();
             state->function = std::forward<Func>(func);
+            state->RequiresCrossContextSynchronization = IsOpenGLResourceThreadEnabled();
             std::future<ResultT> future = state->promise.get_future();
 
             class CommandImpl final : public RenderResourceCommandQueue::Command
@@ -143,11 +151,20 @@ namespace Limitless
                         if constexpr (std::is_void_v<ResultT>)
                         {
                             m_Shared->function(context);
+                            if (m_Shared->RequiresCrossContextSynchronization)
+                            {
+                                Renderer::SynchronizeOpenGLResourceWorkForCrossContextVisibility();
+                            }
                             m_Shared->promise.set_value();
                         }
                         else
                         {
-                            m_Shared->promise.set_value(m_Shared->function(context));
+                            ResultT result = m_Shared->function(context);
+                            if (m_Shared->RequiresCrossContextSynchronization)
+                            {
+                                Renderer::SynchronizeOpenGLResourceWorkForCrossContextVisibility();
+                            }
+                            m_Shared->promise.set_value(std::move(result));
                         }
                     }
                     catch (...)
@@ -196,10 +213,12 @@ namespace Limitless
             {
                 std::promise<ResultT> promise;
                 std::function<ResultT(GraphicsContext*)> function;
+                bool RequiresCrossContextSynchronization = false;
             };
 
             auto state = std::make_shared<SharedState>();
             state->function = std::forward<Func>(func);
+            state->RequiresCrossContextSynchronization = IsOpenGLResourceThreadEnabled();
             std::future<ResultT> future = state->promise.get_future();
 
             class CommandImpl final : public RenderResourceCommandQueue::Command
@@ -217,11 +236,20 @@ namespace Limitless
                         if constexpr (std::is_void_v<ResultT>)
                         {
                             m_Shared->function(context);
+                            if (m_Shared->RequiresCrossContextSynchronization)
+                            {
+                                Renderer::SynchronizeOpenGLResourceWorkForCrossContextVisibility();
+                            }
                             m_Shared->promise.set_value();
                         }
                         else
                         {
-                            m_Shared->promise.set_value(m_Shared->function(context));
+                            ResultT result = m_Shared->function(context);
+                            if (m_Shared->RequiresCrossContextSynchronization)
+                            {
+                                Renderer::SynchronizeOpenGLResourceWorkForCrossContextVisibility();
+                            }
+                            m_Shared->promise.set_value(std::move(result));
                         }
                     }
                     catch (...)
@@ -239,7 +267,7 @@ namespace Limitless
                 throw std::runtime_error("RenderResourceCommandQueue is full");
             }
 
-            NotifyRenderThreadResourceWorkAvailable();
+            NotifyResourceWorkAvailable();
 
             if constexpr (std::is_void_v<ResultT>)
             {
@@ -283,9 +311,19 @@ namespace Limitless
 
         bool IsOnRenderThread() const { return m_RenderThreadRunning.load() && (std::this_thread::get_id() == m_RenderThreadId); }
         void NotifyRenderThreadResourceWorkAvailable();
+        void NotifyResourceWorkAvailable();
+
+        // When a shared OpenGL context is used for resource work, the producer context must
+        // synchronize before a resource is safe to use in the consumer context.
+        // This must be called while an OpenGL context is current on the calling thread.
+        static void SynchronizeOpenGLResourceWorkForCrossContextVisibility();
 
         std::thread::id m_RenderThreadId{};
         RenderResourceCommandQueue m_ResourceQueue;
+
+        // Optional OpenGL shared-context resource thread (multi-threaded GPU resource execution).
+        std::atomic<bool> m_OpenGLResourceThreadEnabled{false};
+        std::unique_ptr<RenderResourceThread> m_OpenGLResourceThread;
 
         // Frame-local upload staging (reduces per-upload heap allocations).
         FrameUploadAllocator m_FrameUploadAllocator;

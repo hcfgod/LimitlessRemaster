@@ -259,6 +259,42 @@ namespace Limitless {
         (void)SDL_GL_MakeCurrent(m_Window, nullptr);
     }
 
+    std::unique_ptr<OpenGLSharedContext> OpenGLContext::CreateSharedContext()
+    {
+        if (!m_Window || !m_Context)
+        {
+            LT_CORE_ERROR("OpenGLContext::CreateSharedContext: primary context not initialized");
+            return nullptr;
+        }
+
+        // Creating a shared context requires a current context.
+        ScopedCurrentContext scope(*this);
+
+        int previousShare = 0;
+        (void)SDL_GL_GetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, &previousShare);
+
+        // Enable sharing for the next context creation.
+        if (!SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1))
+        {
+            LT_CORE_ERROR("OpenGLContext::CreateSharedContext: failed to set SDL_GL_SHARE_WITH_CURRENT_CONTEXT: {}", SDL_GetError());
+            return nullptr;
+        }
+
+        SDL_GLContext shared = SDL_GL_CreateContext(m_Window);
+
+        // Restore prior setting (best-effort).
+        (void)SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, previousShare);
+
+        if (!shared)
+        {
+            LT_CORE_ERROR("OpenGLContext::CreateSharedContext: SDL_GL_CreateContext failed: {}", SDL_GetError());
+            return nullptr;
+        }
+
+        LT_CORE_INFO("OpenGLContext: created shared OpenGL context for resource thread");
+        return std::make_unique<OpenGLSharedContext>(m_Window, shared);
+    }
+
     void OpenGLContext::SwapBuffers() {
         SDL_GL_SwapWindow(m_Window);
     }

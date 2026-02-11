@@ -1,9 +1,11 @@
 #pragma once
 
 #include "Graphics/GraphicsContext.h"
+#include "Graphics/OpenGL/OpenGLSharedContext.h"
 #include <SDL3/SDL.h>
 #include <mutex>
 #include <thread>
+#include <memory>
 
 namespace Limitless {
     class OpenGLContext : public GraphicsContext 
@@ -38,6 +40,14 @@ namespace Limitless {
         bool IsVSync() const override {
             return m_VSyncActuallyEnabled;
         }
+
+        // Create a resource-sharing OpenGL context suitable for running GPU resource work on a
+        // secondary thread (uploads/creates/deletes). Returns null if creation fails.
+        //
+        // Notes:
+        // - The created context shares objects with the primary context.
+        // - This is NOT intended for multi-threaded draw execution.
+        std::unique_ptr<OpenGLSharedContext> CreateSharedContext();
 
     private:
         SDL_Window* m_Window;

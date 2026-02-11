@@ -119,7 +119,7 @@ For OpenGL correctness, the viewport must match the window's **drawable pixel si
 
 1. **RenderCommand**: Base interface for all render commands
 2. **RenderCommandQueue**: Thread-safe queue using lock-free implementation
-3. **RenderCommandExecutor**: Multi-threaded command executor
+3. **RenderCommandExecutor**: Multi-threaded command executor (**currently disabled for OpenGL**; future-facing scaffolding only)
 4. **RenderCommandBatch**: Efficient command batching utility
 
 ### Command Types
@@ -156,6 +156,9 @@ The system includes a comprehensive set of pre-defined render commands:
 ## Usage
 
 ### Basic Setup
+
+In the engine runtime, you typically interact with the render queue through `Renderer` (which owns the queue and coordinates the render thread).
+Constructing a `RenderCommandQueue` directly is a lower-level path that is still useful for tests, prototypes, or standalone tooling.
 
 ```cpp
 #include "Graphics/RenderCommandQueue.h"
@@ -225,7 +228,7 @@ RenderCommandBatch batch(*renderQueue);
 // Add multiple similar commands to the batch
 for (int i = 0; i < 10; ++i)
 {
-    auto drawCommand = std::make_unique<DrawArraysCommand>(GL_TRIANGLES, i * 3, 3);
+    auto drawCommand = std::make_unique<DrawArraysCommand>(Limitless::DrawMode::Triangles, i * 3, 3);
     batch.AddCommand(std::move(drawCommand));
 }
 
@@ -246,26 +249,28 @@ renderQueue->ProcessCommandsBatch(graphicsContext, 100);
 renderQueue->ProcessCommandsWithTimeLimit(graphicsContext, 16000); // 16ms limit
 ```
 
-### Multi-Threaded Rendering
+### Dedicated render thread (implemented)
+
+Limitless supports **multi-threaded submission**: multiple producer threads may submit commands concurrently.
+Execution is **single-threaded** against the graphics context (OpenGL context affinity), and can run either:
+
+- on the **main thread** (render thread disabled), or
+- on a dedicated **render thread** (render thread enabled) that owns “process commands + present” for each frame.
+
+The render thread is coordinated by `Renderer` (see `Limitless/Source/Graphics/Renderer.cpp`), not by `RenderCommandExecutor`.
 
 ```cpp
-// Create a multi-threaded executor
-RenderCommandExecutor executor(graphicsContext, 2); // 2 worker threads
+// Typical engine usage: submit from any thread.
+// Execution + SwapBuffers happen on the render thread when enabled.
+// (Frame boundaries are typically owned by Application: BeginFrame → EndFrame → SwapBuffers.)
+#include "Graphics/Renderer.h"
+#include "Graphics/RenderCommand.h"
 
-// Start the executor
-executor.Start();
+auto& renderer = Limitless::Renderer::GetInstance();
 
-// Submit commands
-std::vector<std::unique_ptr<RenderCommand>> commands;
-// ... add commands ...
-
-executor.SubmitCommands(std::move(commands));
-
-// Wait for completion
-executor.WaitForCompletion();
-
-// Stop the executor
-executor.Stop();
+renderer.SubmitCommand(std::make_unique<Limitless::ClearCommand>(
+    Limitless::ClearCommand::ClearFlags{true, true, false},
+    0.1f, 0.1f, 0.12f, 1.0f));
 ```
 
 ### Performance Monitoring
@@ -321,9 +326,11 @@ renderQueue->SetDebugCallback([](const std::string& message) {
 // Use debug groups in commands
 std::vector<std::unique_ptr<RenderCommand>> commands;
 commands.push_back(std::make_unique<PushDebugGroupCommand>("DrawTriangle"));
-commands.push_back(std::make_unique<DrawArraysCommand>(GL_TRIANGLES, 0, 3));
+commands.push_back(std::make_unique<DrawArraysCommand>(Limitless::DrawMode::Triangles, 0, 3));
 commands.push_back(std::make_unique<PopDebugGroupCommand>());
 ```
+
+Note: debug-marker commands (`PushDebugGroupCommand`, `PopDebugGroupCommand`, `InsertDebugMarkerCommand`) are currently **stubbed** in the OpenGL backend and only log intent (see `Docs/RENDERING_ROADMAP.md`).
 
 ## Configuration Options
 
@@ -336,7 +343,7 @@ commands.push_back(std::make_unique<PopDebugGroupCommand>());
 - `enablePrioritySorting`: Enable priority-based sorting
 - `enableStatistics`: Enable performance statistics
 - `enableDebugMarkers`: Enable debug markers
-- `workerThreadCount`: Number of worker threads for multi-threaded execution
+- `workerThreadCount`: Number of worker threads for multi-threaded execution (**reserved**; `RenderCommandExecutor` is disabled for OpenGL today)
 
 ## Thread Safety
 
@@ -357,7 +364,9 @@ The render command system is thread-safe for *submission*, with strict rules for
 
 ### Notes about `RenderCommandExecutor`
 
-`RenderCommandExecutor` is experimental scaffolding. It is **not safe** to execute OpenGL commands from multiple threads against a single OpenGL context without explicit context sharing/ownership rules. Treat multi-threaded GPU execution as **not implemented** for OpenGL as of right now.
+`RenderCommandExecutor` is experimental scaffolding and is currently **disabled** for the OpenGL-first backend (it will throw `PlatformNotSupported` if used).
+
+Multi-thread **submission** is supported. Multi-thread **OpenGL execution** is not a goal until explicit context ownership / sharing rules are designed and enforced.
 
 ## Performance Considerations
 
