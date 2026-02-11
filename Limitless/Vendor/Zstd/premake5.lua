@@ -52,3 +52,8 @@ project "VendorZstd"
             "/FS"
         }
 
+    -- Linux: we do not build the HUF decompress assembly (huf_decompress_amd64.S),
+    -- so disable ASM so the C code does not reference those symbols.
+    filter "system:linux"
+        defines { "ZSTD_DISABLE_ASM" }
+
