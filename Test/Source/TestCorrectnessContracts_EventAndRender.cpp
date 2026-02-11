@@ -19,6 +19,7 @@ namespace
         void MakeCurrent() override {}
         void Init(void*, Limitless::GraphicsAPI) override {}
         void SwapBuffers() override {}
+        Limitless::GraphicsAPI GetAPI() const override { return Limitless::GraphicsAPI::OpenGL; }
         bool SetVSync(bool) override { return true; }
         bool IsVSync() const override { return false; }
     };
