@@ -1,8 +1,10 @@
 #pragma once
 
+#include "Assets/TextureAsset.h"
 #include "EnTT/entt.hpp"
 
 #include <glm/glm.hpp>
+#include <memory>
 #include <string>
 
 namespace Limitless
@@ -35,10 +37,14 @@ namespace Limitless
         entt::entity Parent = entt::null;
     };
 
-    /// Renders a 2D quad. Used with Renderer2D for the viewport.
-    struct QuadRendererComponent
+    /// Renders a 2D sprite (quad). Size comes from TransformComponent::Scale.
+    /// TextureKey is empty for color-only; non-empty for textured sprites (e.g. "Assets/Textures/sissy.jpg").
+    /// CachedTexture holds a reference to keep the asset alive (avoids per-frame reload / GC).
+    /// Used with Renderer2D for the viewport.
+    struct SpriteComponent
     {
-        glm::vec2 Size = glm::vec2(1.0f, 1.0f);
+        std::string TextureKey;  ///< Asset key for texture; empty = color-only
+        Assets::TextureAsset::Ptr CachedTexture;  ///< Runtime cache; keeps asset alive
         glm::vec4 Color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
     };
 }

@@ -45,7 +45,7 @@ namespace Limitless
 
     // -----------------------------------------------------------------------------
     // SceneRenderer
-    // Renders scene entities to the given camera. Uses Renderer2D for QuadRenderer.
+    // Renders scene entities to the given camera. Uses Renderer2D for SpriteComponent.
     // -----------------------------------------------------------------------------
     class SceneRenderer
     {

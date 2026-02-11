@@ -6,16 +6,16 @@ The Limitless engine uses the [EnTT](https://github.com/skypjack/entt) library f
 
 - **Scene** – Owns an `entt::registry` and manages entity lifecycle.
 - **Entity** – Lightweight handle (`entt::entity`) referring to a logical object.
-- **Components** – Plain data structs attached to entities (e.g. `TransformComponent`, `QuadRendererComponent`).
+- **Components** – Plain data structs attached to entities (e.g. `TransformComponent`, `SpriteComponent`).
 
 ## Core Components
 
 | Component | Purpose |
 |-----------|---------|
 | `TagComponent` | Display name for the hierarchy (required for all entities) |
-| `TransformComponent` | Position, rotation (euler degrees), scale |
+| `TransformComponent` | Position, rotation (euler degrees), scale (added to all entities by default) |
 | `HierarchyComponent` | Parent entity for hierarchy (optional; `entt::null` = root) |
-| `QuadRendererComponent` | Renders a 2D quad (size, color) via Renderer2D |
+| `SpriteComponent` | Renders a 2D sprite (color + optional texture); size from TransformComponent::Scale |
 
 ## Usage
 
@@ -28,12 +28,12 @@ auto scene = std::make_unique<Scene>();
 ### Creating Entities
 
 ```cpp
-entt::entity entity = scene->CreateEntity("My Quad");
-auto& transform = scene->GetRegistry().emplace<TransformComponent>(entity);
+entt::entity entity = scene->CreateEntity("My Sprite");
+auto& transform = scene->GetRegistry().get<TransformComponent>(entity);
 transform.Position = glm::vec3(0.0f, 0.0f, 0.0f);
-auto& quad = scene->GetRegistry().emplace<QuadRendererComponent>(entity);
-quad.Size = glm::vec2(1.0f, 1.0f);
-quad.Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+transform.Scale = glm::vec3(1.0f, 1.0f, 1.0f);
+auto& sprite = scene->GetRegistry().emplace<SpriteComponent>(entity);
+sprite.Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
 ```
 
 ### Rendering
@@ -45,11 +45,11 @@ SceneRenderer::Render(*scene, camera);
 ### Querying Entities
 
 ```cpp
-auto view = scene->GetRegistry().view<TransformComponent, QuadRendererComponent>();
+auto view = scene->GetRegistry().view<TransformComponent, SpriteComponent>();
 for (entt::entity entity : view)
 {
     const auto& transform = view.get<TransformComponent>(entity);
-    const auto& quad = view.get<QuadRendererComponent>(entity);
+    const auto& sprite = view.get<SpriteComponent>(entity);
     // ...
 }
 ```

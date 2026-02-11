@@ -1,5 +1,6 @@
 #include "EditorLayer.h"
 #include "Assets/AssetLoadProgress.h"
+#include "Assets/AssetPaths.h"
 #include "Editor/EditorCameraController.h"
 #include "Graphics/Framebuffer.h"
 #include "Scene/Scene.h"
@@ -8,9 +9,81 @@
 #include "imgui/imgui.h"
 
 #include <glm/glm.hpp>
+#include <algorithm>
+#include <filesystem>
+#include <vector>
 
 namespace Limitless
 {
+    namespace
+    {
+        constexpr const char* kAssetTexturePayload = "ASSET_TEXTURE";
+
+        bool IsTextureExtension(const std::filesystem::path& path)
+        {
+            const std::string ext = path.extension().string();
+            if (ext.empty()) return false;
+            auto lower = ext;
+            for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return lower == ".png" || lower == ".jpg" || lower == ".jpeg" || lower == ".ppm" ||
+                   lower == ".pnm" || lower == ".bmp" || lower == ".tga" || lower == ".gif";
+        }
+
+        void DrawAssetTree(const std::filesystem::path& assetsDir, const std::filesystem::path& relPath)
+        {
+            const std::filesystem::path currentDir = assetsDir / relPath;
+            std::error_code ec;
+            if (!std::filesystem::exists(currentDir, ec) || !std::filesystem::is_directory(currentDir, ec))
+                return;
+
+            std::vector<std::filesystem::path> entries;
+            for (const auto& e : std::filesystem::directory_iterator(currentDir, ec))
+            {
+                if (ec) continue;
+                const std::string name = e.path().filename().string();
+                if (name.empty() || name[0] == '.') continue;
+                if (name == "Cache") continue;  // Skip internal cache
+                entries.push_back(e.path());
+            }
+            std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+                const bool aDir = std::filesystem::is_directory(a);
+                const bool bDir = std::filesystem::is_directory(b);
+                if (aDir != bDir) return aDir;  // Folders first
+                return a.filename().string() < b.filename().string();
+            });
+
+            for (const auto& entry : entries)
+            {
+                const std::string filename = entry.filename().string();
+                const bool isDir = std::filesystem::is_directory(entry);
+                std::string assetKey = ("Assets/" + (relPath / filename).generic_string());
+
+                if (isDir)
+                {
+                    if (ImGui::TreeNodeEx(filename.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
+                    {
+                        DrawAssetTree(assetsDir, relPath / filename);
+                        ImGui::TreePop();
+                    }
+                }
+                else
+                {
+                    const bool isTexture = IsTextureExtension(entry);
+                    const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                    ImGui::TreeNodeEx(filename.c_str(), flags);
+
+                    if (isTexture && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                    {
+                        ImGui::SetDragDropPayload(kAssetTexturePayload, assetKey.c_str(),
+                            static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                        ImGui::Text("%s", filename.c_str());
+                        ImGui::EndDragDropSource();
+                    }
+                }
+            }
+        }
+    }
+
     EditorLayer::EditorLayer()
         : Layer("EditorLayer")
     {
@@ -23,13 +96,12 @@ namespace Limitless
         Renderer2D::Initialize();
 
         m_Scene = std::make_unique<Scene>();
-        auto quadEntity = m_Scene->CreateEntity("Quad (Test)");
-        auto& transform = m_Scene->GetRegistry().emplace<TransformComponent>(quadEntity);
+        auto spriteEntity = m_Scene->CreateEntity("Sprite (Test)");
+        auto& transform = m_Scene->GetRegistry().get<TransformComponent>(spriteEntity);
         transform.Position = glm::vec3(-0.5f, -0.5f, 0.0f);
         transform.Scale = glm::vec3(1.0f, 1.0f, 1.0f);
-        auto& quad = m_Scene->GetRegistry().emplace<QuadRendererComponent>(quadEntity);
-        quad.Size = glm::vec2(1.0f, 1.0f);
-        quad.Color = glm::vec4(0.2f, 0.6f, 0.9f, 1.0f);
+        auto& sprite = m_Scene->GetRegistry().emplace<SpriteComponent>(spriteEntity);
+        sprite.Color = glm::vec4(0.2f, 0.6f, 0.9f, 1.0f);
 
         // Create editor camera (3D perspective).
         CameraManager::Perspective3DCreateInfo cameraInfo{};
@@ -158,11 +230,14 @@ namespace Limitless
         m_ViewportFocused = ImGui::IsWindowFocused();
         m_ViewportHovered = ImGui::IsWindowHovered();
 
+        // Skip render only when collapsed.
+        const bool skipRender = ImGui::IsWindowCollapsed();
+
         ImVec2 viewportSize = ImGui::GetContentRegionAvail();
         uint32_t width = static_cast<uint32_t>(viewportSize.x);
         uint32_t height = static_cast<uint32_t>(viewportSize.y);
 
-        if (width > 0 && height > 0)
+        if (!skipRender && width > 0 && height > 0)
         {
             EnsureViewportFramebuffer(width, height);
 
@@ -283,12 +358,38 @@ namespace Limitless
                     ImGui::TreePop();
                 }
             }
-            if (auto* quad = registry.try_get<QuadRendererComponent>(m_SelectedEntity))
+            if (auto* sprite = registry.try_get<SpriteComponent>(m_SelectedEntity))
             {
-                if (ImGui::TreeNodeEx("Quad Renderer", ImGuiTreeNodeFlags_DefaultOpen))
+                if (ImGui::TreeNodeEx("Sprite", ImGuiTreeNodeFlags_DefaultOpen))
                 {
-                    ImGui::DragFloat2("Size", &quad->Size.x, 0.1f);
-                    ImGui::ColorEdit4("Color", &quad->Color.r);
+                    // Image slot: drag-drop target for textures from Project panel.
+                    ImGui::Text("Image");
+                    ImGui::SameLine(80);
+                    const char* label = sprite->TextureKey.empty() ? "None" : sprite->TextureKey.c_str();
+                    ImGui::Button(label, ImVec2(ImGui::GetContentRegionAvail().x - 60, 0));
+                    if (ImGui::BeginDragDropTarget())
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kAssetTexturePayload))
+                        {
+                            const char* key = static_cast<const char*>(payload->Data);
+                            if (key && key[0])
+                            {
+                                sprite->TextureKey = key;
+                                sprite->CachedTexture.reset();  // Force reload
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+                    if (!sprite->TextureKey.empty())
+                    {
+                        ImGui::SameLine();
+                        if (ImGui::Button("Clear"))
+                        {
+                            sprite->TextureKey.clear();
+                            sprite->CachedTexture.reset();
+                        }
+                    }
+                    ImGui::ColorEdit4("Color", &sprite->Color.r);
                     ImGui::TreePop();
                 }
             }
@@ -301,19 +402,26 @@ namespace Limitless
     {
         ImGui::Begin("Project");
 
-        ImGui::Text("Assets/");
-        if (ImGui::TreeNodeEx("InputActions", ImGuiTreeNodeFlags_DefaultOpen))
+        auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
+        if (rootResult.IsFailure())
         {
-            if (ImGui::TreeNodeEx("EditorCamera.inputactions.json", ImGuiTreeNodeFlags_Leaf))
-                ImGui::TreePop();
-            ImGui::TreePop();
+            ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Could not find Assets folder.");
+            ImGui::End();
+            return;
         }
-        if (ImGui::TreeNodeEx("Textures"))
+
+        const std::filesystem::path assetsDir = rootResult.GetValue() / "Assets";
+        std::error_code ec;
+        if (!std::filesystem::exists(assetsDir, ec) || !std::filesystem::is_directory(assetsDir, ec))
         {
-            ImGui::TreePop();
+            ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Assets directory not found.");
+            ImGui::End();
+            return;
         }
-        if (ImGui::TreeNodeEx("Shaders"))
+
+        if (ImGui::TreeNodeEx("Assets", ImGuiTreeNodeFlags_DefaultOpen))
         {
+            DrawAssetTree(assetsDir, "");
             ImGui::TreePop();
         }
 
@@ -326,7 +434,7 @@ namespace Limitless
             return;
 
         // Clamp to minimum size to avoid GL_INVALID_OPERATION (0x502) with tiny framebuffers.
-        constexpr uint32_t kMinViewportSize = 8;
+        constexpr uint32_t kMinViewportSize = 32;
         width = (width < kMinViewportSize) ? kMinViewportSize : width;
         height = (height < kMinViewportSize) ? kMinViewportSize : height;
 

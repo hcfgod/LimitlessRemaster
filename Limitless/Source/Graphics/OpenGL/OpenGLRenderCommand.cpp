@@ -509,6 +509,10 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
+        // Clear any stale errors from previous commands so we only report errors from this bind.
+        while (glGetError() != GL_NO_ERROR)
+            ;
+
         if (m_Framebuffer)
         {
             m_Framebuffer->Bind();
