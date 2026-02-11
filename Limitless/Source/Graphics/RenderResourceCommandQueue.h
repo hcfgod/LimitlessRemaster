@@ -47,7 +47,15 @@ namespace Limitless
         // Drain queued resource commands. Must be called on the context-owning thread.
         void Process(GraphicsContext* context, uint32_t maxCommands = 1024);
 
-        bool IsEmpty() const { return m_Queue.IsEmpty(); }
+        // IMPORTANT:
+        // Do not rely on the underlying MPMC queue's IsEmpty() as a wake predicate.
+        // Some lock-free queue implementations can report "empty" transiently under contention,
+        // which is fine for best-effort polling but disastrous for condition-variable waits.
+        //
+        // We maintain an explicit approximate size counter that is sufficient for:
+        // - waking worker threads
+        // - avoiding "sleep forever with work queued" deadlocks
+        bool IsEmpty() const { return m_ApproxSize.load(std::memory_order_relaxed) == 0; }
         uint32_t GetApproxSize() const { return m_ApproxSize.load(std::memory_order_relaxed); }
 
         template<typename Func>

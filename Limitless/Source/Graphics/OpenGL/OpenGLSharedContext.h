@@ -39,6 +39,8 @@ namespace Limitless
             std::unique_lock<std::recursive_mutex> m_Lock;
         };
 
+        // Owns both the window and context.
+        // The window is typically a hidden "dummy" window used exclusively for this context.
         OpenGLSharedContext(SDL_Window* window, SDL_GLContext sharedContext);
         ~OpenGLSharedContext();
 

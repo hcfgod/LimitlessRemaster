@@ -15,7 +15,8 @@ namespace Limitless
             default:
             {
                 auto& renderer = Renderer::GetInstance();
-                return renderer.SubmitResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<VertexArray> {
+                // VAOs are not shared across OpenGL contexts; creation must happen on the primary context.
+                return renderer.SubmitPrimaryResourceAndWait([&](GraphicsContext*) -> std::shared_ptr<VertexArray> {
                     return std::make_shared<OpenGLVertexArray>();
                 });
             }

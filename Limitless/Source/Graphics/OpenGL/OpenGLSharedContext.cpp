@@ -57,11 +57,24 @@ namespace Limitless
 
     OpenGLSharedContext::~OpenGLSharedContext()
     {
+        // Best-effort clear current context before destruction.
+        if (m_Window)
+        {
+            (void)SDL_GL_MakeCurrent(m_Window, nullptr);
+        }
+
         if (m_Context)
         {
             LT_CORE_INFO("OpenGLSharedContext: destroying shared OpenGL context");
             SDL_GL_DestroyContext(m_Context);
             m_Context = nullptr;
+        }
+
+        if (m_Window)
+        {
+            LT_CORE_INFO("OpenGLSharedContext: destroying shared context window");
+            SDL_DestroyWindow(m_Window);
+            m_Window = nullptr;
         }
     }
 }

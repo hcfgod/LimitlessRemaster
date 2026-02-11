@@ -90,7 +90,7 @@ namespace Limitless
             const GLuint vaoToDelete = m_RendererID;
             if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
             {
-                renderer.SubmitResourceAndWait([vaoToDelete](GraphicsContext*) {
+                renderer.SubmitPrimaryResourceAndWait([vaoToDelete](GraphicsContext*) {
                     GLuint id = vaoToDelete;
                     glDeleteVertexArrays(1, &id);
                 });
@@ -124,11 +124,11 @@ namespace Limitless
 
     void OpenGLVertexArray::AddVertexBuffer(const std::shared_ptr<VertexBuffer>& vertexBuffer)
     {
-        // Route GPU state changes through the renderer's resource command queue when available.
+        // VAO state is NOT shared across OpenGL contexts; this must be executed on the primary context.
         auto& renderer = Renderer::GetInstance();
         if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
         {
-            renderer.SubmitResourceAndWait([&](GraphicsContext*) {
+            renderer.SubmitPrimaryResourceAndWait([&](GraphicsContext*) {
                 LT_VERIFY(vertexBuffer != nullptr, "VertexBuffer cannot be null");
                 const auto& layout = vertexBuffer->GetLayout();
                 LT_VERIFY(layout.GetElements().size() > 0, "VertexBuffer has no layout");
@@ -266,7 +266,8 @@ namespace Limitless
         auto& renderer = Renderer::GetInstance();
         if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
         {
-            renderer.SubmitResourceAndWait([&](GraphicsContext*) {
+            // VAO state is NOT shared across OpenGL contexts; this must be executed on the primary context.
+            renderer.SubmitPrimaryResourceAndWait([&](GraphicsContext*) {
                 LT_VERIFY(indexBuffer != nullptr, "IndexBuffer cannot be null");
 
                 Bind();

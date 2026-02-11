@@ -280,19 +280,31 @@ namespace Limitless {
             return nullptr;
         }
 
-        SDL_GLContext shared = SDL_GL_CreateContext(m_Window);
+        // IMPORTANT (Windows/WGL + SDL):
+        // Using the same SDL window for two contexts that are current on different threads can stall or deadlock.
+        // Create a dedicated hidden "dummy" window for the shared context.
+        SDL_Window* dummyWindow = SDL_CreateWindow("LimitlessResourceContext", 1, 1, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
+        if (!dummyWindow)
+        {
+            (void)SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, previousShare);
+            LT_CORE_ERROR("OpenGLContext::CreateSharedContext: SDL_CreateWindow (dummy) failed: {}", SDL_GetError());
+            return nullptr;
+        }
+
+        SDL_GLContext shared = SDL_GL_CreateContext(dummyWindow);
 
         // Restore prior setting (best-effort).
         (void)SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, previousShare);
 
         if (!shared)
         {
-            LT_CORE_ERROR("OpenGLContext::CreateSharedContext: SDL_GL_CreateContext failed: {}", SDL_GetError());
+            LT_CORE_ERROR("OpenGLContext::CreateSharedContext: SDL_GL_CreateContext (dummy) failed: {}", SDL_GetError());
+            SDL_DestroyWindow(dummyWindow);
             return nullptr;
         }
 
         LT_CORE_INFO("OpenGLContext: created shared OpenGL context for resource thread");
-        return std::make_unique<OpenGLSharedContext>(m_Window, shared);
+        return std::make_unique<OpenGLSharedContext>(dummyWindow, shared);
     }
 
     void OpenGLContext::SwapBuffers() {

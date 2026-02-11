@@ -86,6 +86,98 @@ namespace Limitless
         // Use these for large uploads to avoid stalling the calling thread.
         bool SubmitResource(std::unique_ptr<RenderResourceCommandQueue::Command> command);
 
+        // Primary-context-only resource submission helpers.
+        //
+        // IMPORTANT:
+        // Some OpenGL object types are NOT shared across contexts even when context sharing is enabled
+        // (notably: Vertex Array Objects, and typically FBO-related state).
+        //
+        // Any GPU work that creates/modifies such objects must be executed on the **primary** OpenGL context,
+        // which this engine owns on the render thread.
+        template<typename Func>
+        auto SubmitPrimaryResourceAndWait(Func&& func) -> decltype(func(static_cast<GraphicsContext*>(nullptr)))
+        {
+            using ResultT = decltype(func(static_cast<GraphicsContext*>(nullptr)));
+
+            if (IsOnRenderThread())
+            {
+                if constexpr (std::is_void_v<ResultT>)
+                {
+                    func(m_GraphicsContext);
+                    return;
+                }
+                else
+                {
+                    return func(m_GraphicsContext);
+                }
+            }
+
+            if (!m_RenderThreadRunning.load(std::memory_order_relaxed))
+            {
+                throw std::runtime_error("SubmitPrimaryResourceAndWait requires the render thread to be running");
+            }
+
+            struct SharedState
+            {
+                std::promise<ResultT> promise;
+                std::function<ResultT(GraphicsContext*)> function;
+            };
+
+            auto state = std::make_shared<SharedState>();
+            state->function = std::forward<Func>(func);
+            std::future<ResultT> future = state->promise.get_future();
+
+            class CommandImpl final : public RenderResourceCommandQueue::Command
+            {
+            public:
+                explicit CommandImpl(std::shared_ptr<SharedState> shared)
+                    : m_Shared(std::move(shared))
+                {
+                }
+
+                void Execute(GraphicsContext* context) override
+                {
+                    try
+                    {
+                        if constexpr (std::is_void_v<ResultT>)
+                        {
+                            m_Shared->function(context);
+                            m_Shared->promise.set_value();
+                        }
+                        else
+                        {
+                            ResultT result = m_Shared->function(context);
+                            m_Shared->promise.set_value(std::move(result));
+                        }
+                    }
+                    catch (...)
+                    {
+                        m_Shared->promise.set_exception(std::current_exception());
+                    }
+                }
+
+            private:
+                std::shared_ptr<SharedState> m_Shared;
+            };
+
+            if (!m_PrimaryResourceQueue.Submit(std::make_unique<CommandImpl>(state)))
+            {
+                throw std::runtime_error("RenderResourceCommandQueue (primary) is full");
+            }
+
+            // Wake the render thread; it is the only consumer of the primary-resource queue.
+            NotifyRenderThreadResourceWorkAvailable();
+
+            if constexpr (std::is_void_v<ResultT>)
+            {
+                future.get();
+            }
+            else
+            {
+                return future.get();
+            }
+        }
+
         // Returns true when the OpenGL shared-context resource thread is active.
         // When enabled, GPU resource work executes on a dedicated thread with its own shared
         // OpenGL context (in parallel with frame rendering on the render thread).
@@ -319,6 +411,7 @@ namespace Limitless
         static void SynchronizeOpenGLResourceWorkForCrossContextVisibility();
 
         std::thread::id m_RenderThreadId{};
+        RenderResourceCommandQueue m_PrimaryResourceQueue;
         RenderResourceCommandQueue m_ResourceQueue;
 
         // Optional OpenGL shared-context resource thread (multi-threaded GPU resource execution).

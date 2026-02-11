@@ -495,6 +495,15 @@ namespace Limitless
 
     void Renderer::NotifyResourceWorkAvailable()
     {
+        // Always wake the render thread as a safety net.
+        //
+        // IMPORTANT:
+        // On some platforms/driver stacks, the shared-context resource thread can stall inside
+        // SDL_GL_MakeCurrent (WGL contention, window message pump interactions, etc).
+        // Many engine startup paths use SubmitResourceAndWait(), so if the render thread is not
+        // also woken it can sleep indefinitely and deadlock the engine before the first frame.
+        NotifyRenderThreadResourceWorkAvailable();
+
         // Prefer resource thread when enabled; otherwise the render thread drains resource work.
         if (m_OpenGLResourceThread && m_OpenGLResourceThreadEnabled.load(std::memory_order_relaxed))
         {
@@ -502,7 +511,7 @@ namespace Limitless
             return;
         }
 
-        NotifyRenderThreadResourceWorkAvailable();
+        // Fallback wake already handled above.
     }
 
     void Renderer::RenderThreadMain()
@@ -523,12 +532,16 @@ namespace Limitless
             {
                 std::unique_lock<std::mutex> lock(m_RenderThreadMutex);
                 m_RenderThreadCV.wait(lock, [this]() {
-                    if (m_OpenGLResourceThreadEnabled.load(std::memory_order_relaxed))
-                    {
-                        return m_FrameRequested || m_RenderThreadShutdown.load();
-                    }
-
-                    return m_FrameRequested || m_RenderThreadShutdown.load() || !m_ResourceQueue.IsEmpty();
+                    // IMPORTANT:
+                    // We must always wake for resource work, even if the optional OpenGL resource thread is enabled.
+                    //
+                    // Why:
+                    // - Many engine subsystems call SubmitResourceAndWait() during startup (VAOs/VBOs/textures/shaders).
+                    // - If the resource thread fails to run (driver/SDL quirks, context make-current stalls, etc),
+                    //   ignoring resource work here can deadlock the entire engine before the first frame.
+                    //
+                    // The render thread can always act as a safe fallback consumer for the resource queue.
+                    return m_FrameRequested || m_RenderThreadShutdown.load() || !m_PrimaryResourceQueue.IsEmpty() || !m_ResourceQueue.IsEmpty();
                 });
                 if (m_RenderThreadShutdown.load(std::memory_order_relaxed))
                 {
@@ -551,11 +564,16 @@ namespace Limitless
             {
                 OpenGLContext::ScopedCurrentContext scope(*glContext);
 
-                // If no resource thread is active, drain resource work on the render thread.
-                if (!m_OpenGLResourceThreadEnabled.load(std::memory_order_relaxed))
-                {
-                    m_ResourceQueue.Process(m_GraphicsContext, 2048);
-                }
+                // Primary-context-only resource work must be drained on the render thread.
+                m_PrimaryResourceQueue.Process(m_GraphicsContext, 256);
+
+                // Drain some resource work on the render thread.
+                // This acts as:
+                // - startup safety net for SubmitResourceAndWait() callers
+                // - fallback if the optional OpenGL shared-context resource thread is stalled
+                //
+                // When the resource thread is healthy, it can also drain in parallel; the queue is MPMC.
+                m_ResourceQueue.Process(m_GraphicsContext, 256);
 
                 if (frameIdToComplete != 0)
                 {
