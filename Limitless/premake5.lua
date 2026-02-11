@@ -37,15 +37,17 @@ project "Limitless"
         "Vendor/imgui/imgui_draw.cpp",
         "Vendor/imgui/imgui_tables.cpp",
         "Vendor/imgui/imgui_widgets.cpp",
-        "Vendor/imgui/backends/imgui_impl_sdl3.cpp",
-        "Vendor/imgui/backends/imgui_impl_opengl3.cpp"
+        "Vendor/imgui/backends/imgui_impl_sdl3.cpp"
+        -- imgui_impl_opengl3.cpp is included via Source/ImGui/ImGuiOpenGL3Backend.cpp
+        -- which includes GLAD first, ensuring OpenGL symbols are available on all platforms
+        -- (Linux/gmake2 forceincludes can be unreliable for vendor files).
     }
 
     filter "files:Vendor/imgui/**"
         flags { "NoPCH" }
 
-    filter "files:Vendor/imgui/backends/imgui_impl_opengl3.cpp"
-        forceincludes { "glad/glad.h" }
+    filter "files:Source/ImGui/ImGuiOpenGL3Backend.cpp"
+        flags { "NoPCH" }
 
     filter "files:Vendor/**"
         flags { "NoPCH" }
