@@ -68,6 +68,9 @@ namespace Limitless
         /// While false, DrawQuad calls are dropped silently and the caller may show a loading UI.
         static bool IsShaderReady();
 
+        /// Asset key for the default Renderer2D shader. Used to query AssetLoadProgress.
+        static const char* GetDefaultShaderKey();
+
     private:
         static void Flush();
     };

@@ -441,6 +441,11 @@ namespace Limitless
         return g_Data.Stats;
     }
 
+    const char* Renderer2D::GetDefaultShaderKey()
+    {
+        return "Assets/Shaders/Renderer2D_TexturedQuad.glsl";
+    }
+
     bool Renderer2D::IsShaderReady()
     {
         if (!g_Data.Initialized)

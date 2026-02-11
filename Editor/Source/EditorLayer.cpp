@@ -1,4 +1,5 @@
 #include "EditorLayer.h"
+#include "Assets/AssetLoadProgress.h"
 #include "Editor/EditorCameraController.h"
 #include "Graphics/Framebuffer.h"
 #include "Graphics/RenderCommand.h"
@@ -213,6 +214,18 @@ namespace Limitless
                     drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 160));
 
                     const char* loadingText = "Loading shader...";
+                    float progressValue = 0.0f;
+                    const auto progressInfo = Assets::AssetLoadProgress::GetProgress(Renderer2D::GetDefaultShaderKey());
+                    if (progressInfo.has_value())
+                    {
+                        loadingText = progressInfo->Status.empty() ? "Loading shader..." : progressInfo->Status.c_str();
+                        progressValue = progressInfo->Progress;
+                    }
+                    else
+                    {
+                        progressValue = fmodf(static_cast<float>(ImGui::GetTime() * 0.8), 1.0f);
+                    }
+
                     ImVec2 textSize = ImGui::CalcTextSize(loadingText);
                     drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f - 24.0f),
                         IM_COL32(255, 255, 255, 255), loadingText);
@@ -222,8 +235,7 @@ namespace Limitless
                     ImVec2 barMin = ImVec2(center.x - barWidth * 0.5f, center.y - barHeight * 0.5f + 8.0f);
                     ImVec2 barMax = ImVec2(center.x + barWidth * 0.5f, center.y + barHeight * 0.5f + 8.0f);
                     drawList->AddRectFilled(barMin, barMax, IM_COL32(50, 50, 55, 255));
-                    float progress = fmodf(static_cast<float>(ImGui::GetTime() * 0.8), 1.0f);
-                    ImVec2 fillMax = ImVec2(barMin.x + barWidth * progress, barMax.y);
+                    ImVec2 fillMax = ImVec2(barMin.x + barWidth * progressValue, barMax.y);
                     drawList->AddRectFilled(barMin, fillMax, IM_COL32(80, 140, 220, 255));
                 }
             }

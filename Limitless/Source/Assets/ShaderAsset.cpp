@@ -1,6 +1,7 @@
 #include "Assets/ShaderAsset.h"
 
 #include "Assets/AssetBundle.h"
+#include "Assets/AssetLoadProgress.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetUtils.h"
 #include "Assets/AssetManager.h"
@@ -166,8 +167,11 @@ namespace Limitless::Assets
         Async::GetAsyncIO().RunAsync([key, settings, generation, promise = std::move(promise)]() mutable -> void {
             try
             {
+                AssetLoadProgress::SetProgress(key, 0.05f, "Resolving...");
+
                 if (!AssetLoadCoordinator::IsGenerationCurrent(generation))
                 {
+                    AssetLoadProgress::ClearProgress(key);
                     promise.set_value(nullptr);
                     return;
                 }
@@ -196,6 +200,7 @@ namespace Limitless::Assets
                                 guid = entry->Guid;
                                 resolvedPath = "<AssetBundle>";
                                 bundleBytes = bytesResult.GetValue();
+                                AssetLoadProgress::SetProgress(key, 0.20f, "Reading from bundle...");
                             }
                         }
                         else
@@ -207,6 +212,7 @@ namespace Limitless::Assets
                                 guid = entry->Guid;
                                 resolvedPath = "<AssetBundle>";
                                 fileText = textResult.GetValue();
+                                AssetLoadProgress::SetProgress(key, 0.20f, "Reading from bundle...");
                             }
                         }
                     }
@@ -217,6 +223,7 @@ namespace Limitless::Assets
                     const auto resolvedResult = ResolveAssetKeyToPath(key);
                     if (resolvedResult.IsFailure())
                     {
+                        AssetLoadProgress::ClearProgress(key);
                         LT_CORE_ERROR("ShaderAsset::LoadAsync: failed to resolve key '{}': {}",
                                       key, resolvedResult.GetError().GetErrorMessage());
                         promise.set_value(nullptr);
@@ -224,11 +231,13 @@ namespace Limitless::Assets
                     }
 
                     resolvedPath = resolvedResult.GetValue().string();
+                    AssetLoadProgress::SetProgress(key, 0.12f, "Reading source...");
 
                     // Ensure GUID `.meta` next to real file.
                     const auto guidResult = LoadOrCreateGuid(resolvedPath, {{"key", key}, {"type", "Shader"}});
                     if (guidResult.IsFailure())
                     {
+                        AssetLoadProgress::ClearProgress(key);
                         LT_CORE_ERROR("ShaderAsset::LoadAsync: meta GUID failed for '{}': {}",
                                       resolvedPath, guidResult.GetError().GetErrorMessage());
                         promise.set_value(nullptr);
@@ -240,6 +249,7 @@ namespace Limitless::Assets
                     std::ifstream in(resolvedPath, std::ios::in | std::ios::binary);
                     if (!in.is_open())
                     {
+                        AssetLoadProgress::ClearProgress(key);
                         LT_CORE_ERROR("ShaderAsset::LoadAsync: failed to open '{}'", resolvedPath);
                         promise.set_value(nullptr);
                         return;
@@ -249,6 +259,8 @@ namespace Limitless::Assets
                     ss << in.rdbuf();
                     fileText = ss.str();
                 }
+
+                AssetLoadProgress::SetProgress(key, 0.30f, "Parsing...");
 
                 if (fromBundle && bundlePayloadFormat == AssetBundlePayloadFormat::CookedShaderStages)
                 {
@@ -261,6 +273,7 @@ namespace Limitless::Assets
                     const auto cookedResult = ::Limitless::Assets::Cooking::ParseCookedShaderStages(bundleBytes.data(), bundleBytes.size());
                     if (cookedResult.IsFailure())
                     {
+                        AssetLoadProgress::ClearProgress(key);
                         LT_CORE_ERROR("ShaderAsset::LoadAsync: cooked shader parse failed for '{}': {}",
                                       key, cookedResult.GetError().GetErrorMessage());
                         promise.set_value(nullptr);
@@ -277,6 +290,7 @@ namespace Limitless::Assets
                     const auto parsedResult = ParseCombinedGlsl(key, resolvedPath, fileText, settings.Name);
                     if (parsedResult.IsFailure())
                     {
+                        AssetLoadProgress::ClearProgress(key);
                         LT_CORE_ERROR("ShaderAsset::LoadAsync: parse failed for '{}': {}",
                                       resolvedPath, parsedResult.GetError().GetErrorMessage());
                         promise.set_value(nullptr);
@@ -286,9 +300,12 @@ namespace Limitless::Assets
                     parsed = parsedResult.GetValue();
                 }
 
+                AssetLoadProgress::SetProgress(key, 0.50f, "Compiling...");
+
                 const auto preparedResult = PrepareShaderStagesForActiveGraphicsAPI(std::move(parsed), resolvedPath);
                 if (preparedResult.IsFailure())
                 {
+                    AssetLoadProgress::ClearProgress(key);
                     LT_CORE_ERROR("ShaderAsset::LoadAsync: shaderc/SPIRV-Cross preparation failed for '{}': {}",
                                   resolvedPath, preparedResult.GetError().GetErrorMessage());
                     promise.set_value(nullptr);
@@ -300,10 +317,13 @@ namespace Limitless::Assets
                 auto& renderer = Renderer::GetInstance();
                 if (!renderer.IsRenderThreadEnabled())
                 {
+                    AssetLoadProgress::ClearProgress(key);
                     LT_CORE_ERROR("ShaderAsset::LoadAsync: render thread must be enabled for GPU shader compilation");
                     promise.set_value(nullptr);
                     return;
                 }
+
+                AssetLoadProgress::SetProgress(key, 0.75f, "Uploading to GPU...");
 
                 struct SharedState
                 {
@@ -342,6 +362,7 @@ namespace Limitless::Assets
                         {
                             if (!AssetLoadCoordinator::IsGenerationCurrent(m_State->generation))
                             {
+                                AssetLoadProgress::ClearProgress(m_State->key);
                                 m_State->promise.set_value(nullptr);
                                 return;
                             }
@@ -349,6 +370,7 @@ namespace Limitless::Assets
                             auto shader = Shader::CreateFromSource(m_State->parsed.Name, m_State->parsed.Vertex, m_State->parsed.Fragment);
                             if (!shader)
                             {
+                                AssetLoadProgress::ClearProgress(m_State->key);
                                 m_State->promise.set_value(nullptr);
                                 return;
                             }
@@ -359,10 +381,12 @@ namespace Limitless::Assets
                                 return Ptr(new ShaderAsset(m_State->key, m_State->guid, std::move(shader), m_State->settings));
                             });
 
+                            AssetLoadProgress::ClearProgress(m_State->key);
                             m_State->promise.set_value(std::move(asset));
                         }
                         catch (...)
                         {
+                            AssetLoadProgress::ClearProgress(m_State->key);
                             // Never throw across the task boundary.
                             try { m_State->promise.set_value(nullptr); } catch (...) {}
                         }
@@ -374,6 +398,7 @@ namespace Limitless::Assets
 
                 if (!renderer.SubmitResource(std::make_unique<Command>(state)))
                 {
+                    AssetLoadProgress::ClearProgress(key);
                     LT_CORE_ERROR("ShaderAsset::LoadAsync: RenderResourceCommandQueue full while compiling '{}'", resolvedPath);
                     state->promise.set_value(nullptr);
                     return;
@@ -381,11 +406,13 @@ namespace Limitless::Assets
             }
             catch (const std::exception& e)
             {
+                AssetLoadProgress::ClearProgress(key);
                 LT_CORE_ERROR("ShaderAsset::LoadAsync: exception while loading '{}': {}", key, e.what());
                 try { promise.set_value(nullptr); } catch (...) {}
             }
             catch (...)
             {
+                AssetLoadProgress::ClearProgress(key);
                 LT_CORE_ERROR("ShaderAsset::LoadAsync: unknown exception while loading '{}'", key);
                 try { promise.set_value(nullptr); } catch (...) {}
             }
