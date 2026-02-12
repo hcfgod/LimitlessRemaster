@@ -2,9 +2,9 @@
   "EditorCamera": {
     "PitchDegrees": -5.156620979309082,
     "Position": [
-      -0.4380398094654083,
-      0.44951319694519043,
-      4.8856282234191895
+      -0.43772417306900024,
+      0.45032718777656555,
+      4.894642353057861
     ],
     "YawDegrees": -92.00545501708984
   },
@@ -62,7 +62,7 @@
       "Tag": "Child",
       "Transform": {
         "Position": [
-          0.699999988079071,
+          1.0,
           -0.3700000047683716,
           0.0
         ],
@@ -110,6 +110,38 @@
         "Scale": [
           0.5,
           0.5,
+          1.0
+        ]
+      }
+    },
+    {
+      "Camera": {
+        "FarPlane": 1000.0,
+        "FieldOfViewYDegrees": 60.0,
+        "IsPrimary": true,
+        "NearPlane": 0.10000000149011612,
+        "Projection": "Perspective3D",
+        "Zoom": 1.0
+      },
+      "Hierarchy": {
+        "ParentIndex": 2,
+        "SiblingOrder": 0
+      },
+      "Tag": "Camera",
+      "Transform": {
+        "Position": [
+          0.0,
+          0.0,
+          10.199999809265137
+        ],
+        "Rotation": [
+          0.0,
+          -0.0,
+          0.0
+        ],
+        "Scale": [
+          2.0,
+          2.0,
           1.0
         ]
       }

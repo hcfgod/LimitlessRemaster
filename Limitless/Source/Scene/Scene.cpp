@@ -300,16 +300,21 @@ namespace Limitless
             if (!sourceHierarchy)
                 continue;
 
-            entt::entity destinationParent = entt::null;
+            auto* destinationHierarchy = destinationRegistry.try_get<HierarchyComponent>(destinationEntity);
+            if (!destinationHierarchy)
+                destinationHierarchy = &destinationRegistry.emplace<HierarchyComponent>(destinationEntity);
+
+            // Preserve exact local transform values from edit scene.
+            // Using SetParent() would preserve world transform and rewrite local transform,
+            // which causes children to shift when entering Play Mode.
+            destinationHierarchy->Parent = entt::null;
             if (sourceHierarchy->Parent != entt::null)
             {
                 auto foundParent = entityMap.find(sourceHierarchy->Parent);
                 if (foundParent != entityMap.end())
-                    destinationParent = foundParent->second;
+                    destinationHierarchy->Parent = foundParent->second;
             }
-            clone->SetParent(destinationEntity, destinationParent);
-            if (auto* destinationHierarchy = destinationRegistry.try_get<HierarchyComponent>(destinationEntity))
-                destinationHierarchy->SiblingOrder = sourceHierarchy->SiblingOrder;
+            destinationHierarchy->SiblingOrder = sourceHierarchy->SiblingOrder;
         }
 
         clone->m_EditorCameraBookmark = m_EditorCameraBookmark;
