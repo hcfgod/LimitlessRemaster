@@ -60,6 +60,11 @@ namespace Limitless {
     OpenGLContext::~OpenGLContext() {
         if (m_Context) {
             LT_CORE_INFO("Destroying OpenGL context");
+            // Release context from any thread before destroying it.
+            // Required for clean shutdown; avoids Intel driver crashes on exit.
+            if (m_Window) {
+                (void)SDL_GL_MakeCurrent(m_Window, nullptr);
+            }
             SDL_GL_DestroyContext(m_Context);
             m_Context = nullptr;
         }

@@ -208,6 +208,15 @@ namespace Limitless
 
     void SDLWindow::Shutdown()
     {
+        // OpenGL context must be destroyed BEFORE the window.
+        // Otherwise the Intel driver (igxelpicd64.dll) can crash during process exit.
+        // See: SDL/OpenGL best practice - destroy context first, then window.
+        if (m_Context)
+        {
+            m_Context.reset();
+            LT_CORE_DEBUG("Graphics context destroyed");
+        }
+
         if (m_Window)
         {
             SDL_DestroyWindow(m_Window);
