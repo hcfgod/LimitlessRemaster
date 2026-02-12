@@ -84,6 +84,17 @@ namespace Limitless
                 BoundTexture2D.fill(0);
             }
 
+            /// Invalidates texture binding cache for slots [0, count).
+            /// Use before binding when external code (e.g. ImGui) may have changed GL state.
+            /// Prevents stale cache from skipping glBindTexture, which causes wrong-texture sampling
+            /// (e.g. glyph artifacts when color-only quads should use white texture).
+            void InvalidateTextureSlots(uint32_t count)
+            {
+                constexpr GLuint kInvalidId = static_cast<GLuint>(-1);
+                for (uint32_t i = 0; i < count && i < BoundTexture2D.size(); ++i)
+                    BoundTexture2D[i] = kInvalidId;
+            }
+
             void UseProgram(GLuint program)
             {
                 if (Program != program)
@@ -437,7 +448,11 @@ namespace Limitless
         }
 
         // Bind textures (multi-texture batching) using cached renderer IDs.
+        // Invalidate texture cache first: ImGui (or other external code) may have bound its font
+        // to texture unit 0, leaving our cache stale. Skipping the bind would cause color-only
+        // quads to sample the wrong texture (glyph artifacts).
         const uint32_t count = (m_TextureCount > kMaxTextureSlots) ? kMaxTextureSlots : m_TextureCount;
+        s_GLState.InvalidateTextureSlots(count);
         for (uint32_t slot = 0; slot < count; ++slot)
         {
             s_GLState.BindTexture2D(slot, static_cast<GLuint>(m_TextureRendererIds[slot]));

@@ -2,6 +2,7 @@
 
 #include "Limitless.h"
 
+#include <filesystem>
 #include <memory>
 
 namespace Limitless
@@ -36,6 +37,8 @@ namespace Limitless
         void DrawScenePanel();
         void DrawInspectorPanel();
         void DrawProjectPanel();
+        void DrawAssetTree(const std::filesystem::path& assetsDir, const std::filesystem::path& relPath);
+        void DrawProjectFolderPopups(const std::filesystem::path& assetsDir);
 
         void EnsureViewportFramebuffer(uint32_t width, uint32_t height);
 
@@ -54,6 +57,15 @@ namespace Limitless
         entt::entity m_SelectedEntity = entt::null;
 
         bool m_ShowDemoWindow = false;
+
+        // Project panel folder popups (Create/Rename).
+        // OpenPopup must be called outside a closing popup, so we defer via Pending.
+        enum class ProjectFolderPopup { None, Create, Rename };
+        ProjectFolderPopup m_ProjectFolderPopupPending = ProjectFolderPopup::None;
+        std::filesystem::path m_ProjectFolderPopupParent;
+        char m_ProjectFolderPopupBuffer[256] = {};
+        bool m_CreateFolderPopupOpen = false;
+        bool m_RenameFolderPopupOpen = false;
     };
 
 }  // namespace Limitless

@@ -1,6 +1,7 @@
 #include "EditorLayer.h"
 #include "Assets/AssetLoadProgress.h"
 #include "Assets/AssetPaths.h"
+#include "Core/Debug/Log.h"
 #include "Editor/EditorCameraController.h"
 #include "Graphics/Framebuffer.h"
 #include "Scene/Scene.h"
@@ -10,6 +11,7 @@
 
 #include <glm/glm.hpp>
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <vector>
 
@@ -18,6 +20,7 @@ namespace Limitless
     namespace
     {
         constexpr const char* kAssetTexturePayload = "ASSET_TEXTURE";
+        constexpr const char* kAssetMovePayload = "ASSET_MOVE";
 
         bool IsTextureExtension(const std::filesystem::path& path)
         {
@@ -29,58 +32,354 @@ namespace Limitless
                    lower == ".pnm" || lower == ".bmp" || lower == ".tga" || lower == ".gif";
         }
 
-        void DrawAssetTree(const std::filesystem::path& assetsDir, const std::filesystem::path& relPath)
+        /// Creates a new folder under parentRelPath with the given name. Returns true if successful.
+        bool CreateFolderInDirectory(const std::filesystem::path& assetsDir,
+                                     const std::filesystem::path& parentRelPath,
+                                     const std::string& folderName)
         {
-            const std::filesystem::path currentDir = assetsDir / relPath;
+            if (folderName.empty())
+                return false;
+
+            const std::filesystem::path parentDir = assetsDir / parentRelPath;
             std::error_code ec;
-            if (!std::filesystem::exists(currentDir, ec) || !std::filesystem::is_directory(currentDir, ec))
-                return;
+            if (!std::filesystem::exists(parentDir, ec) || !std::filesystem::is_directory(parentDir, ec))
+                return false;
 
-            std::vector<std::filesystem::path> entries;
-            for (const auto& e : std::filesystem::directory_iterator(currentDir, ec))
+            const std::filesystem::path candidate = parentDir / folderName;
+            if (std::filesystem::exists(candidate, ec))
             {
-                if (ec) continue;
-                const std::string name = e.path().filename().string();
-                if (name.empty() || name[0] == '.') continue;
-                if (name == "Cache") continue;  // Skip internal cache
-                entries.push_back(e.path());
+                LT_CORE_WARN("CreateFolderInDirectory: folder already exists: {}", candidate.string());
+                return false;
             }
-            std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
-                const bool aDir = std::filesystem::is_directory(a);
-                const bool bDir = std::filesystem::is_directory(b);
-                if (aDir != bDir) return aDir;  // Folders first
-                return a.filename().string() < b.filename().string();
-            });
 
-            for (const auto& entry : entries)
+            return std::filesystem::create_directory(candidate, ec);
+        }
+
+        /// Deletes a folder and all its contents recursively. Returns true if successful.
+        bool DeleteFolderInAssets(const std::filesystem::path& assetsDir,
+                                 const std::filesystem::path& folderRelPath)
+        {
+            const std::filesystem::path folderPath = assetsDir / folderRelPath;
+            std::error_code ec;
+            if (!std::filesystem::exists(folderPath, ec) || !std::filesystem::is_directory(folderPath, ec))
+                return false;
+
+            std::filesystem::remove_all(folderPath, ec);
+            return !ec;
+        }
+
+        /// Renames a folder. Returns true if successful.
+        bool RenameFolderInAssets(const std::filesystem::path& assetsDir,
+                                 const std::filesystem::path& folderRelPath,
+                                 const std::string& newName)
+        {
+            if (newName.empty())
+                return false;
+
+            const std::filesystem::path parentDir = assetsDir / folderRelPath.parent_path();
+            const std::filesystem::path oldPath = assetsDir / folderRelPath;
+            const std::filesystem::path newPath = parentDir / newName;
+
+            std::error_code ec;
+            if (!std::filesystem::exists(oldPath, ec) || !std::filesystem::is_directory(oldPath, ec))
+                return false;
+
+            if (std::filesystem::exists(newPath, ec))
             {
-                const std::string filename = entry.filename().string();
-                const bool isDir = std::filesystem::is_directory(entry);
-                std::string assetKey = ("Assets/" + (relPath / filename).generic_string());
+                LT_CORE_WARN("RenameFolderInAssets: destination already exists: {}", newPath.string());
+                return false;
+            }
 
-                if (isDir)
+            std::filesystem::rename(oldPath, newPath, ec);
+            return !ec;
+        }
+
+        /// Moves a folder into another folder. Returns true if successful.
+        bool MoveFolderToFolder(const std::string& folderKey, const std::filesystem::path& destFolderRelPath)
+        {
+            auto resolveResult = Assets::ResolveAssetKeyToPath(folderKey);
+            if (resolveResult.IsFailure())
+                return false;
+
+            const std::filesystem::path sourcePath = resolveResult.GetValue();
+            if (!std::filesystem::is_directory(sourcePath))
+                return false;
+
+            auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
+            if (rootResult.IsFailure())
+                return false;
+
+            const std::filesystem::path destDir = rootResult.GetValue() / "Assets" / destFolderRelPath;
+            std::error_code ec;
+            if (!std::filesystem::exists(destDir, ec) || !std::filesystem::is_directory(destDir, ec))
+                return false;
+
+            const std::filesystem::path folderName = sourcePath.filename();
+            const std::filesystem::path destPath = destDir / folderName;
+
+            if (sourcePath == destPath)
+                return true;
+
+            // Prevent moving folder into itself or a descendant.
+            auto rel = std::filesystem::relative(destDir, sourcePath, ec);
+            if (!ec)
+            {
+                std::string relStr = rel.generic_string();
+                if (relStr.find("..") != 0 && relStr != ".")
                 {
-                    if (ImGui::TreeNodeEx(filename.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
-                    {
-                        DrawAssetTree(assetsDir, relPath / filename);
-                        ImGui::TreePop();
-                    }
+                    LT_CORE_WARN("MoveFolderToFolder: cannot move folder into itself or descendant");
+                    return false;
                 }
-                else
-                {
-                    const bool isTexture = IsTextureExtension(entry);
-                    const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-                    ImGui::TreeNodeEx(filename.c_str(), flags);
+            }
 
-                    if (isTexture && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+            if (std::filesystem::exists(destPath, ec))
+            {
+                LT_CORE_WARN("MoveFolderToFolder: destination already exists: {}", destPath.string());
+                return false;
+            }
+
+            std::filesystem::rename(sourcePath, destPath, ec);
+            return !ec;
+        }
+
+        /// Moves an asset (file + .meta if present) to the destination folder. Returns true if successful.
+        bool MoveAssetToFolder(const std::string& assetKey, const std::filesystem::path& destFolderRelPath)
+        {
+            auto resolveResult = Assets::ResolveAssetKeyToPath(assetKey);
+            if (resolveResult.IsFailure())
+                return false;
+
+            const std::filesystem::path sourcePath = resolveResult.GetValue();
+            if (!std::filesystem::is_regular_file(sourcePath))
+                return false;
+
+            auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
+            if (rootResult.IsFailure())
+                return false;
+
+            const std::filesystem::path destDir = rootResult.GetValue() / "Assets" / destFolderRelPath;
+            std::error_code ec;
+            if (!std::filesystem::exists(destDir, ec) || !std::filesystem::is_directory(destDir, ec))
+                return false;
+
+            const std::filesystem::path filename = sourcePath.filename();
+            const std::filesystem::path destPath = destDir / filename;
+
+            if (sourcePath == destPath)
+                return true;  // Already in place
+
+            if (std::filesystem::exists(destPath, ec))
+            {
+                LT_CORE_WARN("MoveAssetToFolder: destination already exists: {}", destPath.string());
+                return false;
+            }
+
+            std::filesystem::rename(sourcePath, destPath, ec);
+            if (ec)
+                return false;
+
+            // Move .meta file if present.
+            const std::filesystem::path metaPath = sourcePath.parent_path() / (sourcePath.filename().string() + ".meta");
+            if (std::filesystem::exists(metaPath, ec))
+            {
+                const std::filesystem::path destMetaPath = destDir / (filename.string() + ".meta");
+                std::filesystem::rename(metaPath, destMetaPath, ec);
+            }
+
+            return true;
+        }
+
+    }  // anonymous namespace
+
+    void EditorLayer::DrawAssetTree(const std::filesystem::path& assetsDir, const std::filesystem::path& relPath)
+    {
+        const std::filesystem::path currentDir = assetsDir / relPath;
+        std::error_code ec;
+        if (!std::filesystem::exists(currentDir, ec) || !std::filesystem::is_directory(currentDir, ec))
+            return;
+
+        std::vector<std::filesystem::path> entries;
+        for (const auto& e : std::filesystem::directory_iterator(currentDir, ec))
+        {
+            if (ec) continue;
+            const std::string name = e.path().filename().string();
+            if (name.empty() || name[0] == '.') continue;
+            if (name == "Cache") continue;
+            std::string ext = e.path().extension().string();
+            for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (ext == ".meta") continue;
+            entries.push_back(e.path());
+        }
+        std::sort(entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+            const bool aDir = std::filesystem::is_directory(a);
+            const bool bDir = std::filesystem::is_directory(b);
+            if (aDir != bDir) return aDir;
+            return a.filename().string() < b.filename().string();
+        });
+
+        for (const auto& entry : entries)
+        {
+            const std::string filename = entry.filename().string();
+            const bool isDir = std::filesystem::is_directory(entry);
+            std::string assetKey = ("Assets/" + (relPath / filename).generic_string());
+            const std::filesystem::path entryRelPath = relPath / filename;
+
+            if (isDir)
+            {
+                const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen;
+                const bool nodeOpen = ImGui::TreeNodeEx(filename.c_str(), flags);
+
+                if (ImGui::BeginPopupContextItem())
+                {
+                    m_ProjectFolderPopupParent = entryRelPath;
+                    if (ImGui::MenuItem("Create Folder"))
                     {
+                        m_ProjectFolderPopupPending = ProjectFolderPopup::Create;
+                        strncpy(m_ProjectFolderPopupBuffer, "New Folder", sizeof(m_ProjectFolderPopupBuffer) - 1);
+                        m_ProjectFolderPopupBuffer[sizeof(m_ProjectFolderPopupBuffer) - 1] = '\0';
+                    }
+                    if (ImGui::MenuItem("Rename"))
+                    {
+                        m_ProjectFolderPopupPending = ProjectFolderPopup::Rename;
+                        strncpy(m_ProjectFolderPopupBuffer, filename.c_str(), sizeof(m_ProjectFolderPopupBuffer) - 1);
+                        m_ProjectFolderPopupBuffer[sizeof(m_ProjectFolderPopupBuffer) - 1] = '\0';
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Delete"))
+                    {
+                        if (DeleteFolderInAssets(assetsDir, entryRelPath))
+                            LT_INFO("Deleted folder {}", entryRelPath.generic_string());
+                    }
+                    ImGui::EndPopup();
+                }
+
+                if (ImGui::BeginDragDropTarget())
+                {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kAssetTexturePayload))
+                    {
+                        const char* key = static_cast<const char*>(payload->Data);
+                        if (key && key[0])
+                        {
+                            if (std::filesystem::path(key).extension().empty())
+                                MoveFolderToFolder(key, entryRelPath);
+                            else
+                                MoveAssetToFolder(key, entryRelPath);
+                        }
+                    }
+                    else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kAssetMovePayload))
+                    {
+                        const char* key = static_cast<const char*>(payload->Data);
+                        if (key && key[0])
+                        {
+                            if (std::filesystem::path(key).extension().empty())
+                                MoveFolderToFolder(key, entryRelPath);
+                            else
+                                MoveAssetToFolder(key, entryRelPath);
+                        }
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+
+                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                {
+                    ImGui::SetDragDropPayload(kAssetMovePayload, assetKey.c_str(),
+                        static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                    ImGui::Text("%s", filename.c_str());
+                    ImGui::EndDragDropSource();
+                }
+
+                if (nodeOpen)
+                {
+                    DrawAssetTree(assetsDir, entryRelPath);
+                    ImGui::TreePop();
+                }
+            }
+            else
+            {
+                const bool isTexture = IsTextureExtension(entry);
+                const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                ImGui::TreeNodeEx(filename.c_str(), flags);
+
+                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                {
+                    if (isTexture)
                         ImGui::SetDragDropPayload(kAssetTexturePayload, assetKey.c_str(),
                             static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
-                        ImGui::Text("%s", filename.c_str());
-                        ImGui::EndDragDropSource();
-                    }
+                    else
+                        ImGui::SetDragDropPayload(kAssetMovePayload, assetKey.c_str(),
+                            static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                    ImGui::Text("%s", filename.c_str());
+                    ImGui::EndDragDropSource();
                 }
             }
+        }
+    }
+
+    void EditorLayer::DrawProjectFolderPopups(const std::filesystem::path& assetsDir)
+    {
+        // Defer OpenPopup to here: calling it from inside a closing context menu doesn't work.
+        if (m_ProjectFolderPopupPending == ProjectFolderPopup::Create)
+        {
+            ImGui::OpenPopup("CreateFolder");
+            ImGui::SetNextWindowFocus();
+            m_ProjectFolderPopupPending = ProjectFolderPopup::None;
+            m_CreateFolderPopupOpen = true;
+        }
+        else if (m_ProjectFolderPopupPending == ProjectFolderPopup::Rename)
+        {
+            ImGui::OpenPopup("RenameFolder");
+            ImGui::SetNextWindowFocus();
+            m_ProjectFolderPopupPending = ProjectFolderPopup::None;
+            m_RenameFolderPopupOpen = true;
+        }
+
+        // Use p_open so closing works reliably with docking (CloseCurrentPopup can fail).
+        if (ImGui::BeginPopupModal("CreateFolder", &m_CreateFolderPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::Text("Create Folder");
+            ImGui::Separator();
+            if (ImGui::IsWindowAppearing())
+                ImGui::SetKeyboardFocusHere();
+            const bool create = ImGui::InputText("##Name", m_ProjectFolderPopupBuffer, sizeof(m_ProjectFolderPopupBuffer),
+                ImGuiInputTextFlags_EnterReturnsTrue);
+
+            if (ImGui::Button("Create", ImVec2(120, 0)) || create)
+            {
+                if (m_ProjectFolderPopupBuffer[0] != '\0')
+                {
+                    if (CreateFolderInDirectory(assetsDir, m_ProjectFolderPopupParent, m_ProjectFolderPopupBuffer))
+                        LT_INFO("Created folder {}", m_ProjectFolderPopupBuffer);
+                    m_CreateFolderPopupOpen = false;
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                m_CreateFolderPopupOpen = false;
+            ImGui::EndPopup();
+        }
+
+        if (ImGui::BeginPopupModal("RenameFolder", &m_RenameFolderPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::Text("Rename Folder");
+            ImGui::Separator();
+            if (ImGui::IsWindowAppearing())
+                ImGui::SetKeyboardFocusHere();
+            const bool rename = ImGui::InputText("##Name", m_ProjectFolderPopupBuffer, sizeof(m_ProjectFolderPopupBuffer),
+                ImGuiInputTextFlags_EnterReturnsTrue);
+
+            if (ImGui::Button("Rename", ImVec2(120, 0)) || rename)
+            {
+                if (m_ProjectFolderPopupBuffer[0] != '\0')
+                {
+                    if (RenameFolderInAssets(assetsDir, m_ProjectFolderPopupParent, m_ProjectFolderPopupBuffer))
+                        LT_INFO("Renamed folder to {}", m_ProjectFolderPopupBuffer);
+                    m_RenameFolderPopupOpen = false;
+                }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                m_RenameFolderPopupOpen = false;
+            ImGui::EndPopup();
         }
     }
 
@@ -170,8 +469,17 @@ namespace Limitless
 
     void EditorLayer::OnWindowResize(Events::WindowResizeEvent& event)
     {
-        // Window resize affects the main window; viewport size is driven by ImGui panel.
-        (void)event;
+        // On fullscreen/resize, the viewport size from ImGui::GetContentRegionAvail() may lag.
+        // Update viewport and camera with the new window size to avoid rendering artifacts.
+        const uint32_t w = event.GetWidth();
+        const uint32_t h = event.GetHeight();
+        if (w > 0 && h > 0)
+        {
+            m_ViewportWidthPixels = w;
+            m_ViewportHeightPixels = h;
+            EnsureViewportFramebuffer(w, h);
+            m_EditorCameraController->OnWindowResize(w, h);
+        }
     }
 
     void EditorLayer::DrawMenuBar()
@@ -419,11 +727,65 @@ namespace Limitless
             return;
         }
 
+        // Right-click on empty space: Create Folder at Assets root.
+        if (ImGui::BeginPopupContextWindow("ProjectContext", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
+        {
+            if (ImGui::MenuItem("Create Folder"))
+            {
+                m_ProjectFolderPopupParent = "";
+                m_ProjectFolderPopupPending = ProjectFolderPopup::Create;
+                strncpy(m_ProjectFolderPopupBuffer, "New Folder", sizeof(m_ProjectFolderPopupBuffer) - 1);
+                m_ProjectFolderPopupBuffer[sizeof(m_ProjectFolderPopupBuffer) - 1] = '\0';
+            }
+            ImGui::EndPopup();
+        }
+
         if (ImGui::TreeNodeEx("Assets", ImGuiTreeNodeFlags_DefaultOpen))
         {
+            if (ImGui::BeginPopupContextItem())
+            {
+                m_ProjectFolderPopupParent = "";
+                if (ImGui::MenuItem("Create Folder"))
+                {
+                    m_ProjectFolderPopupPending = ProjectFolderPopup::Create;
+                    strncpy(m_ProjectFolderPopupBuffer, "New Folder", sizeof(m_ProjectFolderPopupBuffer) - 1);
+                    m_ProjectFolderPopupBuffer[sizeof(m_ProjectFolderPopupBuffer) - 1] = '\0';
+                }
+                ImGui::EndPopup();
+            }
+
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kAssetTexturePayload))
+                {
+                    const char* key = static_cast<const char*>(payload->Data);
+                    if (key && key[0])
+                    {
+                        if (std::filesystem::path(key).extension().empty())
+                            MoveFolderToFolder(key, "");
+                        else
+                            MoveAssetToFolder(key, "");
+                    }
+                }
+                else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kAssetMovePayload))
+                {
+                    const char* key = static_cast<const char*>(payload->Data);
+                    if (key && key[0])
+                    {
+                        if (std::filesystem::path(key).extension().empty())
+                            MoveFolderToFolder(key, "");
+                        else
+                            MoveAssetToFolder(key, "");
+                    }
+                }
+                ImGui::EndDragDropTarget();
+            }
+
             DrawAssetTree(assetsDir, "");
             ImGui::TreePop();
         }
+
+        DrawProjectFolderPopups(assetsDir);
 
         ImGui::End();
     }
