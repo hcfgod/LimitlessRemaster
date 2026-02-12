@@ -59,4 +59,26 @@ namespace Limitless
         std::string MaterialKey; ///< Asset key for material (example: "Assets/Materials/MyMaterial.material.json")
         Assets::MaterialAsset::Ptr CachedMaterial; ///< Runtime cache; keeps asset alive
     };
+
+    /// Entity camera settings used to build the active gameplay camera in Play Mode.
+    /// Unity-style: attach to any entity and mark one as Primary.
+    struct CameraComponent
+    {
+        enum class ProjectionType
+        {
+            Orthographic2D = 0,
+            Perspective3D = 1
+        };
+
+        ProjectionType Projection = ProjectionType::Orthographic2D;
+        bool IsPrimary = true;
+
+        // Orthographic settings.
+        float Zoom = 1.0f;
+        float NearPlane = -1.0f;
+        float FarPlane = 1.0f;
+
+        // Perspective settings.
+        float FieldOfViewYDegrees = 60.0f;
+    };
 }

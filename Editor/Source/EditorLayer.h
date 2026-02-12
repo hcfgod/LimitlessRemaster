@@ -70,6 +70,7 @@ namespace Limitless
         CameraManager m_CameraManager;
         CameraId m_EditorCameraId{};
         CameraId m_CachedGameplayCameraId{};
+        bool m_CreatedGameplayCameraFromScene = false;
         std::unique_ptr<EditorCameraController> m_EditorCameraController;
 
         std::unique_ptr<Scene> m_Scene;

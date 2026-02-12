@@ -29,10 +29,12 @@ namespace Limitless
         void SetViewportSize(uint32_t widthPixels, uint32_t heightPixels) override;
 
         void SetPosition(const glm::vec2& position);
+        void SetPosition(const glm::vec3& position);
         void SetRotationRadians(float rotationRadians);
+        void SetProjection(float zoom, float nearPlane, float farPlane);
         void SetZoom(float zoom);
 
-        const glm::vec2& GetPosition() const { return m_Position; }
+        const glm::vec3& GetPosition() const { return m_Position; }
         float GetRotationRadians() const { return m_RotationRadians; }
         float GetZoom() const { return m_Settings.Zoom; }
 
@@ -47,7 +49,7 @@ namespace Limitless
         uint32_t m_ViewportWidth = 1;
         uint32_t m_ViewportHeight = 1;
 
-        glm::vec2 m_Position{0.0f, 0.0f};
+        glm::vec3 m_Position{0.0f, 0.0f, 0.0f};
         float m_RotationRadians = 0.0f;
         Settings m_Settings{};
 

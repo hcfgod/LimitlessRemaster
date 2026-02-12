@@ -29,6 +29,13 @@ namespace Limitless
 
     void OrthographicCamera2D::SetPosition(const glm::vec2& position)
     {
+        m_Position.x = position.x;
+        m_Position.y = position.y;
+        RecomputeView();
+    }
+
+    void OrthographicCamera2D::SetPosition(const glm::vec3& position)
+    {
         m_Position = position;
         RecomputeView();
     }
@@ -50,6 +57,25 @@ namespace Limitless
         RecomputeProjection();
     }
 
+    void OrthographicCamera2D::SetProjection(float zoom, float nearPlane, float farPlane)
+    {
+        if (zoom <= 0.0f)
+        {
+            LT_CORE_WARN("OrthographicCamera2D: zoom must be > 0 (requested {})", zoom);
+            return;
+        }
+        if (nearPlane >= farPlane)
+        {
+            LT_CORE_WARN("OrthographicCamera2D: near plane must be < far plane (near={}, far={})", nearPlane, farPlane);
+            return;
+        }
+
+        m_Settings.Zoom = zoom;
+        m_Settings.NearPlane = nearPlane;
+        m_Settings.FarPlane = farPlane;
+        RecomputeProjection();
+    }
+
     void OrthographicCamera2D::RecomputeProjection()
     {
         const float aspect = static_cast<float>(m_ViewportWidth) / static_cast<float>(m_ViewportHeight);
@@ -66,7 +92,7 @@ namespace Limitless
     void OrthographicCamera2D::RecomputeView()
     {
         glm::mat4 transform(1.0f);
-        transform = glm::translate(transform, glm::vec3(m_Position, 0.0f));
+        transform = glm::translate(transform, m_Position);
         transform = glm::rotate(transform, m_RotationRadians, glm::vec3(0.0f, 0.0f, 1.0f));
 
         // View matrix is inverse of camera transform.

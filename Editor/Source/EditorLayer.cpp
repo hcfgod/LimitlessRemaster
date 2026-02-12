@@ -119,6 +119,13 @@ namespace Limitless
 
     void EditorLayer::OnUpdate(float deltaTime)
     {
+        EditorPlayMode::SyncSceneCamera(
+            m_PlayModeState,
+            m_Scene.get(),
+            m_CameraManager,
+            m_CachedGameplayCameraId,
+            m_CreatedGameplayCameraFromScene);
+
         const ImGuiIO& io = ImGui::GetIO();
         EditorRuntimeOperations::Update(
             m_PlayModeState,
@@ -266,7 +273,10 @@ namespace Limitless
             m_EditSceneStored,
             m_CameraManager,
             m_EditorCameraId,
+            m_ViewportWidthPixels,
+            m_ViewportHeightPixels,
             m_CachedGameplayCameraId,
+            m_CreatedGameplayCameraFromScene,
             m_PlayModeMissingGameplayCamera,
             m_SelectedEntity,
             m_SelectedTextureAssetKey,
@@ -282,6 +292,7 @@ namespace Limitless
             m_CameraManager,
             m_EditorCameraId,
             m_CachedGameplayCameraId,
+            m_CreatedGameplayCameraFromScene,
             m_PlayModeMissingGameplayCamera,
             m_SelectedEntity,
             m_SelectedTextureAssetKey,

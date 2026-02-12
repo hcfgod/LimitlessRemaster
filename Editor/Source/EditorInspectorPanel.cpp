@@ -584,6 +584,19 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::PopID();
             }
         }
+
+        void ClearPrimaryFlagFromOtherCameras(entt::registry& registry, entt::entity currentEntity)
+        {
+            auto view = registry.view<CameraComponent>();
+            for (entt::entity entity : view)
+            {
+                if (entity == currentEntity)
+                    continue;
+
+                auto& otherCamera = view.get<CameraComponent>(entity);
+                otherCamera.IsPrimary = false;
+            }
+        }
     }
 
     void Draw(Scene* scene,
@@ -616,6 +629,9 @@ namespace Limitless::EditorInspectorPanel
         else
         {
             auto& registry = scene->GetRegistry();
+            bool removeSpriteComponent = false;
+            bool removeCameraComponent = false;
+            bool removeMaterialComponent = false;
             if (auto* tag = registry.try_get<TagComponent>(selectedEntity))
             {
                 static entt::entity renameEntity = entt::null;
@@ -640,7 +656,24 @@ namespace Limitless::EditorInspectorPanel
 
             if (auto* transform = registry.try_get<TransformComponent>(selectedEntity))
             {
-                if (ImGui::TreeNodeEx("Transform", ImGuiTreeNodeFlags_DefaultOpen))
+                const bool transformOpen = ImGui::TreeNodeEx("Transform", ImGuiTreeNodeFlags_DefaultOpen);
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                    ImGui::OpenPopup("TransformComponentOptions");
+                ImGui::SameLine();
+                if (ImGui::Button("...##TransformComponentOptionsButton"))
+                    ImGui::OpenPopup("TransformComponentOptions");
+
+                if (ImGui::BeginPopup("TransformComponentOptions"))
+                {
+                    ImGui::BeginDisabled();
+                    ImGui::MenuItem("Remove Component");
+                    ImGui::EndDisabled();
+                    ImGui::Separator();
+                    ImGui::TextDisabled("Transform cannot be removed.");
+                    ImGui::EndPopup();
+                }
+
+                if (transformOpen)
                 {
                     ImGui::DragFloat3("Position", &transform->Position.x, 0.1f);
                     ImGui::DragFloat3("Rotation", &transform->Rotation.x, 1.0f);
@@ -651,7 +684,21 @@ namespace Limitless::EditorInspectorPanel
 
             if (auto* sprite = registry.try_get<SpriteComponent>(selectedEntity))
             {
-                if (ImGui::TreeNodeEx("Sprite", ImGuiTreeNodeFlags_DefaultOpen))
+                const bool spriteOpen = ImGui::TreeNodeEx("Sprite", ImGuiTreeNodeFlags_DefaultOpen);
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                    ImGui::OpenPopup("SpriteComponentOptions");
+                ImGui::SameLine();
+                if (ImGui::Button("...##SpriteComponentOptionsButton"))
+                    ImGui::OpenPopup("SpriteComponentOptions");
+
+                if (ImGui::BeginPopup("SpriteComponentOptions"))
+                {
+                    if (ImGui::MenuItem("Remove Component"))
+                        removeSpriteComponent = true;
+                    ImGui::EndPopup();
+                }
+
+                if (spriteOpen)
                 {
                     ImGui::ColorEdit4("Color", &sprite->Color.r);
 
@@ -694,6 +741,78 @@ namespace Limitless::EditorInspectorPanel
                 }
             }
 
+            if (auto* camera = registry.try_get<CameraComponent>(selectedEntity))
+            {
+                const bool cameraOpen = ImGui::TreeNodeEx("Camera", ImGuiTreeNodeFlags_DefaultOpen);
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                    ImGui::OpenPopup("CameraComponentOptions");
+                ImGui::SameLine();
+                if (ImGui::Button("...##CameraComponentOptionsButton"))
+                    ImGui::OpenPopup("CameraComponentOptions");
+
+                if (ImGui::BeginPopup("CameraComponentOptions"))
+                {
+                    if (ImGui::MenuItem("Remove Component"))
+                        removeCameraComponent = true;
+                    ImGui::EndPopup();
+                }
+
+                if (cameraOpen)
+                {
+                    int projectionIndex = static_cast<int>(camera->Projection);
+                    const char* projectionOptions[] = { "Orthographic 2D", "Perspective 3D" };
+                    const CameraComponent::ProjectionType previousProjection = camera->Projection;
+                    if (ImGui::Combo("Projection", &projectionIndex, projectionOptions, 2))
+                    {
+                        camera->Projection = static_cast<CameraComponent::ProjectionType>(projectionIndex);
+                        if (previousProjection != camera->Projection)
+                        {
+                            if (camera->Projection == CameraComponent::ProjectionType::Perspective3D)
+                            {
+                                // Switching from ortho to perspective should use perspective-safe clip defaults.
+                                camera->NearPlane = 0.1f;
+                                camera->FarPlane = 1000.0f;
+                            }
+                            else
+                            {
+                                // Switching from perspective to ortho uses the classic 2D clip volume.
+                                camera->NearPlane = -1.0f;
+                                camera->FarPlane = 1.0f;
+                            }
+                        }
+                    }
+
+                    if (camera->Projection == CameraComponent::ProjectionType::Orthographic2D)
+                    {
+                        if (camera->NearPlane >= camera->FarPlane)
+                            camera->FarPlane = camera->NearPlane + 2.0f;
+                        ImGui::DragFloat("Zoom", &camera->Zoom, 0.05f, 0.01f, 100.0f);
+                        ImGui::DragFloat("Near Plane", &camera->NearPlane, 0.01f);
+                        ImGui::DragFloat("Far Plane", &camera->FarPlane, 0.01f);
+                    }
+                    else
+                    {
+                        if (camera->NearPlane <= 0.0f)
+                            camera->NearPlane = 0.01f;
+                        if (camera->FarPlane <= camera->NearPlane)
+                            camera->FarPlane = camera->NearPlane + 1000.0f;
+                        ImGui::DragFloat("Field Of View", &camera->FieldOfViewYDegrees, 0.1f, 1.0f, 179.0f);
+                        ImGui::DragFloat("Near Plane", &camera->NearPlane, 0.01f, 0.001f, 1000.0f);
+                        ImGui::DragFloat("Far Plane", &camera->FarPlane, 1.0f, 0.01f, 100000.0f);
+                    }
+
+                    bool isPrimary = camera->IsPrimary;
+                    if (ImGui::Checkbox("Primary", &isPrimary))
+                    {
+                        camera->IsPrimary = isPrimary;
+                        if (camera->IsPrimary)
+                            ClearPrimaryFlagFromOtherCameras(registry, selectedEntity);
+                    }
+
+                    ImGui::TreePop();
+                }
+            }
+
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
@@ -704,6 +823,7 @@ namespace Limitless::EditorInspectorPanel
             if (ImGui::BeginPopup("AddComponentPopup"))
             {
                 const bool hasSpriteComponent = registry.all_of<SpriteComponent>(selectedEntity);
+                const bool hasCameraComponent = registry.all_of<CameraComponent>(selectedEntity);
                 if (hasSpriteComponent)
                     ImGui::BeginDisabled();
 
@@ -713,8 +833,36 @@ namespace Limitless::EditorInspectorPanel
                 if (hasSpriteComponent)
                     ImGui::EndDisabled();
 
+                if (hasCameraComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Camera Component"))
+                {
+                    auto& camera = registry.emplace<CameraComponent>(selectedEntity);
+                    camera.IsPrimary = true;
+                    ClearPrimaryFlagFromOtherCameras(registry, selectedEntity);
+                }
+
+                if (hasCameraComponent)
+                    ImGui::EndDisabled();
+
                 ImGui::EndPopup();
             }
+
+            if (removeSpriteComponent)
+            {
+                registry.remove<SpriteComponent>(selectedEntity);
+                // Material is currently only consumed by sprite rendering; remove it with sprite
+                // to keep components aligned with what the renderer expects.
+                if (registry.all_of<MaterialComponent>(selectedEntity))
+                    removeMaterialComponent = true;
+            }
+
+            if (removeMaterialComponent)
+                registry.remove<MaterialComponent>(selectedEntity);
+
+            if (removeCameraComponent)
+                registry.remove<CameraComponent>(selectedEntity);
         }
 
         ImGui::End();

@@ -2,6 +2,7 @@
 
 #include "Assets/AssetLoadProgress.h"
 #include "Editor/EditorCameraController.h"
+#include "Graphics/Camera/Camera.h"
 #include "Graphics/Framebuffer.h"
 #include "Graphics/Renderer2D.h"
 #include "Scene/Scene.h"
@@ -157,7 +158,9 @@ namespace Limitless::EditorViewportPanel
                     editorCameraController->OnWindowResize(width, height);
             }
 
-            const Camera* camera = cameraManager.GetActiveCamera();
+            Camera* camera = cameraManager.GetActiveCamera();
+            if (camera)
+                camera->SetViewportSize(width, height);
             if (camera && scene && viewportFramebuffer)
                 SceneRenderer::RenderToViewport(*scene, *camera, viewportFramebuffer, width, height);
 
@@ -273,7 +276,7 @@ namespace Limitless::EditorViewportPanel
                     ImDrawList* drawList = ImGui::GetWindowDrawList();
                     drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 140));
 
-                    const char* text = "Play Mode: No active Gameplay camera.\nCreate a camera with Usage=Gameplay to render in Play Mode.";
+                    const char* text = "Play Mode: No active gameplay camera.\nAdd a Camera Component to an entity and set it as Primary.";
                     const ImVec2 textSize = ImGui::CalcTextSize(text);
                     const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
                     drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f), IM_COL32(255, 200, 120, 255), text);

@@ -287,6 +287,11 @@ namespace Limitless
                 destinationMaterial.MaterialKey = material->MaterialKey;
                 destinationMaterial.CachedMaterial.reset();
             }
+
+            if (const auto* camera = sourceRegistry.try_get<CameraComponent>(sourceEntity))
+            {
+                destinationRegistry.emplace<CameraComponent>(destinationEntity, *camera);
+            }
         }
 
         for (const auto& [sourceEntity, destinationEntity] : entityMap)
@@ -388,6 +393,22 @@ namespace Limitless
                 };
             }
 
+            if (const auto* camera = m_Registry.try_get<CameraComponent>(entity))
+            {
+                const char* projectionName = (camera->Projection == CameraComponent::ProjectionType::Perspective3D)
+                    ? "Perspective3D"
+                    : "Orthographic2D";
+
+                entry["Camera"] = {
+                    { "Projection", projectionName },
+                    { "IsPrimary", camera->IsPrimary },
+                    { "Zoom", camera->Zoom },
+                    { "NearPlane", camera->NearPlane },
+                    { "FarPlane", camera->FarPlane },
+                    { "FieldOfViewYDegrees", camera->FieldOfViewYDegrees }
+                };
+            }
+
             root["Entities"].push_back(std::move(entry));
         }
 
@@ -473,6 +494,23 @@ namespace Limitless
                 auto& material = scene->GetRegistry().emplace<MaterialComponent>(entity);
                 material.MaterialKey = materialJson.value("MaterialKey", "");
                 material.CachedMaterial.reset();
+            }
+
+            if (entry.contains("Camera") && entry["Camera"].is_object())
+            {
+                const auto& cameraJson = entry["Camera"];
+                auto& camera = scene->GetRegistry().emplace<CameraComponent>(entity);
+
+                const std::string projectionName = cameraJson.value("Projection", "Orthographic2D");
+                camera.Projection = (projectionName == "Perspective3D")
+                    ? CameraComponent::ProjectionType::Perspective3D
+                    : CameraComponent::ProjectionType::Orthographic2D;
+
+                camera.IsPrimary = cameraJson.value("IsPrimary", true);
+                camera.Zoom = cameraJson.value("Zoom", 1.0f);
+                camera.NearPlane = cameraJson.value("NearPlane", -1.0f);
+                camera.FarPlane = cameraJson.value("FarPlane", 1.0f);
+                camera.FieldOfViewYDegrees = cameraJson.value("FieldOfViewYDegrees", 60.0f);
             }
 
             int32_t parentIndex = -1;

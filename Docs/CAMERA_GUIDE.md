@@ -82,3 +82,22 @@ const Limitless::Camera* active = cameras.GetActiveCamera();
 // active->GetViewProjectionMatrix() is ready for rendering.
 ```
 
+## Scene Camera Component (Unity-style)
+
+You can now add a `CameraComponent` directly to scene entities from the Inspector.
+
+- Add component: `Inspector -> Add Component -> Camera Component`
+- Set **Projection** (`Orthographic 2D` or `Perspective 3D`)
+- Set **Primary** on the camera you want to use in Play Mode
+- Use the entity `TransformComponent` to position/orient the camera
+
+### Play Mode Behavior
+
+- On **Enter Play**, the editor clones the scene and searches for a scene camera entity:
+  - Prefers the first camera marked `Primary`
+  - Falls back to the first entity that has a `CameraComponent`
+- A gameplay camera is created from that component and becomes the active camera.
+- On **Exit Play**, that temporary gameplay camera is destroyed and the editor camera is restored.
+
+If no scene camera component exists, the editor still falls back to any pre-existing gameplay camera in `CameraManager`.
+
