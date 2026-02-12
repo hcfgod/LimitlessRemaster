@@ -17,7 +17,7 @@ namespace Limitless
      * @brief Editor layer with viewport, scene hierarchy, inspector, and project panels.
      *
      * Renders a 3D scene to a framebuffer displayed in the Viewport panel.
-     * Editor camera input is only active when the viewport is focused.
+     * Editor camera input is active when the viewport is hovered (Unity-style).
      */
     class EditorLayer : public Layer
     {
@@ -34,6 +34,13 @@ namespace Limitless
         void OnWindowResize(Events::WindowResizeEvent& event) override;
 
     private:
+        enum class PlayModeState
+        {
+            Edit = 0,
+            Play = 1,
+            Pause = 2
+        };
+
         void DrawMenuBar();
         void DrawViewportPanel();
         void DrawScenePanel();
@@ -56,10 +63,15 @@ namespace Limitless
         bool m_ViewportHovered = false;
 
         CameraManager m_CameraManager;
-        CameraId m_CameraId{};
+        CameraId m_EditorCameraId{};
+        CameraId m_CachedGameplayCameraId{};
         std::unique_ptr<EditorCameraController> m_EditorCameraController;
 
         std::unique_ptr<Scene> m_Scene;
+        /// Stored edit-scene while in Play/Pause. On Stop, we restore this instance.
+        std::unique_ptr<Scene> m_EditSceneStored;
+        PlayModeState m_PlayModeState = PlayModeState::Edit;
+        bool m_PlayModeMissingGameplayCamera = false;
         entt::entity m_SelectedEntity = entt::null;
 
         /// Selected texture asset key when user double-clicks a texture in the Project panel (e.g. "Assets/Textures/X.png").

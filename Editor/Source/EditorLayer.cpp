@@ -39,6 +39,63 @@ namespace Limitless
                    lower == ".pnm" || lower == ".bmp" || lower == ".tga" || lower == ".gif";
         }
 
+        std::unique_ptr<Scene> CloneSceneForPlayMode(const Scene& source)
+        {
+            // NOTE:
+            // This is an editor-only clone used for Unity-style Play Mode.
+            // - Play Mode edits should not affect the edit scene.
+            // - Stop restores the original edit-scene instance.
+            //
+            // Today we clone the core built-in components used by the editor viewport:
+            // - TagComponent
+            // - TransformComponent
+            // - SpriteComponent
+            //
+            // Extend this list as more runtime components are added.
+            auto clone = std::make_unique<Scene>();
+
+            const auto& srcRegistry = source.GetRegistry();
+            auto& dstRegistry = clone->GetRegistry();
+
+            // Scene::CreateEntity always creates Tag + Transform, so cloning via CreateEntity gives us
+            // consistent default initialization before we overwrite the component values.
+            auto view = srcRegistry.view<TagComponent, TransformComponent>();
+            for (entt::entity entity : view)
+            {
+                const auto& tag = view.get<TagComponent>(entity);
+                const auto& transform = view.get<TransformComponent>(entity);
+
+                entt::entity dst = clone->CreateEntity(tag.Tag);
+
+                dstRegistry.replace<TransformComponent>(dst, transform);
+
+                if (auto* sprite = srcRegistry.try_get<SpriteComponent>(entity))
+                {
+                    auto& dstSprite = dstRegistry.emplace<SpriteComponent>(dst);
+                    dstSprite.TextureKey = sprite->TextureKey;
+                    dstSprite.CachedTexture.reset(); // Force runtime reload on demand.
+                    dstSprite.Color = sprite->Color;
+                }
+            }
+
+            return clone;
+        }
+
+        std::optional<CameraId> FindFirstGameplayCamera(CameraManager& cameraManager)
+        {
+            for (CameraId id : cameraManager.GetAllCameraIds())
+            {
+                if (const Camera* camera = cameraManager.GetCamera(id))
+                {
+                    if (camera->GetUsage() == CameraUsage::Gameplay)
+                    {
+                        return id;
+                    }
+                }
+            }
+            return std::nullopt;
+        }
+
         /// Creates a new folder under parentRelPath with the given name. Returns true if successful.
         bool CreateFolderInDirectory(const std::filesystem::path& assetsDir,
                                      const std::filesystem::path& parentRelPath,
@@ -429,10 +486,10 @@ namespace Limitless
         cameraInfo.NearPlane = 0.1f;
         cameraInfo.FarPlane = 1000.0f;
 
-        m_CameraId = m_CameraManager.CreatePerspective3D(cameraInfo);
-        m_CameraManager.SetActiveCamera(m_CameraId);
+        m_EditorCameraId = m_CameraManager.CreatePerspective3D(cameraInfo);
+        m_CameraManager.SetActiveCamera(m_EditorCameraId);
 
-        if (auto* camera = m_CameraManager.GetPerspective3D(m_CameraId))
+        if (auto* camera = m_CameraManager.GetPerspective3D(m_EditorCameraId))
         {
             camera->SetPosition(glm::vec3(0.0f, 0.0f, 2.0f));
             camera->SetYawPitchDegrees(-90.0f, 0.0f);
@@ -442,7 +499,7 @@ namespace Limitless
         EditorCameraController::Settings editorCameraSettings{};
         editorCameraSettings.InputActionsAssetKey = "Assets/InputActions/EditorCamera.inputactions.json";
         editorCameraSettings.UseOverrideActionAsset = true;
-        m_EditorCameraController->Initialize(m_CameraManager, m_CameraId, editorCameraSettings);
+        m_EditorCameraController->Initialize(m_CameraManager, m_EditorCameraId, editorCameraSettings);
 
         // Create initial viewport framebuffer (min size to avoid 0x0).
         EnsureViewportFramebuffer(m_ViewportWidthPixels, m_ViewportHeightPixels);
@@ -459,6 +516,7 @@ namespace Limitless
         }
 
         m_Scene.reset();
+        m_EditSceneStored.reset();
         m_ViewportFramebuffer.reset();
         Renderer2D::Shutdown();
 
@@ -467,8 +525,14 @@ namespace Limitless
 
     void EditorLayer::OnUpdate(float deltaTime)
     {
-        // Only process editor camera input when viewport is focused.
-        m_EditorCameraController->SetInputEnabled(m_ViewportFocused);
+        // Unity-style: allow viewport navigation without a click-to-focus.
+        // Only enable editor camera navigation in Edit mode, and disable while typing in ImGui.
+        const ImGuiIO& io = ImGui::GetIO();
+        const bool allowCameraInput =
+            (m_PlayModeState == PlayModeState::Edit) &&
+            m_ViewportHovered &&
+            !io.WantTextInput;
+        m_EditorCameraController->SetInputEnabled(allowCameraInput);
         m_EditorCameraController->Update(deltaTime);
     }
 
@@ -543,6 +607,95 @@ namespace Limitless
                 ImGui::EndMenu();
             }
 
+            // -----------------------------------------------------------------------------
+            // Play Mode toolbar (Unity-style)
+            // -----------------------------------------------------------------------------
+            ImGui::Separator();
+
+            const char* modeLabel =
+                (m_PlayModeState == PlayModeState::Edit) ? "Edit" :
+                (m_PlayModeState == PlayModeState::Play) ? "Play" :
+                "Pause";
+
+            ImGui::TextDisabled("Mode: %s", modeLabel);
+            ImGui::SameLine();
+
+            // Play / Stop
+            if (m_PlayModeState == PlayModeState::Edit)
+            {
+                if (ImGui::Button("Play"))
+                {
+                    // Enter Play Mode: keep the edit scene instance and simulate on a clone.
+                    m_SelectedEntity = entt::null;
+                    m_SelectedTextureAssetKey.clear();
+                    m_CachedTextureAsset.reset();
+
+                    m_EditSceneStored = std::move(m_Scene);
+                    m_Scene = m_EditSceneStored ? CloneSceneForPlayMode(*m_EditSceneStored) : std::make_unique<Scene>();
+
+                    // Switch to a Gameplay camera if one exists.
+                    m_PlayModeMissingGameplayCamera = false;
+                    std::optional<CameraId> gameplayCam = FindFirstGameplayCamera(m_CameraManager);
+                    if (gameplayCam.has_value())
+                    {
+                        m_CachedGameplayCameraId = gameplayCam.value();
+                        m_CameraManager.SetActiveCamera(m_CachedGameplayCameraId);
+                    }
+                    else
+                    {
+                        // No gameplay camera available; keep editor camera active and show a warning in the viewport.
+                        m_PlayModeMissingGameplayCamera = true;
+                        m_CachedGameplayCameraId = {};
+                        m_CameraManager.SetActiveCamera(m_EditorCameraId);
+                    }
+
+                    Limitless::Time::SetTimeScale(1.0f);
+                    m_PlayModeState = PlayModeState::Play;
+                }
+            }
+            else
+            {
+                if (ImGui::Button("Stop"))
+                {
+                    // Stop Play Mode: restore edit scene instance.
+                    m_SelectedEntity = entt::null;
+                    m_SelectedTextureAssetKey.clear();
+                    m_CachedTextureAsset.reset();
+
+                    if (m_EditSceneStored)
+                    {
+                        m_Scene = std::move(m_EditSceneStored);
+                    }
+                    m_PlayModeMissingGameplayCamera = false;
+                    m_CachedGameplayCameraId = {};
+                    m_CameraManager.SetActiveCamera(m_EditorCameraId);
+                    Limitless::Time::SetTimeScale(1.0f);
+                    m_PlayModeState = PlayModeState::Edit;
+                }
+            }
+
+            ImGui::SameLine();
+
+            // Pause / Resume (only valid in Play Mode)
+            ImGui::BeginDisabled(m_PlayModeState == PlayModeState::Edit);
+            if (m_PlayModeState == PlayModeState::Pause)
+            {
+                if (ImGui::Button("Resume"))
+                {
+                    Limitless::Time::SetTimeScale(1.0f);
+                    m_PlayModeState = PlayModeState::Play;
+                }
+            }
+            else
+            {
+                if (ImGui::Button("Pause"))
+                {
+                    Limitless::Time::SetTimeScale(0.0f);
+                    m_PlayModeState = PlayModeState::Pause;
+                }
+            }
+            ImGui::EndDisabled();
+
             ImGui::EndMainMenuBar();
         }
     }
@@ -573,7 +726,7 @@ namespace Limitless
                 m_EditorCameraController->OnWindowResize(width, height);
             }
 
-            const Camera* camera = m_CameraManager.GetCamera(m_CameraId);
+            const Camera* camera = m_CameraManager.GetActiveCamera();
             if (camera && m_Scene && m_ViewportFramebuffer)
             {
                 SceneRenderer::RenderToViewport(*m_Scene, *camera, m_ViewportFramebuffer, width, height);
@@ -620,6 +773,19 @@ namespace Limitless
                     drawList->AddRectFilled(barMin, barMax, IM_COL32(50, 50, 55, 255));
                     ImVec2 fillMax = ImVec2(barMin.x + barWidth * progressValue, barMax.y);
                     drawList->AddRectFilled(barMin, fillMax, IM_COL32(80, 140, 220, 255));
+                }
+                else if (m_PlayModeState != PlayModeState::Edit && m_PlayModeMissingGameplayCamera)
+                {
+                    // Unity-style warning when entering Play without a gameplay camera.
+                    ImVec2 minPos = ImGui::GetItemRectMin();
+                    ImVec2 maxPos = ImGui::GetItemRectMax();
+                    ImDrawList* drawList = ImGui::GetWindowDrawList();
+                    drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 140));
+
+                    const char* text = "Play Mode: No active Gameplay camera.\nCreate a camera with Usage=Gameplay to render in Play Mode.";
+                    ImVec2 textSize = ImGui::CalcTextSize(text);
+                    ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
+                    drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f), IM_COL32(255, 200, 120, 255), text);
                 }
             }
         }
