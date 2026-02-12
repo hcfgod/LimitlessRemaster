@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Limitless.h"
+#include "Assets/TextureAsset.h"
+#include "Graphics/Texture.h"
 
 #include <filesystem>
 #include <memory>
@@ -36,6 +38,10 @@ namespace Limitless
         void DrawViewportPanel();
         void DrawScenePanel();
         void DrawInspectorPanel();
+        void DrawTextureInspector();
+        void ApplyTextureSpecAndPersist(Assets::TextureAsset::Ptr textureAsset, const TextureSpecification& spec);
+        void PersistTextureSpecAndReload(Assets::TextureAsset::Ptr textureAsset, const TextureSpecification& spec);
+        void InvalidateSpriteCachesForTexture(const std::string& textureKey);
         void DrawProjectPanel();
         void DrawAssetTree(const std::filesystem::path& assetsDir, const std::filesystem::path& relPath);
         void DrawProjectFolderPopups(const std::filesystem::path& assetsDir);
@@ -55,6 +61,13 @@ namespace Limitless
 
         std::unique_ptr<Scene> m_Scene;
         entt::entity m_SelectedEntity = entt::null;
+
+        /// Selected texture asset key when user double-clicks a texture in the Project panel (e.g. "Assets/Textures/X.png").
+        /// When non-empty, the Inspector shows the texture and its spec; entity selection is ignored.
+        std::string m_SelectedTextureAssetKey;
+
+        /// Cached texture asset for the selected key; avoids LoadBlocking every frame and reduces lag.
+        Assets::TextureAsset::Ptr m_CachedTextureAsset;
 
         bool m_ShowDemoWindow = false;
 

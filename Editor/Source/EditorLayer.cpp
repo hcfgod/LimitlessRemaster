@@ -1,9 +1,16 @@
 #include "EditorLayer.h"
 #include "Assets/AssetLoadProgress.h"
 #include "Assets/AssetPaths.h"
+#include "Assets/AssetDatabase.h"
+#include "Assets/AssetManager.h"
+#include "Assets/TextureAsset.h"
+#include "Assets/TextureAssetImporter.h"
+#include "Assets/TextureSpecificationJson.h"
 #include "Core/Debug/Log.h"
 #include "Editor/EditorCameraController.h"
 #include "Graphics/Framebuffer.h"
+#include "Graphics/RenderCommand.h"
+#include "Graphics/Renderer.h"
 #include "Scene/Scene.h"
 #include "Graphics/Renderer2D.h"
 #include "ImGui/ImGuiLayer.h"
@@ -298,7 +305,17 @@ namespace Limitless
             {
                 const bool isTexture = IsTextureExtension(entry);
                 const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-                ImGui::TreeNodeEx(filename.c_str(), flags);
+                const bool isSelected = isTexture && (m_SelectedTextureAssetKey == assetKey);
+                ImGui::TreeNodeEx(filename.c_str(), isSelected ? (flags | ImGuiTreeNodeFlags_Selected) : flags);
+
+                // Double-click to select texture; single-click + drag = drag to Sprite slot.
+                // Selecting on single-click would switch the Inspector to texture mode and hide
+                // the Sprite drag target before the user could drop.
+                if (isTexture && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
+                {
+                    m_SelectedTextureAssetKey = assetKey;
+                    m_SelectedEntity = entt::null;
+                }
 
                 if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
                 {
@@ -628,7 +645,11 @@ namespace Limitless
                         flags |= ImGuiTreeNodeFlags_Selected;
                     ImGui::TreeNodeEx(tag.Tag.c_str(), flags);
                     if (ImGui::IsItemClicked())
+                    {
                         m_SelectedEntity = entity;
+                        m_SelectedTextureAssetKey.clear();
+                        m_CachedTextureAsset.reset();
+                    }
                     // No TreePop for leaf nodes: NoTreePushOnOpen means they don't push to the stack.
                 }
                 ImGui::TreePop();
@@ -642,7 +663,12 @@ namespace Limitless
     {
         ImGui::Begin("Inspector");
 
-        if (!m_Scene || m_SelectedEntity == entt::null || !m_Scene->IsValid(m_SelectedEntity))
+        // Texture selection takes precedence over entity selection.
+        if (!m_SelectedTextureAssetKey.empty())
+        {
+            DrawTextureInspector();
+        }
+        else if (!m_Scene || m_SelectedEntity == entt::null || !m_Scene->IsValid(m_SelectedEntity))
         {
             ImGui::Text("Select an object to edit.");
             ImGui::Spacing();
@@ -704,6 +730,168 @@ namespace Limitless
         }
 
         ImGui::End();
+    }
+
+    void EditorLayer::DrawTextureInspector()
+    {
+        // Use cached asset when key matches; load only when selection changes.
+        if (!m_CachedTextureAsset || m_CachedTextureAsset->GetKey() != m_SelectedTextureAssetKey)
+        {
+            m_CachedTextureAsset = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(m_SelectedTextureAssetKey);
+        }
+        auto textureAsset = m_CachedTextureAsset;
+        if (!textureAsset)
+        {
+            ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Failed to load texture: %s", m_SelectedTextureAssetKey.c_str());
+            m_CachedTextureAsset.reset();
+            return;
+        }
+
+        const auto* texture = textureAsset->GetTexture().get();
+        if (!texture)
+        {
+            ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Texture not ready.");
+            return;
+        }
+
+        const std::string fileName = std::filesystem::path(m_SelectedTextureAssetKey).filename().string();
+        ImGui::Text("Texture: %s", fileName.c_str());
+        ImGui::Text("%u x %u", texture->GetWidth(), texture->GetHeight());
+        ImGui::Spacing();
+
+        // Preview (max 256x256 to keep inspector compact).
+        // OpenGL textures have origin at bottom-left; use uv (0,1)-(1,0) for correct orientation.
+        const float previewSize = 256.0f;
+        const float aspect = static_cast<float>(texture->GetHeight()) / static_cast<float>(texture->GetWidth());
+        const ImVec2 uv0(0.0f, 1.0f);
+        const ImVec2 uv1(1.0f, 0.0f);
+        const ImVec4 tintCol(1.0f, 1.0f, 1.0f, 1.0f);
+        const ImVec4 borderCol(0.4f, 0.4f, 0.4f, 1.0f);
+        if (aspect > 1.0f)
+        {
+            const float w = previewSize / aspect;
+            ImGui::Image((ImTextureID)(void*)(uintptr_t)texture->GetRendererID(), ImVec2(w, previewSize), uv0, uv1, tintCol, borderCol);
+        }
+        else
+        {
+            const float h = previewSize * aspect;
+            ImGui::Image((ImTextureID)(void*)(uintptr_t)texture->GetRendererID(), ImVec2(previewSize, h), uv0, uv1, tintCol, borderCol);
+        }
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // Editable spec copy; we apply changes and persist when user edits.
+        TextureSpecification spec = textureAsset->GetSpecification();
+
+        // Min Filter
+        const char* minFilterNames[] = { "Nearest", "Linear" };
+        int minFilterIdx = static_cast<int>(spec.MinFilter);
+        if (ImGui::Combo("Min Filter", &minFilterIdx, minFilterNames, 2))
+        {
+            spec.MinFilter = static_cast<TextureFilter>(minFilterIdx);
+            ApplyTextureSpecAndPersist(textureAsset, spec);
+        }
+
+        // Mag Filter
+        int magFilterIdx = static_cast<int>(spec.MagFilter);
+        if (ImGui::Combo("Mag Filter", &magFilterIdx, minFilterNames, 2))
+        {
+            spec.MagFilter = static_cast<TextureFilter>(magFilterIdx);
+            ApplyTextureSpecAndPersist(textureAsset, spec);
+        }
+
+        // Wrap U
+        const char* wrapNames[] = { "Repeat", "Clamp To Edge" };
+        int wrapUIdx = static_cast<int>(spec.WrapU);
+        if (ImGui::Combo("Wrap U", &wrapUIdx, wrapNames, 2))
+        {
+            spec.WrapU = static_cast<TextureWrap>(wrapUIdx);
+            ApplyTextureSpecAndPersist(textureAsset, spec);
+        }
+
+        // Wrap V
+        int wrapVIdx = static_cast<int>(spec.WrapV);
+        if (ImGui::Combo("Wrap V", &wrapVIdx, wrapNames, 2))
+        {
+            spec.WrapV = static_cast<TextureWrap>(wrapVIdx);
+            ApplyTextureSpecAndPersist(textureAsset, spec);
+        }
+
+        // Generate Mipmaps (load-time; requires reload to take effect)
+        ImGui::AlignTextToFramePadding();
+        ImGui::Text("Generate Mipmaps");
+        ImGui::SameLine(160);
+        bool genMipmaps = spec.GenerateMipmaps;
+        if (ImGui::Checkbox("##GenerateMipmaps", &genMipmaps))
+        {
+            spec.GenerateMipmaps = genMipmaps;
+            PersistTextureSpecAndReload(textureAsset, spec);
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Requires texture reload to take effect.");
+
+        // Flip Vertically On Load (load-time; requires reload)
+        ImGui::AlignTextToFramePadding();
+        ImGui::Text("Flip Vertically On Load");
+        ImGui::SameLine(160);
+        bool flipVert = spec.FlipVerticallyOnLoad;
+        if (ImGui::Checkbox("##FlipVerticallyOnLoad", &flipVert))
+        {
+            spec.FlipVerticallyOnLoad = flipVert;
+            PersistTextureSpecAndReload(textureAsset, spec);
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Requires texture reload to take effect.");
+    }
+
+    void EditorLayer::ApplyTextureSpecAndPersist(
+        Assets::TextureAsset::Ptr textureAsset,
+        const TextureSpecification& spec)
+    {
+        auto texture = textureAsset->GetTexture();
+        if (!texture)
+            return;
+        // Execute immediately so the texture is updated before the next quad render.
+        // SubmitCommand can have ordering/timing issues with the render thread.
+        Renderer::GetInstance().ExecuteImmediate(std::make_unique<SetTextureSpecificationCommand>(texture, spec));
+        textureAsset->SetSpecification(spec);
+        auto& db = Assets::AssetDatabase::GetInstance();
+        const auto j = Assets::AssetImporter<Assets::TextureAsset>::SettingsToJson(spec);
+        db.ImportOrUpdate(textureAsset->GetKey(), Assets::AssetType::Texture2D, j);
+        InvalidateSpriteCachesForTexture(textureAsset->GetKey());
+    }
+
+    void EditorLayer::PersistTextureSpecAndReload(
+        Assets::TextureAsset::Ptr textureAsset,
+        const TextureSpecification& spec)
+    {
+        auto& db = Assets::AssetDatabase::GetInstance();
+        const auto j = Assets::AssetImporter<Assets::TextureAsset>::SettingsToJson(spec);
+        db.ImportOrUpdate(textureAsset->GetKey(), Assets::AssetType::Texture2D, j);
+        textureAsset->SetSpecification(spec);
+        textureAsset->Reload();
+        InvalidateSpriteCachesForTexture(textureAsset->GetKey());
+    }
+
+    void EditorLayer::InvalidateSpriteCachesForTexture(const std::string& textureKey)
+    {
+        if (!m_Scene || textureKey.empty())
+            return;
+        auto& registry = m_Scene->GetRegistry();
+        auto view = registry.view<SpriteComponent>();
+        for (entt::entity entity : view)
+        {
+            auto& sprite = view.get<SpriteComponent>(entity);
+            if (sprite.TextureKey == textureKey)
+            {
+                sprite.CachedTexture.reset();
+            }
+        }
     }
 
     void EditorLayer::DrawProjectPanel()

@@ -31,6 +31,14 @@ namespace Limitless::Assets
 
         const std::shared_ptr<Texture2D>& GetTexture() const { return m_Texture; }
 
+        /// Returns the specification used when this texture was loaded.
+        /// Used by the editor inspector for display and modification.
+        const TextureSpecification& GetSpecification() const { return m_Specification; }
+
+        /// Updates the stored specification (e.g. after ApplySpecification on the GPU texture).
+        /// Keeps inspector display in sync with the actual texture state.
+        void SetSpecification(const TextureSpecification& spec) { m_Specification = spec; }
+
         bool Reload() override;
 
     private:
