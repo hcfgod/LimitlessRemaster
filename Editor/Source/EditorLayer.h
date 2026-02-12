@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Limitless.h"
+#include "Assets/MaterialAsset.h"
 #include "Assets/TextureAsset.h"
 #include "EditorPlayMode.h"
 #include "EditorProjectPanel.h"
@@ -84,6 +85,14 @@ namespace Limitless
 
         /// Cached texture asset for the selected key; avoids LoadBlocking every frame and reduces lag.
         Assets::TextureAsset::Ptr m_CachedTextureAsset;
+
+        /// Selected material asset key when user double-clicks a material in the Project panel (e.g. "Assets/Materials/X.material.json").
+        /// When non-empty, the Inspector shows the material editor; entity selection is ignored.
+        std::string m_SelectedMaterialAssetKey;
+
+        /// Cached material asset for the selected key; avoids LoadBlocking every frame and reduces lag.
+        Assets::MaterialAsset::Ptr m_CachedMaterialAsset;
+
         std::string m_CurrentSceneAssetKey;
         bool m_SaveScenePopupOpen = false;
         bool m_RequestOpenSaveScenePopup = false;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Assets/MaterialAsset.h"
 #include "Assets/TextureAsset.h"
 #include "Limitless.h"
 
@@ -35,9 +36,13 @@ namespace Limitless
                   entt::entity& selectedEntity,
                   std::string& selectedTextureAssetKey,
                   Assets::TextureAsset::Ptr& cachedTextureAsset,
+                  std::string& selectedMaterialAssetKey,
+                  Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                   const char* texturePayloadId,
                   const char* assetMovePayloadId,
                   const char* scenePayloadId,
+                  const char* materialPayloadId,
+                  const char* shaderPayloadId,
                   const std::function<void(const std::string&)>& onSceneActivated,
                   const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested);
     }

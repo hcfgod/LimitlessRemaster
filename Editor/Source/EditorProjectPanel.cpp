@@ -50,6 +50,25 @@ namespace Limitless::EditorProjectPanel
             return lowerFileName.size() >= 11 && lowerFileName.rfind(".scene.json") == (lowerFileName.size() - 11);
         }
 
+        bool IsMaterialExtension(const std::filesystem::path& path)
+        {
+            std::string lowerFileName = path.filename().string();
+            for (char& character : lowerFileName)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            constexpr const char* materialSuffix = ".material.json";
+            const std::string suffixString = materialSuffix;
+            return lowerFileName.size() >= suffixString.size() &&
+                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
+        }
+
+        bool IsShaderExtension(const std::filesystem::path& path)
+        {
+            std::string lowerExtension = path.extension().string();
+            for (char& character : lowerExtension)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            return lowerExtension == ".glsl";
+        }
+
         std::string GetAssetDisplayName(const std::filesystem::path& path)
         {
             const std::string fileName = path.filename().string();
@@ -82,9 +101,13 @@ namespace Limitless::EditorProjectPanel
                            entt::entity& selectedEntity,
                            std::string& selectedTextureAssetKey,
                            Assets::TextureAsset::Ptr& cachedTextureAsset,
+                           std::string& selectedMaterialAssetKey,
+                           Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                            const char* texturePayloadId,
                            const char* assetMovePayloadId,
                            const char* scenePayloadId,
+                           const char* materialPayloadId,
+                           const char* shaderPayloadId,
                            const std::function<void(const std::string&)>& onSceneActivated,
                            const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested)
         {
@@ -199,9 +222,13 @@ namespace Limitless::EditorProjectPanel
                                       selectedEntity,
                                       selectedTextureAssetKey,
                                       cachedTextureAsset,
+                                      selectedMaterialAssetKey,
+                                      cachedMaterialAsset,
                                       texturePayloadId,
                                       assetMovePayloadId,
                                       scenePayloadId,
+                                      materialPayloadId,
+                                      shaderPayloadId,
                                       onSceneActivated,
                                       onCreateSceneRequested);
                         ImGui::TreePop();
@@ -211,21 +238,59 @@ namespace Limitless::EditorProjectPanel
                 {
                     const bool isTexture = IsTextureExtension(entry);
                     const bool isScene = IsSceneExtension(entry);
+                    const bool isMaterial = IsMaterialExtension(entry);
+                    const bool isShader = IsShaderExtension(entry);
                     const std::string displayName = GetAssetDisplayName(entry);
                     const std::string treeLabel = displayName + "###" + fileName;
-                    const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-                    const bool isSelected = isTexture && (selectedTextureAssetKey == assetKey);
+                    const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
+                    const bool isSelected =
+                        (isTexture && (selectedTextureAssetKey == assetKey)) ||
+                        (isMaterial && (selectedMaterialAssetKey == assetKey));
                     ImGui::TreeNodeEx(treeLabel.c_str(), isSelected ? (flags | ImGuiTreeNodeFlags_Selected) : flags);
+
+                    const bool releasedOnItemWithoutDrag =
+                        ImGui::IsItemHovered() &&
+                        ImGui::IsMouseReleased(0) &&
+                        (ImGui::GetDragDropPayload() == nullptr);
+                    if (releasedOnItemWithoutDrag)
+                    {
+                        if (isTexture)
+                        {
+                            selectedTextureAssetKey = assetKey;
+                            selectedMaterialAssetKey.clear();
+                            selectedEntity = entt::null;
+                            cachedTextureAsset.reset();
+                            cachedMaterialAsset.reset();
+                        }
+                        else if (isMaterial)
+                        {
+                            selectedMaterialAssetKey = assetKey;
+                            selectedTextureAssetKey.clear();
+                            selectedEntity = entt::null;
+                            cachedMaterialAsset.reset();
+                            cachedTextureAsset.reset();
+                        }
+                    }
 
                     if (isTexture && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
                     {
                         selectedTextureAssetKey = assetKey;
+                        selectedMaterialAssetKey.clear();
                         selectedEntity = entt::null;
                         cachedTextureAsset.reset();
+                        cachedMaterialAsset.reset();
                     }
                     else if (isScene && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onSceneActivated)
                     {
                         onSceneActivated(assetKey);
+                    }
+                    else if (isMaterial && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
+                    {
+                        selectedMaterialAssetKey = assetKey;
+                        selectedTextureAssetKey.clear();
+                        selectedEntity = entt::null;
+                        cachedMaterialAsset.reset();
+                        cachedTextureAsset.reset();
                     }
 
                     if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
@@ -234,6 +299,10 @@ namespace Limitless::EditorProjectPanel
                             ImGui::SetDragDropPayload(texturePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
                         else if (isScene)
                             ImGui::SetDragDropPayload(scenePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                        else if (isMaterial)
+                            ImGui::SetDragDropPayload(materialPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                        else if (isShader)
+                            ImGui::SetDragDropPayload(shaderPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
                         else
                             ImGui::SetDragDropPayload(assetMovePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
 
@@ -321,9 +390,13 @@ namespace Limitless::EditorProjectPanel
               entt::entity& selectedEntity,
               std::string& selectedTextureAssetKey,
               Assets::TextureAsset::Ptr& cachedTextureAsset,
+              std::string& selectedMaterialAssetKey,
+              Assets::MaterialAsset::Ptr& cachedMaterialAsset,
               const char* texturePayloadId,
               const char* assetMovePayloadId,
               const char* scenePayloadId,
+              const char* materialPayloadId,
+              const char* shaderPayloadId,
               const std::function<void(const std::string&)>& onSceneActivated,
               const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested)
     {
@@ -407,9 +480,13 @@ namespace Limitless::EditorProjectPanel
                           selectedEntity,
                           selectedTextureAssetKey,
                           cachedTextureAsset,
+                          selectedMaterialAssetKey,
+                          cachedMaterialAsset,
                           texturePayloadId,
                           assetMovePayloadId,
                           scenePayloadId,
+                          materialPayloadId,
+                          shaderPayloadId,
                           onSceneActivated,
                           onCreateSceneRequested);
             ImGui::TreePop();

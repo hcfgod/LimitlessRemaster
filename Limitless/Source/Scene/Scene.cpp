@@ -1,5 +1,6 @@
 #include "Scene/Scene.h"
 #include "Assets/AssetManager.h"
+#include "Assets/MaterialAssetImporter.h"
 #include "Assets/TextureAsset.h"
 #include "Graphics/Camera/Camera.h"
 #include "Graphics/Framebuffer.h"
@@ -279,6 +280,13 @@ namespace Limitless
                 destinationSprite.CachedTexture.reset();
                 destinationSprite.Color = sprite->Color;
             }
+
+            if (const auto* material = sourceRegistry.try_get<MaterialComponent>(sourceEntity))
+            {
+                auto& destinationMaterial = destinationRegistry.emplace<MaterialComponent>(destinationEntity);
+                destinationMaterial.MaterialKey = material->MaterialKey;
+                destinationMaterial.CachedMaterial.reset();
+            }
         }
 
         for (const auto& [sourceEntity, destinationEntity] : entityMap)
@@ -373,6 +381,13 @@ namespace Limitless
                 };
             }
 
+            if (const auto* material = m_Registry.try_get<MaterialComponent>(entity))
+            {
+                entry["Material"] = {
+                    { "MaterialKey", material->MaterialKey }
+                };
+            }
+
             root["Entities"].push_back(std::move(entry));
         }
 
@@ -452,6 +467,14 @@ namespace Limitless
                     sprite.Color = glm::vec4(color[0], color[1], color[2], color[3]);
             }
 
+            if (entry.contains("Material"))
+            {
+                const auto& materialJson = entry["Material"];
+                auto& material = scene->GetRegistry().emplace<MaterialComponent>(entity);
+                material.MaterialKey = materialJson.value("MaterialKey", "");
+                material.CachedMaterial.reset();
+            }
+
             int32_t parentIndex = -1;
             int32_t siblingOrder = 0;
             if (entry.contains("Hierarchy"))
@@ -518,7 +541,29 @@ namespace Limitless
             auto& sprite = registry.get<SpriteComponent>(entity);
 
             glm::mat4 model = scene.GetWorldTransformMatrix(entity);
-            if (!sprite.TextureKey.empty())
+
+            // Material override (Unity-style): if the entity has a MaterialComponent, prefer its main texture.
+            Assets::TextureAsset::Ptr materialMainTextureAsset;
+            if (auto* material = registry.try_get<MaterialComponent>(entity))
+            {
+                if (!material->MaterialKey.empty())
+                {
+                    if (!material->CachedMaterial)
+                    {
+                        material->CachedMaterial = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(material->MaterialKey);
+                    }
+                    if (material->CachedMaterial)
+                    {
+                        materialMainTextureAsset = material->CachedMaterial->GetMainTextureHandle().Lock();
+                    }
+                }
+            }
+
+            if (materialMainTextureAsset)
+            {
+                Renderer2D::DrawQuad(model, materialMainTextureAsset, sprite.Color);
+            }
+            else if (!sprite.TextureKey.empty())
             {
                 if (!sprite.CachedTexture)
                 {

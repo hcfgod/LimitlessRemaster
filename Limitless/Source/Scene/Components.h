@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Assets/MaterialAsset.h"
 #include "Assets/TextureAsset.h"
 #include "EnTT/entt.hpp"
 
@@ -49,5 +50,13 @@ namespace Limitless
         std::string TextureKey;  ///< Asset key for texture; empty = color-only
         Assets::TextureAsset::Ptr CachedTexture;  ///< Runtime cache; keeps asset alive
         glm::vec4 Color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+    };
+
+    /// Optional material reference (Unity-style).
+    /// When set, rendering should prefer the material's bound resources over Sprite defaults.
+    struct MaterialComponent
+    {
+        std::string MaterialKey; ///< Asset key for material (example: "Assets/Materials/MyMaterial.material.json")
+        Assets::MaterialAsset::Ptr CachedMaterial; ///< Runtime cache; keeps asset alive
     };
 }

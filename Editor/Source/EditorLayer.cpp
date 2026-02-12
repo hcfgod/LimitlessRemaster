@@ -30,6 +30,8 @@ namespace Limitless
         constexpr const char* kAssetTexturePayload = "ASSET_TEXTURE";
         constexpr const char* kAssetMovePayload = "ASSET_MOVE";
         constexpr const char* kAssetScenePayload = "ASSET_SCENE";
+        constexpr const char* kAssetMaterialPayload = "ASSET_MATERIAL";
+        constexpr const char* kAssetShaderPayload = "ASSET_SHADER";
         constexpr const char* kDefaultSceneFileName = "New Scene.scene.json";
         constexpr const char* kSceneFileSuffix = ".scene.json";
 
@@ -187,7 +189,13 @@ namespace Limitless
             m_PlayModeMissingGameplayCamera,
             [this](uint32_t width, uint32_t height) { EnsureViewportFramebuffer(width, height); },
             kAssetScenePayload,
-            [this](const std::string& assetKey) { LoadSceneFromAssetKey(assetKey); });
+            [this](const std::string& assetKey) { LoadSceneFromAssetKey(assetKey); },
+            m_SelectedEntity,
+            kAssetMaterialPayload,
+            m_SelectedTextureAssetKey,
+            m_CachedTextureAsset,
+            m_SelectedMaterialAssetKey,
+            m_CachedMaterialAsset);
     }
 
     void EditorLayer::DrawScenePanel()
@@ -197,7 +205,10 @@ namespace Limitless
             m_ScenePanelState,
             m_SelectedEntity,
             m_SelectedTextureAssetKey,
-            m_CachedTextureAsset);
+            m_CachedTextureAsset,
+            m_SelectedMaterialAssetKey,
+            m_CachedMaterialAsset,
+            kAssetMaterialPayload);
     }
 
     void EditorLayer::DrawInspectorPanel()
@@ -207,7 +218,11 @@ namespace Limitless
             m_SelectedEntity,
             kAssetTexturePayload,
             m_SelectedTextureAssetKey,
-            m_CachedTextureAsset);
+            m_CachedTextureAsset,
+            kAssetMaterialPayload,
+            kAssetShaderPayload,
+            m_SelectedMaterialAssetKey,
+            m_CachedMaterialAsset);
     }
 
     void EditorLayer::DrawProjectPanel()
@@ -217,9 +232,13 @@ namespace Limitless
             m_SelectedEntity,
             m_SelectedTextureAssetKey,
             m_CachedTextureAsset,
+            m_SelectedMaterialAssetKey,
+            m_CachedMaterialAsset,
             kAssetTexturePayload,
             kAssetMovePayload,
             kAssetScenePayload,
+            kAssetMaterialPayload,
+            kAssetShaderPayload,
             [this](const std::string& assetKey) { LoadSceneFromAssetKey(assetKey); },
             [this](const std::filesystem::path& relativeFolderPath) {
                 const std::string createdSceneAssetKey = CreateSceneAssetInFolder(relativeFolderPath);

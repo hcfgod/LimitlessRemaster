@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Assets/MaterialAsset.h"
 #include "Assets/TextureAsset.h"
 #include "Limitless.h"
 
@@ -24,6 +25,9 @@ namespace Limitless
                   EditorScenePanelState& state,
                   entt::entity& selectedEntity,
                   std::string& selectedTextureAssetKey,
-                  Assets::TextureAsset::Ptr& cachedTextureAsset);
+                  Assets::TextureAsset::Ptr& cachedTextureAsset,
+                  std::string& selectedMaterialAssetKey,
+                  Assets::MaterialAsset::Ptr& cachedMaterialAsset,
+                  const char* materialPayloadId);
     }
 }

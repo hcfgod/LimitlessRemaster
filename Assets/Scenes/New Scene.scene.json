@@ -1,12 +1,12 @@
 {
   "EditorCamera": {
-    "PitchDegrees": 0.71619713306427,
+    "PitchDegrees": -5.156620979309082,
     "Position": [
-      -0.18998388946056366,
-      -0.011491883546113968,
-      5.355031967163086
+      -0.4380398094654083,
+      0.44951319694519043,
+      4.8856282234191895
     ],
-    "YawDegrees": -93.86767578125
+    "YawDegrees": -92.00545501708984
   },
   "Entities": [
     {
@@ -47,6 +47,9 @@
         "ParentIndex": 0,
         "SiblingOrder": 0
       },
+      "Material": {
+        "MaterialKey": "Assets/Materials/Renderer2D_TexturedQuad.material.json"
+      },
       "Sprite": {
         "Color": [
           1.0,
@@ -79,6 +82,9 @@
       "Hierarchy": {
         "ParentIndex": -1,
         "SiblingOrder": 10
+      },
+      "Material": {
+        "MaterialKey": "Assets/Materials/TexturedTriangle.material.json"
       },
       "Sprite": {
         "Color": [

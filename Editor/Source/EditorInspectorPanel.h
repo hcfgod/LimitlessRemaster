@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Assets/MaterialAsset.h"
 #include "Assets/TextureAsset.h"
 #include "Limitless.h"
 
@@ -15,6 +16,10 @@ namespace Limitless
                   entt::entity selectedEntity,
                   const char* texturePayloadId,
                   std::string& selectedTextureAssetKey,
-                  Assets::TextureAsset::Ptr& cachedTextureAsset);
+                  Assets::TextureAsset::Ptr& cachedTextureAsset,
+                  const char* materialPayloadId,
+                  const char* shaderPayloadId,
+                  std::string& selectedMaterialAssetKey,
+                  Assets::MaterialAsset::Ptr& cachedMaterialAsset);
     }
 }

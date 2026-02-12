@@ -271,6 +271,13 @@ namespace Limitless::Assets
     bool MaterialAsset::LoadFromJsonFile()
     {
         const std::string key = GetKey();
+        auto updateDependencies = [&]() {
+            std::vector<std::string> deps;
+            deps.push_back(m_Shader.GetGuid());
+            if (!m_MainTexture.GetGuid().empty())
+                deps.push_back(m_MainTexture.GetGuid());
+            (void)AssetDatabase::GetInstance().SetDependencies(GetGuid(), deps);
+        };
 
         // Bundle-first: read JSON text from bundle if available.
         auto& bundle = AssetBundle::GetInstance();
@@ -325,6 +332,7 @@ namespace Limitless::Assets
                         m_HasMainTextureSpecOverride = false;
                     }
 
+                    updateDependencies();
                     return true;
                 }
             }
@@ -389,31 +397,15 @@ namespace Limitless::Assets
         {
             m_HasMainTextureSpecOverride = false;
         }
+        updateDependencies();
         return true;
     }
 
     bool MaterialAsset::Reload()
     {
-        // Re-read JSON and update handles.
-        m_ShaderResolved.reset();
-        m_MainTextureResolved.reset();
-        if (!LoadFromJsonFile())
-        {
-            return false;
-        }
-
-        // Dependency tracking:
-        // - shader GUID is required
-        // - texture GUID is optional
-        std::vector<std::string> deps;
-        deps.push_back(m_Shader.GetGuid());
-        if (!m_MainTexture.GetGuid().empty())
-        {
-            deps.push_back(m_MainTexture.GetGuid());
-        }
-
-        (void)AssetDatabase::GetInstance().SetDependencies(GetGuid(), deps);
-        return true;
+        // Re-read JSON and update handles without clearing resolved pointers first.
+        // This avoids visible flicker if a material is reloaded while in use by the scene.
+        return LoadFromJsonFile();
     }
 
     std::shared_ptr<Shader> MaterialAsset::GetShader() const

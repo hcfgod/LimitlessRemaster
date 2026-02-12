@@ -1,11 +1,31 @@
 {
-  "shader": { "key": "Assets/Shaders/TexturedTriangle.glsl" },
-  "mainTexture": { "key": "Assets/Textures/Checker.ppm" },
+  "mainTexture": {
+    "guid": "c6e4c5b8-3ec7-4c71-96c1-7aa38e6d28d8",
+    "key": "Assets/Textures/sissy.jpg"
+  },
   "mainTextureSpec": {
-    "minFilter": "Nearest",
+    "generateMipmaps": false,
     "magFilter": "Nearest",
+    "minFilter": "Nearest",
     "wrapU": "Repeat",
-    "wrapV": "Repeat",
-    "generateMipmaps": false
+    "wrapV": "Repeat"
+  },
+  "shader": {
+    "key": "Assets/Shaders/TexturedTriangle.glsl"
+  },
+  "textureSlots": {
+    "albedo": {
+      "spec": {
+        "generateMipmaps": false,
+        "magFilter": "Nearest",
+        "minFilter": "Nearest",
+        "wrapU": "Repeat",
+        "wrapV": "Repeat"
+      },
+      "texture": {
+        "guid": "c6e4c5b8-3ec7-4c71-96c1-7aa38e6d28d8",
+        "key": "Assets/Textures/sissy.jpg"
+      }
+    }
   }
 }

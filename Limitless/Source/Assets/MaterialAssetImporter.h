@@ -26,30 +26,13 @@ namespace Limitless::Assets
             const auto recordResult = AssetDatabase::GetInstance().ImportOrUpdate(key, Type, SettingsToJson(settings));
             if (recordResult.IsSuccess())
             {
-                // Deps are discovered from the material JSON; we update on Reload().
+                // Deps are discovered from the material JSON during load/reload.
                 AssetDatabase::GetInstance().SetDependencies(recordResult.GetValue().Guid, {});
             }
 
             AssetHotReloadManager::GetInstance().WatchKey(key);
             (void)generation;
-            auto task = MaterialAsset::LoadAsync(key, settings);
-
-            // After initial load completes, trigger a dependency write by calling Reload once.
-            // This is cheap (re-reads JSON) and sets deps immediately for cascading reload.
-            Async::GetAsyncIO().RunAsync([task]() mutable {
-                if (!task.IsValid())
-                {
-                    return;
-                }
-                task.Wait();
-                auto asset = task.Get();
-                if (asset)
-                {
-                    (void)asset->Reload();
-                }
-            });
-
-            return task;
+            return MaterialAsset::LoadAsync(key, settings);
         }
     };
 }

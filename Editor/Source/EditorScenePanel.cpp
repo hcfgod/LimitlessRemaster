@@ -57,7 +57,10 @@ namespace Limitless::EditorScenePanel
                             EditorScenePanelState& state,
                             entt::entity& selectedEntity,
                             std::string& selectedTextureAssetKey,
-                            Assets::TextureAsset::Ptr& cachedTextureAsset)
+                            Assets::TextureAsset::Ptr& cachedTextureAsset,
+                            std::string& selectedMaterialAssetKey,
+                            Assets::MaterialAsset::Ptr& cachedMaterialAsset,
+                            const char* materialPayloadId)
         {
             if (!scene || !scene->IsValid(entity))
                 return false;
@@ -80,6 +83,8 @@ namespace Limitless::EditorScenePanel
                 selectedEntity = entity;
                 selectedTextureAssetKey.clear();
                 cachedTextureAsset.reset();
+                selectedMaterialAssetKey.clear();
+                cachedMaterialAsset.reset();
             }
 
             if (ImGui::BeginPopupContextItem())
@@ -91,6 +96,8 @@ namespace Limitless::EditorScenePanel
                     selectedEntity = child;
                     selectedTextureAssetKey.clear();
                     cachedTextureAsset.reset();
+                    selectedMaterialAssetKey.clear();
+                    cachedMaterialAsset.reset();
                 }
 
                 if (ImGui::MenuItem("Rename"))
@@ -124,6 +131,34 @@ namespace Limitless::EditorScenePanel
                     const auto* childEntity = static_cast<const entt::entity*>(payload->Data);
                     if (childEntity)
                         scene->SetParent(*childEntity, entity);
+                }
+                else if (materialPayloadId)
+                {
+                    // Unity-style: dropping a material onto an entity assigns it to the renderer.
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(materialPayloadId))
+                    {
+                        const char* key = static_cast<const char*>(payload->Data);
+                        if (key && key[0])
+                        {
+                            // Only entities with a SpriteComponent (quad renderer) can use materials right now.
+                            if (registry.all_of<SpriteComponent>(entity))
+                            {
+                                auto* material = registry.try_get<MaterialComponent>(entity);
+                                if (!material)
+                                    material = &registry.emplace<MaterialComponent>(entity);
+
+                                material->MaterialKey = key;
+                                material->CachedMaterial.reset();
+
+                                // Make the drop feel like Unity: select the target object (not the asset).
+                                selectedEntity = entity;
+                                selectedTextureAssetKey.clear();
+                                cachedTextureAsset.reset();
+                                selectedMaterialAssetKey.clear();
+                                cachedMaterialAsset.reset();
+                            }
+                        }
+                    }
                 }
                 ImGui::EndDragDropTarget();
             }
@@ -179,7 +214,15 @@ namespace Limitless::EditorScenePanel
             {
                 for (entt::entity child : children)
                 {
-                    if (DrawEntityNode(scene, child, state, selectedEntity, selectedTextureAssetKey, cachedTextureAsset))
+                    if (DrawEntityNode(scene,
+                                       child,
+                                       state,
+                                       selectedEntity,
+                                       selectedTextureAssetKey,
+                                       cachedTextureAsset,
+                                       selectedMaterialAssetKey,
+                                       cachedMaterialAsset,
+                                       materialPayloadId))
                         deletedSelection = true;
                 }
                 ImGui::TreePop();
@@ -193,7 +236,10 @@ namespace Limitless::EditorScenePanel
               EditorScenePanelState& state,
               entt::entity& selectedEntity,
               std::string& selectedTextureAssetKey,
-              Assets::TextureAsset::Ptr& cachedTextureAsset)
+              Assets::TextureAsset::Ptr& cachedTextureAsset,
+              std::string& selectedMaterialAssetKey,
+              Assets::MaterialAsset::Ptr& cachedMaterialAsset,
+              const char* materialPayloadId)
     {
         ImGui::Begin("Scene");
 
@@ -206,6 +252,8 @@ namespace Limitless::EditorScenePanel
                 selectedEntity = createdEntity;
                 selectedTextureAssetKey.clear();
                 cachedTextureAsset.reset();
+                selectedMaterialAssetKey.clear();
+                cachedMaterialAsset.reset();
             }
             ImGui::EndPopup();
         }
@@ -222,6 +270,8 @@ namespace Limitless::EditorScenePanel
                         selectedEntity = createdEntity;
                         selectedTextureAssetKey.clear();
                         cachedTextureAsset.reset();
+                        selectedMaterialAssetKey.clear();
+                        cachedMaterialAsset.reset();
                     }
                     ImGui::EndPopup();
                 }
@@ -248,7 +298,15 @@ namespace Limitless::EditorScenePanel
 
                 for (entt::entity entity : rootEntities)
                 {
-                    if (DrawEntityNode(scene, entity, state, selectedEntity, selectedTextureAssetKey, cachedTextureAsset))
+                    if (DrawEntityNode(scene,
+                                       entity,
+                                       state,
+                                       selectedEntity,
+                                       selectedTextureAssetKey,
+                                       cachedTextureAsset,
+                                       selectedMaterialAssetKey,
+                                       cachedMaterialAsset,
+                                       materialPayloadId))
                         deletedSelection = true;
                 }
 
@@ -267,6 +325,8 @@ namespace Limitless::EditorScenePanel
                         selectedEntity = createdEntity;
                         selectedTextureAssetKey.clear();
                         cachedTextureAsset.reset();
+                        selectedMaterialAssetKey.clear();
+                        cachedMaterialAsset.reset();
                     }
                     ImGui::EndPopup();
                 }
@@ -336,6 +396,8 @@ namespace Limitless::EditorScenePanel
             selectedEntity = entt::null;
             selectedTextureAssetKey.clear();
             cachedTextureAsset.reset();
+            selectedMaterialAssetKey.clear();
+            cachedMaterialAsset.reset();
         }
 
         ImGui::End();

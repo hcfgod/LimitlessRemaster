@@ -1,12 +1,31 @@
 {
-  "shader": { "key": "Assets/Shaders/Renderer2D_TexturedQuad.glsl" },
-  "mainTexture": { "key": "Assets/Textures/Checker.ppm" },
+  "mainTexture": {
+    "guid": "5b5a13a7-ab2d-4947-974a-af21398cf103",
+    "key": "Assets/Textures/Checker.ppm"
+  },
   "mainTextureSpec": {
-    "minFilter": "Linear",
+    "generateMipmaps": true,
     "magFilter": "Linear",
+    "minFilter": "Linear",
     "wrapU": "ClampToEdge",
-    "wrapV": "ClampToEdge",
-    "generateMipmaps": true
+    "wrapV": "ClampToEdge"
+  },
+  "shader": {
+    "key": "Assets/Shaders/Renderer2D_TexturedQuad.glsl"
+  },
+  "textureSlots": {
+    "albedo": {
+      "spec": {
+        "generateMipmaps": true,
+        "magFilter": "Linear",
+        "minFilter": "Linear",
+        "wrapU": "ClampToEdge",
+        "wrapV": "ClampToEdge"
+      },
+      "texture": {
+        "guid": "5b5a13a7-ab2d-4947-974a-af21398cf103",
+        "key": "Assets/Textures/Checker.ppm"
+      }
+    }
   }
 }
-
