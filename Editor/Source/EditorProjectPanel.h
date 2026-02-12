@@ -1,0 +1,40 @@
+#pragma once
+
+#include "Assets/TextureAsset.h"
+#include "Limitless.h"
+
+#include <array>
+#include <filesystem>
+#include <string>
+
+namespace Limitless
+{
+    /// Modal popup flow used by the Project panel for folder operations.
+    enum class EditorProjectFolderPopup
+    {
+        None,
+        Create,
+        Rename
+    };
+
+    /// Mutable UI state required by the Project panel across frames.
+    struct EditorProjectPanelState
+    {
+        EditorProjectFolderPopup FolderPopupPending = EditorProjectFolderPopup::None;
+        std::filesystem::path FolderPopupParent;
+        std::array<char, 256> FolderPopupBuffer{};
+        bool CreateFolderPopupOpen = false;
+        bool RenameFolderPopupOpen = false;
+    };
+
+    namespace EditorProjectPanel
+    {
+        /// Draws the full Project panel tree and folder popup workflow.
+        void Draw(EditorProjectPanelState& state,
+                  entt::entity& selectedEntity,
+                  std::string& selectedTextureAssetKey,
+                  Assets::TextureAsset::Ptr& cachedTextureAsset,
+                  const char* texturePayloadId,
+                  const char* assetMovePayloadId);
+    }
+}

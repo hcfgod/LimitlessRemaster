@@ -2,6 +2,8 @@
 
 #include "Limitless.h"
 #include "Assets/TextureAsset.h"
+#include "EditorPlayMode.h"
+#include "EditorProjectPanel.h"
 #include "Graphics/Texture.h"
 
 #include <filesystem>
@@ -18,6 +20,8 @@ namespace Limitless
      *
      * Renders a 3D scene to a framebuffer displayed in the Viewport panel.
      * Editor camera input is active when the viewport is hovered (Unity-style).
+     * Most panel/runtime logic is implemented in dedicated Editor* modules and
+     * this layer coordinates high-level state and call order.
      */
     class EditorLayer : public Layer
     {
@@ -34,26 +38,16 @@ namespace Limitless
         void OnWindowResize(Events::WindowResizeEvent& event) override;
 
     private:
-        enum class PlayModeState
-        {
-            Edit = 0,
-            Play = 1,
-            Pause = 2
-        };
-
         void DrawMenuBar();
         void DrawViewportPanel();
         void DrawScenePanel();
         void DrawInspectorPanel();
-        void DrawTextureInspector();
-        void ApplyTextureSpecAndPersist(Assets::TextureAsset::Ptr textureAsset, const TextureSpecification& spec);
-        void PersistTextureSpecAndReload(Assets::TextureAsset::Ptr textureAsset, const TextureSpecification& spec);
-        void InvalidateSpriteCachesForTexture(const std::string& textureKey);
         void DrawProjectPanel();
-        void DrawAssetTree(const std::filesystem::path& assetsDir, const std::filesystem::path& relPath);
-        void DrawProjectFolderPopups(const std::filesystem::path& assetsDir);
 
         void EnsureViewportFramebuffer(uint32_t width, uint32_t height);
+        void EnterPlayMode();
+        void ExitPlayMode();
+        void TogglePausePlayMode();
 
         uint32_t m_ViewportWidthPixels = 1280;
         uint32_t m_ViewportHeightPixels = 720;
@@ -70,7 +64,7 @@ namespace Limitless
         std::unique_ptr<Scene> m_Scene;
         /// Stored edit-scene while in Play/Pause. On Stop, we restore this instance.
         std::unique_ptr<Scene> m_EditSceneStored;
-        PlayModeState m_PlayModeState = PlayModeState::Edit;
+        EditorPlayModeState m_PlayModeState = EditorPlayModeState::Edit;
         bool m_PlayModeMissingGameplayCamera = false;
         entt::entity m_SelectedEntity = entt::null;
 
@@ -82,15 +76,7 @@ namespace Limitless
         Assets::TextureAsset::Ptr m_CachedTextureAsset;
 
         bool m_ShowDemoWindow = false;
-
-        // Project panel folder popups (Create/Rename).
-        // OpenPopup must be called outside a closing popup, so we defer via Pending.
-        enum class ProjectFolderPopup { None, Create, Rename };
-        ProjectFolderPopup m_ProjectFolderPopupPending = ProjectFolderPopup::None;
-        std::filesystem::path m_ProjectFolderPopupParent;
-        char m_ProjectFolderPopupBuffer[256] = {};
-        bool m_CreateFolderPopupOpen = false;
-        bool m_RenameFolderPopupOpen = false;
+        EditorProjectPanelState m_ProjectPanelState;
     };
 
 }  // namespace Limitless

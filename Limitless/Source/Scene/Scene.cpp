@@ -31,6 +31,34 @@ namespace Limitless
         return m_Registry.valid(entity);
     }
 
+    std::unique_ptr<Scene> Scene::Clone() const
+    {
+        auto clone = std::make_unique<Scene>();
+        const auto& sourceRegistry = GetRegistry();
+        auto& destinationRegistry = clone->GetRegistry();
+
+        auto view = sourceRegistry.view<TagComponent, TransformComponent>();
+        for (entt::entity sourceEntity : view)
+        {
+            const auto& tag = view.get<TagComponent>(sourceEntity);
+            const auto& transform = view.get<TransformComponent>(sourceEntity);
+
+            // CreateEntity ensures default baseline components are initialized first.
+            entt::entity destinationEntity = clone->CreateEntity(tag.Tag);
+            destinationRegistry.replace<TransformComponent>(destinationEntity, transform);
+
+            if (const auto* sprite = sourceRegistry.try_get<SpriteComponent>(sourceEntity))
+            {
+                auto& destinationSprite = destinationRegistry.emplace<SpriteComponent>(destinationEntity);
+                destinationSprite.TextureKey = sprite->TextureKey;
+                destinationSprite.CachedTexture.reset();
+                destinationSprite.Color = sprite->Color;
+            }
+        }
+
+        return clone;
+    }
+
     void SceneRenderer::Render(Scene& scene, const Camera& camera)
     {
         Renderer2D::BeginScene(camera);

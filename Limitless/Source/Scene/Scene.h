@@ -39,6 +39,10 @@ namespace Limitless
         entt::registry& GetRegistry() { return m_Registry; }
         const entt::registry& GetRegistry() const { return m_Registry; }
 
+        /// Create a deep copy of this scene for runtime simulation.
+        /// Used by editor Play Mode to keep edit-time data isolated.
+        std::unique_ptr<Scene> Clone() const;
+
     private:
         entt::registry m_Registry;
     };
