@@ -7,6 +7,9 @@
 #include "Scene/Scene.h"
 #include "imgui/imgui.h"
 
+#include <array>
+#include <cstdio>
+#include <cstring>
 #include <filesystem>
 
 namespace Limitless::EditorInspectorPanel
@@ -190,7 +193,26 @@ namespace Limitless::EditorInspectorPanel
         {
             auto& registry = scene->GetRegistry();
             if (auto* tag = registry.try_get<TagComponent>(selectedEntity))
-                ImGui::Text("Tag: %s", tag->Tag.c_str());
+            {
+                static entt::entity renameEntity = entt::null;
+                static std::array<char, 256> renameBuffer{};
+                if (renameEntity != selectedEntity)
+                {
+                    renameEntity = selectedEntity;
+                    std::snprintf(renameBuffer.data(), renameBuffer.size(), "%s", tag->Tag.c_str());
+                }
+
+                ImGui::AlignTextToFramePadding();
+                ImGui::Text("Name");
+                ImGui::SameLine(80);
+                ImGui::SetNextItemWidth(-1.0f);
+                ImGui::InputText("##EntityName", renameBuffer.data(), renameBuffer.size());
+                if (ImGui::IsItemDeactivatedAfterEdit())
+                    tag->Tag = renameBuffer.data();
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
 
             if (auto* transform = registry.try_get<TransformComponent>(selectedEntity))
             {
@@ -239,6 +261,28 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::ColorEdit4("Color", &sprite->Color.r);
                     ImGui::TreePop();
                 }
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            if (ImGui::Button("Add Component", ImVec2(-1.0f, 0.0f)))
+                ImGui::OpenPopup("AddComponentPopup");
+
+            if (ImGui::BeginPopup("AddComponentPopup"))
+            {
+                const bool hasSpriteComponent = registry.all_of<SpriteComponent>(selectedEntity);
+                if (hasSpriteComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Sprite Component"))
+                    registry.emplace<SpriteComponent>(selectedEntity);
+
+                if (hasSpriteComponent)
+                    ImGui::EndDisabled();
+
+                ImGui::EndPopup();
             }
         }
 

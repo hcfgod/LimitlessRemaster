@@ -35,6 +35,9 @@ namespace Limitless
     {
         /// Parent entity. Use entt::null for no parent (root).
         entt::entity Parent = entt::null;
+
+        /// Relative sibling order under the current parent (lower renders/appears first).
+        int32_t SiblingOrder = 0;
     };
 
     /// Renders a 2D sprite (quad). Size comes from TransformComponent::Scale.

@@ -112,6 +112,7 @@ namespace Limitless
     {
         EditorScenePanel::Draw(
             m_Scene.get(),
+            m_ScenePanelState,
             m_SelectedEntity,
             m_SelectedTextureAssetKey,
             m_CachedTextureAsset);

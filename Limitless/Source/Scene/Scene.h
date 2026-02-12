@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace Limitless
 {
@@ -34,6 +35,27 @@ namespace Limitless
 
         /// Check if entity exists.
         bool IsValid(entt::entity entity) const;
+
+        /// Set parent-child relation. Use entt::null parent to make entity root-level.
+        bool SetParent(entt::entity child, entt::entity parent);
+
+        /// Reorder entity to appear before target sibling in hierarchy.
+        bool SetSiblingOrderBefore(entt::entity entity, entt::entity targetSibling);
+
+        /// Reorder entity to appear after target sibling in hierarchy.
+        bool SetSiblingOrderAfter(entt::entity entity, entt::entity targetSibling);
+
+        /// Get entity parent or entt::null when root-level.
+        entt::entity GetParent(entt::entity entity) const;
+
+        /// Returns true when entity is a descendant of potentialAncestor.
+        bool IsDescendantOf(entt::entity entity, entt::entity potentialAncestor) const;
+
+        /// Get all direct children of parent. Use entt::null for root-level entities.
+        std::vector<entt::entity> GetChildren(entt::entity parent) const;
+
+        /// Get world transform matrix with hierarchy applied.
+        glm::mat4 GetWorldTransformMatrix(entt::entity entity) const;
 
         /// Get the EnTT registry for custom queries (views, groups, etc.).
         entt::registry& GetRegistry() { return m_Registry; }

@@ -4,6 +4,7 @@
 #include "Assets/TextureAsset.h"
 #include "EditorPlayMode.h"
 #include "EditorProjectPanel.h"
+#include "EditorScenePanel.h"
 #include "Graphics/Texture.h"
 
 #include <filesystem>
@@ -76,6 +77,7 @@ namespace Limitless
         Assets::TextureAsset::Ptr m_CachedTextureAsset;
 
         bool m_ShowDemoWindow = false;
+        EditorScenePanelState m_ScenePanelState;
         EditorProjectPanelState m_ProjectPanelState;
     };
 

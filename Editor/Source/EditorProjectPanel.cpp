@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -23,7 +24,7 @@ namespace Limitless::EditorProjectPanel
                 return;
             }
 
-            strncpy_s(destination.data(), destination.size(), source, _TRUNCATE);
+            std::snprintf(destination.data(), destination.size(), "%s", source);
         }
 
         bool IsTextureExtension(const std::filesystem::path& path)
