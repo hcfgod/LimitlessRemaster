@@ -1,0 +1,113 @@
+{
+  "EditorCamera": {
+    "PitchDegrees": 0.71619713306427,
+    "Position": [
+      -0.18998388946056366,
+      -0.011491883546113968,
+      5.355031967163086
+    ],
+    "YawDegrees": -93.86767578125
+  },
+  "Entities": [
+    {
+      "Hierarchy": {
+        "ParentIndex": -1,
+        "SiblingOrder": 0
+      },
+      "Sprite": {
+        "Color": [
+          0.20000000298023224,
+          0.6000000238418579,
+          0.8999999761581421,
+          1.0
+        ],
+        "TextureKey": ""
+      },
+      "Tag": "Parent",
+      "Transform": {
+        "Position": [
+          0.699999988079071,
+          0.0,
+          0.0
+        ],
+        "Rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "Scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "Hierarchy": {
+        "ParentIndex": 0,
+        "SiblingOrder": 0
+      },
+      "Sprite": {
+        "Color": [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "TextureKey": ""
+      },
+      "Tag": "Child",
+      "Transform": {
+        "Position": [
+          0.699999988079071,
+          -0.3700000047683716,
+          0.0
+        ],
+        "Rotation": [
+          0.0,
+          -0.0,
+          0.0
+        ],
+        "Scale": [
+          0.25,
+          0.25,
+          1.0
+        ]
+      }
+    },
+    {
+      "Hierarchy": {
+        "ParentIndex": -1,
+        "SiblingOrder": 10
+      },
+      "Sprite": {
+        "Color": [
+          0.4215686321258545,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "TextureKey": ""
+      },
+      "Tag": "Enemy",
+      "Transform": {
+        "Position": [
+          -2.5999999046325684,
+          0.0,
+          0.0
+        ],
+        "Rotation": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "Scale": [
+          0.5,
+          0.5,
+          1.0
+        ]
+      }
+    }
+  ],
+  "Version": 1
+}

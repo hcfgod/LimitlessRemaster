@@ -7,11 +7,14 @@
 #include "Graphics/Renderer.h"
 #include "Graphics/Renderer2D.h"
 
+#include <nlohmann/json.hpp>
+
 #include <glm/gtc/matrix_transform.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/quaternion.hpp>
 #include <algorithm>
+#include <fstream>
 #include <unordered_map>
 
 namespace Limitless
@@ -296,7 +299,189 @@ namespace Limitless
                 destinationHierarchy->SiblingOrder = sourceHierarchy->SiblingOrder;
         }
 
+        clone->m_EditorCameraBookmark = m_EditorCameraBookmark;
         return clone;
+    }
+
+    Result<void> Scene::SaveToFile(const std::filesystem::path& path) const
+    {
+        std::error_code errorCode;
+        const std::filesystem::path parentDirectory = path.parent_path();
+        if (!parentDirectory.empty() && !std::filesystem::exists(parentDirectory, errorCode))
+            std::filesystem::create_directories(parentDirectory, errorCode);
+        if (errorCode)
+            return Result<void>(ErrorCode::FileAccessDenied, "Scene::SaveToFile failed creating parent directories");
+
+        auto view = m_Registry.view<TagComponent, TransformComponent>();
+        std::vector<entt::entity> entities;
+        entities.reserve(view.size_hint());
+        for (entt::entity entity : view)
+            entities.push_back(entity);
+        std::sort(entities.begin(), entities.end(), [](entt::entity left, entt::entity right) {
+            return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
+        });
+
+        std::unordered_map<entt::entity, int32_t> indexByEntity;
+        indexByEntity.reserve(entities.size());
+        for (size_t index = 0; index < entities.size(); ++index)
+            indexByEntity.emplace(entities[index], static_cast<int32_t>(index));
+
+        nlohmann::json root = nlohmann::json::object();
+        root["Version"] = 1;
+        if (m_EditorCameraBookmark.has_value())
+        {
+            root["EditorCamera"] = {
+                { "Position", { m_EditorCameraBookmark->Position.x, m_EditorCameraBookmark->Position.y, m_EditorCameraBookmark->Position.z } },
+                { "YawDegrees", m_EditorCameraBookmark->YawDegrees },
+                { "PitchDegrees", m_EditorCameraBookmark->PitchDegrees }
+            };
+        }
+        root["Entities"] = nlohmann::json::array();
+
+        for (entt::entity entity : entities)
+        {
+            const auto& tag = view.get<TagComponent>(entity);
+            const auto& transform = view.get<TransformComponent>(entity);
+            nlohmann::json entry = nlohmann::json::object();
+            entry["Tag"] = tag.Tag;
+            entry["Transform"] = {
+                { "Position", { transform.Position.x, transform.Position.y, transform.Position.z } },
+                { "Rotation", { transform.Rotation.x, transform.Rotation.y, transform.Rotation.z } },
+                { "Scale", { transform.Scale.x, transform.Scale.y, transform.Scale.z } }
+            };
+
+            const entt::entity parent = GetParent(entity);
+            int32_t parentIndex = -1;
+            if (parent != entt::null)
+            {
+                const auto it = indexByEntity.find(parent);
+                if (it != indexByEntity.end())
+                    parentIndex = it->second;
+            }
+
+            const auto* hierarchy = m_Registry.try_get<HierarchyComponent>(entity);
+            entry["Hierarchy"] = {
+                { "ParentIndex", parentIndex },
+                { "SiblingOrder", hierarchy ? hierarchy->SiblingOrder : 0 }
+            };
+
+            if (const auto* sprite = m_Registry.try_get<SpriteComponent>(entity))
+            {
+                entry["Sprite"] = {
+                    { "TextureKey", sprite->TextureKey },
+                    { "Color", { sprite->Color.r, sprite->Color.g, sprite->Color.b, sprite->Color.a } }
+                };
+            }
+
+            root["Entities"].push_back(std::move(entry));
+        }
+
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        if (!output.is_open())
+            return Result<void>(ErrorCode::FileAccessDenied, "Scene::SaveToFile failed opening destination file");
+        output << root.dump(2);
+        return Result<void>();
+    }
+
+    Result<std::unique_ptr<Scene>> Scene::LoadFromFile(const std::filesystem::path& path)
+    {
+        std::ifstream input(path, std::ios::binary);
+        if (!input.is_open())
+            return Result<std::unique_ptr<Scene>>(ErrorCode::FileNotFound, "Scene::LoadFromFile failed opening scene file");
+
+        nlohmann::json root;
+        try
+        {
+            input >> root;
+        }
+        catch (const std::exception& exception)
+        {
+            return Result<std::unique_ptr<Scene>>(ErrorCode::FileCorrupted, std::string("Scene::LoadFromFile JSON parse failed: ") + exception.what());
+        }
+
+        if (!root.is_object() || !root.contains("Entities") || !root["Entities"].is_array())
+            return Result<std::unique_ptr<Scene>>(ErrorCode::FileCorrupted, "Scene::LoadFromFile invalid scene JSON format");
+
+        auto scene = std::make_unique<Scene>();
+        if (root.contains("EditorCamera") && root["EditorCamera"].is_object())
+        {
+            const auto& editorCameraJson = root["EditorCamera"];
+            auto position = editorCameraJson.value("Position", std::vector<float>{ 0.0f, 0.0f, 0.0f });
+            Scene::EditorCameraBookmark bookmark{};
+            if (position.size() >= 3)
+                bookmark.Position = glm::vec3(position[0], position[1], position[2]);
+            bookmark.YawDegrees = editorCameraJson.value("YawDegrees", -90.0f);
+            bookmark.PitchDegrees = editorCameraJson.value("PitchDegrees", 0.0f);
+            scene->SetEditorCameraBookmark(bookmark);
+        }
+
+        std::vector<entt::entity> createdEntities;
+        std::vector<int32_t> parentIndices;
+        std::vector<int32_t> siblingOrders;
+        createdEntities.reserve(root["Entities"].size());
+        parentIndices.reserve(root["Entities"].size());
+        siblingOrders.reserve(root["Entities"].size());
+
+        for (const auto& entry : root["Entities"])
+        {
+            const std::string tag = entry.value("Tag", "Entity");
+            const entt::entity entity = scene->CreateEntity(tag);
+            auto& transform = scene->GetRegistry().get<TransformComponent>(entity);
+
+            if (entry.contains("Transform"))
+            {
+                const auto& transformJson = entry["Transform"];
+                auto position = transformJson.value("Position", std::vector<float>{ 0.0f, 0.0f, 0.0f });
+                auto rotation = transformJson.value("Rotation", std::vector<float>{ 0.0f, 0.0f, 0.0f });
+                auto scale = transformJson.value("Scale", std::vector<float>{ 1.0f, 1.0f, 1.0f });
+                if (position.size() >= 3)
+                    transform.Position = glm::vec3(position[0], position[1], position[2]);
+                if (rotation.size() >= 3)
+                    transform.Rotation = glm::vec3(rotation[0], rotation[1], rotation[2]);
+                if (scale.size() >= 3)
+                    transform.Scale = glm::vec3(scale[0], scale[1], scale[2]);
+            }
+
+            if (entry.contains("Sprite"))
+            {
+                const auto& spriteJson = entry["Sprite"];
+                auto& sprite = scene->GetRegistry().emplace<SpriteComponent>(entity);
+                sprite.TextureKey = spriteJson.value("TextureKey", "");
+                auto color = spriteJson.value("Color", std::vector<float>{ 1.0f, 1.0f, 1.0f, 1.0f });
+                if (color.size() >= 4)
+                    sprite.Color = glm::vec4(color[0], color[1], color[2], color[3]);
+            }
+
+            int32_t parentIndex = -1;
+            int32_t siblingOrder = 0;
+            if (entry.contains("Hierarchy"))
+            {
+                const auto& hierarchyJson = entry["Hierarchy"];
+                parentIndex = hierarchyJson.value("ParentIndex", -1);
+                siblingOrder = hierarchyJson.value("SiblingOrder", 0);
+            }
+
+            createdEntities.push_back(entity);
+            parentIndices.push_back(parentIndex);
+            siblingOrders.push_back(siblingOrder);
+        }
+
+        auto& registry = scene->GetRegistry();
+        for (size_t index = 0; index < createdEntities.size(); ++index)
+        {
+            auto* hierarchy = registry.try_get<HierarchyComponent>(createdEntities[index]);
+            if (!hierarchy)
+                hierarchy = &registry.emplace<HierarchyComponent>(createdEntities[index]);
+
+            const int32_t parentIndex = parentIndices[index];
+            if (parentIndex >= 0 && static_cast<size_t>(parentIndex) < createdEntities.size())
+                hierarchy->Parent = createdEntities[static_cast<size_t>(parentIndex)];
+            else
+                hierarchy->Parent = entt::null;
+            hierarchy->SiblingOrder = siblingOrders[index];
+        }
+
+        return Result<std::unique_ptr<Scene>>(std::move(scene));
     }
 
     void SceneRenderer::Render(Scene& scene, const Camera& camera)

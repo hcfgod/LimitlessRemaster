@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
 
 namespace Limitless
 {
@@ -26,5 +27,7 @@ namespace Limitless::EditorViewportPanel
               Scene* scene,
               EditorPlayModeState playModeState,
               bool playModeMissingGameplayCamera,
-              const std::function<void(uint32_t, uint32_t)>& ensureViewportFramebuffer);
+              const std::function<void(uint32_t, uint32_t)>& ensureViewportFramebuffer,
+              const char* scenePayloadId,
+              const std::function<void(const std::string&)>& onSceneDropped);
 }

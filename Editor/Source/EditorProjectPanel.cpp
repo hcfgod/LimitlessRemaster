@@ -42,6 +42,40 @@ namespace Limitless::EditorProjectPanel
                    extensionLower == ".tga" || extensionLower == ".gif";
         }
 
+        bool IsSceneExtension(const std::filesystem::path& path)
+        {
+            std::string lowerFileName = path.filename().string();
+            for (char& character : lowerFileName)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            return lowerFileName.size() >= 11 && lowerFileName.rfind(".scene.json") == (lowerFileName.size() - 11);
+        }
+
+        std::string GetAssetDisplayName(const std::filesystem::path& path)
+        {
+            const std::string fileName = path.filename().string();
+            std::string lowerFileName = fileName;
+            for (char& character : lowerFileName)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+
+            constexpr std::array<const char*, 3> compoundSuffixes = {
+                ".scene.json",
+                ".material.json",
+                ".inputactions.json"
+            };
+
+            for (const char* suffix : compoundSuffixes)
+            {
+                const std::string suffixString = suffix;
+                if (lowerFileName.size() >= suffixString.size() &&
+                    lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size()))
+                {
+                    return fileName.substr(0, fileName.size() - suffixString.size());
+                }
+            }
+
+            return path.stem().string();
+        }
+
         void DrawAssetTree(const std::filesystem::path& assetsDirectory,
                            const std::filesystem::path& relativePath,
                            EditorProjectPanelState& state,
@@ -49,7 +83,10 @@ namespace Limitless::EditorProjectPanel
                            std::string& selectedTextureAssetKey,
                            Assets::TextureAsset::Ptr& cachedTextureAsset,
                            const char* texturePayloadId,
-                           const char* assetMovePayloadId)
+                           const char* assetMovePayloadId,
+                           const char* scenePayloadId,
+                           const std::function<void(const std::string&)>& onSceneActivated,
+                           const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested)
         {
             const std::filesystem::path currentDirectory = assetsDirectory / relativePath;
             std::error_code errorCode;
@@ -104,6 +141,8 @@ namespace Limitless::EditorProjectPanel
                             state.FolderPopupPending = EditorProjectFolderPopup::Create;
                             CopyTextToBuffer(state.FolderPopupBuffer, "New Folder");
                         }
+                        if (ImGui::MenuItem("Create Scene") && onCreateSceneRequested)
+                            onCreateSceneRequested(entryRelativePath);
                         if (ImGui::MenuItem("Rename"))
                         {
                             state.FolderPopupPending = EditorProjectFolderPopup::Rename;
@@ -161,16 +200,22 @@ namespace Limitless::EditorProjectPanel
                                       selectedTextureAssetKey,
                                       cachedTextureAsset,
                                       texturePayloadId,
-                                      assetMovePayloadId);
+                                      assetMovePayloadId,
+                                      scenePayloadId,
+                                      onSceneActivated,
+                                      onCreateSceneRequested);
                         ImGui::TreePop();
                     }
                 }
                 else
                 {
                     const bool isTexture = IsTextureExtension(entry);
+                    const bool isScene = IsSceneExtension(entry);
+                    const std::string displayName = GetAssetDisplayName(entry);
+                    const std::string treeLabel = displayName + "###" + fileName;
                     const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
                     const bool isSelected = isTexture && (selectedTextureAssetKey == assetKey);
-                    ImGui::TreeNodeEx(fileName.c_str(), isSelected ? (flags | ImGuiTreeNodeFlags_Selected) : flags);
+                    ImGui::TreeNodeEx(treeLabel.c_str(), isSelected ? (flags | ImGuiTreeNodeFlags_Selected) : flags);
 
                     if (isTexture && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
                     {
@@ -178,15 +223,21 @@ namespace Limitless::EditorProjectPanel
                         selectedEntity = entt::null;
                         cachedTextureAsset.reset();
                     }
+                    else if (isScene && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onSceneActivated)
+                    {
+                        onSceneActivated(assetKey);
+                    }
 
                     if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
                     {
                         if (isTexture)
                             ImGui::SetDragDropPayload(texturePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                        else if (isScene)
+                            ImGui::SetDragDropPayload(scenePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
                         else
                             ImGui::SetDragDropPayload(assetMovePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
 
-                        ImGui::Text("%s", fileName.c_str());
+                        ImGui::Text("%s", displayName.c_str());
                         ImGui::EndDragDropSource();
                     }
                 }
@@ -271,7 +322,10 @@ namespace Limitless::EditorProjectPanel
               std::string& selectedTextureAssetKey,
               Assets::TextureAsset::Ptr& cachedTextureAsset,
               const char* texturePayloadId,
-              const char* assetMovePayloadId)
+              const char* assetMovePayloadId,
+              const char* scenePayloadId,
+              const std::function<void(const std::string&)>& onSceneActivated,
+              const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested)
     {
         ImGui::Begin("Project");
 
@@ -300,6 +354,8 @@ namespace Limitless::EditorProjectPanel
                 state.FolderPopupPending = EditorProjectFolderPopup::Create;
                 CopyTextToBuffer(state.FolderPopupBuffer, "New Folder");
             }
+            if (ImGui::MenuItem("Create Scene") && onCreateSceneRequested)
+                onCreateSceneRequested("");
             ImGui::EndPopup();
         }
 
@@ -313,6 +369,8 @@ namespace Limitless::EditorProjectPanel
                     state.FolderPopupPending = EditorProjectFolderPopup::Create;
                     CopyTextToBuffer(state.FolderPopupBuffer, "New Folder");
                 }
+                if (ImGui::MenuItem("Create Scene") && onCreateSceneRequested)
+                    onCreateSceneRequested("");
                 ImGui::EndPopup();
             }
 
@@ -350,7 +408,10 @@ namespace Limitless::EditorProjectPanel
                           selectedTextureAssetKey,
                           cachedTextureAsset,
                           texturePayloadId,
-                          assetMovePayloadId);
+                          assetMovePayloadId,
+                          scenePayloadId,
+                          onSceneActivated,
+                          onCreateSceneRequested);
             ImGui::TreePop();
         }
 

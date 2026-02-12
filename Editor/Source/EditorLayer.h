@@ -7,8 +7,10 @@
 #include "EditorScenePanel.h"
 #include "Graphics/Texture.h"
 
+#include <array>
 #include <filesystem>
 #include <memory>
+#include <string>
 
 namespace Limitless
 {
@@ -49,6 +51,13 @@ namespace Limitless
         void EnterPlayMode();
         void ExitPlayMode();
         void TogglePausePlayMode();
+        void NewScene();
+        void SaveScene();
+        void SaveSceneAs();
+        void DrawSaveScenePopup();
+        bool LoadSceneFromAssetKey(const std::string& assetKey);
+        bool SaveSceneToAssetKey(const std::string& assetKey);
+        std::string CreateSceneAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
 
         uint32_t m_ViewportWidthPixels = 1280;
         uint32_t m_ViewportHeightPixels = 720;
@@ -75,6 +84,11 @@ namespace Limitless
 
         /// Cached texture asset for the selected key; avoids LoadBlocking every frame and reduces lag.
         Assets::TextureAsset::Ptr m_CachedTextureAsset;
+        std::string m_CurrentSceneAssetKey;
+        bool m_SaveScenePopupOpen = false;
+        bool m_RequestOpenSaveScenePopup = false;
+        std::filesystem::path m_SaveSceneFolderPath = "Scenes";
+        std::array<char, 256> m_SaveSceneFileNameBuffer{};
 
         bool m_ShowDemoWindow = false;
         EditorScenePanelState m_ScenePanelState;

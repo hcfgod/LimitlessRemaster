@@ -1,9 +1,12 @@
 #pragma once
 
+#include "Core/Error.h"
 #include "Scene/Components.h"
 
 #include <glm/glm.hpp>
+#include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -21,6 +24,13 @@ namespace Limitless
     class Scene
     {
     public:
+        struct EditorCameraBookmark
+        {
+            glm::vec3 Position{ 0.0f, 0.0f, 0.0f };
+            float YawDegrees = -90.0f;
+            float PitchDegrees = 0.0f;
+        };
+
         Scene();
         ~Scene() = default;
 
@@ -65,8 +75,20 @@ namespace Limitless
         /// Used by editor Play Mode to keep edit-time data isolated.
         std::unique_ptr<Scene> Clone() const;
 
+        /// Save scene to disk as a scene asset file.
+        Result<void> SaveToFile(const std::filesystem::path& path) const;
+
+        /// Load scene from disk scene asset file.
+        static Result<std::unique_ptr<Scene>> LoadFromFile(const std::filesystem::path& path);
+
+        /// Store editor camera transform so returning to this scene restores the same view.
+        void SetEditorCameraBookmark(const EditorCameraBookmark& bookmark) { m_EditorCameraBookmark = bookmark; }
+        void ClearEditorCameraBookmark() { m_EditorCameraBookmark.reset(); }
+        const std::optional<EditorCameraBookmark>& GetEditorCameraBookmark() const { return m_EditorCameraBookmark; }
+
     private:
         entt::registry m_Registry;
+        std::optional<EditorCameraBookmark> m_EditorCameraBookmark;
     };
 
     // -----------------------------------------------------------------------------

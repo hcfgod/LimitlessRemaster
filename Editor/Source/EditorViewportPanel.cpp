@@ -21,7 +21,9 @@ namespace Limitless::EditorViewportPanel
               Scene* scene,
               EditorPlayModeState playModeState,
               bool playModeMissingGameplayCamera,
-              const std::function<void(uint32_t, uint32_t)>& ensureViewportFramebuffer)
+              const std::function<void(uint32_t, uint32_t)>& ensureViewportFramebuffer,
+              const char* scenePayloadId,
+              const std::function<void(const std::string&)>& onSceneDropped)
     {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         ImGui::Begin("Viewport");
@@ -57,6 +59,17 @@ namespace Limitless::EditorViewportPanel
                     ImVec2(static_cast<float>(width), static_cast<float>(height)),
                     ImVec2(0, 1),
                     ImVec2(1, 0));
+
+                if (ImGui::BeginDragDropTarget())
+                {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(scenePayloadId))
+                    {
+                        const char* key = static_cast<const char*>(payload->Data);
+                        if (key && key[0] && onSceneDropped)
+                            onSceneDropped(key);
+                    }
+                    ImGui::EndDragDropTarget();
+                }
 
                 if (!Renderer2D::IsShaderReady())
                 {

@@ -44,14 +44,20 @@ namespace Limitless::Assets
                 key,
                 Type,
                 isDefaultSettings ? nlohmann::json::object() : SettingsToJson(settings));
+            Settings resolvedSettings = settings;
             if (recordResult.IsSuccess())
             {
                 // No deps for textures, but make sure we clear the field for correctness.
                 AssetDatabase::GetInstance().SetDependencies(recordResult.GetValue().Guid, {});
+
+                // For default caller settings, prefer persisted importer settings from AssetDatabase.
+                // This ensures inspector-edited texture specs survive full editor restarts.
+                if (isDefaultSettings)
+                    resolvedSettings = TextureSpecificationFromImporterSettingsJson(recordResult.GetValue().ImporterSettings);
             }
             AssetHotReloadManager::GetInstance().WatchKey(key);
             // Load actual asset.
-            return TextureAsset::LoadAsync(key, settings, generation);
+            return TextureAsset::LoadAsync(key, resolvedSettings, generation);
         }
     };
 }

@@ -5,6 +5,7 @@
 
 #include <array>
 #include <filesystem>
+#include <functional>
 #include <string>
 
 namespace Limitless
@@ -35,6 +36,9 @@ namespace Limitless
                   std::string& selectedTextureAssetKey,
                   Assets::TextureAsset::Ptr& cachedTextureAsset,
                   const char* texturePayloadId,
-                  const char* assetMovePayloadId);
+                  const char* assetMovePayloadId,
+                  const char* scenePayloadId,
+                  const std::function<void(const std::string&)>& onSceneActivated,
+                  const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested);
     }
 }

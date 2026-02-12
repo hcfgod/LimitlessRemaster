@@ -7,6 +7,9 @@ namespace Limitless::EditorMenuBar
 {
     void Draw(EditorPlayModeState playModeState,
               bool& showDemoWindow,
+              const std::function<void()>& onNewScene,
+              const std::function<void()>& onSaveScene,
+              const std::function<void()>& onSaveSceneAs,
               const std::function<void()>& onPlay,
               const std::function<void()>& onStop,
               const std::function<void()>& onTogglePause)
@@ -16,9 +19,12 @@ namespace Limitless::EditorMenuBar
 
         if (ImGui::BeginMenu("File"))
         {
-            if (ImGui::MenuItem("New")) {}
-            if (ImGui::MenuItem("Open")) {}
-            if (ImGui::MenuItem("Save")) {}
+            if (ImGui::MenuItem("New Scene"))
+                onNewScene();
+            if (ImGui::MenuItem("Save Scene", "Ctrl+S"))
+                onSaveScene();
+            if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S"))
+                onSaveSceneAs();
             ImGui::Separator();
             if (ImGui::MenuItem("Exit"))
                 Application::GetInstance().SetRunning(false);
