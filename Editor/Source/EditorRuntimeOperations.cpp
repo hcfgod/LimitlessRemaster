@@ -21,12 +21,6 @@ namespace Limitless::EditorRuntimeOperations
         Renderer2D::Initialize();
 
         scene = std::make_unique<Scene>();
-        const auto spriteEntity = scene->CreateEntity("Sprite (Test)");
-        auto& transform = scene->GetRegistry().get<TransformComponent>(spriteEntity);
-        transform.Position = glm::vec3(-0.5f, -0.5f, 0.0f);
-        transform.Scale = glm::vec3(1.0f, 1.0f, 1.0f);
-        auto& sprite = scene->GetRegistry().emplace<SpriteComponent>(spriteEntity);
-        sprite.Color = glm::vec4(0.2f, 0.6f, 0.9f, 1.0f);
 
         CameraManager::Perspective3DCreateInfo cameraInfo{};
         cameraInfo.Name = "EditorCamera";

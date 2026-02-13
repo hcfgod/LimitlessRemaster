@@ -15,7 +15,7 @@ namespace Limitless
 
 namespace Limitless::EditorRuntimeOperations
 {
-    /// Initializes editor runtime systems and default scene content.
+    /// Initializes editor runtime systems and an empty working scene container.
     void Attach(uint32_t viewportWidthPixels,
                 uint32_t viewportHeightPixels,
                 std::unique_ptr<Scene>& scene,

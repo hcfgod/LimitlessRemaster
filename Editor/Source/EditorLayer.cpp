@@ -16,13 +16,17 @@
 #include "EditorViewportPanel.h"
 #include "Graphics/Camera/PerspectiveCamera3D.h"
 #include "ImGui/ImGuiLayer.h"
+#include "Project/ProjectManager.h"
+#include "Scene/Components.h"
 #include "Scene/Scene.h"
 #include "imgui/imgui.h"
 
+#include <fstream>
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <functional>
+#include <nlohmann/json.hpp>
 #include <vector>
 
 namespace Limitless
@@ -36,6 +40,127 @@ namespace Limitless
         constexpr const char* kAssetShaderPayload = "ASSET_SHADER";
         constexpr const char* kDefaultSceneFileName = "New Scene.scene.json";
         constexpr const char* kSceneFileSuffix = ".scene.json";
+        constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
+        constexpr uint32_t kEditorSessionStateVersion = 1;
+
+        void PopulateDefaultSceneTemplate(Scene& scene)
+        {
+            const entt::entity cameraEntity = scene.CreateEntity("Main Camera");
+            auto& cameraTransform = scene.GetRegistry().get<TransformComponent>(cameraEntity);
+            cameraTransform.Position = glm::vec3(0.0f, 0.0f, 5.0f);
+            cameraTransform.Rotation = glm::vec3(0.0f);
+
+            auto& camera = scene.GetRegistry().emplace<CameraComponent>(cameraEntity);
+            camera.IsPrimary = true;
+            camera.Projection = CameraComponent::ProjectionType::Perspective3D;
+            camera.FieldOfViewYDegrees = 60.0f;
+            camera.NearPlane = 0.1f;
+            camera.FarPlane = 1000.0f;
+        }
+
+        std::filesystem::path GetEditorSessionStatePathForProjectRoot(const std::filesystem::path& projectRoot)
+        {
+            if (projectRoot.empty())
+            {
+                return {};
+            }
+            return projectRoot / kEditorSessionStateRelativePath;
+        }
+
+        std::string ReadLastSceneAssetKeyFromProjectSessionState(const std::filesystem::path& projectRoot)
+        {
+            const std::filesystem::path statePath = GetEditorSessionStatePathForProjectRoot(projectRoot);
+            if (statePath.empty())
+            {
+                return {};
+            }
+
+            std::error_code ec;
+            if (!std::filesystem::exists(statePath, ec))
+            {
+                return {};
+            }
+
+            try
+            {
+                std::ifstream in(statePath, std::ios::in | std::ios::binary);
+                if (!in.is_open())
+                {
+                    return {};
+                }
+
+                nlohmann::json root;
+                in >> root;
+                if (!root.is_object())
+                {
+                    return {};
+                }
+
+                const uint32_t version = root.value("version", 0u);
+                if (version != kEditorSessionStateVersion)
+                {
+                    return {};
+                }
+
+                return root.value("lastOpenedSceneAssetKey", std::string{});
+            }
+            catch (...)
+            {
+                return {};
+            }
+        }
+
+        void WriteLastSceneAssetKeyToProjectSessionState(const std::filesystem::path& projectRoot, const std::string& sceneAssetKey)
+        {
+            if (projectRoot.empty() || sceneAssetKey.empty())
+            {
+                return;
+            }
+
+            const std::filesystem::path statePath = GetEditorSessionStatePathForProjectRoot(projectRoot);
+            if (statePath.empty())
+            {
+                return;
+            }
+
+            try
+            {
+                std::error_code ec;
+                std::filesystem::create_directories(statePath.parent_path(), ec);
+                if (ec)
+                {
+                    return;
+                }
+
+                nlohmann::json root;
+                root["version"] = kEditorSessionStateVersion;
+                root["lastOpenedSceneAssetKey"] = sceneAssetKey;
+
+                const std::filesystem::path tmpPath = statePath.string() + ".tmp";
+                {
+                    std::ofstream out(tmpPath, std::ios::out | std::ios::binary | std::ios::trunc);
+                    if (!out.is_open())
+                    {
+                        return;
+                    }
+                    out << root.dump(2);
+                    out.flush();
+                }
+
+                std::filesystem::rename(tmpPath, statePath, ec);
+                if (ec)
+                {
+                    ec.clear();
+                    std::filesystem::remove(statePath, ec);
+                    ec.clear();
+                    std::filesystem::rename(tmpPath, statePath, ec);
+                }
+            }
+            catch (...)
+            {
+                // Session state persistence is best-effort.
+            }
+        }
 
         std::string SceneDisplayNameFromFileName(const std::string& fileName)
         {
@@ -170,7 +295,6 @@ namespace Limitless
     void EditorLayer::OnRender()
     {
         const bool openedProjectThisFrame = EditorProjectDialog::Draw(m_ProjectDialogState);
-        (void)openedProjectThisFrame;
 
         // Block the full editor until a project is explicitly selected.
         if (!Project::ProjectManager::GetInstance().HasOpenProject())
@@ -180,6 +304,37 @@ namespace Limitless
                 EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Open);
             }
             return;
+        }
+
+        if (openedProjectThisFrame)
+        {
+            const auto& pm = Project::ProjectManager::GetInstance();
+            const std::filesystem::path projectRoot = pm.GetProjectRoot();
+            bool loadedScene = false;
+
+            const std::string lastOpenedSceneAssetKey = ReadLastSceneAssetKeyFromProjectSessionState(projectRoot);
+            if (!lastOpenedSceneAssetKey.empty())
+            {
+                loadedScene = LoadSceneFromAssetKey(lastOpenedSceneAssetKey);
+            }
+
+            if (!loadedScene)
+            {
+                if (const auto definition = pm.GetProjectDefinition(); definition.has_value() && !definition->DefaultScene.Key.empty())
+                {
+                    loadedScene = LoadSceneFromAssetKey(definition->DefaultScene.Key);
+                }
+            }
+
+            if (!loadedScene)
+            {
+                // Ensure a deterministic default scene exists for new projects.
+                const std::string defaultSceneAssetKey = CreateSceneAssetInFolder("Scenes", kDefaultSceneFileName);
+                if (!defaultSceneAssetKey.empty())
+                {
+                    (void)LoadSceneFromAssetKey(defaultSceneAssetKey);
+                }
+            }
         }
 
         DrawMenuBar();
@@ -399,6 +554,7 @@ namespace Limitless
             ExitPlayMode();
 
         m_Scene = std::make_unique<Scene>();
+        PopulateDefaultSceneTemplate(*m_Scene);
         m_SelectedEntity = entt::null;
         m_SelectedTextureAssetKey.clear();
         m_CachedTextureAsset.reset();
@@ -582,6 +738,10 @@ namespace Limitless
         m_SelectedTextureAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey = assetKey;
+        if (const auto& pm = Project::ProjectManager::GetInstance(); pm.HasOpenProject())
+        {
+            WriteLastSceneAssetKeyToProjectSessionState(pm.GetProjectRoot(), assetKey);
+        }
 
         if (auto* editorCamera = m_CameraManager.GetPerspective3D(m_EditorCameraId))
         {
@@ -631,6 +791,11 @@ namespace Limitless
             LT_WARN("Scene saved but failed to import into AssetDatabase ({}): {}", assetKey, importResult.GetError().GetErrorMessage());
         }
 
+        if (const auto& pm = Project::ProjectManager::GetInstance(); pm.HasOpenProject())
+        {
+            WriteLastSceneAssetKeyToProjectSessionState(pm.GetProjectRoot(), assetKey);
+        }
+
         LT_INFO("Saved scene {}", assetKey);
         return true;
     }
@@ -674,6 +839,7 @@ namespace Limitless
         if (!std::filesystem::exists(scenePath, errorCode))
         {
             Scene scene;
+            PopulateDefaultSceneTemplate(scene);
             const auto saveResult = scene.SaveToFile(scenePath);
             if (saveResult.IsFailure())
             {
