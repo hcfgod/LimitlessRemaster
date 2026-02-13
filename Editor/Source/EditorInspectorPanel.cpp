@@ -695,7 +695,13 @@ namespace Limitless::EditorInspectorPanel
             bool AutoBuildAfterSave = true;
             std::atomic<bool> BuildInProgress{ false };
             std::atomic<int> LastBuildExitCode{ -1 };
-            std::unique_ptr<std::jthread> BuildThread;
+            std::unique_ptr<std::thread> BuildThread;
+
+            ~NativeScriptAuthoringState()
+            {
+                if (BuildThread && BuildThread->joinable())
+                    BuildThread->join();
+            }
         };
 
         NativeScriptAuthoringState& GetNativeScriptAuthoringState()
@@ -866,7 +872,7 @@ namespace Limitless::EditorInspectorPanel
                 ? openedProjectRoot.value()
                 : engineRoot.value();
             const auto [configuration, platform] = GetBuildConfigurationAndPlatform(settingsRoot);
-            state.BuildThread = std::make_unique<std::jthread>([&state, root = engineRoot.value(), configuration, platform]() {
+            state.BuildThread = std::make_unique<std::thread>([&state, root = engineRoot.value(), configuration, platform]() {
                 const int exitCode = RunBuildScriptBlockingWindows(root, configuration, platform);
                 state.LastBuildExitCode.store(exitCode, std::memory_order_relaxed);
                 state.BuildInProgress.store(false, std::memory_order_relaxed);
