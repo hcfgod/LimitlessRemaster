@@ -451,6 +451,13 @@ namespace Limitless
 
     void EditorLayer::DrawScenePanel()
     {
+        std::string sceneRootDisplayName = SceneDisplayNameFromFileName(kDefaultSceneFileName);
+        if (!m_CurrentSceneAssetKey.empty())
+        {
+            const std::filesystem::path sceneAssetPath(m_CurrentSceneAssetKey);
+            sceneRootDisplayName = SceneDisplayNameFromFileName(sceneAssetPath.filename().string());
+        }
+
         EditorScenePanel::Draw(
             m_Scene.get(),
             m_ScenePanelState,
@@ -459,7 +466,8 @@ namespace Limitless
             m_CachedTextureAsset,
             m_SelectedMaterialAssetKey,
             m_CachedMaterialAsset,
-            kAssetMaterialPayload);
+            kAssetMaterialPayload,
+            sceneRootDisplayName);
     }
 
     void EditorLayer::DrawInspectorPanel()
@@ -495,7 +503,8 @@ namespace Limitless
                 const std::string createdSceneAssetKey = CreateSceneAssetInFolder(relativeFolderPath);
                 if (!createdSceneAssetKey.empty())
                     LoadSceneFromAssetKey(createdSceneAssetKey);
-            });
+            },
+            [this](const std::string& sceneAssetKey) { SetProjectDefaultSceneAssetKey(sceneAssetKey); });
     }
 
     void EditorLayer::EnsureViewportFramebuffer(uint32_t width, uint32_t height)
@@ -864,6 +873,30 @@ namespace Limitless
 
         LT_INFO("Created scene asset {}", assetKey);
         return assetKey;
+    }
+
+    void EditorLayer::SetProjectDefaultSceneAssetKey(const std::string& sceneAssetKey)
+    {
+        if (sceneAssetKey.empty())
+        {
+            return;
+        }
+
+        auto& projectManager = Project::ProjectManager::GetInstance();
+        if (!projectManager.HasOpenProject())
+        {
+            LT_WARN("Cannot set default scene: no project is currently open.");
+            return;
+        }
+
+        const auto saveResult = projectManager.SetDefaultSceneAssetKey(sceneAssetKey);
+        if (saveResult.IsFailure())
+        {
+            LT_ERROR("Failed to set default scene '{}': {}", sceneAssetKey, saveResult.GetError().GetErrorMessage());
+            return;
+        }
+
+        LT_INFO("Default scene updated to '{}'", sceneAssetKey);
     }
 
 }  // namespace Limitless

@@ -34,6 +34,9 @@ namespace Limitless::Project
         /// Clears the current project (does not delete anything on disk).
         void CloseProject();
 
+        /// Updates the project's default scene reference and persists Project/Project.json.
+        Result<void> SetDefaultSceneAssetKey(const std::string& sceneAssetKey);
+
         [[nodiscard]] bool HasOpenProject() const;
         [[nodiscard]] std::filesystem::path GetProjectRoot() const;
         [[nodiscard]] std::optional<ProjectDefinition> GetProjectDefinition() const;

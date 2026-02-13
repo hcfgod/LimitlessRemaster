@@ -1,5 +1,6 @@
 #include "Project/ProjectManager.h"
 
+#include "Assets/AssetDatabase.h"
 #include "Assets/AssetManager.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetUtils.h"
@@ -126,6 +127,52 @@ namespace Limitless::Project
         std::lock_guard<std::mutex> lock(m_Mutex);
         m_ProjectRoot.reset();
         m_Definition.reset();
+    }
+
+    Result<void> ProjectManager::SetDefaultSceneAssetKey(const std::string& sceneAssetKey)
+    {
+        if (sceneAssetKey.empty())
+        {
+            return Result<void>(ErrorCode::InvalidArgument, "SetDefaultSceneAssetKey: sceneAssetKey is empty");
+        }
+
+        std::filesystem::path projectRoot;
+        ProjectDefinition definition;
+        {
+            std::lock_guard<std::mutex> lock(m_Mutex);
+            if (!m_ProjectRoot.has_value() || !m_Definition.has_value())
+            {
+                return Result<void>(ErrorCode::InvalidState, "SetDefaultSceneAssetKey: no project is currently open");
+            }
+
+            projectRoot = *m_ProjectRoot;
+            definition = *m_Definition;
+        }
+
+        definition.DefaultScene.Key = sceneAssetKey;
+        definition.DefaultScene.Guid.clear();
+
+        const auto recordResult = Assets::AssetDatabase::GetInstance().FindByKey(sceneAssetKey);
+        if (recordResult.IsSuccess())
+        {
+            definition.DefaultScene.Guid = recordResult.GetValue().Guid;
+        }
+
+        const auto saveResult = SaveProjectDefinitionToFile(GetProjectFilePathForRoot(projectRoot), definition);
+        if (saveResult.IsFailure())
+        {
+            return saveResult;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(m_Mutex);
+            m_Definition = definition;
+        }
+
+        LT_CORE_INFO("Project default scene set: key='{}' guid='{}'",
+                     definition.DefaultScene.Key,
+                     definition.DefaultScene.Guid);
+        return Result<void>();
     }
 
     bool ProjectManager::HasOpenProject() const

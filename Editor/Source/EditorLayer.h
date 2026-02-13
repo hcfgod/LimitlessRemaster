@@ -63,6 +63,7 @@ namespace Limitless
         bool LoadSceneFromAssetKey(const std::string& assetKey);
         bool SaveSceneToAssetKey(const std::string& assetKey);
         std::string CreateSceneAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
+        void SetProjectDefaultSceneAssetKey(const std::string& sceneAssetKey);
 
         uint32_t m_ViewportWidthPixels = 1280;
         uint32_t m_ViewportHeightPixels = 720;

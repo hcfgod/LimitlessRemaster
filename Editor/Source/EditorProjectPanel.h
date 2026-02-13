@@ -49,6 +49,7 @@ namespace Limitless
                   const char* materialPayloadId,
                   const char* shaderPayloadId,
                   const std::function<void(const std::string&)>& onSceneActivated,
-                  const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested);
+                  const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
+                  const std::function<void(const std::string&)>& onSetDefaultSceneRequested);
     }
 }

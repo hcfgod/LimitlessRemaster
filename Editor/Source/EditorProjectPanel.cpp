@@ -109,7 +109,8 @@ namespace Limitless::EditorProjectPanel
                            const char* materialPayloadId,
                            const char* shaderPayloadId,
                            const std::function<void(const std::string&)>& onSceneActivated,
-                           const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested)
+                           const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
+                           const std::function<void(const std::string&)>& onSetDefaultSceneRequested)
         {
             const std::filesystem::path currentDirectory = assetsDirectory / relativePath;
             std::error_code errorCode;
@@ -234,7 +235,8 @@ namespace Limitless::EditorProjectPanel
                                       materialPayloadId,
                                       shaderPayloadId,
                                       onSceneActivated,
-                                      onCreateSceneRequested);
+                                      onCreateSceneRequested,
+                                      onSetDefaultSceneRequested);
                         ImGui::TreePop();
                     }
                 }
@@ -295,6 +297,22 @@ namespace Limitless::EditorProjectPanel
                         selectedEntity = entt::null;
                         cachedMaterialAsset.reset();
                         cachedTextureAsset.reset();
+                    }
+
+                    if (ImGui::BeginPopupContextItem())
+                    {
+                        if (isScene)
+                        {
+                            if (ImGui::MenuItem("Open Scene") && onSceneActivated)
+                            {
+                                onSceneActivated(assetKey);
+                            }
+                            if (ImGui::MenuItem("Set As Default Scene") && onSetDefaultSceneRequested)
+                            {
+                                onSetDefaultSceneRequested(assetKey);
+                            }
+                        }
+                        ImGui::EndPopup();
                     }
 
                     if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
@@ -402,7 +420,8 @@ namespace Limitless::EditorProjectPanel
               const char* materialPayloadId,
               const char* shaderPayloadId,
               const std::function<void(const std::string&)>& onSceneActivated,
-              const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested)
+              const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
+              const std::function<void(const std::string&)>& onSetDefaultSceneRequested)
     {
         ImGui::Begin("Project");
         state.HoveredFolderRelativePathForExternalDrop.clear();
@@ -498,7 +517,8 @@ namespace Limitless::EditorProjectPanel
                           materialPayloadId,
                           shaderPayloadId,
                           onSceneActivated,
-                          onCreateSceneRequested);
+                          onCreateSceneRequested,
+                          onSetDefaultSceneRequested);
             ImGui::TreePop();
         }
 

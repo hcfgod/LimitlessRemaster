@@ -240,7 +240,8 @@ namespace Limitless::EditorScenePanel
               Assets::TextureAsset::Ptr& cachedTextureAsset,
               std::string& selectedMaterialAssetKey,
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
-              const char* materialPayloadId)
+              const char* materialPayloadId,
+              const std::string& sceneRootDisplayName)
     {
         ImGui::Begin("Scene");
 
@@ -261,7 +262,8 @@ namespace Limitless::EditorScenePanel
 
         if (scene)
         {
-            if (ImGui::TreeNodeEx("Scene Root", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth))
+            const char* rootDisplayLabel = sceneRootDisplayName.empty() ? "Scene Root" : sceneRootDisplayName.c_str();
+            if (ImGui::TreeNodeEx("SceneRootTreeNode", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth, "%s", rootDisplayLabel))
             {
                 if (ImGui::BeginPopupContextItem())
                 {
