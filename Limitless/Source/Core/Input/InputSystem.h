@@ -10,6 +10,9 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace Limitless
 {
@@ -49,6 +52,12 @@ namespace Limitless
         // Unity-style convenience: set project-wide input actions from an asset key.
         // (Loads through the engine asset system.)
         void SetProjectActionAssetFromKey(const std::string& key);
+
+        // Additional project-level input action assets (Unity-style: multiple action assets can coexist).
+        // These are addressable by key from gameplay/editor code.
+        void SetProjectAdditionalActionAssetsFromKeys(const std::vector<std::string>& keys);
+        const std::vector<std::string>& GetProjectAdditionalActionAssetKeys() const { return m_AdditionalProjectActionAssetKeys; }
+        std::shared_ptr<InputActionAsset> GetProjectAdditionalActionAssetByKey(const std::string& key) const;
 
         // Backward compatible aliases (previous API was "global action asset").
         void SetActionAsset(std::shared_ptr<InputActionAsset> asset) { SetProjectActionAsset(std::move(asset)); }
@@ -110,6 +119,8 @@ namespace Limitless
 
         std::shared_ptr<InputActionAsset> m_ProjectActionAsset;
         std::vector<std::shared_ptr<InputActionAsset>> m_ActionAssetOverrideStack;
+        std::vector<std::string> m_AdditionalProjectActionAssetKeys;
+        std::unordered_map<std::string, std::shared_ptr<InputActionAsset>> m_AdditionalProjectActionAssetsByKey;
 
         std::shared_ptr<InputRebinding> m_RebindingSession;
     };

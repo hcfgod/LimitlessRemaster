@@ -1,4 +1,5 @@
 #include "EditorLayer.h"
+#include "EditorAssetNaming.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetImportPipeline.h"
@@ -14,9 +15,11 @@
 #include "EditorRuntimeOperations.h"
 #include "EditorScenePanel.h"
 #include "EditorViewportPanel.h"
+#include "Core/Input/InputSystem.h"
 #include "Graphics/Camera/PerspectiveCamera3D.h"
 #include "ImGui/ImGuiLayer.h"
 #include "Project/ProjectManager.h"
+#include "Project/ProjectSettings.h"
 #include "Scene/Components.h"
 #include "Scene/Scene.h"
 #include "imgui/imgui.h"
@@ -164,18 +167,7 @@ namespace Limitless
 
         std::string SceneDisplayNameFromFileName(const std::string& fileName)
         {
-            std::string lowerFileName = fileName;
-            std::transform(lowerFileName.begin(), lowerFileName.end(), lowerFileName.begin(), [](unsigned char character) {
-                return static_cast<char>(std::tolower(character));
-            });
-
-            const std::string lowerSuffix = kSceneFileSuffix;
-            if (lowerFileName.size() >= lowerSuffix.size() &&
-                lowerFileName.rfind(lowerSuffix) == (lowerFileName.size() - lowerSuffix.size()))
-            {
-                return fileName.substr(0, fileName.size() - lowerSuffix.size());
-            }
-            return fileName;
+            return EditorAssetNaming::GetAssetDisplayNameFromFileName(fileName);
         }
 
         std::string NormalizeSceneFileName(const char* rawName)
@@ -310,6 +302,39 @@ namespace Limitless
         {
             const auto& pm = Project::ProjectManager::GetInstance();
             const std::filesystem::path projectRoot = pm.GetProjectRoot();
+
+            // Keep AssetDatabase key mappings canonical before any scene is loaded.
+            // This repairs stale key mappings after file rename/move operations.
+            const auto reimportResult = Assets::AssetImportPipeline::ReimportAll(true);
+            if (reimportResult.IsFailure())
+            {
+                LT_WARN("Asset reimport on project open failed: {}", reimportResult.GetError().GetErrorMessage());
+            }
+
+            // Reset per-project panel cache so settings always match the newly opened project.
+            m_ProjectSettingsPanelState.Loaded = false;
+            m_ProjectSettingsPanelState.StatusMessage.clear();
+            m_ProjectSettingsPanelState.StatusIsError = false;
+
+            // Apply project-level input settings at project open so runtime input defaults are active immediately.
+            const auto inputSettingsResult = Project::LoadInputSettings(projectRoot);
+            if (inputSettingsResult.IsSuccess())
+            {
+                const Project::InputSettings& inputSettings = inputSettingsResult.GetValue();
+                if (inputSettings.ProjectInputActionsKey.empty())
+                    InputSystem::GetInstance().SetProjectActionAsset(nullptr);
+                else
+                    InputSystem::GetInstance().SetProjectActionAssetFromKey(inputSettings.ProjectInputActionsKey);
+                InputSystem::GetInstance().SetProjectAdditionalActionAssetsFromKeys(
+                    Project::CollectAdditionalInputActionsAssetKeys(inputSettings));
+            }
+            else
+            {
+                LT_WARN("Failed to load project input settings: {}", inputSettingsResult.GetError().GetErrorMessage());
+                InputSystem::GetInstance().SetProjectActionAsset(nullptr);
+                InputSystem::GetInstance().SetProjectAdditionalActionAssetsFromKeys({});
+            }
+
             bool loadedScene = false;
 
             const std::string lastOpenedSceneAssetKey = ReadLastSceneAssetKeyFromProjectSessionState(projectRoot);
@@ -504,7 +529,58 @@ namespace Limitless
                 if (!createdSceneAssetKey.empty())
                     LoadSceneFromAssetKey(createdSceneAssetKey);
             },
-            [this](const std::string& sceneAssetKey) { SetProjectDefaultSceneAssetKey(sceneAssetKey); });
+            [this](const std::string& sceneAssetKey) { SetProjectDefaultSceneAssetKey(sceneAssetKey); },
+            [this](const std::string& oldAssetKey, const std::string& newAssetKey) {
+                if (oldAssetKey.empty() || newAssetKey.empty() || oldAssetKey == newAssetKey)
+                    return;
+
+                if (m_SelectedMaterialAssetKey == oldAssetKey)
+                {
+                    m_SelectedMaterialAssetKey = newAssetKey;
+                    m_CachedMaterialAsset.reset();
+                }
+
+                if (!m_Scene)
+                {
+                    // Even without an active scene instance, keep selected material state consistent.
+                    return;
+                }
+
+                bool updatedAnyMaterialReference = false;
+                const auto updateMaterialReferencesInScene = [&oldAssetKey, &newAssetKey, &updatedAnyMaterialReference](Scene* scene) {
+                    if (!scene)
+                        return;
+
+                    auto& registry = scene->GetRegistry();
+                    auto materialView = registry.view<MaterialComponent>();
+                    for (entt::entity entity : materialView)
+                    {
+                        auto& material = materialView.get<MaterialComponent>(entity);
+                        if (material.MaterialKey == oldAssetKey)
+                        {
+                            material.MaterialKey = newAssetKey;
+                            material.CachedMaterial.reset();
+                            material.MaterialLoadAttempted = false;
+                            updatedAnyMaterialReference = true;
+                        }
+                    }
+                };
+
+                // Update both scene instances so rename remains stable across Play/Edit transitions.
+                updateMaterialReferencesInScene(m_Scene.get());
+                updateMaterialReferencesInScene(m_EditSceneStored.get());
+
+                // Persist immediately so reopening the editor cannot revive stale material keys.
+                if (updatedAnyMaterialReference &&
+                    m_PlayModeState == EditorPlayModeState::Edit &&
+                    !m_CurrentSceneAssetKey.empty())
+                {
+                    if (!SaveSceneToAssetKey(m_CurrentSceneAssetKey))
+                    {
+                        LT_WARN("Asset rename updated scene material references but failed to auto-save '{}'.", m_CurrentSceneAssetKey);
+                    }
+                }
+            });
     }
 
     void EditorLayer::EnsureViewportFramebuffer(uint32_t width, uint32_t height)

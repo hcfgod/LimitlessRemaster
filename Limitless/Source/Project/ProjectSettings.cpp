@@ -4,11 +4,67 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <cctype>
+#include <cstdint>
 #include <fstream>
+#include <set>
 
 namespace Limitless::Project
 {
     using json = nlohmann::json;
+    namespace
+    {
+        constexpr const char* kInputActionsSuffix = ".inputactions.json";
+
+        std::string TrimCopy(const std::string& value)
+        {
+            size_t begin = 0;
+            while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin])))
+                ++begin;
+
+            size_t end = value.size();
+            while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1])))
+                --end;
+
+            return value.substr(begin, end - begin);
+        }
+
+        std::string CanonicalizeAlias(const std::string& alias)
+        {
+            std::string normalized = TrimCopy(alias);
+            std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char character) {
+                return static_cast<char>(std::tolower(character));
+            });
+            return normalized;
+        }
+
+        bool EndsWithCaseInsensitive(const std::string& value, const std::string& suffix)
+        {
+            if (value.size() < suffix.size())
+                return false;
+            const size_t offset = value.size() - suffix.size();
+            for (size_t index = 0; index < suffix.size(); ++index)
+            {
+                const unsigned char left = static_cast<unsigned char>(value[offset + index]);
+                const unsigned char right = static_cast<unsigned char>(suffix[index]);
+                if (std::tolower(left) != std::tolower(right))
+                    return false;
+            }
+            return true;
+        }
+
+        std::string DefaultAliasFromInputActionsKey(const std::string& key)
+        {
+            std::filesystem::path path(key);
+            const std::string fileName = path.filename().string();
+            if (fileName.empty())
+                return "InputActions";
+            if (EndsWithCaseInsensitive(fileName, kInputActionsSuffix))
+                return fileName.substr(0, fileName.size() - std::char_traits<char>::length(kInputActionsSuffix));
+            return path.stem().string();
+        }
+    }
 
     std::filesystem::path GetProjectSettingsDirectory(const std::filesystem::path& projectRoot)
     {
@@ -171,6 +227,24 @@ namespace Limitless::Project
         json root;
         root["version"] = s.Version;
         root["projectInputActionsKey"] = s.ProjectInputActionsKey;
+        root["additionalInputActionsAssets"] = json::array();
+        for (const auto& entry : s.AdditionalInputActionsAssets)
+        {
+            if (entry.AssetKey.empty())
+                continue;
+            json entryJson = json::object();
+            entryJson["alias"] = entry.Alias;
+            entryJson["key"] = entry.AssetKey;
+            root["additionalInputActionsAssets"].push_back(std::move(entryJson));
+        }
+
+        // Keep writing legacy list for compatibility with older editor/runtime revisions.
+        root["additionalInputActionsKeys"] = json::array();
+        for (const auto& key : CollectAdditionalInputActionsAssetKeys(s))
+        {
+            if (!key.empty())
+                root["additionalInputActionsKeys"].push_back(key);
+        }
         return root;
     }
 
@@ -184,6 +258,81 @@ namespace Limitless::Project
 
         s.Version = root.value("version", 1u);
         s.ProjectInputActionsKey = root.value("projectInputActionsKey", std::string{});
+        if (root.contains("additionalInputActionsAssets") && root["additionalInputActionsAssets"].is_array())
+        {
+            for (const auto& value : root["additionalInputActionsAssets"])
+            {
+                if (!value.is_object())
+                    continue;
+
+                InputActionsAssetAliasEntry entry{};
+                entry.Alias = value.value("alias", std::string{});
+                entry.AssetKey = value.value("key", std::string{});
+                entry.Alias = TrimCopy(entry.Alias);
+                entry.AssetKey = TrimCopy(entry.AssetKey);
+                if (!entry.AssetKey.empty())
+                    s.AdditionalInputActionsAssets.push_back(std::move(entry));
+            }
+        }
+
+        if (root.contains("additionalInputActionsKeys") && root["additionalInputActionsKeys"].is_array())
+        {
+            for (const auto& value : root["additionalInputActionsKeys"])
+            {
+                if (!value.is_string())
+                    continue;
+
+                const std::string key = value.get<std::string>();
+                if (!key.empty())
+                    s.AdditionalInputActionsKeys.push_back(key);
+            }
+        }
+
+        // Merge and sanitize aliases/keys from both canonical and legacy representations.
+        std::set<std::string> usedAliases;
+        std::set<std::string> usedKeys;
+        std::vector<InputActionsAssetAliasEntry> normalizedEntries;
+
+        auto tryAppendEntry = [&](InputActionsAssetAliasEntry entry) {
+            entry.AssetKey = TrimCopy(entry.AssetKey);
+            if (entry.AssetKey.empty())
+                return;
+            const std::string canonicalKey = entry.AssetKey;
+            if (usedKeys.find(canonicalKey) != usedKeys.end())
+                return;
+
+            entry.Alias = TrimCopy(entry.Alias);
+            if (entry.Alias.empty())
+                entry.Alias = DefaultAliasFromInputActionsKey(entry.AssetKey);
+
+            std::string candidateAlias = entry.Alias;
+            std::string canonicalAlias = CanonicalizeAlias(candidateAlias);
+            int32_t suffixIndex = 2;
+            while (canonicalAlias.empty() || usedAliases.find(canonicalAlias) != usedAliases.end())
+            {
+                candidateAlias = entry.Alias + std::to_string(suffixIndex);
+                canonicalAlias = CanonicalizeAlias(candidateAlias);
+                ++suffixIndex;
+            }
+
+            entry.Alias = candidateAlias;
+            usedAliases.insert(canonicalAlias);
+            usedKeys.insert(canonicalKey);
+            normalizedEntries.push_back(std::move(entry));
+        };
+
+        for (const auto& entry : s.AdditionalInputActionsAssets)
+            tryAppendEntry(entry);
+        for (const auto& key : s.AdditionalInputActionsKeys)
+            tryAppendEntry(InputActionsAssetAliasEntry{ DefaultAliasFromInputActionsKey(key), key });
+
+        s.AdditionalInputActionsAssets = std::move(normalizedEntries);
+        s.AdditionalInputActionsKeys = CollectAdditionalInputActionsAssetKeys(s);
+
+        std::sort(s.AdditionalInputActionsKeys.begin(), s.AdditionalInputActionsKeys.end());
+        s.AdditionalInputActionsKeys.erase(
+            std::unique(s.AdditionalInputActionsKeys.begin(), s.AdditionalInputActionsKeys.end()),
+            s.AdditionalInputActionsKeys.end());
         return s;
     }
 
@@ -285,6 +434,57 @@ namespace Limitless::Project
     Result<void> SaveLayersSettings(const std::filesystem::path& projectRoot, const LayersSettings& settings)
     {
         return AtomicWriteJson(GetLayersSettingsPath(projectRoot), LayersSettingsToJson(settings));
+    }
+
+    std::vector<std::string> CollectAdditionalInputActionsAssetKeys(const InputSettings& settings)
+    {
+        std::vector<std::string> keys;
+        std::set<std::string> uniqueKeys;
+        for (const auto& entry : settings.AdditionalInputActionsAssets)
+        {
+            const std::string key = TrimCopy(entry.AssetKey);
+            if (!key.empty() && uniqueKeys.insert(key).second)
+                keys.push_back(key);
+        }
+        for (const auto& key : settings.AdditionalInputActionsKeys)
+        {
+            const std::string trimmed = TrimCopy(key);
+            if (!trimmed.empty() && uniqueKeys.insert(trimmed).second)
+                keys.push_back(trimmed);
+        }
+        return keys;
+    }
+
+    Result<std::string> ResolveInputActionsAssetKeyByAlias(const InputSettings& settings, const std::string& alias)
+    {
+        const std::string canonicalAlias = CanonicalizeAlias(alias);
+        if (canonicalAlias.empty())
+            return Result<std::string>(ErrorCode::InvalidArgument, "ResolveInputActionsAssetKeyByAlias: alias is empty");
+
+        if (canonicalAlias == "default")
+        {
+            if (settings.ProjectInputActionsKey.empty())
+                return Result<std::string>(ErrorCode::ResourceNotFound, "ResolveInputActionsAssetKeyByAlias: default input actions key is not set");
+            return settings.ProjectInputActionsKey;
+        }
+
+        for (const auto& entry : settings.AdditionalInputActionsAssets)
+        {
+            if (entry.AssetKey.empty())
+                continue;
+            if (CanonicalizeAlias(entry.Alias) == canonicalAlias)
+                return entry.AssetKey;
+        }
+
+        return Result<std::string>(ErrorCode::ResourceNotFound, "ResolveInputActionsAssetKeyByAlias: alias not found");
+    }
+
+    Result<std::string> ResolveInputActionsAssetKeyByAlias(const std::filesystem::path& projectRoot, const std::string& alias)
+    {
+        const auto settingsResult = LoadInputSettings(projectRoot);
+        if (settingsResult.IsFailure())
+            return Result<std::string>(settingsResult.GetError());
+        return ResolveInputActionsAssetKeyByAlias(settingsResult.GetValue(), alias);
     }
 }
 

@@ -32,6 +32,12 @@ namespace Limitless
         // External OS drop import (Explorer/Finder -> Project panel).
         std::vector<std::filesystem::path> PendingExternalDropPaths;
         std::filesystem::path HoveredFolderRelativePathForExternalDrop;
+
+        // Asset file rename popup state.
+        bool RenameAssetPopupPending = false;
+        bool RenameAssetPopupOpen = false;
+        std::filesystem::path RenameAssetRelativePath;
+        std::array<char, 256> RenameAssetBuffer{};
     };
 
     namespace EditorProjectPanel
@@ -50,6 +56,7 @@ namespace Limitless
                   const char* shaderPayloadId,
                   const std::function<void(const std::string&)>& onSceneActivated,
                   const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
-                  const std::function<void(const std::string&)>& onSetDefaultSceneRequested);
+                  const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
+                  const std::function<void(const std::string&, const std::string&)>& onAssetRenamed);
     }
 }

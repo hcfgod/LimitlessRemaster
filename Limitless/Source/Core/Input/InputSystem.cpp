@@ -150,6 +150,44 @@ namespace Limitless
         SetProjectActionAsset(asset->GetValue());
     }
 
+    void InputSystem::SetProjectAdditionalActionAssetsFromKeys(const std::vector<std::string>& keys)
+    {
+        m_AdditionalProjectActionAssetKeys.clear();
+        m_AdditionalProjectActionAssetsByKey.clear();
+
+        if (keys.empty())
+            return;
+
+        std::vector<std::string> deduplicatedKeys = keys;
+        std::sort(deduplicatedKeys.begin(), deduplicatedKeys.end());
+        deduplicatedKeys.erase(std::unique(deduplicatedKeys.begin(), deduplicatedKeys.end()), deduplicatedKeys.end());
+
+        m_AdditionalProjectActionAssetKeys.reserve(deduplicatedKeys.size());
+        for (const std::string& key : deduplicatedKeys)
+        {
+            if (key.empty())
+                continue;
+
+            auto asset = Assets::AssetManager::LoadBlocking<Assets::InputActionsAssetResource>(key);
+            if (!asset || !asset->GetValue())
+            {
+                LT_CORE_WARN("InputSystem: failed to load additional InputActions asset key='{}'", key);
+                continue;
+            }
+
+            m_AdditionalProjectActionAssetKeys.push_back(key);
+            m_AdditionalProjectActionAssetsByKey[key] = asset->GetValue();
+        }
+    }
+
+    std::shared_ptr<InputActionAsset> InputSystem::GetProjectAdditionalActionAssetByKey(const std::string& key) const
+    {
+        const auto it = m_AdditionalProjectActionAssetsByKey.find(key);
+        if (it == m_AdditionalProjectActionAssetsByKey.end())
+            return nullptr;
+        return it->second;
+    }
+
     bool InputSystem::IsKeyDown(SDL_Scancode scancode) const
     {
         if (scancode <= SDL_SCANCODE_UNKNOWN || scancode >= SDL_SCANCODE_COUNT)

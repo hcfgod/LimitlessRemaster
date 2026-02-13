@@ -200,6 +200,17 @@ namespace Limitless::Assets
                 }
             }
 
+            // Keep GUID->key mapping canonical:
+            // if this GUID was previously mapped from older keys (for example after file rename),
+            // remove those stale key aliases so FindByKey(oldKey) no longer resolves.
+            for (auto keyIt = m_GuidByKey.begin(); keyIt != m_GuidByKey.end();)
+            {
+                if (keyIt->second == record.Guid && keyIt->first != record.Key)
+                    keyIt = m_GuidByKey.erase(keyIt);
+                else
+                    ++keyIt;
+            }
+
             m_ByGuid[record.Guid] = record;
             m_GuidByKey[record.Key] = record.Guid;
 

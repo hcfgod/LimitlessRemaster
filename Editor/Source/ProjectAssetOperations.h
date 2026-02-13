@@ -17,6 +17,11 @@ namespace Limitless::ProjectAssetOperations
                               const std::filesystem::path& folderRelativePath,
                               const std::string& newName);
 
+    bool RenameAssetInAssets(const std::filesystem::path& assetsDirectory,
+                             const std::filesystem::path& assetRelativePath,
+                             const std::string& newDisplayName,
+                             std::filesystem::path* outNewAssetRelativePath = nullptr);
+
     bool MoveFolderToFolder(const std::string& folderAssetKey,
                             const std::filesystem::path& destinationFolderRelativePath);
 

@@ -2,6 +2,8 @@
 
 #include "Project/ProjectSettings.h"
 
+#include <array>
+#include <vector>
 #include <string>
 
 namespace Limitless::EditorProjectSettingsPanel
@@ -14,6 +16,12 @@ namespace Limitless::EditorProjectSettingsPanel
         Project::AudioSettings Audio;
         Project::InputSettings Input;
         Project::LayersSettings Layers;
+
+        std::vector<std::string> AvailableInputActionsAssetKeys;
+        int SelectedAdditionalInputActionsIndex = -1;
+        int SelectedAvailableInputActionsIndex = -1;
+        std::array<char, 128> SelectedAdditionalInputAliasBuffer{};
+        int SelectedAdditionalInputAliasBufferSourceIndex = -1;
 
         std::string StatusMessage;
         bool StatusIsError = false;

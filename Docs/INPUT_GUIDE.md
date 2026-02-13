@@ -40,6 +40,37 @@ The engine supports two common patterns:
 `Sandbox/TestLayer` sets the **project** input actions from `Assets/InputActions/Sandbox.inputactions.json`.
 The engine-owned `EditorCameraController` pushes its own override so editor controls do not affect gameplay actions.
 
+## Project Settings InputActions (Default + Aliases)
+
+Project Settings now supports Unity-style multi-asset input setup:
+
+- **Default InputActions**: one project-wide asset used by `InputSystem::GetActiveActionAsset()` when no override stack is active.
+- **Additional InputActions Assets**: multiple assets registered with **logical aliases** (for example: `Gameplay`, `Vehicle`, `UiNavigation`).
+
+### Runtime helpers
+
+Use `Project::ProjectSettings` helpers to resolve aliases:
+
+- `Project::ResolveInputActionsAssetKeyByAlias(inputSettings, alias)`
+- `Project::ResolveInputActionsAssetKeyByAlias(projectRoot, alias)`
+- `Project::CollectAdditionalInputActionsAssetKeys(inputSettings)`
+
+Built-in alias behavior:
+
+- Alias `"Default"` resolves `InputSettings.ProjectInputActionsKey`.
+
+### Example
+
+```cpp
+const std::filesystem::path projectRoot = Project::ProjectManager::GetInstance().GetProjectRoot();
+const auto gameplayKeyResult = Project::ResolveInputActionsAssetKeyByAlias(projectRoot, "Gameplay");
+if (gameplayKeyResult.IsSuccess())
+{
+    const std::string gameplayAssetKey = gameplayKeyResult.GetValue();
+    // Load or activate the gameplay input action asset by key.
+}
+```
+
 ## Key Identifiers
 
 Bindings currently use **SDL scancodes** (`SDL_Scancode`) for keyboard keys (physical keys).

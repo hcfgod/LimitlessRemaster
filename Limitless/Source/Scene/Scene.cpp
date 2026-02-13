@@ -28,6 +28,20 @@ namespace Limitless
     {
         constexpr int32_t kSiblingOrderStep = 10;
 
+        // Resolve legacy/stale asset keys to the latest known key in AssetDatabase.
+        // This keeps scene references resilient across asset moves/renames.
+        std::string ResolveLatestKeyFromDatabase(const std::string& assetKey)
+        {
+            if (assetKey.empty())
+                return {};
+
+            const auto record = Assets::AssetDatabase::GetInstance().FindByKey(assetKey);
+            if (record.IsSuccess() && !record.GetValue().Key.empty())
+                return record.GetValue().Key;
+
+            return assetKey;
+        }
+
         // Unity-style reference object for scene asset links.
         // Prefer GUID stability, but also store key for convenience and bundle-only scenarios.
         nlohmann::json MakeAssetReferenceJson(const std::string& assetKey, Assets::AssetType type)
@@ -74,7 +88,7 @@ namespace Limitless
         {
             if (value.is_string())
             {
-                return value.get<std::string>();
+                return ResolveLatestKeyFromDatabase(value.get<std::string>());
             }
 
             if (!value.is_object())
@@ -99,7 +113,7 @@ namespace Limitless
             // Fallback: embedded key.
             if (value.contains("key") && value["key"].is_string())
             {
-                return value["key"].get<std::string>();
+                return ResolveLatestKeyFromDatabase(value["key"].get<std::string>());
             }
 
             return {};
@@ -594,7 +608,7 @@ namespace Limitless
                 // - v2+: Material { guid, key }
                 if (materialJson.is_object() && materialJson.contains("MaterialKey"))
                 {
-                    material.MaterialKey = materialJson.value("MaterialKey", "");
+                    material.MaterialKey = ResolveLatestKeyFromDatabase(materialJson.value("MaterialKey", ""));
                 }
                 else
                 {

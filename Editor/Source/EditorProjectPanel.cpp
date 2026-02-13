@@ -1,5 +1,7 @@
 #include "EditorProjectPanel.h"
 
+#include "EditorAssetNaming.h"
+#include "Assets/AssetImportPipeline.h"
 #include "Assets/AssetPaths.h"
 #include "Core/Debug/Log.h"
 #include "ProjectAssetOperations.h"
@@ -71,28 +73,7 @@ namespace Limitless::EditorProjectPanel
 
         std::string GetAssetDisplayName(const std::filesystem::path& path)
         {
-            const std::string fileName = path.filename().string();
-            std::string lowerFileName = fileName;
-            for (char& character : lowerFileName)
-                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-
-            constexpr std::array<const char*, 3> compoundSuffixes = {
-                ".scene.json",
-                ".material.json",
-                ".inputactions.json"
-            };
-
-            for (const char* suffix : compoundSuffixes)
-            {
-                const std::string suffixString = suffix;
-                if (lowerFileName.size() >= suffixString.size() &&
-                    lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size()))
-                {
-                    return fileName.substr(0, fileName.size() - suffixString.size());
-                }
-            }
-
-            return path.stem().string();
+            return EditorAssetNaming::GetAssetDisplayNameFromPath(path);
         }
 
         void DrawAssetTree(const std::filesystem::path& assetsDirectory,
@@ -110,7 +91,8 @@ namespace Limitless::EditorProjectPanel
                            const char* shaderPayloadId,
                            const std::function<void(const std::string&)>& onSceneActivated,
                            const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
-                           const std::function<void(const std::string&)>& onSetDefaultSceneRequested)
+                           const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
+                           const std::function<void(const std::string&, const std::string&)>& onAssetRenamed)
         {
             const std::filesystem::path currentDirectory = assetsDirectory / relativePath;
             std::error_code errorCode;
@@ -236,7 +218,8 @@ namespace Limitless::EditorProjectPanel
                                       shaderPayloadId,
                                       onSceneActivated,
                                       onCreateSceneRequested,
-                                      onSetDefaultSceneRequested);
+                                      onSetDefaultSceneRequested,
+                                      onAssetRenamed);
                         ImGui::TreePop();
                     }
                 }
@@ -311,6 +294,26 @@ namespace Limitless::EditorProjectPanel
                             {
                                 onSetDefaultSceneRequested(assetKey);
                             }
+                            ImGui::Separator();
+                        }
+
+                        if (ImGui::MenuItem("Rename"))
+                        {
+                            state.RenameAssetRelativePath = entryRelativePath;
+                            CopyTextToBuffer(state.RenameAssetBuffer, displayName.c_str());
+                            state.RenameAssetPopupPending = true;
+                        }
+                        if (ImGui::MenuItem("Delete"))
+                        {
+                            std::error_code deleteErrorCode;
+                            const bool removed = std::filesystem::remove(entry, deleteErrorCode);
+                            if (removed && !deleteErrorCode)
+                            {
+                                const std::filesystem::path metaPath = entry.parent_path() / (entry.filename().string() + ".meta");
+                                std::filesystem::remove(metaPath, deleteErrorCode);
+                                (void)Assets::AssetImportPipeline::ReimportChanged(true);
+                                LT_INFO("Deleted asset {}", assetKey);
+                            }
                         }
                         ImGui::EndPopup();
                     }
@@ -335,7 +338,9 @@ namespace Limitless::EditorProjectPanel
             }
         }
 
-        void DrawProjectFolderPopups(const std::filesystem::path& assetsDirectory, EditorProjectPanelState& state)
+        void DrawProjectFolderPopups(const std::filesystem::path& assetsDirectory,
+                                     EditorProjectPanelState& state,
+                                     const std::function<void(const std::string&, const std::string&)>& onAssetRenamed)
         {
             if (state.FolderPopupPending == EditorProjectFolderPopup::Create)
             {
@@ -405,6 +410,54 @@ namespace Limitless::EditorProjectPanel
 
                 ImGui::EndPopup();
             }
+
+            if (state.RenameAssetPopupPending)
+            {
+                ImGui::OpenPopup("RenameAsset");
+                ImGui::SetNextWindowFocus();
+                state.RenameAssetPopupPending = false;
+                state.RenameAssetPopupOpen = true;
+            }
+
+            if (ImGui::BeginPopupModal("RenameAsset", &state.RenameAssetPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::Text("Rename Asset");
+                ImGui::Separator();
+                if (ImGui::IsWindowAppearing())
+                    ImGui::SetKeyboardFocusHere();
+
+                const bool rename = ImGui::InputText("##AssetName",
+                                                     state.RenameAssetBuffer.data(),
+                                                     state.RenameAssetBuffer.size(),
+                                                     ImGuiInputTextFlags_EnterReturnsTrue);
+                if (ImGui::Button("Rename", ImVec2(120, 0)) || rename)
+                {
+                    if (state.RenameAssetBuffer[0] != '\0')
+                    {
+                        const std::string oldAssetKey = "Assets/" + state.RenameAssetRelativePath.generic_string();
+                        std::filesystem::path newAssetRelativePath;
+                        if (ProjectAssetOperations::RenameAssetInAssets(
+                                assetsDirectory,
+                                state.RenameAssetRelativePath,
+                                state.RenameAssetBuffer.data(),
+                                &newAssetRelativePath))
+                        {
+                            if (onAssetRenamed)
+                            {
+                                const std::string newAssetKey = "Assets/" + newAssetRelativePath.generic_string();
+                                onAssetRenamed(oldAssetKey, newAssetKey);
+                            }
+                            LT_INFO("Renamed asset to {}", state.RenameAssetBuffer.data());
+                        }
+                        state.RenameAssetPopupOpen = false;
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                    state.RenameAssetPopupOpen = false;
+
+                ImGui::EndPopup();
+            }
         }
     }
 
@@ -421,7 +474,8 @@ namespace Limitless::EditorProjectPanel
               const char* shaderPayloadId,
               const std::function<void(const std::string&)>& onSceneActivated,
               const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
-              const std::function<void(const std::string&)>& onSetDefaultSceneRequested)
+              const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
+              const std::function<void(const std::string&, const std::string&)>& onAssetRenamed)
     {
         ImGui::Begin("Project");
         state.HoveredFolderRelativePathForExternalDrop.clear();
@@ -518,7 +572,8 @@ namespace Limitless::EditorProjectPanel
                           shaderPayloadId,
                           onSceneActivated,
                           onCreateSceneRequested,
-                          onSetDefaultSceneRequested);
+                          onSetDefaultSceneRequested,
+                          onAssetRenamed);
             ImGui::TreePop();
         }
 
@@ -537,7 +592,7 @@ namespace Limitless::EditorProjectPanel
             state.PendingExternalDropPaths.clear();
         }
 
-        DrawProjectFolderPopups(assetsDirectory, state);
+        DrawProjectFolderPopups(assetsDirectory, state, onAssetRenamed);
         ImGui::End();
     }
 }

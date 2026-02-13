@@ -1,5 +1,6 @@
 #include "EditorInspectorPanel.h"
 
+#include "EditorAssetNaming.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetManager.h"
 #include "Assets/AssetPaths.h"
@@ -708,7 +709,7 @@ namespace Limitless::EditorInspectorPanel
                     // Material slot (Unity-style): dropping a material assigns it to the renderer.
                     auto* material = registry.try_get<MaterialComponent>(selectedEntity);
                     const std::string materialLabel = (material && !material->MaterialKey.empty())
-                        ? std::filesystem::path(material->MaterialKey).filename().string()
+                        ? EditorAssetNaming::GetAssetDisplayNameFromAssetKey(material->MaterialKey)
                         : std::string("None");
                     ImGui::Text("Material");
                     ImGui::SameLine(80);
