@@ -178,6 +178,7 @@ project "Limitless"
         links
         {
             "SDL3",
+            "z",
             "Cocoa.framework",
             "CoreServices.framework",
             "IOKit.framework",
@@ -230,6 +231,7 @@ project "Limitless"
         links
         {
             "SDL3",
+            "z",
             "X11",
             "Xext",
             "Xcursor",

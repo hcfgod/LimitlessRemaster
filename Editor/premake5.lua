@@ -134,6 +134,7 @@ project "Editor"
         links
         {
             "SDL3",
+            "z",
             "Cocoa.framework",
             "IOKit.framework",
             "CoreAudio.framework",
@@ -177,6 +178,7 @@ project "Editor"
         links
         {
             "SDL3",
+            "z",
             "X11",
             "Xext",
             "Xcursor",
