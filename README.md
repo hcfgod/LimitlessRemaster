@@ -140,6 +140,7 @@ Start here:
 - `Docs/ASSET_SYSTEM_GUIDE.md` (Unity-style GUID/.meta assets + Material/InputActions)
 - `Docs/ASSET_HOT_RELOAD_GUIDE.md` (Assets/ hot reload, debounce, dependency cascades)
 - `Docs/ASSET_IMPORT_PIPELINE_GUIDE.md` (editor import pipeline, incremental reimport, validation)
+- `Docs/NATIVE_CPP_SCRIPTING_GUIDE.md` (native C++ entity scripts and lifecycle)
 - `Docs/INPUT_GUIDE.md` (action assets, gamepad bindings, rebinding, override stack)
 - `Docs/EDITOR_CAMERA_CONTROLLER_GUIDE.md` (engine-owned editor camera module)
 - `Docs/PROJECT_SYSTEM_GUIDE.md` (project marker file, settings, build/run UX)

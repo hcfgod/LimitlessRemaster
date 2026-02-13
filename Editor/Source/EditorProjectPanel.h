@@ -38,6 +38,13 @@ namespace Limitless
         bool RenameAssetPopupOpen = false;
         std::filesystem::path RenameAssetRelativePath;
         std::array<char, 256> RenameAssetBuffer{};
+        bool RenameAssetAsNativeScriptPair = false;
+
+        // Native script creation popup state.
+        bool CreateNativeScriptPopupPending = false;
+        bool CreateNativeScriptPopupOpen = false;
+        std::filesystem::path CreateNativeScriptParentRelativePath;
+        std::array<char, 256> CreateNativeScriptClassNameBuffer{};
     };
 
     namespace EditorProjectPanel
@@ -49,6 +56,7 @@ namespace Limitless
                   Assets::TextureAsset::Ptr& cachedTextureAsset,
                   std::string& selectedMaterialAssetKey,
                   Assets::MaterialAsset::Ptr& cachedMaterialAsset,
+                  std::string& selectedNativeScriptAssetKey,
                   const char* texturePayloadId,
                   const char* audioPayloadId,
                   const char* assetMovePayloadId,
@@ -59,6 +67,7 @@ namespace Limitless
                   const std::function<void(const std::string&)>& onSceneActivated,
                   const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
                   const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
-                  const std::function<void(const std::string&, const std::string&)>& onAssetRenamed);
+                  const std::function<void(const std::string&, const std::string&)>& onAssetRenamed,
+                  const std::function<void(const std::string&)>& onNativeScriptAssetActivated);
     }
 }

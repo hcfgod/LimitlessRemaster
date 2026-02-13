@@ -17,6 +17,7 @@
 #include "EditorRuntimeOperations.h"
 #include "EditorScenePanel.h"
 #include "EditorViewportPanel.h"
+#include "Scripting/ScriptCoreModuleRuntime.h"
 #include "Core/Input/InputSystem.h"
 #include "Graphics/Camera/PerspectiveCamera3D.h"
 #include "ImGui/ImGuiLayer.h"
@@ -30,6 +31,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <nlohmann/json.hpp>
 #include <vector>
@@ -48,7 +50,13 @@ namespace Limitless
         constexpr const char* kDefaultSceneFileName = "New Scene.scene.json";
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 1;
+        constexpr uint32_t kEditorSessionStateVersion = 2;
+
+        struct EditorSessionStateData final
+        {
+            std::string LastOpenedSceneAssetKey;
+            EditorInspectorPanel::NativeScriptEditorSessionState NativeScriptEditorState;
+        };
 
         void PopulateDefaultSceneTemplate(Scene& scene)
         {
@@ -74,7 +82,7 @@ namespace Limitless
             return projectRoot / kEditorSessionStateRelativePath;
         }
 
-        std::string ReadLastSceneAssetKeyFromProjectSessionState(const std::filesystem::path& projectRoot)
+        EditorSessionStateData ReadProjectSessionState(const std::filesystem::path& projectRoot)
         {
             const std::filesystem::path statePath = GetEditorSessionStatePathForProjectRoot(projectRoot);
             if (statePath.empty())
@@ -103,13 +111,25 @@ namespace Limitless
                     return {};
                 }
 
+                EditorSessionStateData state{};
                 const uint32_t version = root.value("version", 0u);
+                if (version == 1)
+                {
+                    state.LastOpenedSceneAssetKey = root.value("lastOpenedSceneAssetKey", std::string{});
+                    return state;
+                }
+
                 if (version != kEditorSessionStateVersion)
                 {
                     return {};
                 }
 
-                return root.value("lastOpenedSceneAssetKey", std::string{});
+                state.LastOpenedSceneAssetKey = root.value("lastOpenedSceneAssetKey", std::string{});
+                state.NativeScriptEditorState.IsOpen = root.value("nativeScriptEditorIsOpen", false);
+                state.NativeScriptEditorState.LastEditedScriptClassName = root.value("nativeScriptEditorLastClassName", std::string{});
+                state.NativeScriptEditorState.LastEditedScriptAssetRelativePath = root.value("nativeScriptEditorLastAssetRelativePath", std::string{});
+                state.NativeScriptEditorState.ShowDebugInfo = root.value("nativeScriptEditorShowDebugInfo", false);
+                return state;
             }
             catch (...)
             {
@@ -117,9 +137,9 @@ namespace Limitless
             }
         }
 
-        void WriteLastSceneAssetKeyToProjectSessionState(const std::filesystem::path& projectRoot, const std::string& sceneAssetKey)
+        void WriteProjectSessionState(const std::filesystem::path& projectRoot, const EditorSessionStateData& state)
         {
-            if (projectRoot.empty() || sceneAssetKey.empty())
+            if (projectRoot.empty())
             {
                 return;
             }
@@ -141,7 +161,11 @@ namespace Limitless
 
                 nlohmann::json root;
                 root["version"] = kEditorSessionStateVersion;
-                root["lastOpenedSceneAssetKey"] = sceneAssetKey;
+                root["lastOpenedSceneAssetKey"] = state.LastOpenedSceneAssetKey;
+                root["nativeScriptEditorIsOpen"] = state.NativeScriptEditorState.IsOpen;
+                root["nativeScriptEditorLastClassName"] = state.NativeScriptEditorState.LastEditedScriptClassName;
+                root["nativeScriptEditorLastAssetRelativePath"] = state.NativeScriptEditorState.LastEditedScriptAssetRelativePath;
+                root["nativeScriptEditorShowDebugInfo"] = state.NativeScriptEditorState.ShowDebugInfo;
 
                 const std::filesystem::path tmpPath = statePath.string() + ".tmp";
                 {
@@ -314,10 +338,14 @@ namespace Limitless
                 droppedPaths.begin(),
                 droppedPaths.end());
         });
+
+        ScriptCoreModuleRuntime::Initialize();
     }
 
     void EditorLayer::OnDetach()
     {
+        PersistProjectSessionState();
+        ScriptCoreModuleRuntime::Shutdown();
         Application::GetInstance().GetWindow().SetFileDropCallback({});
         EditorBuildAndRunPanel::Shutdown(m_BuildAndRunPanelState);
 
@@ -330,7 +358,11 @@ namespace Limitless
 
     void EditorLayer::OnUpdate(float deltaTime)
     {
+        ScriptCoreModuleRuntime::Update(m_PlayModeState);
         UpdateSceneAudioSources(m_Scene.get(), m_PlayModeState);
+
+        if (m_PlayModeState == EditorPlayModeState::Play && m_Scene)
+            m_Scene->Update(deltaTime);
 
         EditorPlayMode::SyncSceneCamera(
             m_PlayModeState,
@@ -409,8 +441,9 @@ namespace Limitless
             }
 
             bool loadedScene = false;
-
-            const std::string lastOpenedSceneAssetKey = ReadLastSceneAssetKeyFromProjectSessionState(projectRoot);
+            const EditorSessionStateData sessionState = ReadProjectSessionState(projectRoot);
+            EditorInspectorPanel::ApplyNativeScriptEditorSessionState(sessionState.NativeScriptEditorState);
+            const std::string lastOpenedSceneAssetKey = sessionState.LastOpenedSceneAssetKey;
             if (!lastOpenedSceneAssetKey.empty())
             {
                 loadedScene = LoadSceneFromAssetKey(lastOpenedSceneAssetKey);
@@ -544,7 +577,8 @@ namespace Limitless
             m_SelectedTextureAssetKey,
             m_CachedTextureAsset,
             m_SelectedMaterialAssetKey,
-            m_CachedMaterialAsset);
+            m_CachedMaterialAsset,
+            m_SelectedNativeScriptAssetKey);
     }
 
     void EditorLayer::DrawScenePanel()
@@ -564,6 +598,7 @@ namespace Limitless
             m_CachedTextureAsset,
             m_SelectedMaterialAssetKey,
             m_CachedMaterialAsset,
+            m_SelectedNativeScriptAssetKey,
             kAssetMaterialPayload,
             sceneRootDisplayName);
     }
@@ -581,7 +616,8 @@ namespace Limitless
             kAssetShaderPayload,
             kAssetFontPayload,
             m_SelectedMaterialAssetKey,
-            m_CachedMaterialAsset);
+            m_CachedMaterialAsset,
+            m_SelectedNativeScriptAssetKey);
     }
 
     void EditorLayer::DrawProjectPanel()
@@ -593,6 +629,7 @@ namespace Limitless
             m_CachedTextureAsset,
             m_SelectedMaterialAssetKey,
             m_CachedMaterialAsset,
+            m_SelectedNativeScriptAssetKey,
             kAssetTexturePayload,
             kAssetAudioPayload,
             kAssetMovePayload,
@@ -611,11 +648,15 @@ namespace Limitless
                 if (oldAssetKey.empty() || newAssetKey.empty() || oldAssetKey == newAssetKey)
                     return;
 
+                EditorInspectorPanel::OnNativeScriptAssetRenamed(oldAssetKey, newAssetKey);
+
                 if (m_SelectedMaterialAssetKey == oldAssetKey)
                 {
                     m_SelectedMaterialAssetKey = newAssetKey;
                     m_CachedMaterialAsset.reset();
                 }
+                if (m_SelectedNativeScriptAssetKey == oldAssetKey)
+                    m_SelectedNativeScriptAssetKey = newAssetKey;
 
                 if (!m_Scene)
                 {
@@ -665,14 +706,70 @@ namespace Limitless
                     }
                 };
 
+                bool updatedAnyNativeScriptPath = false;
+                const auto toScriptAssetRelativePathWithoutExtension = [](const std::string& key, std::string& outRelativePath) -> bool {
+                    if (key.rfind("Assets/", 0) != 0)
+                        return false;
+                    std::filesystem::path path = key.substr(std::strlen("Assets/"));
+                    std::string extension = path.extension().string();
+                    for (char& character : extension)
+                        character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+                    if (extension != ".h" && extension != ".cpp")
+                        return false;
+                    path.replace_extension("");
+                    outRelativePath = path.generic_string();
+                    return !outRelativePath.empty();
+                };
+                std::string oldScriptRelativePath;
+                std::string newScriptRelativePath;
+                const std::string oldScriptClassName = std::filesystem::path(oldAssetKey).stem().string();
+                const std::string newScriptClassName = std::filesystem::path(newAssetKey).stem().string();
+                const bool isScriptRename =
+                    toScriptAssetRelativePathWithoutExtension(oldAssetKey, oldScriptRelativePath) &&
+                    toScriptAssetRelativePathWithoutExtension(newAssetKey, newScriptRelativePath);
+
+                const auto updateScriptReferencesInScene =
+                    [&oldScriptRelativePath, &newScriptRelativePath, &oldScriptClassName, &newScriptClassName, &updatedAnyNativeScriptPath](Scene* scene) {
+                    if (!scene)
+                        return;
+                    auto& registry = scene->GetRegistry();
+                    auto scriptView = registry.view<NativeScriptComponent>();
+                    for (entt::entity entity : scriptView)
+                    {
+                        auto& nativeScript = scriptView.get<NativeScriptComponent>(entity);
+                        for (auto& scriptEntry : nativeScript.Scripts)
+                        {
+                            const bool matchedByStoredPath = (scriptEntry.ScriptAssetRelativePath == oldScriptRelativePath);
+                            const bool matchedByLegacyClassOnly =
+                                scriptEntry.ScriptAssetRelativePath.empty() &&
+                                !oldScriptClassName.empty() &&
+                                (scriptEntry.ScriptClassName == oldScriptClassName);
+                            if (matchedByStoredPath || matchedByLegacyClassOnly)
+                            {
+                                scriptEntry.ScriptAssetRelativePath = newScriptRelativePath;
+                                if (!newScriptClassName.empty())
+                                    scriptEntry.ScriptClassName = newScriptClassName;
+                                scriptEntry.RuntimeInitialized = false;
+                                scriptEntry.RuntimeInstance.reset();
+                                updatedAnyNativeScriptPath = true;
+                            }
+                        }
+                    }
+                };
+
                 // Update both scene instances so rename remains stable across Play/Edit transitions.
                 updateMaterialReferencesInScene(m_Scene.get());
                 updateMaterialReferencesInScene(m_EditSceneStored.get());
                 updateAudioReferencesInScene(m_Scene.get());
                 updateAudioReferencesInScene(m_EditSceneStored.get());
+                if (isScriptRename)
+                {
+                    updateScriptReferencesInScene(m_Scene.get());
+                    updateScriptReferencesInScene(m_EditSceneStored.get());
+                }
 
                 // Persist immediately so reopening the editor cannot revive stale material keys.
-                if ((updatedAnyMaterialReference || updatedAnyAudioReference) &&
+                if ((updatedAnyMaterialReference || updatedAnyAudioReference || updatedAnyNativeScriptPath) &&
                     m_PlayModeState == EditorPlayModeState::Edit &&
                     !m_CurrentSceneAssetKey.empty())
                 {
@@ -681,6 +778,9 @@ namespace Limitless
                         LT_WARN("Asset rename updated scene references but failed to auto-save '{}'.", m_CurrentSceneAssetKey);
                     }
                 }
+            },
+            [this](const std::string& scriptAssetKey) {
+                (void)EditorInspectorPanel::OpenNativeScriptEditorForAssetKey(scriptAssetKey);
             });
     }
 
@@ -751,6 +851,7 @@ namespace Limitless
         PopulateDefaultSceneTemplate(*m_Scene);
         m_SelectedEntity = entt::null;
         m_SelectedTextureAssetKey.clear();
+        m_SelectedNativeScriptAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey.clear();
     }
@@ -905,6 +1006,18 @@ namespace Limitless
     }
 
 
+    void EditorLayer::PersistProjectSessionState()
+    {
+        const auto& projectManager = Project::ProjectManager::GetInstance();
+        if (!projectManager.HasOpenProject())
+            return;
+
+        EditorSessionStateData state{};
+        state.LastOpenedSceneAssetKey = m_CurrentSceneAssetKey;
+        EditorInspectorPanel::GetNativeScriptEditorSessionState(state.NativeScriptEditorState);
+        WriteProjectSessionState(projectManager.GetProjectRoot(), state);
+    }
+
     bool EditorLayer::LoadSceneFromAssetKey(const std::string& assetKey)
     {
         if (assetKey.empty())
@@ -933,11 +1046,12 @@ namespace Limitless
         m_Scene = std::move(sceneResult.GetValue());
         m_SelectedEntity = entt::null;
         m_SelectedTextureAssetKey.clear();
+        m_SelectedNativeScriptAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey = assetKey;
         if (const auto& pm = Project::ProjectManager::GetInstance(); pm.HasOpenProject())
         {
-            WriteLastSceneAssetKeyToProjectSessionState(pm.GetProjectRoot(), assetKey);
+            PersistProjectSessionState();
         }
 
         if (auto* editorCamera = m_CameraManager.GetPerspective3D(m_EditorCameraId))
@@ -990,7 +1104,7 @@ namespace Limitless
 
         if (const auto& pm = Project::ProjectManager::GetInstance(); pm.HasOpenProject())
         {
-            WriteLastSceneAssetKeyToProjectSessionState(pm.GetProjectRoot(), assetKey);
+            PersistProjectSessionState();
         }
 
         LT_INFO("Saved scene {}", assetKey);

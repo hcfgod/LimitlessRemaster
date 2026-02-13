@@ -32,7 +32,7 @@ namespace Limitless
         };
 
         Scene();
-        ~Scene() = default;
+        ~Scene();
 
         Scene(const Scene&) = delete;
         Scene& operator=(const Scene&) = delete;
@@ -66,6 +66,9 @@ namespace Limitless
 
         /// Get world transform matrix with hierarchy applied.
         glm::mat4 GetWorldTransformMatrix(entt::entity entity) const;
+
+        /// Runtime update for script-driven entity behavior.
+        void Update(float deltaTime);
 
         /// Get the EnTT registry for custom queries (views, groups, etc.).
         entt::registry& GetRegistry() { return m_Registry; }

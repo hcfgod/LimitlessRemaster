@@ -12,6 +12,9 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <regex>
+#include <unordered_set>
 #include <vector>
 
 namespace Limitless::EditorProjectPanel
@@ -87,6 +90,294 @@ namespace Limitless::EditorProjectPanel
             return lowerExtension == ".ttf" || lowerExtension == ".otf";
         }
 
+        bool IsNativeScriptExtension(const std::filesystem::path& path)
+        {
+            std::string lowerExtension = path.extension().string();
+            for (char& character : lowerExtension)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            return lowerExtension == ".h" || lowerExtension == ".cpp";
+        }
+
+        std::filesystem::path GetPairedScriptRelativePath(const std::filesystem::path& scriptRelativePath)
+        {
+            std::filesystem::path pairPath = scriptRelativePath;
+            std::string extension = pairPath.extension().string();
+            for (char& character : extension)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            if (extension == ".cpp")
+                pairPath.replace_extension(".h");
+            else
+                pairPath.replace_extension(".cpp");
+            return pairPath;
+        }
+
+        std::string BuildScriptAssetDisplayName(const std::filesystem::path& path)
+        {
+            std::string extension = path.extension().string();
+            for (char& character : extension)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            const std::string stem = path.stem().string();
+            if (extension == ".h")
+                return stem + " [.h Header]";
+            return stem + " [.cpp Source]";
+        }
+
+        std::string SanitizeScriptClassBaseName(std::string value)
+        {
+            while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0)
+                value.erase(value.begin());
+            while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0)
+                value.pop_back();
+
+            std::string sanitized;
+            sanitized.reserve(value.size() + 8);
+            for (char character : value)
+            {
+                const unsigned char raw = static_cast<unsigned char>(character);
+                if (std::isalnum(raw) || character == '_')
+                    sanitized.push_back(character);
+            }
+
+            if (sanitized.empty())
+                sanitized = "NewNativeScript";
+            if (std::isdigit(static_cast<unsigned char>(sanitized.front())) != 0)
+                sanitized.insert(0, "Script_");
+            return sanitized;
+        }
+
+        bool CreateNativeScriptPairInAssets(const std::filesystem::path& assetsDirectory,
+                                            const std::filesystem::path& parentRelativePath,
+                                            const std::string& requestedClassName,
+                                            std::string& outCreatedSourceAssetKey,
+                                            std::string& outError)
+        {
+            const std::string className = SanitizeScriptClassBaseName(requestedClassName);
+            const std::filesystem::path scriptDirectory = assetsDirectory / parentRelativePath;
+
+            std::error_code errorCode;
+            std::filesystem::create_directories(scriptDirectory, errorCode);
+            if (errorCode)
+            {
+                outError = "Failed to create script directory: " + errorCode.message();
+                return false;
+            }
+
+            const std::filesystem::path headerPath = scriptDirectory / (className + ".h");
+            const std::filesystem::path sourcePath = scriptDirectory / (className + ".cpp");
+            if (std::filesystem::exists(headerPath) || std::filesystem::exists(sourcePath))
+            {
+                outError = "Script already exists: " + className;
+                return false;
+            }
+
+            const std::string headerTemplate =
+                "#pragma once\n\n"
+                "#include \"Limitless.h\"\n\n"
+                "class " + className + " final : public Limitless::ScriptableEntity\n"
+                "{\n"
+                "public:\n"
+                "    float RotationSpeed = 90.0f;\n\n"
+                "protected:\n"
+                "    LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()\n"
+                "        LT_AUTO_EXPOSED_FIELD(RotationSpeed)\n"
+                "    LT_END_AUTO_EXPOSED_FIELD_SYNC()\n\n"
+                "    void OnCreate() override;\n"
+                "    void OnUpdate(float deltaTime) override;\n"
+                "    void OnDestroy() override;\n"
+                "};\n";
+
+            const std::string sourceTemplate =
+                "#include \"" + className + ".h\"\n\n"
+                "#include \"ScriptCoreRegistration.h\"\n\n"
+                "void " + className + "::OnCreate()\n"
+                "{\n"
+                "}\n\n"
+                "void " + className + "::OnUpdate(float deltaTime)\n"
+                "{\n"
+                "    auto& transform = GetComponent<Limitless::TransformComponent>();\n"
+                "    transform.Rotation.z += RotationSpeed * deltaTime;\n"
+                "    if (transform.Rotation.z > 360.0f)\n"
+                "        transform.Rotation.z -= 360.0f;\n"
+                "}\n\n"
+                "void " + className + "::OnDestroy()\n"
+                "{\n"
+                "}\n\n"
+                "LT_REGISTER_SCRIPTCORE_SCRIPT(" + className + ");\n";
+
+            {
+                std::ofstream headerOutput(headerPath, std::ios::out | std::ios::binary | std::ios::trunc);
+                if (!headerOutput.is_open())
+                {
+                    outError = "Failed to create header file: " + headerPath.string();
+                    return false;
+                }
+                headerOutput << headerTemplate;
+            }
+
+            {
+                std::ofstream sourceOutput(sourcePath, std::ios::out | std::ios::binary | std::ios::trunc);
+                if (!sourceOutput.is_open())
+                {
+                    outError = "Failed to create source file: " + sourcePath.string();
+                    return false;
+                }
+                sourceOutput << sourceTemplate;
+            }
+
+            (void)Assets::AssetImportPipeline::ReimportChanged(true);
+            outCreatedSourceAssetKey = "Assets/" + (parentRelativePath / (className + ".cpp")).generic_string();
+            outError.clear();
+            return true;
+        }
+
+        std::string EscapeRegexLiteral(const std::string& value)
+        {
+            std::string escaped;
+            escaped.reserve(value.size() * 2);
+            for (char character : value)
+            {
+                switch (character)
+                {
+                    case '.': case '^': case '$': case '|': case '(': case ')':
+                    case '[': case ']': case '{': case '}': case '*': case '+':
+                    case '?': case '\\':
+                        escaped.push_back('\\');
+                        break;
+                    default:
+                        break;
+                }
+                escaped.push_back(character);
+            }
+            return escaped;
+        }
+
+        bool ReplaceWholeWordInFile(const std::filesystem::path& filePath,
+                                    const std::string& oldWord,
+                                    const std::string& newWord)
+        {
+            std::ifstream input(filePath, std::ios::in | std::ios::binary);
+            if (!input.is_open())
+                return false;
+
+            std::string content((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+            input.close();
+
+            const std::regex wholeWordPattern("\\b" + EscapeRegexLiteral(oldWord) + "\\b");
+            content = std::regex_replace(content, wholeWordPattern, newWord);
+
+            std::ofstream output(filePath, std::ios::out | std::ios::binary | std::ios::trunc);
+            if (!output.is_open())
+                return false;
+            output << content;
+            return output.good();
+        }
+
+        bool RewriteSourceIncludeForRenamedScriptPair(const std::filesystem::path& sourcePath,
+                                                      const std::string& oldHeaderName,
+                                                      const std::string& newHeaderName)
+        {
+            std::ifstream input(sourcePath, std::ios::in | std::ios::binary);
+            if (!input.is_open())
+                return false;
+
+            std::string content((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+            input.close();
+
+            const std::string oldInclude = "#include \"" + oldHeaderName + "\"";
+            const std::string newInclude = "#include \"" + newHeaderName + "\"";
+            const size_t includePosition = content.find(oldInclude);
+            if (includePosition == std::string::npos)
+                return true;
+            content.replace(includePosition, oldInclude.size(), newInclude);
+
+            std::ofstream output(sourcePath, std::ios::out | std::ios::binary | std::ios::trunc);
+            if (!output.is_open())
+                return false;
+            output << content;
+            return output.good();
+        }
+
+        bool RenameNativeScriptPairInAssets(const std::filesystem::path& assetsDirectory,
+                                            const std::filesystem::path& scriptRelativePath,
+                                            const std::string& newDisplayName,
+                                            std::filesystem::path& outNewHeaderRelativePath,
+                                            std::filesystem::path& outNewSourceRelativePath)
+        {
+            const std::string sanitizedBaseName = SanitizeScriptClassBaseName(newDisplayName);
+
+            const std::filesystem::path baseRelativePath = scriptRelativePath.parent_path() / scriptRelativePath.stem();
+            const std::string oldClassName = baseRelativePath.stem().string();
+            const std::string newClassName = sanitizedBaseName;
+            const std::filesystem::path headerRelativePath = baseRelativePath.string() + ".h";
+            const std::filesystem::path sourceRelativePath = baseRelativePath.string() + ".cpp";
+            const std::filesystem::path headerPath = assetsDirectory / headerRelativePath;
+            const std::filesystem::path sourcePath = assetsDirectory / sourceRelativePath;
+
+            std::error_code errorCode;
+            if (!std::filesystem::exists(headerPath, errorCode) || !std::filesystem::exists(sourcePath, errorCode))
+                return false;
+
+            const std::filesystem::path newBaseRelativePath = baseRelativePath.parent_path() / sanitizedBaseName;
+            outNewHeaderRelativePath = newBaseRelativePath.string() + ".h";
+            outNewSourceRelativePath = newBaseRelativePath.string() + ".cpp";
+            const std::filesystem::path newHeaderPath = assetsDirectory / outNewHeaderRelativePath;
+            const std::filesystem::path newSourcePath = assetsDirectory / outNewSourceRelativePath;
+
+            if (newHeaderPath == headerPath && newSourcePath == sourcePath)
+                return true;
+            if (std::filesystem::exists(newHeaderPath, errorCode) || std::filesystem::exists(newSourcePath, errorCode))
+                return false;
+
+            std::filesystem::rename(headerPath, newHeaderPath, errorCode);
+            if (errorCode)
+                return false;
+            std::filesystem::rename(sourcePath, newSourcePath, errorCode);
+            if (errorCode)
+                return false;
+
+            const std::filesystem::path oldHeaderMetaPath = headerPath.parent_path() / (headerPath.filename().string() + ".meta");
+            const std::filesystem::path oldSourceMetaPath = sourcePath.parent_path() / (sourcePath.filename().string() + ".meta");
+            const std::filesystem::path newHeaderMetaPath = newHeaderPath.parent_path() / (newHeaderPath.filename().string() + ".meta");
+            const std::filesystem::path newSourceMetaPath = newSourcePath.parent_path() / (newSourcePath.filename().string() + ".meta");
+            if (std::filesystem::exists(oldHeaderMetaPath, errorCode))
+                std::filesystem::rename(oldHeaderMetaPath, newHeaderMetaPath, errorCode);
+            errorCode.clear();
+            if (std::filesystem::exists(oldSourceMetaPath, errorCode))
+                std::filesystem::rename(oldSourceMetaPath, newSourceMetaPath, errorCode);
+
+            (void)RewriteSourceIncludeForRenamedScriptPair(newSourcePath, headerPath.filename().string(), newHeaderPath.filename().string());
+            (void)ReplaceWholeWordInFile(newHeaderPath, oldClassName, newClassName);
+            (void)ReplaceWholeWordInFile(newSourcePath, oldClassName, newClassName);
+            (void)Assets::AssetImportPipeline::ReimportChanged(true);
+            return true;
+        }
+
+        bool DeleteNativeScriptPairInAssets(const std::filesystem::path& assetsDirectory, const std::filesystem::path& scriptRelativePath)
+        {
+            const std::filesystem::path baseRelativePath = scriptRelativePath.parent_path() / scriptRelativePath.stem();
+            const std::filesystem::path headerPath = assetsDirectory / (baseRelativePath.string() + ".h");
+            const std::filesystem::path sourcePath = assetsDirectory / (baseRelativePath.string() + ".cpp");
+
+            std::error_code errorCode;
+            bool removedAny = false;
+            if (std::filesystem::exists(headerPath, errorCode))
+                removedAny |= std::filesystem::remove(headerPath, errorCode);
+            errorCode.clear();
+            if (std::filesystem::exists(sourcePath, errorCode))
+                removedAny |= std::filesystem::remove(sourcePath, errorCode);
+            errorCode.clear();
+
+            const std::filesystem::path headerMetaPath = headerPath.parent_path() / (headerPath.filename().string() + ".meta");
+            const std::filesystem::path sourceMetaPath = sourcePath.parent_path() / (sourcePath.filename().string() + ".meta");
+            std::filesystem::remove(headerMetaPath, errorCode);
+            errorCode.clear();
+            std::filesystem::remove(sourceMetaPath, errorCode);
+
+            if (removedAny)
+                (void)Assets::AssetImportPipeline::ReimportChanged(true);
+            return removedAny;
+        }
+
         std::string GetAssetDisplayName(const std::filesystem::path& path)
         {
             return EditorAssetNaming::GetAssetDisplayNameFromPath(path);
@@ -100,6 +391,7 @@ namespace Limitless::EditorProjectPanel
                            Assets::TextureAsset::Ptr& cachedTextureAsset,
                            std::string& selectedMaterialAssetKey,
                            Assets::MaterialAsset::Ptr& cachedMaterialAsset,
+                           std::string& selectedNativeScriptAssetKey,
                            const char* texturePayloadId,
                            const char* audioPayloadId,
                            const char* assetMovePayloadId,
@@ -110,7 +402,8 @@ namespace Limitless::EditorProjectPanel
                            const std::function<void(const std::string&)>& onSceneActivated,
                            const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
                            const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
-                           const std::function<void(const std::string&, const std::string&)>& onAssetRenamed)
+                           const std::function<void(const std::string&, const std::string&)>& onAssetRenamed,
+                           const std::function<void(const std::string&)>& onNativeScriptAssetActivated)
         {
             const std::filesystem::path currentDirectory = assetsDirectory / relativePath;
             std::error_code errorCode;
@@ -146,6 +439,7 @@ namespace Limitless::EditorProjectPanel
                 return left.filename().string() < right.filename().string();
             });
 
+            std::unordered_set<std::string> renderedScriptBasePaths;
             for (const auto& entry : entries)
             {
                 const std::string fileName = entry.filename().string();
@@ -171,6 +465,12 @@ namespace Limitless::EditorProjectPanel
                         }
                         if (ImGui::MenuItem("Create Scene") && onCreateSceneRequested)
                             onCreateSceneRequested(entryRelativePath);
+                        if (ImGui::MenuItem("Create Native Script"))
+                        {
+                            state.CreateNativeScriptParentRelativePath = entryRelativePath;
+                            CopyTextToBuffer(state.CreateNativeScriptClassNameBuffer, "NewNativeScript");
+                            state.CreateNativeScriptPopupPending = true;
+                        }
                         if (ImGui::MenuItem("Rename"))
                         {
                             state.FolderPopupPending = EditorProjectFolderPopup::Rename;
@@ -251,6 +551,7 @@ namespace Limitless::EditorProjectPanel
                                       cachedTextureAsset,
                                       selectedMaterialAssetKey,
                                       cachedMaterialAsset,
+                                      selectedNativeScriptAssetKey,
                                       texturePayloadId,
                                       audioPayloadId,
                                       assetMovePayloadId,
@@ -261,24 +562,140 @@ namespace Limitless::EditorProjectPanel
                                       onSceneActivated,
                                       onCreateSceneRequested,
                                       onSetDefaultSceneRequested,
-                                      onAssetRenamed);
+                                      onAssetRenamed,
+                                      onNativeScriptAssetActivated);
                         ImGui::TreePop();
                     }
                 }
                 else
                 {
+                    if (IsNativeScriptExtension(entry))
+                    {
+                        const std::filesystem::path scriptBaseRelativePath = entryRelativePath.parent_path() / entryRelativePath.stem();
+                        const std::string scriptBaseKey = scriptBaseRelativePath.generic_string();
+                        if (renderedScriptBasePaths.find(scriptBaseKey) != renderedScriptBasePaths.end())
+                            continue;
+
+                        const std::filesystem::path headerRelativePath = scriptBaseRelativePath.string() + ".h";
+                        const std::filesystem::path sourceRelativePath = scriptBaseRelativePath.string() + ".cpp";
+                        const bool hasHeader = std::filesystem::exists(assetsDirectory / headerRelativePath);
+                        const bool hasSource = std::filesystem::exists(assetsDirectory / sourceRelativePath);
+                        if (hasHeader && hasSource)
+                        {
+                            renderedScriptBasePaths.insert(scriptBaseKey);
+                            const std::string scriptBaseName = scriptBaseRelativePath.stem().string();
+                            const std::string scriptNodeLabel = scriptBaseName + " [Native Script]###ScriptPair_" + scriptBaseKey;
+                            const std::string sourceAssetKey = "Assets/" + sourceRelativePath.generic_string();
+                            const std::string headerAssetKey = "Assets/" + headerRelativePath.generic_string();
+                            const bool scriptPairSelected =
+                                (selectedNativeScriptAssetKey == sourceAssetKey) ||
+                                (selectedNativeScriptAssetKey == headerAssetKey);
+                            const ImGuiTreeNodeFlags scriptPairFlags = scriptPairSelected
+                                ? (ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Selected)
+                                : ImGuiTreeNodeFlags_DefaultOpen;
+                            const bool scriptNodeOpen = ImGui::TreeNodeEx(scriptNodeLabel.c_str(), scriptPairFlags);
+
+                            const bool selectedScriptPairWithoutDrag =
+                                ImGui::IsItemHovered() &&
+                                ImGui::IsMouseReleased(0) &&
+                                (ImGui::GetDragDropPayload() == nullptr);
+                            if (selectedScriptPairWithoutDrag)
+                            {
+                                selectedNativeScriptAssetKey = sourceAssetKey;
+                                selectedTextureAssetKey.clear();
+                                selectedMaterialAssetKey.clear();
+                                selectedEntity = entt::null;
+                                cachedTextureAsset.reset();
+                                cachedMaterialAsset.reset();
+                            }
+
+                            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
+                            {
+                                onNativeScriptAssetActivated(sourceAssetKey);
+                            }
+
+                            if (ImGui::BeginPopupContextItem())
+                            {
+                                if (ImGui::MenuItem("Open Script") && onNativeScriptAssetActivated)
+                                    onNativeScriptAssetActivated(sourceAssetKey);
+                                if (ImGui::MenuItem("Rename Script Pair"))
+                                {
+                                    state.RenameAssetRelativePath = sourceRelativePath;
+                                    CopyTextToBuffer(state.RenameAssetBuffer, scriptBaseName.c_str());
+                                    state.RenameAssetAsNativeScriptPair = true;
+                                    state.RenameAssetPopupPending = true;
+                                }
+                                if (ImGui::MenuItem("Delete Script Pair"))
+                                {
+                                    const bool removed = DeleteNativeScriptPairInAssets(assetsDirectory, sourceRelativePath);
+                                    if (removed)
+                                        LT_INFO("Deleted native script pair {}", scriptBaseName);
+                                }
+                                ImGui::EndPopup();
+                            }
+
+                            if (scriptNodeOpen)
+                            {
+                                const std::string headerItemLabel = scriptBaseName + " [.h Header]###ScriptPairHeader_" + scriptBaseKey;
+                                const std::string sourceItemLabel = scriptBaseName + " [.cpp Source]###ScriptPairSource_" + scriptBaseKey;
+                                const ImGuiTreeNodeFlags headerItemFlags =
+                                    ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
+                                    ((selectedNativeScriptAssetKey == headerAssetKey) ? ImGuiTreeNodeFlags_Selected : ImGuiTreeNodeFlags_None);
+                                const ImGuiTreeNodeFlags sourceItemFlags =
+                                    ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
+                                    ((selectedNativeScriptAssetKey == sourceAssetKey) ? ImGuiTreeNodeFlags_Selected : ImGuiTreeNodeFlags_None);
+
+                                ImGui::TreeNodeEx(headerItemLabel.c_str(), headerItemFlags);
+                                if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0) && (ImGui::GetDragDropPayload() == nullptr))
+                                {
+                                    selectedNativeScriptAssetKey = headerAssetKey;
+                                    selectedTextureAssetKey.clear();
+                                    selectedMaterialAssetKey.clear();
+                                    selectedEntity = entt::null;
+                                    cachedTextureAsset.reset();
+                                    cachedMaterialAsset.reset();
+                                }
+                                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
+                                    onNativeScriptAssetActivated(headerAssetKey);
+
+                                ImGui::TreeNodeEx(sourceItemLabel.c_str(), sourceItemFlags);
+                                if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0) && (ImGui::GetDragDropPayload() == nullptr))
+                                {
+                                    selectedNativeScriptAssetKey = sourceAssetKey;
+                                    selectedTextureAssetKey.clear();
+                                    selectedMaterialAssetKey.clear();
+                                    selectedEntity = entt::null;
+                                    cachedTextureAsset.reset();
+                                    cachedMaterialAsset.reset();
+                                }
+                                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
+                                    onNativeScriptAssetActivated(sourceAssetKey);
+                                ImGui::TreePop();
+                            }
+                            continue;
+                        }
+                    }
+
                     const bool isTexture = IsTextureExtension(entry);
                     const bool isScene = IsSceneExtension(entry);
                     const bool isMaterial = IsMaterialExtension(entry);
                     const bool isShader = IsShaderExtension(entry);
                     const bool isAudio = IsAudioExtension(entry);
                     const bool isFont = IsFontExtension(entry);
-                    const std::string displayName = GetAssetDisplayName(entry);
+                    const bool isNativeScriptFile = IsNativeScriptExtension(entry);
+                    const std::filesystem::path pairedScriptRelativePath = isNativeScriptFile
+                        ? GetPairedScriptRelativePath(entryRelativePath)
+                        : std::filesystem::path{};
+                    const bool hasPairedScriptFile = isNativeScriptFile && std::filesystem::exists(assetsDirectory / pairedScriptRelativePath);
+                    const std::string displayName = isNativeScriptFile
+                        ? BuildScriptAssetDisplayName(entry)
+                        : GetAssetDisplayName(entry);
                     const std::string treeLabel = displayName + "###" + fileName;
                     const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
                     const bool isSelected =
                         (isTexture && (selectedTextureAssetKey == assetKey)) ||
-                        (isMaterial && (selectedMaterialAssetKey == assetKey));
+                        (isMaterial && (selectedMaterialAssetKey == assetKey)) ||
+                        (isNativeScriptFile && (selectedNativeScriptAssetKey == assetKey));
                     ImGui::TreeNodeEx(treeLabel.c_str(), isSelected ? (flags | ImGuiTreeNodeFlags_Selected) : flags);
 
                     const bool releasedOnItemWithoutDrag =
@@ -291,6 +708,7 @@ namespace Limitless::EditorProjectPanel
                         {
                             selectedTextureAssetKey = assetKey;
                             selectedMaterialAssetKey.clear();
+                            selectedNativeScriptAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedTextureAsset.reset();
                             cachedMaterialAsset.reset();
@@ -299,6 +717,16 @@ namespace Limitless::EditorProjectPanel
                         {
                             selectedMaterialAssetKey = assetKey;
                             selectedTextureAssetKey.clear();
+                            selectedNativeScriptAssetKey.clear();
+                            selectedEntity = entt::null;
+                            cachedMaterialAsset.reset();
+                            cachedTextureAsset.reset();
+                        }
+                        else if (isNativeScriptFile)
+                        {
+                            selectedNativeScriptAssetKey = assetKey;
+                            selectedTextureAssetKey.clear();
+                            selectedMaterialAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedMaterialAsset.reset();
                             cachedTextureAsset.reset();
@@ -309,25 +737,40 @@ namespace Limitless::EditorProjectPanel
                     {
                         selectedTextureAssetKey = assetKey;
                         selectedMaterialAssetKey.clear();
+                        selectedNativeScriptAssetKey.clear();
                         selectedEntity = entt::null;
                         cachedTextureAsset.reset();
                         cachedMaterialAsset.reset();
                     }
                     else if (isScene && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onSceneActivated)
                     {
+                        selectedNativeScriptAssetKey.clear();
                         onSceneActivated(assetKey);
                     }
                     else if (isMaterial && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
                     {
                         selectedMaterialAssetKey = assetKey;
                         selectedTextureAssetKey.clear();
+                        selectedNativeScriptAssetKey.clear();
                         selectedEntity = entt::null;
                         cachedMaterialAsset.reset();
                         cachedTextureAsset.reset();
                     }
+                    else if (isNativeScriptFile && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
+                    {
+                        onNativeScriptAssetActivated(assetKey);
+                    }
 
                     if (ImGui::BeginPopupContextItem())
                     {
+                        if (isNativeScriptFile)
+                        {
+                            if (ImGui::MenuItem("Open Script") && onNativeScriptAssetActivated)
+                                onNativeScriptAssetActivated(assetKey);
+                            if (hasPairedScriptFile)
+                                ImGui::Separator();
+                        }
+
                         if (isScene)
                         {
                             if (ImGui::MenuItem("Open Scene") && onSceneActivated)
@@ -341,23 +784,36 @@ namespace Limitless::EditorProjectPanel
                             ImGui::Separator();
                         }
 
-                        if (ImGui::MenuItem("Rename"))
+                        if (ImGui::MenuItem(hasPairedScriptFile ? "Rename Script Pair" : "Rename"))
                         {
                             state.RenameAssetRelativePath = entryRelativePath;
-                            CopyTextToBuffer(state.RenameAssetBuffer, displayName.c_str());
+                            if (hasPairedScriptFile)
+                                CopyTextToBuffer(state.RenameAssetBuffer, entry.stem().string().c_str());
+                            else
+                                CopyTextToBuffer(state.RenameAssetBuffer, displayName.c_str());
+                            state.RenameAssetAsNativeScriptPair = hasPairedScriptFile;
                             state.RenameAssetPopupPending = true;
                         }
-                        if (ImGui::MenuItem("Delete"))
+                        if (ImGui::MenuItem(hasPairedScriptFile ? "Delete Script Pair" : "Delete"))
                         {
-                            std::error_code deleteErrorCode;
-                            const bool removed = std::filesystem::remove(entry, deleteErrorCode);
-                            if (removed && !deleteErrorCode)
+                            bool removed = false;
+                            if (hasPairedScriptFile)
                             {
-                                const std::filesystem::path metaPath = entry.parent_path() / (entry.filename().string() + ".meta");
-                                std::filesystem::remove(metaPath, deleteErrorCode);
-                                (void)Assets::AssetImportPipeline::ReimportChanged(true);
-                                LT_INFO("Deleted asset {}", assetKey);
+                                removed = DeleteNativeScriptPairInAssets(assetsDirectory, entryRelativePath);
                             }
+                            else
+                            {
+                                std::error_code deleteErrorCode;
+                                removed = std::filesystem::remove(entry, deleteErrorCode);
+                                if (removed && !deleteErrorCode)
+                                {
+                                    const std::filesystem::path metaPath = entry.parent_path() / (entry.filename().string() + ".meta");
+                                    std::filesystem::remove(metaPath, deleteErrorCode);
+                                    (void)Assets::AssetImportPipeline::ReimportChanged(true);
+                                }
+                            }
+                            if (removed)
+                                LT_INFO("Deleted asset {}", assetKey);
                         }
                         ImGui::EndPopup();
                     }
@@ -467,6 +923,14 @@ namespace Limitless::EditorProjectPanel
                 state.RenameAssetPopupOpen = true;
             }
 
+            if (state.CreateNativeScriptPopupPending)
+            {
+                ImGui::OpenPopup("CreateNativeScriptAsset");
+                ImGui::SetNextWindowFocus();
+                state.CreateNativeScriptPopupPending = false;
+                state.CreateNativeScriptPopupOpen = true;
+            }
+
             if (ImGui::BeginPopupModal("RenameAsset", &state.RenameAssetPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
             {
                 ImGui::Text("Rename Asset");
@@ -482,27 +946,95 @@ namespace Limitless::EditorProjectPanel
                 {
                     if (state.RenameAssetBuffer[0] != '\0')
                     {
-                        const std::string oldAssetKey = "Assets/" + state.RenameAssetRelativePath.generic_string();
-                        std::filesystem::path newAssetRelativePath;
-                        if (ProjectAssetOperations::RenameAssetInAssets(
-                                assetsDirectory,
-                                state.RenameAssetRelativePath,
-                                state.RenameAssetBuffer.data(),
-                                &newAssetRelativePath))
+                        if (state.RenameAssetAsNativeScriptPair)
                         {
-                            if (onAssetRenamed)
+                            std::filesystem::path newHeaderRelativePath;
+                            std::filesystem::path newSourceRelativePath;
+                            if (RenameNativeScriptPairInAssets(
+                                    assetsDirectory,
+                                    state.RenameAssetRelativePath,
+                                    state.RenameAssetBuffer.data(),
+                                    newHeaderRelativePath,
+                                    newSourceRelativePath))
                             {
-                                const std::string newAssetKey = "Assets/" + newAssetRelativePath.generic_string();
-                                onAssetRenamed(oldAssetKey, newAssetKey);
+                                if (onAssetRenamed)
+                                {
+                                    const std::filesystem::path oldBase = state.RenameAssetRelativePath.parent_path() / state.RenameAssetRelativePath.stem();
+                                    onAssetRenamed("Assets/" + (oldBase.generic_string() + ".h"), "Assets/" + newHeaderRelativePath.generic_string());
+                                    onAssetRenamed("Assets/" + (oldBase.generic_string() + ".cpp"), "Assets/" + newSourceRelativePath.generic_string());
+                                }
+                                LT_INFO("Renamed script pair to {}", state.RenameAssetBuffer.data());
                             }
-                            LT_INFO("Renamed asset to {}", state.RenameAssetBuffer.data());
                         }
+                        else
+                        {
+                            const std::string oldAssetKey = "Assets/" + state.RenameAssetRelativePath.generic_string();
+                            std::filesystem::path newAssetRelativePath;
+                            if (ProjectAssetOperations::RenameAssetInAssets(
+                                    assetsDirectory,
+                                    state.RenameAssetRelativePath,
+                                    state.RenameAssetBuffer.data(),
+                                    &newAssetRelativePath))
+                            {
+                                if (onAssetRenamed)
+                                {
+                                    const std::string newAssetKey = "Assets/" + newAssetRelativePath.generic_string();
+                                    onAssetRenamed(oldAssetKey, newAssetKey);
+                                }
+                                LT_INFO("Renamed asset to {}", state.RenameAssetBuffer.data());
+                            }
+                        }
+                        state.RenameAssetAsNativeScriptPair = false;
+                        state.RenameAssetRelativePath.clear();
+                        state.RenameAssetBuffer[0] = '\0';
                         state.RenameAssetPopupOpen = false;
                     }
                 }
                 ImGui::SameLine();
                 if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                {
+                    state.RenameAssetAsNativeScriptPair = false;
+                    state.RenameAssetRelativePath.clear();
+                    state.RenameAssetBuffer[0] = '\0';
                     state.RenameAssetPopupOpen = false;
+                }
+
+                ImGui::EndPopup();
+            }
+
+            if (ImGui::BeginPopupModal("CreateNativeScriptAsset", &state.CreateNativeScriptPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::Text("Create Native Script");
+                ImGui::Separator();
+                if (ImGui::IsWindowAppearing())
+                    ImGui::SetKeyboardFocusHere();
+
+                const bool create = ImGui::InputText("Class Name",
+                                                     state.CreateNativeScriptClassNameBuffer.data(),
+                                                     state.CreateNativeScriptClassNameBuffer.size(),
+                                                     ImGuiInputTextFlags_EnterReturnsTrue);
+                if (ImGui::Button("Create", ImVec2(120, 0)) || create)
+                {
+                    std::string createdScriptAssetKey;
+                    std::string createError;
+                    if (CreateNativeScriptPairInAssets(
+                            assetsDirectory,
+                            state.CreateNativeScriptParentRelativePath,
+                            state.CreateNativeScriptClassNameBuffer.data(),
+                            createdScriptAssetKey,
+                            createError))
+                    {
+                        LT_INFO("Created native script {}", createdScriptAssetKey);
+                        state.CreateNativeScriptPopupOpen = false;
+                    }
+                    else if (!createError.empty())
+                    {
+                        LT_WARN("Failed to create native script: {}", createError);
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                    state.CreateNativeScriptPopupOpen = false;
 
                 ImGui::EndPopup();
             }
@@ -515,6 +1047,7 @@ namespace Limitless::EditorProjectPanel
               Assets::TextureAsset::Ptr& cachedTextureAsset,
               std::string& selectedMaterialAssetKey,
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
+              std::string& selectedNativeScriptAssetKey,
               const char* texturePayloadId,
               const char* audioPayloadId,
               const char* assetMovePayloadId,
@@ -525,7 +1058,8 @@ namespace Limitless::EditorProjectPanel
               const std::function<void(const std::string&)>& onSceneActivated,
               const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
               const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
-              const std::function<void(const std::string&, const std::string&)>& onAssetRenamed)
+              const std::function<void(const std::string&, const std::string&)>& onAssetRenamed,
+              const std::function<void(const std::string&)>& onNativeScriptAssetActivated)
     {
         ImGui::Begin("Project");
         state.HoveredFolderRelativePathForExternalDrop.clear();
@@ -557,6 +1091,12 @@ namespace Limitless::EditorProjectPanel
             }
             if (ImGui::MenuItem("Create Scene") && onCreateSceneRequested)
                 onCreateSceneRequested("");
+            if (ImGui::MenuItem("Create Native Script"))
+            {
+                state.CreateNativeScriptParentRelativePath = "";
+                CopyTextToBuffer(state.CreateNativeScriptClassNameBuffer, "NewNativeScript");
+                state.CreateNativeScriptPopupPending = true;
+            }
             ImGui::EndPopup();
         }
 
@@ -577,6 +1117,12 @@ namespace Limitless::EditorProjectPanel
                 }
                 if (ImGui::MenuItem("Create Scene") && onCreateSceneRequested)
                     onCreateSceneRequested("");
+                if (ImGui::MenuItem("Create Native Script"))
+                {
+                    state.CreateNativeScriptParentRelativePath = "";
+                    CopyTextToBuffer(state.CreateNativeScriptClassNameBuffer, "NewNativeScript");
+                    state.CreateNativeScriptPopupPending = true;
+                }
                 ImGui::EndPopup();
             }
 
@@ -637,6 +1183,7 @@ namespace Limitless::EditorProjectPanel
                           cachedTextureAsset,
                           selectedMaterialAssetKey,
                           cachedMaterialAsset,
+                          selectedNativeScriptAssetKey,
                           texturePayloadId,
                           audioPayloadId,
                           assetMovePayloadId,
@@ -647,7 +1194,8 @@ namespace Limitless::EditorProjectPanel
                           onSceneActivated,
                           onCreateSceneRequested,
                           onSetDefaultSceneRequested,
-                          onAssetRenamed);
+                          onAssetRenamed,
+                          onNativeScriptAssetActivated);
             ImGui::TreePop();
         }
 

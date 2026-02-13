@@ -12,6 +12,19 @@ namespace Limitless
 
     namespace EditorInspectorPanel
     {
+        struct NativeScriptEditorSessionState
+        {
+            bool IsOpen = false;
+            std::string LastEditedScriptClassName;
+            std::string LastEditedScriptAssetRelativePath;
+            bool ShowDebugInfo = false;
+        };
+
+        void GetNativeScriptEditorSessionState(NativeScriptEditorSessionState& outState);
+        void ApplyNativeScriptEditorSessionState(const NativeScriptEditorSessionState& state);
+        bool OpenNativeScriptEditorForAssetKey(const std::string& assetKey);
+        void OnNativeScriptAssetRenamed(const std::string& oldAssetKey, const std::string& newAssetKey);
+
         void Draw(Scene* scene,
                   entt::entity selectedEntity,
                   const char* texturePayloadId,
@@ -22,6 +35,7 @@ namespace Limitless
                   const char* shaderPayloadId,
                   const char* fontPayloadId,
                   std::string& selectedMaterialAssetKey,
-                  Assets::MaterialAsset::Ptr& cachedMaterialAsset);
+                  Assets::MaterialAsset::Ptr& cachedMaterialAsset,
+                  std::string& selectedNativeScriptAssetKey);
     }
 }

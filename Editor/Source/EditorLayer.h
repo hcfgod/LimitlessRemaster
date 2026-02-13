@@ -62,6 +62,7 @@ namespace Limitless
         void DrawSaveScenePopup();
         bool LoadSceneFromAssetKey(const std::string& assetKey);
         bool SaveSceneToAssetKey(const std::string& assetKey);
+        void PersistProjectSessionState();
         std::string CreateSceneAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         void SetProjectDefaultSceneAssetKey(const std::string& sceneAssetKey);
 
@@ -98,6 +99,10 @@ namespace Limitless
 
         /// Cached material asset for the selected key; avoids LoadBlocking every frame and reduces lag.
         Assets::MaterialAsset::Ptr m_CachedMaterialAsset;
+
+        /// Selected script asset key when user single-clicks a script in the Project panel.
+        /// When non-empty, the Inspector shows script asset metadata preview.
+        std::string m_SelectedNativeScriptAssetKey;
 
         std::string m_CurrentSceneAssetKey;
         bool m_SaveScenePopupOpen = false;

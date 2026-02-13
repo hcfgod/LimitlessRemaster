@@ -21,6 +21,12 @@ project "Editor"
         "Source/**.cpp"
     }
 
+    removefiles
+    {
+        "Source/Scripting/UserScripts/**.h",
+        "Source/Scripting/UserScripts/**.cpp"
+    }
+
     includedirs
     {
         "../Limitless/Vendor",

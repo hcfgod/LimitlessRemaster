@@ -60,6 +60,7 @@ namespace Limitless::EditorScenePanel
                             Assets::TextureAsset::Ptr& cachedTextureAsset,
                             std::string& selectedMaterialAssetKey,
                             Assets::MaterialAsset::Ptr& cachedMaterialAsset,
+                            std::string& selectedNativeScriptAssetKey,
                             const char* materialPayloadId)
         {
             if (!scene || !scene->IsValid(entity))
@@ -85,6 +86,7 @@ namespace Limitless::EditorScenePanel
                 cachedTextureAsset.reset();
                 selectedMaterialAssetKey.clear();
                 cachedMaterialAsset.reset();
+                selectedNativeScriptAssetKey.clear();
             }
 
             if (ImGui::BeginPopupContextItem())
@@ -98,6 +100,7 @@ namespace Limitless::EditorScenePanel
                     cachedTextureAsset.reset();
                     selectedMaterialAssetKey.clear();
                     cachedMaterialAsset.reset();
+                    selectedNativeScriptAssetKey.clear();
                 }
 
                 if (ImGui::MenuItem("Rename"))
@@ -157,6 +160,7 @@ namespace Limitless::EditorScenePanel
                                 cachedTextureAsset.reset();
                                 selectedMaterialAssetKey.clear();
                                 cachedMaterialAsset.reset();
+                                selectedNativeScriptAssetKey.clear();
                             }
                         }
                     }
@@ -223,6 +227,7 @@ namespace Limitless::EditorScenePanel
                                        cachedTextureAsset,
                                        selectedMaterialAssetKey,
                                        cachedMaterialAsset,
+                                       selectedNativeScriptAssetKey,
                                        materialPayloadId))
                         deletedSelection = true;
                 }
@@ -240,6 +245,7 @@ namespace Limitless::EditorScenePanel
               Assets::TextureAsset::Ptr& cachedTextureAsset,
               std::string& selectedMaterialAssetKey,
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
+              std::string& selectedNativeScriptAssetKey,
               const char* materialPayloadId,
               const std::string& sceneRootDisplayName)
     {
@@ -256,6 +262,7 @@ namespace Limitless::EditorScenePanel
                 cachedTextureAsset.reset();
                 selectedMaterialAssetKey.clear();
                 cachedMaterialAsset.reset();
+                selectedNativeScriptAssetKey.clear();
             }
             ImGui::EndPopup();
         }
@@ -275,6 +282,7 @@ namespace Limitless::EditorScenePanel
                         cachedTextureAsset.reset();
                         selectedMaterialAssetKey.clear();
                         cachedMaterialAsset.reset();
+                        selectedNativeScriptAssetKey.clear();
                     }
                     ImGui::EndPopup();
                 }
@@ -309,6 +317,7 @@ namespace Limitless::EditorScenePanel
                                        cachedTextureAsset,
                                        selectedMaterialAssetKey,
                                        cachedMaterialAsset,
+                                       selectedNativeScriptAssetKey,
                                        materialPayloadId))
                         deletedSelection = true;
                 }
@@ -330,6 +339,7 @@ namespace Limitless::EditorScenePanel
                         cachedTextureAsset.reset();
                         selectedMaterialAssetKey.clear();
                         cachedMaterialAsset.reset();
+                        selectedNativeScriptAssetKey.clear();
                     }
                     ImGui::EndPopup();
                 }
@@ -401,6 +411,7 @@ namespace Limitless::EditorScenePanel
             cachedTextureAsset.reset();
             selectedMaterialAssetKey.clear();
             cachedMaterialAsset.reset();
+            selectedNativeScriptAssetKey.clear();
         }
 
         ImGui::End();

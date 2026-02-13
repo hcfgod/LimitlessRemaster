@@ -133,7 +133,8 @@ namespace Limitless::EditorViewportPanel
               std::string& selectedTextureAssetKey,
               Assets::TextureAsset::Ptr& cachedTextureAsset,
               std::string& selectedMaterialAssetKey,
-              Assets::MaterialAsset::Ptr& cachedMaterialAsset)
+              Assets::MaterialAsset::Ptr& cachedMaterialAsset,
+              std::string& selectedNativeScriptAssetKey)
     {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         ImGui::Begin("Viewport");
@@ -228,6 +229,7 @@ namespace Limitless::EditorViewportPanel
                                         cachedTextureAsset.reset();
                                         selectedMaterialAssetKey.clear();
                                         cachedMaterialAsset.reset();
+                                        selectedNativeScriptAssetKey.clear();
                                     }
                                 }
                             }

@@ -38,5 +38,6 @@ namespace Limitless::EditorViewportPanel
               std::string& selectedTextureAssetKey,
               Assets::TextureAsset::Ptr& cachedTextureAsset,
               std::string& selectedMaterialAssetKey,
-              Assets::MaterialAsset::Ptr& cachedMaterialAsset);
+              Assets::MaterialAsset::Ptr& cachedMaterialAsset,
+              std::string& selectedNativeScriptAssetKey);
 }

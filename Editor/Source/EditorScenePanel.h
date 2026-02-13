@@ -28,6 +28,7 @@ namespace Limitless
                   Assets::TextureAsset::Ptr& cachedTextureAsset,
                   std::string& selectedMaterialAssetKey,
                   Assets::MaterialAsset::Ptr& cachedMaterialAsset,
+                  std::string& selectedNativeScriptAssetKey,
                   const char* materialPayloadId,
                   const std::string& sceneRootDisplayName);
     }

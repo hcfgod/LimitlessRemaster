@@ -43,6 +43,8 @@
 // Scene / ECS
 #include "Scene/Components.h"
 #include "Scene/Scene.h"
+#include "Scripting/ScriptableEntity.h"
+#include "Scripting/NativeScriptRegistry.h"
 
 // Project System (Editor/tooling)
 #include "Project/ProjectDefinition.h"

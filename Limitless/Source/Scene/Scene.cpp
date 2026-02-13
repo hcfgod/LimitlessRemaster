@@ -11,6 +11,7 @@
 #include "Graphics/RenderCommand.h"
 #include "Graphics/Renderer.h"
 #include "Graphics/Renderer2D.h"
+#include "Scripting/NativeScriptRegistry.h"
 
 #include <nlohmann/json.hpp>
 
@@ -118,9 +119,98 @@ namespace Limitless
 
             return {};
         }
+
+        nlohmann::json SerializeScriptPropertyValue(const ScriptPropertyValue& value)
+        {
+            nlohmann::json root = nlohmann::json::object();
+            if (const auto* floatValue = std::get_if<float>(&value))
+            {
+                root["Type"] = "Float";
+                root["Value"] = *floatValue;
+            }
+            else if (const auto* integerValue = std::get_if<int32_t>(&value))
+            {
+                root["Type"] = "Integer";
+                root["Value"] = *integerValue;
+            }
+            else if (const auto* booleanValue = std::get_if<bool>(&value))
+            {
+                root["Type"] = "Boolean";
+                root["Value"] = *booleanValue;
+            }
+            else if (const auto* vectorValue = std::get_if<glm::vec3>(&value))
+            {
+                root["Type"] = "Vector3";
+                root["Value"] = { vectorValue->x, vectorValue->y, vectorValue->z };
+            }
+            else if (const auto* stringValue = std::get_if<std::string>(&value))
+            {
+                root["Type"] = "String";
+                root["Value"] = *stringValue;
+            }
+            return root;
+        }
+
+        bool DeserializeScriptPropertyValue(const nlohmann::json& root, ScriptPropertyValue& outValue)
+        {
+            if (!root.is_object())
+                return false;
+
+            const std::string typeName = root.value("Type", std::string{});
+            if (typeName == "Float")
+            {
+                outValue = root.value("Value", 0.0f);
+                return true;
+            }
+            if (typeName == "Integer")
+            {
+                outValue = root.value("Value", 0);
+                return true;
+            }
+            if (typeName == "Boolean")
+            {
+                outValue = root.value("Value", false);
+                return true;
+            }
+            if (typeName == "Vector3")
+            {
+                const auto vector = root.value("Value", std::vector<float>{ 0.0f, 0.0f, 0.0f });
+                if (vector.size() >= 3)
+                    outValue = glm::vec3(vector[0], vector[1], vector[2]);
+                else
+                    outValue = glm::vec3(0.0f);
+                return true;
+            }
+            if (typeName == "String")
+            {
+                outValue = root.value("Value", std::string{});
+                return true;
+            }
+
+            return false;
+        }
+
     }
 
     Scene::Scene() = default;
+
+    Scene::~Scene()
+    {
+        auto view = m_Registry.view<NativeScriptComponent>();
+        for (entt::entity entity : view)
+        {
+            (void)entity;
+            auto& nativeScript = view.get<NativeScriptComponent>(entity);
+            for (auto& scriptEntry : nativeScript.Scripts)
+            {
+                if (scriptEntry.RuntimeInstance && scriptEntry.RuntimeInitialized)
+                    scriptEntry.RuntimeInstance->OnDestroy();
+                scriptEntry.RuntimeInstance.reset();
+                scriptEntry.RuntimeInitialized = false;
+                scriptEntry.RuntimeUpdateCount = 0;
+            }
+        }
+    }
 
     entt::entity Scene::CreateEntity(const std::string& name)
     {
@@ -151,6 +241,18 @@ namespace Limitless
         const auto children = GetChildren(entity);
         for (entt::entity child : children)
             DestroyEntity(child);
+
+        if (auto* nativeScript = m_Registry.try_get<NativeScriptComponent>(entity))
+        {
+            for (auto& scriptEntry : nativeScript->Scripts)
+            {
+                if (scriptEntry.RuntimeInstance && scriptEntry.RuntimeInitialized)
+                    scriptEntry.RuntimeInstance->OnDestroy();
+                scriptEntry.RuntimeInstance.reset();
+                scriptEntry.RuntimeInitialized = false;
+                scriptEntry.RuntimeUpdateCount = 0;
+            }
+        }
 
         m_Registry.destroy(entity);
     }
@@ -350,6 +452,73 @@ namespace Limitless
         return worldMatrix;
     }
 
+    void Scene::Update(float deltaTime)
+    {
+        auto view = m_Registry.view<NativeScriptComponent>();
+        for (entt::entity entity : view)
+        {
+            auto& nativeScript = view.get<NativeScriptComponent>(entity);
+            for (auto& scriptEntry : nativeScript.Scripts)
+            {
+                if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty())
+                {
+                    if (scriptEntry.RuntimeInstance && scriptEntry.RuntimeInitialized)
+                        scriptEntry.RuntimeInstance->OnDestroy();
+                    scriptEntry.RuntimeInstance.reset();
+                    scriptEntry.RuntimeInitialized = false;
+                    scriptEntry.RuntimeUpdateCount = 0;
+                    continue;
+                }
+
+                if (!scriptEntry.RuntimeInstance)
+                {
+                    scriptEntry.RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry.ScriptClassName);
+                    if (!scriptEntry.RuntimeInstance && !scriptEntry.ScriptAssetRelativePath.empty())
+                    {
+                        const std::string fallbackClassName = std::filesystem::path(scriptEntry.ScriptAssetRelativePath).stem().string();
+                        if (!fallbackClassName.empty() &&
+                            fallbackClassName != scriptEntry.ScriptClassName &&
+                            NativeScriptRegistry::HasScript(fallbackClassName))
+                        {
+                            scriptEntry.ScriptClassName = fallbackClassName;
+                            scriptEntry.RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry.ScriptClassName);
+                        }
+                    }
+                    if (scriptEntry.RuntimeInstance)
+                    {
+                        scriptEntry.RuntimeInstance->m_Scene = this;
+                        scriptEntry.RuntimeInstance->m_Registry = &m_Registry;
+                        scriptEntry.RuntimeInstance->m_EntityHandle = entity;
+                        scriptEntry.RuntimeInstance->m_ExposedProperties = &scriptEntry.ExposedProperties;
+                        scriptEntry.RuntimeInitialized = false;
+                        scriptEntry.RuntimeUpdateCount = 0;
+                    }
+                }
+
+                if (!scriptEntry.RuntimeInstance)
+                    continue;
+
+                // Rebind runtime context every frame. NativeScriptEntry objects can move in memory
+                // when the scripts vector grows/reorders, so cached pointers must be refreshed.
+                scriptEntry.RuntimeInstance->m_Scene = this;
+                scriptEntry.RuntimeInstance->m_Registry = &m_Registry;
+                scriptEntry.RuntimeInstance->m_EntityHandle = entity;
+                scriptEntry.RuntimeInstance->m_ExposedProperties = &scriptEntry.ExposedProperties;
+
+                if (!scriptEntry.RuntimeInitialized)
+                {
+                    scriptEntry.RuntimeInstance->OnSynchronizeExposedFields();
+                    scriptEntry.RuntimeInstance->OnCreate();
+                    scriptEntry.RuntimeInitialized = true;
+                }
+
+                scriptEntry.RuntimeInstance->OnSynchronizeExposedFields();
+                scriptEntry.RuntimeInstance->OnUpdate(deltaTime);
+                ++scriptEntry.RuntimeUpdateCount;
+            }
+        }
+    }
+
     std::unique_ptr<Scene> Scene::Clone() const
     {
         auto clone = std::make_unique<Scene>();
@@ -412,6 +581,22 @@ namespace Limitless
                 destinationAudioSource.RuntimeVoiceId = 0;
                 destinationAudioSource.RuntimePlaybackStarted = false;
             }
+
+            if (const auto* nativeScript = sourceRegistry.try_get<NativeScriptComponent>(sourceEntity))
+            {
+                auto& destinationNativeScript = destinationRegistry.emplace<NativeScriptComponent>(destinationEntity);
+                destinationNativeScript.Scripts.reserve(nativeScript->Scripts.size());
+                for (const auto& sourceScriptEntry : nativeScript->Scripts)
+                {
+                    auto& destinationScriptEntry = destinationNativeScript.Scripts.emplace_back();
+                    destinationScriptEntry.ScriptClassName = sourceScriptEntry.ScriptClassName;
+                    destinationScriptEntry.ScriptAssetRelativePath = sourceScriptEntry.ScriptAssetRelativePath;
+                    destinationScriptEntry.Enabled = sourceScriptEntry.Enabled;
+                    destinationScriptEntry.ExposedProperties = sourceScriptEntry.ExposedProperties;
+                    destinationScriptEntry.RuntimeInitialized = false;
+                    destinationScriptEntry.RuntimeInstance.reset();
+                }
+            }
         }
 
         for (const auto& [sourceEntity, destinationEntity] : entityMap)
@@ -465,7 +650,7 @@ namespace Limitless
             indexByEntity.emplace(entities[index], static_cast<int32_t>(index));
 
         nlohmann::json root = nlohmann::json::object();
-        root["Version"] = 3;
+        root["Version"] = 5;
         if (m_EditorCameraBookmark.has_value())
         {
             root["EditorCamera"] = {
@@ -551,6 +736,26 @@ namespace Limitless
                     { "Loop", audioSource->Loop },
                     { "Muted", audioSource->Muted }
                 };
+            }
+
+            if (const auto* nativeScript = m_Registry.try_get<NativeScriptComponent>(entity))
+            {
+                nlohmann::json scriptEntries = nlohmann::json::array();
+                for (const auto& scriptEntry : nativeScript->Scripts)
+                {
+                    nlohmann::json exposedProperties = nlohmann::json::object();
+                    for (const auto& [propertyName, propertyValue] : scriptEntry.ExposedProperties)
+                    {
+                        exposedProperties[propertyName] = SerializeScriptPropertyValue(propertyValue);
+                    }
+                    scriptEntries.push_back({
+                        { "Class", scriptEntry.ScriptClassName },
+                        { "AssetPath", scriptEntry.ScriptAssetRelativePath },
+                        { "ExposedProperties", std::move(exposedProperties) },
+                        { "Enabled", scriptEntry.Enabled }
+                    });
+                }
+                entry["NativeScripts"] = std::move(scriptEntries);
             }
 
             root["Entities"].push_back(std::move(entry));
@@ -715,6 +920,42 @@ namespace Limitless
 
                 audioSource.RuntimeVoiceId = 0;
                 audioSource.RuntimePlaybackStarted = false;
+            }
+
+            auto loadNativeScriptEntry = [](const nlohmann::json& nativeScriptJson, NativeScriptEntry& outScriptEntry) {
+                outScriptEntry.ScriptClassName = nativeScriptJson.value("Class", std::string{});
+                outScriptEntry.ScriptAssetRelativePath = nativeScriptJson.value("AssetPath", std::string{});
+                outScriptEntry.Enabled = nativeScriptJson.value("Enabled", true);
+                if (nativeScriptJson.contains("ExposedProperties") && nativeScriptJson["ExposedProperties"].is_object())
+                {
+                    for (auto it = nativeScriptJson["ExposedProperties"].begin(); it != nativeScriptJson["ExposedProperties"].end(); ++it)
+                    {
+                        ScriptPropertyValue propertyValue;
+                        if (DeserializeScriptPropertyValue(it.value(), propertyValue))
+                            outScriptEntry.ExposedProperties[it.key()] = propertyValue;
+                    }
+                }
+                outScriptEntry.RuntimeInitialized = false;
+                outScriptEntry.RuntimeInstance.reset();
+            };
+
+            if (entry.contains("NativeScripts") && entry["NativeScripts"].is_array())
+            {
+                auto& nativeScript = scene->GetRegistry().emplace<NativeScriptComponent>(entity);
+                for (const auto& scriptEntryJson : entry["NativeScripts"])
+                {
+                    if (!scriptEntryJson.is_object())
+                        continue;
+                    auto& loadedScriptEntry = nativeScript.Scripts.emplace_back();
+                    loadNativeScriptEntry(scriptEntryJson, loadedScriptEntry);
+                }
+            }
+            else if (entry.contains("NativeScript") && entry["NativeScript"].is_object())
+            {
+                // Backward compatibility: legacy scenes with a single native script object.
+                auto& nativeScript = scene->GetRegistry().emplace<NativeScriptComponent>(entity);
+                auto& loadedScriptEntry = nativeScript.Scripts.emplace_back();
+                loadNativeScriptEntry(entry["NativeScript"], loadedScriptEntry);
             }
 
             int32_t parentIndex = -1;

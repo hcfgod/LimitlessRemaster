@@ -4,12 +4,16 @@
 #include "Assets/AudioClipAsset.h"
 #include "Assets/TextureAsset.h"
 #include "Graphics/Font.h"
+#include "Scripting/ScriptableEntity.h"
+#include "Scripting/ScriptProperty.h"
 #include "EnTT/entt.hpp"
 
 #include <glm/glm.hpp>
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace Limitless
 {
@@ -111,5 +115,55 @@ namespace Limitless
 
         // Perspective settings.
         float FieldOfViewYDegrees = 60.0f;
+    };
+
+    /// Single native C++ behavior script entry attached to an entity.
+    struct NativeScriptEntry
+    {
+        std::string ScriptClassName;
+        std::string ScriptAssetRelativePath; ///< Relative to project Assets root without extension (example: "Gameplay/Player/PlayerController")
+        bool Enabled = true;
+        std::unordered_map<std::string, ScriptPropertyValue> ExposedProperties;
+
+        // Runtime-only state (not serialized).
+        std::unique_ptr<ScriptableEntity> RuntimeInstance;
+        bool RuntimeInitialized = false;
+        uint64_t RuntimeUpdateCount = 0;
+
+        NativeScriptEntry() = default;
+
+        NativeScriptEntry(const NativeScriptEntry& other)
+            : ScriptClassName(other.ScriptClassName),
+              ScriptAssetRelativePath(other.ScriptAssetRelativePath),
+              Enabled(other.Enabled),
+              ExposedProperties(other.ExposedProperties),
+              RuntimeInstance(nullptr),
+              RuntimeInitialized(false),
+              RuntimeUpdateCount(0)
+        {
+        }
+
+        NativeScriptEntry& operator=(const NativeScriptEntry& other)
+        {
+            if (this == &other)
+                return *this;
+            ScriptClassName = other.ScriptClassName;
+            ScriptAssetRelativePath = other.ScriptAssetRelativePath;
+            Enabled = other.Enabled;
+            ExposedProperties = other.ExposedProperties;
+            RuntimeInstance.reset();
+            RuntimeInitialized = false;
+            RuntimeUpdateCount = 0;
+            return *this;
+        }
+
+        NativeScriptEntry(NativeScriptEntry&&) noexcept = default;
+        NativeScriptEntry& operator=(NativeScriptEntry&&) noexcept = default;
+    };
+
+    /// Native C++ behavior scripts attached to an entity (Unity-style list).
+    struct NativeScriptComponent
+    {
+        std::vector<NativeScriptEntry> Scripts;
     };
 }
