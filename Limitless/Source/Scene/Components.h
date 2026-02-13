@@ -49,6 +49,7 @@ namespace Limitless
     {
         std::string TextureKey;  ///< Asset key for texture; empty = color-only
         Assets::TextureAsset::Ptr CachedTexture;  ///< Runtime cache; keeps asset alive
+        bool TextureLoadAttempted = false; ///< Prevents per-frame retry/log spam when texture is missing
         glm::vec4 Color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
     };
 
@@ -58,6 +59,7 @@ namespace Limitless
     {
         std::string MaterialKey; ///< Asset key for material (example: "Assets/Materials/MyMaterial.material.json")
         Assets::MaterialAsset::Ptr CachedMaterial; ///< Runtime cache; keeps asset alive
+        bool MaterialLoadAttempted = false; ///< Prevents per-frame retry/log spam when material is missing
     };
 
     /// Entity camera settings used to build the active gameplay camera in Play Mode.

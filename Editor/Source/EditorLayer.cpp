@@ -1,6 +1,7 @@
 #include "EditorLayer.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetPaths.h"
+#include "Assets/AssetImportPipeline.h"
 #include "Assets/AssetTypes.h"
 #include "Assets/TextureAsset.h"
 #include "Core/Debug/Log.h"
@@ -8,6 +9,7 @@
 #include "EditorInspectorPanel.h"
 #include "EditorMenuBar.h"
 #include "EditorPlayMode.h"
+#include "EditorProjectDialog.h"
 #include "EditorProjectPanel.h"
 #include "EditorRuntimeOperations.h"
 #include "EditorScenePanel.h"
@@ -98,6 +100,12 @@ namespace Limitless
 
     void EditorLayer::OnAttach()
     {
+        // Unity-style startup:
+        // Always begin in the Project Browser and require explicit Open/Create.
+        // Never auto-open from the editor working directory.
+        Project::ProjectManager::GetInstance().CloseProject();
+        EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Open);
+
         EditorRuntimeOperations::Attach(
             m_ViewportWidthPixels,
             m_ViewportHeightPixels,
@@ -106,10 +114,25 @@ namespace Limitless
             m_EditorCameraId,
             m_EditorCameraController,
             m_ViewportFramebuffer);
+
+        Application::GetInstance().GetWindow().SetFileDropCallback([this](const std::vector<std::filesystem::path>& droppedPaths) {
+            if (droppedPaths.empty())
+            {
+                return;
+            }
+
+            m_ProjectPanelState.PendingExternalDropPaths.insert(
+                m_ProjectPanelState.PendingExternalDropPaths.end(),
+                droppedPaths.begin(),
+                droppedPaths.end());
+        });
     }
 
     void EditorLayer::OnDetach()
     {
+        Application::GetInstance().GetWindow().SetFileDropCallback({});
+        EditorBuildAndRunPanel::Shutdown(m_BuildAndRunPanelState);
+
         EditorRuntimeOperations::Detach(
             m_Scene,
             m_EditSceneStored,
@@ -146,7 +169,23 @@ namespace Limitless
 
     void EditorLayer::OnRender()
     {
+        const bool openedProjectThisFrame = EditorProjectDialog::Draw(m_ProjectDialogState);
+        (void)openedProjectThisFrame;
+
+        // Block the full editor until a project is explicitly selected.
+        if (!Project::ProjectManager::GetInstance().HasOpenProject())
+        {
+            if (!m_ProjectDialogState.IsOpen)
+            {
+                EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Open);
+            }
+            return;
+        }
+
         DrawMenuBar();
+        EditorProjectSettingsPanel::Draw(m_ShowProjectSettingsWindow, m_ProjectSettingsPanelState);
+        EditorAssetDiagnosticsPanel::Draw(m_ShowAssetDiagnosticsWindow);
+        EditorBuildAndRunPanel::Draw(m_ShowBuildAndRunWindow, m_BuildAndRunPanelState);
         DrawViewportPanel();
         DrawScenePanel();
         DrawInspectorPanel();
@@ -173,6 +212,56 @@ namespace Limitless
         EditorMenuBar::Draw(
             m_PlayModeState,
             m_ShowDemoWindow,
+            m_ShowAssetDiagnosticsWindow,
+            m_ShowBuildAndRunWindow,
+            [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Open); },
+            [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Create); },
+            [this]() { m_ShowProjectSettingsWindow = true; },
+            [this]() {
+                const auto result = Assets::AssetImportPipeline::ReimportChanged(true);
+                if (result.IsFailure())
+                {
+                    LT_ERROR("Reimport Changed failed: {}", result.GetError().GetErrorMessage());
+                    return;
+                }
+                const auto& s = result.GetValue();
+                LT_INFO("Reimport Changed: discovered={} imported={} skipped={} missing={} errors={}",
+                        s.DiscoveredFiles, s.Imported, s.SkippedUpToDate, s.MissingOnDisk, s.Errors);
+            },
+            [this]() {
+                const auto result = Assets::AssetImportPipeline::ReimportAll(true);
+                if (result.IsFailure())
+                {
+                    LT_ERROR("Reimport All failed: {}", result.GetError().GetErrorMessage());
+                    return;
+                }
+                const auto& s = result.GetValue();
+                LT_INFO("Reimport All: discovered={} imported={} skipped={} missing={} errors={}",
+                        s.DiscoveredFiles, s.Imported, s.SkippedUpToDate, s.MissingOnDisk, s.Errors);
+            },
+            [this]() {
+                const auto result = Assets::AssetImportPipeline::ValidateAssetDatabase();
+                if (result.IsFailure())
+                {
+                    LT_ERROR("Validate Asset Database failed: {}", result.GetError().GetErrorMessage());
+                    return;
+                }
+
+                const auto& issues = result.GetValue();
+                if (issues.empty())
+                {
+                    LT_INFO("Asset Database validation: no issues found.");
+                }
+                else
+                {
+                    LT_WARN("Asset Database validation: {} issue(s) found.", issues.size());
+                    for (const auto& issue : issues)
+                    {
+                        LT_WARN(" - {} (key='{}' guid='{}' path='{}')",
+                                issue.Message, issue.Key, issue.Guid, issue.ResolvedPath);
+                    }
+                }
+            },
             [this]() { NewScene(); },
             [this]() { SaveScene(); },
             [this]() { SaveSceneAs(); },

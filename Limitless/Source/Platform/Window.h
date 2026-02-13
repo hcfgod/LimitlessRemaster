@@ -5,6 +5,7 @@
 #include <functional>
 #include <vector>
 #include <optional>
+#include <filesystem>
 #include "Core/Error.h"
 #include "Graphics/GraphicsContext.h"
 
@@ -126,6 +127,8 @@ namespace Limitless
     class Window
     {
     public:
+        using FileDropCallback = std::function<void(const std::vector<std::filesystem::path>&)>;
+
         virtual ~Window() = default;
 
         // Basic window operations
@@ -216,6 +219,7 @@ namespace Limitless
         virtual void SetMoveCallback(std::function<void(int, int)> callback) = 0;
         virtual void SetFocusCallback(std::function<void(bool)> callback) = 0;
         virtual void SetStateChangeCallback(std::function<void(WindowState)> callback) = 0;
+        virtual void SetFileDropCallback(FileDropCallback callback) = 0;
 
         // Window events
         virtual void SetEventCallback(std::function<void(WindowEventType)> callback) = 0;

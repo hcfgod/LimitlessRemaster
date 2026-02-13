@@ -11,6 +11,7 @@
 #include <shared_mutex>
 #include <string>
 #include <type_traits>
+#include <chrono>
 #include <unordered_map>
 #include <vector>
 
@@ -75,15 +76,39 @@ namespace Limitless::Assets
                 {
                     std::unique_lock<std::shared_mutex> wlock(s_Mutex);
                     s_GuidCache[guid] = cached;
+                    s_FailedLoadRetryByKey.erase(key);
                 }
                 return std::static_pointer_cast<T>(cached);
+            }
+
+            // 2) Respect failure retry cooldown to avoid per-frame load spam for missing assets.
+            const auto now = std::chrono::steady_clock::now();
+            {
+                std::shared_lock<std::shared_mutex> rlock(s_Mutex);
+                const auto failedIt = s_FailedLoadRetryByKey.find(key);
+                if (failedIt != s_FailedLoadRetryByKey.end() && now < failedIt->second)
+                {
+                    return nullptr;
+                }
             }
 
             // 2) Load outside locks.
             auto loaded = loader();
             if (!loaded)
             {
-                LT_CORE_ERROR("AssetManager::GetOrLoad failed to load '{}'", key);
+                bool shouldLog = false;
+                {
+                    std::unique_lock<std::shared_mutex> wlock(s_Mutex);
+                    auto [it, inserted] = s_FailedLoadRetryByKey.insert_or_assign(
+                        key, now + std::chrono::seconds(1));
+                    shouldLog = inserted;
+                    (void)it;
+                }
+
+                if (shouldLog)
+                {
+                    LT_CORE_ERROR("AssetManager::GetOrLoad failed to load '{}'", key);
+                }
                 return nullptr;
             }
 
@@ -100,6 +125,7 @@ namespace Limitless::Assets
                     if (auto existing = it->second.lock())
                     {
                         s_GuidCache[existing->GetGuid()] = existing;
+                        s_FailedLoadRetryByKey.erase(key);
                         return std::static_pointer_cast<T>(existing);
                     }
                     s_KeyCache.erase(it);
@@ -111,6 +137,7 @@ namespace Limitless::Assets
                     if (auto existing = git->second.lock())
                     {
                         s_KeyCache[key] = existing;
+                        s_FailedLoadRetryByKey.erase(key);
                         return std::static_pointer_cast<T>(existing);
                     }
                     s_GuidCache.erase(git);
@@ -118,6 +145,7 @@ namespace Limitless::Assets
 
                 s_KeyCache[key] = loadedBase;
                 s_GuidCache[loadedGuid] = loadedBase;
+                s_FailedLoadRetryByKey.erase(key);
             }
 
             return loaded;
@@ -201,6 +229,7 @@ namespace Limitless::Assets
     private:
         static std::unordered_map<std::string, std::weak_ptr<Asset>> s_KeyCache;
         static std::unordered_map<std::string, std::weak_ptr<Asset>> s_GuidCache;
+        static std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_FailedLoadRetryByKey;
         static std::shared_mutex s_Mutex;
     };
 }

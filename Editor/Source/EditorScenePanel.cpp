@@ -149,6 +149,7 @@ namespace Limitless::EditorScenePanel
 
                                 material->MaterialKey = key;
                                 material->CachedMaterial.reset();
+                                material->MaterialLoadAttempted = false;
 
                                 // Make the drop feel like Unity: select the target object (not the asset).
                                 selectedEntity = entity;

@@ -155,6 +155,10 @@ namespace Limitless::EditorProjectPanel
                 if (isDirectory)
                 {
                     const bool nodeOpen = ImGui::TreeNodeEx(fileName.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_RectOnly))
+                    {
+                        state.HoveredFolderRelativePathForExternalDrop = entryRelativePath;
+                    }
 
                     if (ImGui::BeginPopupContextItem())
                     {
@@ -401,6 +405,7 @@ namespace Limitless::EditorProjectPanel
               const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested)
     {
         ImGui::Begin("Project");
+        state.HoveredFolderRelativePathForExternalDrop.clear();
 
         const auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
         if (rootResult.IsFailure())
@@ -434,6 +439,11 @@ namespace Limitless::EditorProjectPanel
 
         if (ImGui::TreeNodeEx("Assets", ImGuiTreeNodeFlags_DefaultOpen))
         {
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_RectOnly))
+            {
+                state.HoveredFolderRelativePathForExternalDrop.clear();
+            }
+
             if (ImGui::BeginPopupContextItem())
             {
                 state.FolderPopupParent = "";
@@ -490,6 +500,21 @@ namespace Limitless::EditorProjectPanel
                           onSceneActivated,
                           onCreateSceneRequested);
             ImGui::TreePop();
+        }
+
+        if (!state.PendingExternalDropPaths.empty() &&
+            ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup))
+        {
+            const std::filesystem::path targetFolder = state.HoveredFolderRelativePathForExternalDrop;
+            const bool importedAny = ProjectAssetOperations::ImportExternalPathsToFolder(
+                state.PendingExternalDropPaths, targetFolder);
+            if (importedAny)
+            {
+                LT_INFO("Imported {} external path(s) into Assets/{}",
+                        state.PendingExternalDropPaths.size(),
+                        targetFolder.generic_string());
+            }
+            state.PendingExternalDropPaths.clear();
         }
 
         DrawProjectFolderPopups(assetsDirectory, state);

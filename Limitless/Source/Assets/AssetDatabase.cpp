@@ -5,11 +5,36 @@
 #include "Assets/AssetUtils.h"
 
 #include "Core/Debug/Log.h"
+#include "Core/Hash/XxHash64.h"
 
+#include <algorithm>
 #include <fstream>
 
 namespace Limitless::Assets
 {
+    static uint64_t ComputeImporterSettingsHash64(const nlohmann::json& importerSettings)
+    {
+        // Stable across restarts; used only for incremental tooling decisions.
+        const std::string settingsText = importerSettings.dump();
+        ::Limitless::Hash::XxHash64::State hasher(0);
+        hasher.Update(settingsText.data(), settingsText.size());
+        return hasher.Digest();
+    }
+
+    static int64_t GetLastWriteTimeTicksOrZero(const std::filesystem::path& path)
+    {
+        std::error_code ec;
+        const auto t = std::filesystem::last_write_time(path, ec);
+        if (ec)
+        {
+            return 0;
+        }
+
+        // file_time_type::duration::rep is implementation-defined; we store the raw tick count and only
+        // compare values from the same platform/toolchain family (incremental reimport correctness is best-effort).
+        return static_cast<int64_t>(t.time_since_epoch().count());
+    }
+
     AssetDatabase& AssetDatabase::GetInstance()
     {
         static AssetDatabase s_Instance;
@@ -101,6 +126,10 @@ namespace Limitless::Assets
             return Result<Record>(ErrorCode::FileNotFound, "Asset file not found: " + resolvedPath.string());
         }
 
+        std::error_code sizeEc;
+        const uint64_t sizeBytes = std::filesystem::file_size(resolvedPath, sizeEc);
+        const int64_t lastWriteTicks = GetLastWriteTimeTicksOrZero(resolvedPath);
+
         const auto guidResult = LoadOrCreateGuid(resolvedPath.string(), {{"key", key}, {"type", ToString(type)}});
         if (guidResult.IsFailure())
         {
@@ -113,13 +142,53 @@ namespace Limitless::Assets
         record.ResolvedPath = resolvedPath.string();
         record.Type = type;
         record.ImporterSettings = importerSettings;
+        record.SourceSizeBytes = sizeEc ? 0ull : sizeBytes;
+        record.SourceLastWriteTimeTicks = lastWriteTicks;
+        record.ImporterSettingsHash64 = ComputeImporterSettingsHash64(record.ImporterSettings);
+        record.ImporterVersion = 1;
 
         {
             std::lock_guard<std::mutex> lock(m_Mutex);
+            bool rebuildDependentsIndex = false;
+
+            // If the key previously mapped to a different GUID, the `.meta` GUID changed on disk.
+            // This can happen when a user intentionally regenerates a GUID (breaking references).
+            // We treat this as a record identity change:
+            // - The new GUID becomes canonical for the key
+            // - The old record is removed from the database
+            //
+            // NOTE: We intentionally do NOT rewrite other assets' references; those should now be "missing"
+            // and are surfaced via diagnostics.
+            if (auto keyIt = m_GuidByKey.find(record.Key); keyIt != m_GuidByKey.end() && keyIt->second != record.Guid)
+            {
+                const std::string oldGuid = keyIt->second;
+                if (auto oldIt = m_ByGuid.find(oldGuid); oldIt != m_ByGuid.end())
+                {
+                    // Preserve per-key metadata where safe.
+                    if (record.Dependencies.empty())
+                        record.Dependencies = oldIt->second.Dependencies;
+
+                    // Preserve importer settings if caller passed empty object.
+                    if (record.ImporterSettings.is_object() && record.ImporterSettings.empty())
+                    {
+                        record.ImporterSettings = oldIt->second.ImporterSettings;
+                        record.ImporterSettingsHash64 = oldIt->second.ImporterSettingsHash64;
+                    }
+
+                    m_ByGuid.erase(oldIt);
+                    rebuildDependentsIndex = true;
+                }
+            }
+
             // Preserve existing dependencies if present.
             if (auto it = m_ByGuid.find(record.Guid); it != m_ByGuid.end())
             {
                 record.Dependencies = it->second.Dependencies;
+                // Preserve existing import fingerprint if we could not compute it this pass.
+                if (record.SourceSizeBytes == 0) record.SourceSizeBytes = it->second.SourceSizeBytes;
+                if (record.SourceLastWriteTimeTicks == 0) record.SourceLastWriteTimeTicks = it->second.SourceLastWriteTimeTicks;
+                if (record.ImporterSettingsHash64 == 0) record.ImporterSettingsHash64 = it->second.ImporterSettingsHash64;
+                if (record.ImporterVersion == 0) record.ImporterVersion = it->second.ImporterVersion;
 
                 // Preserve importer settings unless explicitly overridden.
                 // This is critical because many tooling paths (bundle discovery, watchers, etc.)
@@ -127,11 +196,17 @@ namespace Limitless::Assets
                 if (record.ImporterSettings.is_object() && record.ImporterSettings.empty())
                 {
                     record.ImporterSettings = it->second.ImporterSettings;
+                    record.ImporterSettingsHash64 = it->second.ImporterSettingsHash64;
                 }
             }
 
             m_ByGuid[record.Guid] = record;
             m_GuidByKey[record.Key] = record.Guid;
+
+            if (rebuildDependentsIndex)
+            {
+                RebuildDependentsIndexLocked();
+            }
 
             const auto saveResult = SaveToDiskLocked();
             if (saveResult.IsFailure())
@@ -161,8 +236,34 @@ namespace Limitless::Assets
                 return Result<void>(ErrorCode::ResourceNotFound, "AssetDatabase::SetDependencies: guid not found");
             }
 
+            // Update reverse dependency index:
+            // Remove old edges (dep -> guid) and add new edges.
+            const auto oldDeps = it->second.Dependencies;
+            for (const auto& dep : oldDeps)
+            {
+                auto dit = m_DependentsByGuid.find(dep);
+                if (dit != m_DependentsByGuid.end())
+                {
+                    auto& vec = dit->second;
+                    vec.erase(std::remove(vec.begin(), vec.end(), guid), vec.end());
+                }
+            }
+
             it->second.Dependencies = dependencies;
             resolvedPath = it->second.ResolvedPath;
+
+            for (const auto& dep : dependencies)
+            {
+                if (dep.empty())
+                {
+                    continue;
+                }
+                auto& vec = m_DependentsByGuid[dep];
+                if (std::find(vec.begin(), vec.end(), guid) == vec.end())
+                {
+                    vec.push_back(guid);
+                }
+            }
 
             const auto saveResult = SaveToDiskLocked();
             if (saveResult.IsFailure())
@@ -186,15 +287,19 @@ namespace Limitless::Assets
             return out;
         }
 
-        for (const auto& [id, record] : m_ByGuid)
+        const auto it = m_DependentsByGuid.find(guid);
+        if (it == m_DependentsByGuid.end())
         {
-            for (const auto& dep : record.Dependencies)
+            return out;
+        }
+
+        out.reserve(it->second.size());
+        for (const auto& dependentGuid : it->second)
+        {
+            const auto recIt = m_ByGuid.find(dependentGuid);
+            if (recIt != m_ByGuid.end())
             {
-                if (dep == guid)
-                {
-                    out.push_back(record);
-                    break;
-                }
+                out.push_back(recIt->second);
             }
         }
 
@@ -213,6 +318,74 @@ namespace Limitless::Assets
             out.push_back(record);
         }
         return out;
+    }
+
+    Result<void> AssetDatabase::RemoveByGuid(const std::string& guid)
+    {
+        if (guid.empty())
+        {
+            return Result<void>(ErrorCode::InvalidArgument, "AssetDatabase::RemoveByGuid: guid is empty");
+        }
+
+        EnsureLoaded();
+        std::lock_guard<std::mutex> lock(m_Mutex);
+
+        const auto it = m_ByGuid.find(guid);
+        if (it == m_ByGuid.end())
+        {
+            return Result<void>(ErrorCode::ResourceNotFound, "AssetDatabase::RemoveByGuid: guid not found");
+        }
+
+        const std::string key = it->second.Key;
+        m_ByGuid.erase(it);
+        if (!key.empty())
+        {
+            m_GuidByKey.erase(key);
+        }
+
+        RebuildDependentsIndexLocked();
+
+        const auto saveResult = SaveToDiskLocked();
+        if (saveResult.IsFailure())
+        {
+            LT_CORE_WARN("AssetDatabase: failed to save database: {}", saveResult.GetError().GetErrorMessage());
+        }
+
+        return Result<void>();
+    }
+
+    Result<void> AssetDatabase::RemoveByKey(const std::string& key)
+    {
+        if (key.empty())
+        {
+            return Result<void>(ErrorCode::InvalidArgument, "AssetDatabase::RemoveByKey: key is empty");
+        }
+
+        EnsureLoaded();
+        std::lock_guard<std::mutex> lock(m_Mutex);
+
+        const auto it = m_GuidByKey.find(key);
+        if (it == m_GuidByKey.end())
+        {
+            return Result<void>(ErrorCode::ResourceNotFound, "AssetDatabase::RemoveByKey: key not found");
+        }
+
+        const std::string guid = it->second;
+        m_GuidByKey.erase(it);
+        if (!guid.empty())
+        {
+            m_ByGuid.erase(guid);
+        }
+
+        RebuildDependentsIndexLocked();
+
+        const auto saveResult = SaveToDiskLocked();
+        if (saveResult.IsFailure())
+        {
+            LT_CORE_WARN("AssetDatabase: failed to save database: {}", saveResult.GetError().GetErrorMessage());
+        }
+
+        return Result<void>();
     }
 
     size_t AssetDatabase::GetRecordCount() const
@@ -266,6 +439,7 @@ namespace Limitless::Assets
 
             m_ByGuid.clear();
             m_GuidByKey.clear();
+            m_DependentsByGuid.clear();
 
             for (const auto& recJson : root["records"])
             {
@@ -285,6 +459,7 @@ namespace Limitless::Assets
                 m_GuidByKey[r.Key] = r.Guid;
                 m_ByGuid[r.Guid] = std::move(r);
             }
+            RebuildDependentsIndexLocked();
         }
         catch (const std::exception& e)
         {
@@ -311,7 +486,7 @@ namespace Limitless::Assets
             }
 
             nlohmann::json root;
-            root["version"] = 1;
+            root["version"] = 2;
             root["records"] = nlohmann::json::array();
 
             for (const auto& [guid, record] : m_ByGuid)
@@ -372,6 +547,10 @@ namespace Limitless::Assets
         j["type"] = ToString(r.Type);
         j["importerSettings"] = r.ImporterSettings;
         j["deps"] = r.Dependencies;
+        j["sourceSizeBytes"] = r.SourceSizeBytes;
+        j["sourceLastWriteTimeTicks"] = r.SourceLastWriteTimeTicks;
+        j["importerSettingsHash64"] = r.ImporterSettingsHash64;
+        j["importerVersion"] = r.ImporterVersion;
         return j;
     }
 
@@ -398,6 +577,10 @@ namespace Limitless::Assets
                 }
             }
         }
+        if (j.contains("sourceSizeBytes") && j["sourceSizeBytes"].is_number_unsigned()) r.SourceSizeBytes = j["sourceSizeBytes"].get<uint64_t>();
+        if (j.contains("sourceLastWriteTimeTicks") && j["sourceLastWriteTimeTicks"].is_number_integer()) r.SourceLastWriteTimeTicks = j["sourceLastWriteTimeTicks"].get<int64_t>();
+        if (j.contains("importerSettingsHash64") && j["importerSettingsHash64"].is_number_unsigned()) r.ImporterSettingsHash64 = j["importerSettingsHash64"].get<uint64_t>();
+        if (j.contains("importerVersion") && j["importerVersion"].is_number_unsigned()) r.ImporterVersion = j["importerVersion"].get<uint32_t>();
 
         if (r.Guid.empty() || r.Key.empty())
         {
@@ -405,6 +588,25 @@ namespace Limitless::Assets
         }
 
         return r;
+    }
+
+    void AssetDatabase::RebuildDependentsIndexLocked()
+    {
+        m_DependentsByGuid.clear();
+        m_DependentsByGuid.reserve(m_ByGuid.size());
+
+        for (const auto& [guid, record] : m_ByGuid)
+        {
+            (void)guid;
+            for (const auto& dep : record.Dependencies)
+            {
+                if (dep.empty())
+                {
+                    continue;
+                }
+                m_DependentsByGuid[dep].push_back(record.Guid);
+            }
+        }
     }
 }
 

@@ -43,3 +43,9 @@
 // Scene / ECS
 #include "Scene/Components.h"
 #include "Scene/Scene.h"
+
+// Project System (Editor/tooling)
+#include "Project/ProjectDefinition.h"
+#include "Project/ProjectManager.h"
+#include "Project/ProjectSettings.h"
+#include "Project/BuildTargetsSettings.h"

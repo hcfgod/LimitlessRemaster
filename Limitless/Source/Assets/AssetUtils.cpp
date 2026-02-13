@@ -148,6 +148,92 @@ namespace Limitless::Assets
         }
     }
 
+    Result<std::string> ForceRegenerateGuid(const std::string& assetPath, const nlohmann::json& extraMeta)
+    {
+        if (assetPath.empty())
+        {
+            return Result<std::string>(ErrorCode::InvalidArgument, "Asset path is empty");
+        }
+
+        const std::string metaPath = GetMetaPath(assetPath);
+
+        nlohmann::json j = extraMeta;
+
+        // Preserve existing fields where safe (especially deps).
+        try
+        {
+            if (std::filesystem::exists(metaPath))
+            {
+                std::ifstream in(metaPath, std::ios::in | std::ios::binary);
+                if (in.is_open())
+                {
+                    nlohmann::json existing;
+                    in >> existing;
+                    if (existing.is_object())
+                    {
+                        // Merge existing -> new, then overwrite guid below.
+                        for (auto it = existing.begin(); it != existing.end(); ++it)
+                        {
+                            if (it.key() == "guid")
+                            {
+                                continue;
+                            }
+                            j[it.key()] = it.value();
+                        }
+                    }
+                }
+            }
+        }
+        catch (const std::exception& e)
+        {
+            LT_CORE_WARN("Assets::ForceRegenerateGuid: failed to read existing meta '{}': {}", metaPath, e.what());
+        }
+
+        const std::string newGuid = GenerateGuid();
+        j["guid"] = newGuid;
+
+        try
+        {
+            const std::filesystem::path metaFsPath(metaPath);
+            if (metaFsPath.has_parent_path())
+            {
+                std::filesystem::create_directories(metaFsPath.parent_path());
+            }
+
+            const std::string tempPath = MakeTempMetaPath(metaPath);
+            {
+                std::ofstream out(tempPath, std::ios::out | std::ios::binary | std::ios::trunc);
+                if (!out.is_open())
+                {
+                    return Result<std::string>(ErrorCode::FileAccessDenied, "Failed to create temp meta file: " + tempPath);
+                }
+                out << j.dump(4);
+                out.flush();
+            }
+
+            std::error_code ec;
+            std::filesystem::rename(tempPath, metaPath, ec);
+            if (ec)
+            {
+                // Replacement path (Windows).
+                ec.clear();
+                std::filesystem::remove(metaPath, ec);
+                ec.clear();
+                std::filesystem::rename(tempPath, metaPath, ec);
+                if (ec)
+                {
+                    return Result<std::string>(ErrorCode::FileAccessDenied, "Failed to replace meta file: " + ec.message());
+                }
+            }
+
+            return newGuid;
+        }
+        catch (const std::exception& e)
+        {
+            return Result<std::string>(ErrorCode::FileAccessDenied, std::string("Failed to regenerate meta file: ") + e.what());
+        }
+    }
+
     Result<void> WriteDependencies(const std::string& assetPath, const std::vector<std::string>& dependencies)
     {
         if (assetPath.empty())

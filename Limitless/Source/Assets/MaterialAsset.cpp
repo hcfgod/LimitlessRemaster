@@ -16,11 +16,42 @@
 #include "Graphics/Renderer.h"
 
 #include <fstream>
+#include <mutex>
 #include <sstream>
+#include <unordered_set>
 
 namespace Limitless::Assets
 {
     using json = nlohmann::json;
+
+    namespace
+    {
+        std::mutex g_MaterialLoadErrorMutex;
+        std::unordered_set<std::string> g_LoggedOpenFailures;
+
+        bool ShouldLogMaterialOpenFailure(const std::string& resolvedPath)
+        {
+            if (resolvedPath.empty())
+            {
+                return false;
+            }
+
+            std::lock_guard<std::mutex> lock(g_MaterialLoadErrorMutex);
+            const auto [_, inserted] = g_LoggedOpenFailures.insert(resolvedPath);
+            return inserted;
+        }
+
+        void ClearMaterialOpenFailureSuppression(const std::string& resolvedPath)
+        {
+            if (resolvedPath.empty())
+            {
+                return;
+            }
+
+            std::lock_guard<std::mutex> lock(g_MaterialLoadErrorMutex);
+            g_LoggedOpenFailures.erase(resolvedPath);
+        }
+    }
 
     static Result<std::shared_ptr<ShaderAsset>> ResolveShaderAsset(const json& root)
     {
@@ -333,6 +364,7 @@ namespace Limitless::Assets
                     }
 
                     updateDependencies();
+                    ClearMaterialOpenFailureSuppression(key);
                     return true;
                 }
             }
@@ -352,7 +384,10 @@ namespace Limitless::Assets
         std::ifstream file(m_ResolvedPath, std::ios::in | std::ios::binary);
         if (!file.is_open())
         {
-            LT_CORE_ERROR("MaterialAsset: failed to open '{}'", m_ResolvedPath);
+            if (ShouldLogMaterialOpenFailure(m_ResolvedPath))
+            {
+                LT_CORE_ERROR("MaterialAsset: failed to open '{}' (further missing-file logs for this path are suppressed)", m_ResolvedPath);
+            }
             return false;
         }
 
@@ -398,6 +433,7 @@ namespace Limitless::Assets
             m_HasMainTextureSpecOverride = false;
         }
         updateDependencies();
+        ClearMaterialOpenFailureSuppression(m_ResolvedPath);
         return true;
     }
 

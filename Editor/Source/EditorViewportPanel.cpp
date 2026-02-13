@@ -219,6 +219,7 @@ namespace Limitless::EditorViewportPanel
 
                                         material->MaterialKey = key;
                                         material->CachedMaterial.reset();
+                                        material->MaterialLoadAttempted = false;
 
                                         selectedEntity = targetEntity;
 

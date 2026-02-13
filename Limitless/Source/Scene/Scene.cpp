@@ -1,5 +1,9 @@
 #include "Scene/Scene.h"
+#include "Assets/AssetDatabase.h"
 #include "Assets/AssetManager.h"
+#include "Assets/AssetPaths.h"
+#include "Assets/AssetTypes.h"
+#include "Assets/AssetUtils.h"
 #include "Assets/MaterialAssetImporter.h"
 #include "Assets/TextureAsset.h"
 #include "Graphics/Camera/Camera.h"
@@ -23,6 +27,83 @@ namespace Limitless
     namespace
     {
         constexpr int32_t kSiblingOrderStep = 10;
+
+        // Unity-style reference object for scene asset links.
+        // Prefer GUID stability, but also store key for convenience and bundle-only scenarios.
+        nlohmann::json MakeAssetReferenceJson(const std::string& assetKey, Assets::AssetType type)
+        {
+            using json = nlohmann::json;
+
+            json ref = json::object();
+            ref["guid"] = "";
+            ref["key"] = assetKey;
+
+            if (assetKey.empty())
+            {
+                return ref;
+            }
+
+            // Preferred: AssetDatabase GUID (stable, fast).
+            const auto record = Assets::AssetDatabase::GetInstance().FindByKey(assetKey);
+            if (record.IsSuccess() && !record.GetValue().Guid.empty())
+            {
+                ref["guid"] = record.GetValue().Guid;
+                return ref;
+            }
+
+            // Fallback: resolve path and ensure `.meta` exists.
+            const auto resolved = Assets::ResolveAssetKeyToPath(assetKey);
+            if (resolved.IsSuccess())
+            {
+                const auto guidResult = Assets::LoadOrCreateGuid(resolved.GetValue().string(), {{"key", assetKey}, {"type", Assets::ToString(type)}});
+                if (guidResult.IsSuccess())
+                {
+                    ref["guid"] = guidResult.GetValue();
+                    (void)Assets::AssetDatabase::GetInstance().ImportOrUpdate(assetKey, type);
+                }
+            }
+
+            return ref;
+        }
+
+        // Resolve a scene reference object to a key.
+        // Accepts either:
+        // - legacy string key
+        // - object { guid, key }
+        std::string ResolveAssetKeyFromSceneJson(const nlohmann::json& value)
+        {
+            if (value.is_string())
+            {
+                return value.get<std::string>();
+            }
+
+            if (!value.is_object())
+            {
+                return {};
+            }
+
+            // Preferred: GUID -> key.
+            if (value.contains("guid") && value["guid"].is_string())
+            {
+                const std::string guid = value["guid"].get<std::string>();
+                if (!guid.empty())
+                {
+                    const auto rec = Assets::AssetDatabase::GetInstance().FindByGuid(guid);
+                    if (rec.IsSuccess() && !rec.GetValue().Key.empty())
+                    {
+                        return rec.GetValue().Key;
+                    }
+                }
+            }
+
+            // Fallback: embedded key.
+            if (value.contains("key") && value["key"].is_string())
+            {
+                return value["key"].get<std::string>();
+            }
+
+            return {};
+        }
     }
 
     Scene::Scene() = default;
@@ -278,6 +359,7 @@ namespace Limitless
                 auto& destinationSprite = destinationRegistry.emplace<SpriteComponent>(destinationEntity);
                 destinationSprite.TextureKey = sprite->TextureKey;
                 destinationSprite.CachedTexture.reset();
+                destinationSprite.TextureLoadAttempted = false;
                 destinationSprite.Color = sprite->Color;
             }
 
@@ -286,6 +368,7 @@ namespace Limitless
                 auto& destinationMaterial = destinationRegistry.emplace<MaterialComponent>(destinationEntity);
                 destinationMaterial.MaterialKey = material->MaterialKey;
                 destinationMaterial.CachedMaterial.reset();
+                destinationMaterial.MaterialLoadAttempted = false;
             }
 
             if (const auto* camera = sourceRegistry.try_get<CameraComponent>(sourceEntity))
@@ -345,7 +428,7 @@ namespace Limitless
             indexByEntity.emplace(entities[index], static_cast<int32_t>(index));
 
         nlohmann::json root = nlohmann::json::object();
-        root["Version"] = 1;
+        root["Version"] = 2;
         if (m_EditorCameraBookmark.has_value())
         {
             root["EditorCamera"] = {
@@ -386,16 +469,14 @@ namespace Limitless
             if (const auto* sprite = m_Registry.try_get<SpriteComponent>(entity))
             {
                 entry["Sprite"] = {
-                    { "TextureKey", sprite->TextureKey },
+                    { "Texture", MakeAssetReferenceJson(sprite->TextureKey, Assets::AssetType::Texture2D) },
                     { "Color", { sprite->Color.r, sprite->Color.g, sprite->Color.b, sprite->Color.a } }
                 };
             }
 
             if (const auto* material = m_Registry.try_get<MaterialComponent>(entity))
             {
-                entry["Material"] = {
-                    { "MaterialKey", material->MaterialKey }
-                };
+                entry["Material"] = MakeAssetReferenceJson(material->MaterialKey, Assets::AssetType::Material);
             }
 
             if (const auto* camera = m_Registry.try_get<CameraComponent>(entity))
@@ -487,7 +568,18 @@ namespace Limitless
             {
                 const auto& spriteJson = entry["Sprite"];
                 auto& sprite = scene->GetRegistry().emplace<SpriteComponent>(entity);
-                sprite.TextureKey = spriteJson.value("TextureKey", "");
+                // Backward compatible:
+                // - v1: Sprite.TextureKey (string)
+                // - v2+: Sprite.Texture { guid, key }
+                if (spriteJson.contains("Texture"))
+                {
+                    sprite.TextureKey = ResolveAssetKeyFromSceneJson(spriteJson["Texture"]);
+                }
+                else
+                {
+                    sprite.TextureKey = spriteJson.value("TextureKey", "");
+                }
+                sprite.TextureLoadAttempted = false;
                 auto color = spriteJson.value("Color", std::vector<float>{ 1.0f, 1.0f, 1.0f, 1.0f });
                 if (color.size() >= 4)
                     sprite.Color = glm::vec4(color[0], color[1], color[2], color[3]);
@@ -497,8 +589,19 @@ namespace Limitless
             {
                 const auto& materialJson = entry["Material"];
                 auto& material = scene->GetRegistry().emplace<MaterialComponent>(entity);
-                material.MaterialKey = materialJson.value("MaterialKey", "");
+                // Backward compatible:
+                // - v1: Material.MaterialKey (string)
+                // - v2+: Material { guid, key }
+                if (materialJson.is_object() && materialJson.contains("MaterialKey"))
+                {
+                    material.MaterialKey = materialJson.value("MaterialKey", "");
+                }
+                else
+                {
+                    material.MaterialKey = ResolveAssetKeyFromSceneJson(materialJson);
+                }
                 material.CachedMaterial.reset();
+                material.MaterialLoadAttempted = false;
             }
 
             if (entry.contains("Camera") && entry["Camera"].is_object())
@@ -584,6 +687,7 @@ namespace Limitless
             auto& sprite = registry.get<SpriteComponent>(entity);
 
             glm::mat4 model = scene.GetWorldTransformMatrix(entity);
+            bool useMissingAssetFallback = false;
 
             // Material override (Unity-style): if the entity has a MaterialComponent, prefer its main texture.
             Assets::TextureAsset::Ptr materialMainTextureAsset;
@@ -591,13 +695,18 @@ namespace Limitless
             {
                 if (!material->MaterialKey.empty())
                 {
-                    if (!material->CachedMaterial)
+                    if (!material->CachedMaterial && !material->MaterialLoadAttempted)
                     {
                         material->CachedMaterial = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(material->MaterialKey);
+                        material->MaterialLoadAttempted = true;
                     }
                     if (material->CachedMaterial)
                     {
                         materialMainTextureAsset = material->CachedMaterial->GetMainTextureHandle().Lock();
+                    }
+                    else
+                    {
+                        useMissingAssetFallback = true;
                     }
                 }
             }
@@ -606,20 +715,27 @@ namespace Limitless
             {
                 Renderer2D::DrawQuad(model, materialMainTextureAsset, sprite.Color);
             }
+            else if (useMissingAssetFallback)
+            {
+                Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, sprite.Color.a));
+            }
             else if (!sprite.TextureKey.empty())
             {
-                if (!sprite.CachedTexture)
+                if (!sprite.CachedTexture && !sprite.TextureLoadAttempted)
                 {
                     auto tex = std::dynamic_pointer_cast<Assets::TextureAsset>(
                         Assets::AssetManager::GetCachedByKey(sprite.TextureKey));
                     if (!tex)
                         tex = Assets::TextureAsset::LoadBlocking(sprite.TextureKey);
                     sprite.CachedTexture = tex;
+                    sprite.TextureLoadAttempted = true;
                 }
                 if (sprite.CachedTexture)
+                {
                     Renderer2D::DrawQuad(model, sprite.CachedTexture, sprite.Color);
+                }
                 else
-                    Renderer2D::DrawQuad(model, sprite.Color);
+                    Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, sprite.Color.a));
             }
             else
             {

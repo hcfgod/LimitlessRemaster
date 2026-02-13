@@ -5,6 +5,10 @@
 #include "Assets/TextureAsset.h"
 #include "EditorPlayMode.h"
 #include "EditorProjectPanel.h"
+#include "EditorProjectDialog.h"
+#include "EditorProjectSettingsPanel.h"
+#include "EditorAssetDiagnosticsPanel.h"
+#include "EditorBuildAndRunPanel.h"
 #include "EditorScenePanel.h"
 #include "Graphics/Texture.h"
 
@@ -101,8 +105,14 @@ namespace Limitless
         std::array<char, 256> m_SaveSceneFileNameBuffer{};
 
         bool m_ShowDemoWindow = false;
+        bool m_ShowProjectSettingsWindow = false;
+        bool m_ShowAssetDiagnosticsWindow = false;
+        bool m_ShowBuildAndRunWindow = false;
         EditorScenePanelState m_ScenePanelState;
         EditorProjectPanelState m_ProjectPanelState;
+        EditorProjectDialog::EditorProjectDialogState m_ProjectDialogState;
+        EditorProjectSettingsPanel::EditorProjectSettingsPanelState m_ProjectSettingsPanelState;
+        EditorBuildAndRunPanel::EditorBuildAndRunPanelState m_BuildAndRunPanelState;
     };
 
 }  // namespace Limitless

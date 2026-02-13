@@ -10,24 +10,59 @@ namespace Limitless::Assets
 {
     static std::optional<std::filesystem::path> s_AssetRootOverride;
 
+    // Cache `FindProjectRootFromWorkingDirectory()` because it is called frequently during asset loads.
+    // IMPORTANT: this cache must be invalidated when callers set an explicit override.
+    static std::mutex s_CacheMutex;
+    static bool s_HasCached = false;
+    static Result<std::filesystem::path> s_CachedResult(ErrorCode::InvalidState, "Project root not cached");
+
+    static std::optional<std::filesystem::path> TryFindProjectRootByMarker(const std::filesystem::path& startingDirectory)
+    {
+        std::error_code ec;
+        std::filesystem::path probe = startingDirectory;
+
+        for (int depth = 0; depth < 32; ++depth)
+        {
+            const std::filesystem::path marker = probe / "Project" / "Project.json";
+            if (std::filesystem::exists(marker, ec) && std::filesystem::is_regular_file(marker, ec))
+            {
+                return probe;
+            }
+
+            if (!probe.has_parent_path())
+            {
+                break;
+            }
+
+            const std::filesystem::path parent = probe.parent_path();
+            if (parent == probe)
+            {
+                break;
+            }
+
+            probe = parent;
+        }
+
+        return std::nullopt;
+    }
+
     void SetAssetRootDirectory(const std::filesystem::path& rootDirectory)
     {
         if (rootDirectory.empty())
         {
             s_AssetRootOverride.reset();
+            std::lock_guard<std::mutex> lock(s_CacheMutex);
+            s_HasCached = false;
             return;
         }
 
         s_AssetRootOverride = std::filesystem::weakly_canonical(rootDirectory);
+        std::lock_guard<std::mutex> lock(s_CacheMutex);
+        s_HasCached = false;
     }
 
     Result<std::filesystem::path> FindProjectRootFromWorkingDirectory()
     {
-        // Cache result: this is called a lot during asset loads/importing.
-        static std::mutex s_CacheMutex;
-        static bool s_HasCached = false;
-        static Result<std::filesystem::path> s_CachedResult(ErrorCode::InvalidState, "Project root not cached");
-
         {
             std::lock_guard<std::mutex> lock(s_CacheMutex);
             if (s_HasCached)
@@ -85,6 +120,16 @@ namespace Limitless::Assets
             return fail;
         }
 
+        // Preferred (Unity-grade): a project marker file makes project discovery deterministic.
+        if (auto markerRoot = TryFindProjectRootByMarker(current); markerRoot.has_value())
+        {
+            Result<std::filesystem::path> ok = markerRoot.value();
+            std::lock_guard<std::mutex> lock(s_CacheMutex);
+            s_CachedResult = ok;
+            s_HasCached = true;
+            return ok;
+        }
+
         // Walk upward until we find a directory containing `Assets/`.
         //
         // IMPORTANT:
@@ -117,7 +162,9 @@ namespace Limitless::Assets
             probeAssets = parent;
         }
 
-        Result<std::filesystem::path> fail(ErrorCode::ResourceNotFound, "Could not locate project root (no solution marker and no 'Assets/' directory found)");
+        Result<std::filesystem::path> fail(
+            ErrorCode::ResourceNotFound,
+            "Could not locate project root (no 'Project/Project.json' marker and no 'Assets/' directory found)");
         std::lock_guard<std::mutex> lock(s_CacheMutex);
         s_CachedResult = fail;
         s_HasCached = true;

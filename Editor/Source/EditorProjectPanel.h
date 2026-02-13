@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace Limitless
 {
@@ -27,6 +28,10 @@ namespace Limitless
         std::array<char, 256> FolderPopupBuffer{};
         bool CreateFolderPopupOpen = false;
         bool RenameFolderPopupOpen = false;
+
+        // External OS drop import (Explorer/Finder -> Project panel).
+        std::vector<std::filesystem::path> PendingExternalDropPaths;
+        std::filesystem::path HoveredFolderRelativePathForExternalDrop;
     };
 
     namespace EditorProjectPanel

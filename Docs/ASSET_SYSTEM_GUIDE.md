@@ -57,7 +57,11 @@ File: `Limitless/Source/Assets/AssetHandle.h`
 
 - `{ "guid": "..." }`
 
-This is the format we’ll use for scenes/prefabs so references survive file moves/renames.
+For scene files, we use a slightly richer reference object to keep workflows convenient while still being GUID-stable:
+
+- `{ "guid": "...", "key": "Assets/..." }`
+
+The loader prefers GUID → key resolution via `AssetDatabase`, and falls back to the embedded key when needed.
 
 ### `AssetManager`
 
@@ -86,6 +90,13 @@ Important properties:
 
 - File: `Limitless/Source/Assets/AssetDatabase.{h,cpp}`
 - Storage: `Build/AssetDatabase.json` (under project root)
+
+The database also stores an **import fingerprint** per record to support incremental tooling:
+
+- `sourceSizeBytes`
+- `sourceLastWriteTimeTicks`
+- `importerSettingsHash64`
+- `importerVersion`
 
 ## Asset Hot Reload (Unity-style)
 
@@ -137,6 +148,28 @@ File: `Limitless/Source/Assets/AssetUtils.{h,cpp}`
 
 - `LoadOrCreateGuid(assetPath)` creates/reads `<assetPath>.meta`
 - `WriteDependencies(assetPath, deps)` writes a `deps` array in the meta for future hot-reload cascades
+- `ForceRegenerateGuid(assetPath)` rewrites `<assetPath>.meta` with a new GUID (**breaks references**, Unity-style)
+
+### `.meta` schema (current)
+
+`.meta` files are JSON and may contain:
+
+- `guid`: string (required)
+- `deps`: array of GUID strings (optional; used for hot reload cascades)
+- optional extra fields written by tooling, for example:
+  - `key`: `Assets/...` key (informational)
+  - `type`: asset type string (informational)
+
+## Scenes: GUID-stable references (v2 scene format)
+
+Scene serialization has been upgraded so material/texture references survive moves/renames:
+
+- Save writes `Sprite.Texture` and `Material` references as `{ guid, key }`.
+- Load remains backward compatible with the older `TextureKey` / `MaterialKey` fields.
+
+Implementation:
+
+- `Limitless/Source/Scene/Scene.cpp`
 
 ## Async Loading Model (Correctness Contract)
 

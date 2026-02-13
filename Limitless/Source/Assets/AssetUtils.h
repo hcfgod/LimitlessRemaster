@@ -19,6 +19,10 @@ namespace Limitless::Assets
     // Note: This function may create files on disk.
     [[nodiscard]] Result<std::string> LoadOrCreateGuid(const std::string& assetPath, const nlohmann::json& extraMeta = {});
 
+    // Force-regenerate a GUID by rewriting `<assetPath>.meta`.
+    // WARNING: This breaks any existing references to the old GUID (Unity-style behavior).
+    [[nodiscard]] Result<std::string> ForceRegenerateGuid(const std::string& assetPath, const nlohmann::json& extraMeta = {});
+
     // Update or create the `.meta` file to contain the given dependency GUIDs.
     // Existing unrelated fields are preserved when possible.
     Result<void> WriteDependencies(const std::string& assetPath, const std::vector<std::string>& dependencies);

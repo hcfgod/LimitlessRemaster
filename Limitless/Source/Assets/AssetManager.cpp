@@ -4,6 +4,7 @@ namespace Limitless::Assets
 {
     std::unordered_map<std::string, std::weak_ptr<Asset>> AssetManager::s_KeyCache;
     std::unordered_map<std::string, std::weak_ptr<Asset>> AssetManager::s_GuidCache;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> AssetManager::s_FailedLoadRetryByKey;
     std::shared_mutex AssetManager::s_Mutex;
 
     void AssetManager::GarbageCollect()
@@ -47,6 +48,7 @@ namespace Limitless::Assets
         std::unique_lock<std::shared_mutex> lock(s_Mutex);
         s_KeyCache.clear();
         s_GuidCache.clear();
+        s_FailedLoadRetryByKey.clear();
     }
 }
 

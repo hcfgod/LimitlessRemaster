@@ -226,6 +226,8 @@ namespace Limitless
 
     void SDLWindow::OnUpdate()
     {
+        std::vector<std::filesystem::path> droppedFilesThisFrame;
+
         // Process SDL events
         SDL_Event event;
         while (SDL_PollEvent(&event))
@@ -275,7 +277,22 @@ namespace Limitless
                 case SDL_EVENT_MOUSE_WHEEL:
                     LT_DISPATCH_DEFERRED(std::make_unique<Events::MouseScrolledEvent>(event.wheel.x, event.wheel.y));
                     break;
+
+                // OS drag-and-drop (Explorer/Finder -> window)
+                case SDL_EVENT_DROP_FILE:
+                {
+                    if (event.drop.data && event.drop.data[0] != '\0')
+                    {
+                        droppedFilesThisFrame.emplace_back(std::filesystem::path(event.drop.data));
+                    }
+                    break;
+                }
             }
+        }
+
+        if (!droppedFilesThisFrame.empty() && m_FileDropCallback)
+        {
+            m_FileDropCallback(droppedFilesThisFrame);
         }
     }
 

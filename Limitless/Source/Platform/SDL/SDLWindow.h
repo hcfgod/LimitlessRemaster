@@ -111,6 +111,7 @@ namespace Limitless
         void SetMoveCallback(std::function<void(int, int)> callback) override { m_MoveCallback = callback; }
         void SetFocusCallback(std::function<void(bool)> callback) override { m_FocusCallback = callback; }
         void SetStateChangeCallback(std::function<void(WindowState)> callback) override { m_StateChangeCallback = callback; }
+        void SetFileDropCallback(FileDropCallback callback) override { m_FileDropCallback = std::move(callback); }
 
         // Window events
         void SetEventCallback(std::function<void(WindowEventType)> callback) override { m_EventCallback = callback; }
@@ -194,6 +195,7 @@ namespace Limitless
         std::function<void(int, int)> m_MoveCallback;
         std::function<void(bool)> m_FocusCallback;
         std::function<void(WindowState)> m_StateChangeCallback;
+        FileDropCallback m_FileDropCallback;
         std::function<void(WindowEventType)> m_EventCallback;
         std::function<void(const SDL_Event&)> m_SdlEventCallback;
 

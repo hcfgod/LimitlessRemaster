@@ -1,0 +1,38 @@
+{
+  "maps": [
+    {
+      "name": "Editor",
+      "enabled": true,
+      "actions": [
+        {
+          "name": "Move",
+          "type": "Axis2D",
+          "bindings": [
+            { "binding": "KeyboardAxis2D", "up": "W", "down": "S", "left": "A", "right": "D", "scale": 1.0 }
+          ]
+        },
+        {
+          "name": "Look",
+          "type": "Axis2D",
+          "bindings": [
+            { "binding": "MouseDelta", "sensitivity": 0.5, "invert_y": false }
+          ]
+        },
+        {
+          "name": "Boost",
+          "type": "Button",
+          "bindings": [
+            { "binding": "KeyboardButton", "key": "Left Shift" }
+          ]
+        },
+        {
+          "name": "LookEnable",
+          "type": "Button",
+          "bindings": [
+            { "binding": "MouseButton", "button": 3 }
+          ]
+        }
+      ]
+    }
+  ]
+}

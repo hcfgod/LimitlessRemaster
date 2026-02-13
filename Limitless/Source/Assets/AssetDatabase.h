@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -38,6 +39,13 @@ namespace Limitless::Assets
             AssetType Type = AssetType::Unknown;
             nlohmann::json ImporterSettings = nlohmann::json::object();
             std::vector<std::string> Dependencies; // GUIDs
+
+            // Import fingerprint (tooling/editor):
+            // Used to support incremental reimport/cooking decisions.
+            uint64_t SourceSizeBytes = 0;
+            int64_t SourceLastWriteTimeTicks = 0;
+            uint64_t ImporterSettingsHash64 = 0;
+            uint32_t ImporterVersion = 1;
         };
 
         static AssetDatabase& GetInstance();
@@ -63,6 +71,10 @@ namespace Limitless::Assets
         // Find all assets that depend on `guid` (reverse dependency lookup).
         std::vector<Record> GetDependentsOf(const std::string& guid);
 
+        // Remove records (tooling only). This does NOT delete files on disk.
+        Result<void> RemoveByGuid(const std::string& guid);
+        Result<void> RemoveByKey(const std::string& key);
+
         // Snapshot all records (for tooling/debug).
         std::vector<Record> GetAllRecords();
 
@@ -79,6 +91,8 @@ namespace Limitless::Assets
         static nlohmann::json RecordToJson(const Record& r);
         static Result<Record> RecordFromJson(const nlohmann::json& j);
 
+        void RebuildDependentsIndexLocked();
+
     private:
         mutable std::mutex m_Mutex;
         bool m_Loaded = false;
@@ -87,6 +101,10 @@ namespace Limitless::Assets
         std::unordered_map<std::string, Record> m_ByGuid;
         // Key -> GUID
         std::unordered_map<std::string, std::string> m_GuidByKey;
+
+        // Reverse dependency index:
+        // depGuid -> list of guids that depend on depGuid
+        std::unordered_map<std::string, std::vector<std::string>> m_DependentsByGuid;
     };
 }
 

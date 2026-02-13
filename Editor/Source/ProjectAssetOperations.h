@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace Limitless::ProjectAssetOperations
 {
@@ -21,4 +22,9 @@ namespace Limitless::ProjectAssetOperations
 
     bool MoveAssetToFolder(const std::string& assetKey,
                            const std::filesystem::path& destinationFolderRelativePath);
+
+    // Import external files/folders from the host file system into Assets/<destinationFolderRelativePath>.
+    // Returns true if at least one file/folder was copied successfully.
+    bool ImportExternalPathsToFolder(const std::vector<std::filesystem::path>& sourcePaths,
+                                     const std::filesystem::path& destinationFolderRelativePath);
 }

@@ -34,7 +34,10 @@ namespace Limitless::EditorInspectorPanel
             {
                 auto& sprite = view.get<SpriteComponent>(entity);
                 if (sprite.TextureKey == textureKey)
+                {
                     sprite.CachedTexture.reset();
+                    sprite.TextureLoadAttempted = false;
+                }
             }
         }
 
@@ -722,6 +725,7 @@ namespace Limitless::EditorInspectorPanel
                                     material = &registry.emplace<MaterialComponent>(selectedEntity);
                                 material->MaterialKey = key;
                                 material->CachedMaterial.reset();
+                                material->MaterialLoadAttempted = false;
                             }
                         }
                         ImGui::EndDragDropTarget();
@@ -734,6 +738,7 @@ namespace Limitless::EditorInspectorPanel
                         {
                             material->MaterialKey.clear();
                             material->CachedMaterial.reset();
+                            material->MaterialLoadAttempted = false;
                         }
                     }
 

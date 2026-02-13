@@ -7,6 +7,14 @@ namespace Limitless::EditorMenuBar
 {
     void Draw(EditorPlayModeState playModeState,
               bool& showDemoWindow,
+              bool& showAssetDiagnosticsWindow,
+              bool& showBuildAndRunWindow,
+              const std::function<void()>& onOpenProject,
+              const std::function<void()>& onCreateProject,
+              const std::function<void()>& onProjectSettings,
+              const std::function<void()>& onReimportChangedAssets,
+              const std::function<void()>& onReimportAllAssets,
+              const std::function<void()>& onValidateAssetDatabase,
               const std::function<void()>& onNewScene,
               const std::function<void()>& onSaveScene,
               const std::function<void()>& onSaveSceneAs,
@@ -19,6 +27,13 @@ namespace Limitless::EditorMenuBar
 
         if (ImGui::BeginMenu("File"))
         {
+            if (ImGui::MenuItem("Open Project..."))
+                onOpenProject();
+            if (ImGui::MenuItem("Create Project..."))
+                onCreateProject();
+            if (ImGui::MenuItem("Project Settings..."))
+                onProjectSettings();
+            ImGui::Separator();
             if (ImGui::MenuItem("New Scene"))
                 onNewScene();
             if (ImGui::MenuItem("Save Scene", "Ctrl+S"))
@@ -40,6 +55,18 @@ namespace Limitless::EditorMenuBar
             ImGui::EndMenu();
         }
 
+        if (ImGui::BeginMenu("Assets"))
+        {
+            if (ImGui::MenuItem("Reimport Changed"))
+                onReimportChangedAssets();
+            if (ImGui::MenuItem("Reimport All"))
+                onReimportAllAssets();
+            ImGui::Separator();
+            if (ImGui::MenuItem("Validate Asset Database"))
+                onValidateAssetDatabase();
+            ImGui::EndMenu();
+        }
+
         if (ImGui::BeginMenu("View"))
         {
             ImGui::MenuItem("Scene", nullptr, nullptr);
@@ -52,6 +79,8 @@ namespace Limitless::EditorMenuBar
         if (ImGui::BeginMenu("Window"))
         {
             ImGui::MenuItem("Demo Window", nullptr, &showDemoWindow);
+            ImGui::MenuItem("Asset Diagnostics", nullptr, &showAssetDiagnosticsWindow);
+            ImGui::MenuItem("Build And Run", nullptr, &showBuildAndRunWindow);
             ImGui::EndMenu();
         }
 
