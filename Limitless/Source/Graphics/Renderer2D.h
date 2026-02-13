@@ -3,6 +3,7 @@
 #include "Assets/MaterialAsset.h"
 #include "Assets/TextureAsset.h"
 #include "Graphics/Camera/Camera.h"
+#include "Graphics/Font.h"
 
 #include <glm/glm.hpp>
 
@@ -60,6 +61,7 @@ namespace Limitless
         // Full transform overloads.
         static void DrawQuad(const glm::mat4& transform, const glm::vec4& color);
         static void DrawQuad(const glm::mat4& transform, const Assets::TextureAsset::Ptr& texture, const glm::vec4& tintColor = glm::vec4(1.0f));
+        static void DrawText(const glm::mat4& transform, const std::string& text, const Font::Ptr& font, float fontSize, const glm::vec4& color = glm::vec4(1.0f));
 
         static const Statistics& GetStatistics();
         static void ResetStatistics();
@@ -72,7 +74,8 @@ namespace Limitless
         static const char* GetDefaultShaderKey();
 
     private:
-        static void Flush();
+        static void FlushQuadBatch();
+        static void FlushTextBatch();
     };
 }
 

@@ -1,0 +1,6 @@
+{
+    "deps": [],
+    "guid": "ab9ccd0d-ca83-4e90-9f67-0eaca38701c5",
+    "key": "Assets/Shaders/Renderer2D_MSDFText.glsl",
+    "type": "Shader"
+}

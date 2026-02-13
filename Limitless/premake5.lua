@@ -73,6 +73,10 @@ project "Limitless"
         -- compilation (shaderc) and reflection/transpilation (SPIRV-Cross).
         "Vendor/shaderc/libshaderc/include",
         "Vendor/SPIRV-Cross",
+        "Vendor/msdf-atlas-gen/msdf-atlas-gen",
+        "Vendor/msdf-atlas-gen/msdfgen",
+        "Vendor/msdf-atlas-gen/msdfgen/include",
+        "Vendor/msdf-atlas-gen/msdfgen/freetype/include",
 
         -- Vulkan headers + loader import library (vendored).
         "Vendor/VulkanSDK/include"
@@ -84,6 +88,9 @@ project "Limitless"
         "VendorSpirvCross",
         -- Build Zstd from source as a normal static library project.
         "VendorZstd",
+        "msdf-atlas-gen",
+        "msdfgen",
+        "freetype",
     }
 
     filter "system:windows"
@@ -266,4 +273,5 @@ project "Limitless"
 group "Dependencies"
     include "Vendor/SPIRV-Cross"
     include "Vendor/Zstd"
+    include "Vendor/msdf-atlas-gen"
 group ""

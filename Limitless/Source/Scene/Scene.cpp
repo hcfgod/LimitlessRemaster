@@ -385,6 +385,17 @@ namespace Limitless
                 destinationMaterial.MaterialLoadAttempted = false;
             }
 
+            if (const auto* text = sourceRegistry.try_get<TextComponent>(sourceEntity))
+            {
+                auto& destinationText = destinationRegistry.emplace<TextComponent>(destinationEntity);
+                destinationText.Text = text->Text;
+                destinationText.FontFilePath = text->FontFilePath;
+                destinationText.CachedFont.reset();
+                destinationText.FontLoadAttempted = false;
+                destinationText.FontSize = text->FontSize;
+                destinationText.Color = text->Color;
+            }
+
             if (const auto* camera = sourceRegistry.try_get<CameraComponent>(sourceEntity))
             {
                 destinationRegistry.emplace<CameraComponent>(destinationEntity, *camera);
@@ -503,6 +514,16 @@ namespace Limitless
             if (const auto* material = m_Registry.try_get<MaterialComponent>(entity))
             {
                 entry["Material"] = MakeAssetReferenceJson(material->MaterialKey, Assets::AssetType::Material);
+            }
+
+            if (const auto* text = m_Registry.try_get<TextComponent>(entity))
+            {
+                entry["Text"] = {
+                    { "Value", text->Text },
+                    { "FontFilePath", text->FontFilePath },
+                    { "FontSize", text->FontSize },
+                    { "Color", { text->Color.r, text->Color.g, text->Color.b, text->Color.a } }
+                };
             }
 
             if (const auto* camera = m_Registry.try_get<CameraComponent>(entity))
@@ -639,6 +660,20 @@ namespace Limitless
                 }
                 material.CachedMaterial.reset();
                 material.MaterialLoadAttempted = false;
+            }
+
+            if (entry.contains("Text") && entry["Text"].is_object())
+            {
+                const auto& textJson = entry["Text"];
+                auto& text = scene->GetRegistry().emplace<TextComponent>(entity);
+                text.Text = textJson.value("Value", std::string("Text"));
+                text.FontFilePath = textJson.value("FontFilePath", std::string{});
+                text.FontSize = textJson.value("FontSize", 32.0f);
+                auto color = textJson.value("Color", std::vector<float>{ 1.0f, 1.0f, 1.0f, 1.0f });
+                if (color.size() >= 4)
+                    text.Color = glm::vec4(color[0], color[1], color[2], color[3]);
+                text.CachedFont.reset();
+                text.FontLoadAttempted = false;
             }
 
             if (entry.contains("Camera") && entry["Camera"].is_object())
@@ -802,6 +837,57 @@ namespace Limitless
             {
                 Renderer2D::DrawQuad(model, sprite.Color);
             }
+        }
+
+        auto textView = registry.view<TransformComponent, TextComponent>();
+        std::vector<entt::entity> textRenderEntities;
+        textRenderEntities.reserve(textView.size_hint());
+        for (entt::entity entity : textView)
+            textRenderEntities.push_back(entity);
+
+        std::sort(textRenderEntities.begin(), textRenderEntities.end(), [&scene, &registry](entt::entity left, entt::entity right) {
+            const glm::mat4 leftWorld = scene.GetWorldTransformMatrix(left);
+            const glm::mat4 rightWorld = scene.GetWorldTransformMatrix(right);
+            const float leftZ = leftWorld[3].z;
+            const float rightZ = rightWorld[3].z;
+            if (leftZ != rightZ)
+                return leftZ < rightZ;
+
+            const auto* leftHierarchy = registry.try_get<HierarchyComponent>(left);
+            const auto* rightHierarchy = registry.try_get<HierarchyComponent>(right);
+            const int32_t leftOrder = leftHierarchy ? leftHierarchy->SiblingOrder : 0;
+            const int32_t rightOrder = rightHierarchy ? rightHierarchy->SiblingOrder : 0;
+            if (leftOrder != rightOrder)
+                return leftOrder < rightOrder;
+
+            return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
+        });
+
+        for (entt::entity entity : textRenderEntities)
+        {
+            auto& text = registry.get<TextComponent>(entity);
+            if (text.Text.empty() || text.FontFilePath.empty())
+            {
+                continue;
+            }
+
+            if (!text.CachedFont && !text.FontLoadAttempted)
+            {
+                text.CachedFont = Font::CreateFromFile(text.FontFilePath);
+                text.FontLoadAttempted = true;
+                if (!text.CachedFont)
+                {
+                    LT_CORE_WARN("SceneRenderer: failed to load text font '{}'", text.FontFilePath);
+                }
+            }
+
+            if (!text.CachedFont)
+            {
+                continue;
+            }
+
+            const glm::mat4 model = scene.GetWorldTransformMatrix(entity);
+            Renderer2D::DrawText(model, text.Text, text.CachedFont, text.FontSize, text.Color);
         }
 
         Renderer2D::EndScene();

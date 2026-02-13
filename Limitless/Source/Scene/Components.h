@@ -3,6 +3,7 @@
 #include "Assets/MaterialAsset.h"
 #include "Assets/AudioClipAsset.h"
 #include "Assets/TextureAsset.h"
+#include "Graphics/Font.h"
 #include "EnTT/entt.hpp"
 
 #include <glm/glm.hpp>
@@ -53,6 +54,17 @@ namespace Limitless
         Assets::TextureAsset::Ptr CachedTexture;  ///< Runtime cache; keeps asset alive
         bool TextureLoadAttempted = false; ///< Prevents per-frame retry/log spam when texture is missing
         glm::vec4 Color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+    };
+
+    /// Renders runtime text using an MSDF atlas generated from the font file path.
+    struct TextComponent
+    {
+        std::string Text = "Text";
+        std::string FontFilePath; ///< Relative or absolute font file path.
+        Font::Ptr CachedFont;
+        bool FontLoadAttempted = false;
+        float FontSize = 32.0f;
+        glm::vec4 Color = glm::vec4(1.0f);
     };
 
     /// Optional material reference (Unity-style).

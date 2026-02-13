@@ -1,0 +1,9 @@
+{
+    "deps": [
+        "ab9ccd0d-ca83-4e90-9f67-0eaca38701c5",
+        "5b5a13a7-ab2d-4947-974a-af21398cf103"
+    ],
+    "guid": "1a5ab268-9aa9-4a68-9cc9-b9e248e2d882",
+    "key": "Assets/Materials/Renderer2D_MSDFText.material.json",
+    "type": "Material"
+}

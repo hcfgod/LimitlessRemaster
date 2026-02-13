@@ -5,7 +5,7 @@
 
 #include <core/SkPath.h>
 #include <pathops/SkPathOps.h>
-#include "../core/Vector2.h"
+#include "../core/Vector2.hpp"
 #include "../core/edge-segments.h"
 #include "../core/Contour.h"
 

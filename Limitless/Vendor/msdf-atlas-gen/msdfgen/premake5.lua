@@ -2,10 +2,10 @@ project "freetype"
 	location "freetype"
 	kind "StaticLib"
 	language "C"
-    staticruntime "on" -- default, overridden per-config
+    staticruntime "off"
 
-	targetdir ("Binaries/" .. OutputDir .. "/%{prj.name}")
-    objdir ("Binaries/Intermediates/" .. OutputDir .. "/%{prj.name}")
+	targetdir ("%{wks.location}/Build/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
+    objdir ("%{wks.location}/Build/Intermediates/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
 
 	files
 	{
@@ -74,17 +74,14 @@ project "freetype"
 
 	filter "configurations:Debug"
 		runtime "Debug"
-		staticruntime "off" -- Use /MDd (Multi-threaded Debug DLL)
 		symbols "on"
 
 	filter "configurations:Release"
 		runtime "Release"
-		staticruntime "on" -- Use /MT (Multi-threaded static)
 		optimize "on"
 
 	filter "configurations:Dist"
 		runtime "Release"
-		staticruntime "on" -- Use /MT (Multi-threaded static)
 		optimize "on"
         symbols "off"
 
@@ -92,10 +89,10 @@ project "msdfgen"
 	kind "StaticLib"
 	language "C++"
 	cppdialect "C++20"
-    staticruntime "on" -- default, overridden per-config
+    staticruntime "off"
 
-	targetdir ("Binaries/" .. OutputDir .. "/%{prj.name}")
-    objdir ("Binaries/Intermediates/" .. OutputDir .. "/%{prj.name}")
+	targetdir ("%{wks.location}/Build/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
+    objdir ("%{wks.location}/Build/Intermediates/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
 
 	files
 	{
@@ -130,16 +127,13 @@ project "msdfgen"
 
 	filter "configurations:Debug"
 		runtime "Debug"
-		staticruntime "off" -- Use /MDd (Multi-threaded Debug DLL)
 		symbols "on"
 
 	filter "configurations:Release"
 		runtime "Release"
-		staticruntime "on" -- Use /MT (Multi-threaded static)
 		optimize "on"
 
 	filter "configurations:Dist"
 		runtime "Release"
-		staticruntime "on" -- Use /MT (Multi-threaded static)
 		optimize "on"
         symbols "off"
