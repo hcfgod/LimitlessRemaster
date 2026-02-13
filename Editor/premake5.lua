@@ -36,6 +36,11 @@ project "Editor"
     {
         "Limitless",
         "VendorZstd",
+        -- NOTE: Static library dependencies from Limitless are not reliably transitive
+        -- on Unix toolchains; link text rendering stack explicitly.
+        "msdf-atlas-gen",
+        "msdfgen",
+        "freetype",
     }
 
     postbuildcommands

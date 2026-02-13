@@ -39,6 +39,9 @@ project "Sandbox"
         "Limitless",
         -- NOTE: `Limitless` is a static lib; link dependencies explicitly for non-MSVC toolchains.
         "VendorZstd",
+        "msdf-atlas-gen",
+        "msdfgen",
+        "freetype",
     }
 
     -- ----------------------------------------------------------------------------------

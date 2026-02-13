@@ -225,6 +225,8 @@ project "Limitless"
         language "C"
         cdialect "C11"
 
+    filter {}
+    filter "system:linux"
         links
         {
             "SDL3",
