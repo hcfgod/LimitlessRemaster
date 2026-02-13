@@ -1,6 +1,6 @@
 # LimitlessRemaster
 
-A modern C++20 engine project with a growing set of core systems (configuration, events, error handling, logging, concurrency), SDL-based windowing, and CI builds.
+A modern C++20 game engine with a Unity-style editor: scene/ECS (EnTT), 2D rendering (OpenGL, Renderer2D), assets (GUID/.meta, hot reload), native C++ scripting (ScriptCore), audio (FFmpeg), and input actions. Core systems include configuration, events, error handling, logging, concurrency, and SDL3 windowing. CI builds on Windows, Linux, and macOS.
 
 ## 🚀 **What's New in This Version**
 
@@ -23,20 +23,26 @@ A modern C++20 engine project with a growing set of core systems (configuration,
 
 ```
 LimitlessRemaster/
-├── Limitless/          # Core engine library with advanced systems
+├── Limitless/          # Core engine library
 │   ├── Source/
-│   │   ├── Core/       # Core systems (Logging, Config, Resources, Events, etc.)
-│   │   │   ├── Debug/  # Debug and profiling systems
-│   │   │   └── Concurrency/ # Lock-free queues, async I/O, thread-safe config
-│   │   └── Platform/   # Platform abstraction (SDL-based with extended Window API)
-│   │       └── SDL/    # SDL3 implementation
-│   └── Vendor/         # Third-party dependencies
-├── Sandbox/           # Example application demonstrating all systems
-├── Test/              # Comprehensive unit tests for all systems
-├── Scripts/           # Build scripts for all platforms
-├── Vendor/            # Third-party dependencies
-├── .github/workflows/ # GitHub Actions CI/CD
-└── Docs/              # Comprehensive documentation
+│   │   ├── Core/       # Application, Logging, Config, Events, Time, Input, Concurrency, Debug
+│   │   ├── Platform/   # SDL3 windowing and platform abstraction
+│   │   ├── Graphics/   # RenderCommand, Renderer2D, OpenGL, Camera, Texture, Shader, Font
+│   │   ├── Scene/      # Scene, ECS (EnTT), Components, SceneRenderer
+│   │   ├── Assets/     # AssetManager, AssetDatabase, import pipeline, hot reload
+│   │   ├── Scripting/  # ScriptableEntity, NativeScriptRegistry
+│   │   ├── Audio/      # AudioEngine, AudioClip decoding (FFmpeg)
+│   │   ├── Project/    # ProjectDefinition, ProjectManager, ProjectSettings
+│   │   └── ImGui/      # ImGui layer
+│   └── Vendor/         # Third-party dependencies (SDL3, imgui, etc.)
+├── Editor/             # Unity-style editor (start project): viewport, scene hierarchy, inspector, project panel, play mode
+├── Sandbox/            # Example game app (TestLayer, Renderer2D demo, audio demo)
+├── ScriptCore/        # Native C++ script DLL built and loaded by the editor
+├── Test/               # Unit tests (doctest)
+├── Scripts/            # Build scripts (build-windows.bat, build-unix.sh, BootstrapPremake)
+├── Vendor/             # Premake5 (bootstrapped by build scripts)
+├── .github/workflows/  # GitHub Actions CI/CD
+└── Docs/               # Documentation
 ```
 
 ## 🎯 **Key Features**
@@ -86,66 +92,75 @@ LimitlessRemaster/
 
 ## 🚀 **Quick Start**
 
+The **start project** is **Editor** (Unity-style editor). Sandbox is an alternate app for demos.
+
 ### **Building**
+
+**Recommended:** use the build scripts; they bootstrap Premake if needed and run tests after a successful build.
 
 #### Windows
 ```batch
 Scripts\build-windows.bat [Debug|Release|Dist] [x64|ARM64]
 ```
+Output: `Build\<Config>-windows-<platform>\` (e.g. `Build\Debug-windows-x64\`). Editor: `Build\Debug-windows-x64\Editor\Editor.exe`.
 
 #### Unix/Linux/macOS
 ```bash
 Scripts/build-unix.sh --config Debug --compiler gcc
 Scripts/build-unix.sh --config Release --compiler clang
 ```
+Output: `Build/<Config>-<system>-<platform>/` (e.g. `Build/Debug-linux-x64/`). Run the Editor: `./Build/Debug-linux-x64/Editor/Editor`.
 
-#### Using Premake Directly
+#### Using Premake directly (from repo root)
 ```bash
-# Generate Visual Studio solution
+# Ensure Premake5 is available (e.g. Scripts\BootstrapPremake.bat on Windows)
+# Generate Visual Studio solution (Windows)
 Vendor/Premake/premake5 vs2022
 
-# Generate Makefiles
+# Generate Makefiles (Linux/macOS)
 Vendor/Premake/premake5 gmake2
 
-# Build with make
-make -j$(nproc) config=Debug_x64
+# Build (examples)
+# Windows: open LimitlessRemaster.sln, build Editor or use MSBuild
+# Linux/macOS:
+make -j$(nproc) Editor config=Debug-linux-x64
 ```
 
+### **Running the Editor**
+From the repo root (with a project open or create one via File → Create Project):
+- **Windows:** `Build\Debug-windows-x64\Editor\Editor.exe`
+- **Linux/macOS:** `./Build/Debug-<system>-x64/Editor/Editor`
+
 ### **Running Tests**
+Binaries go to `Build/<Config>-<system>-<platform>/Test/` (e.g. `Test.exe` on Windows, `Test` on Unix).
+
 ```bash
-# Run all tests
-./Build/Debug_x64/Test/Test --success
+# Windows (PowerShell or cmd)
+Build\Debug-windows-x64\Test\Test.exe --success
 
-# Run with verbose output
-./Build/Debug_x64/Test/Test --success --verbose
+# Linux/macOS
+./Build/Debug-linux-x64/Test/Test --success
+./Build/Debug-macosx-x64/Test/Test --success
 
-# Run specific test suites
-./Build/Debug_x64/Test/Test --success --test-suite="Concurrency"
-./Build/Debug_x64/Test/Test --success --test-suite="Advanced Systems Tests"
+# Verbose or specific suites
+./Build/Debug-linux-x64/Test/Test --success --verbose
+./Build/Debug-linux-x64/Test/Test --success --test-suite="Concurrency"
 ```
 
 ## 📚 Documentation Index
 
 Start here:
 
-- `Docs/CONFIGURATION_GUIDE.md` (ConfigManager behavior + guarantees)
-- `Docs/EVENT_GUIDE.md` (event threading/lifetime/shutdown guarantees)
-- `Docs/ERROR_HANDLING_GUIDE.md` (exceptions vs Result, macros, guarantees)
-- `Docs/LOGGING_GUIDE.md` (config + CLI overrides, shutdown ordering)
-- `Docs/CONCURRENCY_GUIDE.md` (SPSC/MPMC contracts)
-- `Docs/README_RenderCommandSystem.md` (render command system guarantees + current limitations)
-- `Docs/RENDERING_ROADMAP.md` (what is implemented vs stubbed + next milestones)
-- `Docs/RENDERER2D_GUIDE.md` (Renderer2D API, batching model, stats)
-- `Docs/AUDIO_SYSTEM_GUIDE.md` (Unity-style AudioEngine/AudioSource/AudioClip + FFmpeg decode)
-- `Docs/ASSET_SYSTEM_GUIDE.md` (Unity-style GUID/.meta assets + Material/InputActions)
-- `Docs/ASSET_HOT_RELOAD_GUIDE.md` (Assets/ hot reload, debounce, dependency cascades)
-- `Docs/ASSET_IMPORT_PIPELINE_GUIDE.md` (editor import pipeline, incremental reimport, validation)
-- `Docs/NATIVE_CPP_SCRIPTING_GUIDE.md` (native C++ entity scripts and lifecycle)
-- `Docs/INPUT_GUIDE.md` (action assets, gamepad bindings, rebinding, override stack)
-- `Docs/EDITOR_CAMERA_CONTROLLER_GUIDE.md` (engine-owned editor camera module)
-- `Docs/PROJECT_SYSTEM_GUIDE.md` (project marker file, settings, build/run UX)
+- **Core:** `Docs/CONFIGURATION_GUIDE.md`, `Docs/EVENT_GUIDE.md`, `Docs/ERROR_HANDLING_GUIDE.md`, `Docs/LOGGING_GUIDE.md`, `Docs/CONCURRENCY_GUIDE.md`, `Docs/TIME_GUIDE.md`
+- **Rendering:** `Docs/README_RenderCommandSystem.md`, `Docs/RENDERING_ROADMAP.md` (implemented vs stubbed, next milestones), `Docs/RENDERER2D_GUIDE.md`
+- **Scene & editor:** `Docs/SCENE_ECS_GUIDE.md` (Scene, ECS, components), `Docs/EDITOR_PLAY_MODE_GUIDE.md` (Play/Pause/Stop, scene clone coverage)
+- **Assets:** `Docs/ASSET_SYSTEM_GUIDE.md`, `Docs/ASSET_HOT_RELOAD_GUIDE.md`, `Docs/ASSET_IMPORT_PIPELINE_GUIDE.md`
+- **Gameplay:** `Docs/NATIVE_CPP_SCRIPTING_GUIDE.md`, `Docs/INPUT_GUIDE.md`, `Docs/AUDIO_SYSTEM_GUIDE.md`
+- **Editor & project:** `Docs/EDITOR_CAMERA_CONTROLLER_GUIDE.md`, `Docs/PROJECT_SYSTEM_GUIDE.md`, `Docs/BUILD_CONFIGURATION_GUIDE.md`
 
 ### **Basic Usage**
+
+Your app implements `Limitless::Application` and defines `CreateApplication()`. The engine provides `main()` (see `Limitless/Source/Core/EntryPoint.h`; used when `LT_ENABLE_ENTRYPOINT` is defined, as in Editor and Sandbox).
 
 ```cpp
 #include "Limitless.h"
@@ -155,93 +170,46 @@ class MyApp : public Limitless::Application
 public:
     bool Initialize() override
     {
-        // Configuration is already initialized
-        auto& config = GetConfigManager();
-        
-        // Configure window with advanced features
+        // Config is initialized before Initialize(); use the global getter
+        auto& config = Limitless::GetConfigManager();
+
         config.SetValue("window.width", 1920);
         config.SetValue("window.height", 1080);
         config.SetValue("window.fullscreen", false);
-        config.SetValue("window.borderless", false);
-        config.SetValue("window.always_on_top", false);
-        config.SetValue("window.high_dpi", true);
-        config.SetValue("window.min_width", 800);
-        config.SetValue("window.min_height", 600);
-        config.SetValue("window.position.x", 100);
-        config.SetValue("window.position.y", 100);
-        
-        // Configure graphics
         config.SetValue("graphics.vsync", true);
-        config.SetValue("graphics.antialiasing", 4);
-    
-        // Initialize concurrency systems
+
         auto& asyncIO = Limitless::Async::GetAsyncIO();
-        asyncIO.Initialize(4); // 4 worker threads
-        
-        // Register event handlers
-        auto& eventSystem = GetEventSystem();
-        eventSystem.AddCallback(Limitless::EventType::KeyPressed, [this](Limitless::Event& event) {
-            // Handle key press
-        });
-        
-        // Set up window callbacks
-        auto& window = GetWindow();
-        window.SetResizeCallback([this](uint32_t width, uint32_t height) {
-            // Handle window resize
-        });
-        
-        window.SetFocusCallback([this](bool focused) {
-            // Handle focus changes
-        });
-        
-        // Initialize performance monitoring
+        asyncIO.Initialize(4);
+
+        GetEventSystem().AddCallback(Limitless::EventType::KeyPressed, [](Limitless::Event&) { });
+        GetWindow().SetResizeCallback([](uint32_t w, uint32_t h) { });
+
         auto& monitor = Limitless::PerformanceMonitor::GetInstance();
         monitor.Initialize();
         monitor.SetLoggingEnabled(true);
-        
-        // Set up performance metrics callback
-        monitor.SetMetricsCallback([](const Limitless::PerformanceMetrics& metrics) {
-            if (metrics.fps < 30.0) {
-                // Handle low FPS
-            }
-        });
-        
+
         return true;
     }
-    
+
     void OnUpdate(float deltaTime) override
     {
-        // Begin frame timing
         LT_PERF_BEGIN_FRAME();
-        
-        // Process events
         GetEventSystem().ProcessEvents();
-        
-        // End frame timing
         LT_PERF_END_FRAME();
     }
-    
-    void OnRender() override
-    {
-        // Rendering code
-    }
-    
+
+    void OnRender() override { }
     void Shutdown() override
     {
-        // Shutdown performance monitoring
         Limitless::PerformanceMonitor::GetInstance().Shutdown();
-        
-        // Shutdown concurrency systems
         Limitless::Async::GetAsyncIO().Shutdown();
     }
 };
 
-// Entry point
-int main()
+// Required: define CreateApplication so the engine's main() can start your app
+std::unique_ptr<Limitless::Application> CreateApplication()
 {
-    MyApp app;
-    app.Run();
-    return 0;
+    return std::make_unique<MyApp>();
 }
 ```
 
@@ -256,34 +224,27 @@ using namespace Limitless::Async;
 // Lock-free queue example
 LockFreeMPMCQueue<std::string, 1024> messageQueue;
 
-// Producer thread
 std::thread producer([&messageQueue]() {
-    for (int i = 0; i < 1000; ++i) {
+    for (int i = 0; i < 1000; ++i)
         messageQueue.TryPush("Message " + std::to_string(i));
-    }
 });
 
-// Consumer thread
 std::thread consumer([&messageQueue]() {
     while (true) {
         auto message = messageQueue.TryPop();
-        if (message) {
-            LT_INFO("Received: {}", *message);
-        }
+        if (message) LT_INFO("Received: {}", *message);
     }
 });
 
-// Async I/O example
-auto readTask = ReadFileAsync("config.json");
-auto content = readTask.Get(); // Wait for completion
+// Async I/O (ConfigManager is already initialized by the engine)
+auto& asyncIO = Limitless::Async::GetAsyncIO();
+auto readTask = asyncIO.ReadFileAsync("config.json");
+std::string content = readTask.Get();
 
-// Thread-safe configuration
-auto& config = GetThreadSafeConfig();
-config.Initialize("game_config.json");
-
+// Thread-safe config access (ConfigManager has thread-safe Get/Set)
+auto& config = Limitless::GetConfigManager();
 config.SetValue("player.health", 100);
 config.SetValue("player.speed", 5.0f);
-
 int health = config.GetValue<int>("player.health", 50);
 float speed = config.GetValue<float>("player.speed", 1.0f);
 ```
@@ -433,23 +394,12 @@ monitor.SaveMetricsToFile("performance_report.txt");
 ## 📚 **Documentation**
 
 ### **System Guides**
-- **[Logging Guide](Docs/LOGGING_GUIDE.md)** - Logging system setup and usage
-- **[Error Handling Guide](Docs/ERROR_HANDLING_GUIDE.md)** - `ErrorCode`, `Error`, and `Result<T>` patterns
-- **[Concurrency Guide](Docs/CONCURRENCY_GUIDE.md)** - Lock-free queues and `AsyncIO` thread-pool tasks
-- **[Time Guide](Docs/TIME_GUIDE.md)** - Unity-style `Time` API (delta time, timeScale, fixed step)
-- **[Hot Reload Guide](Docs/HOT_RELOAD_GUIDE.md)** - Real-time configuration hot reloading
-- **[Asset System Guide](Docs/ASSET_SYSTEM_GUIDE.md)** - Unity-style GUID/.meta assets, async loading, Material/InputActions
-- **[Asset Hot Reload Guide](Docs/ASSET_HOT_RELOAD_GUIDE.md)** - Assets/ watcher, debounce/coalesce, dependency cascades
-- **[Input Guide](Docs/INPUT_GUIDE.md)** - Input action assets, gamepad bindings, rebinding, override stack
-- **[Editor Camera Controller Guide](Docs/EDITOR_CAMERA_CONTROLLER_GUIDE.md)** - Engine-owned editor camera module
-- **[Platform and Error Guide](Docs/PLATFORM_AND_ERROR_GUIDE.md)** - Platform detection and OS error integration
-- **[Platform Truth Table](Docs/PLATFORM_TRUTH_TABLE.md)** - What is implemented on Windows/macOS/Linux today
-- **[Build Configuration Guide](Docs/BUILD_CONFIGURATION_GUIDE.md)** - Premake targets, configs, and CI parity
-- **[Configuration Guide](Docs/CONFIGURATION_GUIDE.md)** - ConfigManager usage and best practices
-- **[Event System Guide](Docs/EVENT_GUIDE.md)** - Event-driven architecture and patterns
-- **[Window API Guide](Docs/WINDOW_API_GUIDE.md)** - Window creation and advanced behaviors
-- **[Graphics API Detection Guide](Docs/GRAPHICS_API_DETECTION_GUIDE.md)** - Implemented OpenGL path vs future backends
-- **[Audio System Guide](Docs/AUDIO_SYSTEM_GUIDE.md)** - Unity-style audio (AudioClip assets, AudioSource, AudioEngine) with FFmpeg decoding
+- **Core:** [Logging](Docs/LOGGING_GUIDE.md), [Error Handling](Docs/ERROR_HANDLING_GUIDE.md), [Concurrency](Docs/CONCURRENCY_GUIDE.md), [Time](Docs/TIME_GUIDE.md), [Configuration](Docs/CONFIGURATION_GUIDE.md), [Events](Docs/EVENT_GUIDE.md), [Hot Reload](Docs/HOT_RELOAD_GUIDE.md)
+- **Platform & build:** [Window API](Docs/WINDOW_API_GUIDE.md), [Platform and Error](Docs/PLATFORM_AND_ERROR_GUIDE.md), [Platform Truth Table](Docs/PLATFORM_TRUTH_TABLE.md), [Build Configuration](Docs/BUILD_CONFIGURATION_GUIDE.md)
+- **Graphics:** [Render Command System](Docs/README_RenderCommandSystem.md), [Rendering Roadmap](Docs/RENDERING_ROADMAP.md), [Renderer2D](Docs/RENDERER2D_GUIDE.md), [Graphics API Detection](Docs/GRAPHICS_API_DETECTION_GUIDE.md)
+- **Scene & editor:** [Scene/ECS](Docs/SCENE_ECS_GUIDE.md), [Editor Play Mode](Docs/EDITOR_PLAY_MODE_GUIDE.md), [Editor Camera Controller](Docs/EDITOR_CAMERA_CONTROLLER_GUIDE.md)
+- **Assets & gameplay:** [Asset System](Docs/ASSET_SYSTEM_GUIDE.md), [Asset Hot Reload](Docs/ASSET_HOT_RELOAD_GUIDE.md), [Asset Import Pipeline](Docs/ASSET_IMPORT_PIPELINE_GUIDE.md), [Input](Docs/INPUT_GUIDE.md), [Audio](Docs/AUDIO_SYSTEM_GUIDE.md), [Native C++ Scripting](Docs/NATIVE_CPP_SCRIPTING_GUIDE.md)
+- **Project:** [Project System](Docs/PROJECT_SYSTEM_GUIDE.md)
 
 ## 🔧 **Continuous Integration**
 
@@ -559,4 +509,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**LimitlessRemaster** - A modern, enterprise-grade C++ engine with comprehensive advanced systems, high-performance concurrency, and extended Window API for the future of game and application development.
+**LimitlessRemaster** — A modern C++20 game engine with a Unity-style editor, 2D rendering, scene/ECS, assets, native scripting, and cross-platform CI. Built for shipping 2D games and extending toward 2D lighting and 3D.

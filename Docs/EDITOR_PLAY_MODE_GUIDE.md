@@ -30,11 +30,26 @@ When stopping, the editor restores the stored edit-scene instance.
 
 ### Scene Cloning Coverage
 
-`CloneSceneForPlayMode` currently copies the built-in components used by the viewport renderer:
+Play Mode uses `Scene::Clone()` (see `Limitless/Source/Scene/Scene.cpp`). The clone copies all of the following so that the runtime scene matches the edit scene:
 
-- `TagComponent`
-- `TransformComponent`
-- `SpriteComponent` (runtime cache is cleared)
+**Components copied (per entity):**
 
-As new gameplay/runtime components are added, extend the clone function to include them.
+- **TagComponent** — entity name
+- **TransformComponent** — position, rotation, scale
+- **SpriteComponent** — texture key, color; runtime cache is cleared so textures reload in Play Mode
+- **MaterialComponent** — material key; runtime cache cleared
+- **TextComponent** — text, font path, size, color; font cache cleared
+- **CameraComponent** — projection type, primary flag, zoom, planes, FOV (full copy)
+- **AudioSourceComponent** — clip key, volume, play-on-start, loop, muted; runtime voice state reset
+- **NativeScriptComponent** — all script entries (class name, asset path, enabled, exposed properties); runtime instances are not copied (scripts are re-instantiated when the clone runs)
+
+**Hierarchy:**
+
+- **HierarchyComponent** — parent and sibling order are copied; parent references are remapped to the cloned entities so the hierarchy structure is preserved in Play Mode.
+
+**Scene-level:**
+
+- **Editor camera bookmark** — stored so returning to the scene can restore the same editor view.
+
+When you add new component types that should exist at runtime, extend `Scene::Clone()` to copy them (and clear or re-init any runtime-only state).
 

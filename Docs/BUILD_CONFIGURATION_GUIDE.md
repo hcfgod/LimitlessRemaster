@@ -23,14 +23,19 @@ The Limitless Engine uses **Premake5** as its build system generator, providing:
 ### Project Structure
 ```
 LimitlessRemaster/
-├── premake5.lua              # Main workspace configuration
+├── premake5.lua              # Main workspace (start project: Editor)
 ├── Limitless/premake5.lua    # Core engine library
-├── Sandbox/premake5.lua      # Example application
+├── Editor/premake5.lua      # Unity-style editor (default start project)
+├── Sandbox/premake5.lua      # Example game application
+├── ScriptCore/premake5.lua   # Native C++ script DLL (loaded by Editor)
 ├── Test/premake5.lua         # Unit tests
 └── Scripts/                  # Build scripts
-    ├── build-windows.bat     # Windows build script
-    └── build-unix.sh         # Unix/Linux/macOS build script
+    ├── build-windows.bat     # Windows: bootstrap Premake, generate solution, build, run tests
+    ├── build-unix.sh         # Unix/Linux/macOS: dependencies, Premake, make, tests
+    ├── BootstrapPremake.bat  # Download Premake5 into Vendor/Premake (Windows)
+    └── build-scriptcore-windows.bat  # Build ScriptCore DLL (e.g. for editor hot-reload)
 ```
+Output directory: `Build/<Config>-<system>-<platform>/` (e.g. `Build/Debug-windows-x64/`).
 
 ## Platform-Specific Build Options
 

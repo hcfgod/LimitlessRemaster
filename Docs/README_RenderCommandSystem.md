@@ -1,6 +1,6 @@
 # Render Command System
 
-The Render Command System is a **command submission + execution framework** intended to make rendering work explicit and schedulable. Today it is best understood as **infrastructure/scaffolding**: the queueing and prioritization exist, and the OpenGL backend now implements a small but useful subset of commands (enough to bind shaders/VAOs/buffers/textures and draw basic geometry). Several common state commands (blend/depth/cull/polygon/line/point) are now implemented in the OpenGL backend, but framebuffer and debug-marker commands are still stubbed.
+The Render Command System is a **command submission + execution framework** intended to make rendering work explicit and schedulable. The OpenGL backend implements the majority of commands: clear, viewport, scissor, shader/VAO/buffer/texture bind, draw (arrays/indexed), framebuffer bind, blend/depth/cull/polygon/line/point, and debug groups. Only `DrawInstanced` and `DrawIndexedInstanced` are not implemented. See **`Docs/RENDERING_ROADMAP.md`** for the full command status table.
 
 ## Features
 

@@ -8,6 +8,8 @@ This document is a short, practical roadmap for turning the current render-comma
 - **Stubbed**: validates inputs and/or logs intent, but does not issue meaningful OpenGL work yet.
 - **Not implemented**: placeholder with TODO/no behavior.
 
+**Summary**: All commands in the table below are either **Implemented** (real OpenGL work) or **Not implemented** (DrawInstanced / DrawIndexedInstanced only). There are no stubbed commands in the current OpenGL backend.
+
 ## Current Command Implementation Status (OpenGL)
 
 Source of truth: `Limitless/Source/Graphics/OpenGL/OpenGLRenderCommand.cpp`
@@ -87,14 +89,20 @@ Deliverables:
 Acceptance criteria:
 - Demonstrable reduction in command count / state changes under a simple scene.
 
-### Milestone 4 — “Renderer API surface”
+### Milestone 4 — “Renderer API surface” (PARTIALLY DONE)
 
 Goal: move from raw command lists to a stable renderer-facing API.
 
 Deliverables:
-- `Renderer2D` or `Renderer` helpers that build command sequences safely
+- ~~`Renderer2D` or `Renderer` helpers that build command sequences safely~~ **Done**: `Renderer2D` exists and is used by `SceneRenderer` and Sandbox (BeginScene/DrawQuad/DrawText/EndScene, batching, stats). See `Docs/RENDERER2D_GUIDE.md`.
 - Clear ownership rules for GPU resources referenced by queued commands
 - Decide how multi-threaded *GPU execution* will be handled (OpenGL context ownership vs future Vulkan/Metal)
+
+## What’s next
+
+- **Milestone 3 — Batching that matters**: Reduce per-frame overhead (batch key, command pool, renderer stats). Renderer2D already batches by texture; this milestone is about command-level batching and stats.
+- **Milestone 4 — Remaining**: Ownership rules for queued commands; multi-thread GPU execution policy.
+- **Not yet on roadmap**: 2D lighting, 3D mesh pipeline, instanced drawing (DrawInstanced / DrawIndexedInstanced).
 
 ## Notes on multi-threading
 

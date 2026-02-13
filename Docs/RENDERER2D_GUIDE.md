@@ -14,10 +14,16 @@ Header: `Limitless/Source/Graphics/Renderer2D.h`
 
 Core calls:
 
-- `Renderer2D::Initialize()`
-- `Renderer2D::BeginScene(const Camera& camera)` (also supports `BeginScene(viewProjection)` directly)
-- `Renderer2D::DrawQuad(...)` (multiple overloads)
+- `Renderer2D::Initialize()` / `Renderer2D::Shutdown()`
+- `Renderer2D::BeginScene(const Camera& camera)` (also `BeginScene(viewProjection)`)
+- `Renderer2D::DrawQuad(...)` (position+size, or transform; color or texture+tint)
+- `Renderer2D::DrawText(transform, text, font, fontSize, color)` (MSDF text)
 - `Renderer2D::EndScene()`
+
+Readiness and assets:
+
+- `Renderer2D::IsShaderReady()` — true when the default material is loaded; otherwise `DrawQuad` is dropped.
+- `Renderer2D::GetDefaultShaderKey()` — asset key for the default shader (e.g. for `AssetLoadProgress`).
 
 Statistics:
 

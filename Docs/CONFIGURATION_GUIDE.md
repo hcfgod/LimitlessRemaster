@@ -9,7 +9,7 @@
 - Optional hot reload via `FileWatcher`
 - Key-level schema validation and change callbacks
 
-The default configuration file name is `config.json` in the working directory (customizable via `Initialize()`).
+When using the engine’s entry point (`Limitless/Source/Core/EntryPoint.h`), the engine resolves and loads `config.json` (current working directory first, then executable directory) and initializes `ConfigManager` before calling your `CreateApplication()`. In that case you only need `GetInstance()` and Get/Set; you do not call `Initialize()` yourself. For custom or tooling use without the engine main, call `Initialize(path)` as below.
 
 ## Guarantees (Current Behavior)
 

@@ -85,8 +85,9 @@ Limitless::NativeScriptRegistry::RegisterScript<DoorRotateScript>("DoorRotateScr
 
 Notes:
 
-- `NativeScriptComponent.ScriptClassName` must match the registered class name exactly.
-- Scripts are native C++ only (no C# bridge in this system YET).
+- `NativeScriptComponent.ScriptClassName` (and each script entry’s class name) must match the registered class name exactly.
+- Scripts are native C++ only (no C# bridge in this system).
+- **Editor Play Mode**: The Editor builds and loads the **ScriptCore** DLL (`ScriptCore` project). Scripts authored under the project’s `Assets/` are compiled into ScriptCore; when you enter Play Mode, the Editor loads that DLL and registers its scripts so they run on entities with `NativeScriptComponent`.
 
 ## Editor Usage
 

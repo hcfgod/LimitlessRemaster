@@ -53,7 +53,7 @@ Premake will automatically:
 
 - Define `LT_ENABLE_FFMPEG`
 - Link `avcodec`, `avformat`, `avutil`, `swresample`
-- Copy DLLs next to the built executable (Sandbox/Test) in a post-build step
+- Copy DLLs next to the built executables (e.g. Editor, Sandbox) in a post-build step where applicable
 
 After adding FFmpeg binaries, **regenerate project files** (Premake) so the new link/copy rules apply.
 
