@@ -72,6 +72,10 @@ project "freetype"
 	filter "system:windows"
 		systemversion "latest"
 
+	filter { "system:macosx or linux" }
+		defines { "FT_CONFIG_OPTION_SYSTEM_ZLIB" }
+		links { "z" }
+
 	filter "configurations:Debug"
 		runtime "Debug"
 		symbols "on"

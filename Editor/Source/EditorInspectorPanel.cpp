@@ -16,6 +16,7 @@
 #include "imgui/imgui.h"
 
 #include <array>
+#include <algorithm>
 #include <fstream>
 #include <cstdio>
 #include <cstring>
@@ -613,6 +614,7 @@ namespace Limitless::EditorInspectorPanel
               const char* audioPayloadId,
               const char* materialPayloadId,
               const char* shaderPayloadId,
+              const char* fontPayloadId,
               std::string& selectedMaterialAssetKey,
               Assets::MaterialAsset::Ptr& cachedMaterialAsset)
     {
@@ -640,6 +642,7 @@ namespace Limitless::EditorInspectorPanel
             bool removeCameraComponent = false;
             bool removeMaterialComponent = false;
             bool removeAudioSourceComponent = false;
+            bool removeTextComponent = false;
             if (auto* tag = registry.try_get<TagComponent>(selectedEntity))
             {
                 static entt::entity renameEntity = entt::null;
@@ -920,6 +923,89 @@ namespace Limitless::EditorInspectorPanel
                 }
             }
 
+            if (auto* text = registry.try_get<TextComponent>(selectedEntity))
+            {
+                const bool textOpen = ImGui::TreeNodeEx("Text", ImGuiTreeNodeFlags_DefaultOpen);
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                    ImGui::OpenPopup("TextComponentOptions");
+                ImGui::SameLine();
+                if (ImGui::Button("...##TextComponentOptionsButton"))
+                    ImGui::OpenPopup("TextComponentOptions");
+
+                if (ImGui::BeginPopup("TextComponentOptions"))
+                {
+                    if (ImGui::MenuItem("Remove Component"))
+                        removeTextComponent = true;
+                    ImGui::EndPopup();
+                }
+
+                if (textOpen)
+                {
+                    static entt::entity textEditEntity = entt::null;
+                    static std::array<char, 2048> textValueBuffer{};
+                    static std::array<char, 512> fontPathBuffer{};
+                    if (textEditEntity != selectedEntity)
+                    {
+                        textEditEntity = selectedEntity;
+                        std::snprintf(textValueBuffer.data(), textValueBuffer.size(), "%s", text->Text.c_str());
+                        std::snprintf(fontPathBuffer.data(), fontPathBuffer.size(), "%s", text->FontFilePath.c_str());
+                    }
+
+                    ImGui::InputTextMultiline("Text Value", textValueBuffer.data(), textValueBuffer.size(), ImVec2(-1.0f, 84.0f));
+                    if (ImGui::IsItemDeactivatedAfterEdit())
+                        text->Text = textValueBuffer.data();
+
+                    ImGui::InputText("Font File Path", fontPathBuffer.data(), fontPathBuffer.size());
+                    if (ImGui::IsItemDeactivatedAfterEdit())
+                    {
+                        text->FontFilePath = fontPathBuffer.data();
+                        text->CachedFont.reset();
+                        text->FontLoadAttempted = false;
+                    }
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Example: Assets/Fonts/YourFont.ttf");
+
+                    const std::string fontLabel = text->FontFilePath.empty()
+                        ? std::string("None")
+                        : EditorAssetNaming::GetAssetDisplayNameFromAssetKey(text->FontFilePath);
+                    ImGui::Text("Font Asset");
+                    ImGui::SameLine(80);
+                    ImGui::Button((fontLabel + "##TextFontAsset").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 60.0f, 0.0f));
+                    if (ImGui::BeginDragDropTarget())
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(fontPayloadId))
+                        {
+                            const char* key = static_cast<const char*>(payload->Data);
+                            if (key && key[0])
+                            {
+                                text->FontFilePath = key;
+                                std::snprintf(fontPathBuffer.data(), fontPathBuffer.size(), "%s", text->FontFilePath.c_str());
+                                text->CachedFont.reset();
+                                text->FontLoadAttempted = false;
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+                    if (!text->FontFilePath.empty())
+                    {
+                        ImGui::SameLine();
+                        if (ImGui::Button("Clear##TextFontAsset"))
+                        {
+                            text->FontFilePath.clear();
+                            fontPathBuffer[0] = '\0';
+                            text->CachedFont.reset();
+                            text->FontLoadAttempted = false;
+                        }
+                    }
+
+                    if (ImGui::DragFloat("Font Size", &text->FontSize, 1.0f, 4.0f, 512.0f))
+                        text->FontSize = std::max(4.0f, text->FontSize);
+                    ImGui::ColorEdit4("Color", &text->Color.r);
+
+                    ImGui::TreePop();
+                }
+            }
+
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
@@ -932,6 +1018,7 @@ namespace Limitless::EditorInspectorPanel
                 const bool hasSpriteComponent = registry.all_of<SpriteComponent>(selectedEntity);
                 const bool hasCameraComponent = registry.all_of<CameraComponent>(selectedEntity);
                 const bool hasAudioSourceComponent = registry.all_of<AudioSourceComponent>(selectedEntity);
+                const bool hasTextComponent = registry.all_of<TextComponent>(selectedEntity);
                 if (hasSpriteComponent)
                     ImGui::BeginDisabled();
 
@@ -963,6 +1050,15 @@ namespace Limitless::EditorInspectorPanel
                 if (hasAudioSourceComponent)
                     ImGui::EndDisabled();
 
+                if (hasTextComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Text Component"))
+                    registry.emplace<TextComponent>(selectedEntity);
+
+                if (hasTextComponent)
+                    ImGui::EndDisabled();
+
                 ImGui::EndPopup();
             }
 
@@ -990,6 +1086,9 @@ namespace Limitless::EditorInspectorPanel
                 }
                 registry.remove<AudioSourceComponent>(selectedEntity);
             }
+
+            if (removeTextComponent)
+                registry.remove<TextComponent>(selectedEntity);
         }
 
         ImGui::End();

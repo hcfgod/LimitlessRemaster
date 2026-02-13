@@ -20,6 +20,7 @@ namespace Limitless
                   const char* audioPayloadId,
                   const char* materialPayloadId,
                   const char* shaderPayloadId,
+                  const char* fontPayloadId,
                   std::string& selectedMaterialAssetKey,
                   Assets::MaterialAsset::Ptr& cachedMaterialAsset);
     }

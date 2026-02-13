@@ -1,5 +1,6 @@
 #include "Graphics/Font.h"
 
+#include "Assets/AssetPaths.h"
 #include "Core/Debug/Log.h"
 
 #include <msdf-atlas-gen.h>
@@ -7,13 +8,18 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <filesystem>
+#include <mutex>
 #include <thread>
+#include <unordered_map>
 
 namespace Limitless
 {
     namespace
     {
         constexpr uint32_t kFallbackCodepoint = static_cast<uint32_t>('?');
+        std::mutex g_FontCacheMutex;
+        std::unordered_map<std::string, std::weak_ptr<Font>> g_FontCache;
 
         msdf_atlas::Charset BuildDefaultCharset()
         {
@@ -22,10 +28,70 @@ namespace Limitless
             charset.add('\t');
             return charset;
         }
+
+        std::string ResolveFontPath(const std::string& fontPath)
+        {
+            if (fontPath.empty())
+            {
+                return {};
+            }
+
+            std::filesystem::path inputPath(fontPath);
+            if (inputPath.is_absolute() && std::filesystem::exists(inputPath))
+            {
+                return inputPath.string();
+            }
+
+            if (std::filesystem::exists(inputPath))
+            {
+                return std::filesystem::absolute(inputPath).string();
+            }
+
+            if (fontPath.rfind("Assets/", 0) == 0)
+            {
+                const auto resolved = Assets::ResolveAssetKeyToPath(fontPath);
+                if (resolved.IsSuccess())
+                {
+                    return resolved.GetValue().string();
+                }
+            }
+
+            if (fontPath.rfind("Assets/", 0) != 0)
+            {
+                const std::string asAssetKey = "Assets/" + fontPath;
+                const auto resolved = Assets::ResolveAssetKeyToPath(asAssetKey);
+                if (resolved.IsSuccess())
+                {
+                    return resolved.GetValue().string();
+                }
+            }
+
+            return {};
+        }
     }
 
     Font::Ptr Font::CreateFromFile(const std::string& fontPath, const FontSpecification& specification)
     {
+        const std::string resolvedFontPath = ResolveFontPath(fontPath);
+        if (resolvedFontPath.empty())
+        {
+            LT_CORE_ERROR("Font: failed to resolve font path '{}'", fontPath);
+            return nullptr;
+        }
+
+        {
+            std::scoped_lock cacheLock(g_FontCacheMutex);
+            auto cacheIt = g_FontCache.find(resolvedFontPath);
+            if (cacheIt != g_FontCache.end())
+            {
+                if (auto cachedFont = cacheIt->second.lock())
+                {
+                    return cachedFont;
+                }
+                g_FontCache.erase(cacheIt);
+            }
+        }
+
         msdfgen::FreetypeHandle* freetype = msdfgen::initializeFreetype();
         if (!freetype)
         {
@@ -33,10 +99,10 @@ namespace Limitless
             return nullptr;
         }
 
-        msdfgen::FontHandle* fontHandle = msdfgen::loadFont(freetype, fontPath.c_str());
+        msdfgen::FontHandle* fontHandle = msdfgen::loadFont(freetype, resolvedFontPath.c_str());
         if (!fontHandle)
         {
-            LT_CORE_ERROR("Font: failed to load font '{}'", fontPath);
+            LT_CORE_ERROR("Font: failed to load font '{}' (resolved '{}')", fontPath, resolvedFontPath);
             msdfgen::deinitializeFreetype(freetype);
             return nullptr;
         }
@@ -201,6 +267,11 @@ namespace Limitless
 
         msdfgen::destroyFont(fontHandle);
         msdfgen::deinitializeFreetype(freetype);
+
+        {
+            std::scoped_lock cacheLock(g_FontCacheMutex);
+            g_FontCache[resolvedFontPath] = font;
+        }
         return font;
     }
 

@@ -44,6 +44,7 @@ namespace Limitless
         constexpr const char* kAssetScenePayload = "ASSET_SCENE";
         constexpr const char* kAssetMaterialPayload = "ASSET_MATERIAL";
         constexpr const char* kAssetShaderPayload = "ASSET_SHADER";
+        constexpr const char* kAssetFontPayload = "ASSET_FONT";
         constexpr const char* kDefaultSceneFileName = "New Scene.scene.json";
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
@@ -578,6 +579,7 @@ namespace Limitless
             kAssetAudioPayload,
             kAssetMaterialPayload,
             kAssetShaderPayload,
+            kAssetFontPayload,
             m_SelectedMaterialAssetKey,
             m_CachedMaterialAsset);
     }
@@ -597,6 +599,7 @@ namespace Limitless
             kAssetScenePayload,
             kAssetMaterialPayload,
             kAssetShaderPayload,
+            kAssetFontPayload,
             [this](const std::string& assetKey) { LoadSceneFromAssetKey(assetKey); },
             [this](const std::filesystem::path& relativeFolderPath) {
                 const std::string createdSceneAssetKey = CreateSceneAssetInFolder(relativeFolderPath);

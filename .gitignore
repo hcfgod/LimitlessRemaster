@@ -103,6 +103,9 @@ coverage/
 # Core dumps
 core
 core.*
+# Keep vendored msdfgen source directory tracked for CI builds.
+!Limitless/Vendor/msdf-atlas-gen/msdfgen/core/
+!Limitless/Vendor/msdf-atlas-gen/msdfgen/core/**
 
 # Backup files
 *.bak
