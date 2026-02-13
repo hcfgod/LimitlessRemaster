@@ -71,6 +71,14 @@ namespace Limitless::EditorProjectPanel
             return lowerExtension == ".glsl";
         }
 
+        bool IsAudioExtension(const std::filesystem::path& path)
+        {
+            std::string lowerExtension = path.extension().string();
+            for (char& character : lowerExtension)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            return lowerExtension == ".wav" || lowerExtension == ".mp3" || lowerExtension == ".ogg" || lowerExtension == ".flac";
+        }
+
         std::string GetAssetDisplayName(const std::filesystem::path& path)
         {
             return EditorAssetNaming::GetAssetDisplayNameFromPath(path);
@@ -85,6 +93,7 @@ namespace Limitless::EditorProjectPanel
                            std::string& selectedMaterialAssetKey,
                            Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                            const char* texturePayloadId,
+                           const char* audioPayloadId,
                            const char* assetMovePayloadId,
                            const char* scenePayloadId,
                            const char* materialPayloadId,
@@ -191,6 +200,17 @@ namespace Limitless::EditorProjectPanel
                                     ProjectAssetOperations::MoveAssetToFolder(key, entryRelativePath);
                             }
                         }
+                        else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(audioPayloadId))
+                        {
+                            const char* key = static_cast<const char*>(payload->Data);
+                            if (key && key[0])
+                            {
+                                if (std::filesystem::path(key).extension().empty())
+                                    ProjectAssetOperations::MoveFolderToFolder(key, entryRelativePath);
+                                else
+                                    ProjectAssetOperations::MoveAssetToFolder(key, entryRelativePath);
+                            }
+                        }
                         ImGui::EndDragDropTarget();
                     }
 
@@ -212,6 +232,7 @@ namespace Limitless::EditorProjectPanel
                                       selectedMaterialAssetKey,
                                       cachedMaterialAsset,
                                       texturePayloadId,
+                                      audioPayloadId,
                                       assetMovePayloadId,
                                       scenePayloadId,
                                       materialPayloadId,
@@ -229,6 +250,7 @@ namespace Limitless::EditorProjectPanel
                     const bool isScene = IsSceneExtension(entry);
                     const bool isMaterial = IsMaterialExtension(entry);
                     const bool isShader = IsShaderExtension(entry);
+                    const bool isAudio = IsAudioExtension(entry);
                     const std::string displayName = GetAssetDisplayName(entry);
                     const std::string treeLabel = displayName + "###" + fileName;
                     const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
@@ -328,6 +350,8 @@ namespace Limitless::EditorProjectPanel
                             ImGui::SetDragDropPayload(materialPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
                         else if (isShader)
                             ImGui::SetDragDropPayload(shaderPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                        else if (isAudio)
+                            ImGui::SetDragDropPayload(audioPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
                         else
                             ImGui::SetDragDropPayload(assetMovePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
 
@@ -468,6 +492,7 @@ namespace Limitless::EditorProjectPanel
               std::string& selectedMaterialAssetKey,
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
               const char* texturePayloadId,
+              const char* audioPayloadId,
               const char* assetMovePayloadId,
               const char* scenePayloadId,
               const char* materialPayloadId,
@@ -554,6 +579,17 @@ namespace Limitless::EditorProjectPanel
                             ProjectAssetOperations::MoveAssetToFolder(key, "");
                     }
                 }
+                else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(audioPayloadId))
+                {
+                    const char* key = static_cast<const char*>(payload->Data);
+                    if (key && key[0])
+                    {
+                        if (std::filesystem::path(key).extension().empty())
+                            ProjectAssetOperations::MoveFolderToFolder(key, "");
+                        else
+                            ProjectAssetOperations::MoveAssetToFolder(key, "");
+                    }
+                }
                 ImGui::EndDragDropTarget();
             }
 
@@ -566,6 +602,7 @@ namespace Limitless::EditorProjectPanel
                           selectedMaterialAssetKey,
                           cachedMaterialAsset,
                           texturePayloadId,
+                          audioPayloadId,
                           assetMovePayloadId,
                           scenePayloadId,
                           materialPayloadId,

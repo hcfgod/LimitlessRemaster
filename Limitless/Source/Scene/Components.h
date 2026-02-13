@@ -1,10 +1,12 @@
 #pragma once
 
 #include "Assets/MaterialAsset.h"
+#include "Assets/AudioClipAsset.h"
 #include "Assets/TextureAsset.h"
 #include "EnTT/entt.hpp"
 
 #include <glm/glm.hpp>
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -60,6 +62,21 @@ namespace Limitless
         std::string MaterialKey; ///< Asset key for material (example: "Assets/Materials/MyMaterial.material.json")
         Assets::MaterialAsset::Ptr CachedMaterial; ///< Runtime cache; keeps asset alive
         bool MaterialLoadAttempted = false; ///< Prevents per-frame retry/log spam when material is missing
+    };
+
+    /// Optional audio source reference (Unity-style).
+    /// Supports simple non-spatial clip playback with Play On Start and loop.
+    struct AudioSourceComponent
+    {
+        std::string AudioClipKey; ///< Asset key for audio clip (example: "Assets/Audio/MyClip.wav")
+        float Volume = 1.0f;
+        bool PlayOnStart = true;
+        bool Loop = false;
+        bool Muted = false;
+
+        // Runtime-only state (not serialized).
+        uint32_t RuntimeVoiceId = 0;
+        bool RuntimePlaybackStarted = false;
     };
 
     /// Entity camera settings used to build the active gameplay camera in Play Mode.

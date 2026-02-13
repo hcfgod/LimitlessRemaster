@@ -1,6 +1,8 @@
 #include "EditorInspectorPanel.h"
 
 #include "EditorAssetNaming.h"
+#include "Audio/AudioEngine.h"
+#include "Assets/AudioClipAsset.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetManager.h"
 #include "Assets/AssetPaths.h"
@@ -608,6 +610,7 @@ namespace Limitless::EditorInspectorPanel
               const char* texturePayloadId,
               std::string& selectedTextureAssetKey,
               Assets::TextureAsset::Ptr& cachedTextureAsset,
+              const char* audioPayloadId,
               const char* materialPayloadId,
               const char* shaderPayloadId,
               std::string& selectedMaterialAssetKey,
@@ -636,6 +639,7 @@ namespace Limitless::EditorInspectorPanel
             bool removeSpriteComponent = false;
             bool removeCameraComponent = false;
             bool removeMaterialComponent = false;
+            bool removeAudioSourceComponent = false;
             if (auto* tag = registry.try_get<TagComponent>(selectedEntity))
             {
                 static entt::entity renameEntity = entt::null;
@@ -819,6 +823,103 @@ namespace Limitless::EditorInspectorPanel
                 }
             }
 
+            if (auto* audioSource = registry.try_get<AudioSourceComponent>(selectedEntity))
+            {
+                const bool audioOpen = ImGui::TreeNodeEx("Audio Source", ImGuiTreeNodeFlags_DefaultOpen);
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                    ImGui::OpenPopup("AudioSourceComponentOptions");
+                ImGui::SameLine();
+                if (ImGui::Button("...##AudioSourceComponentOptionsButton"))
+                    ImGui::OpenPopup("AudioSourceComponentOptions");
+
+                if (ImGui::BeginPopup("AudioSourceComponentOptions"))
+                {
+                    if (ImGui::MenuItem("Remove Component"))
+                        removeAudioSourceComponent = true;
+                    ImGui::EndPopup();
+                }
+
+                if (audioOpen)
+                {
+                    const std::string clipLabel = audioSource->AudioClipKey.empty()
+                        ? std::string("None")
+                        : EditorAssetNaming::GetAssetDisplayNameFromAssetKey(audioSource->AudioClipKey);
+
+                    ImGui::Text("Clip");
+                    ImGui::SameLine(80);
+                    ImGui::Button((clipLabel + "##AudioClip").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 60.0f, 0.0f));
+                    if (ImGui::BeginDragDropTarget())
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(audioPayloadId))
+                        {
+                            const char* key = static_cast<const char*>(payload->Data);
+                            if (key && key[0])
+                            {
+                                audioSource->AudioClipKey = key;
+                                audioSource->RuntimePlaybackStarted = false;
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+
+                    if (!audioSource->AudioClipKey.empty())
+                    {
+                        ImGui::SameLine();
+                        if (ImGui::Button("Clear##AudioClip"))
+                        {
+                            if (audioSource->RuntimeVoiceId != 0)
+                                Audio::AudioEngine::GetInstance().Stop(audioSource->RuntimeVoiceId);
+                            audioSource->AudioClipKey.clear();
+                            audioSource->RuntimeVoiceId = 0;
+                            audioSource->RuntimePlaybackStarted = false;
+                        }
+                    }
+
+                    ImGui::Checkbox("Play On Start", &audioSource->PlayOnStart);
+                    ImGui::Checkbox("Loop", &audioSource->Loop);
+                    ImGui::Checkbox("Muted", &audioSource->Muted);
+                    ImGui::SliderFloat("Volume", &audioSource->Volume, 0.0f, 2.0f, "%.2f");
+
+                    if (audioSource->RuntimeVoiceId != 0 &&
+                        !Audio::AudioEngine::GetInstance().IsVoiceActive(audioSource->RuntimeVoiceId))
+                    {
+                        audioSource->RuntimeVoiceId = 0;
+                        audioSource->RuntimePlaybackStarted = false;
+                    }
+                    const bool isPlaying = (audioSource->RuntimeVoiceId != 0);
+                    if (isPlaying)
+                    {
+                        if (ImGui::Button("Stop##AudioSourcePreview", ImVec2(120, 0)))
+                        {
+                            Audio::AudioEngine::GetInstance().Stop(audioSource->RuntimeVoiceId);
+                            audioSource->RuntimeVoiceId = 0;
+                            audioSource->RuntimePlaybackStarted = false;
+                        }
+                    }
+                    else
+                    {
+                        if (ImGui::Button("Play##AudioSourcePreview", ImVec2(120, 0)))
+                        {
+                            if (!audioSource->AudioClipKey.empty())
+                            {
+                                auto clipAsset = Assets::AudioClipAsset::LoadBlocking(audioSource->AudioClipKey);
+                                if (clipAsset && clipAsset->GetClip())
+                                {
+                                    const float volume = audioSource->Muted ? 0.0f : audioSource->Volume;
+                                    audioSource->RuntimeVoiceId = Audio::AudioEngine::GetInstance().PlayClip(
+                                        clipAsset->GetClip(),
+                                        volume,
+                                        audioSource->Loop);
+                                    audioSource->RuntimePlaybackStarted = (audioSource->RuntimeVoiceId != 0);
+                                }
+                            }
+                        }
+                    }
+
+                    ImGui::TreePop();
+                }
+            }
+
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
@@ -830,6 +931,7 @@ namespace Limitless::EditorInspectorPanel
             {
                 const bool hasSpriteComponent = registry.all_of<SpriteComponent>(selectedEntity);
                 const bool hasCameraComponent = registry.all_of<CameraComponent>(selectedEntity);
+                const bool hasAudioSourceComponent = registry.all_of<AudioSourceComponent>(selectedEntity);
                 if (hasSpriteComponent)
                     ImGui::BeginDisabled();
 
@@ -852,6 +954,15 @@ namespace Limitless::EditorInspectorPanel
                 if (hasCameraComponent)
                     ImGui::EndDisabled();
 
+                if (hasAudioSourceComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Audio Source"))
+                    registry.emplace<AudioSourceComponent>(selectedEntity);
+
+                if (hasAudioSourceComponent)
+                    ImGui::EndDisabled();
+
                 ImGui::EndPopup();
             }
 
@@ -869,6 +980,16 @@ namespace Limitless::EditorInspectorPanel
 
             if (removeCameraComponent)
                 registry.remove<CameraComponent>(selectedEntity);
+
+            if (removeAudioSourceComponent)
+            {
+                if (auto* audioSource = registry.try_get<AudioSourceComponent>(selectedEntity))
+                {
+                    if (audioSource->RuntimeVoiceId != 0)
+                        Audio::AudioEngine::GetInstance().Stop(audioSource->RuntimeVoiceId);
+                }
+                registry.remove<AudioSourceComponent>(selectedEntity);
+            }
         }
 
         ImGui::End();

@@ -17,6 +17,7 @@ namespace Limitless
                   const char* texturePayloadId,
                   std::string& selectedTextureAssetKey,
                   Assets::TextureAsset::Ptr& cachedTextureAsset,
+                  const char* audioPayloadId,
                   const char* materialPayloadId,
                   const char* shaderPayloadId,
                   std::string& selectedMaterialAssetKey,

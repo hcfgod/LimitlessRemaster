@@ -86,7 +86,7 @@ namespace Limitless::Audio
         m_MasterVolume = std::max(0.0f, volume);
     }
 
-    uint32_t AudioEngine::PlayOneShot(std::shared_ptr<const AudioClip> clip, float volume)
+    uint32_t AudioEngine::PlayClip(std::shared_ptr<const AudioClip> clip, float volume, bool loop)
     {
         if (!clip || clip->Samples.empty())
         {
@@ -113,7 +113,7 @@ namespace Limitless::Audio
                 v.Clip = std::move(clip);
                 v.FrameCursor = 0;
                 v.Volume = std::max(0.0f, volume);
-                v.Loop = false;
+                v.Loop = loop;
                 v.Active = true;
                 return id;
             }
@@ -124,11 +124,16 @@ namespace Limitless::Audio
         v.Clip = std::move(clip);
         v.FrameCursor = 0;
         v.Volume = std::max(0.0f, volume);
-        v.Loop = false;
+        v.Loop = loop;
         v.Active = true;
         m_Voices.emplace_back(std::move(v));
 
         return id;
+    }
+
+    uint32_t AudioEngine::PlayOneShot(std::shared_ptr<const AudioClip> clip, float volume)
+    {
+        return PlayClip(std::move(clip), volume, false);
     }
 
     void AudioEngine::Stop(uint32_t voiceId)
@@ -149,6 +154,21 @@ namespace Limitless::Audio
                 return;
             }
         }
+    }
+
+    bool AudioEngine::IsVoiceActive(uint32_t voiceId) const
+    {
+        if (voiceId == 0)
+            return false;
+
+        std::lock_guard<std::mutex> lock(m_VoiceMutex);
+        for (const auto& v : m_Voices)
+        {
+            if (v.Id == voiceId)
+                return v.Active && v.Clip != nullptr;
+        }
+
+        return false;
     }
 
     void AudioEngine::StopAll()

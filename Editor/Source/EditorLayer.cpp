@@ -1,6 +1,8 @@
 #include "EditorLayer.h"
 #include "EditorAssetNaming.h"
+#include "Audio/AudioEngine.h"
 #include "Assets/AssetDatabase.h"
+#include "Assets/AudioClipAsset.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetImportPipeline.h"
 #include "Assets/AssetTypes.h"
@@ -37,6 +39,7 @@ namespace Limitless
     namespace
     {
         constexpr const char* kAssetTexturePayload = "ASSET_TEXTURE";
+        constexpr const char* kAssetAudioPayload = "ASSET_AUDIO";
         constexpr const char* kAssetMovePayload = "ASSET_MOVE";
         constexpr const char* kAssetScenePayload = "ASSET_SCENE";
         constexpr const char* kAssetMaterialPayload = "ASSET_MATERIAL";
@@ -202,6 +205,73 @@ namespace Limitless
             return fileName;
         }
 
+        void StopAudioSourcesInScene(Scene* scene)
+        {
+            if (!scene)
+                return;
+
+            auto& registry = scene->GetRegistry();
+            auto audioView = registry.view<AudioSourceComponent>();
+            for (entt::entity entity : audioView)
+            {
+                auto& audioSource = audioView.get<AudioSourceComponent>(entity);
+                if (audioSource.RuntimeVoiceId != 0)
+                    Audio::AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
+                audioSource.RuntimeVoiceId = 0;
+                audioSource.RuntimePlaybackStarted = false;
+            }
+        }
+
+        void UpdateSceneAudioSources(Scene* scene, EditorPlayModeState playModeState)
+        {
+            if (!scene)
+                return;
+
+            const bool runtimePlaybackAllowed =
+                (playModeState == EditorPlayModeState::Play || playModeState == EditorPlayModeState::Pause);
+
+            auto& registry = scene->GetRegistry();
+            auto audioView = registry.view<AudioSourceComponent>();
+            for (entt::entity entity : audioView)
+            {
+                auto& audioSource = audioView.get<AudioSourceComponent>(entity);
+                if (audioSource.RuntimeVoiceId != 0 &&
+                    !Audio::AudioEngine::GetInstance().IsVoiceActive(audioSource.RuntimeVoiceId))
+                {
+                    audioSource.RuntimeVoiceId = 0;
+                }
+                if (!runtimePlaybackAllowed)
+                {
+                    // In Edit mode, leave manual preview playback alone.
+                    continue;
+                }
+
+                const bool shouldPlayOnStart =
+                    audioSource.PlayOnStart &&
+                    !audioSource.AudioClipKey.empty() &&
+                    !audioSource.Muted;
+
+                if (shouldPlayOnStart && !audioSource.RuntimePlaybackStarted)
+                {
+                    auto clipAsset = Assets::AudioClipAsset::LoadBlocking(audioSource.AudioClipKey);
+                    if (clipAsset && clipAsset->GetClip())
+                    {
+                        audioSource.RuntimeVoiceId = Audio::AudioEngine::GetInstance().PlayClip(
+                            clipAsset->GetClip(),
+                            audioSource.Volume,
+                            audioSource.Loop);
+                        audioSource.RuntimePlaybackStarted = (audioSource.RuntimeVoiceId != 0);
+                    }
+                }
+                else if (!shouldPlayOnStart && audioSource.RuntimeVoiceId != 0)
+                {
+                    Audio::AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
+                    audioSource.RuntimeVoiceId = 0;
+                    audioSource.RuntimePlaybackStarted = false;
+                }
+            }
+        }
+
     }  // anonymous namespace
 
     EditorLayer::EditorLayer()
@@ -259,6 +329,8 @@ namespace Limitless
 
     void EditorLayer::OnUpdate(float deltaTime)
     {
+        UpdateSceneAudioSources(m_Scene.get(), m_PlayModeState);
+
         EditorPlayMode::SyncSceneCamera(
             m_PlayModeState,
             m_Scene.get(),
@@ -503,6 +575,7 @@ namespace Limitless
             kAssetTexturePayload,
             m_SelectedTextureAssetKey,
             m_CachedTextureAsset,
+            kAssetAudioPayload,
             kAssetMaterialPayload,
             kAssetShaderPayload,
             m_SelectedMaterialAssetKey,
@@ -519,6 +592,7 @@ namespace Limitless
             m_SelectedMaterialAssetKey,
             m_CachedMaterialAsset,
             kAssetTexturePayload,
+            kAssetAudioPayload,
             kAssetMovePayload,
             kAssetScenePayload,
             kAssetMaterialPayload,
@@ -547,6 +621,7 @@ namespace Limitless
                 }
 
                 bool updatedAnyMaterialReference = false;
+                bool updatedAnyAudioReference = false;
                 const auto updateMaterialReferencesInScene = [&oldAssetKey, &newAssetKey, &updatedAnyMaterialReference](Scene* scene) {
                     if (!scene)
                         return;
@@ -566,18 +641,41 @@ namespace Limitless
                     }
                 };
 
+                const auto updateAudioReferencesInScene = [&oldAssetKey, &newAssetKey, &updatedAnyAudioReference](Scene* scene) {
+                    if (!scene)
+                        return;
+
+                    auto& registry = scene->GetRegistry();
+                    auto audioView = registry.view<AudioSourceComponent>();
+                    for (entt::entity entity : audioView)
+                    {
+                        auto& audioSource = audioView.get<AudioSourceComponent>(entity);
+                        if (audioSource.AudioClipKey == oldAssetKey)
+                        {
+                            if (audioSource.RuntimeVoiceId != 0)
+                                Audio::AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
+                            audioSource.AudioClipKey = newAssetKey;
+                            audioSource.RuntimeVoiceId = 0;
+                            audioSource.RuntimePlaybackStarted = false;
+                            updatedAnyAudioReference = true;
+                        }
+                    }
+                };
+
                 // Update both scene instances so rename remains stable across Play/Edit transitions.
                 updateMaterialReferencesInScene(m_Scene.get());
                 updateMaterialReferencesInScene(m_EditSceneStored.get());
+                updateAudioReferencesInScene(m_Scene.get());
+                updateAudioReferencesInScene(m_EditSceneStored.get());
 
                 // Persist immediately so reopening the editor cannot revive stale material keys.
-                if (updatedAnyMaterialReference &&
+                if ((updatedAnyMaterialReference || updatedAnyAudioReference) &&
                     m_PlayModeState == EditorPlayModeState::Edit &&
                     !m_CurrentSceneAssetKey.empty())
                 {
                     if (!SaveSceneToAssetKey(m_CurrentSceneAssetKey))
                     {
-                        LT_WARN("Asset rename updated scene material references but failed to auto-save '{}'.", m_CurrentSceneAssetKey);
+                        LT_WARN("Asset rename updated scene references but failed to auto-save '{}'.", m_CurrentSceneAssetKey);
                     }
                 }
             });
@@ -596,6 +694,9 @@ namespace Limitless
 
     void EditorLayer::EnterPlayMode()
     {
+        StopAudioSourcesInScene(m_Scene.get());
+        StopAudioSourcesInScene(m_EditSceneStored.get());
+
         EditorPlayMode::Enter(
             m_PlayModeState,
             m_Scene,
@@ -614,6 +715,9 @@ namespace Limitless
 
     void EditorLayer::ExitPlayMode()
     {
+        StopAudioSourcesInScene(m_Scene.get());
+        StopAudioSourcesInScene(m_EditSceneStored.get());
+
         EditorPlayMode::Exit(
             m_PlayModeState,
             m_Scene,
@@ -637,6 +741,8 @@ namespace Limitless
     {
         if (m_PlayModeState != EditorPlayModeState::Edit)
             ExitPlayMode();
+
+        StopAudioSourcesInScene(m_Scene.get());
 
         m_Scene = std::make_unique<Scene>();
         PopulateDefaultSceneTemplate(*m_Scene);
@@ -803,6 +909,9 @@ namespace Limitless
 
         if (m_PlayModeState != EditorPlayModeState::Edit)
             ExitPlayMode();
+
+        StopAudioSourcesInScene(m_Scene.get());
+        StopAudioSourcesInScene(m_EditSceneStored.get());
 
         const auto resolvedPathResult = Assets::ResolveAssetKeyToPath(assetKey);
         if (resolvedPathResult.IsFailure())

@@ -50,6 +50,7 @@ namespace Limitless
                   std::string& selectedMaterialAssetKey,
                   Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                   const char* texturePayloadId,
+                  const char* audioPayloadId,
                   const char* assetMovePayloadId,
                   const char* scenePayloadId,
                   const char* materialPayloadId,

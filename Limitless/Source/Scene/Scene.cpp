@@ -389,6 +389,18 @@ namespace Limitless
             {
                 destinationRegistry.emplace<CameraComponent>(destinationEntity, *camera);
             }
+
+            if (const auto* audioSource = sourceRegistry.try_get<AudioSourceComponent>(sourceEntity))
+            {
+                auto& destinationAudioSource = destinationRegistry.emplace<AudioSourceComponent>(destinationEntity);
+                destinationAudioSource.AudioClipKey = audioSource->AudioClipKey;
+                destinationAudioSource.Volume = audioSource->Volume;
+                destinationAudioSource.PlayOnStart = audioSource->PlayOnStart;
+                destinationAudioSource.Loop = audioSource->Loop;
+                destinationAudioSource.Muted = audioSource->Muted;
+                destinationAudioSource.RuntimeVoiceId = 0;
+                destinationAudioSource.RuntimePlaybackStarted = false;
+            }
         }
 
         for (const auto& [sourceEntity, destinationEntity] : entityMap)
@@ -442,7 +454,7 @@ namespace Limitless
             indexByEntity.emplace(entities[index], static_cast<int32_t>(index));
 
         nlohmann::json root = nlohmann::json::object();
-        root["Version"] = 2;
+        root["Version"] = 3;
         if (m_EditorCameraBookmark.has_value())
         {
             root["EditorCamera"] = {
@@ -506,6 +518,17 @@ namespace Limitless
                     { "NearPlane", camera->NearPlane },
                     { "FarPlane", camera->FarPlane },
                     { "FieldOfViewYDegrees", camera->FieldOfViewYDegrees }
+                };
+            }
+
+            if (const auto* audioSource = m_Registry.try_get<AudioSourceComponent>(entity))
+            {
+                entry["AudioSource"] = {
+                    { "AudioClip", MakeAssetReferenceJson(audioSource->AudioClipKey, Assets::AssetType::AudioClip) },
+                    { "Volume", audioSource->Volume },
+                    { "PlayOnStart", audioSource->PlayOnStart },
+                    { "Loop", audioSource->Loop },
+                    { "Muted", audioSource->Muted }
                 };
             }
 
@@ -633,6 +656,30 @@ namespace Limitless
                 camera.NearPlane = cameraJson.value("NearPlane", -1.0f);
                 camera.FarPlane = cameraJson.value("FarPlane", 1.0f);
                 camera.FieldOfViewYDegrees = cameraJson.value("FieldOfViewYDegrees", 60.0f);
+            }
+
+            if (entry.contains("AudioSource"))
+            {
+                const auto& audioSourceJson = entry["AudioSource"];
+                auto& audioSource = scene->GetRegistry().emplace<AudioSourceComponent>(entity);
+
+                if (audioSourceJson.is_object() && audioSourceJson.contains("AudioClip"))
+                    audioSource.AudioClipKey = ResolveAssetKeyFromSceneJson(audioSourceJson["AudioClip"]);
+                else if (audioSourceJson.is_object())
+                    audioSource.AudioClipKey = ResolveLatestKeyFromDatabase(audioSourceJson.value("AudioClipKey", std::string{}));
+
+                if (audioSourceJson.is_object())
+                {
+                    audioSource.Volume = audioSourceJson.value("Volume", 1.0f);
+                    if (audioSource.Volume < 0.0f)
+                        audioSource.Volume = 0.0f;
+                    audioSource.PlayOnStart = audioSourceJson.value("PlayOnStart", true);
+                    audioSource.Loop = audioSourceJson.value("Loop", false);
+                    audioSource.Muted = audioSourceJson.value("Muted", false);
+                }
+
+                audioSource.RuntimeVoiceId = 0;
+                audioSource.RuntimePlaybackStarted = false;
             }
 
             int32_t parentIndex = -1;

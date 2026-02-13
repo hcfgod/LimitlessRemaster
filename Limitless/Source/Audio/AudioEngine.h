@@ -37,10 +37,16 @@ namespace Limitless::Audio
         float GetMasterVolume() const { return m_MasterVolume; }
 
         // Play a clip as a new voice. Returns a voice id that can be stopped later.
+        uint32_t PlayClip(std::shared_ptr<const AudioClip> clip, float volume = 1.0f, bool loop = false);
+
+        // Backward-compatible alias for non-looping playback.
         uint32_t PlayOneShot(std::shared_ptr<const AudioClip> clip, float volume = 1.0f);
 
         // Stop a voice by id. Safe to call even if the voice already finished.
         void Stop(uint32_t voiceId);
+
+        // Returns true when the voice id currently maps to an active voice.
+        bool IsVoiceActive(uint32_t voiceId) const;
 
         // Stop everything immediately.
         void StopAll();
@@ -75,7 +81,7 @@ namespace Limitless::Audio
         float m_MasterVolume = 1.0f;
         uint32_t m_NextVoiceId = 1;
 
-        std::mutex m_VoiceMutex;
+        mutable std::mutex m_VoiceMutex;
         std::vector<Voice> m_Voices;
 
         // Scratch buffer used by the audio callback (interleaved stereo float32).
