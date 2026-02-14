@@ -42,6 +42,8 @@
         #define WIN32_LEAN_AND_MEAN
     #endif
     #include <windows.h>
+#else
+    #include <sys/wait.h>
 #endif
 
 namespace Limitless::EditorInspectorPanel
@@ -187,7 +189,7 @@ namespace Limitless::EditorInspectorPanel
             return { "Debug", "x64" };
         }
 
-        int RunBuildScriptBlockingWindows(const std::filesystem::path& projectRoot, const std::string& configuration, const std::string& platform)
+        int RunBuildScriptBlocking(const std::filesystem::path& projectRoot, const std::string& configuration, const std::string& platform)
         {
 #ifdef LT_PLATFORM_WINDOWS
             const std::string scriptCommand = "cmd.exe /c \"Scripts\\build-scriptcore-windows.bat " + configuration + " " + platform + "\"";
@@ -219,10 +221,17 @@ namespace Limitless::EditorInspectorPanel
             CloseHandle(processInformation.hProcess);
             return static_cast<int>(exitCode);
 #else
-            (void)projectRoot;
-            (void)configuration;
-            (void)platform;
-            return 1;
+            const std::string scriptCommand =
+                "cd \"" + projectRoot.string() + "\" && bash \"Scripts/build-scriptcore-unix.sh\" --config \"" + configuration + "\" --platform \"" + platform + "\"";
+
+            const int systemResult = std::system(scriptCommand.c_str());
+            if (systemResult == -1)
+                return 1;
+
+            if (WIFEXITED(systemResult))
+                return WEXITSTATUS(systemResult);
+
+            return systemResult;
 #endif
         }
 
@@ -263,7 +272,7 @@ namespace Limitless::EditorInspectorPanel
                 : engineRoot.value();
             const auto [configuration, platform] = GetBuildConfigurationAndPlatform(settingsRoot);
             state.BuildThread = std::make_unique<std::thread>([&state, root = engineRoot.value(), configuration, platform]() {
-                const int exitCode = RunBuildScriptBlockingWindows(root, configuration, platform);
+                const int exitCode = RunBuildScriptBlocking(root, configuration, platform);
                 state.LastBuildExitCode.store(exitCode, std::memory_order_relaxed);
                 state.BuildInProgress.store(false, std::memory_order_relaxed);
             });

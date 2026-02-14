@@ -111,14 +111,16 @@ The inspector now supports native script authoring:
 - Saved scripts are mirrored into `<EngineWorkspace>/Build/Generated/ScriptCore` for compilation by the `ScriptCore` build.
 - Mirror preserves your relative folder structure under `Assets` (for example `Assets/Gameplay/Player` mirrors to `.../Build/Generated/ScriptCore/Gameplay/Player`).
 - Build sync mirrors all paired `*.h`/`*.cpp` native scripts found under project `Assets` before compiling `ScriptCore`.
-- `Auto Build On Save` can trigger `Scripts/build-scriptcore-windows.bat` automatically after saving.
+- `Auto Build On Save` can trigger ScriptCore-only builds automatically after saving.
 
 Important:
 
 - New scripts are compiled through the `ScriptCore` DLL project.
-- The editor can trigger script-only builds with `Scripts/build-scriptcore-windows.bat`.
+- The editor can trigger script-only builds with:
+  - Windows: `Scripts/build-scriptcore-windows.bat`
+  - Linux/macOS: `Scripts/build-scriptcore-unix.sh`
 - Build configuration/platform are read from project build target settings when available.
-- Script classes are loaded from `ScriptCore.dll` and hot-reloaded in Edit mode when the DLL timestamp changes.
+- Script classes are loaded from the platform-native ScriptCore module and hot-reloaded in Edit mode when its timestamp changes (`ScriptCore.dll` on Windows, `libScriptCore.so` on Linux, `libScriptCore.dylib` on macOS).
 
 ## Current Scope
 

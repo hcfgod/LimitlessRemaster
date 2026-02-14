@@ -33,7 +33,8 @@ LimitlessRemaster/
     ├── build-windows.bat     # Windows: bootstrap Premake, generate solution, build, run tests
     ├── build-unix.sh         # Unix/Linux/macOS: dependencies, Premake, make, tests
     ├── BootstrapPremake.bat  # Download Premake5 into Vendor/Premake (Windows)
-    └── build-scriptcore-windows.bat  # Build ScriptCore DLL (e.g. for editor hot-reload)
+    ├── build-scriptcore-windows.bat  # Windows ScriptCore-only build
+    └── build-scriptcore-unix.sh      # Linux/macOS ScriptCore-only build
 ```
 Output directory: `Build/<Config>-<system>-<platform>/` (e.g. `Build/Debug-windows-x64/`).
 

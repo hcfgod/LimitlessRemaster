@@ -30,6 +30,28 @@ namespace Limitless::ScriptCoreModuleRuntime
 
         RuntimeState s_RuntimeState;
 
+        std::string GetScriptCoreLibraryFileName()
+        {
+#if defined(LT_PLATFORM_WINDOWS)
+            return "ScriptCore.dll";
+#elif defined(LT_PLATFORM_MACOS)
+            return "libScriptCore.dylib";
+#else
+            return "libScriptCore.so";
+#endif
+        }
+
+        std::string GetRuntimeLoadedLibraryFileName(uint64_t reloadCounter)
+        {
+#if defined(LT_PLATFORM_WINDOWS)
+            return "ScriptCore.RuntimeLoaded." + std::to_string(reloadCounter) + ".dll";
+#elif defined(LT_PLATFORM_MACOS)
+            return "libScriptCore.RuntimeLoaded." + std::to_string(reloadCounter) + ".dylib";
+#else
+            return "libScriptCore.RuntimeLoaded." + std::to_string(reloadCounter) + ".so";
+#endif
+        }
+
         std::optional<std::filesystem::path> FindEngineWorkspaceRoot()
         {
             std::error_code errorCode;
@@ -75,8 +97,15 @@ namespace Limitless::ScriptCoreModuleRuntime
             platformToken = "ARM64";
 #endif
 
+            std::string systemToken = "linux";
+#if defined(LT_PLATFORM_WINDOWS)
+            systemToken = "windows";
+#elif defined(LT_PLATFORM_MACOS)
+            systemToken = "macosx";
+#endif
+
             return std::filesystem::path("Build")
-                / (configName + "_" + architectureName + "-windows-" + platformToken)
+                / (configName + "_" + architectureName + "-" + systemToken + "-" + platformToken)
                 / "Editor";
         }
 
@@ -85,19 +114,39 @@ namespace Limitless::ScriptCoreModuleRuntime
             std::vector<std::filesystem::path> candidates;
 
             const std::string executablePath = PlatformDetection::GetExecutablePath();
+            const std::string scriptCoreLibraryFileName = GetScriptCoreLibraryFileName();
             if (!executablePath.empty())
             {
                 const std::filesystem::path executableDirectory = std::filesystem::path(executablePath).parent_path();
                 if (!executableDirectory.empty())
-                    candidates.push_back(executableDirectory / "ScriptCore.dll");
+                    candidates.push_back(executableDirectory / scriptCoreLibraryFileName);
             }
 
             if (const auto engineRoot = FindEngineWorkspaceRoot(); engineRoot.has_value())
             {
-                candidates.push_back(engineRoot.value() / BuildConfigOutputFolder() / "ScriptCore.dll");
+                candidates.push_back(engineRoot.value() / BuildConfigOutputFolder() / scriptCoreLibraryFileName);
             }
 
             return candidates;
+        }
+
+        void LogScriptCoreLibraryCandidates(const std::vector<std::filesystem::path>& candidates)
+        {
+#if defined(LT_CONFIG_DEBUG)
+            if (candidates.empty())
+            {
+                LT_INFO("ScriptCore runtime: no candidate library paths were generated.");
+                return;
+            }
+
+            LT_INFO("ScriptCore runtime: probing {} candidate path(s).", candidates.size());
+            for (size_t index = 0; index < candidates.size(); ++index)
+            {
+                LT_INFO("ScriptCore runtime candidate [{}]: '{}'", index, candidates[index].string());
+            }
+#else
+            (void)candidates;
+#endif
         }
 
         void ResetRuntimeScriptRegistry()
@@ -139,7 +188,7 @@ namespace Limitless::ScriptCoreModuleRuntime
             }
 
             const std::filesystem::path stagedLibraryPath = libraryPath.parent_path()
-                / ("ScriptCore.RuntimeLoaded." + std::to_string(++s_RuntimeState.ReloadCounter) + ".dll");
+                / GetRuntimeLoadedLibraryFileName(++s_RuntimeState.ReloadCounter);
 
             std::filesystem::copy_file(
                 libraryPath,
@@ -191,7 +240,9 @@ namespace Limitless::ScriptCoreModuleRuntime
         s_RuntimeState.Initialized = true;
         s_RuntimeState.LastPollTime = std::chrono::steady_clock::now();
 
-        for (const auto& candidatePath : BuildScriptCoreLibraryCandidates())
+        const auto candidatePaths = BuildScriptCoreLibraryCandidates();
+        LogScriptCoreLibraryCandidates(candidatePaths);
+        for (const auto& candidatePath : candidatePaths)
         {
             std::error_code existsError;
             if (std::filesystem::exists(candidatePath, existsError))
@@ -201,7 +252,7 @@ namespace Limitless::ScriptCoreModuleRuntime
             }
         }
 
-        LT_INFO("ScriptCore runtime: ScriptCore.dll not found yet, using built-in scripts only.");
+        LT_INFO("ScriptCore runtime: ScriptCore module not found yet, using built-in scripts only.");
     }
 
     void Shutdown()

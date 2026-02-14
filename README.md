@@ -39,7 +39,7 @@ LimitlessRemaster/
 ├── Sandbox/            # Example game app (TestLayer, Renderer2D demo, audio demo)
 ├── ScriptCore/        # Native C++ script DLL built and loaded by the editor
 ├── Test/               # Unit tests (doctest)
-├── Scripts/            # Build scripts (build-windows.bat, build-unix.sh, BootstrapPremake)
+├── Scripts/            # Build scripts (build-windows.bat, build-unix.sh, build-scriptcore-*, BootstrapPremake)
 ├── Vendor/             # Premake5 (bootstrapped by build scripts)
 ├── .github/workflows/  # GitHub Actions CI/CD
 └── Docs/               # Documentation
