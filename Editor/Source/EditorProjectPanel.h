@@ -62,10 +62,13 @@ namespace Limitless
                   const char* assetMovePayloadId,
                   const char* scenePayloadId,
                   const char* materialPayloadId,
+                  const char* prefabPayloadId,
                   const char* shaderPayloadId,
                   const char* fontPayloadId,
                   const std::function<void(const std::string&)>& onSceneActivated,
                   const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
+                  const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
+                  const std::function<void(const std::string&)>& onPrefabActivated,
                   const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
                   const std::function<void(const std::string&, const std::string&)>& onAssetRenamed,
                   const std::function<void(const std::string&)>& onNativeScriptAssetActivated);

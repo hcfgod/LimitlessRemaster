@@ -5,6 +5,7 @@
 #include "Limitless.h"
 
 #include <array>
+#include <functional>
 #include <string>
 
 namespace Limitless
@@ -31,7 +32,13 @@ namespace Limitless
                   Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                   std::string& selectedNativeScriptAssetKey,
                   const char* materialPayloadId,
+                  const char* prefabPayloadId,
                   const std::string& sceneRootDisplayName,
-                  EditorUndoService* undoService);
+                  EditorUndoService* undoService,
+                  const std::function<entt::entity(const std::string&, entt::entity)>& onInstantiatePrefabAtParent,
+                  const std::function<bool(entt::entity)>& onCreatePrefabFromEntity,
+                  const std::function<bool(entt::entity)>& onApplyPrefabFromEntity,
+                  const std::function<entt::entity(entt::entity)>& onRevertPrefabEntity,
+                  const std::function<bool(entt::entity)>& onUnpackPrefabEntity);
     }
 }

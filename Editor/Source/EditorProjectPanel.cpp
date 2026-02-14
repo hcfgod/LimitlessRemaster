@@ -21,6 +21,8 @@ namespace Limitless::EditorProjectPanel
 {
     namespace
     {
+        constexpr const char* kSceneEntityPayload = "SCENE_ENTITY";
+
         void CopyTextToBuffer(std::array<char, 256>& destination, const char* source)
         {
             if (!source)
@@ -62,6 +64,17 @@ namespace Limitless::EditorProjectPanel
                 character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
             constexpr const char* materialSuffix = ".material.json";
             const std::string suffixString = materialSuffix;
+            return lowerFileName.size() >= suffixString.size() &&
+                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
+        }
+
+        bool IsPrefabExtension(const std::filesystem::path& path)
+        {
+            std::string lowerFileName = path.filename().string();
+            for (char& character : lowerFileName)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            constexpr const char* prefabSuffix = ".prefab.json";
+            const std::string suffixString = prefabSuffix;
             return lowerFileName.size() >= suffixString.size() &&
                    lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
         }
@@ -397,10 +410,13 @@ namespace Limitless::EditorProjectPanel
                            const char* assetMovePayloadId,
                            const char* scenePayloadId,
                            const char* materialPayloadId,
+                           const char* prefabPayloadId,
                            const char* shaderPayloadId,
                            const char* fontPayloadId,
                            const std::function<void(const std::string&)>& onSceneActivated,
                            const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
+                           const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
+                           const std::function<void(const std::string&)>& onPrefabActivated,
                            const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
                            const std::function<void(const std::string&, const std::string&)>& onAssetRenamed,
                            const std::function<void(const std::string&)>& onNativeScriptAssetActivated)
@@ -531,6 +547,12 @@ namespace Limitless::EditorProjectPanel
                                     ProjectAssetOperations::MoveAssetToFolder(key, entryRelativePath);
                             }
                         }
+                        else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSceneEntityPayload))
+                        {
+                            const auto* entity = static_cast<const entt::entity*>(payload->Data);
+                            if (entity && onCreatePrefabFromSceneEntityRequested)
+                                onCreatePrefabFromSceneEntityRequested(*entity, entryRelativePath);
+                        }
                         ImGui::EndDragDropTarget();
                     }
 
@@ -557,10 +579,13 @@ namespace Limitless::EditorProjectPanel
                                       assetMovePayloadId,
                                       scenePayloadId,
                                       materialPayloadId,
+                                      prefabPayloadId,
                                       shaderPayloadId,
                                       fontPayloadId,
                                       onSceneActivated,
                                       onCreateSceneRequested,
+                                      onCreatePrefabFromSceneEntityRequested,
+                                      onPrefabActivated,
                                       onSetDefaultSceneRequested,
                                       onAssetRenamed,
                                       onNativeScriptAssetActivated);
@@ -679,6 +704,7 @@ namespace Limitless::EditorProjectPanel
                     const bool isTexture = IsTextureExtension(entry);
                     const bool isScene = IsSceneExtension(entry);
                     const bool isMaterial = IsMaterialExtension(entry);
+                    const bool isPrefab = IsPrefabExtension(entry);
                     const bool isShader = IsShaderExtension(entry);
                     const bool isAudio = IsAudioExtension(entry);
                     const bool isFont = IsFontExtension(entry);
@@ -747,6 +773,11 @@ namespace Limitless::EditorProjectPanel
                         selectedNativeScriptAssetKey.clear();
                         onSceneActivated(assetKey);
                     }
+                    else if (isPrefab && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onPrefabActivated)
+                    {
+                        selectedNativeScriptAssetKey.clear();
+                        onPrefabActivated(assetKey);
+                    }
                     else if (isMaterial && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
                     {
                         selectedMaterialAssetKey = assetKey;
@@ -781,6 +812,12 @@ namespace Limitless::EditorProjectPanel
                             {
                                 onSetDefaultSceneRequested(assetKey);
                             }
+                            ImGui::Separator();
+                        }
+                        if (isPrefab)
+                        {
+                            if (ImGui::MenuItem("Instantiate Prefab") && onPrefabActivated)
+                                onPrefabActivated(assetKey);
                             ImGui::Separator();
                         }
 
@@ -824,6 +861,8 @@ namespace Limitless::EditorProjectPanel
                             ImGui::SetDragDropPayload(texturePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
                         else if (isScene)
                             ImGui::SetDragDropPayload(scenePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                        else if (isPrefab)
+                            ImGui::SetDragDropPayload(prefabPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
                         else if (isMaterial)
                             ImGui::SetDragDropPayload(materialPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
                         else if (isShader)
@@ -1053,10 +1092,13 @@ namespace Limitless::EditorProjectPanel
               const char* assetMovePayloadId,
               const char* scenePayloadId,
               const char* materialPayloadId,
+              const char* prefabPayloadId,
               const char* shaderPayloadId,
               const char* fontPayloadId,
               const std::function<void(const std::string&)>& onSceneActivated,
               const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
+              const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
+              const std::function<void(const std::string&)>& onPrefabActivated,
               const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
               const std::function<void(const std::string&, const std::string&)>& onAssetRenamed,
               const std::function<void(const std::string&)>& onNativeScriptAssetActivated)
@@ -1172,6 +1214,12 @@ namespace Limitless::EditorProjectPanel
                             ProjectAssetOperations::MoveAssetToFolder(key, "");
                     }
                 }
+                else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSceneEntityPayload))
+                {
+                    const auto* entity = static_cast<const entt::entity*>(payload->Data);
+                    if (entity && onCreatePrefabFromSceneEntityRequested)
+                        onCreatePrefabFromSceneEntityRequested(*entity, "");
+                }
                 ImGui::EndDragDropTarget();
             }
 
@@ -1189,10 +1237,13 @@ namespace Limitless::EditorProjectPanel
                           assetMovePayloadId,
                           scenePayloadId,
                           materialPayloadId,
+                          prefabPayloadId,
                           shaderPayloadId,
                           fontPayloadId,
                           onSceneActivated,
                           onCreateSceneRequested,
+                          onCreatePrefabFromSceneEntityRequested,
+                          onPrefabActivated,
                           onSetDefaultSceneRequested,
                           onAssetRenamed,
                           onNativeScriptAssetActivated);

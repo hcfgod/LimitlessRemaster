@@ -599,6 +599,11 @@ namespace Limitless
                     destinationScriptEntry.RuntimeInstance.reset();
                 }
             }
+
+            if (const auto* prefabInstance = sourceRegistry.try_get<PrefabInstanceComponent>(sourceEntity))
+            {
+                destinationRegistry.emplace<PrefabInstanceComponent>(destinationEntity, *prefabInstance);
+            }
         }
 
         for (const auto& [sourceEntity, destinationEntity] : entityMap)
@@ -777,6 +782,13 @@ namespace Limitless
                     });
                 }
                 entry["NativeScripts"] = std::move(scriptEntries);
+            }
+
+            if (const auto* prefabInstance = m_Registry.try_get<PrefabInstanceComponent>(entity))
+            {
+                entry["PrefabInstance"] = {
+                    { "Prefab", MakeAssetReferenceJson(prefabInstance->PrefabAssetKey, Assets::AssetType::Prefab) }
+                };
             }
 
             root["Entities"].push_back(std::move(entry));
@@ -1000,6 +1012,14 @@ namespace Limitless
                 auto& nativeScript = scene->GetRegistry().emplace<NativeScriptComponent>(entity);
                 auto& loadedScriptEntry = nativeScript.Scripts.emplace_back();
                 loadNativeScriptEntry(entry["NativeScript"], loadedScriptEntry);
+            }
+
+            if (entry.contains("PrefabInstance") && entry["PrefabInstance"].is_object())
+            {
+                const auto& prefabJson = entry["PrefabInstance"];
+                auto& prefabInstance = scene->GetRegistry().emplace<PrefabInstanceComponent>(entity);
+                if (prefabJson.contains("Prefab"))
+                    prefabInstance.PrefabAssetKey = ResolveAssetKeyFromSceneJson(prefabJson["Prefab"]);
             }
 
             int32_t parentIndex = -1;

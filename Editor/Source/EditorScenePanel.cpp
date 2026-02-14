@@ -63,7 +63,13 @@ namespace Limitless::EditorScenePanel
                             Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                             std::string& selectedNativeScriptAssetKey,
                             const char* materialPayloadId,
-                            EditorUndoService* undoService)
+                            const char* prefabPayloadId,
+                            EditorUndoService* undoService,
+                            const std::function<entt::entity(const std::string&, entt::entity)>& onInstantiatePrefabAtParent,
+                            const std::function<bool(entt::entity)>& onCreatePrefabFromEntity,
+                            const std::function<bool(entt::entity)>& onApplyPrefabFromEntity,
+                            const std::function<entt::entity(entt::entity)>& onRevertPrefabEntity,
+                            const std::function<bool(entt::entity)>& onUnpackPrefabEntity)
         {
             if (!scene || !scene->IsValid(entity))
                 return false;
@@ -127,6 +133,36 @@ namespace Limitless::EditorScenePanel
                 if (ImGui::MenuItem("Delete"))
                 {
                     state.PendingDeleteEntity = entity;
+                }
+
+                const auto* prefabInstance = registry.try_get<PrefabInstanceComponent>(entity);
+                ImGui::Separator();
+                if (prefabInstance && !prefabInstance->PrefabAssetKey.empty())
+                {
+                    if (ImGui::MenuItem("Apply Prefab") && onApplyPrefabFromEntity)
+                        (void)onApplyPrefabFromEntity(entity);
+
+                    if (ImGui::MenuItem("Revert Prefab") && onRevertPrefabEntity)
+                    {
+                        const entt::entity revertedEntity = onRevertPrefabEntity(entity);
+                        if (revertedEntity != entt::null)
+                        {
+                            selectedEntity = revertedEntity;
+                            selectedTextureAssetKey.clear();
+                            cachedTextureAsset.reset();
+                            selectedMaterialAssetKey.clear();
+                            cachedMaterialAsset.reset();
+                            selectedNativeScriptAssetKey.clear();
+                        }
+                    }
+
+                    if (ImGui::MenuItem("Unpack Prefab") && onUnpackPrefabEntity)
+                        (void)onUnpackPrefabEntity(entity);
+                }
+                else
+                {
+                    if (ImGui::MenuItem("Create Prefab") && onCreatePrefabFromEntity)
+                        (void)onCreatePrefabFromEntity(entity);
                 }
 
                 ImGui::EndPopup();
@@ -196,6 +232,26 @@ namespace Limitless::EditorScenePanel
 
                                 // Make the drop feel like Unity: select the target object (not the asset).
                                 selectedEntity = entity;
+                                selectedTextureAssetKey.clear();
+                                cachedTextureAsset.reset();
+                                selectedMaterialAssetKey.clear();
+                                cachedMaterialAsset.reset();
+                                selectedNativeScriptAssetKey.clear();
+                            }
+                        }
+                    }
+                }
+                if (prefabPayloadId)
+                {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(prefabPayloadId))
+                    {
+                        const char* prefabAssetKey = static_cast<const char*>(payload->Data);
+                        if (prefabAssetKey && prefabAssetKey[0] && onInstantiatePrefabAtParent)
+                        {
+                            const entt::entity createdEntity = onInstantiatePrefabAtParent(prefabAssetKey, entity);
+                            if (createdEntity != entt::null)
+                            {
+                                selectedEntity = createdEntity;
                                 selectedTextureAssetKey.clear();
                                 cachedTextureAsset.reset();
                                 selectedMaterialAssetKey.clear();
@@ -291,7 +347,13 @@ namespace Limitless::EditorScenePanel
                                        cachedMaterialAsset,
                                        selectedNativeScriptAssetKey,
                                        materialPayloadId,
-                                       undoService))
+                                       prefabPayloadId,
+                                       undoService,
+                                       onInstantiatePrefabAtParent,
+                                       onCreatePrefabFromEntity,
+                                       onApplyPrefabFromEntity,
+                                       onRevertPrefabEntity,
+                                       onUnpackPrefabEntity))
                         deletedSelection = true;
                 }
                 ImGui::TreePop();
@@ -310,8 +372,14 @@ namespace Limitless::EditorScenePanel
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
               std::string& selectedNativeScriptAssetKey,
               const char* materialPayloadId,
+              const char* prefabPayloadId,
               const std::string& sceneRootDisplayName,
-              EditorUndoService* undoService)
+              EditorUndoService* undoService,
+              const std::function<entt::entity(const std::string&, entt::entity)>& onInstantiatePrefabAtParent,
+              const std::function<bool(entt::entity)>& onCreatePrefabFromEntity,
+              const std::function<bool(entt::entity)>& onApplyPrefabFromEntity,
+              const std::function<entt::entity(entt::entity)>& onRevertPrefabEntity,
+              const std::function<bool(entt::entity)>& onUnpackPrefabEntity)
     {
         ImGui::Begin("Scene");
 
@@ -401,6 +469,26 @@ namespace Limitless::EditorScenePanel
                             }
                         }
                     }
+                    if (prefabPayloadId)
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(prefabPayloadId))
+                        {
+                            const char* prefabAssetKey = static_cast<const char*>(payload->Data);
+                            if (prefabAssetKey && prefabAssetKey[0] && onInstantiatePrefabAtParent)
+                            {
+                                const entt::entity createdEntity = onInstantiatePrefabAtParent(prefabAssetKey, entt::null);
+                                if (createdEntity != entt::null)
+                                {
+                                    selectedEntity = createdEntity;
+                                    selectedTextureAssetKey.clear();
+                                    cachedTextureAsset.reset();
+                                    selectedMaterialAssetKey.clear();
+                                    cachedMaterialAsset.reset();
+                                    selectedNativeScriptAssetKey.clear();
+                                }
+                            }
+                        }
+                    }
                     ImGui::EndDragDropTarget();
                 }
 
@@ -416,7 +504,13 @@ namespace Limitless::EditorScenePanel
                                        cachedMaterialAsset,
                                        selectedNativeScriptAssetKey,
                                        materialPayloadId,
-                                       undoService))
+                                       prefabPayloadId,
+                                       undoService,
+                                       onInstantiatePrefabAtParent,
+                                       onCreatePrefabFromEntity,
+                                       onApplyPrefabFromEntity,
+                                       onRevertPrefabEntity,
+                                       onUnpackPrefabEntity))
                         deletedSelection = true;
                 }
 
@@ -476,6 +570,26 @@ namespace Limitless::EditorScenePanel
                             else
                             {
                                 scene->SetParent(*childEntity, entt::null);
+                            }
+                        }
+                    }
+                    if (prefabPayloadId)
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(prefabPayloadId))
+                        {
+                            const char* prefabAssetKey = static_cast<const char*>(payload->Data);
+                            if (prefabAssetKey && prefabAssetKey[0] && onInstantiatePrefabAtParent)
+                            {
+                                const entt::entity createdEntity = onInstantiatePrefabAtParent(prefabAssetKey, entt::null);
+                                if (createdEntity != entt::null)
+                                {
+                                    selectedEntity = createdEntity;
+                                    selectedTextureAssetKey.clear();
+                                    cachedTextureAsset.reset();
+                                    selectedMaterialAssetKey.clear();
+                                    cachedMaterialAsset.reset();
+                                    selectedNativeScriptAssetKey.clear();
+                                }
                             }
                         }
                     }

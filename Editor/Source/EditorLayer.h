@@ -72,6 +72,13 @@ namespace Limitless
         void BeginSceneSwitch();
         void PersistProjectSessionState();
         std::string CreateSceneAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
+        std::string CreatePrefabAssetPathForEntity(entt::entity entity, const std::filesystem::path& relativeFolderPath) const;
+        bool CreatePrefabFromEntity(entt::entity entity);
+        bool CreatePrefabFromEntityInFolder(entt::entity entity, const std::filesystem::path& relativeFolderPath);
+        entt::entity InstantiatePrefabAtParent(const std::string& prefabAssetKey, entt::entity parentEntity);
+        bool ApplyPrefabFromEntity(entt::entity entity);
+        entt::entity RevertPrefabEntity(entt::entity entity);
+        bool UnpackPrefabEntity(entt::entity entity);
         void SetProjectDefaultSceneAssetKey(const std::string& sceneAssetKey);
 
         uint32_t m_ViewportWidthPixels = 1280;

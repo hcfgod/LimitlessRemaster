@@ -26,10 +26,11 @@ namespace Limitless::EditorAssetNaming
 
     inline std::string GetAssetDisplayNameFromFileName(const std::string& fileName)
     {
-        constexpr std::array<const char*, 3> kCompoundSuffixes = {
+        constexpr std::array<const char*, 4> kCompoundSuffixes = {
             ".scene.json",
             ".material.json",
-            ".inputactions.json"
+            ".inputactions.json",
+            ".prefab.json"
         };
 
         for (const char* suffix : kCompoundSuffixes)

@@ -13,6 +13,7 @@ namespace Limitless::Assets
             case AssetType::Scene:     return "Scene";
             case AssetType::InputActions: return "InputActions";
             case AssetType::AudioClip: return "AudioClip";
+            case AssetType::Prefab: return "Prefab";
             case AssetType::Unknown:
             default:                   return "Unknown";
         }
@@ -27,6 +28,7 @@ namespace Limitless::Assets
         if (s == "Scene") return AssetType::Scene;
         if (s == "InputActions") return AssetType::InputActions;
         if (s == "AudioClip") return AssetType::AudioClip;
+        if (s == "Prefab") return AssetType::Prefab;
         return AssetType::Unknown;
     }
 }

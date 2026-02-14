@@ -249,6 +249,9 @@ TEST_SUITE("Scene And Editor Flows")
         auto& sprite = registry.emplace<Limitless::SpriteComponent>(root);
         sprite.TextureKey = "Assets/Textures/Backgrounds/Stage01.png";
 
+        auto& prefabInstance = registry.emplace<Limitless::PrefabInstanceComponent>(root);
+        prefabInstance.PrefabAssetKey = "Assets/Prefabs/Ui/Hud.prefab.json";
+
         const std::filesystem::path scenePath = MakeTempScenePath("SceneRoundTrip.scene.json");
         const auto saveResult = scene.SaveToFile(scenePath);
         REQUIRE(saveResult.IsSuccess());
@@ -279,12 +282,17 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(loadedText.Space == Limitless::TextComponent::RenderSpace::Screen);
         CHECK(loadedText.Anchor == Limitless::TextComponent::ScreenAnchor::BottomCenter);
 
+        REQUIRE(loadedRegistry.all_of<Limitless::PrefabInstanceComponent>(loadedRoot));
+        const auto& loadedPrefabInstance = loadedRegistry.get<Limitless::PrefabInstanceComponent>(loadedRoot);
+        CHECK(loadedPrefabInstance.PrefabAssetKey == "Assets/Prefabs/Ui/Hud.prefab.json");
+
         REQUIRE(loadedScene.GetEditorCameraBookmark().has_value());
         CHECK(loadedScene.GetEditorCameraBookmark()->YawDegrees == doctest::Approx(-45.0f));
         CHECK(loadedScene.GetEditorCameraBookmark()->PitchDegrees == doctest::Approx(15.0f));
 
         std::error_code errorCode;
         std::filesystem::remove(scenePath, errorCode);
+        std::filesystem::remove(std::filesystem::path("Assets/Prefabs/Ui/Hud.prefab.json.meta"), errorCode);
     }
 
     TEST_CASE("Editor-like flow create entity add component and save scene")

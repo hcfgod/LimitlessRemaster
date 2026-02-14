@@ -11,6 +11,7 @@
 #include "Editor/EditorCameraController.h"
 #include "EditorInspectorPanel.h"
 #include "EditorMenuBar.h"
+#include "EditorPrefabSystem.h"
 #include "EditorPlayMode.h"
 #include "EditorProjectDialog.h"
 #include "EditorProjectPanel.h"
@@ -45,6 +46,7 @@ namespace Limitless
         constexpr const char* kAssetMovePayload = "ASSET_MOVE";
         constexpr const char* kAssetScenePayload = "ASSET_SCENE";
         constexpr const char* kAssetMaterialPayload = "ASSET_MATERIAL";
+        constexpr const char* kAssetPrefabPayload = "ASSET_PREFAB";
         constexpr const char* kAssetShaderPayload = "ASSET_SHADER";
         constexpr const char* kAssetFontPayload = "ASSET_FONT";
         constexpr const char* kDefaultSceneFileName = "New Scene.scene.json";
@@ -712,6 +714,8 @@ namespace Limitless
             [this](uint32_t width, uint32_t height) { EnsureViewportFramebuffer(width, height); },
             kAssetScenePayload,
             [this](const std::string& assetKey) { LoadSceneFromAssetKey(assetKey); },
+            kAssetPrefabPayload,
+            [this](const std::string& prefabAssetKey) { (void)InstantiatePrefabAtParent(prefabAssetKey, entt::null); },
             m_SelectedEntity,
             kAssetMaterialPayload,
             m_SelectedTextureAssetKey,
@@ -740,8 +744,14 @@ namespace Limitless
             m_CachedMaterialAsset,
             m_SelectedNativeScriptAssetKey,
             kAssetMaterialPayload,
+            kAssetPrefabPayload,
             sceneRootDisplayName,
-            &m_EditorUndoService);
+            &m_EditorUndoService,
+            [this](const std::string& prefabAssetKey, entt::entity parentEntity) { return InstantiatePrefabAtParent(prefabAssetKey, parentEntity); },
+            [this](entt::entity entity) { return CreatePrefabFromEntity(entity); },
+            [this](entt::entity entity) { return ApplyPrefabFromEntity(entity); },
+            [this](entt::entity entity) { return RevertPrefabEntity(entity); },
+            [this](entt::entity entity) { return UnpackPrefabEntity(entity); });
     }
 
     void EditorLayer::DrawInspectorPanel()
@@ -777,6 +787,7 @@ namespace Limitless
             kAssetMovePayload,
             kAssetScenePayload,
             kAssetMaterialPayload,
+            kAssetPrefabPayload,
             kAssetShaderPayload,
             kAssetFontPayload,
             [this](const std::string& assetKey) { LoadSceneFromAssetKey(assetKey); },
@@ -784,6 +795,12 @@ namespace Limitless
                 const std::string createdSceneAssetKey = CreateSceneAssetInFolder(relativeFolderPath);
                 if (!createdSceneAssetKey.empty())
                     LoadSceneFromAssetKey(createdSceneAssetKey);
+            },
+            [this](entt::entity entity, const std::filesystem::path& relativeFolderPath) {
+                (void)CreatePrefabFromEntityInFolder(entity, relativeFolderPath);
+            },
+            [this](const std::string& prefabAssetKey) {
+                (void)InstantiatePrefabAtParent(prefabAssetKey, entt::null);
             },
             [this](const std::string& sceneAssetKey) { SetProjectDefaultSceneAssetKey(sceneAssetKey); },
             [this](const std::string& oldAssetKey, const std::string& newAssetKey) {
@@ -1495,6 +1512,144 @@ namespace Limitless
 
         LT_INFO("Created scene asset {}", assetKey);
         return assetKey;
+    }
+
+    std::string EditorLayer::CreatePrefabAssetPathForEntity(entt::entity entity, const std::filesystem::path& relativeFolderPath) const
+    {
+        if (!m_Scene || !m_Scene->IsValid(entity))
+            return {};
+
+        std::string baseName = "New Prefab";
+        if (const auto* tag = m_Scene->GetRegistry().try_get<TagComponent>(entity))
+        {
+            if (!tag->Tag.empty())
+                baseName = tag->Tag;
+        }
+        for (char& character : baseName)
+        {
+            if (character == '/' || character == '\\' || character == ':' || character == '*'
+                || character == '?' || character == '"' || character == '<' || character == '>'
+                || character == '|')
+            {
+                character = '_';
+            }
+        }
+        if (baseName.empty())
+            baseName = "New Prefab";
+
+        const auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
+        if (rootResult.IsFailure())
+            return {};
+
+        const std::filesystem::path targetFolder = relativeFolderPath.empty()
+            ? std::filesystem::path("Prefabs")
+            : relativeFolderPath;
+        const std::filesystem::path prefabsFolder = rootResult.GetValue() / "Assets" / targetFolder;
+        std::error_code errorCode;
+        std::filesystem::create_directories(prefabsFolder, errorCode);
+        if (errorCode)
+            return {};
+
+        std::filesystem::path candidatePath = prefabsFolder / (baseName + ".prefab.json");
+        uint32_t suffix = 1;
+        while (std::filesystem::exists(candidatePath, errorCode))
+        {
+            candidatePath = prefabsFolder / (baseName + " " + std::to_string(suffix) + ".prefab.json");
+            ++suffix;
+            errorCode.clear();
+        }
+
+        std::filesystem::path relativePath = std::filesystem::relative(candidatePath, rootResult.GetValue(), errorCode);
+        if (errorCode || relativePath.empty())
+            return {};
+        return relativePath.generic_string();
+    }
+
+    bool EditorLayer::CreatePrefabFromEntity(entt::entity entity)
+    {
+        return CreatePrefabFromEntityInFolder(entity, std::filesystem::path("Prefabs"));
+    }
+
+    bool EditorLayer::CreatePrefabFromEntityInFolder(entt::entity entity, const std::filesystem::path& relativeFolderPath)
+    {
+        if (!m_Scene || !m_Scene->IsValid(entity))
+            return false;
+
+        const std::string prefabAssetKey = CreatePrefabAssetPathForEntity(entity, relativeFolderPath);
+        if (prefabAssetKey.empty())
+            return false;
+
+        const bool success = m_EditorUndoService.ExecuteSceneMutation("Create Prefab", [&](Scene& mutableScene) {
+            return EditorPrefabSystem::CreateOrUpdatePrefabFromEntity(mutableScene, entity, prefabAssetKey);
+        });
+
+        if (success)
+            (void)Assets::AssetImportPipeline::ReimportChanged(true);
+        return success;
+    }
+
+    entt::entity EditorLayer::InstantiatePrefabAtParent(const std::string& prefabAssetKey, entt::entity parentEntity)
+    {
+        if (!m_Scene || prefabAssetKey.empty())
+            return entt::null;
+
+        entt::entity createdEntity = entt::null;
+        const bool success = m_EditorUndoService.ExecuteSceneMutation("Instantiate Prefab", [&](Scene& mutableScene) {
+            createdEntity = EditorPrefabSystem::InstantiatePrefab(mutableScene, prefabAssetKey, parentEntity);
+            return createdEntity != entt::null;
+        });
+        if (!success)
+            return entt::null;
+
+        if (createdEntity != entt::null)
+        {
+            m_SelectedEntity = createdEntity;
+            m_SelectedTextureAssetKey.clear();
+            m_CachedTextureAsset.reset();
+            m_SelectedMaterialAssetKey.clear();
+            m_CachedMaterialAsset.reset();
+            m_SelectedNativeScriptAssetKey.clear();
+        }
+        return createdEntity;
+    }
+
+    bool EditorLayer::ApplyPrefabFromEntity(entt::entity entity)
+    {
+        if (!m_Scene || !m_Scene->IsValid(entity))
+            return false;
+
+        const bool success = EditorPrefabSystem::ApplyPrefabFromInstance(*m_Scene, entity);
+        if (success)
+            (void)Assets::AssetImportPipeline::ReimportChanged(true);
+        return success;
+    }
+
+    entt::entity EditorLayer::RevertPrefabEntity(entt::entity entity)
+    {
+        if (!m_Scene || !m_Scene->IsValid(entity))
+            return entt::null;
+
+        entt::entity revertedEntity = entt::null;
+        const bool success = m_EditorUndoService.ExecuteSceneMutation("Revert Prefab", [&](Scene& mutableScene) {
+            revertedEntity = EditorPrefabSystem::RevertPrefabInstance(mutableScene, entity);
+            return revertedEntity != entt::null;
+        });
+        if (!success)
+            return entt::null;
+
+        if (revertedEntity != entt::null)
+            m_SelectedEntity = revertedEntity;
+        return revertedEntity;
+    }
+
+    bool EditorLayer::UnpackPrefabEntity(entt::entity entity)
+    {
+        if (!m_Scene || !m_Scene->IsValid(entity))
+            return false;
+
+        return m_EditorUndoService.ExecuteSceneMutation("Unpack Prefab", [&](Scene& mutableScene) {
+            return EditorPrefabSystem::UnpackPrefabInstance(mutableScene, entity);
+        });
     }
 
     void EditorLayer::SetProjectDefaultSceneAssetKey(const std::string& sceneAssetKey)

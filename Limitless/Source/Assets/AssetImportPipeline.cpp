@@ -30,6 +30,7 @@ namespace Limitless::Assets::AssetImportPipeline
             const std::string ext = path.extension().string();
 
             if (EndsWith(name, ".scene.json")) return AssetType::Scene;
+            if (EndsWith(name, ".prefab.json")) return AssetType::Prefab;
             if (EndsWith(name, ".material.json")) return AssetType::Material;
             if (EndsWith(name, ".inputactions.json")) return AssetType::InputActions;
             if (ext == ".glsl") return AssetType::Shader;

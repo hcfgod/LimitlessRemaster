@@ -186,4 +186,10 @@ namespace Limitless
     {
         std::vector<NativeScriptEntry> Scripts;
     };
+
+    /// Marks an entity hierarchy root as an instance of a prefab asset.
+    struct PrefabInstanceComponent
+    {
+        std::string PrefabAssetKey; ///< Asset key for prefab (example: "Assets/Prefabs/Player.prefab.json")
+    };
 }

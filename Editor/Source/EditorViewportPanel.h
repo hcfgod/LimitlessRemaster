@@ -33,6 +33,8 @@ namespace Limitless::EditorViewportPanel
               const std::function<void(uint32_t, uint32_t)>& ensureViewportFramebuffer,
               const char* scenePayloadId,
               const std::function<void(const std::string&)>& onSceneDropped,
+              const char* prefabPayloadId,
+              const std::function<void(const std::string&)>& onPrefabDropped,
               entt::entity& selectedEntity,
               const char* materialPayloadId,
               std::string& selectedTextureAssetKey,

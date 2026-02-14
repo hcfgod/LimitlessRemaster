@@ -128,6 +128,8 @@ namespace Limitless::EditorViewportPanel
               const std::function<void(uint32_t, uint32_t)>& ensureViewportFramebuffer,
               const char* scenePayloadId,
               const std::function<void(const std::string&)>& onSceneDropped,
+              const char* prefabPayloadId,
+              const std::function<void(const std::string&)>& onPrefabDropped,
               entt::entity& selectedEntity,
               const char* materialPayloadId,
               std::string& selectedTextureAssetKey,
@@ -180,6 +182,15 @@ namespace Limitless::EditorViewportPanel
                         const char* key = static_cast<const char*>(payload->Data);
                         if (key && key[0] && onSceneDropped)
                             onSceneDropped(key);
+                    }
+                    else if (prefabPayloadId)
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(prefabPayloadId))
+                        {
+                            const char* key = static_cast<const char*>(payload->Data);
+                            if (key && key[0] && onPrefabDropped)
+                                onPrefabDropped(key);
+                        }
                     }
                     else if (materialPayloadId)
                     {
