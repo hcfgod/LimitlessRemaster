@@ -42,6 +42,7 @@
 
 // Scene / ECS
 #include "Scene/Components.h"
+#include "Scene/SceneManager.h"
 #include "Scene/Scene.h"
 #include "Scripting/ScriptableEntity.h"
 #include "Scripting/NativeScriptRegistry.h"

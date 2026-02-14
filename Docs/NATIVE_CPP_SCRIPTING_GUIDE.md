@@ -19,6 +19,25 @@ Derive from `ScriptableEntity` and override any of:
 - `OnUpdate(float deltaTime)` called each runtime frame in Play Mode.
 - `OnDestroy()` called when the entity is destroyed, script is disabled/removed, or scene shuts down.
 
+## Scene Management API (Unity-Style)
+
+Scripts can request scene transitions at runtime:
+
+- `Limitless::SceneManager::LoadScene("Level02")`
+- `Limitless::SceneManager::LoadScene("Scenes/Level02")`
+- `Limitless::SceneManager::LoadScene("Assets/Scenes/Level02")`
+- `Limitless::SceneManager::LoadScene("Assets/Scenes/Level02.scene.json")`
+- `Limitless::SceneManager::ReloadCurrentScene()`
+
+Important behavior:
+
+- Scene transitions are deferred until a safe point after script updates in the current frame.
+- In Editor Play Mode, scene transitions stay in Play Mode (they do not force-exit to Edit Mode).
+- Scene keys must be valid asset keys under `Assets/...`.
+- `.scene.json` is optional when calling `LoadScene`; it is appended automatically if omitted.
+- Scene name-only loading (for example `"Level02"`) resolves through project scene records tracked by `AssetDatabase`.
+- If multiple scene assets share the same scene name, loading by name is considered ambiguous and will fail with a warning.
+
 ## Exposed Variables in Inspector
 
 Each `Native Script` component automatically exposes supported `public` fields from the script header.
@@ -51,6 +70,32 @@ protected:
     {
         auto& transform = GetComponent<Limitless::TransformComponent>();
         transform.Rotation.y += RotationSpeed * deltaTime;
+    }
+};
+```
+
+Scene transition example:
+
+```cpp
+#include "Limitless.h"
+
+class PortalScript final : public Limitless::ScriptableEntity
+{
+public:
+    std::string TargetScene = "Level02";
+
+protected:
+    LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()
+        LT_AUTO_EXPOSED_FIELD(TargetScene)
+    LT_END_AUTO_EXPOSED_FIELD_SYNC()
+
+    void OnUpdate(float /*deltaTime*/) override
+    {
+        if (Limitless::InputSystem::IsKeyDown(Limitless::KeyCode::Enter))
+        {
+            // Queue scene change to be applied safely after script updates finish.
+            Limitless::SceneManager::LoadScene(TargetScene);
+        }
     }
 };
 ```

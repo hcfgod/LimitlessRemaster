@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include "Scene/Scene.h"
+#include "Scene/SceneManager.h"
 
 #include <filesystem>
 #include <fstream>
@@ -35,6 +36,84 @@ namespace
 
 TEST_SUITE("Scene And Editor Flows")
 {
+    TEST_CASE("SceneManager queues load and reload transitions")
+    {
+        Limitless::SceneManager::ClearPendingSceneTransition();
+
+        CHECK(Limitless::SceneManager::LoadScene("Assets/Scenes/Gameplay.scene.json"));
+        CHECK(Limitless::SceneManager::HasPendingSceneTransition());
+
+        const auto loadRequest = Limitless::SceneManager::ConsumePendingSceneTransition();
+        REQUIRE(loadRequest.has_value());
+        CHECK(loadRequest->Type == Limitless::SceneTransitionType::LoadByAssetKey);
+        CHECK(loadRequest->SceneIdentifier == "Assets/Scenes/Gameplay.scene.json");
+        CHECK_FALSE(Limitless::SceneManager::HasPendingSceneTransition());
+
+        CHECK(Limitless::SceneManager::ReloadCurrentScene());
+        const auto reloadRequest = Limitless::SceneManager::ConsumePendingSceneTransition();
+        REQUIRE(reloadRequest.has_value());
+        CHECK(reloadRequest->Type == Limitless::SceneTransitionType::ReloadCurrentScene);
+        CHECK(reloadRequest->SceneIdentifier.empty());
+
+        Limitless::SceneManager::ClearPendingSceneTransition();
+    }
+
+    TEST_CASE("SceneManager accepts scene key without file extension")
+    {
+        Limitless::SceneManager::ClearPendingSceneTransition();
+
+        CHECK(Limitless::SceneManager::LoadScene("Assets/Scenes/MainMenu"));
+        const auto request = Limitless::SceneManager::ConsumePendingSceneTransition();
+        REQUIRE(request.has_value());
+        CHECK(request->Type == Limitless::SceneTransitionType::LoadByAssetKey);
+        CHECK(request->SceneIdentifier == "Assets/Scenes/MainMenu.scene.json");
+
+        Limitless::SceneManager::ClearPendingSceneTransition();
+    }
+
+    TEST_CASE("SceneManager prefixes Assets for relative scene paths")
+    {
+        Limitless::SceneManager::ClearPendingSceneTransition();
+
+        CHECK(Limitless::SceneManager::LoadScene("Scenes/MainMenu"));
+        const auto request = Limitless::SceneManager::ConsumePendingSceneTransition();
+        REQUIRE(request.has_value());
+        CHECK(request->Type == Limitless::SceneTransitionType::LoadByAssetKey);
+        CHECK(request->SceneIdentifier == "Assets/Scenes/MainMenu.scene.json");
+
+        Limitless::SceneManager::ClearPendingSceneTransition();
+    }
+
+    TEST_CASE("SceneManager accepts scene name without path")
+    {
+        Limitless::SceneManager::ClearPendingSceneTransition();
+        CHECK(Limitless::SceneManager::LoadScene("MainMenu"));
+        const auto request = Limitless::SceneManager::ConsumePendingSceneTransition();
+        REQUIRE(request.has_value());
+        CHECK(request->Type == Limitless::SceneTransitionType::LoadByAssetKey);
+        CHECK(request->SceneIdentifier == "MainMenu");
+
+        Limitless::SceneManager::ClearPendingSceneTransition();
+    }
+
+    TEST_CASE("SceneManager rejects empty scene key and latest request wins")
+    {
+        Limitless::SceneManager::ClearPendingSceneTransition();
+
+        CHECK_FALSE(Limitless::SceneManager::LoadScene(""));
+        CHECK_FALSE(Limitless::SceneManager::HasPendingSceneTransition());
+
+        CHECK(Limitless::SceneManager::LoadScene("Assets/Scenes/A.scene.json"));
+        CHECK(Limitless::SceneManager::LoadScene("Assets/Scenes/B.scene.json"));
+
+        const auto request = Limitless::SceneManager::ConsumePendingSceneTransition();
+        REQUIRE(request.has_value());
+        CHECK(request->Type == Limitless::SceneTransitionType::LoadByAssetKey);
+        CHECK(request->SceneIdentifier == "Assets/Scenes/B.scene.json");
+
+        Limitless::SceneManager::ClearPendingSceneTransition();
+    }
+
     TEST_CASE("Scene clone preserves authored data and resets runtime state")
     {
         Limitless::Scene scene;

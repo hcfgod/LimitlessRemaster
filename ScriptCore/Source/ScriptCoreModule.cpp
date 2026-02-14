@@ -1,4 +1,5 @@
 #include "ScriptCoreRegistration.h"
+#include "Scene/SceneManager.h"
 
 extern "C" LT_SCRIPTCORE_API void LT_RegisterScriptCoreTypes(Limitless::NativeScriptRegistrationCallback registrationCallback)
 {
@@ -9,4 +10,9 @@ extern "C" LT_SCRIPTCORE_API void LT_RegisterScriptCoreTypes(Limitless::NativeSc
     {
         registrationCallback(registration.ClassName.c_str(), registration.CreateFunction);
     }
+}
+
+extern "C" LT_SCRIPTCORE_API void LT_SetSceneTransitionBridge(Limitless::SceneTransitionBridgeCallback callback)
+{
+    Limitless::SceneManager::SetTransitionBridgeCallback(callback);
 }

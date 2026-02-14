@@ -61,7 +61,9 @@ namespace Limitless
         void SaveSceneAs();
         void DrawSaveScenePopup();
         bool LoadSceneFromAssetKey(const std::string& assetKey);
+        bool LoadSceneFromAssetKeyInPlayMode(const std::string& assetKey);
         bool SaveSceneToAssetKey(const std::string& assetKey);
+        void ProcessPendingSceneTransitions();
         void PersistProjectSessionState();
         std::string CreateSceneAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         void SetProjectDefaultSceneAssetKey(const std::string& sceneAssetKey);

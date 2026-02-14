@@ -15,6 +15,7 @@ project "ScriptCore"
     {
         "Source/**.h",
         "Source/**.cpp",
+        "../Limitless/Source/Scene/SceneManager.cpp",
         "../Limitless/Source/Scripting/ScriptableEntity.cpp",
         generatedScriptCoreDirectory .. "/**.h",
         generatedScriptCoreDirectory .. "/**.cpp"

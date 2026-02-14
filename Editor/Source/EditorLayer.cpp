@@ -51,12 +51,115 @@ namespace Limitless
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
         constexpr uint32_t kEditorSessionStateVersion = 2;
+        constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
         struct EditorSessionStateData final
         {
             std::string LastOpenedSceneAssetKey;
             EditorInspectorPanel::NativeScriptEditorSessionState NativeScriptEditorState;
         };
+
+        std::string NormalizeSlashes(std::string pathText)
+        {
+            std::replace(pathText.begin(), pathText.end(), '\\', '/');
+            return pathText;
+        }
+
+        std::string ToLowerAscii(std::string text)
+        {
+            std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            return text;
+        }
+
+        std::string ExtractSceneNameFromAssetKey(const std::string& assetKey)
+        {
+            const std::string normalizedKey = NormalizeSlashes(assetKey);
+            const std::filesystem::path keyPath(normalizedKey);
+            const std::string filename = keyPath.filename().string();
+            if (filename.empty())
+                return {};
+
+            if (filename.ends_with(kSceneAssetSuffix))
+                return filename.substr(0, filename.size() - kSceneAssetSuffix.size());
+
+            return keyPath.stem().string();
+        }
+
+        std::optional<std::string> ResolveSceneNameToAssetKey(const std::string& sceneName)
+        {
+            const std::string requestedName = sceneName.ends_with(kSceneAssetSuffix)
+                ? sceneName.substr(0, sceneName.size() - kSceneAssetSuffix.size())
+                : sceneName;
+            if (requestedName.empty())
+                return std::nullopt;
+
+            std::vector<std::string> caseSensitiveMatches;
+            std::vector<std::string> caseInsensitiveMatches;
+            const std::string requestedNameLower = ToLowerAscii(requestedName);
+
+            const auto records = Assets::AssetDatabase::GetInstance().GetAllRecords();
+            for (const auto& record : records)
+            {
+                if (record.Type != Assets::AssetType::Scene || record.Key.empty())
+                    continue;
+
+                const std::string candidateName = ExtractSceneNameFromAssetKey(record.Key);
+                if (candidateName.empty())
+                    continue;
+
+                if (candidateName == requestedName)
+                    caseSensitiveMatches.push_back(record.Key);
+
+                if (ToLowerAscii(candidateName) == requestedNameLower)
+                    caseInsensitiveMatches.push_back(record.Key);
+            }
+
+            if (caseSensitiveMatches.size() == 1)
+                return caseSensitiveMatches.front();
+
+            if (caseSensitiveMatches.size() > 1)
+            {
+                LT_WARN("SceneManager::LoadScene('{}') is ambiguous. {} scenes share this name.",
+                    sceneName, caseSensitiveMatches.size());
+                return std::nullopt;
+            }
+
+            if (caseInsensitiveMatches.size() == 1)
+                return caseInsensitiveMatches.front();
+
+            if (caseInsensitiveMatches.size() > 1)
+            {
+                LT_WARN("SceneManager::LoadScene('{}') is ambiguous after case-insensitive lookup. {} scenes share this name.",
+                    sceneName, caseInsensitiveMatches.size());
+                return std::nullopt;
+            }
+
+            return std::nullopt;
+        }
+
+        std::optional<std::string> ResolveSceneIdentifierToAssetKey(const std::string& sceneIdentifier)
+        {
+            if (sceneIdentifier.empty())
+                return std::nullopt;
+
+            const std::string normalizedIdentifier = NormalizeSlashes(sceneIdentifier);
+            const bool looksLikePath = normalizedIdentifier.find('/') != std::string::npos;
+            if (looksLikePath)
+            {
+                std::string sceneAssetKey = normalizedIdentifier;
+                if (sceneAssetKey.rfind("Assets/", 0) != 0)
+                    sceneAssetKey = "Assets/" + sceneAssetKey;
+
+                if (!sceneAssetKey.ends_with(kSceneAssetSuffix))
+                    sceneAssetKey += std::string(kSceneAssetSuffix);
+
+                return sceneAssetKey;
+            }
+
+            return ResolveSceneNameToAssetKey(normalizedIdentifier);
+        }
 
         void PopulateDefaultSceneTemplate(Scene& scene)
         {
@@ -312,6 +415,8 @@ namespace Limitless
 
     void EditorLayer::OnAttach()
     {
+        SceneManager::ClearPendingSceneTransition();
+
         // Unity-style startup:
         // Always begin in the Project Browser and require explicit Open/Create.
         // Never auto-open from the editor working directory.
@@ -344,6 +449,7 @@ namespace Limitless
 
     void EditorLayer::OnDetach()
     {
+        SceneManager::ClearPendingSceneTransition();
         PersistProjectSessionState();
         ScriptCoreModuleRuntime::Shutdown();
         Application::GetInstance().GetWindow().SetFileDropCallback({});
@@ -363,6 +469,8 @@ namespace Limitless
 
         if (m_PlayModeState == EditorPlayModeState::Play && m_Scene)
             m_Scene->Update(deltaTime);
+
+        ProcessPendingSceneTransitions();
 
         EditorPlayMode::SyncSceneCamera(
             m_PlayModeState,
@@ -1066,6 +1174,79 @@ namespace Limitless
 
         LT_INFO("Loaded scene {}", assetKey);
         return true;
+    }
+
+    bool EditorLayer::LoadSceneFromAssetKeyInPlayMode(const std::string& assetKey)
+    {
+        if (assetKey.empty())
+            return false;
+
+        StopAudioSourcesInScene(m_Scene.get());
+
+        const auto resolvedPathResult = Assets::ResolveAssetKeyToPath(assetKey);
+        if (resolvedPathResult.IsFailure())
+        {
+            LT_ERROR("Failed to resolve scene asset key {}: {}", assetKey, resolvedPathResult.GetError().GetErrorMessage());
+            return false;
+        }
+
+        auto sceneResult = Scene::LoadFromFile(resolvedPathResult.GetValue());
+        if (sceneResult.IsFailure())
+        {
+            LT_ERROR("Failed to load scene {}: {}", assetKey, sceneResult.GetError().GetErrorMessage());
+            return false;
+        }
+
+        m_Scene = std::move(sceneResult.GetValue());
+        m_SelectedEntity = entt::null;
+        m_SelectedTextureAssetKey.clear();
+        m_SelectedNativeScriptAssetKey.clear();
+        m_CachedTextureAsset.reset();
+        m_CurrentSceneAssetKey = assetKey;
+
+        LT_INFO("Loaded scene during Play Mode {}", assetKey);
+        return true;
+    }
+
+    void EditorLayer::ProcessPendingSceneTransitions()
+    {
+        const std::optional<SceneTransitionRequest> pendingTransition = SceneManager::ConsumePendingSceneTransition();
+        if (!pendingTransition.has_value())
+            return;
+
+        switch (pendingTransition->Type)
+        {
+            case SceneTransitionType::LoadByAssetKey:
+            {
+                const auto resolvedSceneAssetKey = ResolveSceneIdentifierToAssetKey(pendingTransition->SceneIdentifier);
+                if (!resolvedSceneAssetKey.has_value())
+                {
+                    LT_WARN("Scene transition request '{}' could not be resolved to a scene asset key.",
+                        pendingTransition->SceneIdentifier);
+                    break;
+                }
+
+                if (m_PlayModeState == EditorPlayModeState::Edit)
+                    (void)LoadSceneFromAssetKey(*resolvedSceneAssetKey);
+                else
+                    (void)LoadSceneFromAssetKeyInPlayMode(*resolvedSceneAssetKey);
+                break;
+            }
+            case SceneTransitionType::ReloadCurrentScene:
+            {
+                if (m_CurrentSceneAssetKey.empty())
+                {
+                    LT_WARN("ReloadCurrentScene requested but no active scene asset key is available.");
+                    break;
+                }
+
+                if (m_PlayModeState == EditorPlayModeState::Edit)
+                    (void)LoadSceneFromAssetKey(m_CurrentSceneAssetKey);
+                else
+                    (void)LoadSceneFromAssetKeyInPlayMode(m_CurrentSceneAssetKey);
+                break;
+            }
+        }
     }
 
     bool EditorLayer::SaveSceneToAssetKey(const std::string& assetKey)

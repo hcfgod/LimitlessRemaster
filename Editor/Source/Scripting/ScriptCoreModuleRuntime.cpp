@@ -2,6 +2,7 @@
 
 #include "Core/Debug/Log.h"
 #include "Platform/Platform.h"
+#include "Scene/SceneManager.h"
 #include "Scripting/NativeScriptRegistry.h"
 #include "Scripting/ScriptCoreApi.h"
 
@@ -16,6 +17,7 @@ namespace Limitless::ScriptCoreModuleRuntime
     namespace
     {
         using RegisterScriptCoreTypesFunction = void (*)(NativeScriptRegistrationCallback registrationCallback);
+        using SetSceneTransitionBridgeFunction = void (*)(SceneTransitionBridgeCallback callback);
 
         struct RuntimeState final
         {
@@ -161,6 +163,23 @@ namespace Limitless::ScriptCoreModuleRuntime
             NativeScriptRegistry::RegisterScript(className, createFunction);
         }
 
+        bool ForwardSceneTransitionToHost(SceneTransitionType transitionType, const char* sceneIdentifier)
+        {
+            switch (transitionType)
+            {
+                case SceneTransitionType::LoadByAssetKey:
+                {
+                    if (!sceneIdentifier)
+                        return false;
+                    return SceneManager::LoadScene(sceneIdentifier);
+                }
+                case SceneTransitionType::ReloadCurrentScene:
+                    return SceneManager::ReloadCurrentScene();
+            }
+
+            return false;
+        }
+
         bool ReloadScriptCoreModule(const std::filesystem::path& libraryPath)
         {
             ResetRuntimeScriptRegistry();
@@ -220,6 +239,13 @@ namespace Limitless::ScriptCoreModuleRuntime
                 std::filesystem::remove(stagedLibraryPath, errorCode);
                 (void)errorCode;
                 return false;
+            }
+
+            const auto setSceneTransitionBridge = reinterpret_cast<SetSceneTransitionBridgeFunction>(
+                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetSceneTransitionBridge"));
+            if (setSceneTransitionBridge)
+            {
+                setSceneTransitionBridge(&ForwardSceneTransitionToHost);
             }
 
             registerFunction(&RegisterScriptFromModule);
