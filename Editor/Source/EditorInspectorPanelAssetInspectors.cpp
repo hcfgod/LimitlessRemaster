@@ -19,6 +19,8 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <unordered_set>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -26,6 +28,50 @@ namespace Limitless::EditorInspectorPanel
 {
     namespace
     {
+        std::vector<std::string> BuildAssetPickerKeysByType(Assets::AssetType assetType)
+        {
+            std::vector<std::string> keys;
+            std::unordered_set<std::string> seen;
+
+            const auto records = Assets::AssetDatabase::GetInstance().GetAllRecords();
+            for (const auto& record : records)
+            {
+                if (record.Type != assetType || record.Key.empty())
+                    continue;
+                if (seen.insert(record.Key).second)
+                    keys.push_back(record.Key);
+            }
+
+            auto tryAddKnownDefault = [&](const char* key) {
+                if (!key || !key[0] || seen.contains(key))
+                    return;
+                const auto resolved = Assets::ResolveAssetKeyToPath(key);
+                if (resolved.IsFailure())
+                    return;
+                std::error_code ec;
+                if (std::filesystem::exists(resolved.GetValue(), ec))
+                {
+                    seen.insert(key);
+                    keys.emplace_back(key);
+                }
+            };
+
+            if (assetType == Assets::AssetType::Shader)
+            {
+                tryAddKnownDefault("Assets/Shaders/Renderer2D_TexturedQuad.glsl");
+                tryAddKnownDefault("Assets/Shaders/Renderer2D_MSDFText.glsl");
+                tryAddKnownDefault("Assets/Shaders/TexturedTriangle.glsl");
+            }
+            else if (assetType == Assets::AssetType::Material)
+            {
+                tryAddKnownDefault("Assets/Materials/Renderer2D_TexturedQuad.material.json");
+                tryAddKnownDefault("Assets/Materials/Renderer2D_MSDFText.material.json");
+            }
+
+            std::sort(keys.begin(), keys.end());
+            return keys;
+        }
+
         void InvalidateSpriteCachesForTexture(Scene* scene, const std::string& textureKey)
         {
             if (!scene || textureKey.empty())
@@ -280,6 +326,75 @@ namespace Limitless::EditorInspectorPanel
             (void)EditorInspectorPanel::OpenNativeScriptEditorForAssetKey(pairedAssetKey);
     }
 
+    void DrawPrefabAssetInspector(std::string& selectedPrefabAssetKey)
+    {
+        if (selectedPrefabAssetKey.empty())
+            return;
+
+        const std::filesystem::path selectedPath(selectedPrefabAssetKey);
+        std::string lowerFileName = selectedPath.filename().string();
+        std::transform(lowerFileName.begin(), lowerFileName.end(), lowerFileName.begin(), [](unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+        if (!lowerFileName.ends_with(".prefab.json"))
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Selected asset is not a prefab.");
+            if (ImGui::Button("Clear Selection", ImVec2(160.0f, 0.0f)))
+                selectedPrefabAssetKey.clear();
+            return;
+        }
+
+        const auto resolvedPathResult = Assets::ResolveAssetKeyToPath(selectedPrefabAssetKey);
+        if (resolvedPathResult.IsFailure())
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Could not resolve prefab path.");
+            ImGui::TextDisabled("%s", selectedPrefabAssetKey.c_str());
+            return;
+        }
+
+        const std::filesystem::path resolvedPath = resolvedPathResult.GetValue();
+        const auto loadedSceneResult = Scene::LoadFromFile(resolvedPath);
+        if (loadedSceneResult.IsFailure() || !loadedSceneResult.GetValue())
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Failed to load prefab.");
+            ImGui::TextDisabled("%s", selectedPrefabAssetKey.c_str());
+            return;
+        }
+
+        const Scene& prefabScene = *loadedSceneResult.GetValue();
+        const auto& registry = prefabScene.GetRegistry();
+        auto tagView = registry.view<TagComponent>();
+        const auto rootEntities = prefabScene.GetChildren(entt::null);
+        uint32_t entityCount = 0;
+        for (entt::entity entity : tagView)
+        {
+            (void)entity;
+            ++entityCount;
+        }
+
+        ImGui::Text("Prefab: %s", EditorAssetNaming::GetAssetDisplayNameFromAssetKey(selectedPrefabAssetKey).c_str());
+        ImGui::TextDisabled("Asset Key: %s", selectedPrefabAssetKey.c_str());
+        ImGui::TextDisabled("Path: %s", resolvedPath.string().c_str());
+        ImGui::Separator();
+
+        ImGui::Text("Entities: %u", entityCount);
+        ImGui::Text("Root Objects: %u", static_cast<uint32_t>(rootEntities.size()));
+
+        if (!rootEntities.empty())
+        {
+            ImGui::Spacing();
+            ImGui::Text("Root Preview");
+            ImGui::BeginChild("PrefabRootPreview", ImVec2(0.0f, 120.0f), true);
+            for (entt::entity root : rootEntities)
+            {
+                const auto* tag = registry.try_get<TagComponent>(root);
+                const std::string label = (tag && !tag->Tag.empty()) ? tag->Tag : "Entity";
+                ImGui::BulletText("%s", label.c_str());
+            }
+            ImGui::EndChild();
+        }
+    }
+
     void DrawMaterialInspector(const char* texturePayloadId,
                                const char* shaderPayloadId,
                                std::string& selectedMaterialAssetKey,
@@ -342,7 +457,7 @@ namespace Limitless::EditorInspectorPanel
         ImGui::AlignTextToFramePadding();
         ImGui::Text("Shader");
         ImGui::SameLine(80);
-        ImGui::Button((shaderLabel + "##MaterialShader").c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0));
+        ImGui::Button((shaderLabel + "##MaterialShader").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 30.0f, 0));
         if (ImGui::BeginDragDropTarget())
         {
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(shaderPayloadId))
@@ -362,6 +477,34 @@ namespace Limitless::EditorInspectorPanel
                 }
             }
             ImGui::EndDragDropTarget();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("...##MaterialShaderPicker"))
+            ImGui::OpenPopup("MaterialShaderPickerPopup");
+        if (ImGui::BeginPopup("MaterialShaderPickerPopup"))
+        {
+            const std::vector<std::string> shaderKeys = BuildAssetPickerKeysByType(Assets::AssetType::Shader);
+            for (const auto& key : shaderKeys)
+            {
+                const bool isSelected = (shaderLabel == std::filesystem::path(key).filename().string());
+                const std::string display = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(key);
+                if (ImGui::Selectable((display + "##MaterialShaderPicker_" + key).c_str(), isSelected))
+                {
+                    auto shaderAsset = Assets::ShaderAsset::LoadBlocking(key);
+                    if (shaderAsset)
+                    {
+                        s_State.Json["shader"] = {
+                            { "guid", shaderAsset->GetGuid() },
+                            { "key", shaderAsset->GetKey() }
+                        };
+                        (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+                    }
+                    ImGui::CloseCurrentPopup();
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                    ImGui::SetTooltip("%s", key.c_str());
+            }
+            ImGui::EndPopup();
         }
 
         struct TextureSlotDescriptor
@@ -613,7 +756,7 @@ namespace Limitless::EditorInspectorPanel
             const bool slotOpen = ImGui::TreeNodeEx(slot.DisplayName, slotFlags);
 
             ImGui::SameLine(220.0f);
-            ImGui::Button((textureLabel + "##Texture").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 60.0f, 0.0f));
+            ImGui::Button((textureLabel + "##Texture").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 90.0f, 0.0f));
             if (ImGui::BeginDragDropTarget())
             {
                 if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
@@ -627,6 +770,27 @@ namespace Limitless::EditorInspectorPanel
                     }
                 }
                 ImGui::EndDragDropTarget();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("...##TexturePicker"))
+                ImGui::OpenPopup("TexturePickerPopup");
+            if (ImGui::BeginPopup("TexturePickerPopup"))
+            {
+                const std::vector<std::string> textureKeys = BuildAssetPickerKeysByType(Assets::AssetType::Texture2D);
+                for (const auto& key : textureKeys)
+                {
+                    const std::string display = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(key);
+                    if (ImGui::Selectable((display + "##TexturePicker_" + key).c_str(), textureLabel == std::filesystem::path(key).filename().string()))
+                    {
+                        auto textureAsset = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(key);
+                        if (textureAsset)
+                            setTextureForSlot(slot, textureAsset);
+                        ImGui::CloseCurrentPopup();
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                        ImGui::SetTooltip("%s", key.c_str());
+                }
+                ImGui::EndPopup();
             }
             ImGui::SameLine();
             if (ImGui::Button("X##ClearTextureSlot"))

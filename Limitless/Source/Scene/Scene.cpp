@@ -4,6 +4,7 @@
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetTypes.h"
 #include "Assets/AssetUtils.h"
+#include "Assets/MaterialAsset.h"
 #include "Assets/MaterialAssetImporter.h"
 #include "Assets/TextureAsset.h"
 #include "Graphics/Camera/Camera.h"
@@ -11,6 +12,7 @@
 #include "Graphics/RenderCommand.h"
 #include "Graphics/Renderer.h"
 #include "Graphics/Renderer2D.h"
+#include "Core/Concurrency/AsyncIO.h"
 #include "Scripting/NativeScriptRegistry.h"
 
 #include <nlohmann/json.hpp>
@@ -28,6 +30,8 @@ namespace Limitless
     namespace
     {
         constexpr int32_t kSiblingOrderStep = 10;
+        std::unordered_map<std::string, Async::Task<Assets::TextureAsset::Ptr>> g_PendingTextureLoads;
+        std::unordered_map<std::string, Async::Task<Assets::MaterialAsset::Ptr>> g_PendingMaterialLoads;
 
         // Resolve legacy/stale asset keys to the latest known key in AssetDatabase.
         // This keeps scene references resilient across asset moves/renames.
@@ -1098,8 +1102,28 @@ namespace Limitless
                 {
                     if (!material->CachedMaterial && !material->MaterialLoadAttempted)
                     {
-                        material->CachedMaterial = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(material->MaterialKey);
+                        material->CachedMaterial = std::dynamic_pointer_cast<Assets::MaterialAsset>(
+                            Assets::AssetManager::GetCachedByKey(material->MaterialKey));
+                        if (!material->CachedMaterial)
+                        {
+                            if (!g_PendingMaterialLoads.contains(material->MaterialKey))
+                                g_PendingMaterialLoads.emplace(material->MaterialKey, Assets::AssetManager::LoadAsync<Assets::MaterialAsset>(material->MaterialKey));
+                        }
                         material->MaterialLoadAttempted = true;
+                    }
+                    else if (!material->CachedMaterial && material->MaterialLoadAttempted)
+                    {
+                        material->CachedMaterial = std::dynamic_pointer_cast<Assets::MaterialAsset>(
+                            Assets::AssetManager::GetCachedByKey(material->MaterialKey));
+                        if (!material->CachedMaterial)
+                        {
+                            const auto pendingIt = g_PendingMaterialLoads.find(material->MaterialKey);
+                            if (pendingIt != g_PendingMaterialLoads.end() && pendingIt->second.IsDone())
+                            {
+                                material->CachedMaterial = pendingIt->second.Get();
+                                g_PendingMaterialLoads.erase(pendingIt);
+                            }
+                        }
                     }
                     if (material->CachedMaterial)
                     {
@@ -1127,9 +1151,26 @@ namespace Limitless
                     auto tex = std::dynamic_pointer_cast<Assets::TextureAsset>(
                         Assets::AssetManager::GetCachedByKey(sprite.TextureKey));
                     if (!tex)
-                        tex = Assets::TextureAsset::LoadBlocking(sprite.TextureKey);
+                    {
+                        if (!g_PendingTextureLoads.contains(sprite.TextureKey))
+                            g_PendingTextureLoads.emplace(sprite.TextureKey, Assets::TextureAsset::LoadAsync(sprite.TextureKey));
+                    }
                     sprite.CachedTexture = tex;
                     sprite.TextureLoadAttempted = true;
+                }
+                else if (!sprite.CachedTexture && sprite.TextureLoadAttempted)
+                {
+                    sprite.CachedTexture = std::dynamic_pointer_cast<Assets::TextureAsset>(
+                        Assets::AssetManager::GetCachedByKey(sprite.TextureKey));
+                    if (!sprite.CachedTexture)
+                    {
+                        const auto pendingIt = g_PendingTextureLoads.find(sprite.TextureKey);
+                        if (pendingIt != g_PendingTextureLoads.end() && pendingIt->second.IsDone())
+                        {
+                            sprite.CachedTexture = pendingIt->second.Get();
+                            g_PendingTextureLoads.erase(pendingIt);
+                        }
+                    }
                 }
                 if (sprite.CachedTexture)
                 {

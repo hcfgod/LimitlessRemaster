@@ -1,6 +1,9 @@
 #include "EditorInspectorPanelEntityComponents.h"
 
 #include "EditorAssetNaming.h"
+#include "Assets/AssetDatabase.h"
+#include "Assets/AssetPaths.h"
+#include "Assets/AssetTypes.h"
 #include "Assets/AudioClipAsset.h"
 #include "Undo/EditorUndoService.h"
 #include "imgui/imgui.h"
@@ -8,6 +11,9 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <filesystem>
+#include <unordered_set>
+#include <vector>
 
 namespace Limitless::EditorInspectorPanel
 {
@@ -34,6 +40,42 @@ namespace Limitless::EditorInspectorPanel
                 undoService->BeginInteractiveSceneMutation();
             if (ImGui::IsItemDeactivatedAfterEdit())
                 (void)undoService->CommitInteractiveSceneMutation(label);
+        }
+
+        std::vector<std::string> BuildMaterialPickerKeys()
+        {
+            std::vector<std::string> keys;
+            std::unordered_set<std::string> seen;
+
+            const auto records = Assets::AssetDatabase::GetInstance().GetAllRecords();
+            for (const auto& record : records)
+            {
+                if (record.Type != Assets::AssetType::Material || record.Key.empty())
+                    continue;
+                if (seen.insert(record.Key).second)
+                    keys.push_back(record.Key);
+            }
+
+            auto tryAddKnownDefault = [&](const char* key) {
+                if (!key || !key[0] || seen.contains(key))
+                    return;
+                const auto resolved = Assets::ResolveAssetKeyToPath(key);
+                if (resolved.IsFailure())
+                    return;
+                std::error_code ec;
+                if (std::filesystem::exists(resolved.GetValue(), ec))
+                {
+                    seen.insert(key);
+                    keys.emplace_back(key);
+                }
+            };
+
+            // Shared editor defaults (project assets still take precedence by key resolution).
+            tryAddKnownDefault("Assets/Materials/Renderer2D_TexturedQuad.material.json");
+            tryAddKnownDefault("Assets/Materials/Renderer2D_MSDFText.material.json");
+
+            std::sort(keys.begin(), keys.end());
+            return keys;
         }
     }
 
@@ -137,12 +179,35 @@ namespace Limitless::EditorInspectorPanel
 
                 // Material slot (Unity-style): dropping a material assigns it to the renderer.
                 auto* material = registry.try_get<MaterialComponent>(selectedEntity);
+                const auto assignMaterialKey = [&](const std::string& key) {
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation(key.empty() ? "Clear Material" : "Assign Material", [&](Scene& mutableScene) {
+                            auto& mutableRegistry = mutableScene.GetRegistry();
+                            auto* mutableMaterial = mutableRegistry.try_get<MaterialComponent>(selectedEntity);
+                            if (!mutableMaterial)
+                                mutableMaterial = &mutableRegistry.emplace<MaterialComponent>(selectedEntity);
+                            mutableMaterial->MaterialKey = key;
+                            mutableMaterial->CachedMaterial.reset();
+                            mutableMaterial->MaterialLoadAttempted = false;
+                            return true;
+                        });
+                    }
+                    else
+                    {
+                        if (!material)
+                            material = &registry.emplace<MaterialComponent>(selectedEntity);
+                        material->MaterialKey = key;
+                        material->CachedMaterial.reset();
+                        material->MaterialLoadAttempted = false;
+                    }
+                };
                 const std::string materialLabel = (material && !material->MaterialKey.empty())
                     ? EditorAssetNaming::GetAssetDisplayNameFromAssetKey(material->MaterialKey)
                     : std::string("None");
                 ImGui::Text("Material");
                 ImGui::SameLine(80);
-                ImGui::Button((materialLabel + "##SpriteMaterial").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 60, 0));
+                ImGui::Button((materialLabel + "##SpriteMaterial").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 90, 0));
 
                 if (ImGui::BeginDragDropTarget())
                 {
@@ -150,80 +215,42 @@ namespace Limitless::EditorInspectorPanel
                     {
                         const char* key = static_cast<const char*>(payload->Data);
                         if (key && key[0])
-                        {
-                            if (!material)
-                            {
-                                if (undoService)
-                                {
-                                    (void)undoService->ExecuteSceneMutation("Assign Material", [&](Scene& mutableScene) {
-                                        auto& mutableRegistry = mutableScene.GetRegistry();
-                                        auto* mutableMaterial = mutableRegistry.try_get<MaterialComponent>(selectedEntity);
-                                        if (!mutableMaterial)
-                                            mutableMaterial = &mutableRegistry.emplace<MaterialComponent>(selectedEntity);
-                                        mutableMaterial->MaterialKey = key;
-                                        mutableMaterial->CachedMaterial.reset();
-                                        mutableMaterial->MaterialLoadAttempted = false;
-                                        return true;
-                                    });
-                                }
-                                else
-                                {
-                                    material = &registry.emplace<MaterialComponent>(selectedEntity);
-                                    material->MaterialKey = key;
-                                    material->CachedMaterial.reset();
-                                    material->MaterialLoadAttempted = false;
-                                }
-                            }
-                            else
-                            {
-                                if (undoService)
-                                {
-                                    (void)undoService->ExecuteSceneMutation("Assign Material", [&](Scene& mutableScene) {
-                                        auto* mutableMaterial = mutableScene.GetRegistry().try_get<MaterialComponent>(selectedEntity);
-                                        if (!mutableMaterial)
-                                            return false;
-                                        mutableMaterial->MaterialKey = key;
-                                        mutableMaterial->CachedMaterial.reset();
-                                        mutableMaterial->MaterialLoadAttempted = false;
-                                        return true;
-                                    });
-                                }
-                                else
-                                {
-                                    material->MaterialKey = key;
-                                    material->CachedMaterial.reset();
-                                    material->MaterialLoadAttempted = false;
-                                }
-                            }
-                        }
+                            assignMaterialKey(key);
                     }
                     ImGui::EndDragDropTarget();
+                }
+
+                ImGui::SameLine();
+                if (ImGui::Button("...##SpriteMaterialPicker"))
+                    ImGui::OpenPopup("SpriteMaterialPickerPopup");
+
+                if (ImGui::BeginPopup("SpriteMaterialPickerPopup"))
+                {
+                    if (ImGui::Selectable("None##SpriteMaterialPickerNone"))
+                        assignMaterialKey({});
+                    ImGui::Separator();
+
+                    const std::vector<std::string> materialKeys = BuildMaterialPickerKeys();
+                    for (const auto& key : materialKeys)
+                    {
+                        const bool isSelected = material && material->MaterialKey == key;
+                        const std::string display = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(key);
+                        if (ImGui::Selectable((display + "##SpriteMaterialPicker_" + key).c_str(), isSelected))
+                        {
+                            assignMaterialKey(key);
+                            ImGui::CloseCurrentPopup();
+                        }
+                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                            ImGui::SetTooltip("%s", key.c_str());
+                    }
+                    ImGui::EndPopup();
                 }
 
                 if (material && !material->MaterialKey.empty())
                 {
                     ImGui::SameLine();
                     if (ImGui::Button("Clear##Material"))
-                    {
-                        if (undoService)
-                        {
-                            (void)undoService->ExecuteSceneMutation("Clear Material", [&](Scene& mutableScene) {
-                                auto* mutableMaterial = mutableScene.GetRegistry().try_get<MaterialComponent>(selectedEntity);
-                                if (!mutableMaterial)
-                                    return false;
-                                mutableMaterial->MaterialKey.clear();
-                                mutableMaterial->CachedMaterial.reset();
-                                mutableMaterial->MaterialLoadAttempted = false;
-                                return true;
-                            });
-                        }
-                        else
-                        {
-                            material->MaterialKey.clear();
-                            material->CachedMaterial.reset();
-                            material->MaterialLoadAttempted = false;
-                        }
-                    }
+                        assignMaterialKey({});
                 }
 
                 ImGui::TreePop();

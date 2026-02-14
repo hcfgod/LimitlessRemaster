@@ -10,6 +10,7 @@
 #include "EditorAssetDiagnosticsPanel.h"
 #include "EditorBuildAndRunPanel.h"
 #include "EditorScenePanel.h"
+#include "Core/Concurrency/AsyncIO.h"
 #include "Undo/EditorUndoService.h"
 #include "Graphics/Texture.h"
 
@@ -18,6 +19,7 @@
 #include <glm/glm.hpp>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 namespace Limitless
 {
@@ -68,11 +70,17 @@ namespace Limitless
         bool LoadSceneFromAssetKey(const std::string& assetKey, bool forceWithoutConfirmation);
         bool LoadSceneFromAssetKeyInPlayMode(const std::string& assetKey);
         bool SaveSceneToAssetKey(const std::string& assetKey);
+        bool OpenPrefabAssetForEditing(const std::string& prefabAssetKey);
+        bool ReturnFromPrefabMode(bool forceWithoutConfirmation);
+        bool ApplyPrefabStageChangesToInstances();
+        void QueueSceneAssetPrewarm();
+        void PumpSceneAssetPrewarm();
         void ProcessPendingSceneTransitions();
         bool EnsureSceneSwitchAllowed(const std::function<void()>& deferredSwitchAction);
         void BeginSceneSwitch();
         void PersistProjectSessionState();
         std::string CreateSceneAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
+        std::string CreateMaterialAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         std::string CreatePrefabAssetPathForEntity(entt::entity entity, const std::filesystem::path& relativeFolderPath) const;
         bool CreatePrefabFromEntity(entt::entity entity);
         bool CreatePrefabFromEntityInFolder(entt::entity entity, const std::filesystem::path& relativeFolderPath);
@@ -121,8 +129,13 @@ namespace Limitless
         /// When non-empty, the Inspector shows script asset metadata preview.
         std::string m_SelectedNativeScriptAssetKey;
 
+        /// Selected prefab asset key when user single-clicks a prefab in the Project panel.
+        /// When non-empty, the Inspector shows prefab asset metadata preview.
+        std::string m_SelectedPrefabAssetKey;
+
         std::string m_CurrentSceneAssetKey;
         std::string m_EditSceneStoredAssetKey;
+        std::string m_PrefabModeReturnSceneAssetKey;
         EditorUndoService m_EditorUndoService;
         bool m_RequestOpenSceneSwitchConfirmationPopup = false;
         bool m_SceneSwitchConfirmationPopupOpen = false;
@@ -141,6 +154,11 @@ namespace Limitless
         EditorProjectDialog::EditorProjectDialogState m_ProjectDialogState;
         EditorProjectSettingsPanel::EditorProjectSettingsPanelState m_ProjectSettingsPanelState;
         EditorBuildAndRunPanel::EditorBuildAndRunPanelState m_BuildAndRunPanelState;
+
+        std::unordered_map<std::string, Async::Task<Assets::TextureAsset::Ptr>> m_PendingTexturePrewarmTasks;
+        std::unordered_map<std::string, Async::Task<Assets::MaterialAsset::Ptr>> m_PendingMaterialPrewarmTasks;
+        std::unordered_map<std::string, Assets::TextureAsset::Ptr> m_PrewarmedTextureAssets;
+        std::unordered_map<std::string, Assets::MaterialAsset::Ptr> m_PrewarmedMaterialAssets;
     };
 
 }  // namespace Limitless

@@ -405,6 +405,7 @@ namespace Limitless::EditorProjectPanel
                            std::string& selectedMaterialAssetKey,
                            Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                            std::string& selectedNativeScriptAssetKey,
+                           std::string& selectedPrefabAssetKey,
                            const char* texturePayloadId,
                            const char* audioPayloadId,
                            const char* assetMovePayloadId,
@@ -415,8 +416,10 @@ namespace Limitless::EditorProjectPanel
                            const char* fontPayloadId,
                            const std::function<void(const std::string&)>& onSceneActivated,
                            const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
+                           const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
                            const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
-                           const std::function<void(const std::string&)>& onPrefabActivated,
+                           const std::function<void(const std::string&)>& onPrefabOpened,
+                           const std::function<void(const std::string&)>& onPrefabInstantiated,
                            const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
                            const std::function<void(const std::string&, const std::string&)>& onAssetRenamed,
                            const std::function<void(const std::string&)>& onNativeScriptAssetActivated)
@@ -481,6 +484,12 @@ namespace Limitless::EditorProjectPanel
                         }
                         if (ImGui::MenuItem("Create Scene") && onCreateSceneRequested)
                             onCreateSceneRequested(entryRelativePath);
+                        if (ImGui::MenuItem("Create Material"))
+                        {
+                            state.CreateMaterialParentRelativePath = entryRelativePath;
+                            CopyTextToBuffer(state.CreateMaterialNameBuffer, "New Material");
+                            state.CreateMaterialPopupPending = true;
+                        }
                         if (ImGui::MenuItem("Create Native Script"))
                         {
                             state.CreateNativeScriptParentRelativePath = entryRelativePath;
@@ -574,6 +583,7 @@ namespace Limitless::EditorProjectPanel
                                       selectedMaterialAssetKey,
                                       cachedMaterialAsset,
                                       selectedNativeScriptAssetKey,
+                                      selectedPrefabAssetKey,
                                       texturePayloadId,
                                       audioPayloadId,
                                       assetMovePayloadId,
@@ -584,8 +594,10 @@ namespace Limitless::EditorProjectPanel
                                       fontPayloadId,
                                       onSceneActivated,
                                       onCreateSceneRequested,
+                                      onCreateMaterialRequested,
                                       onCreatePrefabFromSceneEntityRequested,
-                                      onPrefabActivated,
+                                      onPrefabOpened,
+                                      onPrefabInstantiated,
                                       onSetDefaultSceneRequested,
                                       onAssetRenamed,
                                       onNativeScriptAssetActivated);
@@ -627,6 +639,7 @@ namespace Limitless::EditorProjectPanel
                             if (selectedScriptPairWithoutDrag)
                             {
                                 selectedNativeScriptAssetKey = sourceAssetKey;
+                                selectedPrefabAssetKey.clear();
                                 selectedTextureAssetKey.clear();
                                 selectedMaterialAssetKey.clear();
                                 selectedEntity = entt::null;
@@ -674,6 +687,7 @@ namespace Limitless::EditorProjectPanel
                                 if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0) && (ImGui::GetDragDropPayload() == nullptr))
                                 {
                                     selectedNativeScriptAssetKey = headerAssetKey;
+                                    selectedPrefabAssetKey.clear();
                                     selectedTextureAssetKey.clear();
                                     selectedMaterialAssetKey.clear();
                                     selectedEntity = entt::null;
@@ -687,6 +701,7 @@ namespace Limitless::EditorProjectPanel
                                 if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0) && (ImGui::GetDragDropPayload() == nullptr))
                                 {
                                     selectedNativeScriptAssetKey = sourceAssetKey;
+                                    selectedPrefabAssetKey.clear();
                                     selectedTextureAssetKey.clear();
                                     selectedMaterialAssetKey.clear();
                                     selectedEntity = entt::null;
@@ -721,7 +736,8 @@ namespace Limitless::EditorProjectPanel
                     const bool isSelected =
                         (isTexture && (selectedTextureAssetKey == assetKey)) ||
                         (isMaterial && (selectedMaterialAssetKey == assetKey)) ||
-                        (isNativeScriptFile && (selectedNativeScriptAssetKey == assetKey));
+                        (isNativeScriptFile && (selectedNativeScriptAssetKey == assetKey)) ||
+                        (isPrefab && (selectedPrefabAssetKey == assetKey));
                     ImGui::TreeNodeEx(treeLabel.c_str(), isSelected ? (flags | ImGuiTreeNodeFlags_Selected) : flags);
 
                     const bool releasedOnItemWithoutDrag =
@@ -735,6 +751,7 @@ namespace Limitless::EditorProjectPanel
                             selectedTextureAssetKey = assetKey;
                             selectedMaterialAssetKey.clear();
                             selectedNativeScriptAssetKey.clear();
+                            selectedPrefabAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedTextureAsset.reset();
                             cachedMaterialAsset.reset();
@@ -744,6 +761,7 @@ namespace Limitless::EditorProjectPanel
                             selectedMaterialAssetKey = assetKey;
                             selectedTextureAssetKey.clear();
                             selectedNativeScriptAssetKey.clear();
+                            selectedPrefabAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedMaterialAsset.reset();
                             cachedTextureAsset.reset();
@@ -753,6 +771,17 @@ namespace Limitless::EditorProjectPanel
                             selectedNativeScriptAssetKey = assetKey;
                             selectedTextureAssetKey.clear();
                             selectedMaterialAssetKey.clear();
+                            selectedPrefabAssetKey.clear();
+                            selectedEntity = entt::null;
+                            cachedMaterialAsset.reset();
+                            cachedTextureAsset.reset();
+                        }
+                        else if (isPrefab)
+                        {
+                            selectedPrefabAssetKey = assetKey;
+                            selectedTextureAssetKey.clear();
+                            selectedMaterialAssetKey.clear();
+                            selectedNativeScriptAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedMaterialAsset.reset();
                             cachedTextureAsset.reset();
@@ -773,10 +802,11 @@ namespace Limitless::EditorProjectPanel
                         selectedNativeScriptAssetKey.clear();
                         onSceneActivated(assetKey);
                     }
-                    else if (isPrefab && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onPrefabActivated)
+                    else if (isPrefab && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onPrefabOpened)
                     {
                         selectedNativeScriptAssetKey.clear();
-                        onPrefabActivated(assetKey);
+                        selectedPrefabAssetKey = assetKey;
+                        onPrefabOpened(assetKey);
                     }
                     else if (isMaterial && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
                     {
@@ -816,8 +846,10 @@ namespace Limitless::EditorProjectPanel
                         }
                         if (isPrefab)
                         {
-                            if (ImGui::MenuItem("Instantiate Prefab") && onPrefabActivated)
-                                onPrefabActivated(assetKey);
+                            if (ImGui::MenuItem("Open Prefab") && onPrefabOpened)
+                                onPrefabOpened(assetKey);
+                            if (ImGui::MenuItem("Instantiate Prefab") && onPrefabInstantiated)
+                                onPrefabInstantiated(assetKey);
                             ImGui::Separator();
                         }
 
@@ -883,6 +915,7 @@ namespace Limitless::EditorProjectPanel
 
         void DrawProjectFolderPopups(const std::filesystem::path& assetsDirectory,
                                      EditorProjectPanelState& state,
+                                     const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
                                      const std::function<void(const std::string&, const std::string&)>& onAssetRenamed)
         {
             if (state.FolderPopupPending == EditorProjectFolderPopup::Create)
@@ -968,6 +1001,14 @@ namespace Limitless::EditorProjectPanel
                 ImGui::SetNextWindowFocus();
                 state.CreateNativeScriptPopupPending = false;
                 state.CreateNativeScriptPopupOpen = true;
+            }
+
+            if (state.CreateMaterialPopupPending)
+            {
+                ImGui::OpenPopup("CreateMaterialAsset");
+                ImGui::SetNextWindowFocus();
+                state.CreateMaterialPopupPending = false;
+                state.CreateMaterialPopupOpen = true;
             }
 
             if (ImGui::BeginPopupModal("RenameAsset", &state.RenameAssetPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
@@ -1077,6 +1118,33 @@ namespace Limitless::EditorProjectPanel
 
                 ImGui::EndPopup();
             }
+
+            if (ImGui::BeginPopupModal("CreateMaterialAsset", &state.CreateMaterialPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::Text("Create Material");
+                ImGui::Separator();
+                if (ImGui::IsWindowAppearing())
+                    ImGui::SetKeyboardFocusHere();
+
+                const bool create = ImGui::InputText("Name",
+                                                     state.CreateMaterialNameBuffer.data(),
+                                                     state.CreateMaterialNameBuffer.size(),
+                                                     ImGuiInputTextFlags_EnterReturnsTrue);
+                if (ImGui::Button("Create", ImVec2(120, 0)) || create)
+                {
+                    const std::string requestedName = state.CreateMaterialNameBuffer.data();
+                    if (!requestedName.empty() && onCreateMaterialRequested)
+                    {
+                        onCreateMaterialRequested(state.CreateMaterialParentRelativePath, requestedName);
+                        state.CreateMaterialPopupOpen = false;
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                    state.CreateMaterialPopupOpen = false;
+
+                ImGui::EndPopup();
+            }
         }
     }
 
@@ -1087,6 +1155,7 @@ namespace Limitless::EditorProjectPanel
               std::string& selectedMaterialAssetKey,
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
               std::string& selectedNativeScriptAssetKey,
+              std::string& selectedPrefabAssetKey,
               const char* texturePayloadId,
               const char* audioPayloadId,
               const char* assetMovePayloadId,
@@ -1097,8 +1166,10 @@ namespace Limitless::EditorProjectPanel
               const char* fontPayloadId,
               const std::function<void(const std::string&)>& onSceneActivated,
               const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
+              const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
               const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
-              const std::function<void(const std::string&)>& onPrefabActivated,
+              const std::function<void(const std::string&)>& onPrefabOpened,
+              const std::function<void(const std::string&)>& onPrefabInstantiated,
               const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
               const std::function<void(const std::string&, const std::string&)>& onAssetRenamed,
               const std::function<void(const std::string&)>& onNativeScriptAssetActivated)
@@ -1133,6 +1204,12 @@ namespace Limitless::EditorProjectPanel
             }
             if (ImGui::MenuItem("Create Scene") && onCreateSceneRequested)
                 onCreateSceneRequested("");
+            if (ImGui::MenuItem("Create Material"))
+            {
+                state.CreateMaterialParentRelativePath = "";
+                CopyTextToBuffer(state.CreateMaterialNameBuffer, "New Material");
+                state.CreateMaterialPopupPending = true;
+            }
             if (ImGui::MenuItem("Create Native Script"))
             {
                 state.CreateNativeScriptParentRelativePath = "";
@@ -1159,6 +1236,12 @@ namespace Limitless::EditorProjectPanel
                 }
                 if (ImGui::MenuItem("Create Scene") && onCreateSceneRequested)
                     onCreateSceneRequested("");
+                if (ImGui::MenuItem("Create Material"))
+                {
+                    state.CreateMaterialParentRelativePath = "";
+                    CopyTextToBuffer(state.CreateMaterialNameBuffer, "New Material");
+                    state.CreateMaterialPopupPending = true;
+                }
                 if (ImGui::MenuItem("Create Native Script"))
                 {
                     state.CreateNativeScriptParentRelativePath = "";
@@ -1232,6 +1315,7 @@ namespace Limitless::EditorProjectPanel
                           selectedMaterialAssetKey,
                           cachedMaterialAsset,
                           selectedNativeScriptAssetKey,
+                          selectedPrefabAssetKey,
                           texturePayloadId,
                           audioPayloadId,
                           assetMovePayloadId,
@@ -1242,8 +1326,10 @@ namespace Limitless::EditorProjectPanel
                           fontPayloadId,
                           onSceneActivated,
                           onCreateSceneRequested,
+                          onCreateMaterialRequested,
                           onCreatePrefabFromSceneEntityRequested,
-                          onPrefabActivated,
+                          onPrefabOpened,
+                          onPrefabInstantiated,
                           onSetDefaultSceneRequested,
                           onAssetRenamed,
                           onNativeScriptAssetActivated);
@@ -1265,7 +1351,7 @@ namespace Limitless::EditorProjectPanel
             state.PendingExternalDropPaths.clear();
         }
 
-        DrawProjectFolderPopups(assetsDirectory, state, onAssetRenamed);
+        DrawProjectFolderPopups(assetsDirectory, state, onCreateMaterialRequested, onAssetRenamed);
         ImGui::End();
     }
 }

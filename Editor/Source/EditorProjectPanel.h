@@ -45,6 +45,12 @@ namespace Limitless
         bool CreateNativeScriptPopupOpen = false;
         std::filesystem::path CreateNativeScriptParentRelativePath;
         std::array<char, 256> CreateNativeScriptClassNameBuffer{};
+
+        // Material asset creation popup state.
+        bool CreateMaterialPopupPending = false;
+        bool CreateMaterialPopupOpen = false;
+        std::filesystem::path CreateMaterialParentRelativePath;
+        std::array<char, 256> CreateMaterialNameBuffer{};
     };
 
     namespace EditorProjectPanel
@@ -57,6 +63,7 @@ namespace Limitless
                   std::string& selectedMaterialAssetKey,
                   Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                   std::string& selectedNativeScriptAssetKey,
+                  std::string& selectedPrefabAssetKey,
                   const char* texturePayloadId,
                   const char* audioPayloadId,
                   const char* assetMovePayloadId,
@@ -67,8 +74,10 @@ namespace Limitless
                   const char* fontPayloadId,
                   const std::function<void(const std::string&)>& onSceneActivated,
                   const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
+                  const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
                   const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
-                  const std::function<void(const std::string&)>& onPrefabActivated,
+                  const std::function<void(const std::string&)>& onPrefabOpened,
+                  const std::function<void(const std::string&)>& onPrefabInstantiated,
                   const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
                   const std::function<void(const std::string&, const std::string&)>& onAssetRenamed,
                   const std::function<void(const std::string&)>& onNativeScriptAssetActivated);

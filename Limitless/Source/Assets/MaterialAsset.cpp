@@ -23,6 +23,7 @@
 namespace Limitless::Assets
 {
     using json = nlohmann::json;
+    constexpr const char* kDefaultMaterialShaderKey = "Assets/Shaders/Renderer2D_TexturedQuad.glsl";
 
     namespace
     {
@@ -55,12 +56,19 @@ namespace Limitless::Assets
 
     static Result<std::shared_ptr<ShaderAsset>> ResolveShaderAsset(const json& root)
     {
+        auto loadDefaultShader = []() -> Result<std::shared_ptr<ShaderAsset>> {
+            auto shader = AssetManager::LoadBlocking<ShaderAsset>(kDefaultMaterialShaderKey);
+            if (shader)
+                return shader;
+            return Result<std::shared_ptr<ShaderAsset>>(ErrorCode::ResourceNotFound, "Material JSON shader missing/invalid and default shader could not be loaded");
+        };
+
         if (!root.contains("shader"))
-        {
-            return Result<std::shared_ptr<ShaderAsset>>(ErrorCode::InvalidArgument, "Material JSON missing 'shader'");
-        }
+            return loadDefaultShader();
 
         const json& ref = root["shader"];
+        const bool hasKey = ref.is_object() && ref.contains("key") && ref["key"].is_string();
+        const std::string keyFromRef = hasKey ? ref["key"].get<std::string>() : std::string{};
 
         // Preferred: GUID (stable, Unity-style).
         if (ref.is_object() && ref.contains("guid") && ref["guid"].is_string())
@@ -68,7 +76,13 @@ namespace Limitless::Assets
             const std::string guid = ref["guid"].get<std::string>();
             if (guid.empty())
             {
-                return Result<std::shared_ptr<ShaderAsset>>(ErrorCode::InvalidArgument, "Material JSON 'shader' guid is empty");
+                if (!keyFromRef.empty())
+                {
+                    auto shaderFromKey = AssetManager::LoadBlocking<ShaderAsset>(keyFromRef);
+                    if (shaderFromKey)
+                        return shaderFromKey;
+                }
+                return loadDefaultShader();
             }
 
             // If already loaded, grab it.
@@ -95,17 +109,27 @@ namespace Limitless::Assets
                 }
             }
 
-            return Result<std::shared_ptr<ShaderAsset>>(rec.GetError());
+            // Cross-project imports can carry stale GUIDs. If key is present, use it as fallback.
+            if (!keyFromRef.empty())
+            {
+                auto shaderFromKey = AssetManager::LoadBlocking<ShaderAsset>(keyFromRef);
+                if (shaderFromKey)
+                    return shaderFromKey;
+            }
+
+            return loadDefaultShader();
         }
 
         // Convenience: key (path) during early iteration.
-        if (ref.is_object() && ref.contains("key") && ref["key"].is_string())
+        if (hasKey)
         {
-            const std::string key = ref["key"].get<std::string>();
-            return AssetManager::LoadBlocking<ShaderAsset>(key);
+            auto shaderFromKey = AssetManager::LoadBlocking<ShaderAsset>(keyFromRef);
+            if (shaderFromKey)
+                return shaderFromKey;
+            return loadDefaultShader();
         }
 
-        return Result<std::shared_ptr<ShaderAsset>>(ErrorCode::InvalidArgument, "Material JSON 'shader' must contain {guid} or {key}");
+        return loadDefaultShader();
     }
 
     static Result<std::shared_ptr<TextureAsset>> ResolveMainTextureAsset(const json& root)
@@ -117,13 +141,22 @@ namespace Limitless::Assets
         }
 
         const json& ref = root["mainTexture"];
+        const bool hasKey = ref.is_object() && ref.contains("key") && ref["key"].is_string();
+        const std::string keyFromRef = hasKey ? ref["key"].get<std::string>() : std::string{};
 
         if (ref.is_object() && ref.contains("guid") && ref["guid"].is_string())
         {
             const std::string guid = ref["guid"].get<std::string>();
             if (guid.empty())
             {
-                return Result<std::shared_ptr<TextureAsset>>(ErrorCode::InvalidArgument, "Material JSON 'mainTexture' guid is empty");
+                if (!keyFromRef.empty())
+                {
+                    auto textureFromKey = AssetManager::LoadBlocking<TextureAsset>(keyFromRef);
+                    if (textureFromKey)
+                        return textureFromKey;
+                }
+                // Missing/invalid texture reference should behave like "no texture assigned".
+                return std::shared_ptr<TextureAsset>();
             }
 
             if (auto cached = AssetManager::GetByGuid<TextureAsset>(guid))
@@ -147,16 +180,26 @@ namespace Limitless::Assets
                 }
             }
 
-            return Result<std::shared_ptr<TextureAsset>>(rec.GetError());
+            // Cross-project imports can carry stale GUIDs. If key is present, use it as fallback.
+            if (!keyFromRef.empty())
+            {
+                auto textureFromKey = AssetManager::LoadBlocking<TextureAsset>(keyFromRef);
+                if (textureFromKey)
+                    return textureFromKey;
+            }
+
+            return std::shared_ptr<TextureAsset>();
         }
 
-        if (ref.is_object() && ref.contains("key") && ref["key"].is_string())
+        if (hasKey)
         {
-            const std::string key = ref["key"].get<std::string>();
-            return AssetManager::LoadBlocking<TextureAsset>(key);
+            auto textureFromKey = AssetManager::LoadBlocking<TextureAsset>(keyFromRef);
+            if (textureFromKey)
+                return textureFromKey;
+            return std::shared_ptr<TextureAsset>();
         }
 
-        return Result<std::shared_ptr<TextureAsset>>(ErrorCode::InvalidArgument, "Material JSON 'mainTexture' must contain {guid} or {key}");
+        return std::shared_ptr<TextureAsset>();
     }
 
     static Result<TextureSpecification> ParseTextureSpecificationOverride(const json& root)

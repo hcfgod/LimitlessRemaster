@@ -1,9 +1,8 @@
 {
     "deps": [
-        "57f72296-44e1-4dbd-b34f-e901b3c1e0db",
-        "5b5a13a7-ab2d-4947-974a-af21398cf103"
+        "57f72296-44e1-4dbd-b34f-e901b3c1e0db"
     ],
-    "guid": "d6f51ce0-4a87-4b86-bd88-2a5b1925d1da",
+    "guid": "19d80792-ceba-42ce-8f92-d33013eed5c1",
     "key": "Assets/Materials/Renderer2D_TexturedQuad.material.json",
     "type": "Material"
 }

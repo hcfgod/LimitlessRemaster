@@ -21,5 +21,6 @@ namespace Limitless
                                    Assets::MaterialAsset::Ptr& cachedMaterialAsset);
 
         void DrawNativeScriptAssetInspector(std::string& selectedNativeScriptAssetKey);
+        void DrawPrefabAssetInspector(std::string& selectedPrefabAssetKey);
     }
 }

@@ -103,6 +103,7 @@ namespace Limitless::EditorScenePanel
                             std::string& selectedMaterialAssetKey,
                             Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                             std::string& selectedNativeScriptAssetKey,
+                            std::string& selectedPrefabAssetKey,
                             const char* materialPayloadId,
                             const char* prefabPayloadId,
                             EditorUndoService* undoService,
@@ -146,6 +147,7 @@ namespace Limitless::EditorScenePanel
                 selectedMaterialAssetKey.clear();
                 cachedMaterialAsset.reset();
                 selectedNativeScriptAssetKey.clear();
+                selectedPrefabAssetKey.clear();
             }
 
             if (ImGui::BeginPopupContextItem())
@@ -171,6 +173,7 @@ namespace Limitless::EditorScenePanel
                     selectedMaterialAssetKey.clear();
                     cachedMaterialAsset.reset();
                     selectedNativeScriptAssetKey.clear();
+                    selectedPrefabAssetKey.clear();
                 }
 
                 if (ImGui::MenuItem("Rename"))
@@ -204,6 +207,7 @@ namespace Limitless::EditorScenePanel
                             selectedMaterialAssetKey.clear();
                             cachedMaterialAsset.reset();
                             selectedNativeScriptAssetKey.clear();
+                            selectedPrefabAssetKey.clear();
                         }
                     }
 
@@ -288,6 +292,7 @@ namespace Limitless::EditorScenePanel
                                 selectedMaterialAssetKey.clear();
                                 cachedMaterialAsset.reset();
                                 selectedNativeScriptAssetKey.clear();
+                                selectedPrefabAssetKey.clear();
                             }
                         }
                     }
@@ -397,6 +402,7 @@ namespace Limitless::EditorScenePanel
                                        selectedMaterialAssetKey,
                                        cachedMaterialAsset,
                                        selectedNativeScriptAssetKey,
+                                       selectedPrefabAssetKey,
                                        materialPayloadId,
                                        prefabPayloadId,
                                        undoService,
@@ -422,6 +428,7 @@ namespace Limitless::EditorScenePanel
               std::string& selectedMaterialAssetKey,
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
               std::string& selectedNativeScriptAssetKey,
+              std::string& selectedPrefabAssetKey,
               const char* materialPayloadId,
               const char* prefabPayloadId,
               const std::string& sceneRootDisplayName,
@@ -457,6 +464,7 @@ namespace Limitless::EditorScenePanel
                 selectedMaterialAssetKey.clear();
                 cachedMaterialAsset.reset();
                 selectedNativeScriptAssetKey.clear();
+                selectedPrefabAssetKey.clear();
             }
             ImGui::EndPopup();
         }
@@ -536,6 +544,7 @@ namespace Limitless::EditorScenePanel
                                     selectedMaterialAssetKey.clear();
                                     cachedMaterialAsset.reset();
                                     selectedNativeScriptAssetKey.clear();
+                                    selectedPrefabAssetKey.clear();
                                 }
                             }
                         }
@@ -554,6 +563,7 @@ namespace Limitless::EditorScenePanel
                                        selectedMaterialAssetKey,
                                        cachedMaterialAsset,
                                        selectedNativeScriptAssetKey,
+                                       selectedPrefabAssetKey,
                                        materialPayloadId,
                                        prefabPayloadId,
                                        undoService,
@@ -594,6 +604,7 @@ namespace Limitless::EditorScenePanel
                         selectedMaterialAssetKey.clear();
                         cachedMaterialAsset.reset();
                         selectedNativeScriptAssetKey.clear();
+                        selectedPrefabAssetKey.clear();
                     }
                     ImGui::EndPopup();
                 }
@@ -640,6 +651,7 @@ namespace Limitless::EditorScenePanel
                                     selectedMaterialAssetKey.clear();
                                     cachedMaterialAsset.reset();
                                     selectedNativeScriptAssetKey.clear();
+                                    selectedPrefabAssetKey.clear();
                                 }
                             }
                         }
@@ -729,6 +741,7 @@ namespace Limitless::EditorScenePanel
             selectedMaterialAssetKey.clear();
             cachedMaterialAsset.reset();
             selectedNativeScriptAssetKey.clear();
+            selectedPrefabAssetKey.clear();
         }
 
         ImGui::End();

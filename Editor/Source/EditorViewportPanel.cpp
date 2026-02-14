@@ -237,7 +237,7 @@ namespace Limitless::EditorViewportPanel
                         if (key && key[0] && onSceneDropped)
                             onSceneDropped(key);
                     }
-                    else if (prefabPayloadId)
+                    if (prefabPayloadId)
                     {
                         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(prefabPayloadId))
                         {
@@ -257,7 +257,7 @@ namespace Limitless::EditorViewportPanel
                             }
                         }
                     }
-                    else if (materialPayloadId)
+                    if (materialPayloadId)
                     {
                         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(materialPayloadId))
                         {

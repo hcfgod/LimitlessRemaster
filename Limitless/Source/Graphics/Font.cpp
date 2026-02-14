@@ -20,6 +20,7 @@ namespace Limitless
         constexpr uint32_t kFallbackCodepoint = static_cast<uint32_t>('?');
         std::mutex g_FontCacheMutex;
         std::unordered_map<std::string, std::weak_ptr<Font>> g_FontCache;
+        std::unordered_map<std::string, std::shared_ptr<Font>> g_FontStrongCache;
 
         msdf_atlas::Charset BuildDefaultCharset()
         {
@@ -81,11 +82,16 @@ namespace Limitless
 
         {
             std::scoped_lock cacheLock(g_FontCacheMutex);
+            auto strongIt = g_FontStrongCache.find(resolvedFontPath);
+            if (strongIt != g_FontStrongCache.end() && strongIt->second)
+                return strongIt->second;
+
             auto cacheIt = g_FontCache.find(resolvedFontPath);
             if (cacheIt != g_FontCache.end())
             {
                 if (auto cachedFont = cacheIt->second.lock())
                 {
+                    g_FontStrongCache[resolvedFontPath] = cachedFont;
                     return cachedFont;
                 }
                 g_FontCache.erase(cacheIt);
@@ -271,6 +277,7 @@ namespace Limitless
         {
             std::scoped_lock cacheLock(g_FontCacheMutex);
             g_FontCache[resolvedFontPath] = font;
+            g_FontStrongCache[resolvedFontPath] = font;
         }
         return font;
     }

@@ -1,31 +1,5 @@
 {
-  "mainTexture": {
-    "guid": "5b5a13a7-ab2d-4947-974a-af21398cf103",
-    "key": "Assets/Textures/Checker.ppm"
-  },
-  "mainTextureSpec": {
-    "generateMipmaps": false,
-    "magFilter": "Linear",
-    "minFilter": "Linear",
-    "wrapU": "ClampToEdge",
-    "wrapV": "ClampToEdge"
-  },
   "shader": {
     "key": "Assets/Shaders/Renderer2D_MSDFText.glsl"
-  },
-  "textureSlots": {
-    "albedo": {
-      "spec": {
-        "generateMipmaps": false,
-        "magFilter": "Linear",
-        "minFilter": "Linear",
-        "wrapU": "ClampToEdge",
-        "wrapV": "ClampToEdge"
-      },
-      "texture": {
-        "guid": "5b5a13a7-ab2d-4947-974a-af21398cf103",
-        "key": "Assets/Textures/Checker.ppm"
-      }
-    }
   }
 }

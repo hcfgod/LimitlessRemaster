@@ -32,7 +32,8 @@ namespace Limitless::Assets
     //
     // Rules:
     // - If `assetKey` is absolute, it is returned as-is.
-    // - If it starts with "Assets/" (Unity-style), we search for the project root.
+    // - If it starts with "Assets/" (Unity-style), we search project assets first.
+    //   If missing there, editor shared assets are used as fallback.
     // - Otherwise it's treated as a path relative to the current working directory.
     [[nodiscard]] Result<std::filesystem::path> ResolveAssetKeyToPath(const std::string& assetKey);
 }

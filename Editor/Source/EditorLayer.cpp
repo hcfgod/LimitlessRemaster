@@ -49,7 +49,7 @@ namespace Limitless
         constexpr const char* kAssetPrefabPayload = "ASSET_PREFAB";
         constexpr const char* kAssetShaderPayload = "ASSET_SHADER";
         constexpr const char* kAssetFontPayload = "ASSET_FONT";
-        constexpr const char* kDefaultSceneFileName = "New Scene.scene.json";
+        constexpr const char* kDefaultSceneFileName = "SampleScene.scene.json";
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
         constexpr uint32_t kEditorSessionStateVersion = 2;
@@ -65,6 +65,17 @@ namespace Limitless
         {
             std::replace(pathText.begin(), pathText.end(), '\\', '/');
             return pathText;
+        }
+
+        bool IsPrefabAssetKey(const std::string& assetKey)
+        {
+            if (assetKey.empty())
+                return false;
+            std::string lowerKey = NormalizeSlashes(assetKey);
+            std::transform(lowerKey.begin(), lowerKey.end(), lowerKey.begin(), [](unsigned char character) {
+                return static_cast<char>(std::tolower(character));
+            });
+            return lowerKey.ends_with(".prefab.json");
         }
 
         std::string ToLowerAscii(std::string text)
@@ -462,6 +473,10 @@ namespace Limitless
     {
         SceneManager::ClearPendingSceneTransition();
         m_EditorUndoService.Clear();
+        m_PendingTexturePrewarmTasks.clear();
+        m_PendingMaterialPrewarmTasks.clear();
+        m_PrewarmedTextureAssets.clear();
+        m_PrewarmedMaterialAssets.clear();
         PersistProjectSessionState();
         ScriptCoreModuleRuntime::Shutdown();
         Application::GetInstance().GetWindow().SetFileDropCallback({});
@@ -483,6 +498,7 @@ namespace Limitless
             m_Scene->Update(deltaTime);
 
         ProcessPendingSceneTransitions();
+        PumpSceneAssetPrewarm();
 
         EditorPlayMode::SyncSceneCamera(
             m_PlayModeState,
@@ -631,6 +647,10 @@ namespace Limitless
 
     void EditorLayer::DrawMenuBar()
     {
+        const bool isEditingPrefabAsset = IsPrefabAssetKey(m_CurrentSceneAssetKey);
+        const bool canReturnFromPrefabMode = isEditingPrefabAsset && !m_PrefabModeReturnSceneAssetKey.empty();
+        const bool canApplyPrefabToInstances = canReturnFromPrefabMode;
+
         EditorMenuBar::Draw(
             m_PlayModeState,
             m_ShowDemoWindow,
@@ -695,7 +715,15 @@ namespace Limitless
             m_EditorUndoService.GetRedoLabel(),
             [this]() { EnterPlayMode(); },
             [this]() { ExitPlayMode(); },
-            [this]() { TogglePausePlayMode(); });
+            [this]() { TogglePausePlayMode(); },
+            isEditingPrefabAsset,
+            isEditingPrefabAsset
+                ? SceneDisplayNameFromFileName(std::filesystem::path(m_CurrentSceneAssetKey).filename().string())
+                : std::string{},
+            canReturnFromPrefabMode,
+            [this]() { (void)ReturnFromPrefabMode(false); },
+            canApplyPrefabToInstances,
+            [this]() { (void)ApplyPrefabStageChangesToInstances(); });
     }
 
     void EditorLayer::DrawViewportPanel()
@@ -734,6 +762,8 @@ namespace Limitless
         {
             const std::filesystem::path sceneAssetPath(m_CurrentSceneAssetKey);
             sceneRootDisplayName = SceneDisplayNameFromFileName(sceneAssetPath.filename().string());
+            if (IsPrefabAssetKey(m_CurrentSceneAssetKey))
+                sceneRootDisplayName = "Prefab: " + sceneRootDisplayName;
         }
 
         EditorScenePanel::Draw(
@@ -745,6 +775,7 @@ namespace Limitless
             m_SelectedMaterialAssetKey,
             m_CachedMaterialAsset,
             m_SelectedNativeScriptAssetKey,
+            m_SelectedPrefabAssetKey,
             kAssetMaterialPayload,
             kAssetPrefabPayload,
             sceneRootDisplayName,
@@ -771,6 +802,7 @@ namespace Limitless
             m_SelectedMaterialAssetKey,
             m_CachedMaterialAsset,
             m_SelectedNativeScriptAssetKey,
+            m_SelectedPrefabAssetKey,
             &m_EditorUndoService);
     }
 
@@ -784,6 +816,7 @@ namespace Limitless
             m_SelectedMaterialAssetKey,
             m_CachedMaterialAsset,
             m_SelectedNativeScriptAssetKey,
+            m_SelectedPrefabAssetKey,
             kAssetTexturePayload,
             kAssetAudioPayload,
             kAssetMovePayload,
@@ -798,8 +831,14 @@ namespace Limitless
                 if (!createdSceneAssetKey.empty())
                     LoadSceneFromAssetKey(createdSceneAssetKey);
             },
+            [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
+                (void)CreateMaterialAssetInFolder(relativeFolderPath, preferredName);
+            },
             [this](entt::entity entity, const std::filesystem::path& relativeFolderPath) {
                 (void)CreatePrefabFromEntityInFolder(entity, relativeFolderPath);
+            },
+            [this](const std::string& prefabAssetKey) {
+                (void)OpenPrefabAssetForEditing(prefabAssetKey);
             },
             [this](const std::string& prefabAssetKey) {
                 (void)InstantiatePrefabAtParent(prefabAssetKey, entt::null);
@@ -818,6 +857,8 @@ namespace Limitless
                 }
                 if (m_SelectedNativeScriptAssetKey == oldAssetKey)
                     m_SelectedNativeScriptAssetKey = newAssetKey;
+                if (m_SelectedPrefabAssetKey == oldAssetKey)
+                    m_SelectedPrefabAssetKey = newAssetKey;
 
                 if (!m_Scene)
                 {
@@ -958,6 +999,27 @@ namespace Limitless
 
     void EditorLayer::EnterPlayMode()
     {
+        if (m_PlayModeState != EditorPlayModeState::Edit)
+            return;
+
+        // Unity-style: Playing from Prefab Mode first returns to the previous scene.
+        if (IsPrefabAssetKey(m_CurrentSceneAssetKey) && !m_PrefabModeReturnSceneAssetKey.empty())
+        {
+            const std::string returnSceneKey = m_PrefabModeReturnSceneAssetKey;
+            if (!EnsureSceneSwitchAllowed([this, returnSceneKey]() {
+                    m_PrefabModeReturnSceneAssetKey.clear();
+                    (void)LoadSceneFromAssetKey(returnSceneKey, true);
+                    EnterPlayMode();
+                }))
+            {
+                return;
+            }
+
+            m_PrefabModeReturnSceneAssetKey.clear();
+            if (!LoadSceneFromAssetKey(returnSceneKey, true))
+                return;
+        }
+
         StopAudioSourcesInScene(m_Scene.get());
         StopAudioSourcesInScene(m_EditSceneStored.get());
         m_EditSceneStoredAssetKey = m_CurrentSceneAssetKey;
@@ -1030,6 +1092,7 @@ namespace Limitless
         m_SelectedEntity = entt::null;
         m_SelectedTextureAssetKey.clear();
         m_SelectedNativeScriptAssetKey.clear();
+        m_SelectedPrefabAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey.clear();
         m_EditorUndoService.MarkSaved();
@@ -1199,9 +1262,15 @@ namespace Limitless
         if (!ImGui::BeginPopupModal("Unsaved Changes", &m_SceneSwitchConfirmationPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
             return;
 
-        ImGui::TextWrapped("You have undo history for the current scene. Switching scenes will clear undo/redo history.");
+        if (IsPrefabAssetKey(m_CurrentSceneAssetKey))
+            ImGui::TextWrapped("You have undo history for the current prefab asset. Leaving Prefab Mode will clear undo/redo history.");
+        else
+            ImGui::TextWrapped("You have undo history for the current scene. Switching scenes will clear undo/redo history.");
         ImGui::Spacing();
-        ImGui::TextWrapped("Do you want to save before switching?");
+        if (IsPrefabAssetKey(m_CurrentSceneAssetKey))
+            ImGui::TextWrapped("Do you want to save your prefab changes before leaving?");
+        else
+            ImGui::TextWrapped("Do you want to save before switching?");
 
         if (ImGui::Button("Save", ImVec2(120.0f, 0.0f)))
         {
@@ -1271,6 +1340,8 @@ namespace Limitless
         EditorSessionStateData state{};
         if (m_PlayModeState != EditorPlayModeState::Edit)
             state.LastOpenedSceneAssetKey = m_EditSceneStoredAssetKey;
+        else if (IsPrefabAssetKey(m_CurrentSceneAssetKey) && !m_PrefabModeReturnSceneAssetKey.empty())
+            state.LastOpenedSceneAssetKey = m_PrefabModeReturnSceneAssetKey;
         else
             state.LastOpenedSceneAssetKey = m_CurrentSceneAssetKey;
         EditorInspectorPanel::GetNativeScriptEditorSessionState(state.NativeScriptEditorState);
@@ -1315,11 +1386,15 @@ namespace Limitless
         }
 
         m_Scene = std::move(sceneResult.GetValue());
+        QueueSceneAssetPrewarm();
         m_SelectedEntity = entt::null;
         m_SelectedTextureAssetKey.clear();
         m_SelectedNativeScriptAssetKey.clear();
+        m_SelectedPrefabAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey = assetKey;
+        if (!IsPrefabAssetKey(assetKey))
+            m_PrefabModeReturnSceneAssetKey.clear();
         if (const auto& pm = Project::ProjectManager::GetInstance(); pm.HasOpenProject())
         {
             PersistProjectSessionState();
@@ -1362,9 +1437,11 @@ namespace Limitless
         }
 
         m_Scene = std::move(sceneResult.GetValue());
+        QueueSceneAssetPrewarm();
         m_SelectedEntity = entt::null;
         m_SelectedTextureAssetKey.clear();
         m_SelectedNativeScriptAssetKey.clear();
+        m_SelectedPrefabAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey = assetKey;
 
@@ -1453,10 +1530,11 @@ namespace Limitless
             return false;
         }
 
-        const auto importResult = Assets::AssetDatabase::GetInstance().ImportOrUpdate(assetKey, Assets::AssetType::Scene);
+        const Assets::AssetType assetTypeForSave = IsPrefabAssetKey(assetKey) ? Assets::AssetType::Prefab : Assets::AssetType::Scene;
+        const auto importResult = Assets::AssetDatabase::GetInstance().ImportOrUpdate(assetKey, assetTypeForSave);
         if (importResult.IsFailure())
         {
-            LT_WARN("Scene saved but failed to import into AssetDatabase ({}): {}", assetKey, importResult.GetError().GetErrorMessage());
+            LT_WARN("Asset saved but failed to import into AssetDatabase ({}): {}", assetKey, importResult.GetError().GetErrorMessage());
         }
 
         if (const auto& pm = Project::ProjectManager::GetInstance(); pm.HasOpenProject())
@@ -1464,9 +1542,153 @@ namespace Limitless
             PersistProjectSessionState();
         }
 
-        LT_INFO("Saved scene {}", assetKey);
+        if (IsPrefabAssetKey(assetKey))
+            LT_INFO("Saved prefab {}", assetKey);
+        else
+            LT_INFO("Saved scene {}", assetKey);
         m_EditorUndoService.MarkSaved();
         return true;
+    }
+
+    void EditorLayer::QueueSceneAssetPrewarm()
+    {
+        if (!m_Scene)
+            return;
+
+        auto& registry = m_Scene->GetRegistry();
+
+        auto spriteView = registry.view<SpriteComponent>();
+        for (entt::entity entity : spriteView)
+        {
+            const auto& sprite = spriteView.get<SpriteComponent>(entity);
+            if (sprite.TextureKey.empty())
+                continue;
+            if (m_PrewarmedTextureAssets.contains(sprite.TextureKey) || m_PendingTexturePrewarmTasks.contains(sprite.TextureKey))
+                continue;
+
+            m_PendingTexturePrewarmTasks.emplace(sprite.TextureKey, Assets::TextureAsset::LoadAsync(sprite.TextureKey));
+        }
+
+        auto materialView = registry.view<MaterialComponent>();
+        for (entt::entity entity : materialView)
+        {
+            const auto& material = materialView.get<MaterialComponent>(entity);
+            if (material.MaterialKey.empty())
+                continue;
+            if (m_PrewarmedMaterialAssets.contains(material.MaterialKey) || m_PendingMaterialPrewarmTasks.contains(material.MaterialKey))
+                continue;
+
+            m_PendingMaterialPrewarmTasks.emplace(material.MaterialKey, Assets::MaterialAsset::LoadAsync(material.MaterialKey));
+        }
+    }
+
+    void EditorLayer::PumpSceneAssetPrewarm()
+    {
+        for (auto it = m_PendingTexturePrewarmTasks.begin(); it != m_PendingTexturePrewarmTasks.end();)
+        {
+            if (!it->second.IsDone())
+            {
+                ++it;
+                continue;
+            }
+
+            try
+            {
+                if (auto loaded = it->second.Get())
+                    m_PrewarmedTextureAssets[it->first] = loaded;
+            }
+            catch (...) {}
+
+            it = m_PendingTexturePrewarmTasks.erase(it);
+        }
+
+        for (auto it = m_PendingMaterialPrewarmTasks.begin(); it != m_PendingMaterialPrewarmTasks.end();)
+        {
+            if (!it->second.IsDone())
+            {
+                ++it;
+                continue;
+            }
+
+            try
+            {
+                if (auto loaded = it->second.Get())
+                    m_PrewarmedMaterialAssets[it->first] = loaded;
+            }
+            catch (...) {}
+
+            it = m_PendingMaterialPrewarmTasks.erase(it);
+        }
+    }
+
+    bool EditorLayer::OpenPrefabAssetForEditing(const std::string& prefabAssetKey)
+    {
+        if (prefabAssetKey.empty())
+            return false;
+
+        if (!EnsureSceneSwitchAllowed([this, prefabAssetKey]() {
+                if (!IsPrefabAssetKey(m_CurrentSceneAssetKey))
+                    m_PrefabModeReturnSceneAssetKey = m_CurrentSceneAssetKey;
+                (void)LoadSceneFromAssetKey(prefabAssetKey, true);
+            }))
+        {
+            return false;
+        }
+
+        if (!IsPrefabAssetKey(m_CurrentSceneAssetKey))
+            m_PrefabModeReturnSceneAssetKey = m_CurrentSceneAssetKey;
+
+        return LoadSceneFromAssetKey(prefabAssetKey, true);
+    }
+
+    bool EditorLayer::ReturnFromPrefabMode(bool forceWithoutConfirmation)
+    {
+        if (!IsPrefabAssetKey(m_CurrentSceneAssetKey))
+            return false;
+        if (m_PrefabModeReturnSceneAssetKey.empty())
+            return false;
+
+        const std::string returnSceneKey = m_PrefabModeReturnSceneAssetKey;
+
+        if (!forceWithoutConfirmation)
+        {
+            if (!EnsureSceneSwitchAllowed([this, returnSceneKey]() {
+                    m_PrefabModeReturnSceneAssetKey.clear();
+                    (void)LoadSceneFromAssetKey(returnSceneKey, true);
+                }))
+            {
+                return false;
+            }
+        }
+
+        m_PrefabModeReturnSceneAssetKey.clear();
+        return LoadSceneFromAssetKey(returnSceneKey, true);
+    }
+
+    bool EditorLayer::ApplyPrefabStageChangesToInstances()
+    {
+        if (!IsPrefabAssetKey(m_CurrentSceneAssetKey))
+            return false;
+        if (m_PrefabModeReturnSceneAssetKey.empty())
+            return false;
+        if (!m_Scene)
+            return false;
+
+        const std::string prefabAssetKey = m_CurrentSceneAssetKey;
+        const std::string returnSceneKey = m_PrefabModeReturnSceneAssetKey;
+
+        // Save the prefab asset before pushing changes to instances.
+        if (!SaveSceneToAssetKey(prefabAssetKey))
+            return false;
+
+        // Switch back to the scene we came from, then apply to all instances there.
+        m_PrefabModeReturnSceneAssetKey.clear();
+        if (!LoadSceneFromAssetKey(returnSceneKey, true))
+            return false;
+
+        return m_EditorUndoService.ExecuteSceneMutation("Apply Prefab To Instances", [&](Scene& mutableScene) {
+            return EditorPrefabSystem::ApplyPrefabAssetToInstancesInScene(mutableScene, prefabAssetKey);
+        });
     }
 
     std::string EditorLayer::CreateSceneAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName)
@@ -1496,7 +1718,7 @@ namespace Limitless
         {
             for (int32_t index = 1; index < 1024; ++index)
             {
-                const std::filesystem::path candidate = targetDirectory / ("New Scene " + std::to_string(index) + ".scene.json");
+                const std::filesystem::path candidate = targetDirectory / ("SampleScene " + std::to_string(index) + ".scene.json");
                 if (!std::filesystem::exists(candidate, errorCode))
                 {
                     scenePath = candidate;
@@ -1532,6 +1754,74 @@ namespace Limitless
         }
 
         LT_INFO("Created scene asset {}", assetKey);
+        return assetKey;
+    }
+
+    std::string EditorLayer::CreateMaterialAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName)
+    {
+        const auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
+        if (rootResult.IsFailure())
+        {
+            LT_ERROR("Could not create material asset: {}", rootResult.GetError().GetErrorMessage());
+            return {};
+        }
+
+        const std::filesystem::path assetsDirectory = rootResult.GetValue() / "Assets";
+        const std::filesystem::path targetDirectory = assetsDirectory / relativeFolderPath;
+        std::error_code errorCode;
+        std::filesystem::create_directories(targetDirectory, errorCode);
+        if (errorCode)
+        {
+            LT_ERROR("Could not create material folder {}: {}", targetDirectory.string(), errorCode.message());
+            return {};
+        }
+
+        const std::string baseName = preferredFileName.empty() ? std::string("New Material") : preferredFileName;
+        std::string finalFileName = baseName;
+        if (!finalFileName.ends_with(".material.json"))
+            finalFileName += ".material.json";
+
+        std::filesystem::path materialPath = targetDirectory / finalFileName;
+        if (std::filesystem::exists(materialPath, errorCode))
+        {
+            for (int32_t index = 1; index < 1024; ++index)
+            {
+                const std::filesystem::path candidate = targetDirectory / ("New Material " + std::to_string(index) + ".material.json");
+                if (!std::filesystem::exists(candidate, errorCode))
+                {
+                    materialPath = candidate;
+                    break;
+                }
+            }
+        }
+
+        nlohmann::json materialJson = {
+            { "shader", { { "key", "Assets/Shaders/Renderer2D_TexturedQuad.glsl" } } }
+        };
+
+        {
+            std::ofstream output(materialPath, std::ios::out | std::ios::binary | std::ios::trunc);
+            if (!output.is_open())
+            {
+                LT_ERROR("Could not create material asset {}", materialPath.string());
+                return {};
+            }
+            output << materialJson.dump(2);
+        }
+
+        std::filesystem::path relativeAssetPath = std::filesystem::relative(materialPath, assetsDirectory, errorCode);
+        if (errorCode)
+        {
+            LT_ERROR("Could not compute material asset key for {}", materialPath.string());
+            return {};
+        }
+
+        const std::string assetKey = "Assets/" + relativeAssetPath.generic_string();
+        const auto importResult = Assets::AssetDatabase::GetInstance().ImportOrUpdate(assetKey, Assets::AssetType::Material);
+        if (importResult.IsFailure())
+            LT_WARN("Created material asset but failed to import into AssetDatabase ({}): {}", assetKey, importResult.GetError().GetErrorMessage());
+
+        LT_INFO("Created material asset {}", assetKey);
         return assetKey;
     }
 
@@ -1605,7 +1895,7 @@ namespace Limitless
         });
 
         if (success)
-            (void)Assets::AssetImportPipeline::ReimportChanged(true);
+            (void)Assets::AssetDatabase::GetInstance().ImportOrUpdate(prefabAssetKey, Assets::AssetType::Prefab);
         return success;
     }
 
@@ -1630,6 +1920,7 @@ namespace Limitless
             m_SelectedMaterialAssetKey.clear();
             m_CachedMaterialAsset.reset();
             m_SelectedNativeScriptAssetKey.clear();
+            m_SelectedPrefabAssetKey.clear();
         }
         return createdEntity;
     }
@@ -1658,6 +1949,7 @@ namespace Limitless
         m_SelectedMaterialAssetKey.clear();
         m_CachedMaterialAsset.reset();
         m_SelectedNativeScriptAssetKey.clear();
+        m_SelectedPrefabAssetKey.clear();
         return createdEntity;
     }
 
@@ -1666,9 +1958,13 @@ namespace Limitless
         if (!m_Scene || !m_Scene->IsValid(entity))
             return false;
 
+        std::string prefabAssetKey;
+        if (const auto* prefabInstance = m_Scene->GetRegistry().try_get<PrefabInstanceComponent>(entity))
+            prefabAssetKey = prefabInstance->PrefabAssetKey;
+
         const bool success = EditorPrefabSystem::ApplyPrefabFromInstance(*m_Scene, entity);
-        if (success)
-            (void)Assets::AssetImportPipeline::ReimportChanged(true);
+        if (success && !prefabAssetKey.empty())
+            (void)Assets::AssetDatabase::GetInstance().ImportOrUpdate(prefabAssetKey, Assets::AssetType::Prefab);
         return success;
     }
 

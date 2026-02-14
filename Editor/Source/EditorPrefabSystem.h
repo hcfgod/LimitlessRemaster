@@ -20,4 +20,8 @@ namespace Limitless::EditorPrefabSystem
 
     /// Removes prefab linkage from an instance root without changing child objects.
     bool UnpackPrefabInstance(Scene& scene, entt::entity instanceRootEntity);
+
+    /// Re-instantiates all prefab instances in the scene that reference the given prefab asset key.
+    /// This is the "Apply to Instances" behavior used by prefab editing workflows.
+    bool ApplyPrefabAssetToInstancesInScene(Scene& scene, const std::string& prefabAssetKey);
 }

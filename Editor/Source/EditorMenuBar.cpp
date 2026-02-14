@@ -26,7 +26,13 @@ namespace Limitless::EditorMenuBar
               const std::string& redoLabel,
               const std::function<void()>& onPlay,
               const std::function<void()>& onStop,
-              const std::function<void()>& onTogglePause)
+              const std::function<void()>& onTogglePause,
+              bool isEditingPrefabAsset,
+              const std::string& prefabAssetDisplayName,
+              bool canReturnFromPrefabMode,
+              const std::function<void()>& onReturnFromPrefabMode,
+              bool canApplyPrefabToInstances,
+              const std::function<void()>& onApplyPrefabToInstances)
     {
         if (!ImGui::BeginMainMenuBar())
             return;
@@ -153,6 +159,29 @@ namespace Limitless::EditorMenuBar
             ? ("Redo: " + trimLabel(redoLabel))
             : std::string("Redo: <none>");
         ImGui::TextDisabled("%s    %s", undoStatus.c_str(), redoStatus.c_str());
+
+        if (isEditingPrefabAsset)
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled("|");
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.40f, 0.73f, 1.0f, 1.0f), "Prefab Mode: %s", prefabAssetDisplayName.c_str());
+
+            ImGui::SameLine();
+            ImGui::TextDisabled("|");
+            ImGui::SameLine();
+
+            ImGui::BeginDisabled(!canReturnFromPrefabMode);
+            if (ImGui::Button("Back") && onReturnFromPrefabMode)
+                onReturnFromPrefabMode();
+            ImGui::EndDisabled();
+
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!canApplyPrefabToInstances);
+            if (ImGui::Button("Apply To Instances") && onApplyPrefabToInstances)
+                onApplyPrefabToInstances();
+            ImGui::EndDisabled();
+        }
 
         ImGui::EndMainMenuBar();
     }

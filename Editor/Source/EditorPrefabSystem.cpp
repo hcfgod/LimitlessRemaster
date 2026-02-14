@@ -13,6 +13,11 @@ namespace Limitless::EditorPrefabSystem
 {
     namespace
     {
+        bool IsNullEntity(entt::entity entity)
+        {
+            return entity == entt::null;
+        }
+
         bool CopyEntitySubtreeToScene(const Scene& sourceScene,
                                       Scene& destinationScene,
                                       entt::entity sourceRootEntity,
@@ -263,5 +268,99 @@ namespace Limitless::EditorPrefabSystem
         if (!scene.IsValid(instanceRootEntity))
             return false;
         return scene.GetRegistry().remove<PrefabInstanceComponent>(instanceRootEntity) > 0;
+    }
+
+    bool ApplyPrefabAssetToInstancesInScene(Scene& scene, const std::string& prefabAssetKey)
+    {
+        if (prefabAssetKey.empty())
+            return false;
+
+        const auto resolvedPrefabPath = Assets::ResolveAssetKeyToPath(prefabAssetKey);
+        if (resolvedPrefabPath.IsFailure())
+            return false;
+        const auto loadedPrefabSceneResult = Scene::LoadFromFile(resolvedPrefabPath.GetValue());
+        if (loadedPrefabSceneResult.IsFailure())
+        {
+            LT_WARN("Prefab load failed for '{}': {}", prefabAssetKey, loadedPrefabSceneResult.GetError().GetErrorMessage());
+            return false;
+        }
+        auto& loadedPrefabScene = *loadedPrefabSceneResult.GetValue();
+        const auto prefabRoots = loadedPrefabScene.GetChildren(entt::null);
+        if (prefabRoots.empty())
+            return false;
+        const entt::entity prefabSourceRoot = prefabRoots.front();
+
+        auto& registry = scene.GetRegistry();
+        std::vector<entt::entity> instanceRoots;
+        auto view = registry.view<PrefabInstanceComponent>();
+        for (entt::entity entity : view)
+        {
+            const auto& prefabInstance = view.get<PrefabInstanceComponent>(entity);
+            if (prefabInstance.PrefabAssetKey == prefabAssetKey)
+                instanceRoots.push_back(entity);
+        }
+
+        if (instanceRoots.empty())
+            return true;
+
+        struct StoredRootState
+        {
+            entt::entity Parent = entt::null;
+            int32_t SiblingOrder = 0;
+            TransformComponent Transform{};
+            std::string Tag;
+        };
+
+        std::unordered_map<entt::entity, StoredRootState> stored;
+        stored.reserve(instanceRoots.size());
+
+        for (entt::entity root : instanceRoots)
+        {
+            if (!scene.IsValid(root))
+                continue;
+            StoredRootState state{};
+            state.Parent = scene.GetParent(root);
+            if (const auto* hierarchy = registry.try_get<HierarchyComponent>(root))
+                state.SiblingOrder = hierarchy->SiblingOrder;
+            if (const auto* transform = registry.try_get<TransformComponent>(root))
+                state.Transform = *transform;
+            if (const auto* tag = registry.try_get<TagComponent>(root))
+                state.Tag = tag->Tag;
+            stored.emplace(root, std::move(state));
+        }
+
+        // Destroy old instances (roots destroy their children).
+        for (entt::entity root : instanceRoots)
+        {
+            if (scene.IsValid(root))
+                scene.DestroyEntity(root);
+        }
+
+        bool anyApplied = false;
+        for (const auto& [oldRoot, state] : stored)
+        {
+            entt::entity newRoot = entt::null;
+            if (!CopyEntitySubtreeToScene(loadedPrefabScene, scene, prefabSourceRoot, state.Parent, prefabAssetKey, &newRoot))
+                continue;
+            if (IsNullEntity(newRoot) || !scene.IsValid(newRoot))
+                continue;
+
+            auto& newRegistry = scene.GetRegistry();
+            if (auto* newTransform = newRegistry.try_get<TransformComponent>(newRoot))
+                *newTransform = state.Transform;
+
+            if (!state.Tag.empty())
+            {
+                if (auto* newTag = newRegistry.try_get<TagComponent>(newRoot))
+                    newTag->Tag = state.Tag;
+            }
+
+            if (auto* newHierarchy = newRegistry.try_get<HierarchyComponent>(newRoot))
+                newHierarchy->SiblingOrder = state.SiblingOrder;
+
+            anyApplied = true;
+        }
+
+        return anyApplied;
     }
 }

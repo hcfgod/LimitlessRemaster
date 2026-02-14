@@ -1211,6 +1211,7 @@ namespace Limitless::EditorInspectorPanel
               std::string& selectedMaterialAssetKey,
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
               std::string& selectedNativeScriptAssetKey,
+              std::string& selectedPrefabAssetKey,
               EditorUndoService* undoService)
     {
         auto& nativeScriptAuthoringState = GetNativeScriptAuthoringState();
@@ -1256,6 +1257,10 @@ namespace Limitless::EditorInspectorPanel
         else if (!selectedNativeScriptAssetKey.empty())
         {
             DrawNativeScriptAssetInspector(selectedNativeScriptAssetKey);
+        }
+        else if (!selectedPrefabAssetKey.empty())
+        {
+            DrawPrefabAssetInspector(selectedPrefabAssetKey);
         }
         else if (!scene || selectedEntity == entt::null || !scene->IsValid(selectedEntity))
         {
@@ -1658,11 +1663,15 @@ namespace Limitless::EditorInspectorPanel
                 {
                     if (undoService)
                         (void)undoService->ExecuteSceneMutation("Add Text Component", [&](Scene& mutableScene) {
-                            mutableScene.GetRegistry().emplace<TextComponent>(selectedEntity);
+                            auto& text = mutableScene.GetRegistry().emplace<TextComponent>(selectedEntity);
+                            text.FontFilePath = "Assets/Fonts/Default.ttf";
                             return true;
                         });
                     else
-                        registry.emplace<TextComponent>(selectedEntity);
+                    {
+                        auto& text = registry.emplace<TextComponent>(selectedEntity);
+                        text.FontFilePath = "Assets/Fonts/Default.ttf";
+                    }
                 }
 
                 if (hasTextComponent)

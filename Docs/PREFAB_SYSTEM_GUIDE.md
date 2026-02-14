@@ -11,7 +11,12 @@ A prefab is an asset file with the `.prefab.json` suffix (for example `Assets/Pr
 - In the **Scene** panel, right-click an entity and choose `Create Prefab`.
   - The editor writes a prefab asset under `Assets/Prefabs/`.
   - The entity is marked as a prefab instance root.
-- In the **Project** panel, double-click a prefab file to instantiate it into the active scene.
+- In the **Project** panel, single-click a prefab file to preview it in **Inspector**.
+- In the **Project** panel, double-click a prefab file to open it in the editor.
+  - When a prefab is open, the editor enters **Prefab Mode** (see the menu bar header).
+  - Use `Back` to return to the previous scene.
+  - Use `Apply To Instances` to save the prefab and update all instances in the previous scene.
+- Use context menu `Instantiate Prefab` (or drag/drop) to spawn an instance into the active scene.
 - Drag-and-drop a prefab from **Project** to **Scene** hierarchy:
   - Drop on a specific entity to instantiate as its child.
   - Drop on scene root/empty root zone to instantiate at the root level.
@@ -27,7 +32,8 @@ A prefab is an asset file with the `.prefab.json` suffix (for example `Assets/Pr
   - Instantiate Prefab
   - Revert Prefab
   - Unpack Prefab
-- File-only operations (`Apply Prefab` writing the prefab asset) are intentionally not part of scene undo.
+- `Apply To Instances` is treated as a scene mutation in the destination scene (it can be undone/redone).
+- File-only operations (`Apply Prefab` writing the prefab asset from an instance) are intentionally not part of scene undo.
 
 ## Current V1 Scope
 

@@ -31,6 +31,7 @@ namespace Limitless
                   std::string& selectedMaterialAssetKey,
                   Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                   std::string& selectedNativeScriptAssetKey,
+                  std::string& selectedPrefabAssetKey,
                   const char* materialPayloadId,
                   const char* prefabPayloadId,
                   const std::string& sceneRootDisplayName,
