@@ -17,6 +17,11 @@ namespace Limitless::EditorScenePanel
         constexpr ImU32 kDropIndicatorTintColor = IM_COL32(80, 160, 255, 48);
         constexpr float kDropIndicatorThickness = 3.0f;
         constexpr float kDropIndicatorCapHeight = 8.0f;
+        constexpr ImU32 kPrefabHighlightTextColor = IM_COL32(80, 170, 255, 255);
+        constexpr ImU32 kPrefabBadgeFillColor = IM_COL32(58, 125, 198, 255);
+        constexpr ImU32 kPrefabBadgeBorderColor = IM_COL32(120, 190, 255, 255);
+        constexpr ImU32 kPrefabBadgeTextColor = IM_COL32(235, 245, 255, 255);
+        constexpr float kPrefabBadgeSize = 12.0f;
 
         void CopyTextToBuffer(std::array<char, 256>& destination, const char* source)
         {
@@ -53,6 +58,42 @@ namespace Limitless::EditorScenePanel
             drawList->AddRectFilled(min, max, kDropIndicatorTintColor);
         }
 
+        bool IsEntityInPrefabInstanceSubtree(const Scene& scene, entt::entity entity)
+        {
+            if (!scene.IsValid(entity))
+                return false;
+
+            const auto& registry = scene.GetRegistry();
+            entt::entity cursor = entity;
+            while (cursor != entt::null && scene.IsValid(cursor))
+            {
+                const auto* prefabInstance = registry.try_get<PrefabInstanceComponent>(cursor);
+                if (prefabInstance && !prefabInstance->PrefabAssetKey.empty())
+                    return true;
+                cursor = scene.GetParent(cursor);
+            }
+            return false;
+        }
+
+        void DrawPrefabBadgeForLastItem()
+        {
+            const ImVec2 itemMax = ImGui::GetItemRectMax();
+            const ImVec2 itemMin = ImGui::GetItemRectMin();
+            const float badgeHalf = kPrefabBadgeSize * 0.5f;
+            const ImVec2 badgeCenter(itemMax.x - (kPrefabBadgeSize + 6.0f), itemMin.y + (itemMax.y - itemMin.y) * 0.5f);
+            const ImVec2 badgeMin(badgeCenter.x - badgeHalf, badgeCenter.y - badgeHalf);
+            const ImVec2 badgeMax(badgeCenter.x + badgeHalf, badgeCenter.y + badgeHalf);
+
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            drawList->AddRectFilled(badgeMin, badgeMax, kPrefabBadgeFillColor, 2.0f);
+            drawList->AddRect(badgeMin, badgeMax, kPrefabBadgeBorderColor, 2.0f, 0, 1.0f);
+
+            const char* glyph = "P";
+            const ImVec2 textSize = ImGui::CalcTextSize(glyph);
+            const ImVec2 textPos(badgeCenter.x - textSize.x * 0.5f, badgeCenter.y - textSize.y * 0.5f - 1.0f);
+            drawList->AddText(textPos, kPrefabBadgeTextColor, glyph);
+        }
+
         bool DrawEntityNode(Scene* scene,
                             entt::entity entity,
                             EditorScenePanelState& state,
@@ -77,6 +118,10 @@ namespace Limitless::EditorScenePanel
             auto& registry = scene->GetRegistry();
             const auto* tag = registry.try_get<TagComponent>(entity);
             const std::string label = (tag && !tag->Tag.empty()) ? tag->Tag : "Entity";
+            const auto* prefabInstanceForNode = registry.try_get<PrefabInstanceComponent>(entity);
+            const bool isPrefabInstanceRoot = prefabInstanceForNode && !prefabInstanceForNode->PrefabAssetKey.empty();
+            const bool isPrefabLinkedEntity = IsEntityInPrefabInstanceSubtree(*scene, entity);
+            const std::string nodeLabel = isPrefabInstanceRoot ? (label + " [Prefab]") : label;
 
             const auto children = scene->GetChildren(entity);
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
@@ -85,7 +130,13 @@ namespace Limitless::EditorScenePanel
             if (selectedEntity == entity)
                 flags |= ImGuiTreeNodeFlags_Selected;
 
-            const bool opened = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<uintptr_t>(static_cast<uint32_t>(entity))), flags, "%s", label.c_str());
+            if (isPrefabLinkedEntity)
+                ImGui::PushStyleColor(ImGuiCol_Text, kPrefabHighlightTextColor);
+            const bool opened = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<uintptr_t>(static_cast<uint32_t>(entity))), flags, "%s", nodeLabel.c_str());
+            if (isPrefabLinkedEntity)
+                ImGui::PopStyleColor();
+            if (isPrefabLinkedEntity)
+                DrawPrefabBadgeForLastItem();
 
             if (ImGui::IsItemClicked())
             {

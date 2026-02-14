@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <glm/glm.hpp>
 #include <memory>
 #include <string>
 
@@ -34,7 +35,7 @@ namespace Limitless::EditorViewportPanel
               const char* scenePayloadId,
               const std::function<void(const std::string&)>& onSceneDropped,
               const char* prefabPayloadId,
-              const std::function<void(const std::string&)>& onPrefabDropped,
+              const std::function<void(const std::string&, const glm::vec3&)>& onPrefabDropped,
               entt::entity& selectedEntity,
               const char* materialPayloadId,
               std::string& selectedTextureAssetKey,

@@ -15,6 +15,7 @@
 
 #include <array>
 #include <filesystem>
+#include <glm/glm.hpp>
 #include <memory>
 #include <string>
 
@@ -76,6 +77,7 @@ namespace Limitless
         bool CreatePrefabFromEntity(entt::entity entity);
         bool CreatePrefabFromEntityInFolder(entt::entity entity, const std::filesystem::path& relativeFolderPath);
         entt::entity InstantiatePrefabAtParent(const std::string& prefabAssetKey, entt::entity parentEntity);
+        entt::entity InstantiatePrefabAtWorldPosition(const std::string& prefabAssetKey, const glm::vec3& worldPosition);
         bool ApplyPrefabFromEntity(entt::entity entity);
         entt::entity RevertPrefabEntity(entt::entity entity);
         bool UnpackPrefabEntity(entt::entity entity);
@@ -120,6 +122,7 @@ namespace Limitless
         std::string m_SelectedNativeScriptAssetKey;
 
         std::string m_CurrentSceneAssetKey;
+        std::string m_EditSceneStoredAssetKey;
         EditorUndoService m_EditorUndoService;
         bool m_RequestOpenSceneSwitchConfirmationPopup = false;
         bool m_SceneSwitchConfirmationPopupOpen = false;

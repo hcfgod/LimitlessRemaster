@@ -715,7 +715,9 @@ namespace Limitless
             kAssetScenePayload,
             [this](const std::string& assetKey) { LoadSceneFromAssetKey(assetKey); },
             kAssetPrefabPayload,
-            [this](const std::string& prefabAssetKey) { (void)InstantiatePrefabAtParent(prefabAssetKey, entt::null); },
+            [this](const std::string& prefabAssetKey, const glm::vec3& worldPosition) {
+                (void)InstantiatePrefabAtWorldPosition(prefabAssetKey, worldPosition);
+            },
             m_SelectedEntity,
             kAssetMaterialPayload,
             m_SelectedTextureAssetKey,
@@ -958,6 +960,7 @@ namespace Limitless
     {
         StopAudioSourcesInScene(m_Scene.get());
         StopAudioSourcesInScene(m_EditSceneStored.get());
+        m_EditSceneStoredAssetKey = m_CurrentSceneAssetKey;
 
         EditorPlayMode::Enter(
             m_PlayModeState,
@@ -992,6 +995,10 @@ namespace Limitless
             m_SelectedEntity,
             m_SelectedTextureAssetKey,
             m_CachedTextureAsset);
+
+        // Restore the edit scene identity after Play Mode runtime scene changes.
+        m_CurrentSceneAssetKey = m_EditSceneStoredAssetKey;
+        m_EditSceneStoredAssetKey.clear();
     }
 
     void EditorLayer::TogglePausePlayMode()
@@ -1262,7 +1269,10 @@ namespace Limitless
             return;
 
         EditorSessionStateData state{};
-        state.LastOpenedSceneAssetKey = m_CurrentSceneAssetKey;
+        if (m_PlayModeState != EditorPlayModeState::Edit)
+            state.LastOpenedSceneAssetKey = m_EditSceneStoredAssetKey;
+        else
+            state.LastOpenedSceneAssetKey = m_CurrentSceneAssetKey;
         EditorInspectorPanel::GetNativeScriptEditorSessionState(state.NativeScriptEditorState);
         WriteProjectSessionState(projectManager.GetProjectRoot(), state);
     }
@@ -1378,6 +1388,17 @@ namespace Limitless
                 {
                     LT_WARN("Scene transition request '{}' could not be resolved to a scene asset key.",
                         pendingTransition->SceneIdentifier);
+                    break;
+                }
+
+                // Guard against accidental self-load loops in Play Mode.
+                // Example: script OnCreate calls LoadScene(currentScene) each time scene starts.
+                if (m_PlayModeState != EditorPlayModeState::Edit &&
+                    !m_CurrentSceneAssetKey.empty() &&
+                    *resolvedSceneAssetKey == m_CurrentSceneAssetKey)
+                {
+                    LT_WARN("Ignored SceneManager::LoadScene('{}') in Play Mode because it matches the active scene. Use ReloadCurrentScene() for intentional restart.",
+                        *resolvedSceneAssetKey);
                     break;
                 }
 
@@ -1610,6 +1631,33 @@ namespace Limitless
             m_CachedMaterialAsset.reset();
             m_SelectedNativeScriptAssetKey.clear();
         }
+        return createdEntity;
+    }
+
+    entt::entity EditorLayer::InstantiatePrefabAtWorldPosition(const std::string& prefabAssetKey, const glm::vec3& worldPosition)
+    {
+        if (!m_Scene || prefabAssetKey.empty())
+            return entt::null;
+
+        entt::entity createdEntity = entt::null;
+        const bool success = m_EditorUndoService.ExecuteSceneMutation("Instantiate Prefab", [&](Scene& mutableScene) {
+            createdEntity = EditorPrefabSystem::InstantiatePrefab(mutableScene, prefabAssetKey, entt::null);
+            if (createdEntity == entt::null || !mutableScene.IsValid(createdEntity))
+                return false;
+
+            if (auto* transform = mutableScene.GetRegistry().try_get<TransformComponent>(createdEntity))
+                transform->Position = worldPosition;
+            return true;
+        });
+        if (!success)
+            return entt::null;
+
+        m_SelectedEntity = createdEntity;
+        m_SelectedTextureAssetKey.clear();
+        m_CachedTextureAsset.reset();
+        m_SelectedMaterialAssetKey.clear();
+        m_CachedMaterialAsset.reset();
+        m_SelectedNativeScriptAssetKey.clear();
         return createdEntity;
     }
 

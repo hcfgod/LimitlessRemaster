@@ -3,6 +3,8 @@
 #include "Assets/AssetLoadProgress.h"
 #include "Editor/EditorCameraController.h"
 #include "Graphics/Camera/Camera.h"
+#include "Graphics/Camera/OrthographicCamera2D.h"
+#include "Graphics/Camera/PerspectiveCamera3D.h"
 #include "Graphics/Framebuffer.h"
 #include "Graphics/Renderer2D.h"
 #include "Scene/Scene.h"
@@ -47,6 +49,58 @@ namespace Limitless::EditorViewportPanel
         {
             // Quad is convex; treat as two triangles (0,1,2) and (2,3,0).
             return PointInTriangle(point, quad[0], quad[1], quad[2]) || PointInTriangle(point, quad[2], quad[3], quad[0]);
+        }
+
+        bool TryComputeDropWorldPosition(const Camera& camera,
+                                         const ImVec2& viewportMin,
+                                         const ImVec2& viewportMax,
+                                         const ImVec2& mouseScreenPosition,
+                                         glm::vec3& outWorldPosition)
+        {
+            const float viewportWidth = viewportMax.x - viewportMin.x;
+            const float viewportHeight = viewportMax.y - viewportMin.y;
+            if (viewportWidth <= 0.0f || viewportHeight <= 0.0f)
+                return false;
+
+            const float normalizedX = (mouseScreenPosition.x - viewportMin.x) / viewportWidth;
+            const float normalizedY = (mouseScreenPosition.y - viewportMin.y) / viewportHeight;
+            const float ndcX = normalizedX * 2.0f - 1.0f;
+            const float ndcY = 1.0f - normalizedY * 2.0f;
+
+            const glm::mat4 inverseViewProjection = glm::inverse(camera.GetViewProjectionMatrix());
+            if (camera.GetType() == CameraType::Orthographic2D)
+            {
+                const glm::vec4 world = inverseViewProjection * glm::vec4(ndcX, ndcY, 0.0f, 1.0f);
+                if (world.w == 0.0f)
+                    return false;
+                outWorldPosition = glm::vec3(world) / world.w;
+                outWorldPosition.z = 0.0f;
+                return true;
+            }
+
+            const glm::vec4 nearWorldH = inverseViewProjection * glm::vec4(ndcX, ndcY, -1.0f, 1.0f);
+            const glm::vec4 farWorldH = inverseViewProjection * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
+            if (nearWorldH.w == 0.0f || farWorldH.w == 0.0f)
+                return false;
+
+            const glm::vec3 nearWorld = glm::vec3(nearWorldH) / nearWorldH.w;
+            const glm::vec3 farWorld = glm::vec3(farWorldH) / farWorldH.w;
+            const glm::vec3 direction = glm::normalize(farWorld - nearWorld);
+
+            // Place prefab where the ray intersects the world Z=0 plane.
+            constexpr float kTargetPlaneZ = 0.0f;
+            if (std::abs(direction.z) > 0.0001f)
+            {
+                const float distance = (kTargetPlaneZ - nearWorld.z) / direction.z;
+                outWorldPosition = nearWorld + direction * distance;
+            }
+            else
+            {
+                outWorldPosition = nearWorld + direction * 5.0f;
+                outWorldPosition.z = kTargetPlaneZ;
+            }
+
+            return true;
         }
 
         std::optional<entt::entity> PickTopmostSpriteEntityAtPoint(Scene& scene,
@@ -129,7 +183,7 @@ namespace Limitless::EditorViewportPanel
               const char* scenePayloadId,
               const std::function<void(const std::string&)>& onSceneDropped,
               const char* prefabPayloadId,
-              const std::function<void(const std::string&)>& onPrefabDropped,
+              const std::function<void(const std::string&, const glm::vec3&)>& onPrefabDropped,
               entt::entity& selectedEntity,
               const char* materialPayloadId,
               std::string& selectedTextureAssetKey,
@@ -189,7 +243,18 @@ namespace Limitless::EditorViewportPanel
                         {
                             const char* key = static_cast<const char*>(payload->Data);
                             if (key && key[0] && onPrefabDropped)
-                                onPrefabDropped(key);
+                            {
+                                glm::vec3 worldPosition(0.0f);
+                                if (camera)
+                                {
+                                    const ImVec2 viewportMin = ImGui::GetItemRectMin();
+                                    const ImVec2 viewportMax = ImGui::GetItemRectMax();
+                                    const ImVec2 mousePos = ImGui::GetMousePos();
+                                    if (!TryComputeDropWorldPosition(*camera, viewportMin, viewportMax, mousePos, worldPosition))
+                                        worldPosition = glm::vec3(0.0f);
+                                }
+                                onPrefabDropped(key, worldPosition);
+                            }
                         }
                     }
                     else if (materialPayloadId)
