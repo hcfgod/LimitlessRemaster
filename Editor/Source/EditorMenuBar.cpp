@@ -18,12 +18,25 @@ namespace Limitless::EditorMenuBar
               const std::function<void()>& onNewScene,
               const std::function<void()>& onSaveScene,
               const std::function<void()>& onSaveSceneAs,
+              const std::function<void()>& onUndo,
+              const std::function<void()>& onRedo,
+              bool canUndo,
+              bool canRedo,
+              const std::string& undoLabel,
+              const std::string& redoLabel,
               const std::function<void()>& onPlay,
               const std::function<void()>& onStop,
               const std::function<void()>& onTogglePause)
     {
         if (!ImGui::BeginMainMenuBar())
             return;
+
+        auto trimLabel = [](const std::string& label) {
+            constexpr size_t kMaxLabelLength = 40;
+            if (label.size() <= kMaxLabelLength)
+                return label;
+            return label.substr(0, kMaxLabelLength - 3) + "...";
+        };
 
         if (ImGui::BeginMenu("File"))
         {
@@ -48,8 +61,13 @@ namespace Limitless::EditorMenuBar
 
         if (ImGui::BeginMenu("Edit"))
         {
-            if (ImGui::MenuItem("Undo")) {}
-            if (ImGui::MenuItem("Redo")) {}
+            const std::string undoMenuText = undoLabel.empty() ? "Undo" : ("Undo " + undoLabel);
+            const std::string redoMenuText = redoLabel.empty() ? "Redo" : ("Redo " + redoLabel);
+
+            if (ImGui::MenuItem(undoMenuText.c_str(), "Ctrl+Z", false, canUndo))
+                onUndo();
+            if (ImGui::MenuItem(redoMenuText.c_str(), "Ctrl+Y", false, canRedo))
+                onRedo();
             ImGui::Separator();
             if (ImGui::MenuItem("Preferences")) {}
             ImGui::EndMenu();
@@ -123,6 +141,18 @@ namespace Limitless::EditorMenuBar
                 onTogglePause();
         }
         ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+
+        const std::string undoStatus = canUndo
+            ? ("Undo: " + trimLabel(undoLabel))
+            : std::string("Undo: <none>");
+        const std::string redoStatus = canRedo
+            ? ("Redo: " + trimLabel(redoLabel))
+            : std::string("Redo: <none>");
+        ImGui::TextDisabled("%s    %s", undoStatus.c_str(), redoStatus.c_str());
 
         ImGui::EndMainMenuBar();
     }

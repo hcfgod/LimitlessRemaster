@@ -20,12 +20,15 @@ project "Test"
     files
     {
         "Source/**.h",
-        "Source/**.cpp"
+        "Source/**.cpp",
+        "../Editor/Source/Undo/**.h",
+        "../Editor/Source/Undo/**.cpp"
     }
 
     includedirs
     {
         "../Limitless/Source",
+        "../Editor/Source",
         "../Limitless/Vendor/",
         "../Limitless/Vendor/spdlog",
         "../Limitless/Vendor/doctest",

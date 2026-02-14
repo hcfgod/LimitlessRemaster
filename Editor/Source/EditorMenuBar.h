@@ -3,6 +3,7 @@
 #include "EditorPlayMode.h"
 
 #include <functional>
+#include <string>
 
 namespace Limitless::EditorMenuBar
 {
@@ -19,6 +20,12 @@ namespace Limitless::EditorMenuBar
               const std::function<void()>& onNewScene,
               const std::function<void()>& onSaveScene,
               const std::function<void()>& onSaveSceneAs,
+              const std::function<void()>& onUndo,
+              const std::function<void()>& onRedo,
+              bool canUndo,
+              bool canRedo,
+              const std::string& undoLabel,
+              const std::string& redoLabel,
               const std::function<void()>& onPlay,
               const std::function<void()>& onStop,
               const std::function<void()>& onTogglePause);

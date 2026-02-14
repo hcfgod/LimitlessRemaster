@@ -4,6 +4,11 @@
 #include "Limitless.h"
 #include "Scene/Scene.h"
 
+namespace Limitless
+{
+    class EditorUndoService;
+}
+
 namespace Limitless::EditorInspectorPanel
 {
     struct PendingEntityComponentRemovals
@@ -20,5 +25,6 @@ namespace Limitless::EditorInspectorPanel
                                              const char* audioPayloadId,
                                              const char* materialPayloadId,
                                              const char* fontPayloadId,
-                                             PendingEntityComponentRemovals& pendingRemovals);
+                                             PendingEntityComponentRemovals& pendingRemovals,
+                                             Limitless::EditorUndoService* undoService);
 }

@@ -416,6 +416,15 @@ namespace Limitless
     void EditorLayer::OnAttach()
     {
         SceneManager::ClearPendingSceneTransition();
+        m_EditorUndoService.Initialize(
+            [this]() { return m_Scene.get(); },
+            [this](std::unique_ptr<Scene> scene) { m_Scene = std::move(scene); },
+            [this](std::unique_ptr<Scene>& snapshot) {
+                if (!snapshot)
+                    return false;
+                m_Scene.swap(snapshot);
+                return (m_Scene != nullptr);
+            });
 
         // Unity-style startup:
         // Always begin in the Project Browser and require explicit Open/Create.
@@ -450,6 +459,7 @@ namespace Limitless
     void EditorLayer::OnDetach()
     {
         SceneManager::ClearPendingSceneTransition();
+        m_EditorUndoService.Clear();
         PersistProjectSessionState();
         ScriptCoreModuleRuntime::Shutdown();
         Application::GetInstance().GetWindow().SetFileDropCallback({});
@@ -490,6 +500,17 @@ namespace Limitless
         const bool saveModifierDown = io.KeyCtrl || io.KeySuper;
         if (saveModifierDown && !io.WantTextInput)
         {
+            const bool undoPressed = ImGui::IsKeyPressed(ImGuiKey_Z, false);
+            const bool redoPressed = ImGui::IsKeyPressed(ImGuiKey_Y, false) || (io.KeyShift && undoPressed);
+            if (redoPressed)
+            {
+                (void)m_EditorUndoService.Redo();
+            }
+            else if (undoPressed && !io.KeyShift)
+            {
+                (void)m_EditorUndoService.Undo();
+            }
+
             if (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_S, false))
                 SaveSceneAs();
             else if (!io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_S, false))
@@ -555,6 +576,8 @@ namespace Limitless
             if (!lastOpenedSceneAssetKey.empty())
             {
                 loadedScene = LoadSceneFromAssetKey(lastOpenedSceneAssetKey);
+                if (!loadedScene && (m_RequestOpenSceneSwitchConfirmationPopup || m_SceneSwitchConfirmationPopupOpen))
+                    loadedScene = true;
             }
 
             if (!loadedScene)
@@ -562,6 +585,8 @@ namespace Limitless
                 if (const auto definition = pm.GetProjectDefinition(); definition.has_value() && !definition->DefaultScene.Key.empty())
                 {
                     loadedScene = LoadSceneFromAssetKey(definition->DefaultScene.Key);
+                    if (!loadedScene && (m_RequestOpenSceneSwitchConfirmationPopup || m_SceneSwitchConfirmationPopupOpen))
+                        loadedScene = true;
                 }
             }
 
@@ -585,6 +610,7 @@ namespace Limitless
         DrawInspectorPanel();
         DrawProjectPanel();
         DrawSaveScenePopup();
+        DrawSceneSwitchConfirmationPopup();
 
         if (m_ShowDemoWindow)
             ImGui::ShowDemoWindow(&m_ShowDemoWindow);
@@ -659,6 +685,12 @@ namespace Limitless
             [this]() { NewScene(); },
             [this]() { SaveScene(); },
             [this]() { SaveSceneAs(); },
+            [this]() { (void)m_EditorUndoService.Undo(); },
+            [this]() { (void)m_EditorUndoService.Redo(); },
+            m_EditorUndoService.CanUndo(),
+            m_EditorUndoService.CanRedo(),
+            m_EditorUndoService.GetUndoLabel(),
+            m_EditorUndoService.GetRedoLabel(),
             [this]() { EnterPlayMode(); },
             [this]() { ExitPlayMode(); },
             [this]() { TogglePausePlayMode(); });
@@ -708,7 +740,8 @@ namespace Limitless
             m_CachedMaterialAsset,
             m_SelectedNativeScriptAssetKey,
             kAssetMaterialPayload,
-            sceneRootDisplayName);
+            sceneRootDisplayName,
+            &m_EditorUndoService);
     }
 
     void EditorLayer::DrawInspectorPanel()
@@ -725,7 +758,8 @@ namespace Limitless
             kAssetFontPayload,
             m_SelectedMaterialAssetKey,
             m_CachedMaterialAsset,
-            m_SelectedNativeScriptAssetKey);
+            m_SelectedNativeScriptAssetKey,
+            &m_EditorUndoService);
     }
 
     void EditorLayer::DrawProjectPanel()
@@ -950,9 +984,21 @@ namespace Limitless
 
     void EditorLayer::NewScene()
     {
+        NewScene(false);
+    }
+
+    void EditorLayer::NewScene(bool forceWithoutConfirmation)
+    {
+        if (!forceWithoutConfirmation)
+        {
+            if (!EnsureSceneSwitchAllowed([this]() { NewScene(true); }))
+                return;
+        }
+
         if (m_PlayModeState != EditorPlayModeState::Edit)
             ExitPlayMode();
 
+        BeginSceneSwitch();
         StopAudioSourcesInScene(m_Scene.get());
 
         m_Scene = std::make_unique<Scene>();
@@ -962,6 +1008,7 @@ namespace Limitless
         m_SelectedNativeScriptAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey.clear();
+        m_EditorUndoService.MarkSaved();
     }
 
     void EditorLayer::SaveScene()
@@ -1113,6 +1160,83 @@ namespace Limitless
         ImGui::EndPopup();
     }
 
+    void EditorLayer::DrawSceneSwitchConfirmationPopup()
+    {
+        if (m_RequestOpenSceneSwitchConfirmationPopup)
+        {
+            ImGui::OpenPopup("Unsaved Changes");
+            m_RequestOpenSceneSwitchConfirmationPopup = false;
+            m_SceneSwitchConfirmationPopupOpen = true;
+        }
+
+        if (!m_SceneSwitchConfirmationPopupOpen)
+            return;
+
+        if (!ImGui::BeginPopupModal("Unsaved Changes", &m_SceneSwitchConfirmationPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+            return;
+
+        ImGui::TextWrapped("You have undo history for the current scene. Switching scenes will clear undo/redo history.");
+        ImGui::Spacing();
+        ImGui::TextWrapped("Do you want to save before switching?");
+
+        if (ImGui::Button("Save", ImVec2(120.0f, 0.0f)))
+        {
+            bool saved = false;
+            if (!m_CurrentSceneAssetKey.empty())
+                saved = SaveSceneToAssetKey(m_CurrentSceneAssetKey);
+            else
+                SaveSceneAs();
+
+            if (saved && m_PendingSceneSwitchAction)
+            {
+                auto action = std::move(m_PendingSceneSwitchAction);
+                m_PendingSceneSwitchAction = nullptr;
+                action();
+            }
+            m_SceneSwitchConfirmationPopupOpen = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Discard", ImVec2(120.0f, 0.0f)))
+        {
+            if (m_PendingSceneSwitchAction)
+            {
+                auto action = std::move(m_PendingSceneSwitchAction);
+                m_PendingSceneSwitchAction = nullptr;
+                action();
+            }
+            m_SceneSwitchConfirmationPopupOpen = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
+        {
+            m_PendingSceneSwitchAction = nullptr;
+            m_SceneSwitchConfirmationPopupOpen = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+
+    bool EditorLayer::EnsureSceneSwitchAllowed(const std::function<void()>& deferredSwitchAction)
+    {
+        if (m_PlayModeState != EditorPlayModeState::Edit)
+            return true;
+        if (!m_EditorUndoService.IsDirty() && !m_EditorUndoService.CanUndo())
+            return true;
+
+        m_PendingSceneSwitchAction = deferredSwitchAction;
+        m_RequestOpenSceneSwitchConfirmationPopup = true;
+        return false;
+    }
+
+    void EditorLayer::BeginSceneSwitch()
+    {
+        m_EditorUndoService.Clear();
+        m_EditorUndoService.MarkSaved();
+    }
+
 
     void EditorLayer::PersistProjectSessionState()
     {
@@ -1128,12 +1252,24 @@ namespace Limitless
 
     bool EditorLayer::LoadSceneFromAssetKey(const std::string& assetKey)
     {
+        return LoadSceneFromAssetKey(assetKey, false);
+    }
+
+    bool EditorLayer::LoadSceneFromAssetKey(const std::string& assetKey, bool forceWithoutConfirmation)
+    {
         if (assetKey.empty())
             return false;
+
+        if (!forceWithoutConfirmation)
+        {
+            if (!EnsureSceneSwitchAllowed([this, assetKey]() { (void)LoadSceneFromAssetKey(assetKey, true); }))
+                return false;
+        }
 
         if (m_PlayModeState != EditorPlayModeState::Edit)
             ExitPlayMode();
 
+        BeginSceneSwitch();
         StopAudioSourcesInScene(m_Scene.get());
         StopAudioSourcesInScene(m_EditSceneStored.get());
 
@@ -1173,6 +1309,7 @@ namespace Limitless
         }
 
         LT_INFO("Loaded scene {}", assetKey);
+        m_EditorUndoService.MarkSaved();
         return true;
     }
 
@@ -1205,6 +1342,7 @@ namespace Limitless
         m_CurrentSceneAssetKey = assetKey;
 
         LT_INFO("Loaded scene during Play Mode {}", assetKey);
+        m_EditorUndoService.Clear();
         return true;
     }
 
@@ -1289,6 +1427,7 @@ namespace Limitless
         }
 
         LT_INFO("Saved scene {}", assetKey);
+        m_EditorUndoService.MarkSaved();
         return true;
     }
 

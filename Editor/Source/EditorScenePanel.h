@@ -10,6 +10,7 @@
 namespace Limitless
 {
     class Scene;
+    class EditorUndoService;
 
     struct EditorScenePanelState
     {
@@ -30,6 +31,7 @@ namespace Limitless
                   Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                   std::string& selectedNativeScriptAssetKey,
                   const char* materialPayloadId,
-                  const std::string& sceneRootDisplayName);
+                  const std::string& sceneRootDisplayName,
+                  EditorUndoService* undoService);
     }
 }

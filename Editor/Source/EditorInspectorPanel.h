@@ -9,6 +9,7 @@
 namespace Limitless
 {
     class Scene;
+    class EditorUndoService;
 
     namespace EditorInspectorPanel
     {
@@ -36,6 +37,7 @@ namespace Limitless
                   const char* fontPayloadId,
                   std::string& selectedMaterialAssetKey,
                   Assets::MaterialAsset::Ptr& cachedMaterialAsset,
-                  std::string& selectedNativeScriptAssetKey);
+                  std::string& selectedNativeScriptAssetKey,
+                  EditorUndoService* undoService);
     }
 }

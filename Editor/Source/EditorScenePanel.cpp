@@ -1,6 +1,7 @@
 #include "EditorScenePanel.h"
 
 #include "Scene/Scene.h"
+#include "Undo/EditorUndoService.h"
 #include "imgui/imgui.h"
 
 #include <cstdio>
@@ -61,7 +62,8 @@ namespace Limitless::EditorScenePanel
                             std::string& selectedMaterialAssetKey,
                             Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                             std::string& selectedNativeScriptAssetKey,
-                            const char* materialPayloadId)
+                            const char* materialPayloadId,
+                            EditorUndoService* undoService)
         {
             if (!scene || !scene->IsValid(entity))
                 return false;
@@ -93,8 +95,19 @@ namespace Limitless::EditorScenePanel
             {
                 if (ImGui::MenuItem("Create Child"))
                 {
-                    entt::entity child = scene->CreateEntity("Entity");
-                    scene->SetParent(child, entity);
+                    entt::entity child = entt::null;
+                    const bool created = undoService
+                        ? undoService->ExecuteSceneMutation("Create Child", [&](Scene& mutableScene) {
+                            child = mutableScene.CreateEntity("Entity");
+                            return mutableScene.SetParent(child, entity);
+                        })
+                        : [&]() {
+                            child = scene->CreateEntity("Entity");
+                            return scene->SetParent(child, entity);
+                        }();
+                    if (!created)
+                        child = entt::null;
+
                     selectedEntity = child;
                     selectedTextureAssetKey.clear();
                     cachedTextureAsset.reset();
@@ -133,7 +146,18 @@ namespace Limitless::EditorScenePanel
                 {
                     const auto* childEntity = static_cast<const entt::entity*>(payload->Data);
                     if (childEntity)
-                        scene->SetParent(*childEntity, entity);
+                    {
+                        if (undoService)
+                        {
+                            (void)undoService->ExecuteSceneMutation("Reparent Entity", [&](Scene& mutableScene) {
+                                return mutableScene.SetParent(*childEntity, entity);
+                            });
+                        }
+                        else
+                        {
+                            scene->SetParent(*childEntity, entity);
+                        }
+                    }
                 }
                 else if (materialPayloadId)
                 {
@@ -146,13 +170,29 @@ namespace Limitless::EditorScenePanel
                             // Only entities with a SpriteComponent (quad renderer) can use materials right now.
                             if (registry.all_of<SpriteComponent>(entity))
                             {
-                                auto* material = registry.try_get<MaterialComponent>(entity);
-                                if (!material)
-                                    material = &registry.emplace<MaterialComponent>(entity);
+                                if (undoService)
+                                {
+                                    (void)undoService->ExecuteSceneMutation("Assign Material", [&](Scene& mutableScene) {
+                                        auto& mutableRegistry = mutableScene.GetRegistry();
+                                        auto* material = mutableRegistry.try_get<MaterialComponent>(entity);
+                                        if (!material)
+                                            material = &mutableRegistry.emplace<MaterialComponent>(entity);
+                                        material->MaterialKey = key;
+                                        material->CachedMaterial.reset();
+                                        material->MaterialLoadAttempted = false;
+                                        return true;
+                                    });
+                                }
+                                else
+                                {
+                                    auto* material = registry.try_get<MaterialComponent>(entity);
+                                    if (!material)
+                                        material = &registry.emplace<MaterialComponent>(entity);
 
-                                material->MaterialKey = key;
-                                material->CachedMaterial.reset();
-                                material->MaterialLoadAttempted = false;
+                                    material->MaterialKey = key;
+                                    material->CachedMaterial.reset();
+                                    material->MaterialLoadAttempted = false;
+                                }
 
                                 // Make the drop feel like Unity: select the target object (not the asset).
                                 selectedEntity = entity;
@@ -190,7 +230,18 @@ namespace Limitless::EditorScenePanel
                 {
                     const auto* childEntity = static_cast<const entt::entity*>(payload->Data);
                     if (childEntity && *childEntity != entity)
-                        scene->SetSiblingOrderBefore(*childEntity, entity);
+                    {
+                        if (undoService)
+                        {
+                            (void)undoService->ExecuteSceneMutation("Reorder Entity", [&](Scene& mutableScene) {
+                                return mutableScene.SetSiblingOrderBefore(*childEntity, entity);
+                            });
+                        }
+                        else
+                        {
+                            scene->SetSiblingOrderBefore(*childEntity, entity);
+                        }
+                    }
                 }
                 ImGui::EndDragDropTarget();
             }
@@ -208,7 +259,18 @@ namespace Limitless::EditorScenePanel
                 {
                     const auto* childEntity = static_cast<const entt::entity*>(payload->Data);
                     if (childEntity && *childEntity != entity)
-                        scene->SetSiblingOrderAfter(*childEntity, entity);
+                    {
+                        if (undoService)
+                        {
+                            (void)undoService->ExecuteSceneMutation("Reorder Entity", [&](Scene& mutableScene) {
+                                return mutableScene.SetSiblingOrderAfter(*childEntity, entity);
+                            });
+                        }
+                        else
+                        {
+                            scene->SetSiblingOrderAfter(*childEntity, entity);
+                        }
+                    }
                 }
                 ImGui::EndDragDropTarget();
             }
@@ -228,7 +290,8 @@ namespace Limitless::EditorScenePanel
                                        selectedMaterialAssetKey,
                                        cachedMaterialAsset,
                                        selectedNativeScriptAssetKey,
-                                       materialPayloadId))
+                                       materialPayloadId,
+                                       undoService))
                         deletedSelection = true;
                 }
                 ImGui::TreePop();
@@ -247,7 +310,8 @@ namespace Limitless::EditorScenePanel
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
               std::string& selectedNativeScriptAssetKey,
               const char* materialPayloadId,
-              const std::string& sceneRootDisplayName)
+              const std::string& sceneRootDisplayName,
+              EditorUndoService* undoService)
     {
         ImGui::Begin("Scene");
 
@@ -256,7 +320,18 @@ namespace Limitless::EditorScenePanel
         {
             if (ImGui::MenuItem("Create Entity"))
             {
-                entt::entity createdEntity = scene->CreateEntity("Entity");
+                entt::entity createdEntity = entt::null;
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Create Entity", [&](Scene& mutableScene) {
+                        createdEntity = mutableScene.CreateEntity("Entity");
+                        return true;
+                    });
+                }
+                else
+                {
+                    createdEntity = scene->CreateEntity("Entity");
+                }
                 selectedEntity = createdEntity;
                 selectedTextureAssetKey.clear();
                 cachedTextureAsset.reset();
@@ -276,7 +351,18 @@ namespace Limitless::EditorScenePanel
                 {
                     if (ImGui::MenuItem("Create Entity"))
                     {
-                        entt::entity createdEntity = scene->CreateEntity("Entity");
+                        entt::entity createdEntity = entt::null;
+                        if (undoService)
+                        {
+                            (void)undoService->ExecuteSceneMutation("Create Entity", [&](Scene& mutableScene) {
+                                createdEntity = mutableScene.CreateEntity("Entity");
+                                return true;
+                            });
+                        }
+                        else
+                        {
+                            createdEntity = scene->CreateEntity("Entity");
+                        }
                         selectedEntity = createdEntity;
                         selectedTextureAssetKey.clear();
                         cachedTextureAsset.reset();
@@ -302,7 +388,18 @@ namespace Limitless::EditorScenePanel
                     {
                         const auto* childEntity = static_cast<const entt::entity*>(payload->Data);
                         if (childEntity)
-                            scene->SetParent(*childEntity, entt::null);
+                        {
+                            if (undoService)
+                            {
+                                (void)undoService->ExecuteSceneMutation("Reparent Entity", [&](Scene& mutableScene) {
+                                    return mutableScene.SetParent(*childEntity, entt::null);
+                                });
+                            }
+                            else
+                            {
+                                scene->SetParent(*childEntity, entt::null);
+                            }
+                        }
                     }
                     ImGui::EndDragDropTarget();
                 }
@@ -318,7 +415,8 @@ namespace Limitless::EditorScenePanel
                                        selectedMaterialAssetKey,
                                        cachedMaterialAsset,
                                        selectedNativeScriptAssetKey,
-                                       materialPayloadId))
+                                       materialPayloadId,
+                                       undoService))
                         deletedSelection = true;
                 }
 
@@ -333,7 +431,18 @@ namespace Limitless::EditorScenePanel
                 {
                     if (ImGui::MenuItem("Create Entity"))
                     {
-                        entt::entity createdEntity = scene->CreateEntity("Entity");
+                        entt::entity createdEntity = entt::null;
+                        if (undoService)
+                        {
+                            (void)undoService->ExecuteSceneMutation("Create Entity", [&](Scene& mutableScene) {
+                                createdEntity = mutableScene.CreateEntity("Entity");
+                                return true;
+                            });
+                        }
+                        else
+                        {
+                            createdEntity = scene->CreateEntity("Entity");
+                        }
                         selectedEntity = createdEntity;
                         selectedTextureAssetKey.clear();
                         cachedTextureAsset.reset();
@@ -357,7 +466,18 @@ namespace Limitless::EditorScenePanel
                     {
                         const auto* childEntity = static_cast<const entt::entity*>(payload->Data);
                         if (childEntity)
-                            scene->SetParent(*childEntity, entt::null);
+                        {
+                            if (undoService)
+                            {
+                                (void)undoService->ExecuteSceneMutation("Reparent Entity", [&](Scene& mutableScene) {
+                                    return mutableScene.SetParent(*childEntity, entt::null);
+                                });
+                            }
+                            else
+                            {
+                                scene->SetParent(*childEntity, entt::null);
+                            }
+                        }
                     }
                     ImGui::EndDragDropTarget();
                 }
@@ -382,7 +502,26 @@ namespace Limitless::EditorScenePanel
                 if (scene && scene->IsValid(state.RenameEntity))
                 {
                     if (auto* tag = scene->GetRegistry().try_get<TagComponent>(state.RenameEntity))
-                        tag->Tag = state.RenameBuffer.data();
+                    {
+                        const std::string renameValue = state.RenameBuffer.data();
+                        if (undoService)
+                        {
+                            (void)undoService->ExecuteSceneMutation("Rename Entity", [&](Scene& mutableScene) {
+                                if (!mutableScene.IsValid(state.RenameEntity))
+                                    return false;
+                                if (auto* mutableTag = mutableScene.GetRegistry().try_get<TagComponent>(state.RenameEntity))
+                                {
+                                    mutableTag->Tag = renameValue;
+                                    return true;
+                                }
+                                return false;
+                            });
+                        }
+                        else
+                        {
+                            tag->Tag = renameValue;
+                        }
+                    }
                 }
                 state.RenamePopupOpen = false;
                 state.RenameEntity = entt::null;
@@ -400,7 +539,20 @@ namespace Limitless::EditorScenePanel
         {
             if (selectedEntity == state.PendingDeleteEntity || scene->IsDescendantOf(selectedEntity, state.PendingDeleteEntity))
                 deletedSelection = true;
-            scene->DestroyEntity(state.PendingDeleteEntity);
+            if (undoService)
+            {
+                const entt::entity entityToDelete = state.PendingDeleteEntity;
+                (void)undoService->ExecuteSceneMutation("Delete Entity", [&](Scene& mutableScene) {
+                    if (!mutableScene.IsValid(entityToDelete))
+                        return false;
+                    mutableScene.DestroyEntity(entityToDelete);
+                    return true;
+                });
+            }
+            else
+            {
+                scene->DestroyEntity(state.PendingDeleteEntity);
+            }
         }
         state.PendingDeleteEntity = entt::null;
 

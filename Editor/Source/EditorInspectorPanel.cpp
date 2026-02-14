@@ -3,6 +3,7 @@
 #include "EditorAssetNaming.h"
 #include "EditorInspectorPanelAssetInspectors.h"
 #include "EditorInspectorPanelEntityComponents.h"
+#include "Undo/EditorUndoService.h"
 #include "Audio/AudioEngine.h"
 #include "Assets/AudioClipAsset.h"
 #include "Assets/AssetDatabase.h"
@@ -1209,7 +1210,8 @@ namespace Limitless::EditorInspectorPanel
               const char* fontPayloadId,
               std::string& selectedMaterialAssetKey,
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
-              std::string& selectedNativeScriptAssetKey)
+              std::string& selectedNativeScriptAssetKey,
+              EditorUndoService* undoService)
     {
         auto& nativeScriptAuthoringState = GetNativeScriptAuthoringState();
 
@@ -1273,7 +1275,8 @@ namespace Limitless::EditorInspectorPanel
                 audioPayloadId,
                 materialPayloadId,
                 fontPayloadId,
-                pendingRemovals);
+                pendingRemovals,
+                undoService);
 
             if (auto* nativeScript = registry.try_get<NativeScriptComponent>(selectedEntity))
             {
@@ -1302,7 +1305,21 @@ namespace Limitless::EditorInspectorPanel
                         : discoveredScriptNames;
                     if (ImGui::Button("Add Script", ImVec2(-1.0f, 0.0f)))
                     {
-                        nativeScript->Scripts.emplace_back();
+                        if (undoService)
+                        {
+                            (void)undoService->ExecuteSceneMutation("Add Script Entry", [&](Scene& mutableScene) {
+                                auto* mutableNativeScript = mutableScene.GetRegistry().try_get<NativeScriptComponent>(selectedEntity);
+                                if (!mutableNativeScript)
+                                    return false;
+                                mutableNativeScript->Scripts.emplace_back();
+                                return true;
+                            });
+                            nativeScript = registry.try_get<NativeScriptComponent>(selectedEntity);
+                        }
+                        else
+                        {
+                            nativeScript->Scripts.emplace_back();
+                        }
                     }
 
                     if (registeredScriptNames.empty())
@@ -1365,11 +1382,29 @@ namespace Limitless::EditorInspectorPanel
                                     const bool noneSelected = scriptEntry.ScriptClassName.empty();
                                     if (ImGui::Selectable("None", noneSelected))
                                     {
-                                        scriptEntry.ScriptClassName.clear();
-                                        scriptEntry.ScriptAssetRelativePath.clear();
-                                        scriptEntry.ExposedProperties.clear();
-                                        scriptEntry.RuntimeInitialized = false;
-                                        scriptEntry.RuntimeInstance.reset();
+                                        if (undoService)
+                                        {
+                                            (void)undoService->ExecuteSceneMutation("Change Script Class", [&](Scene& mutableScene) {
+                                                auto* mutableNativeScript = mutableScene.GetRegistry().try_get<NativeScriptComponent>(selectedEntity);
+                                                if (!mutableNativeScript || scriptIndex >= mutableNativeScript->Scripts.size())
+                                                    return false;
+                                                auto& mutableEntry = mutableNativeScript->Scripts[scriptIndex];
+                                                mutableEntry.ScriptClassName.clear();
+                                                mutableEntry.ScriptAssetRelativePath.clear();
+                                                mutableEntry.ExposedProperties.clear();
+                                                mutableEntry.RuntimeInitialized = false;
+                                                mutableEntry.RuntimeInstance.reset();
+                                                return true;
+                                            });
+                                        }
+                                        else
+                                        {
+                                            scriptEntry.ScriptClassName.clear();
+                                            scriptEntry.ScriptAssetRelativePath.clear();
+                                            scriptEntry.ExposedProperties.clear();
+                                            scriptEntry.RuntimeInitialized = false;
+                                            scriptEntry.RuntimeInstance.reset();
+                                        }
                                     }
                                     if (noneSelected)
                                         ImGui::SetItemDefaultFocus();
@@ -1379,11 +1414,29 @@ namespace Limitless::EditorInspectorPanel
                                         const bool scriptSelected = (scriptEntry.ScriptClassName == scriptName);
                                         if (ImGui::Selectable(scriptName.c_str(), scriptSelected))
                                         {
-                                            scriptEntry.ScriptClassName = scriptName;
-                                            scriptEntry.ScriptAssetRelativePath.clear();
-                                            scriptEntry.ExposedProperties.clear();
-                                            scriptEntry.RuntimeInitialized = false;
-                                            scriptEntry.RuntimeInstance.reset();
+                                            if (undoService)
+                                            {
+                                                (void)undoService->ExecuteSceneMutation("Change Script Class", [&](Scene& mutableScene) {
+                                                    auto* mutableNativeScript = mutableScene.GetRegistry().try_get<NativeScriptComponent>(selectedEntity);
+                                                    if (!mutableNativeScript || scriptIndex >= mutableNativeScript->Scripts.size())
+                                                        return false;
+                                                    auto& mutableEntry = mutableNativeScript->Scripts[scriptIndex];
+                                                    mutableEntry.ScriptClassName = scriptName;
+                                                    mutableEntry.ScriptAssetRelativePath.clear();
+                                                    mutableEntry.ExposedProperties.clear();
+                                                    mutableEntry.RuntimeInitialized = false;
+                                                    mutableEntry.RuntimeInstance.reset();
+                                                    return true;
+                                                });
+                                            }
+                                            else
+                                            {
+                                                scriptEntry.ScriptClassName = scriptName;
+                                                scriptEntry.ScriptAssetRelativePath.clear();
+                                                scriptEntry.ExposedProperties.clear();
+                                                scriptEntry.RuntimeInitialized = false;
+                                                scriptEntry.RuntimeInstance.reset();
+                                            }
                                         }
                                         if (scriptSelected)
                                             ImGui::SetItemDefaultFocus();
@@ -1430,22 +1483,51 @@ namespace Limitless::EditorInspectorPanel
                                             continue;
 
                                         auto& propertyValue = propertyIterator->second;
+                                        const std::string propertyEditLabel = "Edit Script Property: " + propertyName;
                                         ImGui::PushID(propertyName.c_str());
                                         if (auto* floatValue = std::get_if<float>(&propertyValue))
                                         {
                                             ImGui::DragFloat(propertyName.c_str(), floatValue, 0.1f);
+                                            if (undoService)
+                                            {
+                                                if (ImGui::IsItemActivated())
+                                                    undoService->BeginInteractiveSceneMutation();
+                                                if (ImGui::IsItemDeactivatedAfterEdit())
+                                                    (void)undoService->CommitInteractiveSceneMutation(propertyEditLabel);
+                                            }
                                         }
                                         else if (auto* integerValue = std::get_if<int32_t>(&propertyValue))
                                         {
                                             ImGui::DragInt(propertyName.c_str(), integerValue, 1.0f);
+                                            if (undoService)
+                                            {
+                                                if (ImGui::IsItemActivated())
+                                                    undoService->BeginInteractiveSceneMutation();
+                                                if (ImGui::IsItemDeactivatedAfterEdit())
+                                                    (void)undoService->CommitInteractiveSceneMutation(propertyEditLabel);
+                                            }
                                         }
                                         else if (auto* booleanValue = std::get_if<bool>(&propertyValue))
                                         {
                                             ImGui::Checkbox(propertyName.c_str(), booleanValue);
+                                            if (undoService)
+                                            {
+                                                if (ImGui::IsItemActivated())
+                                                    undoService->BeginInteractiveSceneMutation();
+                                                if (ImGui::IsItemDeactivatedAfterEdit())
+                                                    (void)undoService->CommitInteractiveSceneMutation(propertyEditLabel);
+                                            }
                                         }
                                         else if (auto* vectorValue = std::get_if<glm::vec3>(&propertyValue))
                                         {
                                             ImGui::DragFloat3(propertyName.c_str(), &vectorValue->x, 0.1f);
+                                            if (undoService)
+                                            {
+                                                if (ImGui::IsItemActivated())
+                                                    undoService->BeginInteractiveSceneMutation();
+                                                if (ImGui::IsItemDeactivatedAfterEdit())
+                                                    (void)undoService->CommitInteractiveSceneMutation(propertyEditLabel);
+                                            }
                                         }
                                         else if (auto* stringValue = std::get_if<std::string>(&propertyValue))
                                         {
@@ -1453,6 +1535,13 @@ namespace Limitless::EditorInspectorPanel
                                             std::snprintf(textBuffer.data(), textBuffer.size(), "%s", stringValue->c_str());
                                             if (ImGui::InputText(propertyName.c_str(), textBuffer.data(), textBuffer.size()))
                                                 *stringValue = textBuffer.data();
+                                            if (undoService)
+                                            {
+                                                if (ImGui::IsItemActivated())
+                                                    undoService->BeginInteractiveSceneMutation();
+                                                if (ImGui::IsItemDeactivatedAfterEdit())
+                                                    (void)undoService->CommitInteractiveSceneMutation(propertyEditLabel);
+                                            }
                                         }
                                         ImGui::PopID();
                                     }
@@ -1464,7 +1553,24 @@ namespace Limitless::EditorInspectorPanel
                         }
 
                         if (removeScriptIndex >= 0 && removeScriptIndex < static_cast<int>(nativeScript->Scripts.size()))
-                            nativeScript->Scripts.erase(nativeScript->Scripts.begin() + removeScriptIndex);
+                        {
+                            if (undoService)
+                            {
+                                (void)undoService->ExecuteSceneMutation("Remove Script Entry", [&](Scene& mutableScene) {
+                                    auto* mutableNativeScript = mutableScene.GetRegistry().try_get<NativeScriptComponent>(selectedEntity);
+                                    if (!mutableNativeScript)
+                                        return false;
+                                    if (removeScriptIndex < 0 || removeScriptIndex >= static_cast<int>(mutableNativeScript->Scripts.size()))
+                                        return false;
+                                    mutableNativeScript->Scripts.erase(mutableNativeScript->Scripts.begin() + removeScriptIndex);
+                                    return true;
+                                });
+                            }
+                            else
+                            {
+                                nativeScript->Scripts.erase(nativeScript->Scripts.begin() + removeScriptIndex);
+                            }
+                        }
                     }
 
                     ImGui::TreePop();
@@ -1489,7 +1595,15 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::BeginDisabled();
 
                 if (ImGui::MenuItem("Sprite Component"))
-                    registry.emplace<SpriteComponent>(selectedEntity);
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add Sprite Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<SpriteComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<SpriteComponent>(selectedEntity);
+                }
 
                 if (hasSpriteComponent)
                     ImGui::EndDisabled();
@@ -1499,9 +1613,22 @@ namespace Limitless::EditorInspectorPanel
 
                 if (ImGui::MenuItem("Camera Component"))
                 {
-                    auto& camera = registry.emplace<CameraComponent>(selectedEntity);
-                    camera.IsPrimary = true;
-                    ClearPrimaryFlagFromOtherCameras(registry, selectedEntity);
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation("Add Camera Component", [&](Scene& mutableScene) {
+                            auto& mutableRegistry = mutableScene.GetRegistry();
+                            auto& camera = mutableRegistry.emplace<CameraComponent>(selectedEntity);
+                            camera.IsPrimary = true;
+                            ClearPrimaryFlagFromOtherCameras(mutableRegistry, selectedEntity);
+                            return true;
+                        });
+                    }
+                    else
+                    {
+                        auto& camera = registry.emplace<CameraComponent>(selectedEntity);
+                        camera.IsPrimary = true;
+                        ClearPrimaryFlagFromOtherCameras(registry, selectedEntity);
+                    }
                 }
 
                 if (hasCameraComponent)
@@ -1511,7 +1638,15 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::BeginDisabled();
 
                 if (ImGui::MenuItem("Audio Source"))
-                    registry.emplace<AudioSourceComponent>(selectedEntity);
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add Audio Source Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<AudioSourceComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<AudioSourceComponent>(selectedEntity);
+                }
 
                 if (hasAudioSourceComponent)
                     ImGui::EndDisabled();
@@ -1520,7 +1655,15 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::BeginDisabled();
 
                 if (ImGui::MenuItem("Text Component"))
-                    registry.emplace<TextComponent>(selectedEntity);
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add Text Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<TextComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<TextComponent>(selectedEntity);
+                }
 
                 if (hasTextComponent)
                     ImGui::EndDisabled();
@@ -1529,7 +1672,15 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::BeginDisabled();
 
                 if (ImGui::MenuItem("Native Script"))
-                    registry.emplace<NativeScriptComponent>(selectedEntity);
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add Native Script Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<NativeScriptComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<NativeScriptComponent>(selectedEntity);
+                }
 
                 if (hasNativeScriptComponent)
                     ImGui::EndDisabled();
@@ -1539,18 +1690,53 @@ namespace Limitless::EditorInspectorPanel
 
             if (pendingRemovals.RemoveSpriteComponent)
             {
-                registry.remove<SpriteComponent>(selectedEntity);
-                // Material is currently only consumed by sprite rendering; remove it with sprite
-                // to keep components aligned with what the renderer expects.
-                if (registry.all_of<MaterialComponent>(selectedEntity))
-                    pendingRemovals.RemoveMaterialComponent = true;
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Sprite Component", [&](Scene& mutableScene) {
+                        auto& mutableRegistry = mutableScene.GetRegistry();
+                        mutableRegistry.remove<SpriteComponent>(selectedEntity);
+                        if (mutableRegistry.all_of<MaterialComponent>(selectedEntity))
+                            mutableRegistry.remove<MaterialComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<SpriteComponent>(selectedEntity);
+                    if (registry.all_of<MaterialComponent>(selectedEntity))
+                        pendingRemovals.RemoveMaterialComponent = true;
+                }
             }
 
             if (pendingRemovals.RemoveMaterialComponent)
-                registry.remove<MaterialComponent>(selectedEntity);
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Material Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<MaterialComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<MaterialComponent>(selectedEntity);
+                }
+            }
 
             if (pendingRemovals.RemoveCameraComponent)
-                registry.remove<CameraComponent>(selectedEntity);
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Camera Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<CameraComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<CameraComponent>(selectedEntity);
+                }
+            }
 
             if (pendingRemovals.RemoveAudioSourceComponent)
             {
@@ -1559,11 +1745,39 @@ namespace Limitless::EditorInspectorPanel
                     if (audioSource->RuntimeVoiceId != 0)
                         Audio::AudioEngine::GetInstance().Stop(audioSource->RuntimeVoiceId);
                 }
-                registry.remove<AudioSourceComponent>(selectedEntity);
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Audio Source Component", [&](Scene& mutableScene) {
+                        auto& mutableRegistry = mutableScene.GetRegistry();
+                        if (auto* mutableAudioSource = mutableRegistry.try_get<AudioSourceComponent>(selectedEntity))
+                        {
+                            if (mutableAudioSource->RuntimeVoiceId != 0)
+                                Audio::AudioEngine::GetInstance().Stop(mutableAudioSource->RuntimeVoiceId);
+                        }
+                        mutableRegistry.remove<AudioSourceComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<AudioSourceComponent>(selectedEntity);
+                }
             }
 
             if (pendingRemovals.RemoveTextComponent)
-                registry.remove<TextComponent>(selectedEntity);
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Text Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<TextComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<TextComponent>(selectedEntity);
+                }
+            }
 
             if (removeNativeScriptComponent)
             {
@@ -1575,7 +1789,26 @@ namespace Limitless::EditorInspectorPanel
                         scriptEntry.RuntimeInstance.reset();
                     }
                 }
-                registry.remove<NativeScriptComponent>(selectedEntity);
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Native Script Component", [&](Scene& mutableScene) {
+                        auto& mutableRegistry = mutableScene.GetRegistry();
+                        if (auto* mutableNativeScript = mutableRegistry.try_get<NativeScriptComponent>(selectedEntity))
+                        {
+                            for (auto& scriptEntry : mutableNativeScript->Scripts)
+                            {
+                                scriptEntry.RuntimeInitialized = false;
+                                scriptEntry.RuntimeInstance.reset();
+                            }
+                        }
+                        mutableRegistry.remove<NativeScriptComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<NativeScriptComponent>(selectedEntity);
+                }
             }
         }
 

@@ -10,6 +10,7 @@
 #include "EditorAssetDiagnosticsPanel.h"
 #include "EditorBuildAndRunPanel.h"
 #include "EditorScenePanel.h"
+#include "Undo/EditorUndoService.h"
 #include "Graphics/Texture.h"
 
 #include <array>
@@ -57,13 +58,18 @@ namespace Limitless
         void ExitPlayMode();
         void TogglePausePlayMode();
         void NewScene();
+        void NewScene(bool forceWithoutConfirmation);
         void SaveScene();
         void SaveSceneAs();
         void DrawSaveScenePopup();
+        void DrawSceneSwitchConfirmationPopup();
         bool LoadSceneFromAssetKey(const std::string& assetKey);
+        bool LoadSceneFromAssetKey(const std::string& assetKey, bool forceWithoutConfirmation);
         bool LoadSceneFromAssetKeyInPlayMode(const std::string& assetKey);
         bool SaveSceneToAssetKey(const std::string& assetKey);
         void ProcessPendingSceneTransitions();
+        bool EnsureSceneSwitchAllowed(const std::function<void()>& deferredSwitchAction);
+        void BeginSceneSwitch();
         void PersistProjectSessionState();
         std::string CreateSceneAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         void SetProjectDefaultSceneAssetKey(const std::string& sceneAssetKey);
@@ -107,6 +113,10 @@ namespace Limitless
         std::string m_SelectedNativeScriptAssetKey;
 
         std::string m_CurrentSceneAssetKey;
+        EditorUndoService m_EditorUndoService;
+        bool m_RequestOpenSceneSwitchConfirmationPopup = false;
+        bool m_SceneSwitchConfirmationPopupOpen = false;
+        std::function<void()> m_PendingSceneSwitchAction;
         bool m_SaveScenePopupOpen = false;
         bool m_RequestOpenSaveScenePopup = false;
         std::filesystem::path m_SaveSceneFolderPath = "Scenes";

@@ -2,6 +2,7 @@
 
 #include "EditorAssetNaming.h"
 #include "Assets/AudioClipAsset.h"
+#include "Undo/EditorUndoService.h"
 #include "imgui/imgui.h"
 
 #include <algorithm>
@@ -24,6 +25,16 @@ namespace Limitless::EditorInspectorPanel
                 otherCamera.IsPrimary = false;
             }
         }
+
+        void TrackInteractiveMutation(EditorUndoService* undoService, const char* label)
+        {
+            if (!undoService || !label)
+                return;
+            if (ImGui::IsItemActivated())
+                undoService->BeginInteractiveSceneMutation();
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                (void)undoService->CommitInteractiveSceneMutation(label);
+        }
     }
 
     void DrawStandardEntityComponentSections(entt::registry& registry,
@@ -31,7 +42,8 @@ namespace Limitless::EditorInspectorPanel
                                              const char* audioPayloadId,
                                              const char* materialPayloadId,
                                              const char* fontPayloadId,
-                                             PendingEntityComponentRemovals& pendingRemovals)
+                                             PendingEntityComponentRemovals& pendingRemovals,
+                                             Limitless::EditorUndoService* undoService)
     {
         if (auto* tag = registry.try_get<TagComponent>(selectedEntity))
         {
@@ -49,7 +61,23 @@ namespace Limitless::EditorInspectorPanel
             ImGui::SetNextItemWidth(-1.0f);
             ImGui::InputText("##EntityName", renameBuffer.data(), renameBuffer.size());
             if (ImGui::IsItemDeactivatedAfterEdit())
-                tag->Tag = renameBuffer.data();
+            {
+                const std::string updatedName = renameBuffer.data();
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Rename Entity", [&](Scene& mutableScene) {
+                        auto* mutableTag = mutableScene.GetRegistry().try_get<TagComponent>(selectedEntity);
+                        if (!mutableTag)
+                            return false;
+                        mutableTag->Tag = updatedName;
+                        return true;
+                    });
+                }
+                else
+                {
+                    tag->Tag = updatedName;
+                }
+            }
         }
 
         ImGui::Spacing();
@@ -77,8 +105,11 @@ namespace Limitless::EditorInspectorPanel
             if (transformOpen)
             {
                 ImGui::DragFloat3("Position", &transform->Position.x, 0.1f);
+                TrackInteractiveMutation(undoService, "Edit Transform Position");
                 ImGui::DragFloat3("Rotation", &transform->Rotation.x, 1.0f);
+                TrackInteractiveMutation(undoService, "Edit Transform Rotation");
                 ImGui::DragFloat3("Scale", &transform->Scale.x, 0.1f);
+                TrackInteractiveMutation(undoService, "Edit Transform Scale");
                 ImGui::TreePop();
             }
         }
@@ -102,6 +133,7 @@ namespace Limitless::EditorInspectorPanel
             if (spriteOpen)
             {
                 ImGui::ColorEdit4("Color", &sprite->Color.r);
+                TrackInteractiveMutation(undoService, "Edit Sprite Color");
 
                 // Material slot (Unity-style): dropping a material assigns it to the renderer.
                 auto* material = registry.try_get<MaterialComponent>(selectedEntity);
@@ -120,10 +152,49 @@ namespace Limitless::EditorInspectorPanel
                         if (key && key[0])
                         {
                             if (!material)
-                                material = &registry.emplace<MaterialComponent>(selectedEntity);
-                            material->MaterialKey = key;
-                            material->CachedMaterial.reset();
-                            material->MaterialLoadAttempted = false;
+                            {
+                                if (undoService)
+                                {
+                                    (void)undoService->ExecuteSceneMutation("Assign Material", [&](Scene& mutableScene) {
+                                        auto& mutableRegistry = mutableScene.GetRegistry();
+                                        auto* mutableMaterial = mutableRegistry.try_get<MaterialComponent>(selectedEntity);
+                                        if (!mutableMaterial)
+                                            mutableMaterial = &mutableRegistry.emplace<MaterialComponent>(selectedEntity);
+                                        mutableMaterial->MaterialKey = key;
+                                        mutableMaterial->CachedMaterial.reset();
+                                        mutableMaterial->MaterialLoadAttempted = false;
+                                        return true;
+                                    });
+                                }
+                                else
+                                {
+                                    material = &registry.emplace<MaterialComponent>(selectedEntity);
+                                    material->MaterialKey = key;
+                                    material->CachedMaterial.reset();
+                                    material->MaterialLoadAttempted = false;
+                                }
+                            }
+                            else
+                            {
+                                if (undoService)
+                                {
+                                    (void)undoService->ExecuteSceneMutation("Assign Material", [&](Scene& mutableScene) {
+                                        auto* mutableMaterial = mutableScene.GetRegistry().try_get<MaterialComponent>(selectedEntity);
+                                        if (!mutableMaterial)
+                                            return false;
+                                        mutableMaterial->MaterialKey = key;
+                                        mutableMaterial->CachedMaterial.reset();
+                                        mutableMaterial->MaterialLoadAttempted = false;
+                                        return true;
+                                    });
+                                }
+                                else
+                                {
+                                    material->MaterialKey = key;
+                                    material->CachedMaterial.reset();
+                                    material->MaterialLoadAttempted = false;
+                                }
+                            }
                         }
                     }
                     ImGui::EndDragDropTarget();
@@ -134,9 +205,24 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::SameLine();
                     if (ImGui::Button("Clear##Material"))
                     {
-                        material->MaterialKey.clear();
-                        material->CachedMaterial.reset();
-                        material->MaterialLoadAttempted = false;
+                        if (undoService)
+                        {
+                            (void)undoService->ExecuteSceneMutation("Clear Material", [&](Scene& mutableScene) {
+                                auto* mutableMaterial = mutableScene.GetRegistry().try_get<MaterialComponent>(selectedEntity);
+                                if (!mutableMaterial)
+                                    return false;
+                                mutableMaterial->MaterialKey.clear();
+                                mutableMaterial->CachedMaterial.reset();
+                                mutableMaterial->MaterialLoadAttempted = false;
+                                return true;
+                            });
+                        }
+                        else
+                        {
+                            material->MaterialKey.clear();
+                            material->CachedMaterial.reset();
+                            material->MaterialLoadAttempted = false;
+                        }
                     }
                 }
 
@@ -184,14 +270,18 @@ namespace Limitless::EditorInspectorPanel
                         }
                     }
                 }
+                TrackInteractiveMutation(undoService, "Edit Camera Projection");
 
                 if (camera->Projection == CameraComponent::ProjectionType::Orthographic2D)
                 {
                     if (camera->NearPlane >= camera->FarPlane)
                         camera->FarPlane = camera->NearPlane + 2.0f;
                     ImGui::DragFloat("Zoom", &camera->Zoom, 0.05f, 0.01f, 100.0f);
+                    TrackInteractiveMutation(undoService, "Edit Camera Zoom");
                     ImGui::DragFloat("Near Plane", &camera->NearPlane, 0.01f);
+                    TrackInteractiveMutation(undoService, "Edit Camera Near Plane");
                     ImGui::DragFloat("Far Plane", &camera->FarPlane, 0.01f);
+                    TrackInteractiveMutation(undoService, "Edit Camera Far Plane");
                 }
                 else
                 {
@@ -200,8 +290,11 @@ namespace Limitless::EditorInspectorPanel
                     if (camera->FarPlane <= camera->NearPlane)
                         camera->FarPlane = camera->NearPlane + 1000.0f;
                     ImGui::DragFloat("Field Of View", &camera->FieldOfViewYDegrees, 0.1f, 1.0f, 179.0f);
+                    TrackInteractiveMutation(undoService, "Edit Camera Field Of View");
                     ImGui::DragFloat("Near Plane", &camera->NearPlane, 0.01f, 0.001f, 1000.0f);
+                    TrackInteractiveMutation(undoService, "Edit Camera Near Plane");
                     ImGui::DragFloat("Far Plane", &camera->FarPlane, 1.0f, 0.01f, 100000.0f);
+                    TrackInteractiveMutation(undoService, "Edit Camera Far Plane");
                 }
 
                 bool isPrimary = camera->IsPrimary;
@@ -211,6 +304,7 @@ namespace Limitless::EditorInspectorPanel
                     if (camera->IsPrimary)
                         ClearPrimaryFlagFromOtherCameras(registry, selectedEntity);
                 }
+                TrackInteractiveMutation(undoService, "Edit Camera Primary");
 
                 ImGui::TreePop();
             }
@@ -269,9 +363,13 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 ImGui::Checkbox("Play On Start", &audioSource->PlayOnStart);
+                TrackInteractiveMutation(undoService, "Edit Audio Play On Start");
                 ImGui::Checkbox("Loop", &audioSource->Loop);
+                TrackInteractiveMutation(undoService, "Edit Audio Loop");
                 ImGui::Checkbox("Muted", &audioSource->Muted);
+                TrackInteractiveMutation(undoService, "Edit Audio Muted");
                 ImGui::SliderFloat("Volume", &audioSource->Volume, 0.0f, 2.0f, "%.2f");
+                TrackInteractiveMutation(undoService, "Edit Audio Volume");
 
                 if (audioSource->RuntimeVoiceId != 0 &&
                     !Audio::AudioEngine::GetInstance().IsVoiceActive(audioSource->RuntimeVoiceId))
@@ -343,7 +441,15 @@ namespace Limitless::EditorInspectorPanel
 
                 ImGui::InputTextMultiline("Text Value", textValueBuffer.data(), textValueBuffer.size(), ImVec2(-1.0f, 84.0f));
                 if (ImGui::IsItemDeactivatedAfterEdit())
+                {
                     text->Text = textValueBuffer.data();
+                    if (undoService)
+                        (void)undoService->CommitInteractiveSceneMutation("Edit Text Value");
+                }
+                else if (ImGui::IsItemActivated() && undoService)
+                {
+                    undoService->BeginInteractiveSceneMutation();
+                }
 
                 ImGui::InputText("Font File Path", fontPathBuffer.data(), fontPathBuffer.size());
                 if (ImGui::IsItemDeactivatedAfterEdit())
@@ -351,6 +457,12 @@ namespace Limitless::EditorInspectorPanel
                     text->FontFilePath = fontPathBuffer.data();
                     text->CachedFont.reset();
                     text->FontLoadAttempted = false;
+                    if (undoService)
+                        (void)undoService->CommitInteractiveSceneMutation("Edit Font File Path");
+                }
+                else if (ImGui::IsItemActivated() && undoService)
+                {
+                    undoService->BeginInteractiveSceneMutation();
                 }
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("Example: Assets/Fonts/YourFont.ttf");
@@ -390,10 +502,12 @@ namespace Limitless::EditorInspectorPanel
 
                 if (ImGui::DragFloat("Font Size", &text->FontSize, 1.0f, 4.0f, 512.0f))
                     text->FontSize = std::max(4.0f, text->FontSize);
+                TrackInteractiveMutation(undoService, "Edit Font Size");
                 int textRenderSpaceIndex = static_cast<int>(text->Space);
                 const char* textRenderSpaceOptions[] = { "World", "Screen" };
                 if (ImGui::Combo("Render Space", &textRenderSpaceIndex, textRenderSpaceOptions, 2))
                     text->Space = static_cast<TextComponent::RenderSpace>(textRenderSpaceIndex);
+                TrackInteractiveMutation(undoService, "Edit Text Render Space");
                 if (text->Space == TextComponent::RenderSpace::Screen && ImGui::IsItemHovered())
                     ImGui::SetTooltip("Screen text uses viewport-centered pixel coordinates (0,0 = center, X right, Y up).");
                 if (text->Space == TextComponent::RenderSpace::Screen)
@@ -412,8 +526,10 @@ namespace Limitless::EditorInspectorPanel
                     };
                     if (ImGui::Combo("Screen Anchor", &screenAnchorIndex, screenAnchorOptions, 9))
                         text->Anchor = static_cast<TextComponent::ScreenAnchor>(screenAnchorIndex);
+                    TrackInteractiveMutation(undoService, "Edit Text Anchor");
                 }
                 ImGui::ColorEdit4("Color", &text->Color.r);
+                TrackInteractiveMutation(undoService, "Edit Text Color");
 
                 ImGui::TreePop();
             }
