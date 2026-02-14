@@ -52,6 +52,7 @@ namespace Limitless
         // Renderer2D only requires a stable ViewProjection matrix.
         static void BeginScene(const Camera& camera);
         static void BeginScene(const glm::mat4& viewProjection);
+        static void BeginScene(const glm::mat4& viewProjection, bool enableDepthTest);
         static void EndScene();
 
         // Position/size overloads (Z is 0 in this MVP).

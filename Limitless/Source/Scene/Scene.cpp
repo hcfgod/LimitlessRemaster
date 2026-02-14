@@ -563,6 +563,8 @@ namespace Limitless
                 destinationText.FontLoadAttempted = false;
                 destinationText.FontSize = text->FontSize;
                 destinationText.Color = text->Color;
+                destinationText.Space = text->Space;
+                destinationText.Anchor = text->Anchor;
             }
 
             if (const auto* camera = sourceRegistry.try_get<CameraComponent>(sourceEntity))
@@ -703,11 +705,30 @@ namespace Limitless
 
             if (const auto* text = m_Registry.try_get<TextComponent>(entity))
             {
+                auto toAnchorString = [](TextComponent::ScreenAnchor anchor) -> const char*
+                {
+                    switch (anchor)
+                    {
+                    case TextComponent::ScreenAnchor::TopLeft: return "TopLeft";
+                    case TextComponent::ScreenAnchor::TopCenter: return "TopCenter";
+                    case TextComponent::ScreenAnchor::TopRight: return "TopRight";
+                    case TextComponent::ScreenAnchor::MiddleLeft: return "MiddleLeft";
+                    case TextComponent::ScreenAnchor::MiddleRight: return "MiddleRight";
+                    case TextComponent::ScreenAnchor::BottomLeft: return "BottomLeft";
+                    case TextComponent::ScreenAnchor::BottomCenter: return "BottomCenter";
+                    case TextComponent::ScreenAnchor::BottomRight: return "BottomRight";
+                    case TextComponent::ScreenAnchor::Center:
+                    default:
+                        return "Center";
+                    }
+                };
                 entry["Text"] = {
                     { "Value", text->Text },
                     { "FontFilePath", text->FontFilePath },
                     { "FontSize", text->FontSize },
-                    { "Color", { text->Color.r, text->Color.g, text->Color.b, text->Color.a } }
+                    { "Color", { text->Color.r, text->Color.g, text->Color.b, text->Color.a } },
+                    { "Space", text->Space == TextComponent::RenderSpace::Screen ? "Screen" : "World" },
+                    { "Anchor", toAnchorString(text->Anchor) }
                 };
             }
 
@@ -874,6 +895,29 @@ namespace Limitless
                 text.Text = textJson.value("Value", std::string("Text"));
                 text.FontFilePath = textJson.value("FontFilePath", std::string{});
                 text.FontSize = textJson.value("FontSize", 32.0f);
+                const std::string renderSpace = textJson.value("Space", std::string("World"));
+                text.Space = (renderSpace == "Screen")
+                    ? TextComponent::RenderSpace::Screen
+                    : TextComponent::RenderSpace::World;
+                const std::string anchorName = textJson.value("Anchor", std::string("Center"));
+                if (anchorName == "TopLeft")
+                    text.Anchor = TextComponent::ScreenAnchor::TopLeft;
+                else if (anchorName == "TopCenter")
+                    text.Anchor = TextComponent::ScreenAnchor::TopCenter;
+                else if (anchorName == "TopRight")
+                    text.Anchor = TextComponent::ScreenAnchor::TopRight;
+                else if (anchorName == "MiddleLeft")
+                    text.Anchor = TextComponent::ScreenAnchor::MiddleLeft;
+                else if (anchorName == "MiddleRight")
+                    text.Anchor = TextComponent::ScreenAnchor::MiddleRight;
+                else if (anchorName == "BottomLeft")
+                    text.Anchor = TextComponent::ScreenAnchor::BottomLeft;
+                else if (anchorName == "BottomCenter")
+                    text.Anchor = TextComponent::ScreenAnchor::BottomCenter;
+                else if (anchorName == "BottomRight")
+                    text.Anchor = TextComponent::ScreenAnchor::BottomRight;
+                else
+                    text.Anchor = TextComponent::ScreenAnchor::Center;
                 auto color = textJson.value("Color", std::vector<float>{ 1.0f, 1.0f, 1.0f, 1.0f });
                 if (color.size() >= 4)
                     text.Color = glm::vec4(color[0], color[1], color[2], color[3]);
@@ -1107,6 +1151,10 @@ namespace Limitless
         for (entt::entity entity : textRenderEntities)
         {
             auto& text = registry.get<TextComponent>(entity);
+            if (text.Space != TextComponent::RenderSpace::World)
+            {
+                continue;
+            }
             if (text.Text.empty() || text.FontFilePath.empty())
             {
                 continue;
@@ -1134,6 +1182,127 @@ namespace Limitless
         Renderer2D::EndScene();
     }
 
+    namespace
+    {
+        glm::vec2 GetScreenAnchorBasePosition(TextComponent::ScreenAnchor anchor, float halfWidth, float halfHeight)
+        {
+            switch (anchor)
+            {
+            case TextComponent::ScreenAnchor::TopLeft:
+                return glm::vec2(-halfWidth, halfHeight);
+            case TextComponent::ScreenAnchor::TopCenter:
+                return glm::vec2(0.0f, halfHeight);
+            case TextComponent::ScreenAnchor::TopRight:
+                return glm::vec2(halfWidth, halfHeight);
+            case TextComponent::ScreenAnchor::MiddleLeft:
+                return glm::vec2(-halfWidth, 0.0f);
+            case TextComponent::ScreenAnchor::MiddleRight:
+                return glm::vec2(halfWidth, 0.0f);
+            case TextComponent::ScreenAnchor::BottomLeft:
+                return glm::vec2(-halfWidth, -halfHeight);
+            case TextComponent::ScreenAnchor::BottomCenter:
+                return glm::vec2(0.0f, -halfHeight);
+            case TextComponent::ScreenAnchor::BottomRight:
+                return glm::vec2(halfWidth, -halfHeight);
+            case TextComponent::ScreenAnchor::Center:
+            default:
+                return glm::vec2(0.0f, 0.0f);
+            }
+        }
+
+        void RenderScreenSpaceTextPass(Scene& scene, uint32_t width, uint32_t height)
+        {
+            if (width == 0 || height == 0)
+            {
+                return;
+            }
+
+            auto& registry = scene.GetRegistry();
+            auto textView = registry.view<TransformComponent, TextComponent>();
+            std::vector<entt::entity> textRenderEntities;
+            textRenderEntities.reserve(textView.size_hint());
+            for (entt::entity entity : textView)
+            {
+                textRenderEntities.push_back(entity);
+            }
+
+            std::sort(textRenderEntities.begin(), textRenderEntities.end(), [&scene, &registry](entt::entity left, entt::entity right) {
+                const glm::mat4 leftWorld = scene.GetWorldTransformMatrix(left);
+                const glm::mat4 rightWorld = scene.GetWorldTransformMatrix(right);
+                const float leftZ = leftWorld[3].z;
+                const float rightZ = rightWorld[3].z;
+                if (leftZ != rightZ)
+                    return leftZ < rightZ;
+
+                const auto* leftHierarchy = registry.try_get<HierarchyComponent>(left);
+                const auto* rightHierarchy = registry.try_get<HierarchyComponent>(right);
+                const int32_t leftOrder = leftHierarchy ? leftHierarchy->SiblingOrder : 0;
+                const int32_t rightOrder = rightHierarchy ? rightHierarchy->SiblingOrder : 0;
+                if (leftOrder != rightOrder)
+                    return leftOrder < rightOrder;
+
+                return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
+            });
+
+            // Screen-space UI uses centered pixel coordinates so existing world-origin text
+            // (near X=0,Y=0) remains visible when switching to screen space.
+            // Use a wide depth range for overlays so non-trivial entity Z values do not clip.
+            // Depth testing is disabled for this pass, so Z is not used for occlusion.
+            const float halfWidth = static_cast<float>(width) * 0.5f;
+            const float halfHeight = static_cast<float>(height) * 0.5f;
+            const glm::mat4 screenProjection = glm::ortho(
+                -halfWidth, halfWidth,
+                -halfHeight, halfHeight,
+                -10000.0f, 10000.0f);
+            Renderer2D::BeginScene(screenProjection, false);
+
+            for (entt::entity entity : textRenderEntities)
+            {
+                auto& text = registry.get<TextComponent>(entity);
+                if (text.Space != TextComponent::RenderSpace::Screen)
+                {
+                    continue;
+                }
+
+                if (text.Text.empty() || text.FontFilePath.empty())
+                {
+                    continue;
+                }
+
+                if (!text.CachedFont && !text.FontLoadAttempted)
+                {
+                    text.CachedFont = Font::CreateFromFile(text.FontFilePath);
+                    text.FontLoadAttempted = true;
+                    if (!text.CachedFont)
+                    {
+                        LT_CORE_WARN("SceneRenderer: failed to load text font '{}'", text.FontFilePath);
+                    }
+                }
+
+                if (!text.CachedFont)
+                {
+                    continue;
+                }
+
+                // Screen-space text should not inherit world hierarchy transforms.
+                // Use the entity's local transform directly and force Z to 0 for overlay usage.
+                const auto& transform = registry.get<TransformComponent>(entity);
+                glm::mat4 model = transform.GetLocalMatrix();
+                const glm::vec2 anchorBase = GetScreenAnchorBasePosition(text.Anchor, halfWidth, halfHeight);
+                model[3].x += anchorBase.x;
+                model[3].y += anchorBase.y;
+                model[3].z = 0.0f;
+                // Renderer2D text sizing is normalized by font em-size for world-space rendering.
+                // Convert to pixel-like sizing for screen-space UI so a FontSize of 32 behaves
+                // like ~32 px instead of sub-pixel world units.
+                const float screenSpaceFontSize = text.FontSize * std::max(1.0f, text.CachedFont->GetEmSize());
+                Renderer2D::DrawText(model, text.Text, text.CachedFont, screenSpaceFontSize, text.Color);
+            }
+
+            Renderer2D::EndScene();
+        }
+    }
+
     void SceneRenderer::RenderToViewport(Scene& scene, const Camera& camera,
         const std::shared_ptr<Framebuffer>& framebuffer, uint32_t width, uint32_t height)
     {
@@ -1154,6 +1323,7 @@ namespace Limitless
         renderer.SubmitCommand(std::make_unique<ClearCommand>(clearFlags, 0.12f, 0.12f, 0.14f, 1.0f));
 
         Render(scene, camera);
+        RenderScreenSpaceTextPass(scene, width, height);
 
         renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(nullptr));
     }

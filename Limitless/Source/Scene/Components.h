@@ -63,12 +63,32 @@ namespace Limitless
     /// Renders runtime text using an MSDF atlas generated from the font file path.
     struct TextComponent
     {
+        enum class RenderSpace
+        {
+            World = 0,
+            Screen = 1
+        };
+        enum class ScreenAnchor
+        {
+            Center = 0,
+            TopLeft = 1,
+            TopCenter = 2,
+            TopRight = 3,
+            MiddleLeft = 4,
+            MiddleRight = 5,
+            BottomLeft = 6,
+            BottomCenter = 7,
+            BottomRight = 8
+        };
+
         std::string Text = "Text";
         std::string FontFilePath; ///< Relative or absolute font file path.
         Font::Ptr CachedFont;
         bool FontLoadAttempted = false;
         float FontSize = 32.0f;
         glm::vec4 Color = glm::vec4(1.0f);
+        RenderSpace Space = RenderSpace::World;
+        ScreenAnchor Anchor = ScreenAnchor::Center;
     };
 
     /// Optional material reference (Unity-style).

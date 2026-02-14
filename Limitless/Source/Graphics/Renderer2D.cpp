@@ -216,6 +216,11 @@ namespace Limitless
 
     void Renderer2D::BeginScene(const glm::mat4& viewProjection)
     {
+        BeginScene(viewProjection, true);
+    }
+
+    void Renderer2D::BeginScene(const glm::mat4& viewProjection, bool enableDepthTest)
+    {
         EnsureInitialized();
         if (!g_Data.Initialized)
         {
@@ -234,10 +239,11 @@ namespace Limitless
         g_Data.TextTextureSlotCount = 1;
         g_Data.TextTextureSlots[0] = g_Data.WhiteTexture;
 
-        // Typical 2D defaults: alpha blending on, depth/cull off.
+        // Typical world-space 2D defaults: alpha blending on, cull off.
+        // Keep depth testing enabled so mixed sprite/text content respects Z ordering.
         auto& renderer = Renderer::GetInstance();
         renderer.SubmitCommandArena<SetBlendModeCommand>(BlendFactor::SrcAlpha, BlendFactor::OneMinusSrcAlpha, true);
-        renderer.SubmitCommandArena<SetDepthTestCommand>(false);
+        renderer.SubmitCommandArena<SetDepthTestCommand>(enableDepthTest);
         renderer.SubmitCommandArena<SetCullFaceCommand>(false);
     }
 
