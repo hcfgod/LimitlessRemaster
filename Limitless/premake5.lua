@@ -184,7 +184,8 @@ project "Limitless"
 
         libdirs
         {
-            "/opt/homebrew/lib"
+            "/opt/homebrew/lib",
+            "/usr/local/lib"
         }
 
         links

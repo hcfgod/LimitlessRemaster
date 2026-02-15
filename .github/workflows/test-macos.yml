@@ -15,11 +15,16 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Install SDL3
+    - name: Install macOS dependencies
       run: |
-        brew install sdl3
+        brew install pkg-config sdl3 box2d
         echo "SDL3 installation info:"
         brew list sdl3
+        echo "Box2D installation info:"
+        brew list box2d
+        echo "pkg-config probes:"
+        pkg-config --modversion sdl3
+        pkg-config --modversion box2d
         
     - name: Download premake5
       run: |

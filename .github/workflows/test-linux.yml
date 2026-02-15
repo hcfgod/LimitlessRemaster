@@ -25,6 +25,7 @@ jobs:
         sudo apt-get install -y libdbus-1-dev libudev-dev libibus-1.0-dev
         sudo apt-get install -y libdrm-dev libgbm-dev
         sudo apt-get install -y libwayland-dev libxkbcommon-dev
+        sudo apt-get install -y libbox2d-dev
         
     - name: Install SDL3
       run: |
@@ -47,6 +48,8 @@ jobs:
         
         echo "SDL3 installation info:"
         pkg-config --modversion sdl3 || echo "SDL3 not found by pkg-config"
+        echo "Box2D installation info:"
+        pkg-config --modversion box2d || echo "Box2D not found by pkg-config"
         
     - name: Download premake5
       run: |
