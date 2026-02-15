@@ -73,6 +73,23 @@ namespace Limitless::Project
         float ContactPushSpeed = 8.0f;
     };
 
+    struct Lighting2DSettings final
+    {
+        uint32_t Version = 1;
+        bool Enabled = true;
+        bool EnableNormalMaps = true;
+        bool EnableShadows = true;
+        float AmbientColor[3] = { 0.12f, 0.12f, 0.14f };
+        float AmbientIntensity = 0.6f;
+        int ShadowQualityLevel = 1;
+        int MaxDirectionalLights = 4;
+        int MaxPointLights = 32;
+        int MaxShadowSegments = 128;
+        float ShadowSoftnessScale = 1.0f;
+        float DirectionalShadowBiasScale = 1.0f;
+        int MaxShadowSamplesPerLight = 12;
+    };
+
     [[nodiscard]] std::filesystem::path GetProjectSettingsDirectory(const std::filesystem::path& projectRoot);
 
     [[nodiscard]] std::filesystem::path GetRenderSettingsPath(const std::filesystem::path& projectRoot);
@@ -80,18 +97,21 @@ namespace Limitless::Project
     [[nodiscard]] std::filesystem::path GetInputSettingsPath(const std::filesystem::path& projectRoot);
     [[nodiscard]] std::filesystem::path GetLayersSettingsPath(const std::filesystem::path& projectRoot);
     [[nodiscard]] std::filesystem::path GetPhysics2DSettingsPath(const std::filesystem::path& projectRoot);
+    [[nodiscard]] std::filesystem::path GetLighting2DSettingsPath(const std::filesystem::path& projectRoot);
 
     [[nodiscard]] Result<RenderSettings> LoadRenderSettings(const std::filesystem::path& projectRoot);
     [[nodiscard]] Result<AudioSettings> LoadAudioSettings(const std::filesystem::path& projectRoot);
     [[nodiscard]] Result<InputSettings> LoadInputSettings(const std::filesystem::path& projectRoot);
     [[nodiscard]] Result<LayersSettings> LoadLayersSettings(const std::filesystem::path& projectRoot);
     [[nodiscard]] Result<Physics2DSettings> LoadPhysics2DSettings(const std::filesystem::path& projectRoot);
+    [[nodiscard]] Result<Lighting2DSettings> LoadLighting2DSettings(const std::filesystem::path& projectRoot);
 
     [[nodiscard]] Result<void> SaveRenderSettings(const std::filesystem::path& projectRoot, const RenderSettings& settings);
     [[nodiscard]] Result<void> SaveAudioSettings(const std::filesystem::path& projectRoot, const AudioSettings& settings);
     [[nodiscard]] Result<void> SaveInputSettings(const std::filesystem::path& projectRoot, const InputSettings& settings);
     [[nodiscard]] Result<void> SaveLayersSettings(const std::filesystem::path& projectRoot, const LayersSettings& settings);
     [[nodiscard]] Result<void> SavePhysics2DSettings(const std::filesystem::path& projectRoot, const Physics2DSettings& settings);
+    [[nodiscard]] Result<void> SaveLighting2DSettings(const std::filesystem::path& projectRoot, const Lighting2DSettings& settings);
 
     // Returns a de-duplicated list of additional InputActions keys, merged from canonical and legacy fields.
     [[nodiscard]] std::vector<std::string> CollectAdditionalInputActionsAssetKeys(const InputSettings& settings);

@@ -83,6 +83,8 @@ namespace Limitless
         void PersistProjectSessionState();
         void RefreshProjectPhysics2DSettings();
         void ApplyProjectPhysics2DSettingsToScenes();
+        void RefreshProjectLighting2DSettings();
+        void ApplyProjectLighting2DSettings();
         std::string CreateSceneAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         std::string CreateMaterialAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         std::string CreatePrefabAssetPathForEntity(entt::entity entity, const std::filesystem::path& relativeFolderPath) const;
@@ -163,6 +165,8 @@ namespace Limitless
         EditorProjectSettingsPanel::EditorProjectSettingsPanelState m_ProjectSettingsPanelState;
         Project::Physics2DSettings m_ProjectPhysics2DSettings{};
         bool m_ProjectPhysics2DSettingsLoaded = false;
+        Project::Lighting2DSettings m_ProjectLighting2DSettings{};
+        bool m_ProjectLighting2DSettingsLoaded = false;
 
         std::unordered_map<std::string, Async::Task<Assets::TextureAsset::Ptr>> m_PendingTexturePrewarmTasks;
         std::unordered_map<std::string, Async::Task<Assets::MaterialAsset::Ptr>> m_PendingMaterialPrewarmTasks;

@@ -1,0 +1,6 @@
+{
+    "deps": [],
+    "guid": "308116b6-2ebb-4326-85b9-f401685460ea",
+    "key": "Assets/Shaders/Lighting2D_PointLight.glsl",
+    "type": "Shader"
+}

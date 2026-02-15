@@ -1600,6 +1600,9 @@ namespace Limitless::EditorInspectorPanel
                 const bool hasBoxCollider2DComponent = registry.all_of<BoxCollider2DComponent>(selectedEntity);
                 const bool hasCircleCollider2DComponent = registry.all_of<CircleCollider2DComponent>(selectedEntity);
                 const bool hasJoint2DComponent = registry.all_of<Joint2DComponent>(selectedEntity);
+                const bool hasDirectionalLight2DComponent = registry.all_of<DirectionalLight2DComponent>(selectedEntity);
+                const bool hasPointLight2DComponent = registry.all_of<PointLight2DComponent>(selectedEntity);
+                const bool hasShadowOccluder2DComponent = registry.all_of<ShadowOccluder2DComponent>(selectedEntity);
                 if (hasSpriteComponent)
                     ImGui::BeginDisabled();
 
@@ -1764,6 +1767,57 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 if (hasJoint2DComponent)
+                    ImGui::EndDisabled();
+
+                if (hasDirectionalLight2DComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Directional Light 2D"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add DirectionalLight2D Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<DirectionalLight2DComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<DirectionalLight2DComponent>(selectedEntity);
+                }
+
+                if (hasDirectionalLight2DComponent)
+                    ImGui::EndDisabled();
+
+                if (hasPointLight2DComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Point Light 2D"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add PointLight2D Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<PointLight2DComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<PointLight2DComponent>(selectedEntity);
+                }
+
+                if (hasPointLight2DComponent)
+                    ImGui::EndDisabled();
+
+                if (hasShadowOccluder2DComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Shadow Occluder 2D"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add ShadowOccluder2D Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<ShadowOccluder2DComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<ShadowOccluder2DComponent>(selectedEntity);
+                }
+
+                if (hasShadowOccluder2DComponent)
                     ImGui::EndDisabled();
 
                 ImGui::EndPopup();
@@ -1949,6 +2003,51 @@ namespace Limitless::EditorInspectorPanel
                 else
                 {
                     registry.remove<Joint2DComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveDirectionalLight2DComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove DirectionalLight2D Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<DirectionalLight2DComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<DirectionalLight2DComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemovePointLight2DComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove PointLight2D Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<PointLight2DComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<PointLight2DComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveShadowOccluder2DComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove ShadowOccluder2D Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<ShadowOccluder2DComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<ShadowOccluder2DComponent>(selectedEntity);
                 }
             }
         }

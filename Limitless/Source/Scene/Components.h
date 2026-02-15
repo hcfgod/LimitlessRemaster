@@ -104,6 +104,66 @@ namespace Limitless
         bool MaterialLoadAttempted = false; ///< Prevents per-frame retry/log spam when material is missing
     };
 
+    struct DirectionalLight2DComponent
+    {
+        bool Enabled = true;
+        glm::vec3 Color = glm::vec3(1.0f);
+        float Intensity = 1.0f;
+        bool UseEntityRotation = true;
+        glm::vec2 Direction = glm::vec2(0.0f, -1.0f);
+        bool CastShadows = true;
+        float ShadowStrength = 1.0f;
+        float ShadowSoftness = 1.0f;
+        int ShadowSamples = 8;
+        float ShadowDistance = 25.0f;
+        float ShadowBias = 0.02f;
+
+        // Runtime-only state (not serialized).
+        glm::vec2 RuntimeResolvedDirection = glm::vec2(0.0f, -1.0f);
+    };
+
+    struct PointLight2DComponent
+    {
+        bool Enabled = true;
+        glm::vec3 Color = glm::vec3(1.0f);
+        float Intensity = 1.0f;
+        float Radius = 5.0f;
+        float Falloff = 2.0f;
+        bool CastShadows = true;
+        float ShadowStrength = 1.0f;
+        float ShadowSoftness = 1.0f;
+        int ShadowSamples = 8;
+        float ShadowBias = 0.0015f;
+
+        // Runtime-only state (not serialized).
+        glm::vec2 RuntimeViewportPosition = glm::vec2(0.0f);
+        float RuntimeViewportRadius = 0.0f;
+    };
+
+    struct ShadowOccluder2DComponent
+    {
+        enum class SourceMode
+        {
+            ManualPolygon = 0,
+            PhysicsCollider = 1
+        };
+
+        bool Enabled = true;
+        SourceMode Source = SourceMode::ManualPolygon;
+        bool Closed = true;
+        std::vector<glm::vec2> PolygonPoints = {
+            glm::vec2(-0.5f, -0.5f),
+            glm::vec2(0.5f, -0.5f),
+            glm::vec2(0.5f, 0.5f),
+            glm::vec2(-0.5f, 0.5f)
+        };
+        float Extrusion = 0.0f;
+
+        // Runtime-only state (not serialized).
+        std::vector<glm::vec2> RuntimeResolvedPolygonPoints;
+        uint64_t RuntimeGeometryRevision = 0;
+    };
+
     /// Optional audio source reference (Unity-style).
     /// Supports simple non-spatial clip playback with Play On Start and loop.
     struct AudioSourceComponent

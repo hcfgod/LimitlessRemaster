@@ -3,6 +3,8 @@
 #include "Graphics/Framebuffer.h"
 #include "Graphics/Texture.h"
 
+#include <vector>
+
 #define LT_USE_GLAD
 #ifdef LT_USE_GLAD
 #include <glad/glad.h>
@@ -18,7 +20,9 @@ namespace Limitless
 
         void Bind() const override;
         void Unbind() const override;
-        std::shared_ptr<Texture2D> GetColorAttachment() const override { return m_ColorAttachment; }
+        std::shared_ptr<Texture2D> GetColorAttachment() const override { return GetColorAttachment(0); }
+        std::shared_ptr<Texture2D> GetColorAttachment(uint32_t index) const override;
+        uint32_t GetColorAttachmentCount() const override { return static_cast<uint32_t>(m_ColorAttachments.size()); }
         void Resize(uint32_t width, uint32_t height) override;
 
         uint32_t GetWidth() const override { return m_Width; }
@@ -34,7 +38,7 @@ namespace Limitless
         uint32_t m_Width = 0;
         uint32_t m_Height = 0;
 
-        std::shared_ptr<Texture2D> m_ColorAttachment;
+        std::vector<std::shared_ptr<Texture2D>> m_ColorAttachments;
         GLuint m_DepthAttachment = 0;
     };
 

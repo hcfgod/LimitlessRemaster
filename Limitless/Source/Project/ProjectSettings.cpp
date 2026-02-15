@@ -96,6 +96,11 @@ namespace Limitless::Project
         return GetProjectSettingsDirectory(projectRoot) / "Physics2DSettings.json";
     }
 
+    std::filesystem::path GetLighting2DSettingsPath(const std::filesystem::path& projectRoot)
+    {
+        return GetProjectSettingsDirectory(projectRoot) / "Lighting2DSettings.json";
+    }
+
     static Result<json> TryReadJson(const std::filesystem::path& path)
     {
         if (path.empty() || !std::filesystem::exists(path))
@@ -418,6 +423,55 @@ namespace Limitless::Project
         return s;
     }
 
+    static json Lighting2DSettingsToJson(const Lighting2DSettings& s)
+    {
+        json root;
+        root["version"] = s.Version;
+        root["enabled"] = s.Enabled;
+        root["enableNormalMaps"] = s.EnableNormalMaps;
+        root["enableShadows"] = s.EnableShadows;
+        root["ambientColor"] = { s.AmbientColor[0], s.AmbientColor[1], s.AmbientColor[2] };
+        root["ambientIntensity"] = s.AmbientIntensity;
+        root["shadowQualityLevel"] = s.ShadowQualityLevel;
+        root["maxDirectionalLights"] = s.MaxDirectionalLights;
+        root["maxPointLights"] = s.MaxPointLights;
+        root["maxShadowSegments"] = s.MaxShadowSegments;
+        root["shadowSoftnessScale"] = s.ShadowSoftnessScale;
+        root["directionalShadowBiasScale"] = s.DirectionalShadowBiasScale;
+        root["maxShadowSamplesPerLight"] = s.MaxShadowSamplesPerLight;
+        return root;
+    }
+
+    static Lighting2DSettings Lighting2DSettingsFromJson(const json& root)
+    {
+        Lighting2DSettings s;
+        if (!root.is_object())
+            return s;
+
+        s.Version = root.value("version", 1u);
+        s.Enabled = root.value("enabled", true);
+        s.EnableNormalMaps = root.value("enableNormalMaps", true);
+        s.EnableShadows = root.value("enableShadows", true);
+        if (root.contains("ambientColor") && root["ambientColor"].is_array())
+        {
+            const auto& color = root["ambientColor"];
+            for (int index = 0; index < 3 && index < static_cast<int>(color.size()); ++index)
+            {
+                if (color[index].is_number())
+                    s.AmbientColor[index] = color[index].get<float>();
+            }
+        }
+        s.AmbientIntensity = std::max(0.0f, root.value("ambientIntensity", 0.6f));
+        s.ShadowQualityLevel = std::clamp(root.value("shadowQualityLevel", 1), 0, 2);
+        s.MaxDirectionalLights = std::max(0, root.value("maxDirectionalLights", 4));
+        s.MaxPointLights = std::max(0, root.value("maxPointLights", 32));
+        s.MaxShadowSegments = std::max(1, root.value("maxShadowSegments", 128));
+        s.ShadowSoftnessScale = std::max(0.0f, root.value("shadowSoftnessScale", 1.0f));
+        s.DirectionalShadowBiasScale = std::max(0.0f, root.value("directionalShadowBiasScale", 1.0f));
+        s.MaxShadowSamplesPerLight = std::max(1, root.value("maxShadowSamplesPerLight", 12));
+        return s;
+    }
+
     Result<RenderSettings> LoadRenderSettings(const std::filesystem::path& projectRoot)
     {
         const auto root = TryReadJson(GetRenderSettingsPath(projectRoot));
@@ -468,6 +522,16 @@ namespace Limitless::Project
         return Physics2DSettingsFromJson(root.GetValue());
     }
 
+    Result<Lighting2DSettings> LoadLighting2DSettings(const std::filesystem::path& projectRoot)
+    {
+        const auto root = TryReadJson(GetLighting2DSettingsPath(projectRoot));
+        if (root.IsFailure())
+        {
+            return Result<Lighting2DSettings>(root.GetError());
+        }
+        return Lighting2DSettingsFromJson(root.GetValue());
+    }
+
     Result<void> SaveRenderSettings(const std::filesystem::path& projectRoot, const RenderSettings& settings)
     {
         return AtomicWriteJson(GetRenderSettingsPath(projectRoot), RenderSettingsToJson(settings));
@@ -491,6 +555,11 @@ namespace Limitless::Project
     Result<void> SavePhysics2DSettings(const std::filesystem::path& projectRoot, const Physics2DSettings& settings)
     {
         return AtomicWriteJson(GetPhysics2DSettingsPath(projectRoot), Physics2DSettingsToJson(settings));
+    }
+
+    Result<void> SaveLighting2DSettings(const std::filesystem::path& projectRoot, const Lighting2DSettings& settings)
+    {
+        return AtomicWriteJson(GetLighting2DSettingsPath(projectRoot), Lighting2DSettingsToJson(settings));
     }
 
     std::vector<std::string> CollectAdditionalInputActionsAssetKeys(const InputSettings& settings)

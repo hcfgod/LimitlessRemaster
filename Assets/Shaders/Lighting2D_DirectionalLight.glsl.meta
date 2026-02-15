@@ -1,0 +1,6 @@
+{
+    "deps": [],
+    "guid": "504d10b2-b5d9-49c5-8ca3-db0b574973a7",
+    "key": "Assets/Shaders/Lighting2D_DirectionalLight.glsl",
+    "type": "Shader"
+}

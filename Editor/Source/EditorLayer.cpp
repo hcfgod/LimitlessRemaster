@@ -21,6 +21,7 @@
 #include "Scripting/ScriptCoreModuleRuntime.h"
 #include "Core/Input/InputSystem.h"
 #include "Graphics/Camera/PerspectiveCamera3D.h"
+#include "Graphics/Lighting2DRenderer.h"
 #include "ImGui/ImGuiLayer.h"
 #include "Project/ProjectManager.h"
 #include "Project/ProjectSettings.h"
@@ -502,6 +503,10 @@ namespace Limitless
             m_ProjectPhysics2DSettings = m_ProjectSettingsPanelState.Physics2D;
             m_ProjectPhysics2DSettingsLoaded = true;
             ApplyProjectPhysics2DSettingsToScenes();
+
+            m_ProjectLighting2DSettings = m_ProjectSettingsPanelState.Lighting2D;
+            m_ProjectLighting2DSettingsLoaded = true;
+            ApplyProjectLighting2DSettings();
         }
 
         if (m_PlayModeState == EditorPlayModeState::Play && m_Scene)
@@ -610,6 +615,7 @@ namespace Limitless
             }
 
             RefreshProjectPhysics2DSettings();
+            RefreshProjectLighting2DSettings();
 
             bool loadedScene = false;
             const EditorSessionStateData sessionState = ReadProjectSessionState(projectRoot);
@@ -770,72 +776,85 @@ namespace Limitless
         }
 
         const Physics2DWorld* physicsWorld = m_Scene->GetPhysics2DWorld();
-        if (!physicsWorld)
+        if (physicsWorld)
         {
-            ImGui::TextDisabled("Physics world is not initialized yet.");
-            ImGui::End();
-            return;
-        }
+            const Physics2DDiagnostics& diagnostics = physicsWorld->GetDiagnostics();
+            constexpr float kRecentPeakHoldDurationSeconds = 0.35f;
+            const float frameDeltaSeconds = std::max(0.0f, ImGui::GetIO().DeltaTime);
 
-        const Physics2DDiagnostics& diagnostics = physicsWorld->GetDiagnostics();
-        constexpr float kRecentPeakHoldDurationSeconds = 0.35f;
-        const float frameDeltaSeconds = std::max(0.0f, ImGui::GetIO().DeltaTime);
-
-        if (diagnostics.ContactPairCount > 0 || diagnostics.PenetratingContactPointCount > 0 || diagnostics.MaxPenetrationDepth > 0.0f)
-        {
-            m_PhysicsDiagnosticsRecentPeakContactPairs =
-                std::max(m_PhysicsDiagnosticsRecentPeakContactPairs, diagnostics.ContactPairCount);
-            m_PhysicsDiagnosticsRecentPeakPenetratingPoints =
-                std::max(m_PhysicsDiagnosticsRecentPeakPenetratingPoints, diagnostics.PenetratingContactPointCount);
-            m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth =
-                std::max(m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth, diagnostics.MaxPenetrationDepth);
-            m_PhysicsDiagnosticsRecentPeakHoldSeconds = kRecentPeakHoldDurationSeconds;
-        }
-        else if (m_PhysicsDiagnosticsRecentPeakHoldSeconds > 0.0f)
-        {
-            m_PhysicsDiagnosticsRecentPeakHoldSeconds =
-                std::max(0.0f, m_PhysicsDiagnosticsRecentPeakHoldSeconds - frameDeltaSeconds);
-            if (m_PhysicsDiagnosticsRecentPeakHoldSeconds <= 0.0f)
+            if (diagnostics.ContactPairCount > 0 || diagnostics.PenetratingContactPointCount > 0 || diagnostics.MaxPenetrationDepth > 0.0f)
             {
-                m_PhysicsDiagnosticsRecentPeakContactPairs = diagnostics.ContactPairCount;
-                m_PhysicsDiagnosticsRecentPeakPenetratingPoints = diagnostics.PenetratingContactPointCount;
-                m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth = diagnostics.MaxPenetrationDepth;
+                m_PhysicsDiagnosticsRecentPeakContactPairs =
+                    std::max(m_PhysicsDiagnosticsRecentPeakContactPairs, diagnostics.ContactPairCount);
+                m_PhysicsDiagnosticsRecentPeakPenetratingPoints =
+                    std::max(m_PhysicsDiagnosticsRecentPeakPenetratingPoints, diagnostics.PenetratingContactPointCount);
+                m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth =
+                    std::max(m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth, diagnostics.MaxPenetrationDepth);
+                m_PhysicsDiagnosticsRecentPeakHoldSeconds = kRecentPeakHoldDurationSeconds;
             }
-        }
-
-        ImGui::Text("Bodies: %d (Awake: %d, Sleeping: %d)", diagnostics.BodyCount, diagnostics.AwakeBodyCount, diagnostics.SleepingBodyCount);
-        ImGui::Text("Contact Pairs: %d", diagnostics.ContactPairCount);
-        ImGui::Text("Penetrating Points: %d", diagnostics.PenetratingContactPointCount);
-        ImGui::Text("Max Penetration Depth: %.5f", diagnostics.MaxPenetrationDepth);
-        ImGui::TextDisabled("Recent Peak (%.2fs): contacts=%d, penetrating=%d, maxDepth=%.5f",
-                            kRecentPeakHoldDurationSeconds,
-                            m_PhysicsDiagnosticsRecentPeakContactPairs,
-                            m_PhysicsDiagnosticsRecentPeakPenetratingPoints,
-                            m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth);
-        ImGui::Separator();
-
-        if (m_SelectedEntity != entt::null)
-        {
-            Physics2DBodyDiagnostics bodyDiagnostics{};
-            if (physicsWorld->TryGetBodyDiagnostics(m_SelectedEntity, bodyDiagnostics))
+            else if (m_PhysicsDiagnosticsRecentPeakHoldSeconds > 0.0f)
             {
-                ImGui::TextDisabled("Selected Body");
-                ImGui::Text("Awake: %s", bodyDiagnostics.IsAwake ? "Yes" : "No");
-                ImGui::Text("Contact Pairs: %d", bodyDiagnostics.ContactPairCount);
-                ImGui::Text("Penetrating Points: %d", bodyDiagnostics.PenetratingContactPointCount);
-                ImGui::Text("Max Penetration Depth: %.5f", bodyDiagnostics.MaxPenetrationDepth);
+                m_PhysicsDiagnosticsRecentPeakHoldSeconds =
+                    std::max(0.0f, m_PhysicsDiagnosticsRecentPeakHoldSeconds - frameDeltaSeconds);
+                if (m_PhysicsDiagnosticsRecentPeakHoldSeconds <= 0.0f)
+                {
+                    m_PhysicsDiagnosticsRecentPeakContactPairs = diagnostics.ContactPairCount;
+                    m_PhysicsDiagnosticsRecentPeakPenetratingPoints = diagnostics.PenetratingContactPointCount;
+                    m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth = diagnostics.MaxPenetrationDepth;
+                }
+            }
+
+            ImGui::Text("Bodies: %d (Awake: %d, Sleeping: %d)", diagnostics.BodyCount, diagnostics.AwakeBodyCount, diagnostics.SleepingBodyCount);
+            ImGui::Text("Contact Pairs: %d", diagnostics.ContactPairCount);
+            ImGui::Text("Penetrating Points: %d", diagnostics.PenetratingContactPointCount);
+            ImGui::Text("Max Penetration Depth: %.5f", diagnostics.MaxPenetrationDepth);
+            ImGui::TextDisabled("Recent Peak (%.2fs): contacts=%d, penetrating=%d, maxDepth=%.5f",
+                                kRecentPeakHoldDurationSeconds,
+                                m_PhysicsDiagnosticsRecentPeakContactPairs,
+                                m_PhysicsDiagnosticsRecentPeakPenetratingPoints,
+                                m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth);
+            ImGui::Separator();
+
+            if (m_SelectedEntity != entt::null)
+            {
+                Physics2DBodyDiagnostics bodyDiagnostics{};
+                if (physicsWorld->TryGetBodyDiagnostics(m_SelectedEntity, bodyDiagnostics))
+                {
+                    ImGui::TextDisabled("Selected Body");
+                    ImGui::Text("Awake: %s", bodyDiagnostics.IsAwake ? "Yes" : "No");
+                    ImGui::Text("Contact Pairs: %d", bodyDiagnostics.ContactPairCount);
+                    ImGui::Text("Penetrating Points: %d", bodyDiagnostics.PenetratingContactPointCount);
+                    ImGui::Text("Max Penetration Depth: %.5f", bodyDiagnostics.MaxPenetrationDepth);
+                }
+                else
+                {
+                    ImGui::TextDisabled("Selected entity has no active Rigidbody2D diagnostics.");
+                }
             }
             else
             {
-                ImGui::TextDisabled("Selected entity has no active Rigidbody2D diagnostics.");
+                ImGui::TextDisabled("Select an entity to inspect per-body sleep/contact state.");
             }
+
+            ImGui::TextWrapped("Tip: if contacts and penetration are stable but motion appears jittery, it is usually render sampling rather than solver instability.");
+            ImGui::Separator();
         }
         else
         {
-            ImGui::TextDisabled("Select an entity to inspect per-body sleep/contact state.");
+            ImGui::TextDisabled("Physics world is not initialized yet.");
+            ImGui::Separator();
         }
 
-        ImGui::TextWrapped("Tip: if contacts and penetration are stable but motion appears jittery, it is usually render sampling rather than solver instability.");
+        const Lighting2DDiagnostics& lightingDiagnostics = Lighting2DRenderer::GetDiagnostics();
+        ImGui::TextDisabled("Lighting 2D");
+        ImGui::Text("Path Active: %s", lightingDiagnostics.UsingLightingPath ? "Yes" : "No");
+        ImGui::Text("Directional Lights: %u", lightingDiagnostics.DirectionalLightsRendered);
+        ImGui::Text("Point Lights: %u", lightingDiagnostics.PointLightsRendered);
+        ImGui::Text("Shadow Occluders: %u", lightingDiagnostics.ShadowOccluderCount);
+        ImGui::Text("Shadow Segments: %u", lightingDiagnostics.ShadowSegmentCount);
+        ImGui::Text("CPU Build: %.3f ms | Submit: %.3f ms",
+                    lightingDiagnostics.CpuBuildTimeMs,
+                    lightingDiagnostics.CpuSubmitTimeMs);
         ImGui::End();
     }
 
@@ -1711,6 +1730,27 @@ namespace Limitless
         }
     }
 
+    void EditorLayer::RefreshProjectLighting2DSettings()
+    {
+        const auto& pm = Project::ProjectManager::GetInstance();
+        if (!pm.HasOpenProject())
+            return;
+
+        const auto lightingSettingsResult = Project::LoadLighting2DSettings(pm.GetProjectRoot());
+        if (lightingSettingsResult.IsSuccess())
+        {
+            m_ProjectLighting2DSettings = lightingSettingsResult.GetValue();
+            m_ProjectLighting2DSettingsLoaded = true;
+            m_ProjectSettingsPanelState.Lighting2D = m_ProjectLighting2DSettings;
+            ApplyProjectLighting2DSettings();
+        }
+        else
+        {
+            LT_WARN("Failed to load project lighting settings: {}", lightingSettingsResult.GetError().GetErrorMessage());
+            m_ProjectLighting2DSettingsLoaded = false;
+        }
+    }
+
     void EditorLayer::ApplyProjectPhysics2DSettingsToScenes()
     {
         if (!m_ProjectPhysics2DSettingsLoaded)
@@ -1731,6 +1771,30 @@ namespace Limitless
             m_Scene->SetPhysics2DSettings(runtimeSettings);
         if (m_EditSceneStored)
             m_EditSceneStored->SetPhysics2DSettings(runtimeSettings);
+    }
+
+    void EditorLayer::ApplyProjectLighting2DSettings()
+    {
+        if (!m_ProjectLighting2DSettingsLoaded)
+            return;
+
+        Lighting2DSettings runtimeSettings{};
+        runtimeSettings.Enabled = m_ProjectLighting2DSettings.Enabled;
+        runtimeSettings.EnableNormalMaps = m_ProjectLighting2DSettings.EnableNormalMaps;
+        runtimeSettings.EnableShadows = m_ProjectLighting2DSettings.EnableShadows;
+        runtimeSettings.AmbientColor = glm::vec3(
+            m_ProjectLighting2DSettings.AmbientColor[0],
+            m_ProjectLighting2DSettings.AmbientColor[1],
+            m_ProjectLighting2DSettings.AmbientColor[2]);
+        runtimeSettings.AmbientIntensity = m_ProjectLighting2DSettings.AmbientIntensity;
+        runtimeSettings.ShadowQualityLevel = std::clamp(m_ProjectLighting2DSettings.ShadowQualityLevel, 0, 2);
+        runtimeSettings.MaxDirectionalLights = std::max(0, m_ProjectLighting2DSettings.MaxDirectionalLights);
+        runtimeSettings.MaxPointLights = std::max(0, m_ProjectLighting2DSettings.MaxPointLights);
+        runtimeSettings.MaxShadowSegments = std::max(1, m_ProjectLighting2DSettings.MaxShadowSegments);
+        runtimeSettings.ShadowSoftnessScale = std::max(0.0f, m_ProjectLighting2DSettings.ShadowSoftnessScale);
+        runtimeSettings.DirectionalShadowBiasScale = std::max(0.0f, m_ProjectLighting2DSettings.DirectionalShadowBiasScale);
+        runtimeSettings.MaxShadowSamplesPerLight = std::max(1, m_ProjectLighting2DSettings.MaxShadowSamplesPerLight);
+        Lighting2DRenderer::SetSettings(runtimeSettings);
     }
 
     void EditorLayer::QueueSceneAssetPrewarm()

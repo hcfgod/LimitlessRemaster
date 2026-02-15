@@ -7,6 +7,8 @@
 #include "Core/Debug/Log.h"
 
 #include <cassert>
+#include <algorithm>
+#include <array>
 
 namespace Limitless
 {
@@ -94,10 +96,22 @@ namespace Limitless
     {
         // Direct creation: we are already on the render thread (called from Framebuffer::Create).
         // Texture2D::CreateForRenderTarget would deadlock (SubmitResourceAndWait from render thread).
-        m_ColorAttachment = std::make_shared<OpenGLTexture2D>(m_Width, m_Height);
-        const auto* glTexture = static_cast<const OpenGLTexture2D*>(m_ColorAttachment.get());
+        m_ColorAttachments.clear();
+        m_ColorAttachments.reserve(m_Specification.ColorAttachmentCount);
 
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, glTexture->GetRendererID(), 0);
+        std::array<GLenum, 8> drawBuffers{};
+        const uint32_t colorAttachmentCount = std::min<uint32_t>(m_Specification.ColorAttachmentCount, static_cast<uint32_t>(drawBuffers.size()));
+        for (uint32_t index = 0; index < colorAttachmentCount; ++index)
+        {
+            auto colorAttachment = std::make_shared<OpenGLTexture2D>(m_Width, m_Height);
+            const auto* glTexture = static_cast<const OpenGLTexture2D*>(colorAttachment.get());
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index, GL_TEXTURE_2D, glTexture->GetRendererID(), 0);
+            m_ColorAttachments.push_back(std::move(colorAttachment));
+            drawBuffers[index] = GL_COLOR_ATTACHMENT0 + index;
+        }
+
+        if (!m_ColorAttachments.empty())
+            glDrawBuffers(static_cast<GLsizei>(m_ColorAttachments.size()), drawBuffers.data());
 
         if (m_Specification.DepthAttachment)
         {
@@ -134,14 +148,61 @@ namespace Limitless
 
     void OpenGLFramebuffer::Resize(uint32_t width, uint32_t height)
     {
-        if (width == m_Width && height == m_Height)
+        if (width == 0 || height == 0)
         {
+            LT_CORE_WARN("OpenGLFramebuffer::Resize ignored invalid size {}x{}", width, height);
             return;
         }
-        m_Width = width;
-        m_Height = height;
-        m_Specification.Width = width;
-        m_Specification.Height = height;
-        Invalidate();
+
+        auto resizeOnPrimaryContext = [this, width, height](GraphicsContext*) {
+            uint32_t targetWidth = width;
+            uint32_t targetHeight = height;
+
+            GLint maxRenderbufferSize = 0;
+            glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &maxRenderbufferSize);
+            if (maxRenderbufferSize > 0)
+            {
+                const uint32_t maxSize = static_cast<uint32_t>(maxRenderbufferSize);
+                const uint32_t clampedWidth = std::min(targetWidth, maxSize);
+                const uint32_t clampedHeight = std::min(targetHeight, maxSize);
+                if (clampedWidth != targetWidth || clampedHeight != targetHeight)
+                {
+                    LT_CORE_WARN("OpenGLFramebuffer::Resize clamped {}x{} to {}x{} (GL_MAX_RENDERBUFFER_SIZE={})",
+                                 targetWidth,
+                                 targetHeight,
+                                 clampedWidth,
+                                 clampedHeight,
+                                 maxRenderbufferSize);
+                    targetWidth = clampedWidth;
+                    targetHeight = clampedHeight;
+                }
+            }
+
+            if (targetWidth == m_Width && targetHeight == m_Height)
+                return;
+
+            m_Width = targetWidth;
+            m_Height = targetHeight;
+            m_Specification.Width = targetWidth;
+            m_Specification.Height = targetHeight;
+            Invalidate();
+        };
+
+        auto& renderer = Renderer::GetInstance();
+        if (renderer.IsInitialized())
+        {
+            renderer.SubmitPrimaryResourceAndWait("OpenGLFramebuffer/Resize", resizeOnPrimaryContext);
+            return;
+        }
+
+        // Single-thread fallback for very early startup paths before renderer init.
+        resizeOnPrimaryContext(nullptr);
+    }
+
+    std::shared_ptr<Texture2D> OpenGLFramebuffer::GetColorAttachment(uint32_t index) const
+    {
+        if (index >= m_ColorAttachments.size())
+            return nullptr;
+        return m_ColorAttachments[index];
     }
 } // namespace Limitless

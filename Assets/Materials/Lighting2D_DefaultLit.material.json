@@ -1,0 +1,12 @@
+{
+  "shader": {
+    "key": "Assets/Shaders/Renderer2D_TexturedQuad.glsl"
+  },
+  "normalStrength": 1.0,
+  "roughness": 0.5,
+  "specularIntensity": 0.5,
+  "textureSlots": {
+    "normal": {}
+  }
+}
+

@@ -22,6 +22,9 @@ namespace Limitless::EditorInspectorPanel
         bool RemoveBoxCollider2DComponent = false;
         bool RemoveCircleCollider2DComponent = false;
         bool RemoveJoint2DComponent = false;
+        bool RemoveDirectionalLight2DComponent = false;
+        bool RemovePointLight2DComponent = false;
+        bool RemoveShadowOccluder2DComponent = false;
     };
 
     void DrawStandardEntityComponentSections(entt::registry& registry,

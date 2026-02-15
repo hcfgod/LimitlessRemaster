@@ -71,6 +71,26 @@ namespace Limitless::EditorPrefabSystem
                     destinationMaterial.MaterialLoadAttempted = false;
                 }
 
+                if (const auto* sourceDirectionalLight = sourceRegistry.try_get<DirectionalLight2DComponent>(sourceEntity))
+                {
+                    auto& destinationDirectionalLight = destinationRegistry.emplace<DirectionalLight2DComponent>(destinationEntity, *sourceDirectionalLight);
+                    destinationDirectionalLight.RuntimeResolvedDirection = glm::vec2(0.0f, -1.0f);
+                }
+
+                if (const auto* sourcePointLight = sourceRegistry.try_get<PointLight2DComponent>(sourceEntity))
+                {
+                    auto& destinationPointLight = destinationRegistry.emplace<PointLight2DComponent>(destinationEntity, *sourcePointLight);
+                    destinationPointLight.RuntimeViewportPosition = glm::vec2(0.0f);
+                    destinationPointLight.RuntimeViewportRadius = 0.0f;
+                }
+
+                if (const auto* sourceShadowOccluder = sourceRegistry.try_get<ShadowOccluder2DComponent>(sourceEntity))
+                {
+                    auto& destinationShadowOccluder = destinationRegistry.emplace<ShadowOccluder2DComponent>(destinationEntity, *sourceShadowOccluder);
+                    destinationShadowOccluder.RuntimeResolvedPolygonPoints.clear();
+                    destinationShadowOccluder.RuntimeGeometryRevision = 0;
+                }
+
                 if (const auto* sourceText = sourceRegistry.try_get<TextComponent>(sourceEntity))
                 {
                     auto& destinationText = destinationRegistry.emplace<TextComponent>(destinationEntity);

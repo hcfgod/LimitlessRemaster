@@ -1,0 +1,6 @@
+{
+    "deps": [],
+    "guid": "b8c84fdd-8a87-43db-b222-75621a6b90a2",
+    "key": "Assets/Shaders/Lighting2D_GBufferNormalPass.glsl",
+    "type": "Shader"
+}

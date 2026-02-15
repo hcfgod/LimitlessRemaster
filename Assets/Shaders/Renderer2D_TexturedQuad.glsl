@@ -39,7 +39,8 @@ void main()
     // Note: Some GLSL 330 toolchains/drivers are picky about dynamically indexing sampler arrays.
     // Keep it explicit and branch to a constant index.
     vec4 texColor = vec4(1.0);
-    if (v_TexIndex == 0) texColor = texture(u_Textures[0], v_UV);
+    // Slot 0 is reserved for color-only quads. Do not sample a texture for this path.
+    if (v_TexIndex == 0) texColor = vec4(1.0);
     else if (v_TexIndex == 1) texColor = texture(u_Textures[1], v_UV);
     else if (v_TexIndex == 2) texColor = texture(u_Textures[2], v_UV);
     else if (v_TexIndex == 3) texColor = texture(u_Textures[3], v_UV);

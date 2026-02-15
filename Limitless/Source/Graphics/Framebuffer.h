@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <future>
 #include <memory>
+#include <vector>
 
 namespace Limitless
 {
@@ -19,6 +20,9 @@ namespace Limitless
 
         /// Number of samples for MSAA. 0 or 1 = no MSAA.
         uint32_t Samples = 1;
+
+        /// Number of color attachments to create.
+        uint32_t ColorAttachmentCount = 1;
 
         /// If true, creates a depth attachment (24-bit depth renderbuffer).
         bool DepthAttachment = true;
@@ -47,6 +51,12 @@ namespace Limitless
 
         /// Get the color attachment texture (slot 0). For use with ImGui::Image, etc.
         virtual std::shared_ptr<Texture2D> GetColorAttachment() const = 0;
+
+        /// Get a color attachment texture by index.
+        virtual std::shared_ptr<Texture2D> GetColorAttachment(uint32_t index) const = 0;
+
+        /// Returns number of color attachments.
+        virtual uint32_t GetColorAttachmentCount() const = 0;
 
         /// Resize the framebuffer. Invalidates attachments; they are recreated.
         virtual void Resize(uint32_t width, uint32_t height) = 0;

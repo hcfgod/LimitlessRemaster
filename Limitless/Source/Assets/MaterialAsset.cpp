@@ -15,6 +15,7 @@
 #include "Graphics/RenderCommand.h"
 #include "Graphics/Renderer.h"
 
+#include <algorithm>
 #include <fstream>
 #include <mutex>
 #include <sstream>
@@ -202,6 +203,85 @@ namespace Limitless::Assets
         return std::shared_ptr<TextureAsset>();
     }
 
+    static Result<std::shared_ptr<TextureAsset>> ResolveTextureAssetFromReference(const json& ref)
+    {
+        const bool hasKey = ref.is_object() && ref.contains("key") && ref["key"].is_string();
+        const std::string keyFromRef = hasKey ? ref["key"].get<std::string>() : std::string{};
+
+        if (ref.is_object() && ref.contains("guid") && ref["guid"].is_string())
+        {
+            const std::string guid = ref["guid"].get<std::string>();
+            if (guid.empty())
+            {
+                if (!keyFromRef.empty())
+                {
+                    auto textureFromKey = AssetManager::LoadBlocking<TextureAsset>(keyFromRef);
+                    if (textureFromKey)
+                        return textureFromKey;
+                }
+                return std::shared_ptr<TextureAsset>();
+            }
+
+            if (auto cached = AssetManager::GetByGuid<TextureAsset>(guid))
+            {
+                return cached;
+            }
+
+            const auto rec = AssetDatabase::GetInstance().FindByGuid(guid);
+            if (rec.IsSuccess())
+            {
+                return AssetManager::LoadBlocking<TextureAsset>(rec.GetValue().Key);
+            }
+
+            auto& bundle = AssetBundle::GetInstance();
+            if (bundle.IsEnabled() && bundle.IsLoaded())
+            {
+                const auto keyOpt = bundle.FindKeyByGuid(guid);
+                if (keyOpt.has_value())
+                {
+                    return AssetManager::LoadBlocking<TextureAsset>(*keyOpt);
+                }
+            }
+
+            if (!keyFromRef.empty())
+            {
+                auto textureFromKey = AssetManager::LoadBlocking<TextureAsset>(keyFromRef);
+                if (textureFromKey)
+                    return textureFromKey;
+            }
+            return std::shared_ptr<TextureAsset>();
+        }
+
+        if (hasKey)
+        {
+            auto textureFromKey = AssetManager::LoadBlocking<TextureAsset>(keyFromRef);
+            if (textureFromKey)
+                return textureFromKey;
+            return std::shared_ptr<TextureAsset>();
+        }
+
+        return std::shared_ptr<TextureAsset>();
+    }
+
+    static Result<std::shared_ptr<TextureAsset>> ResolveNormalTextureAsset(const json& root)
+    {
+        if (root.contains("normalTexture"))
+            return ResolveTextureAssetFromReference(root["normalTexture"]);
+
+        if (root.contains("textureSlots") && root["textureSlots"].is_object())
+        {
+            const auto& slots = root["textureSlots"];
+            if (slots.contains("normal") && slots["normal"].is_object())
+            {
+                const auto& normalSlot = slots["normal"];
+                if (normalSlot.contains("texture"))
+                    return ResolveTextureAssetFromReference(normalSlot["texture"]);
+            }
+        }
+
+        return std::shared_ptr<TextureAsset>();
+    }
+
     static Result<TextureSpecification> ParseTextureSpecificationOverride(const json& root)
     {
         if (!root.contains("mainTextureSpec"))
@@ -350,6 +430,8 @@ namespace Limitless::Assets
             deps.push_back(m_Shader.GetGuid());
             if (!m_MainTexture.GetGuid().empty())
                 deps.push_back(m_MainTexture.GetGuid());
+            if (!m_NormalTexture.GetGuid().empty())
+                deps.push_back(m_NormalTexture.GetGuid());
             (void)AssetDatabase::GetInstance().SetDependencies(GetGuid(), deps);
         };
 
@@ -389,11 +471,24 @@ namespace Limitless::Assets
                         return false;
                     }
 
+                    const auto normalTexAssetResult = ResolveNormalTextureAsset(root);
+                    if (normalTexAssetResult.IsFailure())
+                    {
+                        LT_CORE_ERROR("MaterialAsset: {}", normalTexAssetResult.GetError().GetErrorMessage());
+                        return false;
+                    }
+
                     m_ShaderResolved = shaderAssetResult.GetValue();
                     m_MainTextureResolved = texAssetResult.GetValue();
+                    m_NormalTextureResolved = normalTexAssetResult.GetValue();
 
                     m_Shader = m_ShaderResolved ? AssetHandle<ShaderAsset>(m_ShaderResolved) : AssetHandle<ShaderAsset>();
                     m_MainTexture = m_MainTextureResolved ? AssetHandle<TextureAsset>(m_MainTextureResolved) : AssetHandle<TextureAsset>();
+                    m_NormalTexture = m_NormalTextureResolved ? AssetHandle<TextureAsset>(m_NormalTextureResolved) : AssetHandle<TextureAsset>();
+
+                    m_NormalStrength = std::clamp(root.value("normalStrength", 1.0f), 0.0f, 8.0f);
+                    m_Roughness = std::clamp(root.value("roughness", 0.5f), 0.0f, 1.0f);
+                    m_SpecularIntensity = std::clamp(root.value("specularIntensity", root.value("specular", 0.5f)), 0.0f, 8.0f);
 
                     const auto specOverride = ParseTextureSpecificationOverride(root);
                     if (specOverride.IsSuccess())
@@ -459,11 +554,24 @@ namespace Limitless::Assets
             return false;
         }
 
+        const auto normalTexAssetResult = ResolveNormalTextureAsset(root);
+        if (normalTexAssetResult.IsFailure())
+        {
+            LT_CORE_ERROR("MaterialAsset: {}", normalTexAssetResult.GetError().GetErrorMessage());
+            return false;
+        }
+
         m_ShaderResolved = shaderAssetResult.GetValue();
         m_MainTextureResolved = texAssetResult.GetValue();
+        m_NormalTextureResolved = normalTexAssetResult.GetValue();
 
         m_Shader = m_ShaderResolved ? AssetHandle<ShaderAsset>(m_ShaderResolved) : AssetHandle<ShaderAsset>();
         m_MainTexture = m_MainTextureResolved ? AssetHandle<TextureAsset>(m_MainTextureResolved) : AssetHandle<TextureAsset>();
+        m_NormalTexture = m_NormalTextureResolved ? AssetHandle<TextureAsset>(m_NormalTextureResolved) : AssetHandle<TextureAsset>();
+
+        m_NormalStrength = std::clamp(root.value("normalStrength", 1.0f), 0.0f, 8.0f);
+        m_Roughness = std::clamp(root.value("roughness", 0.5f), 0.0f, 1.0f);
+        m_SpecularIntensity = std::clamp(root.value("specularIntensity", root.value("specular", 0.5f)), 0.0f, 8.0f);
 
         const auto specOverride = ParseTextureSpecificationOverride(root);
         if (specOverride.IsSuccess())
@@ -507,6 +615,16 @@ namespace Limitless::Assets
         return texAsset ? texAsset->GetTexture() : nullptr;
     }
 
+    std::shared_ptr<Texture2D> MaterialAsset::GetNormalTexture() const
+    {
+        auto texAsset = m_NormalTextureResolved ? m_NormalTextureResolved : m_NormalTexture.Lock();
+        if (texAsset && !m_NormalTextureResolved)
+        {
+            m_NormalTextureResolved = texAsset;
+        }
+        return texAsset ? texAsset->GetTexture() : nullptr;
+    }
+
     void MaterialAsset::SubmitBind(Limitless::Renderer& renderer, const glm::mat4& viewProjection, const glm::mat4& model) const
     {
         auto shader = GetShader();
@@ -527,6 +645,9 @@ namespace Limitless::Assets
             }
             renderer.SubmitCommand(std::make_unique<BindTextureCommand>(tex, 0));
         }
+
+        if (auto normalTexture = GetNormalTexture())
+            renderer.SubmitCommand(std::make_unique<BindTextureCommand>(normalTexture, 1));
     }
 }
 

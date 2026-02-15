@@ -10,6 +10,7 @@ namespace Limitless
     std::shared_ptr<Framebuffer> Framebuffer::Create(const FramebufferSpecification& specification)
     {
         LT_VERIFY(specification.Width > 0 && specification.Height > 0, "Framebuffer dimensions must be non-zero");
+        LT_VERIFY(specification.ColorAttachmentCount > 0, "Framebuffer must have at least one color attachment");
 
         auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
         switch (api)
@@ -30,6 +31,7 @@ namespace Limitless
     std::future<std::shared_ptr<Framebuffer>> Framebuffer::CreateAsync(const FramebufferSpecification& specification)
     {
         LT_VERIFY(specification.Width > 0 && specification.Height > 0, "Framebuffer dimensions must be non-zero");
+        LT_VERIFY(specification.ColorAttachmentCount > 0, "Framebuffer must have at least one color attachment");
 
         auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
         switch (api)

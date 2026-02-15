@@ -46,9 +46,14 @@ namespace Limitless::Assets
         // Resolved runtime resources (may be null until loaded).
         std::shared_ptr<Shader> GetShader() const;
         std::shared_ptr<Texture2D> GetMainTexture() const;
+        std::shared_ptr<Texture2D> GetNormalTexture() const;
 
         const AssetHandle<ShaderAsset>& GetShaderHandle() const { return m_Shader; }
         const AssetHandle<TextureAsset>& GetMainTextureHandle() const { return m_MainTexture; }
+        const AssetHandle<TextureAsset>& GetNormalTextureHandle() const { return m_NormalTexture; }
+        float GetNormalStrength() const { return m_NormalStrength; }
+        float GetRoughness() const { return m_Roughness; }
+        float GetSpecularIntensity() const { return m_SpecularIntensity; }
 
         // Submit material binds to render command stream.
         void SubmitBind(Limitless::Renderer& renderer, const glm::mat4& viewProjection, const glm::mat4& model) const;
@@ -67,14 +72,20 @@ namespace Limitless::Assets
 
         AssetHandle<ShaderAsset> m_Shader;
         AssetHandle<TextureAsset> m_MainTexture;
+        AssetHandle<TextureAsset> m_NormalTexture;
 
         bool m_HasMainTextureSpecOverride = false;
         TextureSpecification m_MainTextureSpecOverride{};
+
+        float m_NormalStrength = 1.0f;
+        float m_Roughness = 0.5f;
+        float m_SpecularIntensity = 0.5f;
 
         // Strong refs keep dependencies alive while the material is alive.
         // (AssetManager cache is weak by design.)
         mutable std::shared_ptr<ShaderAsset> m_ShaderResolved;
         mutable std::shared_ptr<TextureAsset> m_MainTextureResolved;
+        mutable std::shared_ptr<TextureAsset> m_NormalTextureResolved;
 
         std::string m_ResolvedPath;
     };

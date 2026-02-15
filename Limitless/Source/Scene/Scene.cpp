@@ -9,6 +9,7 @@
 #include "Assets/TextureAsset.h"
 #include "Graphics/Camera/Camera.h"
 #include "Graphics/Framebuffer.h"
+#include "Graphics/Lighting2DRenderer.h"
 #include "Graphics/RenderCommand.h"
 #include "Graphics/Renderer.h"
 #include "Graphics/Renderer2D.h"
@@ -755,6 +756,26 @@ namespace Limitless
                 destinationMaterial.MaterialLoadAttempted = false;
             }
 
+            if (const auto* directionalLight = sourceRegistry.try_get<DirectionalLight2DComponent>(sourceEntity))
+            {
+                auto& destinationDirectionalLight = destinationRegistry.emplace<DirectionalLight2DComponent>(destinationEntity, *directionalLight);
+                destinationDirectionalLight.RuntimeResolvedDirection = glm::vec2(0.0f, -1.0f);
+            }
+
+            if (const auto* pointLight = sourceRegistry.try_get<PointLight2DComponent>(sourceEntity))
+            {
+                auto& destinationPointLight = destinationRegistry.emplace<PointLight2DComponent>(destinationEntity, *pointLight);
+                destinationPointLight.RuntimeViewportPosition = glm::vec2(0.0f);
+                destinationPointLight.RuntimeViewportRadius = 0.0f;
+            }
+
+            if (const auto* shadowOccluder = sourceRegistry.try_get<ShadowOccluder2DComponent>(sourceEntity))
+            {
+                auto& destinationShadowOccluder = destinationRegistry.emplace<ShadowOccluder2DComponent>(destinationEntity, *shadowOccluder);
+                destinationShadowOccluder.RuntimeResolvedPolygonPoints.clear();
+                destinationShadowOccluder.RuntimeGeometryRevision = 0;
+            }
+
             if (const auto* text = sourceRegistry.try_get<TextComponent>(sourceEntity))
             {
                 auto& destinationText = destinationRegistry.emplace<TextComponent>(destinationEntity);
@@ -919,7 +940,7 @@ namespace Limitless
             indexByEntity.emplace(entities[index], static_cast<int32_t>(index));
 
         nlohmann::json root = nlohmann::json::object();
-        root["Version"] = 7;
+        root["Version"] = 8;
         if (m_EditorCameraBookmark.has_value())
         {
             root["EditorCamera"] = {
@@ -979,6 +1000,58 @@ namespace Limitless
             if (const auto* material = m_Registry.try_get<MaterialComponent>(entity))
             {
                 entry["Material"] = MakeAssetReferenceJson(material->MaterialKey, Assets::AssetType::Material);
+            }
+
+            if (const auto* directionalLight = m_Registry.try_get<DirectionalLight2DComponent>(entity))
+            {
+                entry["DirectionalLight2D"] = {
+                    { "Enabled", directionalLight->Enabled },
+                    { "Color", { directionalLight->Color.r, directionalLight->Color.g, directionalLight->Color.b } },
+                    { "Intensity", directionalLight->Intensity },
+                    { "UseEntityRotation", directionalLight->UseEntityRotation },
+                    { "Direction", { directionalLight->Direction.x, directionalLight->Direction.y } },
+                    { "CastShadows", directionalLight->CastShadows },
+                    { "ShadowStrength", directionalLight->ShadowStrength },
+                    { "ShadowSoftness", directionalLight->ShadowSoftness },
+                    { "ShadowSamples", directionalLight->ShadowSamples },
+                    { "ShadowDistance", directionalLight->ShadowDistance },
+                    { "ShadowBias", directionalLight->ShadowBias }
+                };
+            }
+
+            if (const auto* pointLight = m_Registry.try_get<PointLight2DComponent>(entity))
+            {
+                entry["PointLight2D"] = {
+                    { "Enabled", pointLight->Enabled },
+                    { "Color", { pointLight->Color.r, pointLight->Color.g, pointLight->Color.b } },
+                    { "Intensity", pointLight->Intensity },
+                    { "Radius", pointLight->Radius },
+                    { "Falloff", pointLight->Falloff },
+                    { "CastShadows", pointLight->CastShadows },
+                    { "ShadowStrength", pointLight->ShadowStrength },
+                    { "ShadowSoftness", pointLight->ShadowSoftness },
+                    { "ShadowSamples", pointLight->ShadowSamples },
+                    { "ShadowBias", pointLight->ShadowBias }
+                };
+            }
+
+            if (const auto* shadowOccluder = m_Registry.try_get<ShadowOccluder2DComponent>(entity))
+            {
+                nlohmann::json polygonPoints = nlohmann::json::array();
+                for (const glm::vec2& point : shadowOccluder->PolygonPoints)
+                    polygonPoints.push_back({ point.x, point.y });
+
+                const char* sourceModeName = (shadowOccluder->Source == ShadowOccluder2DComponent::SourceMode::PhysicsCollider)
+                    ? "PhysicsCollider"
+                    : "ManualPolygon";
+
+                entry["ShadowOccluder2D"] = {
+                    { "Enabled", shadowOccluder->Enabled },
+                    { "SourceMode", sourceModeName },
+                    { "Closed", shadowOccluder->Closed },
+                    { "PolygonPoints", std::move(polygonPoints) },
+                    { "Extrusion", shadowOccluder->Extrusion }
+                };
             }
 
             if (const auto* text = m_Registry.try_get<TextComponent>(entity))
@@ -1282,6 +1355,88 @@ namespace Limitless
                 }
                 material.CachedMaterial.reset();
                 material.MaterialLoadAttempted = false;
+            }
+
+            if (entry.contains("DirectionalLight2D") && entry["DirectionalLight2D"].is_object())
+            {
+                const auto& directionalLightJson = entry["DirectionalLight2D"];
+                auto& directionalLight = scene->GetRegistry().emplace<DirectionalLight2DComponent>(entity);
+                directionalLight.Enabled = directionalLightJson.value("Enabled", true);
+                auto color = directionalLightJson.value("Color", std::vector<float>{ 1.0f, 1.0f, 1.0f });
+                if (color.size() >= 3)
+                    directionalLight.Color = glm::vec3(color[0], color[1], color[2]);
+                directionalLight.Intensity = directionalLightJson.value("Intensity", 1.0f);
+                directionalLight.UseEntityRotation = directionalLightJson.value("UseEntityRotation", true);
+                auto direction = directionalLightJson.value("Direction", std::vector<float>{ 0.0f, -1.0f });
+                if (direction.size() >= 2)
+                {
+                    directionalLight.Direction = glm::vec2(direction[0], direction[1]);
+                    if (glm::length(directionalLight.Direction) > 0.0001f)
+                        directionalLight.Direction = glm::normalize(directionalLight.Direction);
+                    else
+                        directionalLight.Direction = glm::vec2(0.0f, -1.0f);
+                }
+                directionalLight.CastShadows = directionalLightJson.value("CastShadows", true);
+                directionalLight.ShadowStrength = directionalLightJson.value("ShadowStrength", 1.0f);
+                directionalLight.ShadowSoftness = directionalLightJson.value("ShadowSoftness", 1.0f);
+                directionalLight.ShadowSamples = std::max(1, directionalLightJson.value("ShadowSamples", 8));
+                directionalLight.ShadowDistance = directionalLightJson.value("ShadowDistance", 25.0f);
+                directionalLight.ShadowBias = std::max(0.0f, directionalLightJson.value("ShadowBias", 0.02f));
+                directionalLight.RuntimeResolvedDirection = glm::vec2(0.0f, -1.0f);
+            }
+
+            if (entry.contains("PointLight2D") && entry["PointLight2D"].is_object())
+            {
+                const auto& pointLightJson = entry["PointLight2D"];
+                auto& pointLight = scene->GetRegistry().emplace<PointLight2DComponent>(entity);
+                pointLight.Enabled = pointLightJson.value("Enabled", true);
+                auto color = pointLightJson.value("Color", std::vector<float>{ 1.0f, 1.0f, 1.0f });
+                if (color.size() >= 3)
+                    pointLight.Color = glm::vec3(color[0], color[1], color[2]);
+                pointLight.Intensity = pointLightJson.value("Intensity", 1.0f);
+                pointLight.Radius = std::max(0.01f, pointLightJson.value("Radius", 5.0f));
+                pointLight.Falloff = std::max(0.1f, pointLightJson.value("Falloff", 2.0f));
+                pointLight.CastShadows = pointLightJson.value("CastShadows", true);
+                pointLight.ShadowStrength = pointLightJson.value("ShadowStrength", 1.0f);
+                pointLight.ShadowSoftness = pointLightJson.value("ShadowSoftness", 1.0f);
+                pointLight.ShadowSamples = std::max(1, pointLightJson.value("ShadowSamples", 8));
+                pointLight.ShadowBias = std::max(0.0f, pointLightJson.value("ShadowBias", 0.0015f));
+                pointLight.RuntimeViewportPosition = glm::vec2(0.0f);
+                pointLight.RuntimeViewportRadius = 0.0f;
+            }
+
+            if (entry.contains("ShadowOccluder2D") && entry["ShadowOccluder2D"].is_object())
+            {
+                const auto& shadowOccluderJson = entry["ShadowOccluder2D"];
+                auto& shadowOccluder = scene->GetRegistry().emplace<ShadowOccluder2DComponent>(entity);
+                shadowOccluder.Enabled = shadowOccluderJson.value("Enabled", true);
+                const std::string sourceModeName = shadowOccluderJson.value("SourceMode", std::string("ManualPolygon"));
+                shadowOccluder.Source = (sourceModeName == "PhysicsCollider")
+                    ? ShadowOccluder2DComponent::SourceMode::PhysicsCollider
+                    : ShadowOccluder2DComponent::SourceMode::ManualPolygon;
+                shadowOccluder.Closed = shadowOccluderJson.value("Closed", true);
+                shadowOccluder.Extrusion = std::max(0.0f, shadowOccluderJson.value("Extrusion", 0.0f));
+                shadowOccluder.PolygonPoints.clear();
+                if (shadowOccluderJson.contains("PolygonPoints") && shadowOccluderJson["PolygonPoints"].is_array())
+                {
+                    for (const auto& pointJson : shadowOccluderJson["PolygonPoints"])
+                    {
+                        if (!pointJson.is_array() || pointJson.size() < 2)
+                            continue;
+                        shadowOccluder.PolygonPoints.emplace_back(pointJson[0].get<float>(), pointJson[1].get<float>());
+                    }
+                }
+                if (shadowOccluder.PolygonPoints.empty())
+                {
+                    shadowOccluder.PolygonPoints = {
+                        glm::vec2(-0.5f, -0.5f),
+                        glm::vec2(0.5f, -0.5f),
+                        glm::vec2(0.5f, 0.5f),
+                        glm::vec2(-0.5f, 0.5f)
+                    };
+                }
+                shadowOccluder.RuntimeResolvedPolygonPoints.clear();
+                shadowOccluder.RuntimeGeometryRevision = 0;
             }
 
             if (entry.contains("Text") && entry["Text"].is_object())
@@ -1885,16 +2040,23 @@ namespace Limitless
         if (!renderer.IsInitialized())
             return;
 
-        renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(framebuffer));
-        renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
+        const bool renderedWithLighting = Lighting2DRenderer::RenderToViewport(scene, camera, framebuffer, width, height, [&scene, &camera]() {
+            SceneRenderer::Render(scene, camera);
+        });
 
-        ClearCommand::ClearFlags clearFlags;
-        clearFlags.color = true;
-        clearFlags.depth = true;
-        clearFlags.stencil = false;
-        renderer.SubmitCommand(std::make_unique<ClearCommand>(clearFlags, 0.12f, 0.12f, 0.14f, 1.0f));
+        if (!renderedWithLighting)
+        {
+            renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(framebuffer));
+            renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
 
-        Render(scene, camera);
+            ClearCommand::ClearFlags clearFlags;
+            clearFlags.color = true;
+            clearFlags.depth = true;
+            clearFlags.stencil = false;
+            renderer.SubmitCommand(std::make_unique<ClearCommand>(clearFlags, 0.12f, 0.12f, 0.14f, 1.0f));
+
+            Render(scene, camera);
+        }
         RenderScreenSpaceTextPass(scene, width, height);
 
         renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(nullptr));

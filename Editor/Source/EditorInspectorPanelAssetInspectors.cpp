@@ -61,11 +61,16 @@ namespace Limitless::EditorInspectorPanel
                 tryAddKnownDefault("Assets/Shaders/Renderer2D_TexturedQuad.glsl");
                 tryAddKnownDefault("Assets/Shaders/Renderer2D_MSDFText.glsl");
                 tryAddKnownDefault("Assets/Shaders/TexturedTriangle.glsl");
+                tryAddKnownDefault("Assets/Shaders/Lighting2D_GBufferNormalPass.glsl");
+                tryAddKnownDefault("Assets/Shaders/Lighting2D_DirectionalLight.glsl");
+                tryAddKnownDefault("Assets/Shaders/Lighting2D_PointLight.glsl");
+                tryAddKnownDefault("Assets/Shaders/Lighting2D_Composite.glsl");
             }
             else if (assetType == Assets::AssetType::Material)
             {
                 tryAddKnownDefault("Assets/Materials/Renderer2D_TexturedQuad.material.json");
                 tryAddKnownDefault("Assets/Materials/Renderer2D_MSDFText.material.json");
+                tryAddKnownDefault("Assets/Materials/Lighting2D_DefaultLit.material.json");
             }
 
             std::sort(keys.begin(), keys.end());
@@ -809,6 +814,32 @@ namespace Limitless::EditorInspectorPanel
             }
 
             ImGui::PopID();
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Lighting Response");
+
+        float normalStrength = s_State.Json.value("normalStrength", 1.0f);
+        if (ImGui::DragFloat("Normal Strength", &normalStrength, 0.01f, 0.0f, 8.0f, "%.2f"))
+        {
+            s_State.Json["normalStrength"] = std::clamp(normalStrength, 0.0f, 8.0f);
+            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+        }
+
+        float roughness = s_State.Json.value("roughness", 0.5f);
+        if (ImGui::SliderFloat("Roughness", &roughness, 0.0f, 1.0f, "%.2f"))
+        {
+            s_State.Json["roughness"] = std::clamp(roughness, 0.0f, 1.0f);
+            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+        }
+
+        float specularIntensity = s_State.Json.value("specularIntensity", s_State.Json.value("specular", 0.5f));
+        if (ImGui::DragFloat("Specular Intensity", &specularIntensity, 0.01f, 0.0f, 8.0f, "%.2f"))
+        {
+            s_State.Json["specularIntensity"] = std::clamp(specularIntensity, 0.0f, 8.0f);
+            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
         }
     }
 }

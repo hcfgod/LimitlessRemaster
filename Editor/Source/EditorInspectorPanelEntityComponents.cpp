@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <unordered_set>
@@ -73,9 +74,18 @@ namespace Limitless::EditorInspectorPanel
             // Shared editor defaults (project assets still take precedence by key resolution).
             tryAddKnownDefault("Assets/Materials/Renderer2D_TexturedQuad.material.json");
             tryAddKnownDefault("Assets/Materials/Renderer2D_MSDFText.material.json");
+            tryAddKnownDefault("Assets/Materials/Lighting2D_DefaultLit.material.json");
 
             std::sort(keys.begin(), keys.end());
             return keys;
+        }
+
+        glm::vec2 NormalizeDirectionOrFallback(const glm::vec2& direction, const glm::vec2& fallback = glm::vec2(0.0f, -1.0f))
+        {
+            const float length = glm::length(direction);
+            if (length <= 0.0001f)
+                return fallback;
+            return direction / length;
         }
     }
 
@@ -565,6 +575,209 @@ namespace Limitless::EditorInspectorPanel
                 TrackInteractiveMutation(undoService, "Edit CircleCollider2D Layer");
                 ImGui::InputScalar("Mask Bits", ImGuiDataType_U64, &circleCollider2D->CollisionMask);
                 TrackInteractiveMutation(undoService, "Edit CircleCollider2D Mask");
+
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* directionalLight = registry.try_get<DirectionalLight2DComponent>(selectedEntity))
+        {
+            const bool directionalLightOpen = ImGui::TreeNodeEx("Directional Light 2D", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("DirectionalLight2DComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##DirectionalLight2DComponentOptionsButton"))
+                ImGui::OpenPopup("DirectionalLight2DComponentOptions");
+
+            if (ImGui::BeginPopup("DirectionalLight2DComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveDirectionalLight2DComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (directionalLightOpen)
+            {
+                ImGui::Checkbox("Enabled", &directionalLight->Enabled);
+                TrackInteractiveMutation(undoService, "Edit Directional Light Enabled");
+                ImGui::ColorEdit3("Color", &directionalLight->Color.r);
+                TrackInteractiveMutation(undoService, "Edit Directional Light Color");
+                ImGui::DragFloat("Intensity", &directionalLight->Intensity, 0.01f, 0.0f, 100.0f, "%.2f");
+                TrackInteractiveMutation(undoService, "Edit Directional Light Intensity");
+                ImGui::Checkbox("Use Entity Rotation", &directionalLight->UseEntityRotation);
+                TrackInteractiveMutation(undoService, "Edit Directional Light Rotation Mode");
+                if (!directionalLight->UseEntityRotation)
+                {
+                    ImGui::DragFloat2("Direction", &directionalLight->Direction.x, 0.01f, -1.0f, 1.0f, "%.3f");
+                    directionalLight->Direction = NormalizeDirectionOrFallback(directionalLight->Direction);
+                    TrackInteractiveMutation(undoService, "Edit Directional Light Direction");
+                }
+
+                ImGui::Checkbox("Cast Shadows", &directionalLight->CastShadows);
+                TrackInteractiveMutation(undoService, "Edit Directional Light Cast Shadows");
+                ImGui::DragFloat("Shadow Strength", &directionalLight->ShadowStrength, 0.01f, 0.0f, 1.0f, "%.2f");
+                directionalLight->ShadowStrength = std::clamp(directionalLight->ShadowStrength, 0.0f, 1.0f);
+                TrackInteractiveMutation(undoService, "Edit Directional Light Shadow Strength");
+                ImGui::DragFloat("Shadow Softness", &directionalLight->ShadowSoftness, 0.01f, 0.0f, 256.0f, "%.2f");
+                directionalLight->ShadowSoftness = std::max(0.0f, directionalLight->ShadowSoftness);
+                TrackInteractiveMutation(undoService, "Edit Directional Light Shadow Softness");
+                ImGui::DragInt("Shadow Samples", &directionalLight->ShadowSamples, 1.0f, 1, 32);
+                directionalLight->ShadowSamples = std::clamp(directionalLight->ShadowSamples, 1, 32);
+                TrackInteractiveMutation(undoService, "Edit Directional Light Shadow Samples");
+                ImGui::DragFloat("Shadow Distance", &directionalLight->ShadowDistance, 0.05f, 0.0f, 10000.0f, "%.2f");
+                directionalLight->ShadowDistance = std::max(0.0f, directionalLight->ShadowDistance);
+                TrackInteractiveMutation(undoService, "Edit Directional Light Shadow Distance");
+                ImGui::DragFloat("Shadow Bias", &directionalLight->ShadowBias, 0.0005f, 0.0f, 2.0f, "%.4f");
+                directionalLight->ShadowBias = std::max(0.0f, directionalLight->ShadowBias);
+                TrackInteractiveMutation(undoService, "Edit Directional Light Shadow Bias");
+
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* pointLight = registry.try_get<PointLight2DComponent>(selectedEntity))
+        {
+            const bool pointLightOpen = ImGui::TreeNodeEx("Point Light 2D", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("PointLight2DComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##PointLight2DComponentOptionsButton"))
+                ImGui::OpenPopup("PointLight2DComponentOptions");
+
+            if (ImGui::BeginPopup("PointLight2DComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemovePointLight2DComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (pointLightOpen)
+            {
+                ImGui::Checkbox("Enabled", &pointLight->Enabled);
+                TrackInteractiveMutation(undoService, "Edit Point Light Enabled");
+                ImGui::ColorEdit3("Color", &pointLight->Color.r);
+                TrackInteractiveMutation(undoService, "Edit Point Light Color");
+                ImGui::DragFloat("Intensity", &pointLight->Intensity, 0.01f, 0.0f, 100.0f, "%.2f");
+                TrackInteractiveMutation(undoService, "Edit Point Light Intensity");
+                ImGui::DragFloat("Radius", &pointLight->Radius, 0.01f, 0.01f, 10000.0f, "%.2f");
+                pointLight->Radius = std::max(0.01f, pointLight->Radius);
+                TrackInteractiveMutation(undoService, "Edit Point Light Radius");
+                ImGui::DragFloat("Falloff", &pointLight->Falloff, 0.01f, 0.1f, 8.0f, "%.2f");
+                pointLight->Falloff = std::max(0.1f, pointLight->Falloff);
+                TrackInteractiveMutation(undoService, "Edit Point Light Falloff");
+                ImGui::Checkbox("Cast Shadows", &pointLight->CastShadows);
+                TrackInteractiveMutation(undoService, "Edit Point Light Cast Shadows");
+                ImGui::DragFloat("Shadow Strength", &pointLight->ShadowStrength, 0.01f, 0.0f, 1.0f, "%.2f");
+                pointLight->ShadowStrength = std::clamp(pointLight->ShadowStrength, 0.0f, 1.0f);
+                TrackInteractiveMutation(undoService, "Edit Point Light Shadow Strength");
+                ImGui::DragFloat("Shadow Softness", &pointLight->ShadowSoftness, 0.01f, 0.0f, 256.0f, "%.2f");
+                pointLight->ShadowSoftness = std::max(0.0f, pointLight->ShadowSoftness);
+                TrackInteractiveMutation(undoService, "Edit Point Light Shadow Softness");
+                ImGui::DragInt("Shadow Samples", &pointLight->ShadowSamples, 1.0f, 1, 32);
+                pointLight->ShadowSamples = std::clamp(pointLight->ShadowSamples, 1, 32);
+                TrackInteractiveMutation(undoService, "Edit Point Light Shadow Samples");
+                ImGui::DragFloat("Shadow Bias", &pointLight->ShadowBias, 0.0001f, 0.0f, 10.0f, "%.4f");
+                pointLight->ShadowBias = std::max(0.0f, pointLight->ShadowBias);
+                TrackInteractiveMutation(undoService, "Edit Point Light Shadow Bias");
+
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* shadowOccluder = registry.try_get<ShadowOccluder2DComponent>(selectedEntity))
+        {
+            const bool occluderOpen = ImGui::TreeNodeEx("Shadow Occluder 2D", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("ShadowOccluder2DComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##ShadowOccluder2DComponentOptionsButton"))
+                ImGui::OpenPopup("ShadowOccluder2DComponentOptions");
+
+            if (ImGui::BeginPopup("ShadowOccluder2DComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveShadowOccluder2DComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (occluderOpen)
+            {
+                ImGui::Checkbox("Enabled", &shadowOccluder->Enabled);
+                TrackInteractiveMutation(undoService, "Edit Shadow Occluder Enabled");
+
+                int sourceMode = static_cast<int>(shadowOccluder->Source);
+                const char* sourceModeNames[] = { "Manual Polygon", "Physics Collider" };
+                if (ImGui::Combo("Source", &sourceMode, sourceModeNames, 2))
+                    shadowOccluder->Source = static_cast<ShadowOccluder2DComponent::SourceMode>(sourceMode);
+                TrackInteractiveMutation(undoService, "Edit Shadow Occluder Source");
+
+                ImGui::Checkbox("Closed Polygon", &shadowOccluder->Closed);
+                TrackInteractiveMutation(undoService, "Edit Shadow Occluder Closed");
+                ImGui::DragFloat("Extrusion", &shadowOccluder->Extrusion, 0.01f, 0.0f, 1000.0f, "%.2f");
+                shadowOccluder->Extrusion = std::max(0.0f, shadowOccluder->Extrusion);
+                TrackInteractiveMutation(undoService, "Edit Shadow Occluder Extrusion");
+
+                if (shadowOccluder->Source == ShadowOccluder2DComponent::SourceMode::ManualPolygon)
+                {
+                    if (ImGui::Button("Add Point"))
+                    {
+                        const glm::vec2 newPoint = shadowOccluder->PolygonPoints.empty()
+                            ? glm::vec2(0.0f)
+                            : (shadowOccluder->PolygonPoints.back() + glm::vec2(0.5f, 0.0f));
+
+                        if (undoService)
+                        {
+                            (void)undoService->ExecuteSceneMutation("Add Shadow Occluder Point", [&](Scene& mutableScene) {
+                                auto* mutableOccluder = mutableScene.GetRegistry().try_get<ShadowOccluder2DComponent>(selectedEntity);
+                                if (!mutableOccluder)
+                                    return false;
+                                mutableOccluder->PolygonPoints.push_back(newPoint);
+                                return true;
+                            });
+                            shadowOccluder = registry.try_get<ShadowOccluder2DComponent>(selectedEntity);
+                        }
+                        else
+                        {
+                            shadowOccluder->PolygonPoints.push_back(newPoint);
+                        }
+                    }
+
+                    int removePointIndex = -1;
+                    for (size_t pointIndex = 0; pointIndex < shadowOccluder->PolygonPoints.size(); ++pointIndex)
+                    {
+                        ImGui::PushID(static_cast<int>(pointIndex));
+                        ImGui::DragFloat2("Point", &shadowOccluder->PolygonPoints[pointIndex].x, 0.01f, -10000.0f, 10000.0f, "%.3f");
+                        TrackInteractiveMutation(undoService, "Edit Shadow Occluder Point");
+                        ImGui::SameLine();
+                        if (ImGui::Button("X"))
+                            removePointIndex = static_cast<int>(pointIndex);
+                        ImGui::PopID();
+                    }
+
+                    if (removePointIndex >= 0)
+                    {
+                        if (undoService)
+                        {
+                            (void)undoService->ExecuteSceneMutation("Remove Shadow Occluder Point", [&](Scene& mutableScene) {
+                                auto* mutableOccluder = mutableScene.GetRegistry().try_get<ShadowOccluder2DComponent>(selectedEntity);
+                                if (!mutableOccluder)
+                                    return false;
+                                if (removePointIndex < 0 || removePointIndex >= static_cast<int>(mutableOccluder->PolygonPoints.size()))
+                                    return false;
+                                mutableOccluder->PolygonPoints.erase(mutableOccluder->PolygonPoints.begin() + removePointIndex);
+                                return true;
+                            });
+                        }
+                        else
+                        {
+                            shadowOccluder->PolygonPoints.erase(shadowOccluder->PolygonPoints.begin() + removePointIndex);
+                        }
+                    }
+                }
+                else
+                {
+                    ImGui::TextDisabled("Uses Box/Circle Collider2D shape on this entity.");
+                }
 
                 ImGui::TreePop();
             }

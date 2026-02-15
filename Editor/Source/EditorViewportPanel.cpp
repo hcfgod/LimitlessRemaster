@@ -218,6 +218,29 @@ namespace Limitless::EditorViewportPanel
             return state;
         }
 
+        enum class LightingHandleKind : uint8_t
+        {
+            None = 0,
+            DirectionalDirection,
+            PointRadius,
+            OccluderPoint
+        };
+
+        struct LightingDragState final
+        {
+            bool Active = false;
+            entt::entity Entity = entt::null;
+            LightingHandleKind Handle = LightingHandleKind::None;
+            int PointIndex = -1;
+            const char* CommitLabel = nullptr;
+        };
+
+        LightingDragState& GetLightingDragState()
+        {
+            static LightingDragState state;
+            return state;
+        }
+
         bool IsMouseNearPoint(const ImVec2& mousePosition, const ImVec2& point, float radiusPixels)
         {
             const float dx = mousePosition.x - point.x;
@@ -470,6 +493,236 @@ namespace Limitless::EditorViewportPanel
             return dragState.Active;
         }
 
+        bool DrawAndHandleLightingGizmos(ImDrawList* drawList,
+                                         Scene& scene,
+                                         const Camera& camera,
+                                         entt::entity selectedEntity,
+                                         const ImVec2& viewportMin,
+                                         const ImVec2& viewportMax,
+                                         float viewportWidth,
+                                         float viewportHeight,
+                                         EditorPlayModeState playModeState,
+                                         EditorUndoService* undoService)
+        {
+            if (!drawList || selectedEntity == entt::null || !scene.IsValid(selectedEntity))
+                return false;
+
+            auto& dragState = GetLightingDragState();
+            auto& registry = scene.GetRegistry();
+            auto* transform = registry.try_get<TransformComponent>(selectedEntity);
+            if (!transform)
+                return false;
+
+            const bool canEdit = playModeState == EditorPlayModeState::Edit;
+            const glm::mat4 worldTransform = scene.GetWorldTransformMatrix(selectedEntity);
+            const glm::mat4 inverseWorldTransform = glm::inverse(worldTransform);
+            const ImVec2 mousePosition = ImGui::GetMousePos();
+            const bool mouseInViewport = mousePosition.x >= viewportMin.x && mousePosition.x <= viewportMax.x &&
+                                         mousePosition.y >= viewportMin.y && mousePosition.y <= viewportMax.y;
+            constexpr float handleRadiusPixels = 7.0f;
+
+            if (dragState.Active && dragState.Entity != selectedEntity)
+            {
+                if (undoService)
+                    undoService->CancelInteractiveSceneMutation();
+                dragState = {};
+            }
+
+            auto commitOrCancelDrag = [&](bool commit) {
+                if (!dragState.Active)
+                    return;
+                if (undoService)
+                {
+                    if (commit && dragState.CommitLabel)
+                        (void)undoService->CommitInteractiveSceneMutation(dragState.CommitLabel);
+                    else
+                        undoService->CancelInteractiveSceneMutation();
+                }
+                dragState = {};
+            };
+
+            auto updateWorldPointFromMouse = [&](glm::vec3& worldPointOut) -> bool {
+                return TryComputeDropWorldPosition(camera, viewportMin, viewportMax, mousePosition, worldPointOut);
+            };
+
+            if (auto* directionalLight = registry.try_get<DirectionalLight2DComponent>(selectedEntity))
+            {
+                glm::vec2 worldDirection = directionalLight->UseEntityRotation
+                    ? glm::vec2(worldTransform[0].x, worldTransform[0].y)
+                    : directionalLight->Direction;
+                if (glm::length(worldDirection) <= 0.0001f)
+                    worldDirection = glm::vec2(0.0f, -1.0f);
+                worldDirection = glm::normalize(worldDirection);
+
+                const glm::vec3 worldOrigin = glm::vec3(worldTransform[3]);
+                constexpr float arrowLengthWorld = 1.5f;
+                const glm::vec3 worldEndpoint = worldOrigin + glm::vec3(worldDirection * arrowLengthWorld, 0.0f);
+
+                ImVec2 originPoint{};
+                ImVec2 endpointPoint{};
+                if (WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, worldOrigin, originPoint) &&
+                    WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, worldEndpoint, endpointPoint))
+                {
+                    drawList->AddLine(originPoint, endpointPoint, IM_COL32(255, 230, 110, 240), 2.0f);
+                    drawList->AddCircleFilled(originPoint, handleRadiusPixels - 1.0f, IM_COL32(255, 230, 110, 220));
+                    drawList->AddCircleFilled(endpointPoint, handleRadiusPixels, IM_COL32(255, 180, 60, 245));
+
+                    if (canEdit && mouseInViewport && !dragState.Active &&
+                        IsMouseNearPoint(mousePosition, endpointPoint, handleRadiusPixels + 3.0f))
+                    {
+                        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                        {
+                            if (undoService)
+                                undoService->BeginInteractiveSceneMutation();
+                            dragState.Active = true;
+                            dragState.Entity = selectedEntity;
+                            dragState.Handle = LightingHandleKind::DirectionalDirection;
+                            dragState.PointIndex = -1;
+                            dragState.CommitLabel = directionalLight->UseEntityRotation
+                                ? "Edit Directional Light Rotation"
+                                : "Edit Directional Light Direction";
+                        }
+                    }
+                }
+            }
+
+            if (auto* pointLight = registry.try_get<PointLight2DComponent>(selectedEntity))
+            {
+                const glm::vec4 worldCenter4 = worldTransform * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+                const glm::vec4 worldRadiusPoint4 = worldTransform * glm::vec4(pointLight->Radius, 0.0f, 0.0f, 1.0f);
+
+                ImVec2 centerPoint{};
+                ImVec2 radiusPoint{};
+                if (WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldCenter4), centerPoint) &&
+                    WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldRadiusPoint4), radiusPoint))
+                {
+                    const float radiusPixels = std::sqrt((radiusPoint.x - centerPoint.x) * (radiusPoint.x - centerPoint.x) +
+                                                         (radiusPoint.y - centerPoint.y) * (radiusPoint.y - centerPoint.y));
+                    drawList->AddCircle(centerPoint, radiusPixels, IM_COL32(255, 185, 80, 235), 64, 2.0f);
+                    drawList->AddCircleFilled(radiusPoint, handleRadiusPixels, IM_COL32(255, 185, 80, 245));
+
+                    if (canEdit && mouseInViewport && !dragState.Active &&
+                        IsMouseNearPoint(mousePosition, radiusPoint, handleRadiusPixels + 3.0f))
+                    {
+                        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                        {
+                            if (undoService)
+                                undoService->BeginInteractiveSceneMutation();
+                            dragState.Active = true;
+                            dragState.Entity = selectedEntity;
+                            dragState.Handle = LightingHandleKind::PointRadius;
+                            dragState.PointIndex = -1;
+                            dragState.CommitLabel = "Edit Point Light Radius";
+                        }
+                    }
+                }
+            }
+
+            if (auto* shadowOccluder = registry.try_get<ShadowOccluder2DComponent>(selectedEntity))
+            {
+                if (shadowOccluder->Source == ShadowOccluder2DComponent::SourceMode::ManualPolygon &&
+                    shadowOccluder->PolygonPoints.size() >= 2)
+                {
+                    std::vector<ImVec2> projectedPoints;
+                    projectedPoints.reserve(shadowOccluder->PolygonPoints.size());
+                    for (const glm::vec2& localPoint : shadowOccluder->PolygonPoints)
+                    {
+                        const glm::vec4 worldPoint = worldTransform * glm::vec4(localPoint, 0.0f, 1.0f);
+                        ImVec2 projectedPoint{};
+                        if (!WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldPoint), projectedPoint))
+                            continue;
+                        projectedPoints.push_back(projectedPoint);
+                    }
+
+                    if (projectedPoints.size() >= 2)
+                    {
+                        for (size_t pointIndex = 0; pointIndex + 1 < projectedPoints.size(); ++pointIndex)
+                            drawList->AddLine(projectedPoints[pointIndex], projectedPoints[pointIndex + 1], IM_COL32(140, 240, 255, 235), 2.0f);
+                        if (shadowOccluder->Closed && projectedPoints.size() >= 3)
+                            drawList->AddLine(projectedPoints.back(), projectedPoints.front(), IM_COL32(140, 240, 255, 235), 2.0f);
+
+                        for (size_t pointIndex = 0; pointIndex < projectedPoints.size(); ++pointIndex)
+                        {
+                            drawList->AddCircleFilled(projectedPoints[pointIndex], handleRadiusPixels - 1.0f, IM_COL32(90, 200, 255, 240));
+                            if (!canEdit || !mouseInViewport || dragState.Active)
+                                continue;
+                            if (!IsMouseNearPoint(mousePosition, projectedPoints[pointIndex], handleRadiusPixels + 3.0f))
+                                continue;
+                            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                            {
+                                if (undoService)
+                                    undoService->BeginInteractiveSceneMutation();
+                                dragState.Active = true;
+                                dragState.Entity = selectedEntity;
+                                dragState.Handle = LightingHandleKind::OccluderPoint;
+                                dragState.PointIndex = static_cast<int>(pointIndex);
+                                dragState.CommitLabel = "Edit Shadow Occluder Point";
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (dragState.Active && dragState.Entity == selectedEntity)
+            {
+                glm::vec3 mouseWorldPoint(0.0f);
+                const bool hasMouseWorldPoint = updateWorldPointFromMouse(mouseWorldPoint);
+
+                if (hasMouseWorldPoint && dragState.Handle == LightingHandleKind::DirectionalDirection)
+                {
+                    if (auto* directionalLight = registry.try_get<DirectionalLight2DComponent>(selectedEntity))
+                    {
+                        const glm::vec3 worldOrigin = glm::vec3(worldTransform[3]);
+                        glm::vec2 direction = glm::vec2(mouseWorldPoint.x - worldOrigin.x, mouseWorldPoint.y - worldOrigin.y);
+                        if (glm::length(direction) > 0.0001f)
+                        {
+                            direction = glm::normalize(direction);
+                            if (directionalLight->UseEntityRotation)
+                            {
+                                if (auto* mutableTransform = registry.try_get<TransformComponent>(selectedEntity))
+                                    mutableTransform->Rotation.z = glm::degrees(std::atan2(direction.y, direction.x));
+                            }
+                            else
+                            {
+                                directionalLight->Direction = direction;
+                            }
+                        }
+                    }
+                }
+                else if (hasMouseWorldPoint && dragState.Handle == LightingHandleKind::PointRadius)
+                {
+                    if (auto* pointLight = registry.try_get<PointLight2DComponent>(selectedEntity))
+                    {
+                        const glm::vec4 localPoint = inverseWorldTransform * glm::vec4(mouseWorldPoint, 1.0f);
+                        pointLight->Radius = std::max(0.01f, glm::length(glm::vec2(localPoint.x, localPoint.y)));
+                    }
+                }
+                else if (hasMouseWorldPoint && dragState.Handle == LightingHandleKind::OccluderPoint && dragState.PointIndex >= 0)
+                {
+                    if (auto* shadowOccluder = registry.try_get<ShadowOccluder2DComponent>(selectedEntity))
+                    {
+                        if (dragState.PointIndex < static_cast<int>(shadowOccluder->PolygonPoints.size()))
+                        {
+                            const glm::vec4 localPoint = inverseWorldTransform * glm::vec4(mouseWorldPoint, 1.0f);
+                            shadowOccluder->PolygonPoints[dragState.PointIndex] = glm::vec2(localPoint.x, localPoint.y);
+                        }
+                    }
+                }
+
+                if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+                    commitOrCancelDrag(true);
+            }
+
+            if (dragState.Active && !ImGui::IsMouseDown(ImGuiMouseButton_Left))
+                commitOrCancelDrag(true);
+
+            return dragState.Active;
+        }
+
         void DrawSelectedPhysicsOverlays(ImDrawList* drawList,
                                          Scene& scene,
                                          const Camera& camera,
@@ -482,6 +735,8 @@ namespace Limitless::EditorViewportPanel
                                          EditorUndoService* undoService)
         {
             (void)DrawAndHandleColliderGizmos(
+                drawList, scene, camera, selectedEntity, viewportMin, viewportMax, viewportWidth, viewportHeight, playModeState, undoService);
+            (void)DrawAndHandleLightingGizmos(
                 drawList, scene, camera, selectedEntity, viewportMin, viewportMax, viewportWidth, viewportHeight, playModeState, undoService);
         }
     }
@@ -518,8 +773,13 @@ namespace Limitless::EditorViewportPanel
         const bool skipRender = ImGui::IsWindowCollapsed();
 
         const ImVec2 viewportSize = ImGui::GetContentRegionAvail();
-        const uint32_t width = static_cast<uint32_t>(viewportSize.x);
-        const uint32_t height = static_cast<uint32_t>(viewportSize.y);
+        auto sanitizeViewportDimension = [](float value) -> uint32_t {
+            if (!std::isfinite(value) || value <= 1.0f)
+                return 0;
+            return static_cast<uint32_t>(std::floor(value));
+        };
+        const uint32_t width = sanitizeViewportDimension(viewportSize.x);
+        const uint32_t height = sanitizeViewportDimension(viewportSize.y);
 
         if (!skipRender && width > 0 && height > 0)
         {

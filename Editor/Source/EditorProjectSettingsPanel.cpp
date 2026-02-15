@@ -178,18 +178,21 @@ namespace Limitless::EditorProjectSettingsPanel
             const auto i = Project::LoadInputSettings(projectRoot);
             const auto l = Project::LoadLayersSettings(projectRoot);
             const auto p = Project::LoadPhysics2DSettings(projectRoot);
+            const auto lighting = Project::LoadLighting2DSettings(projectRoot);
 
             if (r.IsFailure()) { SetStatus(state, true, r.GetError().GetErrorMessage()); return false; }
             if (a.IsFailure()) { SetStatus(state, true, a.GetError().GetErrorMessage()); return false; }
             if (i.IsFailure()) { SetStatus(state, true, i.GetError().GetErrorMessage()); return false; }
             if (l.IsFailure()) { SetStatus(state, true, l.GetError().GetErrorMessage()); return false; }
             if (p.IsFailure()) { SetStatus(state, true, p.GetError().GetErrorMessage()); return false; }
+            if (lighting.IsFailure()) { SetStatus(state, true, lighting.GetError().GetErrorMessage()); return false; }
 
             state.Render = r.GetValue();
             state.Audio = a.GetValue();
             state.Input = i.GetValue();
             state.Layers = l.GetValue();
             state.Physics2D = p.GetValue();
+            state.Lighting2D = lighting.GetValue();
             RefreshInputActionsAssetKeys(state, projectRoot);
             state.Loaded = true;
             return true;
@@ -496,6 +499,34 @@ namespace Limitless::EditorProjectSettingsPanel
                 ImGui::EndTabItem();
             }
 
+            if (ImGui::BeginTabItem("Lighting 2D"))
+            {
+                ImGui::Checkbox("Enabled", &state.Lighting2D.Enabled);
+                ImGui::Checkbox("Enable Normal Maps", &state.Lighting2D.EnableNormalMaps);
+                ImGui::Checkbox("Enable Shadows", &state.Lighting2D.EnableShadows);
+                ImGui::ColorEdit3("Ambient Color", state.Lighting2D.AmbientColor);
+                ImGui::SliderFloat("Ambient Intensity", &state.Lighting2D.AmbientIntensity, 0.0f, 4.0f, "%.2f");
+                ImGui::SliderInt("Shadow Quality", &state.Lighting2D.ShadowQualityLevel, 0, 2);
+                ImGui::DragInt("Max Directional Lights", &state.Lighting2D.MaxDirectionalLights, 1.0f, 0, 32);
+                ImGui::DragInt("Max Point Lights", &state.Lighting2D.MaxPointLights, 1.0f, 0, 256);
+                ImGui::DragInt("Max Shadow Segments", &state.Lighting2D.MaxShadowSegments, 1.0f, 8, 512);
+                ImGui::DragFloat("Shadow Softness Scale", &state.Lighting2D.ShadowSoftnessScale, 0.01f, 0.0f, 16.0f, "%.2f");
+                ImGui::DragFloat("Directional Shadow Bias Scale", &state.Lighting2D.DirectionalShadowBiasScale, 0.01f, 0.0f, 8.0f, "%.2f");
+                ImGui::DragInt("Max Shadow Samples Per Light", &state.Lighting2D.MaxShadowSamplesPerLight, 1.0f, 1, 32);
+
+                state.Lighting2D.ShadowQualityLevel = std::clamp(state.Lighting2D.ShadowQualityLevel, 0, 2);
+                state.Lighting2D.MaxDirectionalLights = std::max(0, state.Lighting2D.MaxDirectionalLights);
+                state.Lighting2D.MaxPointLights = std::max(0, state.Lighting2D.MaxPointLights);
+                state.Lighting2D.MaxShadowSegments = std::max(1, state.Lighting2D.MaxShadowSegments);
+                state.Lighting2D.ShadowSoftnessScale = std::max(0.0f, state.Lighting2D.ShadowSoftnessScale);
+                state.Lighting2D.DirectionalShadowBiasScale = std::max(0.0f, state.Lighting2D.DirectionalShadowBiasScale);
+                state.Lighting2D.MaxShadowSamplesPerLight = std::max(1, state.Lighting2D.MaxShadowSamplesPerLight);
+                state.Lighting2D.AmbientIntensity = std::max(0.0f, state.Lighting2D.AmbientIntensity);
+
+                ImGui::TextDisabled("Quality 0=Low, 1=Medium, 2=High.");
+                ImGui::EndTabItem();
+            }
+
             ImGui::EndTabBar();
         }
 
@@ -521,12 +552,14 @@ namespace Limitless::EditorProjectSettingsPanel
             const auto si = Project::SaveInputSettings(projectRoot, state.Input);
             const auto sl = Project::SaveLayersSettings(projectRoot, state.Layers);
             const auto sp = Project::SavePhysics2DSettings(projectRoot, state.Physics2D);
+            const auto lighting = Project::SaveLighting2DSettings(projectRoot, state.Lighting2D);
 
             if (sr.IsFailure()) { SetStatus(state, true, sr.GetError().GetErrorMessage()); }
             else if (sa.IsFailure()) { SetStatus(state, true, sa.GetError().GetErrorMessage()); }
             else if (si.IsFailure()) { SetStatus(state, true, si.GetError().GetErrorMessage()); }
             else if (sl.IsFailure()) { SetStatus(state, true, sl.GetError().GetErrorMessage()); }
             else if (sp.IsFailure()) { SetStatus(state, true, sp.GetError().GetErrorMessage()); }
+            else if (lighting.IsFailure()) { SetStatus(state, true, lighting.GetError().GetErrorMessage()); }
             else { SetStatus(state, false, "Project settings saved."); }
 
             // Best-effort apply so project defaults are live in the editor session.
