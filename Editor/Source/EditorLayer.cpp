@@ -496,6 +496,13 @@ namespace Limitless
         ScriptCoreModuleRuntime::Update(m_PlayModeState);
         UpdateSceneAudioSources(m_Scene.get(), m_PlayModeState);
 
+        if (m_ProjectSettingsPanelState.Loaded)
+        {
+            m_ProjectPhysics2DSettings = m_ProjectSettingsPanelState.Physics2D;
+            m_ProjectPhysics2DSettingsLoaded = true;
+            ApplyProjectPhysics2DSettingsToScenes();
+        }
+
         if (m_PlayModeState == EditorPlayModeState::Play && m_Scene)
             m_Scene->Update(deltaTime);
 
@@ -597,6 +604,8 @@ namespace Limitless
                 InputSystem::GetInstance().SetProjectActionAsset(nullptr);
                 InputSystem::GetInstance().SetProjectAdditionalActionAssetsFromKeys({});
             }
+
+            RefreshProjectPhysics2DSettings();
 
             bool loadedScene = false;
             const EditorSessionStateData sessionState = ReadProjectSessionState(projectRoot);
@@ -759,6 +768,7 @@ namespace Limitless
                 (void)InstantiatePrefabAtWorldPosition(prefabAssetKey, worldPosition);
             },
             m_SelectedEntity,
+            &m_EditorUndoService,
             kAssetMaterialPayload,
             m_SelectedTextureAssetKey,
             m_CachedTextureAsset,
@@ -1423,6 +1433,7 @@ namespace Limitless
         }
 
         m_Scene = std::move(sceneResult.GetValue());
+        ApplyProjectPhysics2DSettingsToScenes();
         QueueSceneAssetPrewarm();
         m_SelectedEntity = entt::null;
         m_SelectedTextureAssetKey.clear();
@@ -1474,6 +1485,7 @@ namespace Limitless
         }
 
         m_Scene = std::move(sceneResult.GetValue());
+        ApplyProjectPhysics2DSettingsToScenes();
         QueueSceneAssetPrewarm();
         m_SelectedEntity = entt::null;
         m_SelectedTextureAssetKey.clear();
@@ -1585,6 +1597,46 @@ namespace Limitless
             LT_INFO("Saved scene {}", assetKey);
         m_EditorUndoService.MarkSaved();
         return true;
+    }
+
+    void EditorLayer::RefreshProjectPhysics2DSettings()
+    {
+        const auto& pm = Project::ProjectManager::GetInstance();
+        if (!pm.HasOpenProject())
+            return;
+
+        const auto physicsSettingsResult = Project::LoadPhysics2DSettings(pm.GetProjectRoot());
+        if (physicsSettingsResult.IsSuccess())
+        {
+            m_ProjectPhysics2DSettings = physicsSettingsResult.GetValue();
+            m_ProjectPhysics2DSettingsLoaded = true;
+            m_ProjectSettingsPanelState.Physics2D = m_ProjectPhysics2DSettings;
+        }
+        else
+        {
+            LT_WARN("Failed to load project physics settings: {}", physicsSettingsResult.GetError().GetErrorMessage());
+            m_ProjectPhysics2DSettingsLoaded = false;
+        }
+    }
+
+    void EditorLayer::ApplyProjectPhysics2DSettingsToScenes()
+    {
+        if (!m_ProjectPhysics2DSettingsLoaded)
+            return;
+
+        Physics2DWorldSettings runtimeSettings{};
+        runtimeSettings.Gravity = glm::vec2(m_ProjectPhysics2DSettings.GravityX, m_ProjectPhysics2DSettings.GravityY);
+        runtimeSettings.VelocitySubSteps = std::max(1, m_ProjectPhysics2DSettings.VelocitySubSteps);
+        runtimeSettings.EnableSleep = m_ProjectPhysics2DSettings.EnableSleep;
+        runtimeSettings.EnableContinuousCollision = m_ProjectPhysics2DSettings.EnableContinuousCollision;
+        runtimeSettings.ContactHertz = m_ProjectPhysics2DSettings.ContactHertz;
+        runtimeSettings.ContactDampingRatio = m_ProjectPhysics2DSettings.ContactDampingRatio;
+        runtimeSettings.ContactPushSpeed = m_ProjectPhysics2DSettings.ContactPushSpeed;
+
+        if (m_Scene)
+            m_Scene->SetPhysics2DSettings(runtimeSettings);
+        if (m_EditSceneStored)
+            m_EditSceneStored->SetPhysics2DSettings(runtimeSettings);
     }
 
     void EditorLayer::QueueSceneAssetPrewarm()

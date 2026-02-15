@@ -58,22 +58,38 @@ namespace Limitless::Project
         std::vector<std::string> Layers;
     };
 
+    struct Physics2DSettings final
+    {
+        uint32_t Version = 1;
+        float GravityX = 0.0f;
+        float GravityY = -9.81f;
+        int VelocitySubSteps = 8;
+        bool EnableSleep = true;
+        bool EnableContinuousCollision = true;
+        float ContactHertz = 90.0f;
+        float ContactDampingRatio = 1.0f;
+        float ContactPushSpeed = 8.0f;
+    };
+
     [[nodiscard]] std::filesystem::path GetProjectSettingsDirectory(const std::filesystem::path& projectRoot);
 
     [[nodiscard]] std::filesystem::path GetRenderSettingsPath(const std::filesystem::path& projectRoot);
     [[nodiscard]] std::filesystem::path GetAudioSettingsPath(const std::filesystem::path& projectRoot);
     [[nodiscard]] std::filesystem::path GetInputSettingsPath(const std::filesystem::path& projectRoot);
     [[nodiscard]] std::filesystem::path GetLayersSettingsPath(const std::filesystem::path& projectRoot);
+    [[nodiscard]] std::filesystem::path GetPhysics2DSettingsPath(const std::filesystem::path& projectRoot);
 
     [[nodiscard]] Result<RenderSettings> LoadRenderSettings(const std::filesystem::path& projectRoot);
     [[nodiscard]] Result<AudioSettings> LoadAudioSettings(const std::filesystem::path& projectRoot);
     [[nodiscard]] Result<InputSettings> LoadInputSettings(const std::filesystem::path& projectRoot);
     [[nodiscard]] Result<LayersSettings> LoadLayersSettings(const std::filesystem::path& projectRoot);
+    [[nodiscard]] Result<Physics2DSettings> LoadPhysics2DSettings(const std::filesystem::path& projectRoot);
 
     [[nodiscard]] Result<void> SaveRenderSettings(const std::filesystem::path& projectRoot, const RenderSettings& settings);
     [[nodiscard]] Result<void> SaveAudioSettings(const std::filesystem::path& projectRoot, const AudioSettings& settings);
     [[nodiscard]] Result<void> SaveInputSettings(const std::filesystem::path& projectRoot, const InputSettings& settings);
     [[nodiscard]] Result<void> SaveLayersSettings(const std::filesystem::path& projectRoot, const LayersSettings& settings);
+    [[nodiscard]] Result<void> SavePhysics2DSettings(const std::filesystem::path& projectRoot, const Physics2DSettings& settings);
 
     // Returns a de-duplicated list of additional InputActions keys, merged from canonical and legacy fields.
     [[nodiscard]] std::vector<std::string> CollectAdditionalInputActionsAssetKeys(const InputSettings& settings);

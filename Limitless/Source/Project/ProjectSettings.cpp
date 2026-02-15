@@ -91,6 +91,11 @@ namespace Limitless::Project
         return GetProjectSettingsDirectory(projectRoot) / "Layers.json";
     }
 
+    std::filesystem::path GetPhysics2DSettingsPath(const std::filesystem::path& projectRoot)
+    {
+        return GetProjectSettingsDirectory(projectRoot) / "Physics2DSettings.json";
+    }
+
     static Result<json> TryReadJson(const std::filesystem::path& path)
     {
         if (path.empty() || !std::filesystem::exists(path))
@@ -376,6 +381,39 @@ namespace Limitless::Project
         return s;
     }
 
+    static json Physics2DSettingsToJson(const Physics2DSettings& s)
+    {
+        json root;
+        root["version"] = s.Version;
+        root["gravityX"] = s.GravityX;
+        root["gravityY"] = s.GravityY;
+        root["velocitySubSteps"] = s.VelocitySubSteps;
+        root["enableSleep"] = s.EnableSleep;
+        root["enableContinuousCollision"] = s.EnableContinuousCollision;
+        root["contactHertz"] = s.ContactHertz;
+        root["contactDampingRatio"] = s.ContactDampingRatio;
+        root["contactPushSpeed"] = s.ContactPushSpeed;
+        return root;
+    }
+
+    static Physics2DSettings Physics2DSettingsFromJson(const json& root)
+    {
+        Physics2DSettings s;
+        if (!root.is_object())
+            return s;
+
+        s.Version = root.value("version", 1u);
+        s.GravityX = root.value("gravityX", 0.0f);
+        s.GravityY = root.value("gravityY", -9.81f);
+        s.VelocitySubSteps = std::max(1, root.value("velocitySubSteps", 8));
+        s.EnableSleep = root.value("enableSleep", true);
+        s.EnableContinuousCollision = root.value("enableContinuousCollision", true);
+        s.ContactHertz = root.value("contactHertz", 90.0f);
+        s.ContactDampingRatio = root.value("contactDampingRatio", 1.0f);
+        s.ContactPushSpeed = root.value("contactPushSpeed", 8.0f);
+        return s;
+    }
+
     Result<RenderSettings> LoadRenderSettings(const std::filesystem::path& projectRoot)
     {
         const auto root = TryReadJson(GetRenderSettingsPath(projectRoot));
@@ -416,6 +454,16 @@ namespace Limitless::Project
         return LayersSettingsFromJson(root.GetValue());
     }
 
+    Result<Physics2DSettings> LoadPhysics2DSettings(const std::filesystem::path& projectRoot)
+    {
+        const auto root = TryReadJson(GetPhysics2DSettingsPath(projectRoot));
+        if (root.IsFailure())
+        {
+            return Result<Physics2DSettings>(root.GetError());
+        }
+        return Physics2DSettingsFromJson(root.GetValue());
+    }
+
     Result<void> SaveRenderSettings(const std::filesystem::path& projectRoot, const RenderSettings& settings)
     {
         return AtomicWriteJson(GetRenderSettingsPath(projectRoot), RenderSettingsToJson(settings));
@@ -434,6 +482,11 @@ namespace Limitless::Project
     Result<void> SaveLayersSettings(const std::filesystem::path& projectRoot, const LayersSettings& settings)
     {
         return AtomicWriteJson(GetLayersSettingsPath(projectRoot), LayersSettingsToJson(settings));
+    }
+
+    Result<void> SavePhysics2DSettings(const std::filesystem::path& projectRoot, const Physics2DSettings& settings)
+    {
+        return AtomicWriteJson(GetPhysics2DSettingsPath(projectRoot), Physics2DSettingsToJson(settings));
     }
 
     std::vector<std::string> CollectAdditionalInputActionsAssetKeys(const InputSettings& settings)

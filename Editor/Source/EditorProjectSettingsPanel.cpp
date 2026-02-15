@@ -177,16 +177,19 @@ namespace Limitless::EditorProjectSettingsPanel
             const auto a = Project::LoadAudioSettings(projectRoot);
             const auto i = Project::LoadInputSettings(projectRoot);
             const auto l = Project::LoadLayersSettings(projectRoot);
+            const auto p = Project::LoadPhysics2DSettings(projectRoot);
 
             if (r.IsFailure()) { SetStatus(state, true, r.GetError().GetErrorMessage()); return false; }
             if (a.IsFailure()) { SetStatus(state, true, a.GetError().GetErrorMessage()); return false; }
             if (i.IsFailure()) { SetStatus(state, true, i.GetError().GetErrorMessage()); return false; }
             if (l.IsFailure()) { SetStatus(state, true, l.GetError().GetErrorMessage()); return false; }
+            if (p.IsFailure()) { SetStatus(state, true, p.GetError().GetErrorMessage()); return false; }
 
             state.Render = r.GetValue();
             state.Audio = a.GetValue();
             state.Input = i.GetValue();
             state.Layers = l.GetValue();
+            state.Physics2D = p.GetValue();
             RefreshInputActionsAssetKeys(state, projectRoot);
             state.Loaded = true;
             return true;
@@ -477,6 +480,19 @@ namespace Limitless::EditorProjectSettingsPanel
                 ImGui::EndTabItem();
             }
 
+            if (ImGui::BeginTabItem("Physics 2D"))
+            {
+                ImGui::DragFloat2("Gravity", &state.Physics2D.GravityX, 0.05f, -100.0f, 100.0f);
+                ImGui::SliderInt("Velocity Sub Steps", &state.Physics2D.VelocitySubSteps, 1, 24);
+                ImGui::Checkbox("Enable Sleep", &state.Physics2D.EnableSleep);
+                ImGui::Checkbox("Enable Continuous Collision", &state.Physics2D.EnableContinuousCollision);
+                ImGui::DragFloat("Contact Hertz", &state.Physics2D.ContactHertz, 0.5f, 1.0f, 240.0f);
+                ImGui::DragFloat("Contact Damping Ratio", &state.Physics2D.ContactDampingRatio, 0.01f, 0.0f, 2.0f);
+                ImGui::DragFloat("Contact Push Speed", &state.Physics2D.ContactPushSpeed, 0.1f, 0.1f, 64.0f);
+                ImGui::TextDisabled("Higher sub-steps/contact tuning reduces clipping on fast/rotating collisions.");
+                ImGui::EndTabItem();
+            }
+
             ImGui::EndTabBar();
         }
 
@@ -501,11 +517,13 @@ namespace Limitless::EditorProjectSettingsPanel
             const auto sa = Project::SaveAudioSettings(projectRoot, state.Audio);
             const auto si = Project::SaveInputSettings(projectRoot, state.Input);
             const auto sl = Project::SaveLayersSettings(projectRoot, state.Layers);
+            const auto sp = Project::SavePhysics2DSettings(projectRoot, state.Physics2D);
 
             if (sr.IsFailure()) { SetStatus(state, true, sr.GetError().GetErrorMessage()); }
             else if (sa.IsFailure()) { SetStatus(state, true, sa.GetError().GetErrorMessage()); }
             else if (si.IsFailure()) { SetStatus(state, true, si.GetError().GetErrorMessage()); }
             else if (sl.IsFailure()) { SetStatus(state, true, sl.GetError().GetErrorMessage()); }
+            else if (sp.IsFailure()) { SetStatus(state, true, sp.GetError().GetErrorMessage()); }
             else { SetStatus(state, false, "Project settings saved."); }
 
             // Best-effort apply so project defaults are live in the editor session.

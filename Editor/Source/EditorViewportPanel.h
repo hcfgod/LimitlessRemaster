@@ -15,6 +15,7 @@ namespace Limitless
 {
     class CameraManager;
     class EditorCameraController;
+    class EditorUndoService;
     class Framebuffer;
     class Scene;
 }
@@ -37,6 +38,7 @@ namespace Limitless::EditorViewportPanel
               const char* prefabPayloadId,
               const std::function<void(const std::string&, const glm::vec3&)>& onPrefabDropped,
               entt::entity& selectedEntity,
+              EditorUndoService* undoService,
               const char* materialPayloadId,
               std::string& selectedTextureAssetKey,
               Assets::TextureAsset::Ptr& cachedTextureAsset,

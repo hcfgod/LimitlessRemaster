@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 # Parse command line arguments
 CONFIGURATION="Debug"
 COMPILER="gcc"
@@ -41,170 +43,189 @@ fi
 # Function to check and install dependencies
 check_dependencies() {
     echo "Checking for required dependencies..."
-    
-    local missing_deps=()
-    
-    # Check for build tools
-    if ! command -v gcc >/dev/null 2>&1; then
-        missing_deps+=("build-essential")
-    fi
-    
-    if ! command -v make >/dev/null 2>&1; then
-        missing_deps+=("make")
-    fi
-    
-    # Check for X11 libraries
-    if ! pkg-config --exists x11 2>/dev/null; then
-        missing_deps+=("libx11-dev")
-    fi
-    
-    if ! pkg-config --exists xext 2>/dev/null; then
-        missing_deps+=("libxext-dev")
-    fi
-    
-    if ! pkg-config --exists xrandr 2>/dev/null; then
-        missing_deps+=("libxrandr-dev")
-    fi
-    
-    if ! pkg-config --exists xcursor 2>/dev/null; then
-        missing_deps+=("libxcursor-dev")
-    fi
-    
-    if ! pkg-config --exists xi 2>/dev/null; then
-        missing_deps+=("libxi-dev")
-    fi
-    
-    if ! pkg-config --exists xinerama 2>/dev/null; then
-        missing_deps+=("libxinerama-dev")
-    fi
-    
-    if ! pkg-config --exists xxf86vm 2>/dev/null; then
-        missing_deps+=("libxxf86vm-dev")
-    fi
-    
-    if ! pkg-config --exists xss 2>/dev/null; then
-        missing_deps+=("libxss-dev")
-    fi
-    
-    # Check for audio libraries
-    if ! pkg-config --exists alsa 2>/dev/null; then
-        missing_deps+=("libasound2-dev")
-    fi
-    
-    # Check for other system libraries
-    if ! pkg-config --exists box2d 2>/dev/null; then
-        missing_deps+=("libbox2d-dev")
+
+    local system_name
+    system_name="$(uname -s | tr '[:upper:]' '[:lower:]')"
+
+    if [[ "$system_name" == "darwin" ]]; then
+        if ! command -v brew >/dev/null 2>&1; then
+            echo "Error: Homebrew is required on macOS to install build dependencies."
+            echo "Install it from https://brew.sh and rerun this script."
+            return 1
+        fi
+
+        local missing_brew_deps=()
+        local brew_deps=("pkg-config" "box2d" "sdl3")
+        for dep in "${brew_deps[@]}"; do
+            if ! brew list --versions "$dep" >/dev/null 2>&1; then
+                missing_brew_deps+=("$dep")
+            fi
+        done
+
+        if [[ ${#missing_brew_deps[@]} -gt 0 ]]; then
+            echo "Installing missing Homebrew dependencies: ${missing_brew_deps[*]}"
+            brew update
+            brew install "${missing_brew_deps[@]}"
+        fi
+
+        if ! pkg-config --exists box2d 2>/dev/null; then
+            echo "Error: box2d still not discoverable by pkg-config after Homebrew install."
+            echo "Try: export PKG_CONFIG_PATH=\"$(brew --prefix)/lib/pkgconfig:${PKG_CONFIG_PATH:-}\""
+            return 1
+        fi
+        if ! pkg-config --exists sdl3 2>/dev/null; then
+            echo "Error: sdl3 still not discoverable by pkg-config after Homebrew install."
+            echo "Try: export PKG_CONFIG_PATH=\"$(brew --prefix)/lib/pkgconfig:${PKG_CONFIG_PATH:-}\""
+            return 1
+        fi
+    else
+        local missing_deps=()
+
+        # Check for build tools
+        if ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
+            missing_deps+=("build-essential")
+        fi
+
+        if ! command -v make >/dev/null 2>&1; then
+            missing_deps+=("make")
+        fi
+
+        if ! command -v pkg-config >/dev/null 2>&1; then
+            missing_deps+=("pkg-config")
+        fi
+
+        # Check for X11 libraries
+        if ! pkg-config --exists x11 2>/dev/null; then
+            missing_deps+=("libx11-dev")
+        fi
+        if ! pkg-config --exists xext 2>/dev/null; then
+            missing_deps+=("libxext-dev")
+        fi
+        if ! pkg-config --exists xrandr 2>/dev/null; then
+            missing_deps+=("libxrandr-dev")
+        fi
+        if ! pkg-config --exists xcursor 2>/dev/null; then
+            missing_deps+=("libxcursor-dev")
+        fi
+        if ! pkg-config --exists xi 2>/dev/null; then
+            missing_deps+=("libxi-dev")
+        fi
+        if ! pkg-config --exists xinerama 2>/dev/null; then
+            missing_deps+=("libxinerama-dev")
+        fi
+        if ! pkg-config --exists xxf86vm 2>/dev/null; then
+            missing_deps+=("libxxf86vm-dev")
+        fi
+        if ! pkg-config --exists xss 2>/dev/null; then
+            missing_deps+=("libxss-dev")
+        fi
+
+        # Check for audio and runtime libraries
+        if ! pkg-config --exists alsa 2>/dev/null; then
+            missing_deps+=("libasound2-dev")
+        fi
+        if ! pkg-config --exists box2d 2>/dev/null; then
+            missing_deps+=("libbox2d-dev")
+        fi
+        if ! pkg-config --exists dbus-1 2>/dev/null; then
+            missing_deps+=("libdbus-1-dev")
+        fi
+        if ! pkg-config --exists libudev 2>/dev/null; then
+            missing_deps+=("libudev-dev")
+        fi
+        if ! pkg-config --exists ibus-1.0 2>/dev/null; then
+            missing_deps+=("libibus-1.0-dev")
+        fi
+
+        if [[ ${#missing_deps[@]} -gt 0 ]]; then
+            echo "Installing missing Linux dependencies..."
+            echo "Missing: ${missing_deps[*]}"
+
+            if command -v apt-get >/dev/null 2>&1; then
+                sudo apt-get update
+                sudo apt-get install -y "${missing_deps[@]}"
+            elif command -v pacman >/dev/null 2>&1; then
+                # Map Debian package names to Arch equivalents where needed.
+                local arch_deps=("base-devel" "pkgconf" "libx11" "libxext" "libxrandr" "libxcursor" "libxi" "libxinerama" "libxxf86vm" "libxss" "alsa-lib" "box2d" "dbus" "ibus" "systemd")
+                sudo pacman -Syu --needed "${arch_deps[@]}"
+            else
+                echo "Error: Unsupported Linux package manager. Install dependencies manually and retry."
+                return 1
+            fi
+            echo "Linux system dependencies installed successfully."
+        fi
+
+        # Check for SDL3 and install from package manager / source as fallback
+        if ! pkg-config --exists sdl3 2>/dev/null; then
+            echo "SDL3 not found. Attempting package manager install first..."
+            if command -v apt-get >/dev/null 2>&1 && sudo apt-get install -y libsdl3-dev 2>/dev/null; then
+                echo "SDL3 installed from apt."
+            elif command -v pacman >/dev/null 2>&1 && sudo pacman -S --needed sdl3 >/dev/null 2>&1; then
+                echo "SDL3 installed from pacman."
+            else
+                echo "SDL3 package unavailable. Building SDL3 from source..."
+                local temp_dir="/tmp/sdl3_build_$$"
+                mkdir -p "$temp_dir"
+                pushd "$temp_dir" >/dev/null
+
+                if ! command -v git >/dev/null 2>&1; then
+                    if command -v apt-get >/dev/null 2>&1; then
+                        sudo apt-get install -y git
+                    elif command -v pacman >/dev/null 2>&1; then
+                        sudo pacman -S --needed git
+                    else
+                        echo "Error: git is required to build SDL3 from source."
+                        popd >/dev/null
+                        rm -rf "$temp_dir"
+                        return 1
+                    fi
+                fi
+
+                if ! command -v cmake >/dev/null 2>&1; then
+                    if command -v apt-get >/dev/null 2>&1; then
+                        sudo apt-get install -y cmake
+                    elif command -v pacman >/dev/null 2>&1; then
+                        sudo pacman -S --needed cmake
+                    else
+                        echo "Error: cmake is required to build SDL3 from source."
+                        popd >/dev/null
+                        rm -rf "$temp_dir"
+                        return 1
+                    fi
+                fi
+
+                git clone https://github.com/libsdl-org/SDL.git
+                cd SDL
+                git checkout release-3.2.18
+                mkdir build && cd build
+                cmake .. -DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_TEST=OFF -DSDL_OPENGL=ON -DSDL_OPENGLES=ON
+                make -j"$(get_job_count)"
+                sudo make install
+                if command -v ldconfig >/dev/null 2>&1; then
+                    sudo ldconfig
+                fi
+
+                popd >/dev/null
+                rm -rf "$temp_dir"
+                echo "SDL3 built and installed successfully from source."
+            fi
+        fi
     fi
 
-    if ! pkg-config --exists dbus-1 2>/dev/null; then
-        missing_deps+=("libdbus-1-dev")
-    fi
-    
-    if ! pkg-config --exists libudev 2>/dev/null; then
-        missing_deps+=("libudev-dev")
-    fi
-    
-    if ! pkg-config --exists ibus-1.0 2>/dev/null; then
-        missing_deps+=("libibus-1.0-dev")
-    fi
-    
-    # Install missing system dependencies
-    if [[ ${#missing_deps[@]} -gt 0 ]]; then
-        echo "Installing missing system dependencies..."
-        echo "Missing: ${missing_deps[*]}"
-        
-        if ! sudo apt-get update; then
-            echo "Error: Failed to update package list"
-            return 1
-        fi
-        
-        if ! sudo apt-get install -y "${missing_deps[@]}"; then
-            echo "Error: Failed to install system dependencies"
-            return 1
-        fi
-        
-        echo "System dependencies installed successfully."
-    fi
-    
-    # Check for SDL3 and install from source if needed
-    if ! pkg-config --exists sdl3 2>/dev/null; then
-        echo "SDL3 not found. Attempting to install from package manager first..."
-        
-        if sudo apt-get install -y libsdl3-dev 2>/dev/null; then
-            echo "SDL3 installed from package manager"
-        else
-            echo "SDL3 not available in package manager. Building from source..."
-            
-            # Check if we have the required tools for building SDL3
-            if ! command -v git >/dev/null 2>&1; then
-                echo "Installing git..."
-                sudo apt-get install -y git
-            fi
-            
-            if ! command -v cmake >/dev/null 2>&1; then
-                echo "Installing cmake..."
-                sudo apt-get install -y cmake
-            fi
-            
-            # Build SDL3 from source
-            local temp_dir="/tmp/sdl3_build_$$"
-            mkdir -p "$temp_dir"
-            cd "$temp_dir"
-            
-            echo "Cloning SDL repository..."
-            if ! git clone https://github.com/libsdl-org/SDL.git; then
-                echo "Error: Failed to clone SDL repository"
-                cd "$(dirname "$0")/.."
-                rm -rf "$temp_dir"
-                return 1
-            fi
-            
-            cd SDL
-            echo "Checking out SDL release-3.2.18..."
-            if ! git checkout release-3.2.18; then
-                echo "Error: Failed to checkout SDL release"
-                cd "$(dirname "$0")/.."
-                rm -rf "$temp_dir"
-                return 1
-            fi
-            
-            mkdir build && cd build
-            echo "Configuring SDL3 build..."
-            if ! cmake .. -DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_TEST=OFF -DSDL_OPENGL=ON -DSDL_OPENGLES=ON; then
-                echo "Error: Failed to configure SDL3 build"
-                cd "$(dirname "$0")/.."
-                rm -rf "$temp_dir"
-                return 1
-            fi
-            
-            echo "Building SDL3 (this may take a few minutes)..."
-            if ! make -j$(nproc); then
-                echo "Error: Failed to build SDL3"
-                cd "$(dirname "$0")/.."
-                rm -rf "$temp_dir"
-                return 1
-            fi
-            
-            echo "Installing SDL3..."
-            if ! sudo make install; then
-                echo "Error: Failed to install SDL3"
-                cd "$(dirname "$0")/.."
-                rm -rf "$temp_dir"
-                return 1
-            fi
-            
-            sudo ldconfig
-            
-            # Clean up
-            cd "$(dirname "$0")/.."
-            rm -rf "$temp_dir"
-            
-            echo "SDL3 built and installed successfully from source"
-        fi
-    fi
-    
     echo "All required dependencies are installed."
     return 0
+}
+
+get_job_count() {
+    if command -v nproc >/dev/null 2>&1; then
+        nproc
+        return
+    fi
+    if command -v sysctl >/dev/null 2>&1; then
+        sysctl -n hw.logicalcpu
+        return
+    fi
+    echo "4"
 }
 
 # Function to download and setup premake5
@@ -324,7 +345,7 @@ fi
 CONFIG_LOWER="${CONFIGURATION,,}"
 CFG_SHORTNAME="${CONFIG_LOWER}_${MAKE_PLATFORM_NAME}"
 
-make -j"$(nproc)" config="${CFG_SHORTNAME}"
+make -j"$(get_job_count)" config="${CFG_SHORTNAME}"
 if [[ $? -ne 0 ]]; then
     echo "Error: Build failed"
     exit 1

@@ -8,10 +8,13 @@
 #include "Graphics/Framebuffer.h"
 #include "Graphics/Renderer2D.h"
 #include "Scene/Scene.h"
+#include "Undo/EditorUndoService.h"
 #include "imgui/imgui.h"
 
 #include <array>
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <optional>
 
@@ -189,31 +192,104 @@ namespace Limitless::EditorViewportPanel
             return true;
         }
 
-        void DrawSelectedPhysicsOverlays(ImDrawList* drawList,
+        enum class ColliderHandleKind : uint8_t
+        {
+            None = 0,
+            BoxOffset,
+            BoxCorner0,
+            BoxCorner1,
+            BoxCorner2,
+            BoxCorner3,
+            CircleOffset,
+            CircleRadius
+        };
+
+        struct ColliderDragState final
+        {
+            bool Active = false;
+            entt::entity Entity = entt::null;
+            ColliderHandleKind Handle = ColliderHandleKind::None;
+            const char* CommitLabel = nullptr;
+        };
+
+        ColliderDragState& GetColliderDragState()
+        {
+            static ColliderDragState state;
+            return state;
+        }
+
+        bool IsMouseNearPoint(const ImVec2& mousePosition, const ImVec2& point, float radiusPixels)
+        {
+            const float dx = mousePosition.x - point.x;
+            const float dy = mousePosition.y - point.y;
+            return (dx * dx + dy * dy) <= radiusPixels * radiusPixels;
+        }
+
+        bool DrawAndHandleColliderGizmos(ImDrawList* drawList,
                                          Scene& scene,
                                          const Camera& camera,
                                          entt::entity selectedEntity,
                                          const ImVec2& viewportMin,
+                                         const ImVec2& viewportMax,
                                          float viewportWidth,
-                                         float viewportHeight)
+                                         float viewportHeight,
+                                         EditorPlayModeState playModeState,
+                                         EditorUndoService* undoService)
         {
             if (!drawList || selectedEntity == entt::null || !scene.IsValid(selectedEntity))
-                return;
+                return false;
 
+            auto& dragState = GetColliderDragState();
             auto& registry = scene.GetRegistry();
-            auto* transform = registry.try_get<TransformComponent>(selectedEntity);
-            if (!transform)
-                return;
+            if (!registry.try_get<TransformComponent>(selectedEntity))
+                return false;
 
+            const bool canEdit = playModeState == EditorPlayModeState::Edit;
             const glm::mat4 worldTransform = scene.GetWorldTransformMatrix(selectedEntity);
+            const glm::mat4 inverseWorldTransform = glm::inverse(worldTransform);
+            const ImVec2 mousePosition = ImGui::GetMousePos();
+            const bool mouseInViewport = mousePosition.x >= viewportMin.x && mousePosition.x <= viewportMax.x &&
+                                         mousePosition.y >= viewportMin.y && mousePosition.y <= viewportMax.y;
+            constexpr float handleRadiusPixels = 7.0f;
+
+            // If the selected entity changed mid-drag, abort the pending operation safely.
+            if (dragState.Active && dragState.Entity != selectedEntity)
+            {
+                if (undoService)
+                    undoService->CancelInteractiveSceneMutation();
+                dragState = {};
+            }
+
+            auto commitOrCancelDrag = [&](bool commit) {
+                if (!dragState.Active)
+                    return;
+                if (undoService)
+                {
+                    if (commit && dragState.CommitLabel)
+                        (void)undoService->CommitInteractiveSceneMutation(dragState.CommitLabel);
+                    else
+                        undoService->CancelInteractiveSceneMutation();
+                }
+                dragState = {};
+            };
+
+            auto updateLocalPointFromMouse = [&](glm::vec2& localPointOut) -> bool {
+                glm::vec3 worldPoint{};
+                if (!TryComputeDropWorldPosition(camera, viewportMin, viewportMax, mousePosition, worldPoint))
+                    return false;
+                const glm::vec4 localPoint = inverseWorldTransform * glm::vec4(worldPoint, 1.0f);
+                localPointOut = glm::vec2(localPoint.x, localPoint.y);
+                return true;
+            };
 
             if (auto* boxCollider2D = registry.try_get<BoxCollider2DComponent>(selectedEntity))
             {
+                const glm::vec2 halfSize = boxCollider2D->Size * 0.5f;
                 const glm::vec3 localCorners[4] = {
-                    glm::vec3(boxCollider2D->Offset.x - boxCollider2D->Size.x * 0.5f, boxCollider2D->Offset.y - boxCollider2D->Size.y * 0.5f, 0.0f),
-                    glm::vec3(boxCollider2D->Offset.x + boxCollider2D->Size.x * 0.5f, boxCollider2D->Offset.y - boxCollider2D->Size.y * 0.5f, 0.0f),
-                    glm::vec3(boxCollider2D->Offset.x + boxCollider2D->Size.x * 0.5f, boxCollider2D->Offset.y + boxCollider2D->Size.y * 0.5f, 0.0f),
-                    glm::vec3(boxCollider2D->Offset.x - boxCollider2D->Size.x * 0.5f, boxCollider2D->Offset.y + boxCollider2D->Size.y * 0.5f, 0.0f)
+                    glm::vec3(boxCollider2D->Offset.x - halfSize.x, boxCollider2D->Offset.y - halfSize.y, 0.0f),
+                    glm::vec3(boxCollider2D->Offset.x + halfSize.x, boxCollider2D->Offset.y - halfSize.y, 0.0f),
+                    glm::vec3(boxCollider2D->Offset.x + halfSize.x, boxCollider2D->Offset.y + halfSize.y, 0.0f),
+                    glm::vec3(boxCollider2D->Offset.x - halfSize.x, boxCollider2D->Offset.y + halfSize.y, 0.0f)
                 };
 
                 ImVec2 projectedCorners[4]{};
@@ -228,12 +304,79 @@ namespace Limitless::EditorViewportPanel
                     }
                 }
 
+                ImVec2 projectedOffset{};
+                const glm::vec4 worldOffset = worldTransform * glm::vec4(boxCollider2D->Offset, 0.0f, 1.0f);
+                valid = valid && WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldOffset), projectedOffset);
                 if (valid)
                 {
                     drawList->AddLine(projectedCorners[0], projectedCorners[1], IM_COL32(90, 200, 255, 255), 2.0f);
                     drawList->AddLine(projectedCorners[1], projectedCorners[2], IM_COL32(90, 200, 255, 255), 2.0f);
                     drawList->AddLine(projectedCorners[2], projectedCorners[3], IM_COL32(90, 200, 255, 255), 2.0f);
                     drawList->AddLine(projectedCorners[3], projectedCorners[0], IM_COL32(90, 200, 255, 255), 2.0f);
+
+                    drawList->AddCircleFilled(projectedOffset, handleRadiusPixels, IM_COL32(75, 220, 140, 245));
+                    for (const ImVec2& point : projectedCorners)
+                        drawList->AddCircleFilled(point, handleRadiusPixels, IM_COL32(90, 200, 255, 245));
+
+                    ColliderHandleKind hoveredHandle = ColliderHandleKind::None;
+                    if (canEdit && mouseInViewport && !dragState.Active)
+                    {
+                        if (IsMouseNearPoint(mousePosition, projectedOffset, handleRadiusPixels + 3.0f))
+                        {
+                            hoveredHandle = ColliderHandleKind::BoxOffset;
+                        }
+                        else
+                        {
+                            for (int i = 0; i < 4; ++i)
+                            {
+                                if (!IsMouseNearPoint(mousePosition, projectedCorners[i], handleRadiusPixels + 3.0f))
+                                    continue;
+                                hoveredHandle = static_cast<ColliderHandleKind>(static_cast<uint8_t>(ColliderHandleKind::BoxCorner0) + static_cast<uint8_t>(i));
+                                break;
+                            }
+                        }
+                    }
+
+                    if (hoveredHandle != ColliderHandleKind::None)
+                    {
+                        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                        {
+                            if (undoService)
+                                undoService->BeginInteractiveSceneMutation();
+                            dragState.Active = true;
+                            dragState.Entity = selectedEntity;
+                            dragState.Handle = hoveredHandle;
+                            dragState.CommitLabel = (hoveredHandle == ColliderHandleKind::BoxOffset)
+                                ? "Edit Box Collider Offset"
+                                : "Edit Box Collider Size";
+                        }
+                    }
+
+                    if (dragState.Active && dragState.Entity == selectedEntity &&
+                        (dragState.Handle == ColliderHandleKind::BoxOffset ||
+                         dragState.Handle == ColliderHandleKind::BoxCorner0 ||
+                         dragState.Handle == ColliderHandleKind::BoxCorner1 ||
+                         dragState.Handle == ColliderHandleKind::BoxCorner2 ||
+                         dragState.Handle == ColliderHandleKind::BoxCorner3))
+                    {
+                        glm::vec2 localPoint(0.0f);
+                        if (updateLocalPointFromMouse(localPoint))
+                        {
+                            if (dragState.Handle == ColliderHandleKind::BoxOffset)
+                            {
+                                boxCollider2D->Offset = localPoint;
+                            }
+                            else
+                            {
+                                const glm::vec2 delta = localPoint - boxCollider2D->Offset;
+                                boxCollider2D->Size = glm::max(glm::abs(glm::vec2(delta.x, delta.y)) * 2.0f, glm::vec2(0.02f));
+                            }
+                        }
+
+                        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+                            commitOrCancelDrag(true);
+                    }
                 }
             }
 
@@ -250,8 +393,59 @@ namespace Limitless::EditorViewportPanel
                     const float radiusPixels = std::sqrt((radiusPoint.x - centerPoint.x) * (radiusPoint.x - centerPoint.x) +
                                                          (radiusPoint.y - centerPoint.y) * (radiusPoint.y - centerPoint.y));
                     drawList->AddCircle(centerPoint, radiusPixels, IM_COL32(255, 190, 70, 255), 48, 2.0f);
+                    drawList->AddCircleFilled(centerPoint, handleRadiusPixels, IM_COL32(75, 220, 140, 245));
+                    drawList->AddCircleFilled(radiusPoint, handleRadiusPixels, IM_COL32(255, 190, 70, 245));
+
+                    ColliderHandleKind hoveredHandle = ColliderHandleKind::None;
+                    if (canEdit && mouseInViewport && !dragState.Active)
+                    {
+                        if (IsMouseNearPoint(mousePosition, centerPoint, handleRadiusPixels + 3.0f))
+                            hoveredHandle = ColliderHandleKind::CircleOffset;
+                        else if (IsMouseNearPoint(mousePosition, radiusPoint, handleRadiusPixels + 3.0f))
+                            hoveredHandle = ColliderHandleKind::CircleRadius;
+                    }
+
+                    if (hoveredHandle != ColliderHandleKind::None)
+                    {
+                        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                        {
+                            if (undoService)
+                                undoService->BeginInteractiveSceneMutation();
+                            dragState.Active = true;
+                            dragState.Entity = selectedEntity;
+                            dragState.Handle = hoveredHandle;
+                            dragState.CommitLabel = (hoveredHandle == ColliderHandleKind::CircleOffset)
+                                ? "Edit Circle Collider Offset"
+                                : "Edit Circle Collider Radius";
+                        }
+                    }
+
+                    if (dragState.Active && dragState.Entity == selectedEntity &&
+                        (dragState.Handle == ColliderHandleKind::CircleOffset ||
+                         dragState.Handle == ColliderHandleKind::CircleRadius))
+                    {
+                        glm::vec2 localPoint(0.0f);
+                        if (updateLocalPointFromMouse(localPoint))
+                        {
+                            if (dragState.Handle == ColliderHandleKind::CircleOffset)
+                            {
+                                circleCollider2D->Offset = localPoint;
+                            }
+                            else
+                            {
+                                circleCollider2D->Radius = std::max(0.01f, glm::length(localPoint - circleCollider2D->Offset));
+                            }
+                        }
+
+                        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+                            commitOrCancelDrag(true);
+                    }
                 }
             }
+
+            if (dragState.Active && !ImGui::IsMouseDown(ImGuiMouseButton_Left))
+                commitOrCancelDrag(true);
 
             if (auto* joint2D = registry.try_get<Joint2DComponent>(selectedEntity))
             {
@@ -272,6 +466,23 @@ namespace Limitless::EditorViewportPanel
                     }
                 }
             }
+
+            return dragState.Active;
+        }
+
+        void DrawSelectedPhysicsOverlays(ImDrawList* drawList,
+                                         Scene& scene,
+                                         const Camera& camera,
+                                         entt::entity selectedEntity,
+                                         const ImVec2& viewportMin,
+                                         const ImVec2& viewportMax,
+                                         float viewportWidth,
+                                         float viewportHeight,
+                                         EditorPlayModeState playModeState,
+                                         EditorUndoService* undoService)
+        {
+            (void)DrawAndHandleColliderGizmos(
+                drawList, scene, camera, selectedEntity, viewportMin, viewportMax, viewportWidth, viewportHeight, playModeState, undoService);
         }
     }
 
@@ -291,6 +502,7 @@ namespace Limitless::EditorViewportPanel
               const char* prefabPayloadId,
               const std::function<void(const std::string&, const glm::vec3&)>& onPrefabDropped,
               entt::entity& selectedEntity,
+              EditorUndoService* undoService,
               const char* materialPayloadId,
               std::string& selectedTextureAssetKey,
               Assets::TextureAsset::Ptr& cachedTextureAsset,
@@ -338,8 +550,18 @@ namespace Limitless::EditorViewportPanel
                 if (scene && camera)
                 {
                     const ImVec2 viewportMin = ImGui::GetItemRectMin();
+                    const ImVec2 viewportMax = ImGui::GetItemRectMax();
                     ImDrawList* drawList = ImGui::GetWindowDrawList();
-                    DrawSelectedPhysicsOverlays(drawList, *scene, *camera, selectedEntity, viewportMin, static_cast<float>(width), static_cast<float>(height));
+                    DrawSelectedPhysicsOverlays(drawList,
+                                                *scene,
+                                                *camera,
+                                                selectedEntity,
+                                                viewportMin,
+                                                viewportMax,
+                                                static_cast<float>(width),
+                                                static_cast<float>(height),
+                                                playModeState,
+                                                undoService);
                 }
 
                 if (ImGui::BeginDragDropTarget())
