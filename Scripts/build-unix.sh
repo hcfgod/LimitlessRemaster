@@ -126,9 +126,6 @@ check_dependencies() {
         if ! pkg-config --exists alsa 2>/dev/null; then
             missing_deps+=("libasound2-dev")
         fi
-        if ! pkg-config --exists box2d 2>/dev/null; then
-            missing_deps+=("libbox2d-dev")
-        fi
         if ! pkg-config --exists dbus-1 2>/dev/null; then
             missing_deps+=("libdbus-1-dev")
         fi
@@ -148,13 +145,17 @@ check_dependencies() {
                 sudo apt-get install -y "${missing_deps[@]}"
             elif command -v pacman >/dev/null 2>&1; then
                 # Map Debian package names to Arch equivalents where needed.
-                local arch_deps=("base-devel" "pkgconf" "libx11" "libxext" "libxrandr" "libxcursor" "libxi" "libxinerama" "libxxf86vm" "libxss" "alsa-lib" "box2d" "dbus" "ibus" "systemd")
+                local arch_deps=("base-devel" "pkgconf" "libx11" "libxext" "libxrandr" "libxcursor" "libxi" "libxinerama" "libxxf86vm" "libxss" "alsa-lib" "dbus" "ibus" "systemd")
                 sudo pacman -Syu --needed "${arch_deps[@]}"
             else
                 echo "Error: Unsupported Linux package manager. Install dependencies manually and retry."
                 return 1
             fi
             echo "Linux system dependencies installed successfully."
+        fi
+
+        if ! install_box2d_v3_linux; then
+            return 1
         fi
 
         # Check for SDL3 and install from package manager / source as fallback
@@ -228,6 +229,79 @@ get_job_count() {
         return
     fi
     echo "4"
+}
+
+has_box2d_v3_linux() {
+    if command -v ldconfig >/dev/null 2>&1; then
+        local installed_path
+        installed_path="$(ldconfig -p 2>/dev/null | awk '/libbox2d\.so/{print $NF; exit}')"
+        if [[ -n "${installed_path:-}" ]] && nm -D "$installed_path" 2>/dev/null | grep -q "b2World_IsValid"; then
+            return 0
+        fi
+    fi
+
+    if [[ -f "/usr/local/lib/libbox2d.so" ]] && nm -D "/usr/local/lib/libbox2d.so" 2>/dev/null | grep -q "b2World_IsValid"; then
+        return 0
+    fi
+
+    return 1
+}
+
+install_box2d_v3_linux() {
+    if has_box2d_v3_linux; then
+        return 0
+    fi
+
+    echo "Box2D 3.x not found (missing b2World_IsValid). Building from source..."
+
+    local temp_dir="/tmp/box2d_build_$$"
+    mkdir -p "$temp_dir"
+    pushd "$temp_dir" >/dev/null
+
+    if ! command -v git >/dev/null 2>&1; then
+        if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get install -y git
+        elif command -v pacman >/dev/null 2>&1; then
+            sudo pacman -S --needed git
+        else
+            echo "Error: git is required to install Box2D from source."
+            popd >/dev/null
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    fi
+
+    if ! command -v cmake >/dev/null 2>&1; then
+        if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get install -y cmake
+        elif command -v pacman >/dev/null 2>&1; then
+            sudo pacman -S --needed cmake
+        else
+            echo "Error: cmake is required to install Box2D from source."
+            popd >/dev/null
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    fi
+
+    git clone --depth 1 --branch v3.1.1 https://github.com/erincatto/box2d.git
+    cmake -S box2d -B box2d/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
+    cmake --build box2d/build --parallel "$(get_job_count)"
+    sudo cmake --install box2d/build
+    if command -v ldconfig >/dev/null 2>&1; then
+        sudo ldconfig
+    fi
+
+    popd >/dev/null
+    rm -rf "$temp_dir"
+
+    if ! has_box2d_v3_linux; then
+        echo "Error: Box2D 3.x installation verification failed."
+        return 1
+    fi
+
+    echo "Box2D 3.x installed successfully."
+    return 0
 }
 
 # Function to download and setup premake5

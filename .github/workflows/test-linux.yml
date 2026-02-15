@@ -18,14 +18,29 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential g++ make cmake pkg-config
+        sudo apt-get install -y build-essential g++ make cmake pkg-config git
         sudo apt-get install -y libasound2-dev libpulse-dev libaudio-dev libjack-dev
         sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev libxxf86vm-dev libxss-dev
         sudo apt-get install -y libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev
         sudo apt-get install -y libdbus-1-dev libudev-dev libibus-1.0-dev
         sudo apt-get install -y libdrm-dev libgbm-dev
         sudo apt-get install -y libwayland-dev libxkbcommon-dev
-        sudo apt-get install -y libbox2d-dev
+
+    - name: Install Box2D 3.x
+      run: |
+        echo "Installing Box2D 3.x from source..."
+        cd /tmp
+        rm -rf box2d
+        git clone --depth 1 --branch v3.1.1 https://github.com/erincatto/box2d.git
+        cd box2d
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
+        cmake --build build --parallel $(nproc)
+        sudo cmake --install build
+        sudo ldconfig
+
+        echo "Box2D installation info:"
+        ls -la /usr/local/lib/libbox2d.so*
+        nm -D /usr/local/lib/libbox2d.so | grep b2World_IsValid
         
     - name: Install SDL3
       run: |
@@ -48,8 +63,6 @@ jobs:
         
         echo "SDL3 installation info:"
         pkg-config --modversion sdl3 || echo "SDL3 not found by pkg-config"
-        echo "Box2D installation info:"
-        pkg-config --modversion box2d || echo "Box2D not found by pkg-config"
         
     - name: Download premake5
       run: |
@@ -76,6 +89,8 @@ jobs:
     - name: Build project
       run: |
         echo "Building project..."
+        export LIBRARY_PATH="/usr/local/lib:${LIBRARY_PATH}"
+        export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
         make -j$(nproc) config=debug_x64
         
         if [ $? -ne 0 ]; then
@@ -92,6 +107,7 @@ jobs:
         
     - name: Run tests
       run: |
+        export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
         TEST_EXE=$(find Build/ -name "Test" -type f 2>/dev/null | head -1)
         if [ -n "$TEST_EXE" ]; then
           echo "Running tests..."
