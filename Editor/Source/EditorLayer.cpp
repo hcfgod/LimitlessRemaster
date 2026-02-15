@@ -474,13 +474,14 @@ namespace Limitless
     void EditorLayer::OnDetach()
     {
         SceneManager::ClearPendingSceneTransition();
+        if (m_PlayModeState != EditorPlayModeState::Edit)
+            ExitPlayMode();
         m_EditorUndoService.Clear();
         m_PendingTexturePrewarmTasks.clear();
         m_PendingMaterialPrewarmTasks.clear();
         m_PrewarmedTextureAssets.clear();
         m_PrewarmedMaterialAssets.clear();
         PersistProjectSessionState();
-        ScriptCoreModuleRuntime::Shutdown();
         Application::GetInstance().GetWindow().SetFileDropCallback({});
         EditorBuildAndRunPanel::Shutdown(m_BuildAndRunPanelState);
 
@@ -489,6 +490,7 @@ namespace Limitless
             m_EditSceneStored,
             m_EditorCameraController,
             m_ViewportFramebuffer);
+        ScriptCoreModuleRuntime::Shutdown();
     }
 
     void EditorLayer::OnUpdate(float deltaTime)
@@ -551,7 +553,10 @@ namespace Limitless
             return;
 
         if (m_PlayModeState == EditorPlayModeState::Play || m_PlayModeState == EditorPlayModeState::Simulate)
+        {
+            m_Scene->FixedUpdate(fixedDeltaTime);
             m_Scene->StepPhysics2D(fixedDeltaTime);
+        }
     }
 
     void EditorLayer::OnRender()

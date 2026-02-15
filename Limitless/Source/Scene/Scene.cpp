@@ -528,6 +528,70 @@ namespace Limitless
         }
     }
 
+    void Scene::FixedUpdate(float fixedDeltaTime)
+    {
+        auto view = m_Registry.view<NativeScriptComponent>();
+        for (entt::entity entity : view)
+        {
+            auto& nativeScript = view.get<NativeScriptComponent>(entity);
+            for (auto& scriptEntry : nativeScript.Scripts)
+            {
+                if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty())
+                {
+                    if (scriptEntry.RuntimeInstance && scriptEntry.RuntimeInitialized)
+                        scriptEntry.RuntimeInstance->OnDestroy();
+                    scriptEntry.RuntimeInstance.reset();
+                    scriptEntry.RuntimeInitialized = false;
+                    scriptEntry.RuntimeUpdateCount = 0;
+                    continue;
+                }
+
+                if (!scriptEntry.RuntimeInstance)
+                {
+                    scriptEntry.RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry.ScriptClassName);
+                    if (!scriptEntry.RuntimeInstance && !scriptEntry.ScriptAssetRelativePath.empty())
+                    {
+                        const std::string fallbackClassName = std::filesystem::path(scriptEntry.ScriptAssetRelativePath).stem().string();
+                        if (!fallbackClassName.empty() &&
+                            fallbackClassName != scriptEntry.ScriptClassName &&
+                            NativeScriptRegistry::HasScript(fallbackClassName))
+                        {
+                            scriptEntry.ScriptClassName = fallbackClassName;
+                            scriptEntry.RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry.ScriptClassName);
+                        }
+                    }
+                    if (scriptEntry.RuntimeInstance)
+                    {
+                        scriptEntry.RuntimeInstance->m_Scene = this;
+                        scriptEntry.RuntimeInstance->m_Registry = &m_Registry;
+                        scriptEntry.RuntimeInstance->m_EntityHandle = entity;
+                        scriptEntry.RuntimeInstance->m_ExposedProperties = &scriptEntry.ExposedProperties;
+                        scriptEntry.RuntimeInitialized = false;
+                        scriptEntry.RuntimeUpdateCount = 0;
+                    }
+                }
+
+                if (!scriptEntry.RuntimeInstance)
+                    continue;
+
+                scriptEntry.RuntimeInstance->m_Scene = this;
+                scriptEntry.RuntimeInstance->m_Registry = &m_Registry;
+                scriptEntry.RuntimeInstance->m_EntityHandle = entity;
+                scriptEntry.RuntimeInstance->m_ExposedProperties = &scriptEntry.ExposedProperties;
+
+                if (!scriptEntry.RuntimeInitialized)
+                {
+                    scriptEntry.RuntimeInstance->OnSynchronizeExposedFields();
+                    scriptEntry.RuntimeInstance->OnCreate();
+                    scriptEntry.RuntimeInitialized = true;
+                }
+
+                scriptEntry.RuntimeInstance->OnSynchronizeExposedFields();
+                scriptEntry.RuntimeInstance->OnFixedUpdate(fixedDeltaTime);
+            }
+        }
+    }
+
     void Scene::StepPhysics2D(float fixedDeltaTime)
     {
         if (!m_Physics2DWorld)

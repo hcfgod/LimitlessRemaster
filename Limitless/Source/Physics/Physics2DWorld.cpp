@@ -304,33 +304,43 @@ namespace Limitless
             const glm::vec2 runtimePosition(runtimeTransform.p.x, runtimeTransform.p.y);
             const float runtimeAngleRadians = b2Rot_GetAngle(runtimeTransform.q);
 
+            if (expectedType == b2_kinematicBody)
+            {
+                // For authored kinematic bodies, drive velocity from authored transform deltas.
+                // This avoids solver-feedback jitter when a dynamic body is in contact.
+                const glm::vec2 authoredPositionDelta = authoringPosition - rigidbody.RuntimePreviousPosition;
+                const float authoredAngleDelta = WrapAngleRadians(authoringAngleRadians - rigidbody.RuntimePreviousAngleRadians);
+                const bool authoringChanged = glm::length(authoredPositionDelta) > kTransformSnapEpsilon ||
+                                              std::abs(authoredAngleDelta) > kTransformSnapEpsilon;
+
+                if (!authoringChanged)
+                {
+                    b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, { 0.0f, 0.0f });
+                    b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, 0.0f);
+                    continue;
+                }
+
+                const float inverseStep = 1.0f / std::max(fixedDeltaTime, kMinimumStepDelta);
+                const glm::vec2 targetLinearVelocity = authoredPositionDelta * inverseStep;
+                const float targetAngularVelocity = authoredAngleDelta * inverseStep;
+                b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, { targetLinearVelocity.x, targetLinearVelocity.y });
+                b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, targetAngularVelocity);
+
+                rigidbody.RuntimePreviousPosition = authoringPosition;
+                rigidbody.RuntimePreviousAngleRadians = authoringAngleRadians;
+                continue;
+            }
+
             const glm::vec2 positionDelta = authoringPosition - runtimePosition;
             const float angleDelta = WrapAngleRadians(authoringAngleRadians - runtimeAngleRadians);
             const bool transformChangedByAuthoring = glm::length(positionDelta) > kTransformSnapEpsilon ||
                                                      std::abs(angleDelta) > kTransformSnapEpsilon;
             if (transformChangedByAuthoring)
             {
-                if (expectedType == b2_kinematicBody)
-                {
-                    const float inverseStep = 1.0f / std::max(fixedDeltaTime, kMinimumStepDelta);
-                    const glm::vec2 targetLinearVelocity = positionDelta * inverseStep;
-                    const float targetAngularVelocity = angleDelta * inverseStep;
-                    b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, { targetLinearVelocity.x, targetLinearVelocity.y });
-                    b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, targetAngularVelocity);
-                }
-                else
-                {
-                    b2Body_SetTransform(
-                        rigidbody.RuntimeBodyId,
-                        { authoringPosition.x, authoringPosition.y },
-                        b2MakeRot(authoringAngleRadians));
-                }
-            }
-            else if (expectedType == b2_kinematicBody)
-            {
-                // Keep idle kinematic bodies stable and avoid drift accumulation.
-                b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, { 0.0f, 0.0f });
-                b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, 0.0f);
+                b2Body_SetTransform(
+                    rigidbody.RuntimeBodyId,
+                    { authoringPosition.x, authoringPosition.y },
+                    b2MakeRot(authoringAngleRadians));
             }
         }
 #else
@@ -483,6 +493,9 @@ namespace Limitless
             auto* transform = registry.try_get<TransformComponent>(entity);
             auto* rigidbody = registry.try_get<Rigidbody2DComponent>(entity);
             if (!transform || !rigidbody)
+                continue;
+
+            if (rigidbody->Type == Rigidbody2DComponent::BodyType::Kinematic)
                 continue;
 
             rigidbody->RuntimePreviousPosition = glm::vec2(transform->Position.x, transform->Position.y);

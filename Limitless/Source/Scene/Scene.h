@@ -71,6 +71,7 @@ namespace Limitless
 
         /// Runtime update for script-driven entity behavior.
         void Update(float deltaTime);
+        void FixedUpdate(float fixedDeltaTime);
         void StepPhysics2D(float fixedDeltaTime);
 
         void SetPhysics2DSettings(const Physics2DWorldSettings& settings);

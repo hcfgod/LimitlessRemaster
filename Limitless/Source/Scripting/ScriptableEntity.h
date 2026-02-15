@@ -88,6 +88,7 @@ namespace Limitless
         virtual void OnSynchronizeExposedFields() {}
 
         virtual void OnCreate() {}
+        virtual void OnFixedUpdate(float fixedDeltaTime) { (void)fixedDeltaTime; }
         virtual void OnUpdate(float deltaTime) {}
         virtual void OnDestroy() {}
 
