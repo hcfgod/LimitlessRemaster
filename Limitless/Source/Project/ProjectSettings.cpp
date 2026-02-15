@@ -390,6 +390,8 @@ namespace Limitless::Project
         root["velocitySubSteps"] = s.VelocitySubSteps;
         root["enableSleep"] = s.EnableSleep;
         root["enableContinuousCollision"] = s.EnableContinuousCollision;
+        root["highContactQualityMode"] = s.HighContactQualityMode;
+        root["highContactQualityExtraSubSteps"] = s.HighContactQualityExtraSubSteps;
         root["contactHertz"] = s.ContactHertz;
         root["contactDampingRatio"] = s.ContactDampingRatio;
         root["contactPushSpeed"] = s.ContactPushSpeed;
@@ -408,6 +410,8 @@ namespace Limitless::Project
         s.VelocitySubSteps = std::max(1, root.value("velocitySubSteps", 8));
         s.EnableSleep = root.value("enableSleep", true);
         s.EnableContinuousCollision = root.value("enableContinuousCollision", true);
+        s.HighContactQualityMode = root.value("highContactQualityMode", false);
+        s.HighContactQualityExtraSubSteps = std::max(0, root.value("highContactQualityExtraSubSteps", 4));
         s.ContactHertz = root.value("contactHertz", 90.0f);
         s.ContactDampingRatio = root.value("contactDampingRatio", 1.0f);
         s.ContactPushSpeed = root.value("contactPushSpeed", 8.0f);

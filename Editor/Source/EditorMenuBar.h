@@ -10,7 +10,7 @@ namespace Limitless::EditorMenuBar
     void Draw(EditorPlayModeState playModeState,
               bool& showDemoWindow,
               bool& showAssetDiagnosticsWindow,
-              bool& showBuildAndRunWindow,
+              bool& showPhysicsDiagnosticsWindow,
               const std::function<void()>& onOpenProject,
               const std::function<void()>& onCreateProject,
               const std::function<void()>& onProjectSettings,

@@ -486,6 +486,9 @@ namespace Limitless::EditorProjectSettingsPanel
                 ImGui::SliderInt("Velocity Sub Steps", &state.Physics2D.VelocitySubSteps, 1, 24);
                 ImGui::Checkbox("Enable Sleep", &state.Physics2D.EnableSleep);
                 ImGui::Checkbox("Enable Continuous Collision", &state.Physics2D.EnableContinuousCollision);
+                ImGui::Checkbox("High Contact Quality Mode", &state.Physics2D.HighContactQualityMode);
+                ImGui::DragInt("High Quality Extra Sub Steps", &state.Physics2D.HighContactQualityExtraSubSteps, 1.0f, 0, 24);
+                state.Physics2D.HighContactQualityExtraSubSteps = std::max(0, state.Physics2D.HighContactQualityExtraSubSteps);
                 ImGui::DragFloat("Contact Hertz", &state.Physics2D.ContactHertz, 0.5f, 1.0f, 240.0f);
                 ImGui::DragFloat("Contact Damping Ratio", &state.Physics2D.ContactDampingRatio, 0.01f, 0.0f, 2.0f);
                 ImGui::DragFloat("Contact Push Speed", &state.Physics2D.ContactPushSpeed, 0.1f, 0.1f, 64.0f);

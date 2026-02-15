@@ -66,6 +66,8 @@ namespace Limitless::Project
         int VelocitySubSteps = 8;
         bool EnableSleep = true;
         bool EnableContinuousCollision = true;
+        bool HighContactQualityMode = false;
+        int HighContactQualityExtraSubSteps = 4;
         float ContactHertz = 90.0f;
         float ContactDampingRatio = 1.0f;
         float ContactPushSpeed = 8.0f;

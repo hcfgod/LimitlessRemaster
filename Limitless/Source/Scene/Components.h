@@ -152,10 +152,12 @@ namespace Limitless
 
         BodyType Type = BodyType::Dynamic;
         bool FixedRotation = false;
-        bool IsBullet = false;
+        bool UseCCD = false;
         bool EnableSleep = true;
         bool StartAwake = true;
         bool Interpolate = true;
+        bool HighContactQuality = false;
+        int ExtraSolverSubSteps = 0;
         float GravityScale = 1.0f;
         float LinearDamping = 0.0f;
         float AngularDamping = 0.01f;
@@ -166,6 +168,10 @@ namespace Limitless
         bool RuntimeBodyCreated = false;
         glm::vec2 RuntimePreviousPosition = glm::vec2(0.0f);
         float RuntimePreviousAngleRadians = 0.0f;
+        glm::vec2 RuntimeRenderPreviousPosition = glm::vec2(0.0f);
+        float RuntimeRenderPreviousAngleRadians = 0.0f;
+        glm::vec2 RuntimeRenderCurrentPosition = glm::vec2(0.0f);
+        float RuntimeRenderCurrentAngleRadians = 0.0f;
     };
 
     struct BoxCollider2DComponent
@@ -244,6 +250,7 @@ namespace Limitless
         std::unique_ptr<ScriptableEntity> RuntimeInstance;
         bool RuntimeInitialized = false;
         uint64_t RuntimeUpdateCount = 0;
+        bool RuntimeWarnedOnUpdateTransformMutation = false;
 
         NativeScriptEntry() = default;
 
@@ -254,7 +261,8 @@ namespace Limitless
               ExposedProperties(other.ExposedProperties),
               RuntimeInstance(nullptr),
               RuntimeInitialized(false),
-              RuntimeUpdateCount(0)
+              RuntimeUpdateCount(0),
+              RuntimeWarnedOnUpdateTransformMutation(false)
         {
         }
 
@@ -269,6 +277,7 @@ namespace Limitless
             RuntimeInstance.reset();
             RuntimeInitialized = false;
             RuntimeUpdateCount = 0;
+            RuntimeWarnedOnUpdateTransformMutation = false;
             return *this;
         }
 

@@ -483,7 +483,6 @@ namespace Limitless
         m_PrewarmedMaterialAssets.clear();
         PersistProjectSessionState();
         Application::GetInstance().GetWindow().SetFileDropCallback({});
-        EditorBuildAndRunPanel::Shutdown(m_BuildAndRunPanelState);
 
         EditorRuntimeOperations::Detach(
             m_Scene,
@@ -647,11 +646,11 @@ namespace Limitless
         DrawMenuBar();
         EditorProjectSettingsPanel::Draw(m_ShowProjectSettingsWindow, m_ProjectSettingsPanelState);
         EditorAssetDiagnosticsPanel::Draw(m_ShowAssetDiagnosticsWindow);
-        EditorBuildAndRunPanel::Draw(m_ShowBuildAndRunWindow, m_BuildAndRunPanelState);
         DrawViewportPanel();
         DrawScenePanel();
         DrawInspectorPanel();
         DrawProjectPanel();
+        DrawPhysicsDiagnosticsPanel();
         DrawSaveScenePopup();
         DrawSceneSwitchConfirmationPopup();
 
@@ -680,7 +679,7 @@ namespace Limitless
             m_PlayModeState,
             m_ShowDemoWindow,
             m_ShowAssetDiagnosticsWindow,
-            m_ShowBuildAndRunWindow,
+            m_ShowPhysicsDiagnosticsWindow,
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Open); },
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Create); },
             [this]() { m_ShowProjectSettingsWindow = true; },
@@ -750,6 +749,94 @@ namespace Limitless
             [this]() { (void)ReturnFromPrefabMode(false); },
             canApplyPrefabToInstances,
             [this]() { (void)ApplyPrefabStageChangesToInstances(); });
+    }
+
+    void EditorLayer::DrawPhysicsDiagnosticsPanel()
+    {
+        if (!m_ShowPhysicsDiagnosticsWindow)
+            return;
+
+        if (!ImGui::Begin("Physics 2D Diagnostics", &m_ShowPhysicsDiagnosticsWindow))
+        {
+            ImGui::End();
+            return;
+        }
+
+        if (!m_Scene)
+        {
+            ImGui::TextDisabled("No active scene.");
+            ImGui::End();
+            return;
+        }
+
+        const Physics2DWorld* physicsWorld = m_Scene->GetPhysics2DWorld();
+        if (!physicsWorld)
+        {
+            ImGui::TextDisabled("Physics world is not initialized yet.");
+            ImGui::End();
+            return;
+        }
+
+        const Physics2DDiagnostics& diagnostics = physicsWorld->GetDiagnostics();
+        constexpr float kRecentPeakHoldDurationSeconds = 0.35f;
+        const float frameDeltaSeconds = std::max(0.0f, ImGui::GetIO().DeltaTime);
+
+        if (diagnostics.ContactPairCount > 0 || diagnostics.PenetratingContactPointCount > 0 || diagnostics.MaxPenetrationDepth > 0.0f)
+        {
+            m_PhysicsDiagnosticsRecentPeakContactPairs =
+                std::max(m_PhysicsDiagnosticsRecentPeakContactPairs, diagnostics.ContactPairCount);
+            m_PhysicsDiagnosticsRecentPeakPenetratingPoints =
+                std::max(m_PhysicsDiagnosticsRecentPeakPenetratingPoints, diagnostics.PenetratingContactPointCount);
+            m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth =
+                std::max(m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth, diagnostics.MaxPenetrationDepth);
+            m_PhysicsDiagnosticsRecentPeakHoldSeconds = kRecentPeakHoldDurationSeconds;
+        }
+        else if (m_PhysicsDiagnosticsRecentPeakHoldSeconds > 0.0f)
+        {
+            m_PhysicsDiagnosticsRecentPeakHoldSeconds =
+                std::max(0.0f, m_PhysicsDiagnosticsRecentPeakHoldSeconds - frameDeltaSeconds);
+            if (m_PhysicsDiagnosticsRecentPeakHoldSeconds <= 0.0f)
+            {
+                m_PhysicsDiagnosticsRecentPeakContactPairs = diagnostics.ContactPairCount;
+                m_PhysicsDiagnosticsRecentPeakPenetratingPoints = diagnostics.PenetratingContactPointCount;
+                m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth = diagnostics.MaxPenetrationDepth;
+            }
+        }
+
+        ImGui::Text("Bodies: %d (Awake: %d, Sleeping: %d)", diagnostics.BodyCount, diagnostics.AwakeBodyCount, diagnostics.SleepingBodyCount);
+        ImGui::Text("Contact Pairs: %d", diagnostics.ContactPairCount);
+        ImGui::Text("Penetrating Points: %d", diagnostics.PenetratingContactPointCount);
+        ImGui::Text("Max Penetration Depth: %.5f", diagnostics.MaxPenetrationDepth);
+        ImGui::TextDisabled("Recent Peak (%.2fs): contacts=%d, penetrating=%d, maxDepth=%.5f",
+                            kRecentPeakHoldDurationSeconds,
+                            m_PhysicsDiagnosticsRecentPeakContactPairs,
+                            m_PhysicsDiagnosticsRecentPeakPenetratingPoints,
+                            m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth);
+        ImGui::Separator();
+
+        if (m_SelectedEntity != entt::null)
+        {
+            Physics2DBodyDiagnostics bodyDiagnostics{};
+            if (physicsWorld->TryGetBodyDiagnostics(m_SelectedEntity, bodyDiagnostics))
+            {
+                ImGui::TextDisabled("Selected Body");
+                ImGui::Text("Awake: %s", bodyDiagnostics.IsAwake ? "Yes" : "No");
+                ImGui::Text("Contact Pairs: %d", bodyDiagnostics.ContactPairCount);
+                ImGui::Text("Penetrating Points: %d", bodyDiagnostics.PenetratingContactPointCount);
+                ImGui::Text("Max Penetration Depth: %.5f", bodyDiagnostics.MaxPenetrationDepth);
+            }
+            else
+            {
+                ImGui::TextDisabled("Selected entity has no active Rigidbody2D diagnostics.");
+            }
+        }
+        else
+        {
+            ImGui::TextDisabled("Select an entity to inspect per-body sleep/contact state.");
+        }
+
+        ImGui::TextWrapped("Tip: if contacts and penetration are stable but motion appears jittery, it is usually render sampling rather than solver instability.");
+        ImGui::End();
     }
 
     void EditorLayer::DrawViewportPanel()
@@ -1634,6 +1721,8 @@ namespace Limitless
         runtimeSettings.VelocitySubSteps = std::max(1, m_ProjectPhysics2DSettings.VelocitySubSteps);
         runtimeSettings.EnableSleep = m_ProjectPhysics2DSettings.EnableSleep;
         runtimeSettings.EnableContinuousCollision = m_ProjectPhysics2DSettings.EnableContinuousCollision;
+        runtimeSettings.HighContactQualityMode = m_ProjectPhysics2DSettings.HighContactQualityMode;
+        runtimeSettings.HighContactQualityExtraSubSteps = std::max(0, m_ProjectPhysics2DSettings.HighContactQualityExtraSubSteps);
         runtimeSettings.ContactHertz = m_ProjectPhysics2DSettings.ContactHertz;
         runtimeSettings.ContactDampingRatio = m_ProjectPhysics2DSettings.ContactDampingRatio;
         runtimeSettings.ContactPushSpeed = m_ProjectPhysics2DSettings.ContactPushSpeed;

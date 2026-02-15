@@ -4,6 +4,7 @@
 #include "Scene/Components.h"
 
 #include <glm/glm.hpp>
+#include <unordered_map>
 
 namespace Limitless
 {
@@ -15,6 +16,8 @@ namespace Limitless
         int VelocitySubSteps = 8;
         bool EnableSleep = true;
         bool EnableContinuousCollision = true;
+        bool HighContactQualityMode = false;
+        int HighContactQualityExtraSubSteps = 4;
         float ContactHertz = 90.0f;
         float ContactDampingRatio = 1.0f;
         float ContactPushSpeed = 8.0f;
@@ -27,6 +30,25 @@ namespace Limitless
         glm::vec2 Point = glm::vec2(0.0f);
         glm::vec2 Normal = glm::vec2(0.0f, 1.0f);
         float Fraction = 0.0f;
+    };
+
+    struct Physics2DDiagnostics
+    {
+        int BodyCount = 0;
+        int AwakeBodyCount = 0;
+        int SleepingBodyCount = 0;
+        int ContactPairCount = 0;
+        int PenetratingContactPointCount = 0;
+        float MaxPenetrationDepth = 0.0f;
+    };
+
+    struct Physics2DBodyDiagnostics
+    {
+        bool IsValid = false;
+        bool IsAwake = false;
+        int ContactPairCount = 0;
+        int PenetratingContactPointCount = 0;
+        float MaxPenetrationDepth = 0.0f;
     };
 
     class Physics2DWorld
@@ -48,6 +70,8 @@ namespace Limitless
         Physics2DRaycastHit RaycastClosest(const glm::vec2& origin, const glm::vec2& direction, float maxDistance, uint64_t collisionMask) const;
 
         const Physics2DContactListener& GetContactListener() const { return m_ContactListener; }
+        const Physics2DDiagnostics& GetDiagnostics() const { return m_Diagnostics; }
+        bool TryGetBodyDiagnostics(entt::entity entity, Physics2DBodyDiagnostics& outDiagnostics) const;
 
     private:
         void DestroyRuntimeState(Scene& scene);
@@ -57,10 +81,14 @@ namespace Limitless
         bool RequiresRuntimeRebuild(Scene& scene) const;
         void SyncMovedBodiesToTransforms(Scene& scene);
         void CollectContactEvents();
+        void CollectDiagnostics(Scene& scene);
+        int ComputeEffectiveSubSteps(Scene& scene) const;
 
     private:
         Physics2DWorldSettings m_Settings{};
         Physics2DContactListener m_ContactListener;
+        Physics2DDiagnostics m_Diagnostics{};
+        std::unordered_map<entt::entity, Physics2DBodyDiagnostics> m_BodyDiagnostics;
         bool m_RuntimeBuilt = false;
 #ifdef LT_ENABLE_PHYSICS2D
         b2WorldId m_WorldId = b2_nullWorldId;

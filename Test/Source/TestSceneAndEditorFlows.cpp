@@ -261,7 +261,7 @@ TEST_SUITE("Scene And Editor Flows")
         nlohmann::json rootJson;
         sceneFile >> rootJson;
         REQUIRE(rootJson.is_object());
-        CHECK(rootJson.value("Version", -1) == 6);
+        CHECK(rootJson.value("Version", -1) == 7);
 
         const auto loadResult = Limitless::Scene::LoadFromFile(scenePath);
         REQUIRE(loadResult.IsSuccess());

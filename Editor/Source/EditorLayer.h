@@ -8,7 +8,6 @@
 #include "EditorProjectDialog.h"
 #include "EditorProjectSettingsPanel.h"
 #include "EditorAssetDiagnosticsPanel.h"
-#include "EditorBuildAndRunPanel.h"
 #include "EditorScenePanel.h"
 #include "Core/Concurrency/AsyncIO.h"
 #include "Undo/EditorUndoService.h"
@@ -56,6 +55,7 @@ namespace Limitless
         void DrawScenePanel();
         void DrawInspectorPanel();
         void DrawProjectPanel();
+        void DrawPhysicsDiagnosticsPanel();
 
         void EnsureViewportFramebuffer(uint32_t width, uint32_t height);
         void EnterPlayMode();
@@ -152,12 +152,15 @@ namespace Limitless
         bool m_ShowDemoWindow = false;
         bool m_ShowProjectSettingsWindow = false;
         bool m_ShowAssetDiagnosticsWindow = false;
-        bool m_ShowBuildAndRunWindow = false;
+        bool m_ShowPhysicsDiagnosticsWindow = true;
+        int m_PhysicsDiagnosticsRecentPeakContactPairs = 0;
+        int m_PhysicsDiagnosticsRecentPeakPenetratingPoints = 0;
+        float m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth = 0.0f;
+        float m_PhysicsDiagnosticsRecentPeakHoldSeconds = 0.0f;
         EditorScenePanelState m_ScenePanelState;
         EditorProjectPanelState m_ProjectPanelState;
         EditorProjectDialog::EditorProjectDialogState m_ProjectDialogState;
         EditorProjectSettingsPanel::EditorProjectSettingsPanelState m_ProjectSettingsPanelState;
-        EditorBuildAndRunPanel::EditorBuildAndRunPanelState m_BuildAndRunPanelState;
         Project::Physics2DSettings m_ProjectPhysics2DSettings{};
         bool m_ProjectPhysics2DSettingsLoaded = false;
 

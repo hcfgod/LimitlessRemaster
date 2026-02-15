@@ -94,18 +94,13 @@ Implementation:
 - `Limitless/Source/Project/ProjectSettings.{h,cpp}`
 - `Editor/Source/EditorProjectSettingsPanel.{h,cpp}`
 
-## Build And Run
+## Build Target Settings
 
-Build target configuration is stored in:
+Build target configuration remains available for native script tooling and is stored in:
 
 - `Project/Settings/BuildTargets.json`
-
-Editor window:
-
-- **Window → Build And Run**
 
 Implementation:
 
 - `Limitless/Source/Project/BuildTargetsSettings.{h,cpp}`
-- `Editor/Source/EditorBuildAndRunPanel.{h,cpp}`
 

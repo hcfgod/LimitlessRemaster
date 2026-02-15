@@ -68,6 +68,7 @@ namespace Limitless
 
         /// Get world transform matrix with hierarchy applied.
         glm::mat4 GetWorldTransformMatrix(entt::entity entity) const;
+        glm::mat4 GetWorldTransformMatrixForRendering(entt::entity entity, float interpolationAlpha) const;
 
         /// Runtime update for script-driven entity behavior.
         void Update(float deltaTime);

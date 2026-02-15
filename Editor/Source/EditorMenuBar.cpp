@@ -8,7 +8,7 @@ namespace Limitless::EditorMenuBar
     void Draw(EditorPlayModeState playModeState,
               bool& showDemoWindow,
               bool& showAssetDiagnosticsWindow,
-              bool& showBuildAndRunWindow,
+              bool& showPhysicsDiagnosticsWindow,
               const std::function<void()>& onOpenProject,
               const std::function<void()>& onCreateProject,
               const std::function<void()>& onProjectSettings,
@@ -105,7 +105,7 @@ namespace Limitless::EditorMenuBar
         {
             ImGui::MenuItem("Demo Window", nullptr, &showDemoWindow);
             ImGui::MenuItem("Asset Diagnostics", nullptr, &showAssetDiagnosticsWindow);
-            ImGui::MenuItem("Build And Run", nullptr, &showBuildAndRunWindow);
+            ImGui::MenuItem("Physics 2D Diagnostics", nullptr, &showPhysicsDiagnosticsWindow);
             ImGui::EndMenu();
         }
 

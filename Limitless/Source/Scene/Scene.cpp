@@ -13,6 +13,7 @@
 #include "Graphics/Renderer.h"
 #include "Graphics/Renderer2D.h"
 #include "Core/Concurrency/AsyncIO.h"
+#include "Core/Time.h"
 #include "Physics/Physics2DWorld.h"
 #include "Scripting/NativeScriptRegistry.h"
 
@@ -23,6 +24,7 @@
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/quaternion.hpp>
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <unordered_map>
 
@@ -195,6 +197,15 @@ namespace Limitless
             return false;
         }
 
+        float WrapAngleRadians(float angleRadians)
+        {
+            while (angleRadians > glm::pi<float>())
+                angleRadians -= glm::two_pi<float>();
+            while (angleRadians < -glm::pi<float>())
+                angleRadians += glm::two_pi<float>();
+            return angleRadians;
+        }
+
     }
 
     Scene::Scene() = default;
@@ -216,6 +227,7 @@ namespace Limitless
                 scriptEntry.RuntimeInstance.reset();
                 scriptEntry.RuntimeInitialized = false;
                 scriptEntry.RuntimeUpdateCount = 0;
+                scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
             }
         }
     }
@@ -259,6 +271,7 @@ namespace Limitless
                 scriptEntry.RuntimeInstance.reset();
                 scriptEntry.RuntimeInitialized = false;
                 scriptEntry.RuntimeUpdateCount = 0;
+                scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
             }
         }
 
@@ -461,6 +474,46 @@ namespace Limitless
         return worldMatrix;
     }
 
+    glm::mat4 Scene::GetWorldTransformMatrixForRendering(entt::entity entity, float interpolationAlpha) const
+    {
+        if (!IsValid(entity))
+            return glm::mat4(1.0f);
+
+        const float alpha = std::clamp(interpolationAlpha, 0.0f, 1.0f);
+        std::vector<entt::entity> chain;
+        entt::entity current = entity;
+        while (current != entt::null && IsValid(current))
+        {
+            chain.push_back(current);
+            current = GetParent(current);
+        }
+
+        glm::mat4 worldMatrix(1.0f);
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it)
+        {
+            const auto* transform = m_Registry.try_get<TransformComponent>(*it);
+            if (!transform)
+                continue;
+
+            TransformComponent localForRender = *transform;
+            const auto* rigidbody = m_Registry.try_get<Rigidbody2DComponent>(*it);
+            if (rigidbody &&
+                rigidbody->RuntimeBodyCreated &&
+                rigidbody->Interpolate &&
+                rigidbody->Type == Rigidbody2DComponent::BodyType::Kinematic)
+            {
+                localForRender.Position.x = glm::mix(rigidbody->RuntimeRenderPreviousPosition.x, rigidbody->RuntimeRenderCurrentPosition.x, alpha);
+                localForRender.Position.y = glm::mix(rigidbody->RuntimeRenderPreviousPosition.y, rigidbody->RuntimeRenderCurrentPosition.y, alpha);
+                const float angleDelta = WrapAngleRadians(rigidbody->RuntimeRenderCurrentAngleRadians - rigidbody->RuntimeRenderPreviousAngleRadians);
+                localForRender.Rotation.z = glm::degrees(rigidbody->RuntimeRenderPreviousAngleRadians + angleDelta * alpha);
+            }
+
+            worldMatrix *= localForRender.GetLocalMatrix();
+        }
+
+        return worldMatrix;
+    }
+
     void Scene::Update(float deltaTime)
     {
         auto view = m_Registry.view<NativeScriptComponent>();
@@ -476,6 +529,7 @@ namespace Limitless
                     scriptEntry.RuntimeInstance.reset();
                     scriptEntry.RuntimeInitialized = false;
                     scriptEntry.RuntimeUpdateCount = 0;
+                    scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
                     continue;
                 }
 
@@ -501,6 +555,7 @@ namespace Limitless
                         scriptEntry.RuntimeInstance->m_ExposedProperties = &scriptEntry.ExposedProperties;
                         scriptEntry.RuntimeInitialized = false;
                         scriptEntry.RuntimeUpdateCount = 0;
+                        scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
                     }
                 }
 
@@ -521,9 +576,41 @@ namespace Limitless
                     scriptEntry.RuntimeInitialized = true;
                 }
 
+                TransformComponent transformBeforeUpdate{};
+                bool trackTransformMutation = false;
+                if (auto* transform = m_Registry.try_get<TransformComponent>(entity))
+                {
+                    transformBeforeUpdate = *transform;
+                    if (const auto* rigidbody2D = m_Registry.try_get<Rigidbody2DComponent>(entity))
+                    {
+                        trackTransformMutation = rigidbody2D->Type == Rigidbody2DComponent::BodyType::Dynamic ||
+                                                rigidbody2D->Type == Rigidbody2DComponent::BodyType::Kinematic;
+                    }
+                }
+
                 scriptEntry.RuntimeInstance->OnSynchronizeExposedFields();
                 scriptEntry.RuntimeInstance->OnUpdate(deltaTime);
                 ++scriptEntry.RuntimeUpdateCount;
+
+                if (trackTransformMutation && !scriptEntry.RuntimeWarnedOnUpdateTransformMutation)
+                {
+                    const auto* transformAfterUpdate = m_Registry.try_get<TransformComponent>(entity);
+                    if (transformAfterUpdate)
+                    {
+                        constexpr float kGuardrailEpsilon = 0.0001f;
+                        const bool positionChanged = glm::length(transformAfterUpdate->Position - transformBeforeUpdate.Position) > kGuardrailEpsilon;
+                        const bool rotationChanged = glm::length(transformAfterUpdate->Rotation - transformBeforeUpdate.Rotation) > kGuardrailEpsilon;
+                        const bool scaleChanged = glm::length(transformAfterUpdate->Scale - transformBeforeUpdate.Scale) > kGuardrailEpsilon;
+                        if (positionChanged || rotationChanged || scaleChanged)
+                        {
+                            const auto* tag = m_Registry.try_get<TagComponent>(entity);
+                            LT_WARN("Script '{}' on entity '{}' is mutating Transform in OnUpdate while Rigidbody2D is Dynamic/Kinematic. Move physics-related transform writes to OnFixedUpdate for stable simulation.",
+                                    scriptEntry.ScriptClassName,
+                                    tag ? tag->Tag : "Entity");
+                            scriptEntry.RuntimeWarnedOnUpdateTransformMutation = true;
+                        }
+                    }
+                }
             }
         }
     }
@@ -568,6 +655,7 @@ namespace Limitless
                         scriptEntry.RuntimeInstance->m_ExposedProperties = &scriptEntry.ExposedProperties;
                         scriptEntry.RuntimeInitialized = false;
                         scriptEntry.RuntimeUpdateCount = 0;
+                        scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
                     }
                 }
 
@@ -694,6 +782,10 @@ namespace Limitless
                 destinationRigidbody2D.RuntimeBodyCreated = false;
                 destinationRigidbody2D.RuntimePreviousPosition = glm::vec2(0.0f);
                 destinationRigidbody2D.RuntimePreviousAngleRadians = 0.0f;
+                destinationRigidbody2D.RuntimeRenderPreviousPosition = glm::vec2(0.0f);
+                destinationRigidbody2D.RuntimeRenderPreviousAngleRadians = 0.0f;
+                destinationRigidbody2D.RuntimeRenderCurrentPosition = glm::vec2(0.0f);
+                destinationRigidbody2D.RuntimeRenderCurrentAngleRadians = 0.0f;
             }
 
             if (const auto* boxCollider2D = sourceRegistry.try_get<BoxCollider2DComponent>(sourceEntity))
@@ -748,6 +840,7 @@ namespace Limitless
                     destinationScriptEntry.ExposedProperties = sourceScriptEntry.ExposedProperties;
                     destinationScriptEntry.RuntimeInitialized = false;
                     destinationScriptEntry.RuntimeInstance.reset();
+                    destinationScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
                 }
             }
 
@@ -826,7 +919,7 @@ namespace Limitless
             indexByEntity.emplace(entities[index], static_cast<int32_t>(index));
 
         nlohmann::json root = nlohmann::json::object();
-        root["Version"] = 6;
+        root["Version"] = 7;
         if (m_EditorCameraBookmark.has_value())
         {
             root["EditorCamera"] = {
@@ -839,7 +932,12 @@ namespace Limitless
             { "Gravity", { m_Physics2DSettings.Gravity.x, m_Physics2DSettings.Gravity.y } },
             { "VelocitySubSteps", m_Physics2DSettings.VelocitySubSteps },
             { "EnableSleep", m_Physics2DSettings.EnableSleep },
-            { "EnableContinuousCollision", m_Physics2DSettings.EnableContinuousCollision }
+            { "EnableContinuousCollision", m_Physics2DSettings.EnableContinuousCollision },
+            { "HighContactQualityMode", m_Physics2DSettings.HighContactQualityMode },
+            { "HighContactQualityExtraSubSteps", m_Physics2DSettings.HighContactQualityExtraSubSteps },
+            { "ContactHertz", m_Physics2DSettings.ContactHertz },
+            { "ContactDampingRatio", m_Physics2DSettings.ContactDampingRatio },
+            { "ContactPushSpeed", m_Physics2DSettings.ContactPushSpeed }
         };
         root["Entities"] = nlohmann::json::array();
 
@@ -954,10 +1052,12 @@ namespace Limitless
                 entry["Rigidbody2D"] = {
                     { "BodyType", toBodyTypeString(rigidbody2D->Type) },
                     { "FixedRotation", rigidbody2D->FixedRotation },
-                    { "IsBullet", rigidbody2D->IsBullet },
+                    { "UseCCD", rigidbody2D->UseCCD },
                     { "EnableSleep", rigidbody2D->EnableSleep },
                     { "StartAwake", rigidbody2D->StartAwake },
                     { "Interpolate", rigidbody2D->Interpolate },
+                    { "HighContactQuality", rigidbody2D->HighContactQuality },
+                    { "ExtraSolverSubSteps", rigidbody2D->ExtraSolverSubSteps },
                     { "GravityScale", rigidbody2D->GravityScale },
                     { "LinearDamping", rigidbody2D->LinearDamping },
                     { "AngularDamping", rigidbody2D->AngularDamping }
@@ -1097,6 +1197,11 @@ namespace Limitless
             scene->m_Physics2DSettings.VelocitySubSteps = std::max(1, physicsSettingsJson.value("VelocitySubSteps", 4));
             scene->m_Physics2DSettings.EnableSleep = physicsSettingsJson.value("EnableSleep", true);
             scene->m_Physics2DSettings.EnableContinuousCollision = physicsSettingsJson.value("EnableContinuousCollision", true);
+            scene->m_Physics2DSettings.HighContactQualityMode = physicsSettingsJson.value("HighContactQualityMode", false);
+            scene->m_Physics2DSettings.HighContactQualityExtraSubSteps = std::max(0, physicsSettingsJson.value("HighContactQualityExtraSubSteps", 4));
+            scene->m_Physics2DSettings.ContactHertz = physicsSettingsJson.value("ContactHertz", 90.0f);
+            scene->m_Physics2DSettings.ContactDampingRatio = physicsSettingsJson.value("ContactDampingRatio", 1.0f);
+            scene->m_Physics2DSettings.ContactPushSpeed = physicsSettingsJson.value("ContactPushSpeed", 8.0f);
         }
         if (root.contains("EditorCamera") && root["EditorCamera"].is_object())
         {
@@ -1269,10 +1374,12 @@ namespace Limitless
                 else
                     rigidbody2D.Type = Rigidbody2DComponent::BodyType::Dynamic;
                 rigidbody2D.FixedRotation = rigidbody2DJson.value("FixedRotation", false);
-                rigidbody2D.IsBullet = rigidbody2DJson.value("IsBullet", false);
+                rigidbody2D.UseCCD = rigidbody2DJson.value("UseCCD", rigidbody2DJson.value("IsBullet", false));
                 rigidbody2D.EnableSleep = rigidbody2DJson.value("EnableSleep", true);
                 rigidbody2D.StartAwake = rigidbody2DJson.value("StartAwake", true);
                 rigidbody2D.Interpolate = rigidbody2DJson.value("Interpolate", true);
+                rigidbody2D.HighContactQuality = rigidbody2DJson.value("HighContactQuality", false);
+                rigidbody2D.ExtraSolverSubSteps = std::max(0, rigidbody2DJson.value("ExtraSolverSubSteps", 0));
                 rigidbody2D.GravityScale = rigidbody2DJson.value("GravityScale", 1.0f);
                 rigidbody2D.LinearDamping = rigidbody2DJson.value("LinearDamping", 0.0f);
                 rigidbody2D.AngularDamping = rigidbody2DJson.value("AngularDamping", 0.01f);
@@ -1282,6 +1389,10 @@ namespace Limitless
                 rigidbody2D.RuntimeBodyCreated = false;
                 rigidbody2D.RuntimePreviousPosition = glm::vec2(0.0f);
                 rigidbody2D.RuntimePreviousAngleRadians = 0.0f;
+                rigidbody2D.RuntimeRenderPreviousPosition = glm::vec2(0.0f);
+                rigidbody2D.RuntimeRenderPreviousAngleRadians = 0.0f;
+                rigidbody2D.RuntimeRenderCurrentPosition = glm::vec2(0.0f);
+                rigidbody2D.RuntimeRenderCurrentAngleRadians = 0.0f;
             }
 
             if (entry.contains("BoxCollider2D") && entry["BoxCollider2D"].is_object())
@@ -1381,6 +1492,7 @@ namespace Limitless
                 }
                 outScriptEntry.RuntimeInitialized = false;
                 outScriptEntry.RuntimeInstance.reset();
+                outScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
             };
 
             if (entry.contains("NativeScripts") && entry["NativeScripts"].is_array())
@@ -1456,6 +1568,10 @@ namespace Limitless
     void SceneRenderer::Render(Scene& scene, const Camera& camera)
     {
         Renderer2D::BeginScene(camera);
+        const float fixedDelta = Time::GetFixedDeltaTimeSeconds();
+        const float interpolationAlpha = (fixedDelta > 0.0f)
+            ? std::clamp(Time::GetFixedTimeAccumulatorSeconds() / fixedDelta, 0.0f, 1.0f)
+            : 1.0f;
 
         auto& registry = scene.GetRegistry();
         auto view = registry.view<TransformComponent, SpriteComponent>();
@@ -1464,9 +1580,9 @@ namespace Limitless
         for (entt::entity entity : view)
             renderEntities.push_back(entity);
 
-        std::sort(renderEntities.begin(), renderEntities.end(), [&scene, &registry](entt::entity left, entt::entity right) {
-            const glm::mat4 leftWorld = scene.GetWorldTransformMatrix(left);
-            const glm::mat4 rightWorld = scene.GetWorldTransformMatrix(right);
+        std::sort(renderEntities.begin(), renderEntities.end(), [&scene, &registry, interpolationAlpha](entt::entity left, entt::entity right) {
+            const glm::mat4 leftWorld = scene.GetWorldTransformMatrixForRendering(left, interpolationAlpha);
+            const glm::mat4 rightWorld = scene.GetWorldTransformMatrixForRendering(right, interpolationAlpha);
             const float leftZ = leftWorld[3].z;
             const float rightZ = rightWorld[3].z;
             if (leftZ != rightZ)
@@ -1486,7 +1602,7 @@ namespace Limitless
         {
             auto& sprite = registry.get<SpriteComponent>(entity);
 
-            glm::mat4 model = scene.GetWorldTransformMatrix(entity);
+            glm::mat4 model = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
             bool useMissingAssetFallback = false;
 
             // Material override (Unity-style): if the entity has a MaterialComponent, prefer its main texture.
@@ -1586,9 +1702,9 @@ namespace Limitless
         for (entt::entity entity : textView)
             textRenderEntities.push_back(entity);
 
-        std::sort(textRenderEntities.begin(), textRenderEntities.end(), [&scene, &registry](entt::entity left, entt::entity right) {
-            const glm::mat4 leftWorld = scene.GetWorldTransformMatrix(left);
-            const glm::mat4 rightWorld = scene.GetWorldTransformMatrix(right);
+        std::sort(textRenderEntities.begin(), textRenderEntities.end(), [&scene, &registry, interpolationAlpha](entt::entity left, entt::entity right) {
+            const glm::mat4 leftWorld = scene.GetWorldTransformMatrixForRendering(left, interpolationAlpha);
+            const glm::mat4 rightWorld = scene.GetWorldTransformMatrixForRendering(right, interpolationAlpha);
             const float leftZ = leftWorld[3].z;
             const float rightZ = rightWorld[3].z;
             if (leftZ != rightZ)
@@ -1631,7 +1747,7 @@ namespace Limitless
                 continue;
             }
 
-            const glm::mat4 model = scene.GetWorldTransformMatrix(entity);
+            const glm::mat4 model = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
             Renderer2D::DrawText(model, text.Text, text.CachedFont, text.FontSize, text.Color);
         }
 

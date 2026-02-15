@@ -464,14 +464,23 @@ namespace Limitless::EditorInspectorPanel
 
                 ImGui::Checkbox("Fixed Rotation", &rigidbody2D->FixedRotation);
                 TrackInteractiveMutation(undoService, "Edit Rigidbody2D Fixed Rotation");
-                ImGui::Checkbox("Is Bullet (CCD)", &rigidbody2D->IsBullet);
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Is Bullet");
+                ImGui::Checkbox("Use CCD", &rigidbody2D->UseCCD);
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                    ImGui::SetTooltip("Continuous Collision Detection. Use for fast-moving bodies to reduce tunneling through colliders.");
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Use CCD");
                 ImGui::Checkbox("Enable Sleep", &rigidbody2D->EnableSleep);
                 TrackInteractiveMutation(undoService, "Edit Rigidbody2D Enable Sleep");
                 ImGui::Checkbox("Start Awake", &rigidbody2D->StartAwake);
                 TrackInteractiveMutation(undoService, "Edit Rigidbody2D Start Awake");
                 ImGui::Checkbox("Interpolate", &rigidbody2D->Interpolate);
                 TrackInteractiveMutation(undoService, "Edit Rigidbody2D Interpolate");
+                ImGui::Checkbox("High Contact Quality", &rigidbody2D->HighContactQuality);
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                    ImGui::SetTooltip("Applies extra world solver sub-steps when this body is present. Useful for rotating platforms and dense contact stacks.");
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D High Contact Quality");
+                ImGui::DragInt("Extra Solver Sub Steps", &rigidbody2D->ExtraSolverSubSteps, 1.0f, 0, 24);
+                rigidbody2D->ExtraSolverSubSteps = std::max(0, rigidbody2D->ExtraSolverSubSteps);
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Extra Solver Sub Steps");
                 ImGui::DragFloat("Gravity Scale", &rigidbody2D->GravityScale, 0.01f, -10.0f, 10.0f);
                 TrackInteractiveMutation(undoService, "Edit Rigidbody2D Gravity Scale");
                 ImGui::DragFloat("Linear Damping", &rigidbody2D->LinearDamping, 0.01f, 0.0f, 100.0f);

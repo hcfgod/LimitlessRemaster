@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <unordered_set>
+#include <vector>
 #include <glm/gtc/constants.hpp>
 
 namespace Limitless
@@ -72,6 +74,8 @@ namespace Limitless
 #endif
         m_RuntimeBuilt = false;
         m_ContactListener.Clear();
+        m_Diagnostics = Physics2DDiagnostics{};
+        m_BodyDiagnostics.clear();
     }
 
     void Physics2DWorld::Shutdown(Scene& scene)
@@ -133,11 +137,12 @@ namespace Limitless
         const float step = std::max(fixedDeltaTime, kMinimumStepDelta);
         SyncAuthoringTransformsToBodies(scene, step);
 
-        const int subSteps = std::max(1, m_Settings.VelocitySubSteps);
+        const int subSteps = ComputeEffectiveSubSteps(scene);
         b2World_Step(m_WorldId, step, subSteps);
 
         SyncMovedBodiesToTransforms(scene);
         CollectContactEvents();
+        CollectDiagnostics(scene);
 #else
         (void)scene;
         (void)fixedDeltaTime;
@@ -192,7 +197,13 @@ namespace Limitless
             rigidbody.RuntimeBodyCreated = false;
             rigidbody.RuntimePreviousPosition = glm::vec2(0.0f);
             rigidbody.RuntimePreviousAngleRadians = 0.0f;
+            rigidbody.RuntimeRenderPreviousPosition = glm::vec2(0.0f);
+            rigidbody.RuntimeRenderPreviousAngleRadians = 0.0f;
+            rigidbody.RuntimeRenderCurrentPosition = glm::vec2(0.0f);
+            rigidbody.RuntimeRenderCurrentAngleRadians = 0.0f;
         }
+        m_Diagnostics = Physics2DDiagnostics{};
+        m_BodyDiagnostics.clear();
     }
 
     void Physics2DWorld::BuildBodiesAndShapes(Scene& scene)
@@ -215,13 +226,17 @@ namespace Limitless
             bodyDefinition.fixedRotation = rigidbody.FixedRotation;
             bodyDefinition.enableSleep = rigidbody.EnableSleep;
             bodyDefinition.isAwake = rigidbody.StartAwake;
-            bodyDefinition.isBullet = rigidbody.IsBullet;
+            bodyDefinition.isBullet = rigidbody.UseCCD;
             bodyDefinition.userData = ToUserData(entity);
 
             rigidbody.RuntimeBodyId = b2CreateBody(m_WorldId, &bodyDefinition);
             rigidbody.RuntimeBodyCreated = b2Body_IsValid(rigidbody.RuntimeBodyId);
             rigidbody.RuntimePreviousPosition = glm::vec2(transform.Position.x, transform.Position.y);
             rigidbody.RuntimePreviousAngleRadians = glm::radians(transform.Rotation.z);
+            rigidbody.RuntimeRenderPreviousPosition = rigidbody.RuntimePreviousPosition;
+            rigidbody.RuntimeRenderPreviousAngleRadians = rigidbody.RuntimePreviousAngleRadians;
+            rigidbody.RuntimeRenderCurrentPosition = rigidbody.RuntimePreviousPosition;
+            rigidbody.RuntimeRenderCurrentAngleRadians = rigidbody.RuntimePreviousAngleRadians;
 
             if (!rigidbody.RuntimeBodyCreated)
                 continue;
@@ -296,7 +311,7 @@ namespace Limitless
             b2Body_SetGravityScale(rigidbody.RuntimeBodyId, rigidbody.GravityScale);
             b2Body_SetFixedRotation(rigidbody.RuntimeBodyId, rigidbody.FixedRotation);
             b2Body_EnableSleep(rigidbody.RuntimeBodyId, rigidbody.EnableSleep);
-            b2Body_SetBullet(rigidbody.RuntimeBodyId, rigidbody.IsBullet);
+            b2Body_SetBullet(rigidbody.RuntimeBodyId, rigidbody.UseCCD);
 
             const b2Transform runtimeTransform = b2Body_GetTransform(rigidbody.RuntimeBodyId);
             const glm::vec2 authoringPosition(transform.Position.x, transform.Position.y);
@@ -495,15 +510,22 @@ namespace Limitless
             if (!transform || !rigidbody)
                 continue;
 
+            const glm::vec2 bodyPosition(moveEvent.transform.p.x, moveEvent.transform.p.y);
+            const float bodyAngleRadians = b2Rot_GetAngle(moveEvent.transform.q);
+            rigidbody->RuntimeRenderPreviousPosition = rigidbody->RuntimeRenderCurrentPosition;
+            rigidbody->RuntimeRenderPreviousAngleRadians = rigidbody->RuntimeRenderCurrentAngleRadians;
+            rigidbody->RuntimeRenderCurrentPosition = bodyPosition;
+            rigidbody->RuntimeRenderCurrentAngleRadians = bodyAngleRadians;
+
             if (rigidbody->Type == Rigidbody2DComponent::BodyType::Kinematic)
                 continue;
 
             rigidbody->RuntimePreviousPosition = glm::vec2(transform->Position.x, transform->Position.y);
             rigidbody->RuntimePreviousAngleRadians = glm::radians(transform->Rotation.z);
 
-            transform->Position.x = moveEvent.transform.p.x;
-            transform->Position.y = moveEvent.transform.p.y;
-            transform->Rotation.z = glm::degrees(b2Rot_GetAngle(moveEvent.transform.q));
+            transform->Position.x = bodyPosition.x;
+            transform->Position.y = bodyPosition.y;
+            transform->Rotation.z = glm::degrees(bodyAngleRadians);
         }
 #else
         (void)scene;
@@ -550,6 +572,154 @@ namespace Limitless
             m_ContactListener.PushEnd(entityA, entityB, isSensor);
         }
 #endif
+    }
+
+    int Physics2DWorld::ComputeEffectiveSubSteps(Scene& scene) const
+    {
+        int effectiveSubSteps = std::max(1, m_Settings.VelocitySubSteps);
+        if (m_Settings.HighContactQualityMode)
+            effectiveSubSteps += std::max(0, m_Settings.HighContactQualityExtraSubSteps);
+
+        auto& registry = scene.GetRegistry();
+        auto bodyView = registry.view<Rigidbody2DComponent>();
+        int maxBodyExtraSubSteps = 0;
+        for (entt::entity entity : bodyView)
+        {
+            const auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
+            if (!rigidbody.HighContactQuality)
+                continue;
+            maxBodyExtraSubSteps = std::max(maxBodyExtraSubSteps, std::max(0, rigidbody.ExtraSolverSubSteps));
+        }
+
+        // Box2D sub-steps are world-wide, so we apply the strongest requested body override.
+        effectiveSubSteps += maxBodyExtraSubSteps;
+        return std::max(1, effectiveSubSteps);
+    }
+
+    void Physics2DWorld::CollectDiagnostics(Scene& scene)
+    {
+        m_Diagnostics = Physics2DDiagnostics{};
+        m_BodyDiagnostics.clear();
+#ifdef LT_ENABLE_PHYSICS2D
+        if (!b2World_IsValid(m_WorldId))
+            return;
+
+        auto& registry = scene.GetRegistry();
+        auto bodyView = registry.view<Rigidbody2DComponent>();
+        for (entt::entity entity : bodyView)
+        {
+            const auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
+            if (!rigidbody.RuntimeBodyCreated || !b2Body_IsValid(rigidbody.RuntimeBodyId))
+                continue;
+
+            ++m_Diagnostics.BodyCount;
+            auto& bodyDiagnostics = m_BodyDiagnostics[entity];
+            bodyDiagnostics.IsValid = true;
+            if (b2Body_IsAwake(rigidbody.RuntimeBodyId))
+            {
+                ++m_Diagnostics.AwakeBodyCount;
+                bodyDiagnostics.IsAwake = true;
+            }
+            else
+            {
+                ++m_Diagnostics.SleepingBodyCount;
+                bodyDiagnostics.IsAwake = false;
+            }
+        }
+
+        struct ShapePairKey
+        {
+            uint64_t ShapeA = 0;
+            uint64_t ShapeB = 0;
+
+            bool operator==(const ShapePairKey& other) const
+            {
+                return ShapeA == other.ShapeA && ShapeB == other.ShapeB;
+            }
+        };
+
+        struct ShapePairKeyHash
+        {
+            size_t operator()(const ShapePairKey& key) const
+            {
+                const uint64_t mixed = key.ShapeA ^ (key.ShapeB + 0x9e3779b97f4a7c15ull + (key.ShapeA << 6) + (key.ShapeA >> 2));
+                return static_cast<size_t>(mixed);
+            }
+        };
+
+        std::unordered_set<ShapePairKey, ShapePairKeyHash> uniqueContactPairs;
+        std::vector<b2ContactData> contactBuffer;
+        for (entt::entity entity : bodyView)
+        {
+            const auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
+            if (!rigidbody.RuntimeBodyCreated || !b2Body_IsValid(rigidbody.RuntimeBodyId))
+                continue;
+
+            const int contactCapacity = std::max(0, b2Body_GetContactCapacity(rigidbody.RuntimeBodyId));
+            if (contactCapacity <= 0)
+                continue;
+
+            contactBuffer.resize(static_cast<size_t>(contactCapacity));
+            const int contactCount = b2Body_GetContactData(rigidbody.RuntimeBodyId, contactBuffer.data(), contactCapacity);
+            auto bodyDiagnosticsIt = m_BodyDiagnostics.find(entity);
+            if (bodyDiagnosticsIt != m_BodyDiagnostics.end())
+                bodyDiagnosticsIt->second.ContactPairCount = std::max(0, contactCount);
+            for (int contactIndex = 0; contactIndex < contactCount; ++contactIndex)
+            {
+                const b2ContactData& contact = contactBuffer[static_cast<size_t>(contactIndex)];
+
+                const uint64_t shapeAId = b2StoreShapeId(contact.shapeIdA);
+                const uint64_t shapeBId = b2StoreShapeId(contact.shapeIdB);
+                ShapePairKey pairKey{};
+                if (shapeAId < shapeBId)
+                {
+                    pairKey.ShapeA = shapeAId;
+                    pairKey.ShapeB = shapeBId;
+                }
+                else
+                {
+                    pairKey.ShapeA = shapeBId;
+                    pairKey.ShapeB = shapeAId;
+                }
+
+                const bool firstTimeSeen = uniqueContactPairs.insert(pairKey).second;
+                if (firstTimeSeen)
+                    ++m_Diagnostics.ContactPairCount;
+
+                for (int pointIndex = 0; pointIndex < contact.manifold.pointCount; ++pointIndex)
+                {
+                    const float separation = contact.manifold.points[pointIndex].separation;
+                    if (separation < 0.0f)
+                    {
+                        if (firstTimeSeen)
+                        {
+                            ++m_Diagnostics.PenetratingContactPointCount;
+                            m_Diagnostics.MaxPenetrationDepth = std::max(m_Diagnostics.MaxPenetrationDepth, -separation);
+                        }
+                        if (bodyDiagnosticsIt != m_BodyDiagnostics.end())
+                        {
+                            ++bodyDiagnosticsIt->second.PenetratingContactPointCount;
+                            bodyDiagnosticsIt->second.MaxPenetrationDepth =
+                                std::max(bodyDiagnosticsIt->second.MaxPenetrationDepth, -separation);
+                        }
+                    }
+                }
+            }
+        }
+#else
+        (void)scene;
+#endif
+    }
+
+    bool Physics2DWorld::TryGetBodyDiagnostics(entt::entity entity, Physics2DBodyDiagnostics& outDiagnostics) const
+    {
+        outDiagnostics = Physics2DBodyDiagnostics{};
+        const auto diagnosticsIt = m_BodyDiagnostics.find(entity);
+        if (diagnosticsIt == m_BodyDiagnostics.end())
+            return false;
+
+        outDiagnostics = diagnosticsIt->second;
+        return outDiagnostics.IsValid;
     }
 
     Physics2DRaycastHit Physics2DWorld::RaycastClosest(const glm::vec2& origin, const glm::vec2& direction, float maxDistance, uint64_t collisionMask) const
