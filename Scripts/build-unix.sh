@@ -92,6 +92,10 @@ check_dependencies() {
     fi
     
     # Check for other system libraries
+    if ! pkg-config --exists box2d 2>/dev/null; then
+        missing_deps+=("libbox2d-dev")
+    fi
+
     if ! pkg-config --exists dbus-1 2>/dev/null; then
         missing_deps+=("libdbus-1-dev")
     fi

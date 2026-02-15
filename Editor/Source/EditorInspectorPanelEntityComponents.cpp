@@ -438,6 +438,187 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
+        if (auto* rigidbody2D = registry.try_get<Rigidbody2DComponent>(selectedEntity))
+        {
+            const bool rigidbodyOpen = ImGui::TreeNodeEx("Rigidbody 2D", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("Rigidbody2DComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##Rigidbody2DComponentOptionsButton"))
+                ImGui::OpenPopup("Rigidbody2DComponentOptions");
+
+            if (ImGui::BeginPopup("Rigidbody2DComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveRigidbody2DComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (rigidbodyOpen)
+            {
+                int bodyTypeIndex = static_cast<int>(rigidbody2D->Type);
+                const char* bodyTypeNames[] = { "Static", "Dynamic", "Kinematic" };
+                if (ImGui::Combo("Body Type", &bodyTypeIndex, bodyTypeNames, 3))
+                    rigidbody2D->Type = static_cast<Rigidbody2DComponent::BodyType>(bodyTypeIndex);
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Body Type");
+
+                ImGui::Checkbox("Fixed Rotation", &rigidbody2D->FixedRotation);
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Fixed Rotation");
+                ImGui::Checkbox("Is Bullet (CCD)", &rigidbody2D->IsBullet);
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Is Bullet");
+                ImGui::Checkbox("Enable Sleep", &rigidbody2D->EnableSleep);
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Enable Sleep");
+                ImGui::Checkbox("Start Awake", &rigidbody2D->StartAwake);
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Start Awake");
+                ImGui::Checkbox("Interpolate", &rigidbody2D->Interpolate);
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Interpolate");
+                ImGui::DragFloat("Gravity Scale", &rigidbody2D->GravityScale, 0.01f, -10.0f, 10.0f);
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Gravity Scale");
+                ImGui::DragFloat("Linear Damping", &rigidbody2D->LinearDamping, 0.01f, 0.0f, 100.0f);
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Linear Damping");
+                ImGui::DragFloat("Angular Damping", &rigidbody2D->AngularDamping, 0.01f, 0.0f, 100.0f);
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Angular Damping");
+
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* boxCollider2D = registry.try_get<BoxCollider2DComponent>(selectedEntity))
+        {
+            const bool boxColliderOpen = ImGui::TreeNodeEx("Box Collider 2D", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("BoxCollider2DComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##BoxCollider2DComponentOptionsButton"))
+                ImGui::OpenPopup("BoxCollider2DComponentOptions");
+
+            if (ImGui::BeginPopup("BoxCollider2DComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveBoxCollider2DComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (boxColliderOpen)
+            {
+                ImGui::DragFloat2("Offset", &boxCollider2D->Offset.x, 0.01f);
+                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Offset");
+                ImGui::DragFloat2("Size", &boxCollider2D->Size.x, 0.01f, 0.001f, 1000.0f);
+                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Size");
+                ImGui::DragFloat("Density", &boxCollider2D->Density, 0.01f, 0.0f, 1000.0f);
+                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Density");
+                ImGui::DragFloat("Friction", &boxCollider2D->Friction, 0.01f, 0.0f, 1.0f);
+                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Friction");
+                ImGui::DragFloat("Restitution", &boxCollider2D->Restitution, 0.01f, 0.0f, 1.0f);
+                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Restitution");
+                ImGui::Checkbox("Is Sensor", &boxCollider2D->IsSensor);
+                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Sensor");
+                ImGui::InputScalar("Layer Bits", ImGuiDataType_U64, &boxCollider2D->CollisionLayer);
+                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Layer");
+                ImGui::InputScalar("Mask Bits", ImGuiDataType_U64, &boxCollider2D->CollisionMask);
+                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Mask");
+
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* circleCollider2D = registry.try_get<CircleCollider2DComponent>(selectedEntity))
+        {
+            const bool circleColliderOpen = ImGui::TreeNodeEx("Circle Collider 2D", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("CircleCollider2DComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##CircleCollider2DComponentOptionsButton"))
+                ImGui::OpenPopup("CircleCollider2DComponentOptions");
+
+            if (ImGui::BeginPopup("CircleCollider2DComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveCircleCollider2DComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (circleColliderOpen)
+            {
+                ImGui::DragFloat2("Offset", &circleCollider2D->Offset.x, 0.01f);
+                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Offset");
+                ImGui::DragFloat("Radius", &circleCollider2D->Radius, 0.01f, 0.001f, 1000.0f);
+                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Radius");
+                ImGui::DragFloat("Density", &circleCollider2D->Density, 0.01f, 0.0f, 1000.0f);
+                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Density");
+                ImGui::DragFloat("Friction", &circleCollider2D->Friction, 0.01f, 0.0f, 1.0f);
+                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Friction");
+                ImGui::DragFloat("Restitution", &circleCollider2D->Restitution, 0.01f, 0.0f, 1.0f);
+                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Restitution");
+                ImGui::Checkbox("Is Sensor", &circleCollider2D->IsSensor);
+                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Sensor");
+                ImGui::InputScalar("Layer Bits", ImGuiDataType_U64, &circleCollider2D->CollisionLayer);
+                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Layer");
+                ImGui::InputScalar("Mask Bits", ImGuiDataType_U64, &circleCollider2D->CollisionMask);
+                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Mask");
+
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* joint2D = registry.try_get<Joint2DComponent>(selectedEntity))
+        {
+            const bool jointOpen = ImGui::TreeNodeEx("Joint 2D", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("Joint2DComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##Joint2DComponentOptionsButton"))
+                ImGui::OpenPopup("Joint2DComponentOptions");
+
+            if (ImGui::BeginPopup("Joint2DComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveJoint2DComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (jointOpen)
+            {
+                int jointTypeIndex = static_cast<int>(joint2D->Type);
+                const char* jointTypeNames[] = { "Distance", "Revolute", "Prismatic" };
+                if (ImGui::Combo("Type", &jointTypeIndex, jointTypeNames, 3))
+                    joint2D->Type = static_cast<Joint2DComponent::JointType>(jointTypeIndex);
+                TrackInteractiveMutation(undoService, "Edit Joint2D Type");
+
+                int connectedEntityId = (joint2D->ConnectedEntity == entt::null) ? -1 : static_cast<int>(joint2D->ConnectedEntity);
+                if (ImGui::InputInt("Connected Entity ID", &connectedEntityId))
+                    joint2D->ConnectedEntity = connectedEntityId >= 0 ? static_cast<entt::entity>(connectedEntityId) : entt::null;
+                TrackInteractiveMutation(undoService, "Edit Joint2D Connected Entity");
+
+                ImGui::Checkbox("Collide Connected", &joint2D->CollideConnected);
+                TrackInteractiveMutation(undoService, "Edit Joint2D Collide Connected");
+                ImGui::DragFloat2("Anchor A", &joint2D->AnchorA.x, 0.01f);
+                TrackInteractiveMutation(undoService, "Edit Joint2D Anchor A");
+                ImGui::DragFloat2("Anchor B", &joint2D->AnchorB.x, 0.01f);
+                TrackInteractiveMutation(undoService, "Edit Joint2D Anchor B");
+                ImGui::DragFloat2("Axis", &joint2D->Axis.x, 0.01f);
+                TrackInteractiveMutation(undoService, "Edit Joint2D Axis");
+                ImGui::Checkbox("Enable Limit", &joint2D->EnableLimit);
+                TrackInteractiveMutation(undoService, "Edit Joint2D Enable Limit");
+                ImGui::DragFloat2("Limits", &joint2D->Limits.x, 0.01f);
+                TrackInteractiveMutation(undoService, "Edit Joint2D Limits");
+                ImGui::Checkbox("Enable Motor", &joint2D->EnableMotor);
+                TrackInteractiveMutation(undoService, "Edit Joint2D Enable Motor");
+                ImGui::DragFloat("Motor Speed", &joint2D->MotorSpeed, 0.01f);
+                TrackInteractiveMutation(undoService, "Edit Joint2D Motor Speed");
+                ImGui::DragFloat("Max Motor Force/Torque", &joint2D->MaxMotorForceOrTorque, 0.1f, 0.0f, 100000.0f);
+                TrackInteractiveMutation(undoService, "Edit Joint2D Max Motor");
+                ImGui::Checkbox("Enable Spring", &joint2D->EnableSpring);
+                TrackInteractiveMutation(undoService, "Edit Joint2D Enable Spring");
+                ImGui::DragFloat("Hertz", &joint2D->Hertz, 0.1f, 0.0f, 1000.0f);
+                TrackInteractiveMutation(undoService, "Edit Joint2D Hertz");
+                ImGui::DragFloat("Damping Ratio", &joint2D->DampingRatio, 0.01f, 0.0f, 10.0f);
+                TrackInteractiveMutation(undoService, "Edit Joint2D Damping");
+
+                ImGui::TreePop();
+            }
+        }
+
         if (auto* text = registry.try_get<TextComponent>(selectedEntity))
         {
             const bool textOpen = ImGui::TreeNodeEx("Text", ImGuiTreeNodeFlags_DefaultOpen);

@@ -27,6 +27,7 @@ namespace Limitless::EditorMenuBar
               const std::string& undoLabel,
               const std::string& redoLabel,
               const std::function<void()>& onPlay,
+              const std::function<void()>& onSimulate,
               const std::function<void()>& onStop,
               const std::function<void()>& onTogglePause,
               bool isEditingPrefabAsset,

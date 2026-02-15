@@ -25,6 +25,7 @@ namespace Limitless::EditorMenuBar
               const std::string& undoLabel,
               const std::string& redoLabel,
               const std::function<void()>& onPlay,
+              const std::function<void()>& onSimulate,
               const std::function<void()>& onStop,
               const std::function<void()>& onTogglePause,
               bool isEditingPrefabAsset,
@@ -119,6 +120,7 @@ namespace Limitless::EditorMenuBar
         const char* modeLabel =
             (playModeState == EditorPlayModeState::Edit) ? "Edit" :
             (playModeState == EditorPlayModeState::Play) ? "Play" :
+            (playModeState == EditorPlayModeState::Simulate) ? "Simulate" :
             "Pause";
         ImGui::TextDisabled("Mode: %s", modeLabel);
         ImGui::SameLine();
@@ -127,6 +129,9 @@ namespace Limitless::EditorMenuBar
         {
             if (ImGui::Button("Play"))
                 onPlay();
+            ImGui::SameLine();
+            if (ImGui::Button("Simulate"))
+                onSimulate();
         }
         else
         {

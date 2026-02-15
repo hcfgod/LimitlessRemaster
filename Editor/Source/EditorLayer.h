@@ -44,6 +44,7 @@ namespace Limitless
         void OnAttach() override;
         void OnDetach() override;
         void OnUpdate(float deltaTime) override;
+        void OnFixedUpdate(float fixedDeltaTime) override;
         void OnRender() override;
 
     protected:
@@ -58,6 +59,7 @@ namespace Limitless
 
         void EnsureViewportFramebuffer(uint32_t width, uint32_t height);
         void EnterPlayMode();
+        void EnterSimulateMode();
         void ExitPlayMode();
         void TogglePausePlayMode();
         void NewScene();

@@ -13,6 +13,7 @@
 #include "Graphics/Renderer.h"
 #include "Graphics/Renderer2D.h"
 #include "Core/Concurrency/AsyncIO.h"
+#include "Physics/Physics2DWorld.h"
 #include "Scripting/NativeScriptRegistry.h"
 
 #include <nlohmann/json.hpp>
@@ -200,6 +201,9 @@ namespace Limitless
 
     Scene::~Scene()
     {
+        if (m_Physics2DWorld)
+            m_Physics2DWorld->Shutdown(*this);
+
         auto view = m_Registry.view<NativeScriptComponent>();
         for (entt::entity entity : view)
         {
@@ -259,6 +263,7 @@ namespace Limitless
         }
 
         m_Registry.destroy(entity);
+        ResetPhysicsRuntimeState();
     }
 
     bool Scene::IsValid(entt::entity entity) const
@@ -523,6 +528,46 @@ namespace Limitless
         }
     }
 
+    void Scene::StepPhysics2D(float fixedDeltaTime)
+    {
+        if (!m_Physics2DWorld)
+            m_Physics2DWorld = std::make_unique<Physics2DWorld>();
+        if (!m_Physics2DWorld->IsInitialized())
+            m_Physics2DWorld->Initialize(m_Physics2DSettings);
+        m_Physics2DWorld->SetSettings(m_Physics2DSettings);
+        m_Physics2DWorld->Step(*this, fixedDeltaTime);
+    }
+
+    void Scene::SetPhysics2DSettings(const Physics2DWorldSettings& settings)
+    {
+        m_Physics2DSettings = settings;
+        if (m_Physics2DWorld)
+            m_Physics2DWorld->SetSettings(m_Physics2DSettings);
+    }
+
+    Physics2DWorld* Scene::GetPhysics2DWorld()
+    {
+        return m_Physics2DWorld.get();
+    }
+
+    const Physics2DWorld* Scene::GetPhysics2DWorld() const
+    {
+        return m_Physics2DWorld.get();
+    }
+
+    const Physics2DContactListener* Scene::GetPhysics2DContactEvents() const
+    {
+        if (!m_Physics2DWorld)
+            return nullptr;
+        return &m_Physics2DWorld->GetContactListener();
+    }
+
+    void Scene::ResetPhysicsRuntimeState()
+    {
+        if (m_Physics2DWorld)
+            m_Physics2DWorld->Shutdown(*this);
+    }
+
     std::unique_ptr<Scene> Scene::Clone() const
     {
         auto clone = std::make_unique<Scene>();
@@ -574,6 +619,44 @@ namespace Limitless
             if (const auto* camera = sourceRegistry.try_get<CameraComponent>(sourceEntity))
             {
                 destinationRegistry.emplace<CameraComponent>(destinationEntity, *camera);
+            }
+
+            if (const auto* rigidbody2D = sourceRegistry.try_get<Rigidbody2DComponent>(sourceEntity))
+            {
+                auto& destinationRigidbody2D = destinationRegistry.emplace<Rigidbody2DComponent>(destinationEntity, *rigidbody2D);
+#ifdef LT_ENABLE_PHYSICS2D
+                destinationRigidbody2D.RuntimeBodyId = b2_nullBodyId;
+#endif
+                destinationRigidbody2D.RuntimeBodyCreated = false;
+                destinationRigidbody2D.RuntimePreviousPosition = glm::vec2(0.0f);
+                destinationRigidbody2D.RuntimePreviousAngleRadians = 0.0f;
+            }
+
+            if (const auto* boxCollider2D = sourceRegistry.try_get<BoxCollider2DComponent>(sourceEntity))
+            {
+                auto& destinationBoxCollider2D = destinationRegistry.emplace<BoxCollider2DComponent>(destinationEntity, *boxCollider2D);
+#ifdef LT_ENABLE_PHYSICS2D
+                destinationBoxCollider2D.RuntimeShapeId = b2_nullShapeId;
+#endif
+                destinationBoxCollider2D.RuntimeShapeCreated = false;
+            }
+
+            if (const auto* circleCollider2D = sourceRegistry.try_get<CircleCollider2DComponent>(sourceEntity))
+            {
+                auto& destinationCircleCollider2D = destinationRegistry.emplace<CircleCollider2DComponent>(destinationEntity, *circleCollider2D);
+#ifdef LT_ENABLE_PHYSICS2D
+                destinationCircleCollider2D.RuntimeShapeId = b2_nullShapeId;
+#endif
+                destinationCircleCollider2D.RuntimeShapeCreated = false;
+            }
+
+            if (const auto* joint2D = sourceRegistry.try_get<Joint2DComponent>(sourceEntity))
+            {
+                auto& destinationJoint2D = destinationRegistry.emplace<Joint2DComponent>(destinationEntity, *joint2D);
+#ifdef LT_ENABLE_PHYSICS2D
+                destinationJoint2D.RuntimeJointId = b2_nullJointId;
+#endif
+                destinationJoint2D.RuntimeJointCreated = false;
             }
 
             if (const auto* audioSource = sourceRegistry.try_get<AudioSourceComponent>(sourceEntity))
@@ -633,7 +716,25 @@ namespace Limitless
             destinationHierarchy->SiblingOrder = sourceHierarchy->SiblingOrder;
         }
 
+        for (const auto& [sourceEntity, destinationEntity] : entityMap)
+        {
+            const auto* sourceJoint = sourceRegistry.try_get<Joint2DComponent>(sourceEntity);
+            auto* destinationJoint = destinationRegistry.try_get<Joint2DComponent>(destinationEntity);
+            if (!sourceJoint || !destinationJoint)
+                continue;
+            if (sourceJoint->ConnectedEntity == entt::null)
+            {
+                destinationJoint->ConnectedEntity = entt::null;
+                continue;
+            }
+            const auto mappedConnectedEntity = entityMap.find(sourceJoint->ConnectedEntity);
+            destinationJoint->ConnectedEntity = (mappedConnectedEntity != entityMap.end())
+                ? mappedConnectedEntity->second
+                : entt::null;
+        }
+
         clone->m_EditorCameraBookmark = m_EditorCameraBookmark;
+        clone->m_Physics2DSettings = m_Physics2DSettings;
         return clone;
     }
 
@@ -661,7 +762,7 @@ namespace Limitless
             indexByEntity.emplace(entities[index], static_cast<int32_t>(index));
 
         nlohmann::json root = nlohmann::json::object();
-        root["Version"] = 5;
+        root["Version"] = 6;
         if (m_EditorCameraBookmark.has_value())
         {
             root["EditorCamera"] = {
@@ -670,6 +771,12 @@ namespace Limitless
                 { "PitchDegrees", m_EditorCameraBookmark->PitchDegrees }
             };
         }
+        root["Physics2DSettings"] = {
+            { "Gravity", { m_Physics2DSettings.Gravity.x, m_Physics2DSettings.Gravity.y } },
+            { "VelocitySubSteps", m_Physics2DSettings.VelocitySubSteps },
+            { "EnableSleep", m_Physics2DSettings.EnableSleep },
+            { "EnableContinuousCollision", m_Physics2DSettings.EnableContinuousCollision }
+        };
         root["Entities"] = nlohmann::json::array();
 
         for (entt::entity entity : entities)
@@ -768,6 +875,98 @@ namespace Limitless
                 };
             }
 
+            if (const auto* rigidbody2D = m_Registry.try_get<Rigidbody2DComponent>(entity))
+            {
+                auto toBodyTypeString = [](Rigidbody2DComponent::BodyType type) -> const char*
+                {
+                    switch (type)
+                    {
+                        case Rigidbody2DComponent::BodyType::Static: return "Static";
+                        case Rigidbody2DComponent::BodyType::Kinematic: return "Kinematic";
+                        case Rigidbody2DComponent::BodyType::Dynamic:
+                        default: return "Dynamic";
+                    }
+                };
+                entry["Rigidbody2D"] = {
+                    { "BodyType", toBodyTypeString(rigidbody2D->Type) },
+                    { "FixedRotation", rigidbody2D->FixedRotation },
+                    { "IsBullet", rigidbody2D->IsBullet },
+                    { "EnableSleep", rigidbody2D->EnableSleep },
+                    { "StartAwake", rigidbody2D->StartAwake },
+                    { "Interpolate", rigidbody2D->Interpolate },
+                    { "GravityScale", rigidbody2D->GravityScale },
+                    { "LinearDamping", rigidbody2D->LinearDamping },
+                    { "AngularDamping", rigidbody2D->AngularDamping }
+                };
+            }
+
+            if (const auto* boxCollider2D = m_Registry.try_get<BoxCollider2DComponent>(entity))
+            {
+                entry["BoxCollider2D"] = {
+                    { "Offset", { boxCollider2D->Offset.x, boxCollider2D->Offset.y } },
+                    { "Size", { boxCollider2D->Size.x, boxCollider2D->Size.y } },
+                    { "Density", boxCollider2D->Density },
+                    { "Friction", boxCollider2D->Friction },
+                    { "Restitution", boxCollider2D->Restitution },
+                    { "IsSensor", boxCollider2D->IsSensor },
+                    { "CollisionLayer", boxCollider2D->CollisionLayer },
+                    { "CollisionMask", boxCollider2D->CollisionMask }
+                };
+            }
+
+            if (const auto* circleCollider2D = m_Registry.try_get<CircleCollider2DComponent>(entity))
+            {
+                entry["CircleCollider2D"] = {
+                    { "Offset", { circleCollider2D->Offset.x, circleCollider2D->Offset.y } },
+                    { "Radius", circleCollider2D->Radius },
+                    { "Density", circleCollider2D->Density },
+                    { "Friction", circleCollider2D->Friction },
+                    { "Restitution", circleCollider2D->Restitution },
+                    { "IsSensor", circleCollider2D->IsSensor },
+                    { "CollisionLayer", circleCollider2D->CollisionLayer },
+                    { "CollisionMask", circleCollider2D->CollisionMask }
+                };
+            }
+
+            if (const auto* joint2D = m_Registry.try_get<Joint2DComponent>(entity))
+            {
+                auto toJointTypeString = [](Joint2DComponent::JointType type) -> const char*
+                {
+                    switch (type)
+                    {
+                        case Joint2DComponent::JointType::Revolute: return "Revolute";
+                        case Joint2DComponent::JointType::Prismatic: return "Prismatic";
+                        case Joint2DComponent::JointType::Distance:
+                        default: return "Distance";
+                    }
+                };
+
+                int32_t connectedEntityIndex = -1;
+                if (joint2D->ConnectedEntity != entt::null)
+                {
+                    const auto connectedEntityIt = indexByEntity.find(joint2D->ConnectedEntity);
+                    if (connectedEntityIt != indexByEntity.end())
+                        connectedEntityIndex = connectedEntityIt->second;
+                }
+
+                entry["Joint2D"] = {
+                    { "Type", toJointTypeString(joint2D->Type) },
+                    { "ConnectedEntityIndex", connectedEntityIndex },
+                    { "CollideConnected", joint2D->CollideConnected },
+                    { "AnchorA", { joint2D->AnchorA.x, joint2D->AnchorA.y } },
+                    { "AnchorB", { joint2D->AnchorB.x, joint2D->AnchorB.y } },
+                    { "Axis", { joint2D->Axis.x, joint2D->Axis.y } },
+                    { "EnableLimit", joint2D->EnableLimit },
+                    { "Limits", { joint2D->Limits.x, joint2D->Limits.y } },
+                    { "EnableMotor", joint2D->EnableMotor },
+                    { "MotorSpeed", joint2D->MotorSpeed },
+                    { "MaxMotorForceOrTorque", joint2D->MaxMotorForceOrTorque },
+                    { "EnableSpring", joint2D->EnableSpring },
+                    { "Hertz", joint2D->Hertz },
+                    { "DampingRatio", joint2D->DampingRatio }
+                };
+            }
+
             if (const auto* nativeScript = m_Registry.try_get<NativeScriptComponent>(entity))
             {
                 nlohmann::json scriptEntries = nlohmann::json::array();
@@ -825,6 +1024,16 @@ namespace Limitless
             return Result<std::unique_ptr<Scene>>(ErrorCode::FileCorrupted, "Scene::LoadFromFile invalid scene JSON format");
 
         auto scene = std::make_unique<Scene>();
+        if (root.contains("Physics2DSettings") && root["Physics2DSettings"].is_object())
+        {
+            const auto& physicsSettingsJson = root["Physics2DSettings"];
+            auto gravity = physicsSettingsJson.value("Gravity", std::vector<float>{ 0.0f, -9.81f });
+            if (gravity.size() >= 2)
+                scene->m_Physics2DSettings.Gravity = glm::vec2(gravity[0], gravity[1]);
+            scene->m_Physics2DSettings.VelocitySubSteps = std::max(1, physicsSettingsJson.value("VelocitySubSteps", 4));
+            scene->m_Physics2DSettings.EnableSleep = physicsSettingsJson.value("EnableSleep", true);
+            scene->m_Physics2DSettings.EnableContinuousCollision = physicsSettingsJson.value("EnableContinuousCollision", true);
+        }
         if (root.contains("EditorCamera") && root["EditorCamera"].is_object())
         {
             const auto& editorCameraJson = root["EditorCamera"];
@@ -840,9 +1049,11 @@ namespace Limitless
         std::vector<entt::entity> createdEntities;
         std::vector<int32_t> parentIndices;
         std::vector<int32_t> siblingOrders;
+        std::vector<int32_t> jointConnectedEntityIndices;
         createdEntities.reserve(root["Entities"].size());
         parentIndices.reserve(root["Entities"].size());
         siblingOrders.reserve(root["Entities"].size());
+        jointConnectedEntityIndices.reserve(root["Entities"].size());
 
         for (const auto& entry : root["Entities"])
         {
@@ -982,6 +1193,115 @@ namespace Limitless
                 audioSource.RuntimePlaybackStarted = false;
             }
 
+            if (entry.contains("Rigidbody2D") && entry["Rigidbody2D"].is_object())
+            {
+                const auto& rigidbody2DJson = entry["Rigidbody2D"];
+                auto& rigidbody2D = scene->GetRegistry().emplace<Rigidbody2DComponent>(entity);
+                const std::string bodyTypeName = rigidbody2DJson.value("BodyType", std::string("Dynamic"));
+                if (bodyTypeName == "Static")
+                    rigidbody2D.Type = Rigidbody2DComponent::BodyType::Static;
+                else if (bodyTypeName == "Kinematic")
+                    rigidbody2D.Type = Rigidbody2DComponent::BodyType::Kinematic;
+                else
+                    rigidbody2D.Type = Rigidbody2DComponent::BodyType::Dynamic;
+                rigidbody2D.FixedRotation = rigidbody2DJson.value("FixedRotation", false);
+                rigidbody2D.IsBullet = rigidbody2DJson.value("IsBullet", false);
+                rigidbody2D.EnableSleep = rigidbody2DJson.value("EnableSleep", true);
+                rigidbody2D.StartAwake = rigidbody2DJson.value("StartAwake", true);
+                rigidbody2D.Interpolate = rigidbody2DJson.value("Interpolate", true);
+                rigidbody2D.GravityScale = rigidbody2DJson.value("GravityScale", 1.0f);
+                rigidbody2D.LinearDamping = rigidbody2DJson.value("LinearDamping", 0.0f);
+                rigidbody2D.AngularDamping = rigidbody2DJson.value("AngularDamping", 0.01f);
+#ifdef LT_ENABLE_PHYSICS2D
+                rigidbody2D.RuntimeBodyId = b2_nullBodyId;
+#endif
+                rigidbody2D.RuntimeBodyCreated = false;
+                rigidbody2D.RuntimePreviousPosition = glm::vec2(0.0f);
+                rigidbody2D.RuntimePreviousAngleRadians = 0.0f;
+            }
+
+            if (entry.contains("BoxCollider2D") && entry["BoxCollider2D"].is_object())
+            {
+                const auto& boxCollider2DJson = entry["BoxCollider2D"];
+                auto& boxCollider2D = scene->GetRegistry().emplace<BoxCollider2DComponent>(entity);
+                auto offset = boxCollider2DJson.value("Offset", std::vector<float>{ 0.0f, 0.0f });
+                if (offset.size() >= 2)
+                    boxCollider2D.Offset = glm::vec2(offset[0], offset[1]);
+                auto size = boxCollider2DJson.value("Size", std::vector<float>{ 1.0f, 1.0f });
+                if (size.size() >= 2)
+                    boxCollider2D.Size = glm::vec2(size[0], size[1]);
+                boxCollider2D.Density = boxCollider2DJson.value("Density", 1.0f);
+                boxCollider2D.Friction = boxCollider2DJson.value("Friction", 0.5f);
+                boxCollider2D.Restitution = boxCollider2DJson.value("Restitution", 0.0f);
+                boxCollider2D.IsSensor = boxCollider2DJson.value("IsSensor", false);
+                boxCollider2D.CollisionLayer = boxCollider2DJson.value("CollisionLayer", 1ull);
+                boxCollider2D.CollisionMask = boxCollider2DJson.value("CollisionMask", ~0ull);
+#ifdef LT_ENABLE_PHYSICS2D
+                boxCollider2D.RuntimeShapeId = b2_nullShapeId;
+#endif
+                boxCollider2D.RuntimeShapeCreated = false;
+            }
+
+            if (entry.contains("CircleCollider2D") && entry["CircleCollider2D"].is_object())
+            {
+                const auto& circleCollider2DJson = entry["CircleCollider2D"];
+                auto& circleCollider2D = scene->GetRegistry().emplace<CircleCollider2DComponent>(entity);
+                auto offset = circleCollider2DJson.value("Offset", std::vector<float>{ 0.0f, 0.0f });
+                if (offset.size() >= 2)
+                    circleCollider2D.Offset = glm::vec2(offset[0], offset[1]);
+                circleCollider2D.Radius = circleCollider2DJson.value("Radius", 0.5f);
+                circleCollider2D.Density = circleCollider2DJson.value("Density", 1.0f);
+                circleCollider2D.Friction = circleCollider2DJson.value("Friction", 0.5f);
+                circleCollider2D.Restitution = circleCollider2DJson.value("Restitution", 0.0f);
+                circleCollider2D.IsSensor = circleCollider2DJson.value("IsSensor", false);
+                circleCollider2D.CollisionLayer = circleCollider2DJson.value("CollisionLayer", 1ull);
+                circleCollider2D.CollisionMask = circleCollider2DJson.value("CollisionMask", ~0ull);
+#ifdef LT_ENABLE_PHYSICS2D
+                circleCollider2D.RuntimeShapeId = b2_nullShapeId;
+#endif
+                circleCollider2D.RuntimeShapeCreated = false;
+            }
+
+            int32_t jointConnectedEntityIndex = -1;
+            if (entry.contains("Joint2D") && entry["Joint2D"].is_object())
+            {
+                const auto& joint2DJson = entry["Joint2D"];
+                auto& joint2D = scene->GetRegistry().emplace<Joint2DComponent>(entity);
+                const std::string jointTypeName = joint2DJson.value("Type", std::string("Distance"));
+                if (jointTypeName == "Revolute")
+                    joint2D.Type = Joint2DComponent::JointType::Revolute;
+                else if (jointTypeName == "Prismatic")
+                    joint2D.Type = Joint2DComponent::JointType::Prismatic;
+                else
+                    joint2D.Type = Joint2DComponent::JointType::Distance;
+                jointConnectedEntityIndex = joint2DJson.value("ConnectedEntityIndex", -1);
+                joint2D.CollideConnected = joint2DJson.value("CollideConnected", false);
+                auto anchorA = joint2DJson.value("AnchorA", std::vector<float>{ 0.0f, 0.0f });
+                if (anchorA.size() >= 2)
+                    joint2D.AnchorA = glm::vec2(anchorA[0], anchorA[1]);
+                auto anchorB = joint2DJson.value("AnchorB", std::vector<float>{ 0.0f, 0.0f });
+                if (anchorB.size() >= 2)
+                    joint2D.AnchorB = glm::vec2(anchorB[0], anchorB[1]);
+                auto axis = joint2DJson.value("Axis", std::vector<float>{ 1.0f, 0.0f });
+                if (axis.size() >= 2)
+                    joint2D.Axis = glm::vec2(axis[0], axis[1]);
+                joint2D.EnableLimit = joint2DJson.value("EnableLimit", false);
+                auto limits = joint2DJson.value("Limits", std::vector<float>{ -1.0f, 1.0f });
+                if (limits.size() >= 2)
+                    joint2D.Limits = glm::vec2(limits[0], limits[1]);
+                joint2D.EnableMotor = joint2DJson.value("EnableMotor", false);
+                joint2D.MotorSpeed = joint2DJson.value("MotorSpeed", 0.0f);
+                joint2D.MaxMotorForceOrTorque = joint2DJson.value("MaxMotorForceOrTorque", 10.0f);
+                joint2D.EnableSpring = joint2DJson.value("EnableSpring", false);
+                joint2D.Hertz = joint2DJson.value("Hertz", 5.0f);
+                joint2D.DampingRatio = joint2DJson.value("DampingRatio", 0.7f);
+                joint2D.ConnectedEntity = entt::null;
+#ifdef LT_ENABLE_PHYSICS2D
+                joint2D.RuntimeJointId = b2_nullJointId;
+#endif
+                joint2D.RuntimeJointCreated = false;
+            }
+
             auto loadNativeScriptEntry = [](const nlohmann::json& nativeScriptJson, NativeScriptEntry& outScriptEntry) {
                 outScriptEntry.ScriptClassName = nativeScriptJson.value("Class", std::string{});
                 outScriptEntry.ScriptAssetRelativePath = nativeScriptJson.value("AssetPath", std::string{});
@@ -1038,6 +1358,7 @@ namespace Limitless
             createdEntities.push_back(entity);
             parentIndices.push_back(parentIndex);
             siblingOrders.push_back(siblingOrder);
+            jointConnectedEntityIndices.push_back(jointConnectedEntityIndex);
         }
 
         auto& registry = scene->GetRegistry();
@@ -1053,6 +1374,16 @@ namespace Limitless
             else
                 hierarchy->Parent = entt::null;
             hierarchy->SiblingOrder = siblingOrders[index];
+
+            auto* joint2D = registry.try_get<Joint2DComponent>(createdEntities[index]);
+            if (joint2D)
+            {
+                const int32_t connectedEntityIndex = jointConnectedEntityIndices[index];
+                if (connectedEntityIndex >= 0 && static_cast<size_t>(connectedEntityIndex) < createdEntities.size())
+                    joint2D->ConnectedEntity = createdEntities[static_cast<size_t>(connectedEntityIndex)];
+                else
+                    joint2D->ConnectedEntity = entt::null;
+            }
         }
 
         return Result<std::unique_ptr<Scene>>(std::move(scene));

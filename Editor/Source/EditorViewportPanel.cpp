@@ -167,6 +167,112 @@ namespace Limitless::EditorViewportPanel
                 return std::nullopt;
             return bestEntity;
         }
+
+        bool WorldToViewportPoint(const Camera& camera,
+                                  const ImVec2& viewportMin,
+                                  float viewportWidth,
+                                  float viewportHeight,
+                                  const glm::vec3& worldPoint,
+                                  ImVec2& outPoint)
+        {
+            if (viewportWidth <= 0.0f || viewportHeight <= 0.0f)
+                return false;
+
+            const glm::vec4 clip = camera.GetViewProjectionMatrix() * glm::vec4(worldPoint, 1.0f);
+            if (std::abs(clip.w) <= 0.000001f)
+                return false;
+
+            const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+            const float pixelX = (ndc.x * 0.5f + 0.5f) * viewportWidth;
+            const float pixelY = (1.0f - (ndc.y * 0.5f + 0.5f)) * viewportHeight;
+            outPoint = ImVec2(viewportMin.x + pixelX, viewportMin.y + pixelY);
+            return true;
+        }
+
+        void DrawSelectedPhysicsOverlays(ImDrawList* drawList,
+                                         Scene& scene,
+                                         const Camera& camera,
+                                         entt::entity selectedEntity,
+                                         const ImVec2& viewportMin,
+                                         float viewportWidth,
+                                         float viewportHeight)
+        {
+            if (!drawList || selectedEntity == entt::null || !scene.IsValid(selectedEntity))
+                return;
+
+            auto& registry = scene.GetRegistry();
+            auto* transform = registry.try_get<TransformComponent>(selectedEntity);
+            if (!transform)
+                return;
+
+            const glm::mat4 worldTransform = scene.GetWorldTransformMatrix(selectedEntity);
+
+            if (auto* boxCollider2D = registry.try_get<BoxCollider2DComponent>(selectedEntity))
+            {
+                const glm::vec3 localCorners[4] = {
+                    glm::vec3(boxCollider2D->Offset.x - boxCollider2D->Size.x * 0.5f, boxCollider2D->Offset.y - boxCollider2D->Size.y * 0.5f, 0.0f),
+                    glm::vec3(boxCollider2D->Offset.x + boxCollider2D->Size.x * 0.5f, boxCollider2D->Offset.y - boxCollider2D->Size.y * 0.5f, 0.0f),
+                    glm::vec3(boxCollider2D->Offset.x + boxCollider2D->Size.x * 0.5f, boxCollider2D->Offset.y + boxCollider2D->Size.y * 0.5f, 0.0f),
+                    glm::vec3(boxCollider2D->Offset.x - boxCollider2D->Size.x * 0.5f, boxCollider2D->Offset.y + boxCollider2D->Size.y * 0.5f, 0.0f)
+                };
+
+                ImVec2 projectedCorners[4]{};
+                bool valid = true;
+                for (int i = 0; i < 4; ++i)
+                {
+                    const glm::vec4 worldCorner = worldTransform * glm::vec4(localCorners[i], 1.0f);
+                    if (!WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldCorner), projectedCorners[i]))
+                    {
+                        valid = false;
+                        break;
+                    }
+                }
+
+                if (valid)
+                {
+                    drawList->AddLine(projectedCorners[0], projectedCorners[1], IM_COL32(90, 200, 255, 255), 2.0f);
+                    drawList->AddLine(projectedCorners[1], projectedCorners[2], IM_COL32(90, 200, 255, 255), 2.0f);
+                    drawList->AddLine(projectedCorners[2], projectedCorners[3], IM_COL32(90, 200, 255, 255), 2.0f);
+                    drawList->AddLine(projectedCorners[3], projectedCorners[0], IM_COL32(90, 200, 255, 255), 2.0f);
+                }
+            }
+
+            if (auto* circleCollider2D = registry.try_get<CircleCollider2DComponent>(selectedEntity))
+            {
+                const glm::vec4 worldCenter = worldTransform * glm::vec4(circleCollider2D->Offset.x, circleCollider2D->Offset.y, 0.0f, 1.0f);
+                const glm::vec4 worldRadiusPoint = worldTransform * glm::vec4(circleCollider2D->Offset.x + circleCollider2D->Radius, circleCollider2D->Offset.y, 0.0f, 1.0f);
+
+                ImVec2 centerPoint{};
+                ImVec2 radiusPoint{};
+                if (WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldCenter), centerPoint) &&
+                    WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldRadiusPoint), radiusPoint))
+                {
+                    const float radiusPixels = std::sqrt((radiusPoint.x - centerPoint.x) * (radiusPoint.x - centerPoint.x) +
+                                                         (radiusPoint.y - centerPoint.y) * (radiusPoint.y - centerPoint.y));
+                    drawList->AddCircle(centerPoint, radiusPixels, IM_COL32(255, 190, 70, 255), 48, 2.0f);
+                }
+            }
+
+            if (auto* joint2D = registry.try_get<Joint2DComponent>(selectedEntity))
+            {
+                if (joint2D->ConnectedEntity != entt::null && scene.IsValid(joint2D->ConnectedEntity))
+                {
+                    const glm::mat4 connectedWorldTransform = scene.GetWorldTransformMatrix(joint2D->ConnectedEntity);
+                    const glm::vec4 worldAnchorA = worldTransform * glm::vec4(joint2D->AnchorA, 0.0f, 1.0f);
+                    const glm::vec4 worldAnchorB = connectedWorldTransform * glm::vec4(joint2D->AnchorB, 0.0f, 1.0f);
+
+                    ImVec2 projectedA{};
+                    ImVec2 projectedB{};
+                    if (WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldAnchorA), projectedA) &&
+                        WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldAnchorB), projectedB))
+                    {
+                        drawList->AddLine(projectedA, projectedB, IM_COL32(130, 255, 130, 255), 2.0f);
+                        drawList->AddCircleFilled(projectedA, 4.0f, IM_COL32(130, 255, 130, 255));
+                        drawList->AddCircleFilled(projectedB, 4.0f, IM_COL32(130, 255, 130, 255));
+                    }
+                }
+            }
+        }
     }
 
     void Draw(uint32_t& viewportWidthPixels,
@@ -228,6 +334,13 @@ namespace Limitless::EditorViewportPanel
                     ImVec2(static_cast<float>(width), static_cast<float>(height)),
                     ImVec2(0, 1),
                     ImVec2(1, 0));
+
+                if (scene && camera)
+                {
+                    const ImVec2 viewportMin = ImGui::GetItemRectMin();
+                    ImDrawList* drawList = ImGui::GetWindowDrawList();
+                    DrawSelectedPhysicsOverlays(drawList, *scene, *camera, selectedEntity, viewportMin, static_cast<float>(width), static_cast<float>(height));
+                }
 
                 if (ImGui::BeginDragDropTarget())
                 {

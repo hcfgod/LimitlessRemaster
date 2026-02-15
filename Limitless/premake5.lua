@@ -61,6 +61,7 @@ project "Limitless"
     {
         "Source",
         "Vendor/",
+        "Vendor/box2d/include",
         "Vendor/Zstd/include",
         "Vendor/glad",
         "Vendor/spdlog",
@@ -103,12 +104,14 @@ project "Limitless"
             "LT_PLATFORM_WINDOWS",
             -- Enable shaderc-based compilation on Windows where we vendor prebuilt libs.
             "LT_ENABLE_SHADERC",
-            "LT_ENABLE_ZSTD"
+            "LT_ENABLE_ZSTD",
+            "LT_ENABLE_PHYSICS2D"
         }
 
         libdirs
         {
             "Vendor/SDL3/SDL3Libs",
+            "Vendor/box2d/libs",
 
             -- shaderc ships prebuilt .lib files in this folder in our vendor drop.
             "Vendor/shaderc/libs",
@@ -148,10 +151,18 @@ project "Limitless"
 
         -- Select the correct shaderc library for each configuration.
         filter { "system:windows", "configurations:Debug" }
-            links { "shaderc_sharedd" }
+            links
+            {
+                "shaderc_sharedd",
+                "box2DD"
+            }
 
         filter { "system:windows", "configurations:Release or Dist" }
-            links { "shaderc_shared" }
+            links
+            {
+                "shaderc_shared",
+                "box2D"
+            }
 
         filter "system:windows"
             buildoptions
@@ -167,7 +178,8 @@ project "Limitless"
         defines
         {
             "LT_PLATFORM_MACOS",
-            "LT_ENABLE_ZSTD"
+            "LT_ENABLE_ZSTD",
+            "LT_ENABLE_PHYSICS2D"
         }
 
         libdirs
@@ -177,6 +189,7 @@ project "Limitless"
 
         links
         {
+            "box2d",
             "SDL3",
             "z",
             "Cocoa.framework",
@@ -213,7 +226,8 @@ project "Limitless"
         defines
         {
             "LT_PLATFORM_LINUX",
-            "LT_ENABLE_ZSTD"
+            "LT_ENABLE_ZSTD",
+            "LT_ENABLE_PHYSICS2D"
         }
 
         libdirs
@@ -230,6 +244,7 @@ project "Limitless"
     filter "system:linux"
         links
         {
+            "box2d",
             "SDL3",
             "z",
             "X11",

@@ -14,7 +14,8 @@ namespace Limitless
     {
         Edit = 0,
         Play = 1,
-        Pause = 2
+        Simulate = 2,
+        Pause = 3
     };
 
     namespace EditorPlayMode
@@ -32,6 +33,20 @@ namespace Limitless
                    entt::entity& selectedEntity,
                    std::string& selectedTextureAssetKey,
                    Assets::TextureAsset::Ptr& cachedTextureAsset);
+
+        void EnterSimulate(EditorPlayModeState& playModeState,
+                           std::unique_ptr<Scene>& scene,
+                           std::unique_ptr<Scene>& editSceneStored,
+                           CameraManager& cameraManager,
+                           CameraId editorCameraId,
+                           uint32_t viewportWidthPixels,
+                           uint32_t viewportHeightPixels,
+                           CameraId& cachedGameplayCameraId,
+                           bool& createdGameplayCameraFromScene,
+                           bool& playModeMissingGameplayCamera,
+                           entt::entity& selectedEntity,
+                           std::string& selectedTextureAssetKey,
+                           Assets::TextureAsset::Ptr& cachedTextureAsset);
 
         void Exit(EditorPlayModeState& playModeState,
                   std::unique_ptr<Scene>& scene,

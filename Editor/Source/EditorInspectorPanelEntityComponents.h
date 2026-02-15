@@ -18,6 +18,10 @@ namespace Limitless::EditorInspectorPanel
         bool RemoveMaterialComponent = false;
         bool RemoveAudioSourceComponent = false;
         bool RemoveTextComponent = false;
+        bool RemoveRigidbody2DComponent = false;
+        bool RemoveBoxCollider2DComponent = false;
+        bool RemoveCircleCollider2DComponent = false;
+        bool RemoveJoint2DComponent = false;
     };
 
     void DrawStandardEntityComponentSections(entt::registry& registry,

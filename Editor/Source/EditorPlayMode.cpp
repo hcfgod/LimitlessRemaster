@@ -235,6 +235,38 @@ namespace Limitless
             playModeState = EditorPlayModeState::Play;
         }
 
+        void EnterSimulate(EditorPlayModeState& playModeState,
+                           std::unique_ptr<Scene>& scene,
+                           std::unique_ptr<Scene>& editSceneStored,
+                           CameraManager& cameraManager,
+                           CameraId editorCameraId,
+                           uint32_t viewportWidthPixels,
+                           uint32_t viewportHeightPixels,
+                           CameraId& cachedGameplayCameraId,
+                           bool& createdGameplayCameraFromScene,
+                           bool& playModeMissingGameplayCamera,
+                           entt::entity& selectedEntity,
+                           std::string& selectedTextureAssetKey,
+                           Assets::TextureAsset::Ptr& cachedTextureAsset)
+        {
+            Enter(
+                playModeState,
+                scene,
+                editSceneStored,
+                cameraManager,
+                editorCameraId,
+                viewportWidthPixels,
+                viewportHeightPixels,
+                cachedGameplayCameraId,
+                createdGameplayCameraFromScene,
+                playModeMissingGameplayCamera,
+                selectedEntity,
+                selectedTextureAssetKey,
+                cachedTextureAsset);
+            if (playModeState == EditorPlayModeState::Play)
+                playModeState = EditorPlayModeState::Simulate;
+        }
+
         void Exit(EditorPlayModeState& playModeState,
                   std::unique_ptr<Scene>& scene,
                   std::unique_ptr<Scene>& editSceneStored,
@@ -275,7 +307,9 @@ namespace Limitless
                              bool createdGameplayCameraFromScene)
         {
             if (!createdGameplayCameraFromScene ||
-                (playModeState != EditorPlayModeState::Play && playModeState != EditorPlayModeState::Pause) ||
+                (playModeState != EditorPlayModeState::Play &&
+                 playModeState != EditorPlayModeState::Simulate &&
+                 playModeState != EditorPlayModeState::Pause) ||
                 !scene ||
                 !cachedGameplayCameraId)
             {

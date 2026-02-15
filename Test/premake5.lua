@@ -30,6 +30,7 @@ project "Test"
         "../Limitless/Source",
         "../Editor/Source",
         "../Limitless/Vendor/",
+        "../Limitless/Vendor/box2d/include",
         "../Limitless/Vendor/spdlog",
         "../Limitless/Vendor/doctest",
         "../Limitless/Vendor/nlohmann",
@@ -54,12 +55,14 @@ project "Test"
 
         defines
         {
-            "LT_PLATFORM_WINDOWS"
+            "LT_PLATFORM_WINDOWS",
+            "LT_ENABLE_PHYSICS2D"
         }
 
         libdirs
         {
             "../Limitless/Vendor/SDL3/SDL3Libs",
+            "../Limitless/Vendor/box2d/libs",
 
             -- Shader toolchain libraries (vendored).
             "../Limitless/Vendor/shaderc/libs",
@@ -96,10 +99,18 @@ project "Test"
 
         -- Select the correct shaderc library for each configuration.
         filter { "system:windows", "configurations:Debug" }
-            links { "shaderc_sharedd" }
+            links
+            {
+                "shaderc_sharedd",
+                "box2DD"
+            }
 
         filter { "system:windows", "configurations:Release or Dist" }
-            links { "shaderc_shared" }
+            links
+            {
+                "shaderc_shared",
+                "box2D"
+            }
 
         filter "system:windows"
         buildoptions
@@ -133,7 +144,8 @@ project "Test"
 
         defines
         {
-            "LT_PLATFORM_MACOS"
+            "LT_PLATFORM_MACOS",
+            "LT_ENABLE_PHYSICS2D"
         }
 
         libdirs
@@ -143,6 +155,7 @@ project "Test"
 
         links
         {
+            "box2d",
             "SDL3",
             "z",
             "Cocoa.framework",
@@ -177,7 +190,8 @@ project "Test"
 
         defines
         {
-            "LT_PLATFORM_LINUX"
+            "LT_PLATFORM_LINUX",
+            "LT_ENABLE_PHYSICS2D"
         }
 
         libdirs
@@ -187,6 +201,7 @@ project "Test"
 
         links
         {
+            "box2d",
             "SDL3",
             "z",
             "X11",

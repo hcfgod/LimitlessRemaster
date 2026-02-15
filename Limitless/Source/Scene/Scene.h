@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Error.h"
+#include "Physics/Physics2DWorld.h"
 #include "Scene/Components.h"
 
 #include <glm/glm.hpp>
@@ -14,6 +15,7 @@ namespace Limitless
 {
     class Camera;
     class Framebuffer;
+    class Physics2DWorld;
 
     // -----------------------------------------------------------------------------
     // Scene
@@ -69,6 +71,13 @@ namespace Limitless
 
         /// Runtime update for script-driven entity behavior.
         void Update(float deltaTime);
+        void StepPhysics2D(float fixedDeltaTime);
+
+        void SetPhysics2DSettings(const Physics2DWorldSettings& settings);
+        const Physics2DWorldSettings& GetPhysics2DSettings() const { return m_Physics2DSettings; }
+        Physics2DWorld* GetPhysics2DWorld();
+        const Physics2DWorld* GetPhysics2DWorld() const;
+        const Physics2DContactListener* GetPhysics2DContactEvents() const;
 
         /// Get the EnTT registry for custom queries (views, groups, etc.).
         entt::registry& GetRegistry() { return m_Registry; }
@@ -90,8 +99,13 @@ namespace Limitless
         const std::optional<EditorCameraBookmark>& GetEditorCameraBookmark() const { return m_EditorCameraBookmark; }
 
     private:
+        void ResetPhysicsRuntimeState();
+
+    private:
         entt::registry m_Registry;
         std::optional<EditorCameraBookmark> m_EditorCameraBookmark;
+        Physics2DWorldSettings m_Physics2DSettings{};
+        std::unique_ptr<Physics2DWorld> m_Physics2DWorld;
     };
 
     // -----------------------------------------------------------------------------

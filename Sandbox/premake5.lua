@@ -26,6 +26,7 @@ project "Sandbox"
     includedirs
     {
         "../Limitless/Vendor",
+        "../Limitless/Vendor/box2d/include",
         "../Limitless/Source",
         "../Limitless/Vendor/spdlog",
         "../Limitless/Vendor/doctest",
@@ -69,12 +70,14 @@ project "Sandbox"
 
         defines
         {
-            "LT_PLATFORM_WINDOWS"
+            "LT_PLATFORM_WINDOWS",
+            "LT_ENABLE_PHYSICS2D"
         }
 
         libdirs
         {
             "../Limitless/Vendor/SDL3/SDL3Libs",
+            "../Limitless/Vendor/box2d/libs",
 
             -- Shader toolchain libraries (vendored).
             "../Limitless/Vendor/shaderc/libs",
@@ -111,10 +114,18 @@ project "Sandbox"
 
         -- Select the correct shaderc library for each configuration.
         filter { "system:windows", "configurations:Debug" }
-            links { "shaderc_sharedd" }
+            links
+            {
+                "shaderc_sharedd",
+                "box2DD"
+            }
 
         filter { "system:windows", "configurations:Release or Dist" }
-            links { "shaderc_shared" }
+            links
+            {
+                "shaderc_shared",
+                "box2D"
+            }
 
         filter "system:windows"
         buildoptions
@@ -148,7 +159,8 @@ project "Sandbox"
 
         defines
         {
-            "LT_PLATFORM_MACOS"
+            "LT_PLATFORM_MACOS",
+            "LT_ENABLE_PHYSICS2D"
         }
 
         libdirs
@@ -158,6 +170,7 @@ project "Sandbox"
 
         links
         {
+            "box2d",
             "SDL3",
             "z",
             "Cocoa.framework",
@@ -192,7 +205,8 @@ project "Sandbox"
 
         defines
         {
-            "LT_PLATFORM_LINUX"
+            "LT_PLATFORM_LINUX",
+            "LT_ENABLE_PHYSICS2D"
         }
 
         libdirs
@@ -202,6 +216,7 @@ project "Sandbox"
 
         links
         {
+            "box2d",
             "SDL3",
             "z",
             "X11",

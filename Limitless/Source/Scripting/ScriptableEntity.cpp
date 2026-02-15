@@ -1,5 +1,10 @@
 #include "Scripting/ScriptableEntity.h"
 
+#ifndef SCRIPTCORE_EXPORTS
+    #include "Physics/Physics2DQueries.h"
+    #include "Scene/Scene.h"
+#endif
+
 namespace Limitless
 {
     float ScriptableEntity::GetExposedFloat(const std::string& name, float fallbackValue) const
@@ -90,5 +95,93 @@ namespace Limitless
     {
         if (m_ExposedProperties)
             (*m_ExposedProperties)[name] = value;
+    }
+
+    bool ScriptableEntity::Raycast2D(const glm::vec2& origin,
+                                     const glm::vec2& direction,
+                                     float maxDistance,
+                                     entt::entity& outEntity,
+                                     glm::vec2& outPoint,
+                                     glm::vec2& outNormal,
+                                     float& outFraction,
+                                     uint64_t collisionMask) const
+    {
+#ifdef SCRIPTCORE_EXPORTS
+        (void)origin;
+        (void)direction;
+        (void)maxDistance;
+        (void)outEntity;
+        (void)outPoint;
+        (void)outNormal;
+        (void)outFraction;
+        (void)collisionMask;
+        return false;
+#else
+        if (!m_Scene)
+            return false;
+
+        const Physics2DRaycastHit hit = Physics2DQueries::RaycastClosest(m_Scene, origin, direction, maxDistance, collisionMask);
+        if (!hit.HasHit)
+            return false;
+
+        outEntity = hit.Entity;
+        outPoint = hit.Point;
+        outNormal = hit.Normal;
+        outFraction = hit.Fraction;
+        return true;
+#endif
+    }
+
+    bool ScriptableEntity::HasContactWith(entt::entity otherEntity, bool includeSensorContacts) const
+    {
+#ifdef SCRIPTCORE_EXPORTS
+        (void)otherEntity;
+        (void)includeSensorContacts;
+        return false;
+#else
+        if (!m_Scene)
+            return false;
+        const Physics2DContactListener* contacts = m_Scene->GetPhysics2DContactEvents();
+        if (!contacts)
+            return false;
+
+        const auto& events = contacts->GetEvents();
+        for (const auto& eventData : events)
+        {
+            if (!includeSensorContacts && eventData.IsSensor)
+                continue;
+            const bool matchesPair = (eventData.EntityA == m_EntityHandle && eventData.EntityB == otherEntity) ||
+                                     (eventData.EntityB == m_EntityHandle && eventData.EntityA == otherEntity);
+            if (matchesPair)
+                return true;
+        }
+
+        return false;
+#endif
+    }
+
+    int ScriptableEntity::GetContactCount(bool includeSensorContacts) const
+    {
+#ifdef SCRIPTCORE_EXPORTS
+        (void)includeSensorContacts;
+        return 0;
+#else
+        if (!m_Scene)
+            return 0;
+        const Physics2DContactListener* contacts = m_Scene->GetPhysics2DContactEvents();
+        if (!contacts)
+            return 0;
+
+        int contactCount = 0;
+        const auto& events = contacts->GetEvents();
+        for (const auto& eventData : events)
+        {
+            if (!includeSensorContacts && eventData.IsSensor)
+                continue;
+            if (eventData.EntityA == m_EntityHandle || eventData.EntityB == m_EntityHandle)
+                ++contactCount;
+        }
+        return contactCount;
+#endif
     }
 }

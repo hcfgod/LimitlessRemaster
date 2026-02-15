@@ -73,6 +73,18 @@ namespace Limitless
         void SyncExposedField(const std::string& name, glm::vec3& value) { value = GetExposedVector3(name, value); }
         void SyncExposedField(const std::string& name, std::string& value) { value = GetExposedString(name, value); }
 
+        bool Raycast2D(const glm::vec2& origin,
+                       const glm::vec2& direction,
+                       float maxDistance,
+                       entt::entity& outEntity,
+                       glm::vec2& outPoint,
+                       glm::vec2& outNormal,
+                       float& outFraction,
+                       uint64_t collisionMask = ~0ull) const;
+
+        bool HasContactWith(entt::entity otherEntity, bool includeSensorContacts = true) const;
+        int GetContactCount(bool includeSensorContacts = true) const;
+
         virtual void OnSynchronizeExposedFields() {}
 
         virtual void OnCreate() {}

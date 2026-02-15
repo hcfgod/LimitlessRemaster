@@ -9,6 +9,10 @@
 #include "EnTT/entt.hpp"
 
 #include <glm/glm.hpp>
+#ifdef LT_ENABLE_PHYSICS2D
+    #include <box2d/box2d.h>
+#endif
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -135,6 +139,97 @@ namespace Limitless
 
         // Perspective settings.
         float FieldOfViewYDegrees = 60.0f;
+    };
+
+    struct Rigidbody2DComponent
+    {
+        enum class BodyType
+        {
+            Static = 0,
+            Dynamic = 1,
+            Kinematic = 2
+        };
+
+        BodyType Type = BodyType::Dynamic;
+        bool FixedRotation = false;
+        bool IsBullet = false;
+        bool EnableSleep = true;
+        bool StartAwake = true;
+        bool Interpolate = true;
+        float GravityScale = 1.0f;
+        float LinearDamping = 0.0f;
+        float AngularDamping = 0.01f;
+
+#ifdef LT_ENABLE_PHYSICS2D
+        b2BodyId RuntimeBodyId = b2_nullBodyId;
+#endif
+        bool RuntimeBodyCreated = false;
+        glm::vec2 RuntimePreviousPosition = glm::vec2(0.0f);
+        float RuntimePreviousAngleRadians = 0.0f;
+    };
+
+    struct BoxCollider2DComponent
+    {
+        glm::vec2 Offset = glm::vec2(0.0f);
+        glm::vec2 Size = glm::vec2(1.0f, 1.0f);
+        float Density = 1.0f;
+        float Friction = 0.5f;
+        float Restitution = 0.0f;
+        bool IsSensor = false;
+        uint64_t CollisionLayer = 1ull;
+        uint64_t CollisionMask = ~0ull;
+
+#ifdef LT_ENABLE_PHYSICS2D
+        b2ShapeId RuntimeShapeId = b2_nullShapeId;
+#endif
+        bool RuntimeShapeCreated = false;
+    };
+
+    struct CircleCollider2DComponent
+    {
+        glm::vec2 Offset = glm::vec2(0.0f);
+        float Radius = 0.5f;
+        float Density = 1.0f;
+        float Friction = 0.5f;
+        float Restitution = 0.0f;
+        bool IsSensor = false;
+        uint64_t CollisionLayer = 1ull;
+        uint64_t CollisionMask = ~0ull;
+
+#ifdef LT_ENABLE_PHYSICS2D
+        b2ShapeId RuntimeShapeId = b2_nullShapeId;
+#endif
+        bool RuntimeShapeCreated = false;
+    };
+
+    struct Joint2DComponent
+    {
+        enum class JointType
+        {
+            Distance = 0,
+            Revolute = 1,
+            Prismatic = 2
+        };
+
+        JointType Type = JointType::Distance;
+        entt::entity ConnectedEntity = entt::null;
+        bool CollideConnected = false;
+        glm::vec2 AnchorA = glm::vec2(0.0f);
+        glm::vec2 AnchorB = glm::vec2(0.0f);
+        glm::vec2 Axis = glm::vec2(1.0f, 0.0f);
+        bool EnableLimit = false;
+        glm::vec2 Limits = glm::vec2(-1.0f, 1.0f);
+        bool EnableMotor = false;
+        float MotorSpeed = 0.0f;
+        float MaxMotorForceOrTorque = 10.0f;
+        bool EnableSpring = false;
+        float Hertz = 5.0f;
+        float DampingRatio = 0.7f;
+
+#ifdef LT_ENABLE_PHYSICS2D
+        b2JointId RuntimeJointId = b2_nullJointId;
+#endif
+        bool RuntimeJointCreated = false;
     };
 
     /// Single native C++ behavior script entry attached to an entity.

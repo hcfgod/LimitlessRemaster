@@ -1596,6 +1596,10 @@ namespace Limitless::EditorInspectorPanel
                 const bool hasAudioSourceComponent = registry.all_of<AudioSourceComponent>(selectedEntity);
                 const bool hasTextComponent = registry.all_of<TextComponent>(selectedEntity);
                 const bool hasNativeScriptComponent = registry.all_of<NativeScriptComponent>(selectedEntity);
+                const bool hasRigidbody2DComponent = registry.all_of<Rigidbody2DComponent>(selectedEntity);
+                const bool hasBoxCollider2DComponent = registry.all_of<BoxCollider2DComponent>(selectedEntity);
+                const bool hasCircleCollider2DComponent = registry.all_of<CircleCollider2DComponent>(selectedEntity);
+                const bool hasJoint2DComponent = registry.all_of<Joint2DComponent>(selectedEntity);
                 if (hasSpriteComponent)
                     ImGui::BeginDisabled();
 
@@ -1692,6 +1696,74 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 if (hasNativeScriptComponent)
+                    ImGui::EndDisabled();
+
+                if (hasRigidbody2DComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Rigidbody 2D"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add Rigidbody2D Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<Rigidbody2DComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<Rigidbody2DComponent>(selectedEntity);
+                }
+
+                if (hasRigidbody2DComponent)
+                    ImGui::EndDisabled();
+
+                if (hasBoxCollider2DComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Box Collider 2D"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add BoxCollider2D Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<BoxCollider2DComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<BoxCollider2DComponent>(selectedEntity);
+                }
+
+                if (hasBoxCollider2DComponent)
+                    ImGui::EndDisabled();
+
+                if (hasCircleCollider2DComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Circle Collider 2D"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add CircleCollider2D Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<CircleCollider2DComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<CircleCollider2DComponent>(selectedEntity);
+                }
+
+                if (hasCircleCollider2DComponent)
+                    ImGui::EndDisabled();
+
+                if (hasJoint2DComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Joint 2D"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add Joint2D Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<Joint2DComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<Joint2DComponent>(selectedEntity);
+                }
+
+                if (hasJoint2DComponent)
                     ImGui::EndDisabled();
 
                 ImGui::EndPopup();
@@ -1817,6 +1889,66 @@ namespace Limitless::EditorInspectorPanel
                 else
                 {
                     registry.remove<NativeScriptComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveRigidbody2DComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Rigidbody2D Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<Rigidbody2DComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<Rigidbody2DComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveBoxCollider2DComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove BoxCollider2D Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<BoxCollider2DComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<BoxCollider2DComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveCircleCollider2DComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove CircleCollider2D Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<CircleCollider2DComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<CircleCollider2DComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveJoint2DComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Joint2D Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<Joint2DComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<Joint2DComponent>(selectedEntity);
                 }
             }
         }

@@ -30,6 +30,7 @@ project "Editor"
     includedirs
     {
         "../Limitless/Vendor",
+        "../Limitless/Vendor/box2d/include",
         "../Limitless/Source",
         "../Limitless/Vendor/spdlog",
         "../Limitless/Vendor/nlohmann",
@@ -61,12 +62,14 @@ project "Editor"
 
         defines
         {
-            "LT_PLATFORM_WINDOWS"
+            "LT_PLATFORM_WINDOWS",
+            "LT_ENABLE_PHYSICS2D"
         }
 
         libdirs
         {
             "../Limitless/Vendor/SDL3/SDL3Libs",
+            "../Limitless/Vendor/box2d/libs",
             "../Limitless/Vendor/shaderc/libs",
             "../Limitless/Vendor/VulkanSDK/lib"
         }
@@ -99,10 +102,18 @@ project "Editor"
         }
 
         filter { "system:windows", "configurations:Debug" }
-            links { "shaderc_sharedd" }
+            links
+            {
+                "shaderc_sharedd",
+                "box2DD"
+            }
 
         filter { "system:windows", "configurations:Release or Dist" }
-            links { "shaderc_shared" }
+            links
+            {
+                "shaderc_shared",
+                "box2D"
+            }
 
         filter "system:windows"
         buildoptions
@@ -129,7 +140,8 @@ project "Editor"
 
         defines
         {
-            "LT_PLATFORM_MACOS"
+            "LT_PLATFORM_MACOS",
+            "LT_ENABLE_PHYSICS2D"
         }
 
         libdirs
@@ -139,6 +151,7 @@ project "Editor"
 
         links
         {
+            "box2d",
             "SDL3",
             "z",
             "Cocoa.framework",
@@ -173,7 +186,8 @@ project "Editor"
 
         defines
         {
-            "LT_PLATFORM_LINUX"
+            "LT_PLATFORM_LINUX",
+            "LT_ENABLE_PHYSICS2D"
         }
 
         libdirs
@@ -183,6 +197,7 @@ project "Editor"
 
         links
         {
+            "box2d",
             "SDL3",
             "z",
             "X11",

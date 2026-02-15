@@ -369,7 +369,9 @@ namespace Limitless
                 return;
 
             const bool runtimePlaybackAllowed =
-                (playModeState == EditorPlayModeState::Play || playModeState == EditorPlayModeState::Pause);
+                (playModeState == EditorPlayModeState::Play ||
+                 playModeState == EditorPlayModeState::Simulate ||
+                 playModeState == EditorPlayModeState::Pause);
 
             auto& registry = scene->GetRegistry();
             auto audioView = registry.view<AudioSourceComponent>();
@@ -534,6 +536,15 @@ namespace Limitless
             else if (!io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_S, false))
                 SaveScene();
         }
+    }
+
+    void EditorLayer::OnFixedUpdate(float fixedDeltaTime)
+    {
+        if (!m_Scene)
+            return;
+
+        if (m_PlayModeState == EditorPlayModeState::Play || m_PlayModeState == EditorPlayModeState::Simulate)
+            m_Scene->StepPhysics2D(fixedDeltaTime);
     }
 
     void EditorLayer::OnRender()
@@ -714,6 +725,7 @@ namespace Limitless
             m_EditorUndoService.GetUndoLabel(),
             m_EditorUndoService.GetRedoLabel(),
             [this]() { EnterPlayMode(); },
+            [this]() { EnterSimulateMode(); },
             [this]() { ExitPlayMode(); },
             [this]() { TogglePausePlayMode(); },
             isEditingPrefabAsset,
@@ -1025,6 +1037,31 @@ namespace Limitless
         m_EditSceneStoredAssetKey = m_CurrentSceneAssetKey;
 
         EditorPlayMode::Enter(
+            m_PlayModeState,
+            m_Scene,
+            m_EditSceneStored,
+            m_CameraManager,
+            m_EditorCameraId,
+            m_ViewportWidthPixels,
+            m_ViewportHeightPixels,
+            m_CachedGameplayCameraId,
+            m_CreatedGameplayCameraFromScene,
+            m_PlayModeMissingGameplayCamera,
+            m_SelectedEntity,
+            m_SelectedTextureAssetKey,
+            m_CachedTextureAsset);
+    }
+
+    void EditorLayer::EnterSimulateMode()
+    {
+        if (m_PlayModeState != EditorPlayModeState::Edit)
+            return;
+
+        StopAudioSourcesInScene(m_Scene.get());
+        StopAudioSourcesInScene(m_EditSceneStored.get());
+        m_EditSceneStoredAssetKey = m_CurrentSceneAssetKey;
+
+        EditorPlayMode::EnterSimulate(
             m_PlayModeState,
             m_Scene,
             m_EditSceneStored,
