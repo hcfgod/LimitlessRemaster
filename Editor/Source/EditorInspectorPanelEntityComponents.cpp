@@ -89,7 +89,8 @@ namespace Limitless::EditorInspectorPanel
         }
     }
 
-    void DrawStandardEntityComponentSections(entt::registry& registry,
+    void DrawStandardEntityComponentSections(Scene* scene,
+                                             entt::registry& registry,
                                              entt::entity selectedEntity,
                                              const char* audioPayloadId,
                                              const char* materialPayloadId,
@@ -497,6 +498,46 @@ namespace Limitless::EditorInspectorPanel
                 TrackInteractiveMutation(undoService, "Edit Rigidbody2D Linear Damping");
                 ImGui::DragFloat("Angular Damping", &rigidbody2D->AngularDamping, 0.01f, 0.0f, 100.0f);
                 TrackInteractiveMutation(undoService, "Edit Rigidbody2D Angular Damping");
+
+                ImGui::Separator();
+                ImGui::TextDisabled("Runtime Diagnostics");
+                if (!scene)
+                {
+                    ImGui::TextDisabled("Scene unavailable.");
+                }
+                else
+                {
+                    const Physics2DWorld* physicsWorld = scene->GetPhysics2DWorld();
+                    if (!physicsWorld)
+                    {
+                        ImGui::TextDisabled("Physics world is not initialized.");
+                    }
+                    else
+                    {
+                        const Physics2DDiagnostics& worldDiagnostics = physicsWorld->GetDiagnostics();
+                        ImGui::Text("Bodies: %d (Awake: %d, Sleeping: %d)",
+                                    worldDiagnostics.BodyCount,
+                                    worldDiagnostics.AwakeBodyCount,
+                                    worldDiagnostics.SleepingBodyCount);
+                        ImGui::Text("Contacts: %d | Penetrating Points: %d",
+                                    worldDiagnostics.ContactPairCount,
+                                    worldDiagnostics.PenetratingContactPointCount);
+                        ImGui::Text("Max Penetration Depth: %.5f", worldDiagnostics.MaxPenetrationDepth);
+
+                        Physics2DBodyDiagnostics bodyDiagnostics{};
+                        if (physicsWorld->TryGetBodyDiagnostics(selectedEntity, bodyDiagnostics))
+                        {
+                            ImGui::Text("Body Awake: %s", bodyDiagnostics.IsAwake ? "Yes" : "No");
+                            ImGui::Text("Body Contact Pairs: %d", bodyDiagnostics.ContactPairCount);
+                            ImGui::Text("Body Penetrating Points: %d", bodyDiagnostics.PenetratingContactPointCount);
+                            ImGui::Text("Body Max Penetration: %.5f", bodyDiagnostics.MaxPenetrationDepth);
+                        }
+                        else
+                        {
+                            ImGui::TextDisabled("No active runtime body diagnostics for selected entity.");
+                        }
+                    }
+                }
 
                 ImGui::TreePop();
             }

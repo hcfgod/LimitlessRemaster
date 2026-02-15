@@ -162,6 +162,36 @@ TEST_SUITE("Scene And Editor Flows")
         camera.NearPlane = 0.1f;
         camera.FarPlane = 3000.0f;
 
+        auto& directionalLight = registry.emplace<Limitless::DirectionalLight2DComponent>(child);
+        directionalLight.RuntimeResolvedDirection = { 0.4f, 0.9f };
+
+        auto& pointLight = registry.emplace<Limitless::PointLight2DComponent>(child);
+        pointLight.RuntimeViewportPosition = { 100.0f, 200.0f };
+        pointLight.RuntimeViewportRadius = 32.0f;
+
+        auto& shadowOccluder = registry.emplace<Limitless::ShadowOccluder2DComponent>(child);
+        shadowOccluder.RuntimeResolvedPolygonPoints = { {0.0f, 0.0f}, {1.0f, 0.0f}, {0.5f, 1.0f} };
+        shadowOccluder.RuntimeGeometryRevision = 7;
+
+        auto& rigidbody = registry.emplace<Limitless::Rigidbody2DComponent>(child);
+        rigidbody.RuntimeBodyCreated = true;
+        rigidbody.RuntimePreviousPosition = { 1.0f, 2.0f };
+        rigidbody.RuntimePreviousAngleRadians = 0.25f;
+        rigidbody.RuntimeRenderPreviousPosition = { 3.0f, 4.0f };
+        rigidbody.RuntimeRenderPreviousAngleRadians = 0.5f;
+        rigidbody.RuntimeRenderCurrentPosition = { 5.0f, 6.0f };
+        rigidbody.RuntimeRenderCurrentAngleRadians = 0.75f;
+
+        auto& boxCollider = registry.emplace<Limitless::BoxCollider2DComponent>(child);
+        boxCollider.RuntimeShapeCreated = true;
+
+        auto& circleCollider = registry.emplace<Limitless::CircleCollider2DComponent>(child);
+        circleCollider.RuntimeShapeCreated = true;
+
+        auto& joint = registry.emplace<Limitless::Joint2DComponent>(child);
+        joint.RuntimeJointCreated = true;
+        joint.ConnectedEntity = parent;
+
         auto& audio = registry.emplace<Limitless::AudioSourceComponent>(child);
         audio.AudioClipKey = "Assets/Audio/Ui/Click.wav";
         audio.Volume = 0.6f;
@@ -194,6 +224,13 @@ TEST_SUITE("Scene And Editor Flows")
         REQUIRE(cloneRegistry.all_of<Limitless::TextComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::AudioSourceComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::NativeScriptComponent>(clonedChild));
+        REQUIRE(cloneRegistry.all_of<Limitless::DirectionalLight2DComponent>(clonedChild));
+        REQUIRE(cloneRegistry.all_of<Limitless::PointLight2DComponent>(clonedChild));
+        REQUIRE(cloneRegistry.all_of<Limitless::ShadowOccluder2DComponent>(clonedChild));
+        REQUIRE(cloneRegistry.all_of<Limitless::Rigidbody2DComponent>(clonedChild));
+        REQUIRE(cloneRegistry.all_of<Limitless::BoxCollider2DComponent>(clonedChild));
+        REQUIRE(cloneRegistry.all_of<Limitless::CircleCollider2DComponent>(clonedChild));
+        REQUIRE(cloneRegistry.all_of<Limitless::Joint2DComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::CameraComponent>(clonedParent));
 
         const auto& clonedSprite = cloneRegistry.get<Limitless::SpriteComponent>(clonedChild);
@@ -223,6 +260,41 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(clonedScripts.Scripts[0].ScriptClassName == "ButtonScript");
         CHECK(clonedScripts.Scripts[0].RuntimeInitialized == false);
         CHECK(clonedScripts.Scripts[0].RuntimeUpdateCount == 0);
+
+        const auto& clonedDirectionalLight = cloneRegistry.get<Limitless::DirectionalLight2DComponent>(clonedChild);
+        CHECK(clonedDirectionalLight.RuntimeResolvedDirection.x == doctest::Approx(0.0f));
+        CHECK(clonedDirectionalLight.RuntimeResolvedDirection.y == doctest::Approx(-1.0f));
+
+        const auto& clonedPointLight = cloneRegistry.get<Limitless::PointLight2DComponent>(clonedChild);
+        CHECK(clonedPointLight.RuntimeViewportPosition.x == doctest::Approx(0.0f));
+        CHECK(clonedPointLight.RuntimeViewportPosition.y == doctest::Approx(0.0f));
+        CHECK(clonedPointLight.RuntimeViewportRadius == doctest::Approx(0.0f));
+
+        const auto& clonedShadowOccluder = cloneRegistry.get<Limitless::ShadowOccluder2DComponent>(clonedChild);
+        CHECK(clonedShadowOccluder.RuntimeResolvedPolygonPoints.empty());
+        CHECK(clonedShadowOccluder.RuntimeGeometryRevision == 0);
+
+        const auto& clonedRigidbody = cloneRegistry.get<Limitless::Rigidbody2DComponent>(clonedChild);
+        CHECK(clonedRigidbody.RuntimeBodyCreated == false);
+        CHECK(clonedRigidbody.RuntimePreviousPosition.x == doctest::Approx(0.0f));
+        CHECK(clonedRigidbody.RuntimePreviousPosition.y == doctest::Approx(0.0f));
+        CHECK(clonedRigidbody.RuntimePreviousAngleRadians == doctest::Approx(0.0f));
+        CHECK(clonedRigidbody.RuntimeRenderPreviousPosition.x == doctest::Approx(0.0f));
+        CHECK(clonedRigidbody.RuntimeRenderPreviousPosition.y == doctest::Approx(0.0f));
+        CHECK(clonedRigidbody.RuntimeRenderPreviousAngleRadians == doctest::Approx(0.0f));
+        CHECK(clonedRigidbody.RuntimeRenderCurrentPosition.x == doctest::Approx(0.0f));
+        CHECK(clonedRigidbody.RuntimeRenderCurrentPosition.y == doctest::Approx(0.0f));
+        CHECK(clonedRigidbody.RuntimeRenderCurrentAngleRadians == doctest::Approx(0.0f));
+
+        const auto& clonedBoxCollider = cloneRegistry.get<Limitless::BoxCollider2DComponent>(clonedChild);
+        CHECK(clonedBoxCollider.RuntimeShapeCreated == false);
+
+        const auto& clonedCircleCollider = cloneRegistry.get<Limitless::CircleCollider2DComponent>(clonedChild);
+        CHECK(clonedCircleCollider.RuntimeShapeCreated == false);
+
+        const auto& clonedJoint = cloneRegistry.get<Limitless::Joint2DComponent>(clonedChild);
+        CHECK(clonedJoint.RuntimeJointCreated == false);
+        CHECK(clonedJoint.ConnectedEntity == clonedParent);
 
         CHECK(clone->GetParent(clonedChild) == clonedParent);
     }

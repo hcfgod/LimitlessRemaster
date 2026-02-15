@@ -1275,6 +1275,7 @@ namespace Limitless::EditorInspectorPanel
             PendingEntityComponentRemovals pendingRemovals{};
             bool removeNativeScriptComponent = false;
             DrawStandardEntityComponentSections(
+                scene,
                 registry,
                 selectedEntity,
                 audioPayloadId,

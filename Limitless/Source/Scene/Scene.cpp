@@ -1,5 +1,6 @@
 #include "Scene/Scene.h"
 #include "Assets/AssetDatabase.h"
+#include "Assets/AssetBundle.h"
 #include "Assets/AssetManager.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetTypes.h"
@@ -205,6 +206,99 @@ namespace Limitless
             while (angleRadians < -glm::pi<float>())
                 angleRadians += glm::two_pi<float>();
             return angleRadians;
+        }
+
+        // Keep clone/load runtime cleanup centralized so newly added components
+        // only need one update point to stay Play Mode-safe.
+        void ResetRuntimeStateForEntity(entt::registry& registry, entt::entity entity)
+        {
+            if (auto* sprite = registry.try_get<SpriteComponent>(entity))
+            {
+                sprite->CachedTexture.reset();
+                sprite->TextureLoadAttempted = false;
+            }
+
+            if (auto* material = registry.try_get<MaterialComponent>(entity))
+            {
+                material->CachedMaterial.reset();
+                material->MaterialLoadAttempted = false;
+            }
+
+            if (auto* text = registry.try_get<TextComponent>(entity))
+            {
+                text->CachedFont.reset();
+                text->FontLoadAttempted = false;
+            }
+
+            if (auto* directionalLight = registry.try_get<DirectionalLight2DComponent>(entity))
+                directionalLight->RuntimeResolvedDirection = glm::vec2(0.0f, -1.0f);
+
+            if (auto* pointLight = registry.try_get<PointLight2DComponent>(entity))
+            {
+                pointLight->RuntimeViewportPosition = glm::vec2(0.0f);
+                pointLight->RuntimeViewportRadius = 0.0f;
+            }
+
+            if (auto* shadowOccluder = registry.try_get<ShadowOccluder2DComponent>(entity))
+            {
+                shadowOccluder->RuntimeResolvedPolygonPoints.clear();
+                shadowOccluder->RuntimeGeometryRevision = 0;
+            }
+
+            if (auto* audioSource = registry.try_get<AudioSourceComponent>(entity))
+            {
+                audioSource->RuntimeVoiceId = 0;
+                audioSource->RuntimePlaybackStarted = false;
+            }
+
+            if (auto* rigidbody2D = registry.try_get<Rigidbody2DComponent>(entity))
+            {
+#ifdef LT_ENABLE_PHYSICS2D
+                rigidbody2D->RuntimeBodyId = b2_nullBodyId;
+#endif
+                rigidbody2D->RuntimeBodyCreated = false;
+                rigidbody2D->RuntimePreviousPosition = glm::vec2(0.0f);
+                rigidbody2D->RuntimePreviousAngleRadians = 0.0f;
+                rigidbody2D->RuntimeRenderPreviousPosition = glm::vec2(0.0f);
+                rigidbody2D->RuntimeRenderPreviousAngleRadians = 0.0f;
+                rigidbody2D->RuntimeRenderCurrentPosition = glm::vec2(0.0f);
+                rigidbody2D->RuntimeRenderCurrentAngleRadians = 0.0f;
+            }
+
+            if (auto* boxCollider2D = registry.try_get<BoxCollider2DComponent>(entity))
+            {
+#ifdef LT_ENABLE_PHYSICS2D
+                boxCollider2D->RuntimeShapeId = b2_nullShapeId;
+#endif
+                boxCollider2D->RuntimeShapeCreated = false;
+            }
+
+            if (auto* circleCollider2D = registry.try_get<CircleCollider2DComponent>(entity))
+            {
+#ifdef LT_ENABLE_PHYSICS2D
+                circleCollider2D->RuntimeShapeId = b2_nullShapeId;
+#endif
+                circleCollider2D->RuntimeShapeCreated = false;
+            }
+
+            if (auto* joint2D = registry.try_get<Joint2DComponent>(entity))
+            {
+#ifdef LT_ENABLE_PHYSICS2D
+                joint2D->RuntimeJointId = b2_nullJointId;
+#endif
+                joint2D->RuntimeJointCreated = false;
+            }
+
+            if (auto* nativeScript = registry.try_get<NativeScriptComponent>(entity))
+            {
+                for (auto& scriptEntry : nativeScript->Scripts)
+                {
+                    scriptEntry.RuntimeInitialized = false;
+                    scriptEntry.RuntimeInstance.reset();
+                    scriptEntry.RuntimeUpdateCount = 0;
+                    scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                }
+            }
         }
 
     }
@@ -869,6 +963,8 @@ namespace Limitless
             {
                 destinationRegistry.emplace<PrefabInstanceComponent>(destinationEntity, *prefabInstance);
             }
+
+            ResetRuntimeStateForEntity(destinationRegistry, destinationEntity);
         }
 
         for (const auto& [sourceEntity, destinationEntity] : entityMap)
@@ -1243,14 +1339,53 @@ namespace Limitless
 
     Result<std::unique_ptr<Scene>> Scene::LoadFromFile(const std::filesystem::path& path)
     {
-        std::ifstream input(path, std::ios::binary);
-        if (!input.is_open())
-            return Result<std::unique_ptr<Scene>>(ErrorCode::FileNotFound, "Scene::LoadFromFile failed opening scene file");
-
         nlohmann::json root;
         try
         {
-            input >> root;
+            bool loadedFromBundle = false;
+            std::string sceneText;
+
+            auto& bundle = Assets::AssetBundle::GetInstance();
+            std::vector<std::string> bundleKeys;
+            bundleKeys.push_back(path.generic_string());
+            if (!bundleKeys.back().empty())
+            {
+                const std::string marker = "/Assets/";
+                const size_t markerPosition = bundleKeys.back().find(marker);
+                if (markerPosition != std::string::npos)
+                {
+                    bundleKeys.push_back(bundleKeys.back().substr(markerPosition + 1));
+                }
+            }
+
+            if (bundle.IsEnabled() && bundle.IsLoaded())
+            {
+                for (const std::string& bundleKey : bundleKeys)
+                {
+                    if (bundleKey.empty())
+                        continue;
+                    const auto bundleTextResult = bundle.ReadAllTextByKey(bundleKey);
+                    if (bundleTextResult.IsSuccess())
+                    {
+                        sceneText = bundleTextResult.GetValue();
+                        loadedFromBundle = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!loadedFromBundle)
+            {
+                std::ifstream input(path, std::ios::binary);
+                if (!input.is_open())
+                    return Result<std::unique_ptr<Scene>>(ErrorCode::FileNotFound, "Scene::LoadFromFile failed opening scene file");
+
+                input >> root;
+            }
+            else
+            {
+                root = nlohmann::json::parse(sceneText);
+            }
         }
         catch (const std::exception& exception)
         {
@@ -1647,6 +1782,7 @@ namespace Limitless
                 }
                 outScriptEntry.RuntimeInitialized = false;
                 outScriptEntry.RuntimeInstance.reset();
+                outScriptEntry.RuntimeUpdateCount = 0;
                 outScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
             };
 
@@ -1685,6 +1821,8 @@ namespace Limitless
                 parentIndex = hierarchyJson.value("ParentIndex", -1);
                 siblingOrder = hierarchyJson.value("SiblingOrder", 0);
             }
+
+            ResetRuntimeStateForEntity(scene->GetRegistry(), entity);
 
             createdEntities.push_back(entity);
             parentIndices.push_back(parentIndex);
@@ -2049,11 +2187,22 @@ namespace Limitless
             renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(framebuffer));
             renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
 
+            // Mirror Lighting2DRenderer target clear color for a stable fallback path.
+            // This keeps editor and built runtime visuals consistent when Lighting2D is off
+            // or when lighting resources are still loading.
+            const Lighting2DSettings& lightingSettings = Lighting2DRenderer::GetSettings();
+            const glm::vec3 fallbackClearColor = glm::max(lightingSettings.AmbientColor, glm::vec3(0.0f));
+
             ClearCommand::ClearFlags clearFlags;
             clearFlags.color = true;
             clearFlags.depth = true;
             clearFlags.stencil = false;
-            renderer.SubmitCommand(std::make_unique<ClearCommand>(clearFlags, 0.12f, 0.12f, 0.14f, 1.0f));
+            renderer.SubmitCommand(std::make_unique<ClearCommand>(
+                clearFlags,
+                fallbackClearColor.r,
+                fallbackClearColor.g,
+                fallbackClearColor.b,
+                1.0f));
 
             Render(scene, camera);
         }

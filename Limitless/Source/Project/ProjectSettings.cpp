@@ -1,5 +1,6 @@
 #include "Project/ProjectSettings.h"
 
+#include "Assets/AssetBundle.h"
 #include "Core/Debug/Log.h"
 
 #include <nlohmann/json.hpp>
@@ -16,6 +17,7 @@ namespace Limitless::Project
     namespace
     {
         constexpr const char* kInputActionsSuffix = ".inputactions.json";
+        constexpr const char* kProjectSettingsPrefix = "Project/Settings/";
 
         std::string TrimCopy(const std::string& value)
         {
@@ -64,6 +66,26 @@ namespace Limitless::Project
                 return fileName.substr(0, fileName.size() - std::char_traits<char>::length(kInputActionsSuffix));
             return path.stem().string();
         }
+
+        std::string BuildProjectSettingsBundleKey(const std::filesystem::path& path)
+        {
+            if (path.empty())
+                return {};
+
+            const std::string normalized = path.generic_string();
+            if (normalized.empty())
+                return {};
+
+            if (normalized.rfind(kProjectSettingsPrefix, 0) == 0)
+                return normalized;
+
+            const std::string marker = std::string("/") + kProjectSettingsPrefix;
+            const size_t markerPosition = normalized.find(marker);
+            if (markerPosition != std::string::npos)
+                return normalized.substr(markerPosition + 1);
+
+            return {};
+        }
     }
 
     std::filesystem::path GetProjectSettingsDirectory(const std::filesystem::path& projectRoot)
@@ -103,6 +125,30 @@ namespace Limitless::Project
 
     static Result<json> TryReadJson(const std::filesystem::path& path)
     {
+        if (!path.empty())
+        {
+            const std::string bundleKey = BuildProjectSettingsBundleKey(path);
+            if (!bundleKey.empty())
+            {
+                auto& bundle = Assets::AssetBundle::GetInstance();
+                if (bundle.IsEnabled() && bundle.IsLoaded())
+                {
+                    const auto bundleTextResult = bundle.ReadAllTextByKey(bundleKey);
+                    if (bundleTextResult.IsSuccess())
+                    {
+                        try
+                        {
+                            return json::parse(bundleTextResult.GetValue());
+                        }
+                        catch (const std::exception& e)
+                        {
+                            return Result<json>(ErrorCode::FileCorrupted, std::string("Failed to parse bundled settings json: ") + e.what());
+                        }
+                    }
+                }
+            }
+        }
+
         if (path.empty() || !std::filesystem::exists(path))
         {
             return json::object();

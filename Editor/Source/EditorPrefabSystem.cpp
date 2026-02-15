@@ -231,11 +231,7 @@ namespace Limitless::EditorPrefabSystem
         if (prefabAssetKey.empty())
             return entt::null;
 
-        const auto resolvedPrefabPath = Assets::ResolveAssetKeyToPath(prefabAssetKey);
-        if (resolvedPrefabPath.IsFailure())
-            return entt::null;
-
-        const auto loadedPrefabSceneResult = Scene::LoadFromFile(resolvedPrefabPath.GetValue());
+        const auto loadedPrefabSceneResult = Scene::LoadFromFile(prefabAssetKey);
         if (loadedPrefabSceneResult.IsFailure())
         {
             LT_WARN("Prefab load failed for '{}': {}", prefabAssetKey, loadedPrefabSceneResult.GetError().GetErrorMessage());
@@ -295,10 +291,7 @@ namespace Limitless::EditorPrefabSystem
         if (prefabAssetKey.empty())
             return false;
 
-        const auto resolvedPrefabPath = Assets::ResolveAssetKeyToPath(prefabAssetKey);
-        if (resolvedPrefabPath.IsFailure())
-            return false;
-        const auto loadedPrefabSceneResult = Scene::LoadFromFile(resolvedPrefabPath.GetValue());
+        const auto loadedPrefabSceneResult = Scene::LoadFromFile(prefabAssetKey);
         if (loadedPrefabSceneResult.IsFailure())
         {
             LT_WARN("Prefab load failed for '{}': {}", prefabAssetKey, loadedPrefabSceneResult.GetError().GetErrorMessage());

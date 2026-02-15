@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 
 #include <fstream>
+#include <array>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -61,6 +62,11 @@ namespace Limitless::Assets
         const std::string name = path.filename().string();
         const std::string ext = path.extension().string();
 
+        if (EndsWith(name, ".scene.json")) return AssetType::Scene;
+        if (EndsWith(name, ".prefab.json")) return AssetType::Prefab;
+        if (EndsWith(name, ".tilemap.json")) return AssetType::Tilemap;
+        if (EndsWith(name, ".animationclip.json") || EndsWith(name, ".animation.json") || EndsWith(name, ".anim.json"))
+            return AssetType::AnimationClip;
         if (EndsWith(name, ".material.json")) return AssetType::Material;
         if (EndsWith(name, ".inputactions.json")) return AssetType::InputActions;
         if (ext == ".glsl") return AssetType::Shader;
@@ -444,6 +450,10 @@ namespace Limitless::Assets
             if (r.Type != AssetType::Texture2D &&
                 r.Type != AssetType::Shader &&
                 r.Type != AssetType::Material &&
+                r.Type != AssetType::Scene &&
+                r.Type != AssetType::Prefab &&
+                r.Type != AssetType::Tilemap &&
+                r.Type != AssetType::AnimationClip &&
                 r.Type != AssetType::InputActions &&
                 r.Type != AssetType::AudioClip)
             {
@@ -674,6 +684,50 @@ namespace Limitless::Assets
 
             data.insert(data.end(), storedBytes.begin(), storedBytes.end());
             entries.push_back(std::move(e));
+        }
+
+        // Bundle project settings JSON so runtime builds can resolve settings
+        // without relying on editor/source directory layouts.
+        const std::filesystem::path projectSettingsDir = projectRoot / "Project" / "Settings";
+        const std::array<const char*, 6> projectSettingsFiles = {
+            "RenderSettings.json",
+            "AudioSettings.json",
+            "InputSettings.json",
+            "Layers.json",
+            "Physics2DSettings.json",
+            "Lighting2DSettings.json"
+        };
+        for (const char* fileName : projectSettingsFiles)
+        {
+            if (!fileName || !fileName[0])
+                continue;
+            const std::filesystem::path absolutePath = projectSettingsDir / fileName;
+            if (!std::filesystem::exists(absolutePath))
+                continue;
+
+            const auto bytesResult = ReadAllBytes(absolutePath);
+            if (bytesResult.IsFailure())
+            {
+                LT_CORE_WARN("AssetBundleBuilder: skipping project setting '{}' (read failed): {}",
+                             absolutePath.string(),
+                             bytesResult.GetError().GetErrorMessage());
+                continue;
+            }
+
+            const std::string key = std::string("Project/Settings/") + fileName;
+            OutEntry settingEntry{};
+            settingEntry.Guid = std::string("ProjectSetting:") + key;
+            settingEntry.Key = key;
+            settingEntry.Type = AssetType::Unknown;
+            settingEntry.PayloadFormat = AssetBundlePayloadFormat::Raw;
+            settingEntry.Compression = AssetBundleCompression::None;
+            settingEntry.ContentHash64 = ::Limitless::Hash::XxHash64::Compute(bytesResult.GetValue().data(), bytesResult.GetValue().size(), 0);
+            settingEntry.Offset = static_cast<uint64_t>(data.size());
+            settingEntry.Size = static_cast<uint64_t>(bytesResult.GetValue().size());
+            settingEntry.UncompressedSize = settingEntry.Size;
+
+            data.insert(data.end(), bytesResult.GetValue().begin(), bytesResult.GetValue().end());
+            entries.push_back(std::move(settingEntry));
         }
 
         if (entries.empty())

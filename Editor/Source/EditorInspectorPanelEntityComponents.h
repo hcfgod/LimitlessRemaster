@@ -27,7 +27,8 @@ namespace Limitless::EditorInspectorPanel
         bool RemoveShadowOccluder2DComponent = false;
     };
 
-    void DrawStandardEntityComponentSections(entt::registry& registry,
+    void DrawStandardEntityComponentSections(Scene* scene,
+                                             entt::registry& registry,
                                              entt::entity selectedEntity,
                                              const char* audioPayloadId,
                                              const char* materialPayloadId,

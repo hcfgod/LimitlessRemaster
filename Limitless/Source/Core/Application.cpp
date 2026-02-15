@@ -13,9 +13,11 @@
 #include "Assets/AssetHotReloadManager.h"
 #include "Assets/AssetLoadCoordinator.h"
 #include "Assets/AssetBundle.h"
+#include "Assets/AssetPaths.h"
 #include "Audio/AudioEngine.h"
 #include "Graphics/GraphicsAPIDetector.h"
 #include "Graphics/Renderer.h"
+#include "Project/ProjectSettings.h"
 #include "Core/Time.h"
 #include "Core/Input/InputSystem.h"
 #include <chrono>
@@ -203,6 +205,44 @@ namespace Limitless
             {
                 // Dev default: source assets on disk, hot reload allowed if the app enables it.
                 LT_CORE_INFO("AssetBundle: not enabled (auto-load failed): {}", loadResult.GetError().GetErrorMessage());
+            }
+        }
+
+        // -----------------------------------------------------------------------------
+        // Runtime input actions bootstrap
+        //
+        // In bundled builds there may be no project folder layout on disk. Input settings
+        // are resolved through Project::LoadInputSettings, which now checks bundled
+        // "Project/Settings/InputSettings.json" first and falls back to filesystem.
+        // -----------------------------------------------------------------------------
+        {
+            std::filesystem::path inputSettingsRoot = std::filesystem::path(PlatformDetection::GetWorkingDirectory());
+            if (inputSettingsRoot.empty())
+            {
+                const std::filesystem::path executablePath = PlatformDetection::GetExecutablePath();
+                if (!executablePath.empty() && executablePath.has_parent_path())
+                    inputSettingsRoot = executablePath.parent_path();
+            }
+
+            if (!inputSettingsRoot.empty())
+            {
+                const auto inputSettingsResult = Project::LoadInputSettings(inputSettingsRoot);
+                if (inputSettingsResult.IsSuccess())
+                {
+                    const auto& inputSettings = inputSettingsResult.GetValue();
+                    auto& inputSystem = GetInputSystem();
+                    if (inputSettings.ProjectInputActionsKey.empty())
+                        inputSystem.SetProjectActionAsset(nullptr);
+                    else
+                        inputSystem.SetProjectActionAssetFromKey(inputSettings.ProjectInputActionsKey);
+
+                    inputSystem.SetProjectAdditionalActionAssetsFromKeys(
+                        Project::CollectAdditionalInputActionsAssetKeys(inputSettings));
+                }
+                else
+                {
+                    LT_CORE_INFO("InputSettings: not applied during startup: {}", inputSettingsResult.GetError().GetErrorMessage());
+                }
             }
         }
 

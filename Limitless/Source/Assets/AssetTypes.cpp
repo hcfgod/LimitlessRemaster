@@ -14,6 +14,8 @@ namespace Limitless::Assets
             case AssetType::InputActions: return "InputActions";
             case AssetType::AudioClip: return "AudioClip";
             case AssetType::Prefab: return "Prefab";
+            case AssetType::Tilemap: return "Tilemap";
+            case AssetType::AnimationClip: return "AnimationClip";
             case AssetType::Unknown:
             default:                   return "Unknown";
         }
@@ -29,6 +31,8 @@ namespace Limitless::Assets
         if (s == "InputActions") return AssetType::InputActions;
         if (s == "AudioClip") return AssetType::AudioClip;
         if (s == "Prefab") return AssetType::Prefab;
+        if (s == "Tilemap") return AssetType::Tilemap;
+        if (s == "AnimationClip") return AssetType::AnimationClip;
         return AssetType::Unknown;
     }
 }

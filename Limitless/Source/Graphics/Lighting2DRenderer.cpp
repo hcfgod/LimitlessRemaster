@@ -1164,11 +1164,20 @@ namespace Limitless
             renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(targetFramebuffer));
             renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
 
+            // Keep target clear color in sync with the unlit fallback path in SceneRenderer.
+            // This prevents editor/runtime mismatches if lighting is disabled or resources are unavailable.
+            const glm::vec3 fallbackClearColor = glm::max(g_State.Settings.AmbientColor, glm::vec3(0.0f));
+
             ClearCommand::ClearFlags targetClearFlags{};
             targetClearFlags.color = true;
             targetClearFlags.depth = true;
             targetClearFlags.stencil = false;
-            renderer.SubmitCommand(std::make_unique<ClearCommand>(targetClearFlags, 0.12f, 0.12f, 0.14f, 1.0f));
+            renderer.SubmitCommand(std::make_unique<ClearCommand>(
+                targetClearFlags,
+                fallbackClearColor.r,
+                fallbackClearColor.g,
+                fallbackClearColor.b,
+                1.0f));
 
             renderer.SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
             renderer.SubmitCommand(std::make_unique<SetCullFaceCommand>(false));

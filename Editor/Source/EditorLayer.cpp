@@ -477,6 +477,43 @@ namespace Limitless
         SceneManager::ClearPendingSceneTransition();
         if (m_PlayModeState != EditorPlayModeState::Edit)
             ExitPlayMode();
+
+        // Save current scene on editor exit when possible.
+        if (m_Scene && m_PlayModeState == EditorPlayModeState::Edit)
+        {
+            if (!m_CurrentSceneAssetKey.empty())
+            {
+                if (!SaveSceneToAssetKey(m_CurrentSceneAssetKey))
+                    LT_WARN("Editor exit: failed to save current scene '{}'.", m_CurrentSceneAssetKey);
+            }
+            else if (m_EditorUndoService.IsDirty() || m_EditorUndoService.CanUndo())
+            {
+                LT_WARN("Editor exit: current scene has unsaved changes but has no asset key. Use Save Scene As before exit to persist it.");
+            }
+        }
+
+        // Persist project settings values currently loaded in the Project Settings panel.
+        {
+            const auto& projectManager = Project::ProjectManager::GetInstance();
+            if (projectManager.HasOpenProject() && m_ProjectSettingsPanelState.Loaded)
+            {
+                const std::filesystem::path projectRoot = projectManager.GetProjectRoot();
+                const auto sr = Project::SaveRenderSettings(projectRoot, m_ProjectSettingsPanelState.Render);
+                const auto sa = Project::SaveAudioSettings(projectRoot, m_ProjectSettingsPanelState.Audio);
+                const auto si = Project::SaveInputSettings(projectRoot, m_ProjectSettingsPanelState.Input);
+                const auto sl = Project::SaveLayersSettings(projectRoot, m_ProjectSettingsPanelState.Layers);
+                const auto sp = Project::SavePhysics2DSettings(projectRoot, m_ProjectSettingsPanelState.Physics2D);
+                const auto lighting = Project::SaveLighting2DSettings(projectRoot, m_ProjectSettingsPanelState.Lighting2D);
+
+                if (sr.IsFailure()) LT_WARN("Editor exit: failed to save render settings: {}", sr.GetError().GetErrorMessage());
+                if (sa.IsFailure()) LT_WARN("Editor exit: failed to save audio settings: {}", sa.GetError().GetErrorMessage());
+                if (si.IsFailure()) LT_WARN("Editor exit: failed to save input settings: {}", si.GetError().GetErrorMessage());
+                if (sl.IsFailure()) LT_WARN("Editor exit: failed to save layers settings: {}", sl.GetError().GetErrorMessage());
+                if (sp.IsFailure()) LT_WARN("Editor exit: failed to save physics settings: {}", sp.GetError().GetErrorMessage());
+                if (lighting.IsFailure()) LT_WARN("Editor exit: failed to save lighting settings: {}", lighting.GetError().GetErrorMessage());
+            }
+        }
+
         m_EditorUndoService.Clear();
         m_PendingTexturePrewarmTasks.clear();
         m_PendingMaterialPrewarmTasks.clear();
