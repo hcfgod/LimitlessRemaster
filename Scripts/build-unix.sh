@@ -68,9 +68,11 @@ check_dependencies() {
             brew install "${missing_brew_deps[@]}"
         fi
 
-        if ! pkg-config --exists box2d 2>/dev/null; then
-            echo "Error: box2d still not discoverable by pkg-config after Homebrew install."
-            echo "Try: export PKG_CONFIG_PATH=\"$(brew --prefix)/lib/pkgconfig:${PKG_CONFIG_PATH:-}\""
+        local box2d_prefix
+        box2d_prefix="$(brew --prefix box2d 2>/dev/null || true)"
+        if [[ -z "$box2d_prefix" || ! -f "${box2d_prefix}/lib/libbox2d.dylib" ]]; then
+            echo "Error: box2d library not found after Homebrew install."
+            echo "Expected file: \${HOMEBREW_PREFIX}/opt/box2d/lib/libbox2d.dylib"
             return 1
         fi
         if ! pkg-config --exists sdl3 2>/dev/null; then

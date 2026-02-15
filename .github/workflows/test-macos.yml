@@ -24,7 +24,9 @@ jobs:
         brew list box2d
         echo "pkg-config probes:"
         pkg-config --modversion sdl3
-        pkg-config --modversion box2d
+        BOX2D_PREFIX=$(brew --prefix box2d)
+        echo "Box2D prefix: ${BOX2D_PREFIX}"
+        ls -la "${BOX2D_PREFIX}/lib/libbox2d.dylib"
         
     - name: Download premake5
       run: |
