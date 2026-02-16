@@ -79,6 +79,17 @@ namespace Limitless::EditorProjectPanel
                    lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
         }
 
+        bool IsAudioMixerExtension(const std::filesystem::path& path)
+        {
+            std::string lowerFileName = path.filename().string();
+            for (char& character : lowerFileName)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            constexpr const char* audioMixerSuffix = ".audiomixer.json";
+            const std::string suffixString = audioMixerSuffix;
+            return lowerFileName.size() >= suffixString.size() &&
+                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
+        }
+
         bool IsInputActionsExtension(const std::filesystem::path& path)
         {
             std::string lowerFileName = path.filename().string();
@@ -429,6 +440,7 @@ namespace Limitless::EditorProjectPanel
                            std::string& selectedNativeScriptAssetKey,
                            std::string& selectedPrefabAssetKey,
                            std::string& selectedTilesetAssetKey,
+                           std::string& selectedAudioMixerAssetKey,
                            std::string& selectedInputActionsAssetKey,
                            const char* texturePayloadId,
                            const char* audioPayloadId,
@@ -442,6 +454,7 @@ namespace Limitless::EditorProjectPanel
                            const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
                            const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
                            const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
+                           const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAudioMixerRequested,
                            const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
                            const std::function<void(const std::string&)>& onPrefabOpened,
                            const std::function<void(const std::string&)>& onPrefabInstantiated,
@@ -520,6 +533,12 @@ namespace Limitless::EditorProjectPanel
                             state.CreateTilesetParentRelativePath = entryRelativePath;
                             CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
                             state.CreateTilesetPopupPending = true;
+                        }
+                        if (ImGui::MenuItem("Create Audio Mixer"))
+                        {
+                            state.CreateAudioMixerParentRelativePath = entryRelativePath;
+                            CopyTextToBuffer(state.CreateAudioMixerNameBuffer, "New Audio Mixer");
+                            state.CreateAudioMixerPopupPending = true;
                         }
                         if (ImGui::MenuItem("Create Native Script"))
                         {
@@ -616,6 +635,7 @@ namespace Limitless::EditorProjectPanel
                                       selectedNativeScriptAssetKey,
                                       selectedPrefabAssetKey,
                                       selectedTilesetAssetKey,
+                                      selectedAudioMixerAssetKey,
                                       selectedInputActionsAssetKey,
                                       texturePayloadId,
                                       audioPayloadId,
@@ -629,6 +649,7 @@ namespace Limitless::EditorProjectPanel
                                       onCreateSceneRequested,
                                       onCreateMaterialRequested,
                                       onCreateTilesetRequested,
+                                      onCreateAudioMixerRequested,
                                       onCreatePrefabFromSceneEntityRequested,
                                       onPrefabOpened,
                                       onPrefabInstantiated,
@@ -677,6 +698,7 @@ namespace Limitless::EditorProjectPanel
                                 selectedTextureAssetKey.clear();
                                 selectedMaterialAssetKey.clear();
                                 selectedTilesetAssetKey.clear();
+                                selectedAudioMixerAssetKey.clear();
                                 selectedInputActionsAssetKey.clear();
                                 selectedEntity = entt::null;
                                 cachedTextureAsset.reset();
@@ -727,6 +749,7 @@ namespace Limitless::EditorProjectPanel
                                     selectedTextureAssetKey.clear();
                                     selectedMaterialAssetKey.clear();
                                     selectedTilesetAssetKey.clear();
+                                    selectedAudioMixerAssetKey.clear();
                                     selectedInputActionsAssetKey.clear();
                                     selectedEntity = entt::null;
                                     cachedTextureAsset.reset();
@@ -743,6 +766,7 @@ namespace Limitless::EditorProjectPanel
                                     selectedTextureAssetKey.clear();
                                     selectedMaterialAssetKey.clear();
                                     selectedTilesetAssetKey.clear();
+                                    selectedAudioMixerAssetKey.clear();
                                     selectedInputActionsAssetKey.clear();
                                     selectedEntity = entt::null;
                                     cachedTextureAsset.reset();
@@ -760,6 +784,7 @@ namespace Limitless::EditorProjectPanel
                     const bool isScene = IsSceneExtension(entry);
                     const bool isMaterial = IsMaterialExtension(entry);
                     const bool isTileset = IsTilesetExtension(entry);
+                    const bool isAudioMixer = IsAudioMixerExtension(entry);
                     const bool isInputActions = IsInputActionsExtension(entry);
                     const bool isPrefab = IsPrefabExtension(entry);
                     const bool isShader = IsShaderExtension(entry);
@@ -779,6 +804,7 @@ namespace Limitless::EditorProjectPanel
                         (isTexture && (selectedTextureAssetKey == assetKey)) ||
                         (isMaterial && (selectedMaterialAssetKey == assetKey)) ||
                         (isTileset && (selectedTilesetAssetKey == assetKey)) ||
+                        (isAudioMixer && (selectedAudioMixerAssetKey == assetKey)) ||
                         (isInputActions && (selectedInputActionsAssetKey == assetKey)) ||
                         (isNativeScriptFile && (selectedNativeScriptAssetKey == assetKey)) ||
                         (isPrefab && (selectedPrefabAssetKey == assetKey));
@@ -797,6 +823,7 @@ namespace Limitless::EditorProjectPanel
                             selectedNativeScriptAssetKey.clear();
                             selectedPrefabAssetKey.clear();
                             selectedTilesetAssetKey.clear();
+                            selectedAudioMixerAssetKey.clear();
                             selectedInputActionsAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedTextureAsset.reset();
@@ -809,6 +836,7 @@ namespace Limitless::EditorProjectPanel
                             selectedNativeScriptAssetKey.clear();
                             selectedPrefabAssetKey.clear();
                             selectedTilesetAssetKey.clear();
+                            selectedAudioMixerAssetKey.clear();
                             selectedInputActionsAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedMaterialAsset.reset();
@@ -821,6 +849,7 @@ namespace Limitless::EditorProjectPanel
                             selectedMaterialAssetKey.clear();
                             selectedNativeScriptAssetKey.clear();
                             selectedPrefabAssetKey.clear();
+                            selectedAudioMixerAssetKey.clear();
                             selectedInputActionsAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedMaterialAsset.reset();
@@ -833,6 +862,7 @@ namespace Limitless::EditorProjectPanel
                             selectedMaterialAssetKey.clear();
                             selectedPrefabAssetKey.clear();
                             selectedTilesetAssetKey.clear();
+                            selectedAudioMixerAssetKey.clear();
                             selectedInputActionsAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedMaterialAsset.reset();
@@ -844,6 +874,20 @@ namespace Limitless::EditorProjectPanel
                             selectedTextureAssetKey.clear();
                             selectedMaterialAssetKey.clear();
                             selectedNativeScriptAssetKey.clear();
+                            selectedTilesetAssetKey.clear();
+                            selectedAudioMixerAssetKey.clear();
+                            selectedInputActionsAssetKey.clear();
+                            selectedEntity = entt::null;
+                            cachedMaterialAsset.reset();
+                            cachedTextureAsset.reset();
+                        }
+                        else if (isAudioMixer)
+                        {
+                            selectedAudioMixerAssetKey = assetKey;
+                            selectedTextureAssetKey.clear();
+                            selectedMaterialAssetKey.clear();
+                            selectedNativeScriptAssetKey.clear();
+                            selectedPrefabAssetKey.clear();
                             selectedTilesetAssetKey.clear();
                             selectedInputActionsAssetKey.clear();
                             selectedEntity = entt::null;
@@ -858,6 +902,7 @@ namespace Limitless::EditorProjectPanel
                             selectedNativeScriptAssetKey.clear();
                             selectedPrefabAssetKey.clear();
                             selectedTilesetAssetKey.clear();
+                            selectedAudioMixerAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedMaterialAsset.reset();
                             cachedTextureAsset.reset();
@@ -870,6 +915,7 @@ namespace Limitless::EditorProjectPanel
                         selectedMaterialAssetKey.clear();
                         selectedNativeScriptAssetKey.clear();
                         selectedTilesetAssetKey.clear();
+                        selectedAudioMixerAssetKey.clear();
                         selectedInputActionsAssetKey.clear();
                         selectedEntity = entt::null;
                         cachedTextureAsset.reset();
@@ -879,6 +925,7 @@ namespace Limitless::EditorProjectPanel
                     {
                         selectedNativeScriptAssetKey.clear();
                         selectedTilesetAssetKey.clear();
+                        selectedAudioMixerAssetKey.clear();
                         selectedInputActionsAssetKey.clear();
                         onSceneActivated(assetKey);
                     }
@@ -886,6 +933,7 @@ namespace Limitless::EditorProjectPanel
                     {
                         selectedNativeScriptAssetKey.clear();
                         selectedTilesetAssetKey.clear();
+                        selectedAudioMixerAssetKey.clear();
                         selectedInputActionsAssetKey.clear();
                         selectedPrefabAssetKey = assetKey;
                         onPrefabOpened(assetKey);
@@ -896,6 +944,7 @@ namespace Limitless::EditorProjectPanel
                         selectedTextureAssetKey.clear();
                         selectedNativeScriptAssetKey.clear();
                         selectedTilesetAssetKey.clear();
+                        selectedAudioMixerAssetKey.clear();
                         selectedInputActionsAssetKey.clear();
                         selectedEntity = entt::null;
                         cachedMaterialAsset.reset();
@@ -908,6 +957,20 @@ namespace Limitless::EditorProjectPanel
                         selectedMaterialAssetKey.clear();
                         selectedNativeScriptAssetKey.clear();
                         selectedPrefabAssetKey.clear();
+                        selectedAudioMixerAssetKey.clear();
+                        selectedInputActionsAssetKey.clear();
+                        selectedEntity = entt::null;
+                        cachedMaterialAsset.reset();
+                        cachedTextureAsset.reset();
+                    }
+                    else if (isAudioMixer && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
+                    {
+                        selectedAudioMixerAssetKey = assetKey;
+                        selectedTextureAssetKey.clear();
+                        selectedMaterialAssetKey.clear();
+                        selectedNativeScriptAssetKey.clear();
+                        selectedPrefabAssetKey.clear();
+                        selectedTilesetAssetKey.clear();
                         selectedInputActionsAssetKey.clear();
                         selectedEntity = entt::null;
                         cachedMaterialAsset.reset();
@@ -1013,6 +1076,7 @@ namespace Limitless::EditorProjectPanel
                                      EditorProjectPanelState& state,
                                      const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
                                      const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
+                                     const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAudioMixerRequested,
                                      const std::function<void(const std::string&, const std::string&)>& onAssetRenamed)
         {
             if (state.FolderPopupPending == EditorProjectFolderPopup::Create)
@@ -1114,6 +1178,14 @@ namespace Limitless::EditorProjectPanel
                 ImGui::SetNextWindowFocus();
                 state.CreateTilesetPopupPending = false;
                 state.CreateTilesetPopupOpen = true;
+            }
+
+            if (state.CreateAudioMixerPopupPending)
+            {
+                ImGui::OpenPopup("CreateAudioMixerAsset");
+                ImGui::SetNextWindowFocus();
+                state.CreateAudioMixerPopupPending = false;
+                state.CreateAudioMixerPopupOpen = true;
             }
 
             if (ImGui::BeginPopupModal("RenameAsset", &state.RenameAssetPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
@@ -1277,6 +1349,33 @@ namespace Limitless::EditorProjectPanel
 
                 ImGui::EndPopup();
             }
+
+            if (ImGui::BeginPopupModal("CreateAudioMixerAsset", &state.CreateAudioMixerPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::Text("Create Audio Mixer");
+                ImGui::Separator();
+                if (ImGui::IsWindowAppearing())
+                    ImGui::SetKeyboardFocusHere();
+
+                const bool create = ImGui::InputText("Name",
+                                                     state.CreateAudioMixerNameBuffer.data(),
+                                                     state.CreateAudioMixerNameBuffer.size(),
+                                                     ImGuiInputTextFlags_EnterReturnsTrue);
+                if (ImGui::Button("Create", ImVec2(120, 0)) || create)
+                {
+                    const std::string requestedName = state.CreateAudioMixerNameBuffer.data();
+                    if (!requestedName.empty() && onCreateAudioMixerRequested)
+                    {
+                        onCreateAudioMixerRequested(state.CreateAudioMixerParentRelativePath, requestedName);
+                        state.CreateAudioMixerPopupOpen = false;
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                    state.CreateAudioMixerPopupOpen = false;
+
+                ImGui::EndPopup();
+            }
         }
     }
 
@@ -1289,6 +1388,7 @@ namespace Limitless::EditorProjectPanel
               std::string& selectedNativeScriptAssetKey,
               std::string& selectedPrefabAssetKey,
               std::string& selectedTilesetAssetKey,
+              std::string& selectedAudioMixerAssetKey,
               std::string& selectedInputActionsAssetKey,
               const char* texturePayloadId,
               const char* audioPayloadId,
@@ -1301,7 +1401,8 @@ namespace Limitless::EditorProjectPanel
               const std::function<void(const std::string&)>& onSceneActivated,
               const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
               const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
-                                     const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
+              const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
+              const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAudioMixerRequested,
               const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
               const std::function<void(const std::string&)>& onPrefabOpened,
               const std::function<void(const std::string&)>& onPrefabInstantiated,
@@ -1351,6 +1452,12 @@ namespace Limitless::EditorProjectPanel
                 CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
                 state.CreateTilesetPopupPending = true;
             }
+            if (ImGui::MenuItem("Create Audio Mixer"))
+            {
+                state.CreateAudioMixerParentRelativePath = "";
+                CopyTextToBuffer(state.CreateAudioMixerNameBuffer, "New Audio Mixer");
+                state.CreateAudioMixerPopupPending = true;
+            }
             if (ImGui::MenuItem("Create Native Script"))
             {
                 state.CreateNativeScriptParentRelativePath = "";
@@ -1388,6 +1495,12 @@ namespace Limitless::EditorProjectPanel
                     state.CreateTilesetParentRelativePath = "";
                     CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
                     state.CreateTilesetPopupPending = true;
+                }
+                if (ImGui::MenuItem("Create Audio Mixer"))
+                {
+                    state.CreateAudioMixerParentRelativePath = "";
+                    CopyTextToBuffer(state.CreateAudioMixerNameBuffer, "New Audio Mixer");
+                    state.CreateAudioMixerPopupPending = true;
                 }
                 if (ImGui::MenuItem("Create Native Script"))
                 {
@@ -1464,6 +1577,7 @@ namespace Limitless::EditorProjectPanel
                           selectedNativeScriptAssetKey,
                           selectedPrefabAssetKey,
                           selectedTilesetAssetKey,
+                          selectedAudioMixerAssetKey,
                           selectedInputActionsAssetKey,
                           texturePayloadId,
                           audioPayloadId,
@@ -1477,6 +1591,7 @@ namespace Limitless::EditorProjectPanel
                           onCreateSceneRequested,
                           onCreateMaterialRequested,
                           onCreateTilesetRequested,
+                          onCreateAudioMixerRequested,
                           onCreatePrefabFromSceneEntityRequested,
                           onPrefabOpened,
                           onPrefabInstantiated,
@@ -1501,7 +1616,7 @@ namespace Limitless::EditorProjectPanel
             state.PendingExternalDropPaths.clear();
         }
 
-        DrawProjectFolderPopups(assetsDirectory, state, onCreateMaterialRequested, onCreateTilesetRequested, onAssetRenamed);
+        DrawProjectFolderPopups(assetsDirectory, state, onCreateMaterialRequested, onCreateTilesetRequested, onCreateAudioMixerRequested, onAssetRenamed);
         ImGui::End();
     }
 }

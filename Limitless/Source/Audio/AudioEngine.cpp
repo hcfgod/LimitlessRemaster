@@ -51,6 +51,17 @@ namespace Limitless::Audio
         const uint32_t initialFrames = 4096;
         m_Scratch.resize(static_cast<size_t>(initialFrames) * kMixerChannels);
 
+        {
+            std::lock_guard<std::mutex> lock(m_VoiceMutex);
+            if (m_MixerGroupVolumes.empty())
+            {
+                m_MixerGroupVolumes.emplace("Master", 1.0f);
+                m_MixerGroupVolumes.emplace("SFX", 1.0f);
+                m_MixerGroupVolumes.emplace("Music", 1.0f);
+                m_MixerGroupVolumes.emplace("UI", 1.0f);
+            }
+        }
+
         if (!SDL_ResumeAudioStreamDevice(m_Stream))
         {
             LT_CORE_ERROR("AudioEngine: SDL_ResumeAudioStreamDevice failed: {}", SDL_GetError());
@@ -86,7 +97,7 @@ namespace Limitless::Audio
         m_MasterVolume = std::max(0.0f, volume);
     }
 
-    uint32_t AudioEngine::PlayClip(std::shared_ptr<const AudioClip> clip, float volume, bool loop)
+    uint32_t AudioEngine::PlayClip(std::shared_ptr<const AudioClip> clip, float volume, bool loop, const std::string& mixerGroup, float pan)
     {
         if (!clip || clip->Samples.empty())
         {
@@ -95,7 +106,7 @@ namespace Limitless::Audio
 
         if (clip->SampleRateHz != kMixerSampleRateHz || clip->ChannelCount != kMixerChannels)
         {
-            LT_CORE_WARN("AudioEngine::PlayOneShot: clip format mismatch ({} Hz, {} ch). Expected {} Hz, {} ch. Decoder should resample/remix.",
+            LT_CORE_WARN("AudioEngine::PlayClip: clip format mismatch ({} Hz, {} ch). Expected {} Hz, {} ch. Decoder should resample/remix.",
                          clip->SampleRateHz, clip->ChannelCount, kMixerSampleRateHz, kMixerChannels);
         }
 
@@ -113,6 +124,8 @@ namespace Limitless::Audio
                 v.Clip = std::move(clip);
                 v.FrameCursor = 0;
                 v.Volume = std::max(0.0f, volume);
+                v.Pan = std::clamp(pan, -1.0f, 1.0f);
+                v.MixerGroup = mixerGroup.empty() ? "Master" : mixerGroup;
                 v.Loop = loop;
                 v.Active = true;
                 return id;
@@ -124,6 +137,8 @@ namespace Limitless::Audio
         v.Clip = std::move(clip);
         v.FrameCursor = 0;
         v.Volume = std::max(0.0f, volume);
+        v.Pan = std::clamp(pan, -1.0f, 1.0f);
+        v.MixerGroup = mixerGroup.empty() ? "Master" : mixerGroup;
         v.Loop = loop;
         v.Active = true;
         m_Voices.emplace_back(std::move(v));
@@ -169,6 +184,47 @@ namespace Limitless::Audio
         }
 
         return false;
+    }
+
+    bool AudioEngine::SetVoiceMixParameters(uint32_t voiceId, float volume, float pan, const std::string& mixerGroup)
+    {
+        if (voiceId == 0)
+            return false;
+
+        std::lock_guard<std::mutex> lock(m_VoiceMutex);
+        for (auto& v : m_Voices)
+        {
+            if (v.Id == voiceId && v.Active && v.Clip)
+            {
+                v.Volume = std::max(0.0f, volume);
+                v.Pan = std::clamp(pan, -1.0f, 1.0f);
+                v.MixerGroup = mixerGroup.empty() ? "Master" : mixerGroup;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    void AudioEngine::SetMixerGroupVolume(const std::string& mixerGroup, float volume)
+    {
+        if (mixerGroup.empty())
+            return;
+
+        std::lock_guard<std::mutex> lock(m_VoiceMutex);
+        m_MixerGroupVolumes[mixerGroup] = std::max(0.0f, volume);
+    }
+
+    float AudioEngine::GetMixerGroupVolume(const std::string& mixerGroup) const
+    {
+        if (mixerGroup.empty())
+            return 1.0f;
+
+        std::lock_guard<std::mutex> lock(m_VoiceMutex);
+        const auto it = m_MixerGroupVolumes.find(mixerGroup);
+        if (it == m_MixerGroupVolumes.end())
+            return 1.0f;
+        return std::max(0.0f, it->second);
     }
 
     void AudioEngine::StopAll()
@@ -261,7 +317,13 @@ namespace Limitless::Audio
             }
 
             uint64_t cursor = v.FrameCursor;
-            const float voiceVolume = v.Volume;
+            const float mixerGroupVolume = ResolveMixerGroupVolumeLocked(v.MixerGroup);
+            const float voiceVolume = v.Volume * mixerGroupVolume;
+            const float clampedPan = std::clamp(v.Pan, -1.0f, 1.0f);
+            constexpr float kHalfPi = 1.57079632679f;
+            const float panAngle = (clampedPan + 1.0f) * 0.5f * kHalfPi;
+            const float panLeftGain = std::cos(panAngle);
+            const float panRightGain = std::sin(panAngle);
 
             for (uint32_t f = 0; f < frameCount; ++f)
             {
@@ -284,8 +346,8 @@ namespace Limitless::Audio
                 const float inR = samples[static_cast<size_t>(base + 1)];
 
                 const uint32_t outBase = f * kMixerChannels;
-                outInterleavedStereoF32[outBase + 0] += inL * voiceVolume;
-                outInterleavedStereoF32[outBase + 1] += inR * voiceVolume;
+                outInterleavedStereoF32[outBase + 0] += inL * voiceVolume * panLeftGain;
+                outInterleavedStereoF32[outBase + 1] += inR * voiceVolume * panRightGain;
 
                 ++cursor;
             }
@@ -301,6 +363,27 @@ namespace Limitless::Audio
             x = std::max(-1.0f, std::min(1.0f, x));
             outInterleavedStereoF32[i] = x;
         }
+    }
+
+    float AudioEngine::ResolveMixerGroupVolumeLocked(const std::string& mixerGroup) const
+    {
+        auto resolveSingleGroup = [this](const std::string& groupName) {
+            if (groupName.empty())
+                return 1.0f;
+            const auto it = m_MixerGroupVolumes.find(groupName);
+            if (it == m_MixerGroupVolumes.end())
+                return 1.0f;
+            return std::max(0.0f, it->second);
+        };
+
+        // Mixer "Master" is a true top-level fader:
+        // it applies to every routed group, not just voices explicitly assigned to "Master".
+        const float masterGroupVolume = resolveSingleGroup("Master");
+        if (mixerGroup.empty() || mixerGroup == "Master")
+            return masterGroupVolume;
+
+        const float routedGroupVolume = resolveSingleGroup(mixerGroup);
+        return masterGroupVolume * routedGroupVolume;
     }
 }
 

@@ -14,6 +14,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -1294,6 +1295,7 @@ namespace Limitless::EditorViewportPanel
               std::string& selectedMaterialAssetKey,
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
               std::string& selectedNativeScriptAssetKey,
+              bool showFpsOverlay,
               TilemapEditorState* tilemapEditorState)
     {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
@@ -1499,6 +1501,115 @@ namespace Limitless::EditorViewportPanel
                     const ImVec2 textSize = ImGui::CalcTextSize(text);
                     const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
                     drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f), IM_COL32(255, 200, 120, 255), text);
+                }
+
+                if (showFpsOverlay)
+                {
+                    const ImVec2 minPos = ImGui::GetItemRectMin();
+                    ImDrawList* drawList = ImGui::GetWindowDrawList();
+                    struct FpsOverlayHistory
+                    {
+                        std::array<float, 180> FrameTimesMs{};
+                        size_t NextIndex = 0;
+                        size_t SampleCount = 0;
+                    };
+                    static FpsOverlayHistory fpsHistory{};
+
+                    const float deltaTimeMs = std::max(0.0f, ImGui::GetIO().DeltaTime * 1000.0f);
+                    if (deltaTimeMs > 0.0f)
+                    {
+                        fpsHistory.FrameTimesMs[fpsHistory.NextIndex] = deltaTimeMs;
+                        fpsHistory.NextIndex = (fpsHistory.NextIndex + 1) % fpsHistory.FrameTimesMs.size();
+                        fpsHistory.SampleCount = std::min(fpsHistory.SampleCount + 1, fpsHistory.FrameTimesMs.size());
+                    }
+
+                    float minFrameMs = 0.0f;
+                    float maxFrameMs = 0.0f;
+                    float avgFrameMs = 0.0f;
+                    if (fpsHistory.SampleCount > 0)
+                    {
+                        minFrameMs = std::numeric_limits<float>::max();
+                        for (size_t sampleIndex = 0; sampleIndex < fpsHistory.SampleCount; ++sampleIndex)
+                        {
+                            const size_t readIndex =
+                                (fpsHistory.NextIndex + fpsHistory.FrameTimesMs.size() - fpsHistory.SampleCount + sampleIndex) %
+                                fpsHistory.FrameTimesMs.size();
+                            const float sampleMs = fpsHistory.FrameTimesMs[readIndex];
+                            minFrameMs = std::min(minFrameMs, sampleMs);
+                            maxFrameMs = std::max(maxFrameMs, sampleMs);
+                            avgFrameMs += sampleMs;
+                        }
+                        avgFrameMs /= static_cast<float>(fpsHistory.SampleCount);
+                    }
+
+                    const float fps = (deltaTimeMs > 0.01f) ? (1000.0f / deltaTimeMs) : ImGui::GetIO().Framerate;
+                    const ImU32 statusColor = (deltaTimeMs <= 16.67f)
+                        ? IM_COL32(120, 255, 130, 255)
+                        : ((deltaTimeMs <= 33.33f) ? IM_COL32(255, 220, 100, 255) : IM_COL32(255, 120, 120, 255));
+
+                    const ImVec2 panelMin(minPos.x + 10.0f, minPos.y + 10.0f);
+                    const ImVec2 panelMax(panelMin.x + 280.0f, panelMin.y + 130.0f);
+                    drawList->AddRectFilled(panelMin, panelMax, IM_COL32(0, 0, 0, 165), 4.0f);
+                    drawList->AddRect(panelMin, panelMax, IM_COL32(255, 255, 255, 32), 4.0f);
+
+                    char titleBuffer[96]{};
+                    std::snprintf(titleBuffer, sizeof(titleBuffer), "FPS %d", static_cast<int>(std::round(fps)));
+                    drawList->AddText(ImVec2(panelMin.x + 8.0f, panelMin.y + 6.0f), statusColor, titleBuffer);
+
+                    char frameAvgBuffer[160]{};
+                    std::snprintf(frameAvgBuffer,
+                                  sizeof(frameAvgBuffer),
+                                  "Frame %.2f ms | Avg %.2f ms",
+                                  deltaTimeMs,
+                                  avgFrameMs);
+                    drawList->AddText(ImVec2(panelMin.x + 8.0f, panelMin.y + 24.0f), IM_COL32(215, 230, 255, 255), frameAvgBuffer);
+
+                    char minMaxBuffer[160]{};
+                    std::snprintf(minMaxBuffer,
+                                  sizeof(minMaxBuffer),
+                                  "Min %.2f ms | Max %.2f ms",
+                                  minFrameMs,
+                                  maxFrameMs);
+                    drawList->AddText(ImVec2(panelMin.x + 8.0f, panelMin.y + 40.0f), IM_COL32(215, 230, 255, 255), minMaxBuffer);
+
+                    const ImVec2 graphMin(panelMin.x + 8.0f, panelMin.y + 58.0f);
+                    const ImVec2 graphMax(panelMax.x - 8.0f, panelMax.y - 8.0f);
+                    drawList->AddRectFilled(graphMin, graphMax, IM_COL32(20, 24, 30, 220), 3.0f);
+                    drawList->AddRect(graphMin, graphMax, IM_COL32(255, 255, 255, 20), 3.0f);
+
+                    const float graphHeight = graphMax.y - graphMin.y;
+                    const float graphWidth = graphMax.x - graphMin.x;
+                    const float graphMaxMs = std::max(50.0f, maxFrameMs * 1.2f);
+                    auto msToY = [&](float milliseconds) {
+                        const float normalized = std::clamp(milliseconds / graphMaxMs, 0.0f, 1.0f);
+                        return graphMax.y - normalized * graphHeight;
+                    };
+
+                    const float y60 = msToY(16.67f);
+                    const float y30 = msToY(33.33f);
+                    drawList->AddLine(ImVec2(graphMin.x, y60), ImVec2(graphMax.x, y60), IM_COL32(110, 255, 120, 70), 1.0f);
+                    drawList->AddLine(ImVec2(graphMin.x, y30), ImVec2(graphMax.x, y30), IM_COL32(255, 220, 90, 70), 1.0f);
+
+                    if (fpsHistory.SampleCount >= 2)
+                    {
+                        const size_t baseIndex = (fpsHistory.NextIndex + fpsHistory.FrameTimesMs.size() - fpsHistory.SampleCount) % fpsHistory.FrameTimesMs.size();
+                        for (size_t pointIndex = 1; pointIndex < fpsHistory.SampleCount; ++pointIndex)
+                        {
+                            const size_t sampleIndexA = (baseIndex + pointIndex - 1) % fpsHistory.FrameTimesMs.size();
+                            const size_t sampleIndexB = (baseIndex + pointIndex) % fpsHistory.FrameTimesMs.size();
+                            const float sampleA = fpsHistory.FrameTimesMs[sampleIndexA];
+                            const float sampleB = fpsHistory.FrameTimesMs[sampleIndexB];
+
+                            const float xA = graphMin.x + (static_cast<float>(pointIndex - 1) / static_cast<float>(fpsHistory.SampleCount - 1)) * graphWidth;
+                            const float xB = graphMin.x + (static_cast<float>(pointIndex) / static_cast<float>(fpsHistory.SampleCount - 1)) * graphWidth;
+                            const float yA = msToY(sampleA);
+                            const float yB = msToY(sampleB);
+
+                            drawList->AddLine(ImVec2(xA, yA), ImVec2(xB, yB), IM_COL32(120, 200, 255, 220), 1.8f);
+                        }
+
+                        drawList->AddCircleFilled(ImVec2(graphMax.x, msToY(deltaTimeMs)), 2.5f, statusColor);
+                    }
                 }
             }
         }

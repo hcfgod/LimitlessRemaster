@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace Limitless::Audio
@@ -37,7 +39,13 @@ namespace Limitless::Audio
         float GetMasterVolume() const { return m_MasterVolume; }
 
         // Play a clip as a new voice. Returns a voice id that can be stopped later.
-        uint32_t PlayClip(std::shared_ptr<const AudioClip> clip, float volume = 1.0f, bool loop = false);
+        // `mixerGroup` routes the voice through a named group fader (Master/SFX/Music/UI/custom).
+        // `pan` is stereo pan in the range [-1, 1], where -1 = left and 1 = right.
+        uint32_t PlayClip(std::shared_ptr<const AudioClip> clip,
+                          float volume = 1.0f,
+                          bool loop = false,
+                          const std::string& mixerGroup = "Master",
+                          float pan = 0.0f);
 
         // Backward-compatible alias for non-looping playback.
         uint32_t PlayOneShot(std::shared_ptr<const AudioClip> clip, float volume = 1.0f);
@@ -47,6 +55,13 @@ namespace Limitless::Audio
 
         // Returns true when the voice id currently maps to an active voice.
         bool IsVoiceActive(uint32_t voiceId) const;
+
+        // Update per-voice volume/pan/group at runtime (used by spatial audio updates).
+        bool SetVoiceMixParameters(uint32_t voiceId, float volume, float pan, const std::string& mixerGroup);
+
+        // Update/read mixer group faders at runtime.
+        void SetMixerGroupVolume(const std::string& mixerGroup, float volume);
+        float GetMixerGroupVolume(const std::string& mixerGroup) const;
 
         // Stop everything immediately.
         void StopAll();
@@ -64,6 +79,8 @@ namespace Limitless::Audio
             std::shared_ptr<const AudioClip> Clip;
             uint64_t FrameCursor = 0;
             float Volume = 1.0f;
+            float Pan = 0.0f;
+            std::string MixerGroup = "Master";
             bool Loop = false;
             bool Active = false;
         };
@@ -73,6 +90,7 @@ namespace Limitless::Audio
 
         // Mix into `outInterleavedStereoF32`, which contains `frameCount` frames.
         void Mix(float* outInterleavedStereoF32, uint32_t frameCount);
+        float ResolveMixerGroupVolumeLocked(const std::string& mixerGroup) const;
 
     private:
         SDL_AudioStream* m_Stream = nullptr;
@@ -83,6 +101,7 @@ namespace Limitless::Audio
 
         mutable std::mutex m_VoiceMutex;
         std::vector<Voice> m_Voices;
+        std::unordered_map<std::string, float> m_MixerGroupVolumes;
 
         // Scratch buffer used by the audio callback (interleaved stereo float32).
         // This is preallocated to avoid per-callback allocations.

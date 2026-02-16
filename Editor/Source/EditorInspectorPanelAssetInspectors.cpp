@@ -3,6 +3,7 @@
 #include "EditorAssetNaming.h"
 #include "EditorInspectorPanel.h"
 
+#include "Audio/AudioMixerAsset.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetImportPipeline.h"
 #include "Assets/AssetManager.h"
@@ -1235,6 +1236,125 @@ namespace Limitless::EditorInspectorPanel
 
         if (saveFailed)
             ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Failed to save input actions asset.");
+    }
+
+    void DrawAudioMixerAssetInspector(std::string& selectedAudioMixerAssetKey)
+    {
+        struct State
+        {
+            std::string LoadedKey;
+            std::filesystem::path ResolvedPath;
+            Audio::AudioMixerDefinition Definition{};
+            bool Loaded = false;
+        };
+        static State s_State;
+
+        if (selectedAudioMixerAssetKey.empty())
+            return;
+
+        if (!s_State.Loaded || s_State.LoadedKey != selectedAudioMixerAssetKey)
+        {
+            s_State = {};
+            s_State.LoadedKey = selectedAudioMixerAssetKey;
+            s_State.Loaded = Audio::LoadAudioMixerDefinitionFromAssetKey(
+                selectedAudioMixerAssetKey,
+                s_State.Definition,
+                &s_State.ResolvedPath);
+            if (!s_State.Loaded)
+            {
+                ImGui::TextColored(
+                    ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
+                    "Failed to load audio mixer asset: %s",
+                    selectedAudioMixerAssetKey.c_str());
+                return;
+            }
+        }
+
+        bool modified = false;
+        bool saveFailed = false;
+
+        ImGui::Text("Audio Mixer: %s", std::filesystem::path(selectedAudioMixerAssetKey).filename().string().c_str());
+        ImGui::TextDisabled("Asset Key: %s", selectedAudioMixerAssetKey.c_str());
+        ImGui::Separator();
+
+        if (ImGui::Button("Add Group", ImVec2(120.0f, 0.0f)))
+        {
+            std::string groupName = "Group";
+            int32_t suffix = 1;
+            auto nameExists = [&](const std::string& name) {
+                return std::any_of(
+                    s_State.Definition.Groups.begin(),
+                    s_State.Definition.Groups.end(),
+                    [&name](const Audio::AudioMixerGroupEntry& group) {
+                        return group.Name == name;
+                    });
+            };
+            while (nameExists(groupName))
+            {
+                ++suffix;
+                groupName = "Group" + std::to_string(suffix);
+            }
+
+            s_State.Definition.Groups.push_back(Audio::AudioMixerGroupEntry{ groupName, 1.0f });
+            modified = true;
+        }
+
+        if (s_State.Definition.Groups.empty())
+            ImGui::TextDisabled("No groups authored.");
+
+        int32_t removeGroupIndex = -1;
+        for (int32_t groupIndex = 0; groupIndex < static_cast<int32_t>(s_State.Definition.Groups.size()); ++groupIndex)
+        {
+            auto& group = s_State.Definition.Groups[static_cast<size_t>(groupIndex)];
+            ImGui::PushID(groupIndex);
+
+            std::array<char, 128> groupNameBuffer{};
+            std::snprintf(groupNameBuffer.data(), groupNameBuffer.size(), "%s", group.Name.c_str());
+            if (ImGui::InputText("Group", groupNameBuffer.data(), groupNameBuffer.size()))
+            {
+                group.Name = groupNameBuffer.data();
+                modified = true;
+            }
+
+            if (ImGui::SliderFloat("Volume", &group.Volume, 0.0f, 2.0f, "%.2f"))
+            {
+                group.Volume = std::max(0.0f, group.Volume);
+                modified = true;
+            }
+
+            if (ImGui::Button("Remove Group", ImVec2(120.0f, 0.0f)))
+                removeGroupIndex = groupIndex;
+
+            ImGui::Separator();
+            ImGui::PopID();
+        }
+
+        if (removeGroupIndex >= 0 &&
+            removeGroupIndex < static_cast<int32_t>(s_State.Definition.Groups.size()))
+        {
+            s_State.Definition.Groups.erase(
+                s_State.Definition.Groups.begin() + removeGroupIndex);
+            modified = true;
+        }
+
+        if (modified)
+        {
+            Audio::NormalizeAudioMixerDefinition(s_State.Definition);
+            if (!Audio::SaveAudioMixerDefinitionToPath(s_State.ResolvedPath, s_State.Definition))
+            {
+                saveFailed = true;
+            }
+            else
+            {
+                (void)Assets::AssetDatabase::GetInstance().ImportOrUpdate(
+                    selectedAudioMixerAssetKey,
+                    Assets::AssetType::AudioMixer);
+                (void)Assets::AssetImportPipeline::ReimportChanged(true);
+            }
+        }
+
+        if (saveFailed)
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Failed to save audio mixer asset.");
     }
 
     void DrawNativeScriptAssetInspector(std::string& selectedNativeScriptAssetKey)

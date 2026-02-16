@@ -173,6 +173,10 @@ TEST_SUITE("Scene And Editor Flows")
         camera.NearPlane = 0.1f;
         camera.FarPlane = 3000.0f;
 
+        auto& listener = registry.emplace<Limitless::AudioListener2DComponent>(parent);
+        listener.Enabled = true;
+        listener.UsePrimaryCameraPosition = false;
+
         auto& directionalLight = registry.emplace<Limitless::DirectionalLight2DComponent>(child);
         directionalLight.RuntimeResolvedDirection = { 0.4f, 0.9f };
 
@@ -209,6 +213,13 @@ TEST_SUITE("Scene And Editor Flows")
         audio.PlayOnStart = false;
         audio.Loop = true;
         audio.Muted = true;
+        audio.Space = Limitless::AudioSourceComponent::PlaybackSpace::Spatial2D;
+        audio.MixerGroup = "UI";
+        audio.SpatialMinDistance = 0.75f;
+        audio.SpatialMaxDistance = 8.25f;
+        audio.SpatialRolloffExponent = 2.0f;
+        audio.StereoPanStrength = 0.65f;
+        audio.AttenuationCurveKey = "Assets/Audio/Curves/UiNearToFar.curve.json";
         audio.RuntimeVoiceId = 99;
         audio.RuntimePlaybackStarted = true;
 
@@ -244,6 +255,7 @@ TEST_SUITE("Scene And Editor Flows")
         REQUIRE(cloneRegistry.all_of<Limitless::Joint2DComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::TilemapComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::CameraComponent>(clonedParent));
+        REQUIRE(cloneRegistry.all_of<Limitless::AudioListener2DComponent>(clonedParent));
 
         const auto& clonedSprite = cloneRegistry.get<Limitless::SpriteComponent>(clonedChild);
         CHECK(clonedSprite.TextureKey == sprite.TextureKey);
@@ -274,8 +286,19 @@ TEST_SUITE("Scene And Editor Flows")
         const auto& clonedAudio = cloneRegistry.get<Limitless::AudioSourceComponent>(clonedChild);
         CHECK(clonedAudio.AudioClipKey == audio.AudioClipKey);
         CHECK(clonedAudio.Volume == doctest::Approx(audio.Volume));
+        CHECK(clonedAudio.Space == Limitless::AudioSourceComponent::PlaybackSpace::Spatial2D);
+        CHECK(clonedAudio.MixerGroup == "UI");
+        CHECK(clonedAudio.SpatialMinDistance == doctest::Approx(0.75f));
+        CHECK(clonedAudio.SpatialMaxDistance == doctest::Approx(8.25f));
+        CHECK(clonedAudio.SpatialRolloffExponent == doctest::Approx(2.0f));
+        CHECK(clonedAudio.StereoPanStrength == doctest::Approx(0.65f));
+        CHECK(clonedAudio.AttenuationCurveKey == "Assets/Audio/Curves/UiNearToFar.curve.json");
         CHECK(clonedAudio.RuntimeVoiceId == 0);
         CHECK(clonedAudio.RuntimePlaybackStarted == false);
+
+        const auto& clonedListener = cloneRegistry.get<Limitless::AudioListener2DComponent>(clonedParent);
+        CHECK(clonedListener.Enabled == true);
+        CHECK(clonedListener.UsePrimaryCameraPosition == false);
 
         const auto& clonedScripts = cloneRegistry.get<Limitless::NativeScriptComponent>(clonedChild);
         REQUIRE(clonedScripts.Scripts.size() == 1);
@@ -412,6 +435,24 @@ TEST_SUITE("Scene And Editor Flows")
             { -0.45f, 0.4f }
         };
 
+        auto& listener = registry.emplace<Limitless::AudioListener2DComponent>(root);
+        listener.Enabled = true;
+        listener.UsePrimaryCameraPosition = true;
+
+        auto& audioSource = registry.emplace<Limitless::AudioSourceComponent>(hud);
+        audioSource.AudioClipKey = "Assets/Audio/Music/MainTheme.wav";
+        audioSource.Volume = 0.85f;
+        audioSource.PlayOnStart = true;
+        audioSource.Loop = true;
+        audioSource.Muted = false;
+        audioSource.Space = Limitless::AudioSourceComponent::PlaybackSpace::Spatial2D;
+        audioSource.MixerGroup = "Music";
+        audioSource.SpatialMinDistance = 1.5f;
+        audioSource.SpatialMaxDistance = 24.0f;
+        audioSource.SpatialRolloffExponent = 1.35f;
+        audioSource.StereoPanStrength = 0.8f;
+        audioSource.AttenuationCurveKey = "Assets/Audio/Curves/MusicDistance.curve.json";
+
         const std::filesystem::path scenePath = MakeTempScenePath("SceneRoundTrip.scene.json");
         const auto saveResult = scene.SaveToFile(scenePath);
         REQUIRE(saveResult.IsSuccess());
@@ -498,6 +539,28 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(loadedShadowOccluder.PolygonPoints[2].x == doctest::Approx(0.55f));
         CHECK(loadedShadowOccluder.PolygonPoints[2].y == doctest::Approx(0.7f));
 
+        REQUIRE(loadedRegistry.all_of<Limitless::AudioListener2DComponent>(loadedRoot));
+        const auto& loadedListener = loadedRegistry.get<Limitless::AudioListener2DComponent>(loadedRoot);
+        CHECK(loadedListener.Enabled == true);
+        CHECK(loadedListener.UsePrimaryCameraPosition == true);
+
+        REQUIRE(loadedRegistry.all_of<Limitless::AudioSourceComponent>(loadedHud));
+        const auto& loadedAudioSource = loadedRegistry.get<Limitless::AudioSourceComponent>(loadedHud);
+        CHECK(loadedAudioSource.AudioClipKey == "Assets/Audio/Music/MainTheme.wav");
+        CHECK(loadedAudioSource.Volume == doctest::Approx(0.85f));
+        CHECK(loadedAudioSource.PlayOnStart == true);
+        CHECK(loadedAudioSource.Loop == true);
+        CHECK(loadedAudioSource.Muted == false);
+        CHECK(loadedAudioSource.Space == Limitless::AudioSourceComponent::PlaybackSpace::Spatial2D);
+        CHECK(loadedAudioSource.MixerGroup == "Music");
+        CHECK(loadedAudioSource.SpatialMinDistance == doctest::Approx(1.5f));
+        CHECK(loadedAudioSource.SpatialMaxDistance == doctest::Approx(24.0f));
+        CHECK(loadedAudioSource.SpatialRolloffExponent == doctest::Approx(1.35f));
+        CHECK(loadedAudioSource.StereoPanStrength == doctest::Approx(0.8f));
+        CHECK(loadedAudioSource.AttenuationCurveKey == "Assets/Audio/Curves/MusicDistance.curve.json");
+        CHECK(loadedAudioSource.RuntimeVoiceId == 0);
+        CHECK(loadedAudioSource.RuntimePlaybackStarted == false);
+
         REQUIRE(loadedScene.GetEditorCameraBookmark().has_value());
         CHECK(loadedScene.GetEditorCameraBookmark()->YawDegrees == doctest::Approx(-45.0f));
         CHECK(loadedScene.GetEditorCameraBookmark()->PitchDegrees == doctest::Approx(15.0f));
@@ -505,6 +568,7 @@ TEST_SUITE("Scene And Editor Flows")
         std::error_code errorCode;
         std::filesystem::remove(scenePath, errorCode);
         std::filesystem::remove(std::filesystem::path("Assets/Prefabs/Ui/Hud.prefab.json.meta"), errorCode);
+        std::filesystem::remove(std::filesystem::path("Assets/Audio/Music/MainTheme.wav.meta"), errorCode);
     }
 
     TEST_CASE("Editor-like flow create entity add component and save scene")

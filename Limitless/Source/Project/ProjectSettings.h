@@ -34,6 +34,7 @@ namespace Limitless::Project
         uint32_t Version = 1;
         float MasterVolume = 1.0f;
         bool Muted = false;
+        std::string MixerAssetKey;
     };
 
     struct InputSettings final

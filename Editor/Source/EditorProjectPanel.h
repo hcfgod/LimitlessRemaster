@@ -57,6 +57,12 @@ namespace Limitless
         bool CreateTilesetPopupOpen = false;
         std::filesystem::path CreateTilesetParentRelativePath;
         std::array<char, 256> CreateTilesetNameBuffer{};
+
+        // Audio mixer asset creation popup state.
+        bool CreateAudioMixerPopupPending = false;
+        bool CreateAudioMixerPopupOpen = false;
+        std::filesystem::path CreateAudioMixerParentRelativePath;
+        std::array<char, 256> CreateAudioMixerNameBuffer{};
     };
 
     namespace EditorProjectPanel
@@ -71,6 +77,7 @@ namespace Limitless
                   std::string& selectedNativeScriptAssetKey,
                   std::string& selectedPrefabAssetKey,
                   std::string& selectedTilesetAssetKey,
+                  std::string& selectedAudioMixerAssetKey,
                   std::string& selectedInputActionsAssetKey,
                   const char* texturePayloadId,
                   const char* audioPayloadId,
@@ -84,6 +91,7 @@ namespace Limitless
                   const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
                   const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
                   const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
+                  const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAudioMixerRequested,
                   const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
                   const std::function<void(const std::string&)>& onPrefabOpened,
                   const std::function<void(const std::string&)>& onPrefabInstantiated,

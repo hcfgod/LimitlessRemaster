@@ -261,6 +261,7 @@ namespace Limitless::Project
         root["version"] = s.Version;
         root["masterVolume"] = s.MasterVolume;
         root["muted"] = s.Muted;
+        root["mixerAssetKey"] = s.MixerAssetKey;
         return root;
     }
 
@@ -275,6 +276,7 @@ namespace Limitless::Project
         s.Version = root.value("version", 1u);
         s.MasterVolume = root.value("masterVolume", 1.0f);
         s.Muted = root.value("muted", false);
+        s.MixerAssetKey = root.value("mixerAssetKey", std::string{});
         return s;
     }
 

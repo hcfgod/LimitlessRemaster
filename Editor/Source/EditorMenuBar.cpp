@@ -10,6 +10,7 @@ namespace Limitless::EditorMenuBar
               bool& showAssetDiagnosticsWindow,
               bool& showPhysicsDiagnosticsWindow,
               bool& showConsoleWindow,
+              bool& showEditorFpsOverlay,
               const std::function<void()>& onOpenProject,
               const std::function<void()>& onCreateProject,
               const std::function<void()>& onProjectSettings,
@@ -108,6 +109,7 @@ namespace Limitless::EditorMenuBar
             ImGui::MenuItem("Asset Diagnostics", nullptr, &showAssetDiagnosticsWindow);
             ImGui::MenuItem("Physics 2D Diagnostics", nullptr, &showPhysicsDiagnosticsWindow);
             ImGui::MenuItem("Console", nullptr, &showConsoleWindow);
+            ImGui::MenuItem("FPS Overlay", nullptr, &showEditorFpsOverlay);
             ImGui::EndMenu();
         }
 

@@ -37,6 +37,7 @@ namespace Limitless::Assets::AssetImportPipeline
                 return AssetType::AnimationClip;
             if (EndsWith(name, ".material.json")) return AssetType::Material;
             if (EndsWith(name, ".inputactions.json")) return AssetType::InputActions;
+            if (EndsWith(name, ".audiomixer.json")) return AssetType::AudioMixer;
             if (ext == ".glsl") return AssetType::Shader;
 
             // Textures

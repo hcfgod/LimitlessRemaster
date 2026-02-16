@@ -1,6 +1,7 @@
 #include "EditorLayer.h"
 #include "EditorAssetNaming.h"
 #include "Audio/AudioEngine.h"
+#include "Audio/AudioMixerAsset.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetManager.h"
 #include "Assets/AudioClipAsset.h"
@@ -87,6 +88,15 @@ namespace Limitless
                 return static_cast<char>(std::tolower(c));
             });
             return text;
+        }
+
+        int64_t GetLastWriteTimeTicksOrZero(const std::filesystem::path& path)
+        {
+            std::error_code errorCode;
+            const auto lastWriteTime = std::filesystem::last_write_time(path, errorCode);
+            if (errorCode)
+                return 0;
+            return static_cast<int64_t>(lastWriteTime.time_since_epoch().count());
         }
 
         std::string ExtractSceneNameFromAssetKey(const std::string& assetKey)
@@ -366,6 +376,123 @@ namespace Limitless
             }
         }
 
+        struct AudioListener2DRuntimeState
+        {
+            bool HasListener = false;
+            glm::vec2 Position = glm::vec2(0.0f);
+        };
+
+        struct AudioSpatialMix2D
+        {
+            float Gain = 1.0f;
+            float Pan = 0.0f;
+        };
+
+        glm::vec2 ComputeEntityWorldPosition2D(const Scene& scene, entt::entity entity)
+        {
+            const glm::mat4 worldTransform = scene.GetWorldTransformMatrix(entity);
+            return glm::vec2(worldTransform[3][0], worldTransform[3][1]);
+        }
+
+        bool TryFindPrimaryCameraEntity(const Scene& scene, entt::entity& outEntity)
+        {
+            const auto& registry = scene.GetRegistry();
+            auto cameraView = registry.view<CameraComponent>();
+            entt::entity fallbackEntity = entt::null;
+            for (entt::entity entity : cameraView)
+            {
+                if (fallbackEntity == entt::null)
+                    fallbackEntity = entity;
+                const auto& camera = cameraView.get<CameraComponent>(entity);
+                if (camera.IsPrimary)
+                {
+                    outEntity = entity;
+                    return true;
+                }
+            }
+
+            if (fallbackEntity != entt::null)
+            {
+                outEntity = fallbackEntity;
+                return true;
+            }
+
+            return false;
+        }
+
+        AudioListener2DRuntimeState ResolveAudioListener2DRuntimeState(const Scene& scene)
+        {
+            AudioListener2DRuntimeState listenerState{};
+            const auto& registry = scene.GetRegistry();
+
+            auto listenerView = registry.view<AudioListener2DComponent>();
+            for (entt::entity entity : listenerView)
+            {
+                const auto& listener = listenerView.get<AudioListener2DComponent>(entity);
+                if (!listener.Enabled)
+                    continue;
+
+                if (listener.UsePrimaryCameraPosition)
+                {
+                    entt::entity cameraEntity = entt::null;
+                    if (TryFindPrimaryCameraEntity(scene, cameraEntity))
+                    {
+                        listenerState.HasListener = true;
+                        listenerState.Position = ComputeEntityWorldPosition2D(scene, cameraEntity);
+                        return listenerState;
+                    }
+                }
+
+                listenerState.HasListener = true;
+                listenerState.Position = ComputeEntityWorldPosition2D(scene, entity);
+                return listenerState;
+            }
+
+            // Fallback behavior keeps authored scenes audible even before a listener is added.
+            entt::entity fallbackCameraEntity = entt::null;
+            if (TryFindPrimaryCameraEntity(scene, fallbackCameraEntity))
+            {
+                listenerState.HasListener = true;
+                listenerState.Position = ComputeEntityWorldPosition2D(scene, fallbackCameraEntity);
+            }
+
+            return listenerState;
+        }
+
+        AudioSpatialMix2D ComputeAudioSpatialMix2D(const AudioSourceComponent& audioSource,
+                                                   const glm::vec2& sourcePosition,
+                                                   const AudioListener2DRuntimeState& listenerState)
+        {
+            AudioSpatialMix2D result{};
+            if (audioSource.Space != AudioSourceComponent::PlaybackSpace::Spatial2D || !listenerState.HasListener)
+                return result;
+
+            const float minDistance = std::max(0.001f, audioSource.SpatialMinDistance);
+            const float maxDistance = std::max(minDistance, audioSource.SpatialMaxDistance);
+            const float rolloffExponent = std::max(0.01f, audioSource.SpatialRolloffExponent);
+            const float panStrength = std::clamp(audioSource.StereoPanStrength, 0.0f, 1.0f);
+
+            const float distanceToListener = glm::length(sourcePosition - listenerState.Position);
+            if (distanceToListener <= minDistance)
+            {
+                result.Gain = 1.0f;
+            }
+            else if (distanceToListener >= maxDistance)
+            {
+                result.Gain = 0.0f;
+            }
+            else
+            {
+                const float normalized = (distanceToListener - minDistance) / (maxDistance - minDistance);
+                result.Gain = std::pow(std::max(0.0f, 1.0f - normalized), rolloffExponent);
+            }
+
+            const float panNormalizationDistance = std::max(maxDistance, 0.001f);
+            const float signedPan = std::clamp((sourcePosition.x - listenerState.Position.x) / panNormalizationDistance, -1.0f, 1.0f);
+            result.Pan = signedPan * panStrength;
+            return result;
+        }
+
         void UpdateSceneAudioSources(Scene* scene, EditorPlayModeState playModeState)
         {
             if (!scene)
@@ -377,6 +504,7 @@ namespace Limitless
                  playModeState == EditorPlayModeState::Pause);
 
             auto& registry = scene->GetRegistry();
+            const AudioListener2DRuntimeState listenerState = ResolveAudioListener2DRuntimeState(*scene);
             auto audioView = registry.view<AudioSourceComponent>();
             for (entt::entity entity : audioView)
             {
@@ -392,10 +520,15 @@ namespace Limitless
                     continue;
                 }
 
+                const glm::vec2 sourcePosition = ComputeEntityWorldPosition2D(*scene, entity);
+                const AudioSpatialMix2D spatialMix = ComputeAudioSpatialMix2D(audioSource, sourcePosition, listenerState);
+                const float authoredVolume = audioSource.Muted ? 0.0f : std::max(0.0f, audioSource.Volume);
+                const float runtimeVolume = authoredVolume * spatialMix.Gain;
+                const float runtimePan = spatialMix.Pan;
+
                 const bool shouldPlayOnStart =
                     audioSource.PlayOnStart &&
-                    !audioSource.AudioClipKey.empty() &&
-                    !audioSource.Muted;
+                    !audioSource.AudioClipKey.empty();
 
                 if (shouldPlayOnStart && !audioSource.RuntimePlaybackStarted)
                 {
@@ -404,10 +537,20 @@ namespace Limitless
                     {
                         audioSource.RuntimeVoiceId = Audio::AudioEngine::GetInstance().PlayClip(
                             clipAsset->GetClip(),
-                            audioSource.Volume,
-                            audioSource.Loop);
+                            runtimeVolume,
+                            audioSource.Loop,
+                            audioSource.MixerGroup,
+                            runtimePan);
                         audioSource.RuntimePlaybackStarted = (audioSource.RuntimeVoiceId != 0);
                     }
+                }
+                else if (shouldPlayOnStart && audioSource.RuntimeVoiceId != 0)
+                {
+                    (void)Audio::AudioEngine::GetInstance().SetVoiceMixParameters(
+                        audioSource.RuntimeVoiceId,
+                        runtimeVolume,
+                        runtimePan,
+                        audioSource.MixerGroup);
                 }
                 else if (!shouldPlayOnStart && audioSource.RuntimeVoiceId != 0)
                 {
@@ -536,9 +679,14 @@ namespace Limitless
     {
         ScriptCoreModuleRuntime::Update(m_PlayModeState);
         UpdateSceneAudioSources(m_Scene.get(), m_PlayModeState);
+        ApplyProjectAudioSettings();
 
         if (m_ProjectSettingsPanelState.Loaded)
         {
+            m_ProjectAudioSettings = m_ProjectSettingsPanelState.Audio;
+            m_ProjectAudioSettingsLoaded = true;
+            ApplyProjectAudioSettings();
+
             m_ProjectPhysics2DSettings = m_ProjectSettingsPanelState.Physics2D;
             m_ProjectPhysics2DSettingsLoaded = true;
             ApplyProjectPhysics2DSettingsToScenes();
@@ -654,6 +802,7 @@ namespace Limitless
             }
 
             RefreshProjectPhysics2DSettings();
+            RefreshProjectAudioSettings();
             RefreshProjectLighting2DSettings();
 
             bool loadedScene = false;
@@ -728,6 +877,7 @@ namespace Limitless
             m_ShowAssetDiagnosticsWindow,
             m_ShowPhysicsDiagnosticsWindow,
             m_ShowConsoleWindow,
+            m_ShowEditorFpsOverlay,
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Open); },
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Create); },
             [this]() { m_ShowProjectSettingsWindow = true; },
@@ -1064,6 +1214,7 @@ namespace Limitless
             m_SelectedMaterialAssetKey,
             m_CachedMaterialAsset,
             m_SelectedNativeScriptAssetKey,
+            m_ShowEditorFpsOverlay,
             &m_TilemapEditorState);
     }
 
@@ -1088,6 +1239,9 @@ namespace Limitless
             m_CachedMaterialAsset,
             m_SelectedNativeScriptAssetKey,
             m_SelectedPrefabAssetKey,
+            m_SelectedTilesetAssetKey,
+            m_SelectedAudioMixerAssetKey,
+            m_SelectedInputActionsAssetKey,
             kAssetMaterialPayload,
             kAssetPrefabPayload,
             sceneRootDisplayName,
@@ -1116,6 +1270,7 @@ namespace Limitless
             m_SelectedNativeScriptAssetKey,
             m_SelectedPrefabAssetKey,
             m_SelectedTilesetAssetKey,
+            m_SelectedAudioMixerAssetKey,
             m_SelectedInputActionsAssetKey,
             &m_EditorUndoService);
     }
@@ -1132,6 +1287,7 @@ namespace Limitless
             m_SelectedNativeScriptAssetKey,
             m_SelectedPrefabAssetKey,
             m_SelectedTilesetAssetKey,
+            m_SelectedAudioMixerAssetKey,
             m_SelectedInputActionsAssetKey,
             kAssetTexturePayload,
             kAssetAudioPayload,
@@ -1152,6 +1308,9 @@ namespace Limitless
             },
             [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
                 (void)CreateTilesetAssetInFolder(relativeFolderPath, preferredName);
+            },
+            [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
+                (void)CreateAudioMixerAssetInFolder(relativeFolderPath, preferredName);
             },
             [this](entt::entity entity, const std::filesystem::path& relativeFolderPath) {
                 (void)CreatePrefabFromEntityInFolder(entity, relativeFolderPath);
@@ -1180,8 +1339,24 @@ namespace Limitless
                     m_SelectedPrefabAssetKey = newAssetKey;
                 if (m_SelectedTilesetAssetKey == oldAssetKey)
                     m_SelectedTilesetAssetKey = newAssetKey;
+                if (m_SelectedAudioMixerAssetKey == oldAssetKey)
+                    m_SelectedAudioMixerAssetKey = newAssetKey;
                 if (m_SelectedInputActionsAssetKey == oldAssetKey)
                     m_SelectedInputActionsAssetKey = newAssetKey;
+                if (m_ProjectAudioSettings.MixerAssetKey == oldAssetKey)
+                {
+                    m_ProjectAudioSettings.MixerAssetKey = newAssetKey;
+                    m_ProjectSettingsPanelState.Audio.MixerAssetKey = newAssetKey;
+                    m_ProjectAppliedAudioMixerAssetKey.clear();
+                    m_ProjectAppliedAudioMixerLastWriteTimeTicks = 0;
+                    ApplyProjectAudioSettings();
+                    if (const auto& projectManager = Project::ProjectManager::GetInstance(); projectManager.HasOpenProject())
+                    {
+                        const auto saveAudioResult = Project::SaveAudioSettings(projectManager.GetProjectRoot(), m_ProjectAudioSettings);
+                        if (saveAudioResult.IsFailure())
+                            LT_WARN("Failed to persist audio settings after audio mixer rename: {}", saveAudioResult.GetError().GetErrorMessage());
+                    }
+                }
 
                 if (!m_Scene)
                 {
@@ -1620,6 +1795,7 @@ namespace Limitless
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
         m_SelectedTilesetAssetKey.clear();
+        m_SelectedAudioMixerAssetKey.clear();
         m_SelectedInputActionsAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey.clear();
@@ -1921,6 +2097,7 @@ namespace Limitless
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
         m_SelectedTilesetAssetKey.clear();
+        m_SelectedAudioMixerAssetKey.clear();
         m_SelectedInputActionsAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey = assetKey;
@@ -1975,6 +2152,7 @@ namespace Limitless
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
         m_SelectedTilesetAssetKey.clear();
+        m_SelectedAudioMixerAssetKey.clear();
         m_SelectedInputActionsAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey = assetKey;
@@ -2082,6 +2260,67 @@ namespace Limitless
             LT_INFO("Saved scene {}", assetKey);
         m_EditorUndoService.MarkSaved();
         return true;
+    }
+
+    void EditorLayer::RefreshProjectAudioSettings()
+    {
+        const auto& projectManager = Project::ProjectManager::GetInstance();
+        if (!projectManager.HasOpenProject())
+            return;
+
+        const auto audioSettingsResult = Project::LoadAudioSettings(projectManager.GetProjectRoot());
+        if (audioSettingsResult.IsSuccess())
+        {
+            m_ProjectAudioSettings = audioSettingsResult.GetValue();
+            m_ProjectAudioSettingsLoaded = true;
+            m_ProjectSettingsPanelState.Audio = m_ProjectAudioSettings;
+            m_ProjectAppliedAudioMixerAssetKey.clear();
+            m_ProjectAppliedAudioMixerLastWriteTimeTicks = 0;
+            ApplyProjectAudioSettings();
+        }
+        else
+        {
+            LT_WARN("Failed to load project audio settings: {}", audioSettingsResult.GetError().GetErrorMessage());
+            m_ProjectAudioSettingsLoaded = false;
+        }
+    }
+
+    void EditorLayer::ApplyProjectAudioSettings()
+    {
+        if (!m_ProjectAudioSettingsLoaded)
+            return;
+
+        Audio::AudioEngine& audioEngine = Audio::AudioEngine::GetInstance();
+        const float masterVolume = m_ProjectAudioSettings.Muted
+            ? 0.0f
+            : std::max(0.0f, m_ProjectAudioSettings.MasterVolume);
+        audioEngine.SetMasterVolume(masterVolume);
+
+        if (m_ProjectAudioSettings.MixerAssetKey.empty())
+            return;
+
+        std::filesystem::path mixerResolvedPath;
+        Audio::AudioMixerDefinition mixerDefinition{};
+        if (!Audio::LoadAudioMixerDefinitionFromAssetKey(
+                m_ProjectAudioSettings.MixerAssetKey,
+                mixerDefinition,
+                &mixerResolvedPath))
+        {
+            return;
+        }
+
+        const int64_t lastWriteTicks = GetLastWriteTimeTicksOrZero(mixerResolvedPath);
+        const bool shouldApplyMixer =
+            m_ProjectAppliedAudioMixerAssetKey != m_ProjectAudioSettings.MixerAssetKey ||
+            m_ProjectAppliedAudioMixerLastWriteTimeTicks != lastWriteTicks;
+        if (!shouldApplyMixer)
+            return;
+
+        for (const auto& group : mixerDefinition.Groups)
+            audioEngine.SetMixerGroupVolume(group.Name, group.Volume);
+
+        m_ProjectAppliedAudioMixerAssetKey = m_ProjectAudioSettings.MixerAssetKey;
+        m_ProjectAppliedAudioMixerLastWriteTimeTicks = lastWriteTicks;
     }
 
     void EditorLayer::RefreshProjectPhysics2DSettings()
@@ -2520,6 +2759,79 @@ namespace Limitless
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
         m_SelectedTilesetAssetKey.clear();
+        m_SelectedAudioMixerAssetKey.clear();
+        m_SelectedInputActionsAssetKey.clear();
+        m_SelectedEntity = entt::null;
+        return assetKey;
+    }
+
+    std::string EditorLayer::CreateAudioMixerAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName)
+    {
+        const auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
+        if (rootResult.IsFailure())
+        {
+            LT_ERROR("Could not create audio mixer asset: {}", rootResult.GetError().GetErrorMessage());
+            return {};
+        }
+
+        const std::filesystem::path assetsDirectory = rootResult.GetValue() / "Assets";
+        const std::filesystem::path targetDirectory = assetsDirectory / relativeFolderPath;
+        std::error_code errorCode;
+        std::filesystem::create_directories(targetDirectory, errorCode);
+        if (errorCode)
+        {
+            LT_ERROR("Could not create audio mixer folder {}: {}", targetDirectory.string(), errorCode.message());
+            return {};
+        }
+
+        const std::string baseName = preferredFileName.empty() ? std::string("New Audio Mixer") : preferredFileName;
+        std::string finalFileName = baseName;
+        if (!finalFileName.ends_with(".audiomixer.json"))
+            finalFileName += ".audiomixer.json";
+
+        std::filesystem::path mixerPath = targetDirectory / finalFileName;
+        if (std::filesystem::exists(mixerPath, errorCode))
+        {
+            for (int32_t index = 1; index < 1024; ++index)
+            {
+                const std::filesystem::path candidate = targetDirectory / ("New Audio Mixer " + std::to_string(index) + ".audiomixer.json");
+                if (!std::filesystem::exists(candidate, errorCode))
+                {
+                    mixerPath = candidate;
+                    break;
+                }
+            }
+        }
+
+        Audio::AudioMixerDefinition definition{};
+        Audio::NormalizeAudioMixerDefinition(definition);
+        if (!Audio::SaveAudioMixerDefinitionToPath(mixerPath, definition))
+        {
+            LT_ERROR("Could not create audio mixer asset {}", mixerPath.string());
+            return {};
+        }
+
+        std::filesystem::path relativeAssetPath = std::filesystem::relative(mixerPath, assetsDirectory, errorCode);
+        if (errorCode)
+        {
+            LT_ERROR("Could not compute audio mixer asset key for {}", mixerPath.string());
+            return {};
+        }
+
+        const std::string assetKey = "Assets/" + relativeAssetPath.generic_string();
+        const auto importResult = Assets::AssetDatabase::GetInstance().ImportOrUpdate(assetKey, Assets::AssetType::AudioMixer);
+        if (importResult.IsFailure())
+            LT_WARN("Created audio mixer asset but failed to import into AssetDatabase ({}): {}", assetKey, importResult.GetError().GetErrorMessage());
+
+        LT_INFO("Created audio mixer asset {}", assetKey);
+        m_SelectedAudioMixerAssetKey = assetKey;
+        m_SelectedTextureAssetKey.clear();
+        m_CachedTextureAsset.reset();
+        m_SelectedMaterialAssetKey.clear();
+        m_CachedMaterialAsset.reset();
+        m_SelectedNativeScriptAssetKey.clear();
+        m_SelectedPrefabAssetKey.clear();
+        m_SelectedTilesetAssetKey.clear();
         m_SelectedInputActionsAssetKey.clear();
         m_SelectedEntity = entt::null;
         return assetKey;
@@ -2622,6 +2934,7 @@ namespace Limitless
             m_SelectedNativeScriptAssetKey.clear();
             m_SelectedPrefabAssetKey.clear();
             m_SelectedTilesetAssetKey.clear();
+            m_SelectedAudioMixerAssetKey.clear();
             m_SelectedInputActionsAssetKey.clear();
         }
         return createdEntity;
@@ -2653,6 +2966,7 @@ namespace Limitless
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
         m_SelectedTilesetAssetKey.clear();
+        m_SelectedAudioMixerAssetKey.clear();
         m_SelectedInputActionsAssetKey.clear();
         return createdEntity;
     }

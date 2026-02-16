@@ -24,5 +24,6 @@ namespace Limitless
         void DrawPrefabAssetInspector(std::string& selectedPrefabAssetKey);
         void DrawTilesetAssetInspector(Scene* scene, std::string& selectedTilesetAssetKey);
         void DrawInputActionsAssetInspector(std::string& selectedInputActionsAssetKey);
+        void DrawAudioMixerAssetInspector(std::string& selectedAudioMixerAssetKey);
     }
 }

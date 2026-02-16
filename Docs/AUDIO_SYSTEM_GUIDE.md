@@ -28,6 +28,39 @@ Decoders are expected to **resample/remix** into this format at import/load time
 - The engine provides data through SDL’s audio stream callback.
 - The callback mixes active voices into a preallocated scratch buffer and queues it to SDL.
 
+### Spatial 2D Audio (Implemented)
+
+Scene-authored 2D spatial audio is now supported through ECS components:
+
+- **`AudioListener2DComponent`**:
+  - `Enabled`
+  - `UsePrimaryCameraPosition` (listener can follow the scene primary camera)
+- **`AudioSourceComponent`** (extended):
+  - `PlaybackSpace`: `Global` or `Spatial2D`
+  - `SpatialMinDistance`, `SpatialMaxDistance`
+  - `SpatialRolloffExponent`
+  - `StereoPanStrength`
+  - `AttenuationCurveKey` (reserved string key for future authored attenuation curve assets)
+
+At runtime, play mode computes listener/source world positions, applies attenuation based on distance, then applies stereo pan from listener-relative X position.
+
+### Mixer Groups (Implemented)
+
+`AudioEngine` now supports per-voice mixer routing and group faders:
+
+- Per-voice routing: `PlayClip(..., mixerGroup, pan)`
+- Runtime voice updates: `SetVoiceMixParameters(...)`
+- Group faders: `SetMixerGroupVolume(...)`, `GetMixerGroupVolume(...)`
+
+Default groups initialized by the engine:
+
+- `Master`
+- `SFX`
+- `Music`
+- `UI`
+
+Each `AudioSourceComponent` stores a `MixerGroup` name for scene-authored routing.
+
 ## FFmpeg Integration (Decoding)
 
 When `LT_ENABLE_FFMPEG` is defined, audio files are decoded through FFmpeg:
@@ -86,8 +119,8 @@ Drop an audio file at that path and run Sandbox. If AssetBundle is enabled, rebu
 
 ## Next Steps (Planned)
 
-- **Looping / per-source settings**: looping, pitch, play-on-awake, start time.
 - **Streaming clips**: large music tracks via streaming ring buffers instead of “decode whole file”.
-- **Spatial audio**: listener + 3D attenuation + panning (HRTF later).
+- **Authored attenuation curves**: resolve `AttenuationCurveKey` to real curve assets.
+- **Effect buses/sends**: reverb and other per-group or per-voice effects.
 - **Lock-free audio command queue**: remove mutex usage in the audio callback.
 

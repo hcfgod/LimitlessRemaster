@@ -127,6 +127,9 @@ namespace Limitless::EditorPrefabSystem
                 if (const auto* sourceCamera = sourceRegistry.try_get<CameraComponent>(sourceEntity))
                     destinationRegistry.emplace<CameraComponent>(destinationEntity, *sourceCamera);
 
+                if (const auto* sourceAudioListener = sourceRegistry.try_get<AudioListener2DComponent>(sourceEntity))
+                    destinationRegistry.emplace<AudioListener2DComponent>(destinationEntity, *sourceAudioListener);
+
                 if (const auto* sourceAudio = sourceRegistry.try_get<AudioSourceComponent>(sourceEntity))
                 {
                     auto& destinationAudio = destinationRegistry.emplace<AudioSourceComponent>(destinationEntity);
@@ -135,6 +138,13 @@ namespace Limitless::EditorPrefabSystem
                     destinationAudio.PlayOnStart = sourceAudio->PlayOnStart;
                     destinationAudio.Loop = sourceAudio->Loop;
                     destinationAudio.Muted = sourceAudio->Muted;
+                    destinationAudio.Space = sourceAudio->Space;
+                    destinationAudio.MixerGroup = sourceAudio->MixerGroup;
+                    destinationAudio.SpatialMinDistance = sourceAudio->SpatialMinDistance;
+                    destinationAudio.SpatialMaxDistance = sourceAudio->SpatialMaxDistance;
+                    destinationAudio.SpatialRolloffExponent = sourceAudio->SpatialRolloffExponent;
+                    destinationAudio.StereoPanStrength = sourceAudio->StereoPanStrength;
+                    destinationAudio.AttenuationCurveKey = sourceAudio->AttenuationCurveKey;
                     destinationAudio.RuntimeVoiceId = 0;
                     destinationAudio.RuntimePlaybackStarted = false;
                 }

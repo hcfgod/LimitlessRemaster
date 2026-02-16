@@ -86,11 +86,14 @@ namespace Limitless
         void PersistProjectSessionState();
         void RefreshProjectPhysics2DSettings();
         void ApplyProjectPhysics2DSettingsToScenes();
+        void RefreshProjectAudioSettings();
+        void ApplyProjectAudioSettings();
         void RefreshProjectLighting2DSettings();
         void ApplyProjectLighting2DSettings();
         std::string CreateSceneAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         std::string CreateMaterialAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         std::string CreateTilesetAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
+        std::string CreateAudioMixerAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         std::string CreatePrefabAssetPathForEntity(entt::entity entity, const std::filesystem::path& relativeFolderPath) const;
         bool CreatePrefabFromEntity(entt::entity entity);
         bool CreatePrefabFromEntityInFolder(entt::entity entity, const std::filesystem::path& relativeFolderPath);
@@ -146,6 +149,9 @@ namespace Limitless
         /// Selected tileset asset key when user clicks a tileset in the Project panel.
         std::string m_SelectedTilesetAssetKey;
 
+        /// Selected audio mixer asset key when user clicks an audio mixer in the Project panel.
+        std::string m_SelectedAudioMixerAssetKey;
+
         /// Selected input actions asset key when user clicks an input actions asset in the Project panel.
         std::string m_SelectedInputActionsAssetKey;
 
@@ -166,6 +172,7 @@ namespace Limitless
         bool m_ShowAssetDiagnosticsWindow = false;
         bool m_ShowPhysicsDiagnosticsWindow = true;
         bool m_ShowConsoleWindow = true;
+        bool m_ShowEditorFpsOverlay = true;
         bool m_ShowTilemapPanel = true;
         bool m_ConsoleAutoScroll = true;
         bool m_ConsoleShowScriptLogs = true;
@@ -182,6 +189,10 @@ namespace Limitless
         EditorProjectPanelState m_ProjectPanelState;
         EditorProjectDialog::EditorProjectDialogState m_ProjectDialogState;
         EditorProjectSettingsPanel::EditorProjectSettingsPanelState m_ProjectSettingsPanelState;
+        Project::AudioSettings m_ProjectAudioSettings{};
+        bool m_ProjectAudioSettingsLoaded = false;
+        std::string m_ProjectAppliedAudioMixerAssetKey;
+        int64_t m_ProjectAppliedAudioMixerLastWriteTimeTicks = 0;
         Project::Physics2DSettings m_ProjectPhysics2DSettings{};
         bool m_ProjectPhysics2DSettingsLoaded = false;
         Project::Lighting2DSettings m_ProjectLighting2DSettings{};

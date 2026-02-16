@@ -22,6 +22,7 @@ namespace Limitless::EditorProjectSettingsPanel
     namespace
     {
         constexpr const char* kInputActionsSuffix = ".inputactions.json";
+        constexpr const char* kAudioMixerSuffix = ".audiomixer.json";
 
         std::string InputActionsDisplayNameFromKey(const std::string& assetKey)
         {
@@ -107,6 +108,56 @@ namespace Limitless::EditorProjectSettingsPanel
             return keys;
         }
 
+        std::vector<std::string> DiscoverAudioMixerAssetKeys(const std::filesystem::path& projectRoot)
+        {
+            std::vector<std::string> keys;
+            const std::filesystem::path assetsDirectory = projectRoot / "Assets";
+            std::error_code errorCode;
+            if (!std::filesystem::exists(assetsDirectory, errorCode) || !std::filesystem::is_directory(assetsDirectory, errorCode))
+                return keys;
+
+            auto& assetDatabase = Assets::AssetDatabase::GetInstance();
+            for (std::filesystem::recursive_directory_iterator iterator(assetsDirectory, std::filesystem::directory_options::skip_permission_denied, errorCode), end;
+                 iterator != end;
+                 iterator.increment(errorCode))
+            {
+                if (errorCode)
+                {
+                    errorCode.clear();
+                    continue;
+                }
+
+                const std::filesystem::path currentPath = iterator->path();
+                const std::string fileName = currentPath.filename().string();
+                if (iterator->is_directory(errorCode))
+                {
+                    if (fileName == "Cache")
+                        iterator.disable_recursion_pending();
+                    continue;
+                }
+
+                if (!iterator->is_regular_file(errorCode))
+                    continue;
+                if (!EditorAssetNaming::EndsWithCaseInsensitive(fileName, kAudioMixerSuffix))
+                    continue;
+
+                std::filesystem::path relativePath = std::filesystem::relative(currentPath, assetsDirectory, errorCode);
+                if (errorCode)
+                {
+                    errorCode.clear();
+                    continue;
+                }
+
+                const std::string assetKey = "Assets/" + relativePath.generic_string();
+                keys.push_back(assetKey);
+                (void)assetDatabase.ImportOrUpdate(assetKey, Assets::AssetType::AudioMixer);
+            }
+
+            std::sort(keys.begin(), keys.end());
+            keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+            return keys;
+        }
+
         void RefreshInputActionsAssetKeys(EditorProjectSettingsPanelState& state, const std::filesystem::path& projectRoot)
         {
             state.AvailableInputActionsAssetKeys = DiscoverInputActionsAssetKeys(projectRoot);
@@ -148,6 +199,21 @@ namespace Limitless::EditorProjectSettingsPanel
                 }
                 state.SelectedAdditionalInputAliasBufferSourceIndex = state.SelectedAdditionalInputActionsIndex;
             }
+        }
+
+        void RefreshAudioMixerAssetKeys(EditorProjectSettingsPanelState& state, const std::filesystem::path& projectRoot)
+        {
+            state.AvailableAudioMixerAssetKeys = DiscoverAudioMixerAssetKeys(projectRoot);
+            std::set<std::string> uniqueKeys(
+                state.AvailableAudioMixerAssetKeys.begin(),
+                state.AvailableAudioMixerAssetKeys.end());
+            if (!state.Audio.MixerAssetKey.empty())
+                uniqueKeys.insert(state.Audio.MixerAssetKey);
+            state.AvailableAudioMixerAssetKeys.assign(uniqueKeys.begin(), uniqueKeys.end());
+            state.SelectedAudioMixerAssetIndex = std::clamp(
+                state.SelectedAudioMixerAssetIndex,
+                -1,
+                static_cast<int>(state.AvailableAudioMixerAssetKeys.size()) - 1);
         }
 
         void ApplyInputSettingsToRuntime(const Project::InputSettings& settings)
@@ -193,6 +259,7 @@ namespace Limitless::EditorProjectSettingsPanel
             state.Layers = l.GetValue();
             state.Physics2D = p.GetValue();
             state.Lighting2D = lighting.GetValue();
+            RefreshAudioMixerAssetKeys(state, projectRoot);
             RefreshInputActionsAssetKeys(state, projectRoot);
             state.Loaded = true;
             return true;
@@ -309,6 +376,31 @@ namespace Limitless::EditorProjectSettingsPanel
             {
                 ImGui::Checkbox("Muted", &state.Audio.Muted);
                 ImGui::SliderFloat("Master Volume", &state.Audio.MasterVolume, 0.0f, 1.0f, "%.2f");
+
+                const bool hasAudioMixer = !state.Audio.MixerAssetKey.empty();
+                const std::string audioMixerDisplayName = hasAudioMixer
+                    ? InputActionsDisplayNameFromKey(state.Audio.MixerAssetKey)
+                    : std::string("None");
+                if (ImGui::BeginCombo("Audio Mixer Asset", audioMixerDisplayName.c_str()))
+                {
+                    const bool selectedNone = state.Audio.MixerAssetKey.empty();
+                    if (ImGui::Selectable("None", selectedNone))
+                        state.Audio.MixerAssetKey.clear();
+
+                    for (const auto& key : state.AvailableAudioMixerAssetKeys)
+                    {
+                        const bool selected = (key == state.Audio.MixerAssetKey);
+                        const std::string label = InputActionsDisplayNameFromKey(key) + "##AudioMixerAsset:" + key;
+                        if (ImGui::Selectable(label.c_str(), selected))
+                            state.Audio.MixerAssetKey = key;
+                    }
+                    ImGui::EndCombo();
+                }
+
+                if (ImGui::Button("Refresh Audio Mixer Assets", ImVec2(220, 0)))
+                {
+                    RefreshAudioMixerAssetKeys(state, projectRoot);
+                }
                 ImGui::EndTabItem();
             }
 
@@ -535,6 +627,7 @@ namespace Limitless::EditorProjectSettingsPanel
         if (ImGui::Button("Reload From Disk", ImVec2(160, 0)))
         {
             state.Loaded = false;
+            state.SelectedAudioMixerAssetIndex = -1;
             state.SelectedAvailableInputActionsIndex = -1;
             state.SelectedAdditionalInputActionsIndex = -1;
             state.SelectedAdditionalInputAliasBufferSourceIndex = -1;

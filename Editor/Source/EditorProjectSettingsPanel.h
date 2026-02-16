@@ -19,6 +19,8 @@ namespace Limitless::EditorProjectSettingsPanel
         Project::Physics2DSettings Physics2D;
         Project::Lighting2DSettings Lighting2D;
 
+        std::vector<std::string> AvailableAudioMixerAssetKeys;
+        int SelectedAudioMixerAssetIndex = -1;
         std::vector<std::string> AvailableInputActionsAssetKeys;
         int SelectedAdditionalInputActionsIndex = -1;
         int SelectedAvailableInputActionsIndex = -1;

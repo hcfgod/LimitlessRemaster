@@ -22,7 +22,8 @@ namespace Limitless::Assets
         Prefab = 8,
         Tilemap = 9,
         AnimationClip = 10,
-        Tileset = 11
+        Tileset = 11,
+        AudioMixer = 12
     };
 
     [[nodiscard]] const char* ToString(AssetType type);

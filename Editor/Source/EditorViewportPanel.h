@@ -68,5 +68,6 @@ namespace Limitless::EditorViewportPanel
               std::string& selectedMaterialAssetKey,
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
               std::string& selectedNativeScriptAssetKey,
+              bool showFpsOverlay,
               TilemapEditorState* tilemapEditorState);
 }

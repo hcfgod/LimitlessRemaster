@@ -81,6 +81,24 @@ namespace Limitless::EditorInspectorPanel
             return keys;
         }
 
+        std::vector<std::string> BuildAudioClipPickerKeys()
+        {
+            std::vector<std::string> keys;
+            std::unordered_set<std::string> seen;
+
+            const auto records = Assets::AssetDatabase::GetInstance().GetAllRecords();
+            for (const auto& record : records)
+            {
+                if (record.Type != Assets::AssetType::AudioClip || record.Key.empty())
+                    continue;
+                if (seen.insert(record.Key).second)
+                    keys.push_back(record.Key);
+            }
+
+            std::sort(keys.begin(), keys.end());
+            return keys;
+        }
+
         glm::vec2 NormalizeDirectionOrFallback(const glm::vec2& direction, const glm::vec2& fallback = glm::vec2(0.0f, -1.0f))
         {
             const float length = glm::length(direction);
@@ -346,6 +364,33 @@ namespace Limitless::EditorInspectorPanel
                 }
                 TrackInteractiveMutation(undoService, "Edit Camera Primary");
 
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* audioListener = registry.try_get<AudioListener2DComponent>(selectedEntity))
+        {
+            const bool listenerOpen = ImGui::TreeNodeEx("Audio Listener 2D", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("AudioListener2DComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##AudioListener2DComponentOptionsButton"))
+                ImGui::OpenPopup("AudioListener2DComponentOptions");
+
+            if (ImGui::BeginPopup("AudioListener2DComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveAudioListener2DComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (listenerOpen)
+            {
+                ImGui::Checkbox("Enabled", &audioListener->Enabled);
+                TrackInteractiveMutation(undoService, "Edit Audio Listener 2D Enabled");
+                ImGui::Checkbox("Use Primary Camera Position", &audioListener->UsePrimaryCameraPosition);
+                TrackInteractiveMutation(undoService, "Edit Audio Listener 2D Camera Follow");
+                ImGui::TextDisabled("When enabled, spatial 2D sources attenuate and pan relative to this listener.");
                 ImGui::TreePop();
             }
         }
@@ -695,38 +740,68 @@ namespace Limitless::EditorInspectorPanel
 
             if (audioOpen)
             {
+                auto assignAudioClipKey = [&](const std::string& key) {
+                    if (key == audioSource->AudioClipKey)
+                        return;
+                    if (audioSource->RuntimeVoiceId != 0)
+                        Audio::AudioEngine::GetInstance().Stop(audioSource->RuntimeVoiceId);
+                    audioSource->AudioClipKey = key;
+                    audioSource->RuntimeVoiceId = 0;
+                    audioSource->RuntimePlaybackStarted = false;
+                };
+
                 const std::string clipLabel = audioSource->AudioClipKey.empty()
                     ? std::string("None")
                     : EditorAssetNaming::GetAssetDisplayNameFromAssetKey(audioSource->AudioClipKey);
 
                 ImGui::Text("Clip");
                 ImGui::SameLine(80);
-                ImGui::Button((clipLabel + "##AudioClip").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 60.0f, 0.0f));
+                ImGui::Button((clipLabel + "##AudioClip").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 90.0f, 0.0f));
                 if (ImGui::BeginDragDropTarget())
                 {
                     if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(audioPayloadId))
                     {
                         const char* key = static_cast<const char*>(payload->Data);
                         if (key && key[0])
-                        {
-                            audioSource->AudioClipKey = key;
-                            audioSource->RuntimePlaybackStarted = false;
-                        }
+                            assignAudioClipKey(key);
                     }
                     ImGui::EndDragDropTarget();
+                }
+
+                ImGui::SameLine();
+                if (ImGui::Button("...##AudioClipPicker"))
+                    ImGui::OpenPopup("AudioClipPickerPopup");
+
+                if (ImGui::BeginPopup("AudioClipPickerPopup"))
+                {
+                    if (ImGui::Selectable("None##AudioClipPickerNone"))
+                    {
+                        assignAudioClipKey({});
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::Separator();
+
+                    const std::vector<std::string> audioClipKeys = BuildAudioClipPickerKeys();
+                    for (const auto& key : audioClipKeys)
+                    {
+                        const bool isSelected = (audioSource->AudioClipKey == key);
+                        const std::string display = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(key);
+                        if (ImGui::Selectable((display + "##AudioClipPicker_" + key).c_str(), isSelected))
+                        {
+                            assignAudioClipKey(key);
+                            ImGui::CloseCurrentPopup();
+                        }
+                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                            ImGui::SetTooltip("%s", key.c_str());
+                    }
+                    ImGui::EndPopup();
                 }
 
                 if (!audioSource->AudioClipKey.empty())
                 {
                     ImGui::SameLine();
                     if (ImGui::Button("Clear##AudioClip"))
-                    {
-                        if (audioSource->RuntimeVoiceId != 0)
-                            Audio::AudioEngine::GetInstance().Stop(audioSource->RuntimeVoiceId);
-                        audioSource->AudioClipKey.clear();
-                        audioSource->RuntimeVoiceId = 0;
-                        audioSource->RuntimePlaybackStarted = false;
-                    }
+                        assignAudioClipKey({});
                 }
 
                 ImGui::Checkbox("Play On Start", &audioSource->PlayOnStart);
@@ -737,6 +812,45 @@ namespace Limitless::EditorInspectorPanel
                 TrackInteractiveMutation(undoService, "Edit Audio Muted");
                 ImGui::SliderFloat("Volume", &audioSource->Volume, 0.0f, 2.0f, "%.2f");
                 TrackInteractiveMutation(undoService, "Edit Audio Volume");
+
+                int playbackSpaceIndex = static_cast<int>(audioSource->Space);
+                const char* playbackSpaceNames[] = { "Global", "Spatial 2D" };
+                if (ImGui::Combo("Playback Space", &playbackSpaceIndex, playbackSpaceNames, 2))
+                    audioSource->Space = static_cast<AudioSourceComponent::PlaybackSpace>(playbackSpaceIndex);
+                TrackInteractiveMutation(undoService, "Edit Audio Playback Space");
+
+                std::array<char, 128> mixerGroupBuffer{};
+                std::snprintf(mixerGroupBuffer.data(), mixerGroupBuffer.size(), "%s", audioSource->MixerGroup.c_str());
+                if (ImGui::InputText("Mixer Group", mixerGroupBuffer.data(), mixerGroupBuffer.size()))
+                    audioSource->MixerGroup = mixerGroupBuffer.data();
+                if (audioSource->MixerGroup.empty())
+                    audioSource->MixerGroup = "SFX";
+                TrackInteractiveMutation(undoService, "Edit Audio Mixer Group");
+
+                if (audioSource->Space == AudioSourceComponent::PlaybackSpace::Spatial2D)
+                {
+                    ImGui::DragFloat("Min Distance", &audioSource->SpatialMinDistance, 0.01f, 0.001f, 10000.0f, "%.3f");
+                    audioSource->SpatialMinDistance = std::max(0.001f, audioSource->SpatialMinDistance);
+                    TrackInteractiveMutation(undoService, "Edit Audio Spatial Min Distance");
+
+                    ImGui::DragFloat("Max Distance", &audioSource->SpatialMaxDistance, 0.05f, 0.001f, 10000.0f, "%.3f");
+                    audioSource->SpatialMaxDistance = std::max(audioSource->SpatialMinDistance, audioSource->SpatialMaxDistance);
+                    TrackInteractiveMutation(undoService, "Edit Audio Spatial Max Distance");
+
+                    ImGui::DragFloat("Rolloff Exponent", &audioSource->SpatialRolloffExponent, 0.01f, 0.01f, 16.0f, "%.2f");
+                    audioSource->SpatialRolloffExponent = std::max(0.01f, audioSource->SpatialRolloffExponent);
+                    TrackInteractiveMutation(undoService, "Edit Audio Spatial Rolloff Exponent");
+
+                    ImGui::SliderFloat("Stereo Pan Strength", &audioSource->StereoPanStrength, 0.0f, 1.0f, "%.2f");
+                    audioSource->StereoPanStrength = std::clamp(audioSource->StereoPanStrength, 0.0f, 1.0f);
+                    TrackInteractiveMutation(undoService, "Edit Audio Spatial Pan Strength");
+
+                    std::array<char, 256> attenuationCurveBuffer{};
+                    std::snprintf(attenuationCurveBuffer.data(), attenuationCurveBuffer.size(), "%s", audioSource->AttenuationCurveKey.c_str());
+                    if (ImGui::InputText("Attenuation Curve Key", attenuationCurveBuffer.data(), attenuationCurveBuffer.size()))
+                        audioSource->AttenuationCurveKey = attenuationCurveBuffer.data();
+                    TrackInteractiveMutation(undoService, "Edit Audio Attenuation Curve Key");
+                }
 
                 if (audioSource->RuntimeVoiceId != 0 &&
                     !Audio::AudioEngine::GetInstance().IsVoiceActive(audioSource->RuntimeVoiceId))
@@ -767,7 +881,9 @@ namespace Limitless::EditorInspectorPanel
                                 audioSource->RuntimeVoiceId = Audio::AudioEngine::GetInstance().PlayClip(
                                     clipAsset->GetClip(),
                                     volume,
-                                    audioSource->Loop);
+                                    audioSource->Loop,
+                                    audioSource->MixerGroup,
+                                    0.0f);
                                 audioSource->RuntimePlaybackStarted = (audioSource->RuntimeVoiceId != 0);
                             }
                         }

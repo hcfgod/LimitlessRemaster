@@ -288,6 +288,23 @@ namespace Limitless
             return angleRadians;
         }
 
+        const char* ToAudioPlaybackSpaceName(AudioSourceComponent::PlaybackSpace space)
+        {
+            switch (space)
+            {
+                case AudioSourceComponent::PlaybackSpace::Spatial2D: return "Spatial2D";
+                case AudioSourceComponent::PlaybackSpace::Global:
+                default: return "Global";
+            }
+        }
+
+        AudioSourceComponent::PlaybackSpace ParseAudioPlaybackSpaceName(const std::string& spaceName)
+        {
+            if (spaceName == "Spatial2D")
+                return AudioSourceComponent::PlaybackSpace::Spatial2D;
+            return AudioSourceComponent::PlaybackSpace::Global;
+        }
+
         // Keep clone/load runtime cleanup centralized so newly added components
         // only need one update point to stay Play Mode-safe.
         void ResetRuntimeStateForEntity(entt::registry& registry, entt::entity entity)
@@ -1007,6 +1024,11 @@ namespace Limitless
                 destinationRegistry.emplace<CameraComponent>(destinationEntity, *camera);
             }
 
+            if (const auto* audioListener = sourceRegistry.try_get<AudioListener2DComponent>(sourceEntity))
+            {
+                destinationRegistry.emplace<AudioListener2DComponent>(destinationEntity, *audioListener);
+            }
+
             if (const auto* rigidbody2D = sourceRegistry.try_get<Rigidbody2DComponent>(sourceEntity))
             {
                 auto& destinationRigidbody2D = destinationRegistry.emplace<Rigidbody2DComponent>(destinationEntity, *rigidbody2D);
@@ -1077,6 +1099,13 @@ namespace Limitless
                 destinationAudioSource.PlayOnStart = audioSource->PlayOnStart;
                 destinationAudioSource.Loop = audioSource->Loop;
                 destinationAudioSource.Muted = audioSource->Muted;
+                destinationAudioSource.Space = audioSource->Space;
+                destinationAudioSource.MixerGroup = audioSource->MixerGroup;
+                destinationAudioSource.SpatialMinDistance = audioSource->SpatialMinDistance;
+                destinationAudioSource.SpatialMaxDistance = audioSource->SpatialMaxDistance;
+                destinationAudioSource.SpatialRolloffExponent = audioSource->SpatialRolloffExponent;
+                destinationAudioSource.StereoPanStrength = audioSource->StereoPanStrength;
+                destinationAudioSource.AttenuationCurveKey = audioSource->AttenuationCurveKey;
                 destinationAudioSource.RuntimeVoiceId = 0;
                 destinationAudioSource.RuntimePlaybackStarted = false;
             }
@@ -1375,6 +1404,14 @@ namespace Limitless
                 };
             }
 
+            if (const auto* audioListener = m_Registry.try_get<AudioListener2DComponent>(entity))
+            {
+                entry["AudioListener2D"] = {
+                    { "Enabled", audioListener->Enabled },
+                    { "UsePrimaryCameraPosition", audioListener->UsePrimaryCameraPosition }
+                };
+            }
+
             if (const auto* audioSource = m_Registry.try_get<AudioSourceComponent>(entity))
             {
                 entry["AudioSource"] = {
@@ -1382,7 +1419,14 @@ namespace Limitless
                     { "Volume", audioSource->Volume },
                     { "PlayOnStart", audioSource->PlayOnStart },
                     { "Loop", audioSource->Loop },
-                    { "Muted", audioSource->Muted }
+                    { "Muted", audioSource->Muted },
+                    { "PlaybackSpace", ToAudioPlaybackSpaceName(audioSource->Space) },
+                    { "MixerGroup", audioSource->MixerGroup },
+                    { "SpatialMinDistance", audioSource->SpatialMinDistance },
+                    { "SpatialMaxDistance", audioSource->SpatialMaxDistance },
+                    { "SpatialRolloffExponent", audioSource->SpatialRolloffExponent },
+                    { "StereoPanStrength", audioSource->StereoPanStrength },
+                    { "AttenuationCurveKey", audioSource->AttenuationCurveKey }
                 };
             }
 
@@ -1896,6 +1940,14 @@ namespace Limitless
                 camera.FieldOfViewYDegrees = cameraJson.value("FieldOfViewYDegrees", 60.0f);
             }
 
+            if (entry.contains("AudioListener2D") && entry["AudioListener2D"].is_object())
+            {
+                const auto& audioListenerJson = entry["AudioListener2D"];
+                auto& audioListener = scene->GetRegistry().emplace<AudioListener2DComponent>(entity);
+                audioListener.Enabled = audioListenerJson.value("Enabled", true);
+                audioListener.UsePrimaryCameraPosition = audioListenerJson.value("UsePrimaryCameraPosition", true);
+            }
+
             if (entry.contains("AudioSource"))
             {
                 const auto& audioSourceJson = entry["AudioSource"];
@@ -1914,6 +1966,17 @@ namespace Limitless
                     audioSource.PlayOnStart = audioSourceJson.value("PlayOnStart", true);
                     audioSource.Loop = audioSourceJson.value("Loop", false);
                     audioSource.Muted = audioSourceJson.value("Muted", false);
+                    audioSource.Space = ParseAudioPlaybackSpaceName(audioSourceJson.value("PlaybackSpace", std::string("Global")));
+                    if (audioSourceJson.value("Spatial", false))
+                        audioSource.Space = AudioSourceComponent::PlaybackSpace::Spatial2D;
+                    audioSource.MixerGroup = audioSourceJson.value("MixerGroup", std::string("SFX"));
+                    if (audioSource.MixerGroup.empty())
+                        audioSource.MixerGroup = "SFX";
+                    audioSource.SpatialMinDistance = std::max(0.001f, audioSourceJson.value("SpatialMinDistance", 1.0f));
+                    audioSource.SpatialMaxDistance = std::max(audioSource.SpatialMinDistance, audioSourceJson.value("SpatialMaxDistance", 20.0f));
+                    audioSource.SpatialRolloffExponent = std::max(0.01f, audioSourceJson.value("SpatialRolloffExponent", 1.0f));
+                    audioSource.StereoPanStrength = std::clamp(audioSourceJson.value("StereoPanStrength", 1.0f), 0.0f, 1.0f);
+                    audioSource.AttenuationCurveKey = audioSourceJson.value("AttenuationCurveKey", std::string{});
                 }
 
                 audioSource.RuntimeVoiceId = 0;

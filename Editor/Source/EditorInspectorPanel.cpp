@@ -1268,6 +1268,7 @@ namespace Limitless::EditorInspectorPanel
               std::string& selectedNativeScriptAssetKey,
               std::string& selectedPrefabAssetKey,
               std::string& selectedTilesetAssetKey,
+              std::string& selectedAudioMixerAssetKey,
               std::string& selectedInputActionsAssetKey,
               EditorUndoService* undoService)
     {
@@ -1303,9 +1304,26 @@ namespace Limitless::EditorInspectorPanel
 
         ImGui::Begin("Inspector");
 
+        if (scene && selectedEntity != entt::null && scene->IsValid(selectedEntity))
+        {
+            selectedInputActionsAssetKey.clear();
+            selectedAudioMixerAssetKey.clear();
+            selectedMaterialAssetKey.clear();
+            selectedTextureAssetKey.clear();
+            cachedTextureAsset.reset();
+            cachedMaterialAsset.reset();
+            selectedNativeScriptAssetKey.clear();
+            selectedPrefabAssetKey.clear();
+            selectedTilesetAssetKey.clear();
+        }
+
         if (!selectedInputActionsAssetKey.empty())
         {
             DrawInputActionsAssetInspector(selectedInputActionsAssetKey);
+        }
+        else if (!selectedAudioMixerAssetKey.empty())
+        {
+            DrawAudioMixerAssetInspector(selectedAudioMixerAssetKey);
         }
         else if (!selectedMaterialAssetKey.empty())
         {
@@ -1660,6 +1678,7 @@ namespace Limitless::EditorInspectorPanel
             {
                 const bool hasSpriteComponent = registry.all_of<SpriteComponent>(selectedEntity);
                 const bool hasCameraComponent = registry.all_of<CameraComponent>(selectedEntity);
+                const bool hasAudioListener2DComponent = registry.all_of<AudioListener2DComponent>(selectedEntity);
                 const bool hasAudioSourceComponent = registry.all_of<AudioSourceComponent>(selectedEntity);
                 const bool hasTextComponent = registry.all_of<TextComponent>(selectedEntity);
                 const bool hasNativeScriptComponent = registry.all_of<NativeScriptComponent>(selectedEntity);
@@ -1713,6 +1732,23 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 if (hasCameraComponent)
+                    ImGui::EndDisabled();
+
+                if (hasAudioListener2DComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Audio Listener 2D"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add Audio Listener 2D Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<AudioListener2DComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<AudioListener2DComponent>(selectedEntity);
+                }
+
+                if (hasAudioListener2DComponent)
                     ImGui::EndDisabled();
 
                 if (hasAudioSourceComponent)
@@ -1980,6 +2016,21 @@ namespace Limitless::EditorInspectorPanel
                 else
                 {
                     registry.remove<CameraComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveAudioListener2DComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Audio Listener 2D Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<AudioListener2DComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<AudioListener2DComponent>(selectedEntity);
                 }
             }
 
