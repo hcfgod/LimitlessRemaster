@@ -196,7 +196,8 @@ project "Test"
 
         libdirs
         {
-            "/usr/local/lib"
+            "/usr/local/lib",
+            "../Limitless/Vendor/box2d/libs/linux"
         }
 
         links

@@ -99,16 +99,28 @@ setup_premake() {
     temp_file="$(mktemp)"
 
     if command -v curl >/dev/null 2>&1; then
-        curl -L -o "$temp_file" "$premake_url"
+        if ! curl -L -o "$temp_file" "$premake_url"; then
+            echo "Error: Failed to download Premake5 with curl."
+            rm -f "$temp_file"
+            return 1
+        fi
     elif command -v wget >/dev/null 2>&1; then
-        wget -O "$temp_file" "$premake_url"
+        if ! wget -O "$temp_file" "$premake_url"; then
+            echo "Error: Failed to download Premake5 with wget."
+            rm -f "$temp_file"
+            return 1
+        fi
     else
         echo "Error: Neither curl nor wget is installed."
         rm -f "$temp_file"
         return 1
     fi
 
-    tar -xzf "$temp_file" -C "$premake_dir"
+    if ! tar --no-same-owner -xzf "$temp_file" -C "$premake_dir"; then
+        echo "Error: Failed to extract Premake5 archive."
+        rm -f "$temp_file"
+        return 1
+    fi
     chmod +x "$premake_path"
     rm -f "$temp_file"
 }

@@ -233,7 +233,8 @@ project "Limitless"
 
         libdirs
         {
-            "/usr/local/lib"
+            "/usr/local/lib",
+            "Vendor/box2d/libs/linux"
         }
 
     -- Ensure C sources are treated as C (not C++).
