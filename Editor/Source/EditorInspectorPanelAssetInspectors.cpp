@@ -8,6 +8,7 @@
 #include "Assets/AssetManager.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetTypes.h"
+#include "Assets/InputActionsAssetResource.h"
 #include "Assets/MaterialAssetImporter.h"
 #include "Assets/ShaderAsset.h"
 #include "Assets/TextureAssetImporter.h"
@@ -15,9 +16,14 @@
 #include "Scene/Scene.h"
 #include "imgui/imgui.h"
 
+#include <SDL3/SDL_gamepad.h>
+#include <SDL3/SDL_keyboard.h>
+#include <SDL3/SDL_mouse.h>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <unordered_set>
@@ -227,6 +233,544 @@ namespace Limitless::EditorInspectorPanel
 
             return cachedMaterialAsset != nullptr;
         }
+
+        bool LoadInputActionsJson(const std::string& assetKey, nlohmann::json& outJson, std::filesystem::path& outResolvedPath)
+        {
+            const auto resolvedResult = Assets::ResolveAssetKeyToPath(assetKey);
+            if (resolvedResult.IsFailure())
+                return false;
+
+            outResolvedPath = resolvedResult.GetValue();
+            std::ifstream input(outResolvedPath, std::ios::in | std::ios::binary);
+            if (!input.is_open())
+                return false;
+
+            try
+            {
+                input >> outJson;
+            }
+            catch (...)
+            {
+                return false;
+            }
+
+            if (!outJson.is_object())
+                outJson = nlohmann::json::object();
+            return true;
+        }
+
+        bool SaveInputActionsJsonAndReload(const std::string& assetKey,
+                                           const nlohmann::json& jsonToSave,
+                                           const std::filesystem::path& resolvedPath)
+        {
+            std::ofstream output(resolvedPath, std::ios::out | std::ios::binary | std::ios::trunc);
+            if (!output.is_open())
+                return false;
+
+            output << jsonToSave.dump(2);
+            output.close();
+
+            (void)Assets::AssetDatabase::GetInstance().ImportOrUpdate(assetKey, Assets::AssetType::InputActions);
+            (void)Assets::AssetImportPipeline::ReimportChanged(true);
+
+            if (auto cachedBase = Assets::AssetManager::GetCachedByKey(assetKey))
+            {
+                if (auto cachedInputActions = std::dynamic_pointer_cast<Assets::InputActionsAssetResource>(cachedBase))
+                    (void)cachedInputActions->Reload();
+            }
+
+            return true;
+        }
+
+        constexpr std::array<const char*, 3> kInputActionValueTypes = {
+            "Button",
+            "Axis1D",
+            "Axis2D"
+        };
+
+        constexpr std::array<const char*, 8> kInputBindingTypes = {
+            "KeyboardButton",
+            "MouseButton",
+            "KeyboardAxis1D",
+            "KeyboardAxis2D",
+            "MouseDelta",
+            "GamepadButton",
+            "GamepadAxis1D",
+            "GamepadAxis2D"
+        };
+
+        std::string GetScancodeDisplayName(int scancode)
+        {
+            if (scancode < 0 || scancode >= static_cast<int>(SDL_SCANCODE_COUNT))
+                return "Unknown";
+            const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(scancode));
+            if (name && name[0] != '\0')
+                return name;
+            return "Unknown";
+        }
+
+        int ReadScancodeValue(const nlohmann::json& binding, const char* scancodeKey, const char* nameKey)
+        {
+            int scancodeValue = binding.value(scancodeKey, static_cast<int>(SDL_SCANCODE_UNKNOWN));
+            if (binding.contains(nameKey) && binding[nameKey].is_string())
+            {
+                const std::string keyName = binding[nameKey].get<std::string>();
+                if (!keyName.empty())
+                    scancodeValue = static_cast<int>(SDL_GetScancodeFromName(keyName.c_str()));
+            }
+
+            if (scancodeValue < 0 || scancodeValue >= static_cast<int>(SDL_SCANCODE_COUNT))
+                scancodeValue = static_cast<int>(SDL_SCANCODE_UNKNOWN);
+            return scancodeValue;
+        }
+
+        void WriteScancodeValue(nlohmann::json& binding, const char* scancodeKey, const char* nameKey, int scancodeValue)
+        {
+            const int clamped = std::clamp(scancodeValue, 0, static_cast<int>(SDL_SCANCODE_COUNT) - 1);
+            binding[scancodeKey] = clamped;
+
+            const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(clamped));
+            if (name && name[0] != '\0')
+                binding[nameKey] = std::string(name);
+            else
+                binding.erase(nameKey);
+        }
+
+        std::string GetGamepadButtonDisplayName(int buttonId)
+        {
+            if (buttonId < 0 || buttonId >= static_cast<int>(SDL_GAMEPAD_BUTTON_COUNT))
+                return "Invalid";
+            const char* name = SDL_GetGamepadStringForButton(static_cast<SDL_GamepadButton>(buttonId));
+            if (name && name[0] != '\0')
+                return name;
+            return "Unknown";
+        }
+
+        int ReadGamepadButtonValue(const nlohmann::json& binding, const char* buttonIdKey, const char* buttonNameKey)
+        {
+            int buttonId = binding.value(buttonIdKey, static_cast<int>(SDL_GAMEPAD_BUTTON_INVALID));
+            if (binding.contains(buttonNameKey) && binding[buttonNameKey].is_string())
+            {
+                const std::string buttonName = binding[buttonNameKey].get<std::string>();
+                if (!buttonName.empty())
+                    buttonId = static_cast<int>(SDL_GetGamepadButtonFromString(buttonName.c_str()));
+            }
+
+            if (buttonId < 0 || buttonId >= static_cast<int>(SDL_GAMEPAD_BUTTON_COUNT))
+                return static_cast<int>(SDL_GAMEPAD_BUTTON_INVALID);
+            return buttonId;
+        }
+
+        void WriteGamepadButtonValue(nlohmann::json& binding, const char* buttonIdKey, const char* buttonNameKey, int buttonId)
+        {
+            if (buttonId < 0 || buttonId >= static_cast<int>(SDL_GAMEPAD_BUTTON_COUNT))
+            {
+                binding[buttonIdKey] = static_cast<int>(SDL_GAMEPAD_BUTTON_INVALID);
+                binding.erase(buttonNameKey);
+                return;
+            }
+
+            binding[buttonIdKey] = buttonId;
+            const char* name = SDL_GetGamepadStringForButton(static_cast<SDL_GamepadButton>(buttonId));
+            if (name && name[0] != '\0')
+                binding[buttonNameKey] = std::string(name);
+            else
+                binding.erase(buttonNameKey);
+        }
+
+        std::string GetGamepadAxisDisplayName(int axisId)
+        {
+            if (axisId < 0 || axisId >= static_cast<int>(SDL_GAMEPAD_AXIS_COUNT))
+                return "Invalid";
+            const char* name = SDL_GetGamepadStringForAxis(static_cast<SDL_GamepadAxis>(axisId));
+            if (name && name[0] != '\0')
+                return name;
+            return "Unknown";
+        }
+
+        int ReadGamepadAxisValue(const nlohmann::json& binding, const char* axisIdKey, const char* axisNameKey)
+        {
+            int axisId = binding.value(axisIdKey, static_cast<int>(SDL_GAMEPAD_AXIS_INVALID));
+            if (binding.contains(axisNameKey) && binding[axisNameKey].is_string())
+            {
+                const std::string axisName = binding[axisNameKey].get<std::string>();
+                if (!axisName.empty())
+                    axisId = static_cast<int>(SDL_GetGamepadAxisFromString(axisName.c_str()));
+            }
+
+            if (axisId < 0 || axisId >= static_cast<int>(SDL_GAMEPAD_AXIS_COUNT))
+                return static_cast<int>(SDL_GAMEPAD_AXIS_INVALID);
+            return axisId;
+        }
+
+        void WriteGamepadAxisValue(nlohmann::json& binding, const char* axisIdKey, const char* axisNameKey, int axisId)
+        {
+            if (axisId < 0 || axisId >= static_cast<int>(SDL_GAMEPAD_AXIS_COUNT))
+            {
+                binding[axisIdKey] = static_cast<int>(SDL_GAMEPAD_AXIS_INVALID);
+                binding.erase(axisNameKey);
+                return;
+            }
+
+            binding[axisIdKey] = axisId;
+            const char* name = SDL_GetGamepadStringForAxis(static_cast<SDL_GamepadAxis>(axisId));
+            if (name && name[0] != '\0')
+                binding[axisNameKey] = std::string(name);
+            else
+                binding.erase(axisNameKey);
+        }
+
+        nlohmann::json CreateDefaultBindingJson(const std::string& bindingType)
+        {
+            if (bindingType == "KeyboardButton")
+            {
+                nlohmann::json binding = nlohmann::json::object();
+                binding["binding"] = "KeyboardButton";
+                WriteScancodeValue(binding, "scancode", "key", static_cast<int>(SDL_SCANCODE_SPACE));
+                return binding;
+            }
+            if (bindingType == "MouseButton")
+            {
+                return nlohmann::json{
+                    { "binding", "MouseButton" },
+                    { "button", static_cast<int>(SDL_BUTTON_LEFT) }
+                };
+            }
+            if (bindingType == "KeyboardAxis1D")
+            {
+                nlohmann::json binding = nlohmann::json::object();
+                binding["binding"] = "KeyboardAxis1D";
+                WriteScancodeValue(binding, "negative_scancode", "negative", static_cast<int>(SDL_SCANCODE_A));
+                WriteScancodeValue(binding, "positive_scancode", "positive", static_cast<int>(SDL_SCANCODE_D));
+                binding["negative_scale"] = -1.0f;
+                binding["positive_scale"] = 1.0f;
+                return binding;
+            }
+            if (bindingType == "KeyboardAxis2D")
+            {
+                nlohmann::json binding = nlohmann::json::object();
+                binding["binding"] = "KeyboardAxis2D";
+                WriteScancodeValue(binding, "up_scancode", "up", static_cast<int>(SDL_SCANCODE_W));
+                WriteScancodeValue(binding, "down_scancode", "down", static_cast<int>(SDL_SCANCODE_S));
+                WriteScancodeValue(binding, "left_scancode", "left", static_cast<int>(SDL_SCANCODE_A));
+                WriteScancodeValue(binding, "right_scancode", "right", static_cast<int>(SDL_SCANCODE_D));
+                binding["scale"] = 1.0f;
+                return binding;
+            }
+            if (bindingType == "MouseDelta")
+            {
+                return nlohmann::json{
+                    { "binding", "MouseDelta" },
+                    { "sensitivity", 1.0f },
+                    { "invert_y", false }
+                };
+            }
+            if (bindingType == "GamepadButton")
+            {
+                nlohmann::json binding = nlohmann::json::object();
+                binding["binding"] = "GamepadButton";
+                WriteGamepadButtonValue(binding, "button_id", "button", static_cast<int>(SDL_GAMEPAD_BUTTON_SOUTH));
+                return binding;
+            }
+            if (bindingType == "GamepadAxis1D")
+            {
+                nlohmann::json binding = nlohmann::json::object();
+                binding["binding"] = "GamepadAxis1D";
+                WriteGamepadAxisValue(binding, "axis_id", "axis", static_cast<int>(SDL_GAMEPAD_AXIS_LEFTX));
+                binding["scale"] = 1.0f;
+                binding["deadzone"] = 0.15f;
+                return binding;
+            }
+
+            nlohmann::json binding = nlohmann::json::object();
+            binding["binding"] = "GamepadAxis2D";
+            WriteGamepadAxisValue(binding, "x_axis_id", "x_axis", static_cast<int>(SDL_GAMEPAD_AXIS_LEFTX));
+            WriteGamepadAxisValue(binding, "y_axis_id", "y_axis", static_cast<int>(SDL_GAMEPAD_AXIS_LEFTY));
+            binding["scale"] = 1.0f;
+            binding["deadzone"] = 0.15f;
+            binding["invert_y"] = false;
+            return binding;
+        }
+
+        std::string GetDefaultBindingTypeForActionType(const std::string& actionType)
+        {
+            if (actionType == "Axis1D")
+                return "KeyboardAxis1D";
+            if (actionType == "Axis2D")
+                return "KeyboardAxis2D";
+            return "KeyboardButton";
+        }
+
+        bool DrawInputBindingEditor(nlohmann::json& bindingJson)
+        {
+            bool modified = false;
+            if (!bindingJson.is_object())
+            {
+                bindingJson = CreateDefaultBindingJson("KeyboardButton");
+                return true;
+            }
+
+            std::string bindingType = bindingJson.value("binding", std::string("KeyboardButton"));
+            int bindingTypeIndex = 0;
+            for (size_t i = 0; i < kInputBindingTypes.size(); ++i)
+            {
+                if (bindingType == kInputBindingTypes[i])
+                {
+                    bindingTypeIndex = static_cast<int>(i);
+                    break;
+                }
+            }
+
+            if (ImGui::Combo("Binding Type", &bindingTypeIndex, kInputBindingTypes.data(), static_cast<int>(kInputBindingTypes.size())))
+            {
+                bindingType = kInputBindingTypes[static_cast<size_t>(bindingTypeIndex)];
+                bindingJson = CreateDefaultBindingJson(bindingType);
+                modified = true;
+            }
+
+            if (bindingType == "KeyboardButton")
+            {
+                int scancode = ReadScancodeValue(bindingJson, "scancode", "key");
+                if (ImGui::DragInt("Scancode", &scancode, 1.0f, 0, static_cast<int>(SDL_SCANCODE_COUNT) - 1))
+                {
+                    WriteScancodeValue(bindingJson, "scancode", "key", scancode);
+                    modified = true;
+                }
+                ImGui::TextDisabled("Key: %s", GetScancodeDisplayName(scancode).c_str());
+            }
+            else if (bindingType == "MouseButton")
+            {
+                int mouseButton = bindingJson.value("button", static_cast<int>(SDL_BUTTON_LEFT));
+                const char* mouseButtonNames[] = { "Left", "Middle", "Right", "X1", "X2" };
+                const int mouseButtonValues[] = {
+                    static_cast<int>(SDL_BUTTON_LEFT),
+                    static_cast<int>(SDL_BUTTON_MIDDLE),
+                    static_cast<int>(SDL_BUTTON_RIGHT),
+                    static_cast<int>(SDL_BUTTON_X1),
+                    static_cast<int>(SDL_BUTTON_X2)
+                };
+
+                int selectedMouseIndex = 0;
+                for (int i = 0; i < 5; ++i)
+                {
+                    if (mouseButton == mouseButtonValues[i])
+                    {
+                        selectedMouseIndex = i;
+                        break;
+                    }
+                }
+
+                if (ImGui::Combo("Mouse Button", &selectedMouseIndex, mouseButtonNames, 5))
+                {
+                    bindingJson["button"] = mouseButtonValues[selectedMouseIndex];
+                    modified = true;
+                }
+            }
+            else if (bindingType == "KeyboardAxis1D")
+            {
+                int negativeScancode = ReadScancodeValue(bindingJson, "negative_scancode", "negative");
+                int positiveScancode = ReadScancodeValue(bindingJson, "positive_scancode", "positive");
+                float negativeScale = bindingJson.value("negative_scale", -1.0f);
+                float positiveScale = bindingJson.value("positive_scale", 1.0f);
+
+                if (ImGui::DragInt("Negative Scancode", &negativeScancode, 1.0f, 0, static_cast<int>(SDL_SCANCODE_COUNT) - 1))
+                {
+                    WriteScancodeValue(bindingJson, "negative_scancode", "negative", negativeScancode);
+                    modified = true;
+                }
+                ImGui::TextDisabled("Negative Key: %s", GetScancodeDisplayName(negativeScancode).c_str());
+
+                if (ImGui::DragInt("Positive Scancode", &positiveScancode, 1.0f, 0, static_cast<int>(SDL_SCANCODE_COUNT) - 1))
+                {
+                    WriteScancodeValue(bindingJson, "positive_scancode", "positive", positiveScancode);
+                    modified = true;
+                }
+                ImGui::TextDisabled("Positive Key: %s", GetScancodeDisplayName(positiveScancode).c_str());
+
+                if (ImGui::DragFloat("Negative Scale", &negativeScale, 0.05f))
+                {
+                    bindingJson["negative_scale"] = negativeScale;
+                    modified = true;
+                }
+                if (ImGui::DragFloat("Positive Scale", &positiveScale, 0.05f))
+                {
+                    bindingJson["positive_scale"] = positiveScale;
+                    modified = true;
+                }
+            }
+            else if (bindingType == "KeyboardAxis2D")
+            {
+                int upScancode = ReadScancodeValue(bindingJson, "up_scancode", "up");
+                int downScancode = ReadScancodeValue(bindingJson, "down_scancode", "down");
+                int leftScancode = ReadScancodeValue(bindingJson, "left_scancode", "left");
+                int rightScancode = ReadScancodeValue(bindingJson, "right_scancode", "right");
+                float scale = bindingJson.value("scale", 1.0f);
+
+                if (ImGui::DragInt("Up Scancode", &upScancode, 1.0f, 0, static_cast<int>(SDL_SCANCODE_COUNT) - 1))
+                {
+                    WriteScancodeValue(bindingJson, "up_scancode", "up", upScancode);
+                    modified = true;
+                }
+                ImGui::TextDisabled("Up Key: %s", GetScancodeDisplayName(upScancode).c_str());
+
+                if (ImGui::DragInt("Down Scancode", &downScancode, 1.0f, 0, static_cast<int>(SDL_SCANCODE_COUNT) - 1))
+                {
+                    WriteScancodeValue(bindingJson, "down_scancode", "down", downScancode);
+                    modified = true;
+                }
+                ImGui::TextDisabled("Down Key: %s", GetScancodeDisplayName(downScancode).c_str());
+
+                if (ImGui::DragInt("Left Scancode", &leftScancode, 1.0f, 0, static_cast<int>(SDL_SCANCODE_COUNT) - 1))
+                {
+                    WriteScancodeValue(bindingJson, "left_scancode", "left", leftScancode);
+                    modified = true;
+                }
+                ImGui::TextDisabled("Left Key: %s", GetScancodeDisplayName(leftScancode).c_str());
+
+                if (ImGui::DragInt("Right Scancode", &rightScancode, 1.0f, 0, static_cast<int>(SDL_SCANCODE_COUNT) - 1))
+                {
+                    WriteScancodeValue(bindingJson, "right_scancode", "right", rightScancode);
+                    modified = true;
+                }
+                ImGui::TextDisabled("Right Key: %s", GetScancodeDisplayName(rightScancode).c_str());
+
+                if (ImGui::DragFloat("Scale", &scale, 0.05f))
+                {
+                    bindingJson["scale"] = scale;
+                    modified = true;
+                }
+            }
+            else if (bindingType == "MouseDelta")
+            {
+                float sensitivity = bindingJson.value("sensitivity", 1.0f);
+                bool invertY = bindingJson.value("invert_y", false);
+                if (ImGui::DragFloat("Sensitivity", &sensitivity, 0.05f, 0.0f, 50.0f))
+                {
+                    bindingJson["sensitivity"] = sensitivity;
+                    modified = true;
+                }
+                if (ImGui::Checkbox("Invert Y", &invertY))
+                {
+                    bindingJson["invert_y"] = invertY;
+                    modified = true;
+                }
+            }
+            else if (bindingType == "GamepadButton")
+            {
+                int buttonId = ReadGamepadButtonValue(bindingJson, "button_id", "button");
+                if (ImGui::BeginCombo("Gamepad Button", GetGamepadButtonDisplayName(buttonId).c_str()))
+                {
+                    for (int id = -1; id < static_cast<int>(SDL_GAMEPAD_BUTTON_COUNT); ++id)
+                    {
+                        const bool selected = (buttonId == id);
+                        const std::string optionLabel = GetGamepadButtonDisplayName(id);
+                        if (ImGui::Selectable(optionLabel.c_str(), selected))
+                        {
+                            WriteGamepadButtonValue(bindingJson, "button_id", "button", id);
+                            modified = true;
+                        }
+                        if (selected)
+                            ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+            }
+            else if (bindingType == "GamepadAxis1D")
+            {
+                int axisId = ReadGamepadAxisValue(bindingJson, "axis_id", "axis");
+                float scale = bindingJson.value("scale", 1.0f);
+                float deadzone = bindingJson.value("deadzone", 0.15f);
+
+                if (ImGui::BeginCombo("Gamepad Axis", GetGamepadAxisDisplayName(axisId).c_str()))
+                {
+                    for (int id = -1; id < static_cast<int>(SDL_GAMEPAD_AXIS_COUNT); ++id)
+                    {
+                        const bool selected = (axisId == id);
+                        const std::string optionLabel = GetGamepadAxisDisplayName(id);
+                        if (ImGui::Selectable(optionLabel.c_str(), selected))
+                        {
+                            WriteGamepadAxisValue(bindingJson, "axis_id", "axis", id);
+                            modified = true;
+                        }
+                        if (selected)
+                            ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+
+                if (ImGui::DragFloat("Scale", &scale, 0.05f))
+                {
+                    bindingJson["scale"] = scale;
+                    modified = true;
+                }
+                if (ImGui::DragFloat("Deadzone", &deadzone, 0.01f, 0.0f, 1.0f))
+                {
+                    bindingJson["deadzone"] = std::clamp(deadzone, 0.0f, 1.0f);
+                    modified = true;
+                }
+            }
+            else if (bindingType == "GamepadAxis2D")
+            {
+                int xAxisId = ReadGamepadAxisValue(bindingJson, "x_axis_id", "x_axis");
+                int yAxisId = ReadGamepadAxisValue(bindingJson, "y_axis_id", "y_axis");
+                float scale = bindingJson.value("scale", 1.0f);
+                float deadzone = bindingJson.value("deadzone", 0.15f);
+                bool invertY = bindingJson.value("invert_y", false);
+
+                if (ImGui::BeginCombo("X Axis", GetGamepadAxisDisplayName(xAxisId).c_str()))
+                {
+                    for (int id = -1; id < static_cast<int>(SDL_GAMEPAD_AXIS_COUNT); ++id)
+                    {
+                        const bool selected = (xAxisId == id);
+                        const std::string optionLabel = GetGamepadAxisDisplayName(id);
+                        if (ImGui::Selectable(optionLabel.c_str(), selected))
+                        {
+                            WriteGamepadAxisValue(bindingJson, "x_axis_id", "x_axis", id);
+                            modified = true;
+                        }
+                        if (selected)
+                            ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+
+                if (ImGui::BeginCombo("Y Axis", GetGamepadAxisDisplayName(yAxisId).c_str()))
+                {
+                    for (int id = -1; id < static_cast<int>(SDL_GAMEPAD_AXIS_COUNT); ++id)
+                    {
+                        const bool selected = (yAxisId == id);
+                        const std::string optionLabel = GetGamepadAxisDisplayName(id);
+                        if (ImGui::Selectable(optionLabel.c_str(), selected))
+                        {
+                            WriteGamepadAxisValue(bindingJson, "y_axis_id", "y_axis", id);
+                            modified = true;
+                        }
+                        if (selected)
+                            ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+
+                if (ImGui::DragFloat("Scale", &scale, 0.05f))
+                {
+                    bindingJson["scale"] = scale;
+                    modified = true;
+                }
+                if (ImGui::DragFloat("Deadzone", &deadzone, 0.01f, 0.0f, 1.0f))
+                {
+                    bindingJson["deadzone"] = std::clamp(deadzone, 0.0f, 1.0f);
+                    modified = true;
+                }
+                if (ImGui::Checkbox("Invert Y", &invertY))
+                {
+                    bindingJson["invert_y"] = invertY;
+                    modified = true;
+                }
+            }
+
+            bindingJson["binding"] = bindingType;
+            return modified;
+        }
     }
 
     void DrawTextureInspector(Scene* scene,
@@ -424,6 +968,273 @@ namespace Limitless::EditorInspectorPanel
             s_State.Json["TileSizePixels"] = { std::max(1, tileSizePixels[0]), std::max(1, tileSizePixels[1]) };
             (void)SaveTilesetJson(scene, selectedTilesetAssetKey, s_State.Json, s_State.ResolvedPath);
         }
+    }
+
+    void DrawInputActionsAssetInspector(std::string& selectedInputActionsAssetKey)
+    {
+        struct State
+        {
+            std::string LoadedKey;
+            std::filesystem::path ResolvedPath;
+            nlohmann::json Json = nlohmann::json::object();
+            bool Loaded = false;
+        };
+        static State s_State;
+
+        if (selectedInputActionsAssetKey.empty())
+            return;
+
+        if (!s_State.Loaded || s_State.LoadedKey != selectedInputActionsAssetKey)
+        {
+            s_State = {};
+            s_State.LoadedKey = selectedInputActionsAssetKey;
+            s_State.Loaded = LoadInputActionsJson(selectedInputActionsAssetKey, s_State.Json, s_State.ResolvedPath);
+            if (!s_State.Loaded)
+            {
+                ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Failed to load input actions JSON: %s", selectedInputActionsAssetKey.c_str());
+                return;
+            }
+        }
+
+        bool modified = false;
+        bool saveFailed = false;
+
+        ImGui::Text("Input Actions: %s", std::filesystem::path(selectedInputActionsAssetKey).filename().string().c_str());
+        ImGui::TextDisabled("Asset Key: %s", selectedInputActionsAssetKey.c_str());
+        ImGui::Separator();
+
+        if (!s_State.Json.contains("maps") || !s_State.Json["maps"].is_array())
+        {
+            s_State.Json["maps"] = nlohmann::json::array();
+            modified = true;
+        }
+
+        auto& maps = s_State.Json["maps"];
+
+        ImGui::TextUnformatted("Action Maps");
+        if (ImGui::Button("Add Action Map", ImVec2(160.0f, 0.0f)))
+        {
+            nlohmann::json newMap = nlohmann::json::object();
+            newMap["name"] = "NewMap" + std::to_string(maps.size() + 1);
+            newMap["enabled"] = true;
+            newMap["actions"] = nlohmann::json::array();
+            maps.push_back(std::move(newMap));
+            modified = true;
+        }
+
+        if (maps.empty())
+            ImGui::TextDisabled("No action maps yet.");
+
+        int removeMapIndex = -1;
+
+        for (size_t mapIndex = 0; mapIndex < maps.size(); ++mapIndex)
+        {
+            auto& mapJson = maps[mapIndex];
+            if (!mapJson.is_object())
+            {
+                mapJson = nlohmann::json::object();
+                modified = true;
+            }
+
+            if (!mapJson.contains("name") || !mapJson["name"].is_string())
+            {
+                mapJson["name"] = "Map" + std::to_string(mapIndex + 1);
+                modified = true;
+            }
+            if (!mapJson.contains("enabled") || !mapJson["enabled"].is_boolean())
+            {
+                mapJson["enabled"] = true;
+                modified = true;
+            }
+            if (!mapJson.contains("actions") || !mapJson["actions"].is_array())
+            {
+                mapJson["actions"] = nlohmann::json::array();
+                modified = true;
+            }
+
+            std::string mapName = mapJson.value("name", std::string("Map" + std::to_string(mapIndex + 1)));
+            const std::string mapLabel = mapName.empty()
+                ? ("Map " + std::to_string(mapIndex + 1) + "##InputMap_" + std::to_string(mapIndex))
+                : ("Map: " + mapName + "##InputMap_" + std::to_string(mapIndex));
+
+            ImGuiTreeNodeFlags mapFlags = ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
+            const bool mapOpen = ImGui::TreeNodeEx(mapLabel.c_str(), mapFlags);
+
+            ImGui::SameLine();
+            const std::string removeMapButtonLabel = "Remove##RemoveMap_" + std::to_string(mapIndex);
+            if (ImGui::Button(removeMapButtonLabel.c_str()))
+                removeMapIndex = static_cast<int>(mapIndex);
+
+            if (!mapOpen)
+                continue;
+
+            ImGui::PushID(static_cast<int>(mapIndex));
+
+            std::array<char, 128> mapNameBuffer{};
+            std::snprintf(mapNameBuffer.data(), mapNameBuffer.size(), "%s", mapName.c_str());
+            if (ImGui::InputText("Map Name", mapNameBuffer.data(), mapNameBuffer.size()))
+            {
+                mapJson["name"] = std::string(mapNameBuffer.data());
+                modified = true;
+            }
+
+            bool mapEnabled = mapJson.value("enabled", true);
+            if (ImGui::Checkbox("Enabled", &mapEnabled))
+            {
+                mapJson["enabled"] = mapEnabled;
+                modified = true;
+            }
+
+            auto& actions = mapJson["actions"];
+            int removeActionIndex = -1;
+
+            if (ImGui::Button("Add Action", ImVec2(120.0f, 0.0f)))
+            {
+                nlohmann::json newAction = nlohmann::json::object();
+                newAction["name"] = "Action" + std::to_string(actions.size() + 1);
+                newAction["type"] = "Button";
+                newAction["bindings"] = nlohmann::json::array();
+                actions.push_back(std::move(newAction));
+                modified = true;
+            }
+
+            if (actions.empty())
+                ImGui::TextDisabled("No actions in this map.");
+
+            for (size_t actionIndex = 0; actionIndex < actions.size(); ++actionIndex)
+            {
+                auto& actionJson = actions[actionIndex];
+                if (!actionJson.is_object())
+                {
+                    actionJson = nlohmann::json::object();
+                    modified = true;
+                }
+
+                if (!actionJson.contains("name") || !actionJson["name"].is_string())
+                {
+                    actionJson["name"] = "Action" + std::to_string(actionIndex + 1);
+                    modified = true;
+                }
+                if (!actionJson.contains("type") || !actionJson["type"].is_string())
+                {
+                    actionJson["type"] = "Button";
+                    modified = true;
+                }
+                if (!actionJson.contains("bindings") || !actionJson["bindings"].is_array())
+                {
+                    actionJson["bindings"] = nlohmann::json::array();
+                    modified = true;
+                }
+
+                const std::string actionName = actionJson.value("name", std::string("Action" + std::to_string(actionIndex + 1)));
+                const std::string actionLabel = actionName.empty()
+                    ? ("Action " + std::to_string(actionIndex + 1) + "##InputAction_" + std::to_string(actionIndex))
+                    : ("Action: " + actionName + "##InputAction_" + std::to_string(actionIndex));
+                const bool actionOpen = ImGui::TreeNodeEx(actionLabel.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth);
+
+                ImGui::SameLine();
+                const std::string removeActionButtonLabel = "Remove##RemoveAction_" + std::to_string(actionIndex);
+                if (ImGui::Button(removeActionButtonLabel.c_str()))
+                    removeActionIndex = static_cast<int>(actionIndex);
+
+                if (!actionOpen)
+                    continue;
+
+                ImGui::PushID(static_cast<int>(actionIndex));
+
+                std::array<char, 128> actionNameBuffer{};
+                std::snprintf(actionNameBuffer.data(), actionNameBuffer.size(), "%s", actionName.c_str());
+                if (ImGui::InputText("Action Name", actionNameBuffer.data(), actionNameBuffer.size()))
+                {
+                    actionJson["name"] = std::string(actionNameBuffer.data());
+                    modified = true;
+                }
+
+                std::string actionType = actionJson.value("type", std::string("Button"));
+                int actionTypeIndex = 0;
+                for (size_t typeIndex = 0; typeIndex < kInputActionValueTypes.size(); ++typeIndex)
+                {
+                    if (actionType == kInputActionValueTypes[typeIndex])
+                    {
+                        actionTypeIndex = static_cast<int>(typeIndex);
+                        break;
+                    }
+                }
+                if (ImGui::Combo("Action Type", &actionTypeIndex, kInputActionValueTypes.data(), static_cast<int>(kInputActionValueTypes.size())))
+                {
+                    actionJson["type"] = std::string(kInputActionValueTypes[static_cast<size_t>(actionTypeIndex)]);
+                    actionType = actionJson["type"].get<std::string>();
+                    modified = true;
+                }
+
+                auto& bindings = actionJson["bindings"];
+                int removeBindingIndex = -1;
+
+                if (ImGui::Button("Add Binding", ImVec2(120.0f, 0.0f)))
+                {
+                    const std::string defaultBindingType = GetDefaultBindingTypeForActionType(actionType);
+                    bindings.push_back(CreateDefaultBindingJson(defaultBindingType));
+                    modified = true;
+                }
+
+                if (bindings.empty())
+                    ImGui::TextDisabled("No bindings on this action.");
+
+                for (size_t bindingIndex = 0; bindingIndex < bindings.size(); ++bindingIndex)
+                {
+                    auto& bindingJson = bindings[bindingIndex];
+                    const std::string bindingLabel = "Binding " + std::to_string(bindingIndex + 1) + "##Binding_" + std::to_string(bindingIndex);
+                    const bool bindingOpen = ImGui::TreeNodeEx(bindingLabel.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth);
+
+                    ImGui::SameLine();
+                    const std::string removeBindingButtonLabel = "Remove##RemoveBinding_" + std::to_string(bindingIndex);
+                    if (ImGui::Button(removeBindingButtonLabel.c_str()))
+                        removeBindingIndex = static_cast<int>(bindingIndex);
+
+                    if (bindingOpen)
+                    {
+                        ImGui::PushID(static_cast<int>(bindingIndex));
+                        if (DrawInputBindingEditor(bindingJson))
+                            modified = true;
+                        ImGui::PopID();
+                        ImGui::TreePop();
+                    }
+                }
+
+                if (removeBindingIndex >= 0)
+                {
+                    bindings.erase(static_cast<size_t>(removeBindingIndex));
+                    modified = true;
+                }
+
+                ImGui::PopID();
+                ImGui::TreePop();
+            }
+
+            if (removeActionIndex >= 0)
+            {
+                actions.erase(static_cast<size_t>(removeActionIndex));
+                modified = true;
+            }
+
+            ImGui::PopID();
+            ImGui::TreePop();
+        }
+
+        if (removeMapIndex >= 0)
+        {
+            maps.erase(static_cast<size_t>(removeMapIndex));
+            modified = true;
+        }
+
+        if (modified)
+        {
+            if (!SaveInputActionsJsonAndReload(selectedInputActionsAssetKey, s_State.Json, s_State.ResolvedPath))
+                saveFailed = true;
+        }
+
+        if (saveFailed)
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Failed to save input actions asset.");
     }
 
     void DrawNativeScriptAssetInspector(std::string& selectedNativeScriptAssetKey)

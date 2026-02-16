@@ -17,6 +17,11 @@
 
 namespace Limitless
 {
+    namespace Assets
+    {
+        class InputActionsAssetResource;
+    }
+
     class InputRebinding;
 
     class InputSystem final
@@ -136,6 +141,8 @@ namespace Limitless
         std::vector<std::shared_ptr<InputActionAsset>> m_ActionAssetOverrideStack;
         std::vector<std::string> m_AdditionalProjectActionAssetKeys;
         std::unordered_map<std::string, std::shared_ptr<InputActionAsset>> m_AdditionalProjectActionAssetsByKey;
+        std::shared_ptr<Assets::InputActionsAssetResource> m_ProjectActionAssetResource;
+        std::unordered_map<std::string, std::shared_ptr<Assets::InputActionsAssetResource>> m_AdditionalProjectActionAssetResourcesByKey;
         mutable std::unordered_set<std::string> m_WarnedMissingActions;
 
         std::shared_ptr<InputRebinding> m_RebindingSession;

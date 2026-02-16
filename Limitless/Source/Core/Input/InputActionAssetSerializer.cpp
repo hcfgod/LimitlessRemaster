@@ -36,43 +36,72 @@ namespace Limitless
 
     static SDL_Scancode ParseScancode(const json& obj, const char* scancodeKey, const char* nameKey)
     {
-        if (obj.contains(scancodeKey))
-        {
-            return static_cast<SDL_Scancode>(obj[scancodeKey].get<int>());
-        }
-        if (obj.contains(nameKey))
+        // Prefer explicit human-readable names when valid.
+        // This makes manual JSON edits reliable even if a stale numeric scancode is still present.
+        if (obj.contains(nameKey) && obj[nameKey].is_string())
         {
             const std::string name = obj[nameKey].get<std::string>();
-            return SDL_GetScancodeFromName(name.c_str());
+            if (!name.empty())
+            {
+                const SDL_Scancode parsed = SDL_GetScancodeFromName(name.c_str());
+                if (parsed != SDL_SCANCODE_UNKNOWN)
+                    return parsed;
+            }
         }
+
+        if (obj.contains(scancodeKey) && obj[scancodeKey].is_number_integer())
+        {
+            const int rawScancode = obj[scancodeKey].get<int>();
+            if (rawScancode >= 0 && rawScancode < static_cast<int>(SDL_SCANCODE_COUNT))
+                return static_cast<SDL_Scancode>(rawScancode);
+        }
+
         return SDL_SCANCODE_UNKNOWN;
     }
 
     static SDL_GamepadButton ParseGamepadButton(const json& obj, const char* buttonKey, const char* nameKey)
     {
-        if (obj.contains(buttonKey))
-        {
-            return static_cast<SDL_GamepadButton>(obj[buttonKey].get<int>());
-        }
-        if (obj.contains(nameKey))
+        if (obj.contains(nameKey) && obj[nameKey].is_string())
         {
             const std::string name = obj[nameKey].get<std::string>();
-            return SDL_GetGamepadButtonFromString(name.c_str());
+            if (!name.empty())
+            {
+                const SDL_GamepadButton parsed = SDL_GetGamepadButtonFromString(name.c_str());
+                if (parsed != SDL_GAMEPAD_BUTTON_INVALID)
+                    return parsed;
+            }
         }
+
+        if (obj.contains(buttonKey) && obj[buttonKey].is_number_integer())
+        {
+            const int rawButton = obj[buttonKey].get<int>();
+            if (rawButton >= 0 && rawButton < static_cast<int>(SDL_GAMEPAD_BUTTON_COUNT))
+                return static_cast<SDL_GamepadButton>(rawButton);
+        }
+
         return SDL_GAMEPAD_BUTTON_INVALID;
     }
 
     static SDL_GamepadAxis ParseGamepadAxis(const json& obj, const char* axisKey, const char* nameKey)
     {
-        if (obj.contains(axisKey))
-        {
-            return static_cast<SDL_GamepadAxis>(obj[axisKey].get<int>());
-        }
-        if (obj.contains(nameKey))
+        if (obj.contains(nameKey) && obj[nameKey].is_string())
         {
             const std::string name = obj[nameKey].get<std::string>();
-            return SDL_GetGamepadAxisFromString(name.c_str());
+            if (!name.empty())
+            {
+                const SDL_GamepadAxis parsed = SDL_GetGamepadAxisFromString(name.c_str());
+                if (parsed != SDL_GAMEPAD_AXIS_INVALID)
+                    return parsed;
+            }
         }
+
+        if (obj.contains(axisKey) && obj[axisKey].is_number_integer())
+        {
+            const int rawAxis = obj[axisKey].get<int>();
+            if (rawAxis >= 0 && rawAxis < static_cast<int>(SDL_GAMEPAD_AXIS_COUNT))
+                return static_cast<SDL_GamepadAxis>(rawAxis);
+        }
+
         return SDL_GAMEPAD_AXIS_INVALID;
     }
 

@@ -40,6 +40,7 @@ namespace Limitless
                   std::string& selectedNativeScriptAssetKey,
                   std::string& selectedPrefabAssetKey,
                   std::string& selectedTilesetAssetKey,
+                  std::string& selectedInputActionsAssetKey,
                   EditorUndoService* undoService);
     }
 }

@@ -146,6 +146,9 @@ namespace Limitless
         /// Selected tileset asset key when user clicks a tileset in the Project panel.
         std::string m_SelectedTilesetAssetKey;
 
+        /// Selected input actions asset key when user clicks an input actions asset in the Project panel.
+        std::string m_SelectedInputActionsAssetKey;
+
         std::string m_CurrentSceneAssetKey;
         std::string m_EditSceneStoredAssetKey;
         std::string m_PrefabModeReturnSceneAssetKey;

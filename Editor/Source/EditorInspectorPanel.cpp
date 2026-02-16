@@ -1268,6 +1268,7 @@ namespace Limitless::EditorInspectorPanel
               std::string& selectedNativeScriptAssetKey,
               std::string& selectedPrefabAssetKey,
               std::string& selectedTilesetAssetKey,
+              std::string& selectedInputActionsAssetKey,
               EditorUndoService* undoService)
     {
         auto& nativeScriptAuthoringState = GetNativeScriptAuthoringState();
@@ -1302,7 +1303,11 @@ namespace Limitless::EditorInspectorPanel
 
         ImGui::Begin("Inspector");
 
-        if (!selectedMaterialAssetKey.empty())
+        if (!selectedInputActionsAssetKey.empty())
+        {
+            DrawInputActionsAssetInspector(selectedInputActionsAssetKey);
+        }
+        else if (!selectedMaterialAssetKey.empty())
         {
             DrawMaterialInspector(texturePayloadId, shaderPayloadId, selectedMaterialAssetKey, cachedMaterialAsset);
         }

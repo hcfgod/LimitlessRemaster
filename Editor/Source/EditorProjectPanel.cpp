@@ -79,6 +79,17 @@ namespace Limitless::EditorProjectPanel
                    lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
         }
 
+        bool IsInputActionsExtension(const std::filesystem::path& path)
+        {
+            std::string lowerFileName = path.filename().string();
+            for (char& character : lowerFileName)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            constexpr const char* inputActionsSuffix = ".inputactions.json";
+            const std::string suffixString = inputActionsSuffix;
+            return lowerFileName.size() >= suffixString.size() &&
+                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
+        }
+
         bool IsPrefabExtension(const std::filesystem::path& path)
         {
             std::string lowerFileName = path.filename().string();
@@ -418,6 +429,7 @@ namespace Limitless::EditorProjectPanel
                            std::string& selectedNativeScriptAssetKey,
                            std::string& selectedPrefabAssetKey,
                            std::string& selectedTilesetAssetKey,
+                           std::string& selectedInputActionsAssetKey,
                            const char* texturePayloadId,
                            const char* audioPayloadId,
                            const char* assetMovePayloadId,
@@ -604,6 +616,7 @@ namespace Limitless::EditorProjectPanel
                                       selectedNativeScriptAssetKey,
                                       selectedPrefabAssetKey,
                                       selectedTilesetAssetKey,
+                                      selectedInputActionsAssetKey,
                                       texturePayloadId,
                                       audioPayloadId,
                                       assetMovePayloadId,
@@ -664,6 +677,7 @@ namespace Limitless::EditorProjectPanel
                                 selectedTextureAssetKey.clear();
                                 selectedMaterialAssetKey.clear();
                                 selectedTilesetAssetKey.clear();
+                                selectedInputActionsAssetKey.clear();
                                 selectedEntity = entt::null;
                                 cachedTextureAsset.reset();
                                 cachedMaterialAsset.reset();
@@ -713,6 +727,7 @@ namespace Limitless::EditorProjectPanel
                                     selectedTextureAssetKey.clear();
                                     selectedMaterialAssetKey.clear();
                                     selectedTilesetAssetKey.clear();
+                                    selectedInputActionsAssetKey.clear();
                                     selectedEntity = entt::null;
                                     cachedTextureAsset.reset();
                                     cachedMaterialAsset.reset();
@@ -728,6 +743,7 @@ namespace Limitless::EditorProjectPanel
                                     selectedTextureAssetKey.clear();
                                     selectedMaterialAssetKey.clear();
                                     selectedTilesetAssetKey.clear();
+                                    selectedInputActionsAssetKey.clear();
                                     selectedEntity = entt::null;
                                     cachedTextureAsset.reset();
                                     cachedMaterialAsset.reset();
@@ -744,6 +760,7 @@ namespace Limitless::EditorProjectPanel
                     const bool isScene = IsSceneExtension(entry);
                     const bool isMaterial = IsMaterialExtension(entry);
                     const bool isTileset = IsTilesetExtension(entry);
+                    const bool isInputActions = IsInputActionsExtension(entry);
                     const bool isPrefab = IsPrefabExtension(entry);
                     const bool isShader = IsShaderExtension(entry);
                     const bool isAudio = IsAudioExtension(entry);
@@ -762,6 +779,7 @@ namespace Limitless::EditorProjectPanel
                         (isTexture && (selectedTextureAssetKey == assetKey)) ||
                         (isMaterial && (selectedMaterialAssetKey == assetKey)) ||
                         (isTileset && (selectedTilesetAssetKey == assetKey)) ||
+                        (isInputActions && (selectedInputActionsAssetKey == assetKey)) ||
                         (isNativeScriptFile && (selectedNativeScriptAssetKey == assetKey)) ||
                         (isPrefab && (selectedPrefabAssetKey == assetKey));
                     ImGui::TreeNodeEx(treeLabel.c_str(), isSelected ? (flags | ImGuiTreeNodeFlags_Selected) : flags);
@@ -779,6 +797,7 @@ namespace Limitless::EditorProjectPanel
                             selectedNativeScriptAssetKey.clear();
                             selectedPrefabAssetKey.clear();
                             selectedTilesetAssetKey.clear();
+                            selectedInputActionsAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedTextureAsset.reset();
                             cachedMaterialAsset.reset();
@@ -790,6 +809,7 @@ namespace Limitless::EditorProjectPanel
                             selectedNativeScriptAssetKey.clear();
                             selectedPrefabAssetKey.clear();
                             selectedTilesetAssetKey.clear();
+                            selectedInputActionsAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedMaterialAsset.reset();
                             cachedTextureAsset.reset();
@@ -801,6 +821,7 @@ namespace Limitless::EditorProjectPanel
                             selectedMaterialAssetKey.clear();
                             selectedNativeScriptAssetKey.clear();
                             selectedPrefabAssetKey.clear();
+                            selectedInputActionsAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedMaterialAsset.reset();
                             cachedTextureAsset.reset();
@@ -812,6 +833,7 @@ namespace Limitless::EditorProjectPanel
                             selectedMaterialAssetKey.clear();
                             selectedPrefabAssetKey.clear();
                             selectedTilesetAssetKey.clear();
+                            selectedInputActionsAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedMaterialAsset.reset();
                             cachedTextureAsset.reset();
@@ -822,6 +844,19 @@ namespace Limitless::EditorProjectPanel
                             selectedTextureAssetKey.clear();
                             selectedMaterialAssetKey.clear();
                             selectedNativeScriptAssetKey.clear();
+                            selectedTilesetAssetKey.clear();
+                            selectedInputActionsAssetKey.clear();
+                            selectedEntity = entt::null;
+                            cachedMaterialAsset.reset();
+                            cachedTextureAsset.reset();
+                        }
+                        else if (isInputActions)
+                        {
+                            selectedInputActionsAssetKey = assetKey;
+                            selectedTextureAssetKey.clear();
+                            selectedMaterialAssetKey.clear();
+                            selectedNativeScriptAssetKey.clear();
+                            selectedPrefabAssetKey.clear();
                             selectedTilesetAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedMaterialAsset.reset();
@@ -835,6 +870,7 @@ namespace Limitless::EditorProjectPanel
                         selectedMaterialAssetKey.clear();
                         selectedNativeScriptAssetKey.clear();
                         selectedTilesetAssetKey.clear();
+                        selectedInputActionsAssetKey.clear();
                         selectedEntity = entt::null;
                         cachedTextureAsset.reset();
                         cachedMaterialAsset.reset();
@@ -843,12 +879,14 @@ namespace Limitless::EditorProjectPanel
                     {
                         selectedNativeScriptAssetKey.clear();
                         selectedTilesetAssetKey.clear();
+                        selectedInputActionsAssetKey.clear();
                         onSceneActivated(assetKey);
                     }
                     else if (isPrefab && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onPrefabOpened)
                     {
                         selectedNativeScriptAssetKey.clear();
                         selectedTilesetAssetKey.clear();
+                        selectedInputActionsAssetKey.clear();
                         selectedPrefabAssetKey = assetKey;
                         onPrefabOpened(assetKey);
                     }
@@ -858,6 +896,7 @@ namespace Limitless::EditorProjectPanel
                         selectedTextureAssetKey.clear();
                         selectedNativeScriptAssetKey.clear();
                         selectedTilesetAssetKey.clear();
+                        selectedInputActionsAssetKey.clear();
                         selectedEntity = entt::null;
                         cachedMaterialAsset.reset();
                         cachedTextureAsset.reset();
@@ -869,6 +908,7 @@ namespace Limitless::EditorProjectPanel
                         selectedMaterialAssetKey.clear();
                         selectedNativeScriptAssetKey.clear();
                         selectedPrefabAssetKey.clear();
+                        selectedInputActionsAssetKey.clear();
                         selectedEntity = entt::null;
                         cachedMaterialAsset.reset();
                         cachedTextureAsset.reset();
@@ -1248,7 +1288,8 @@ namespace Limitless::EditorProjectPanel
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
               std::string& selectedNativeScriptAssetKey,
               std::string& selectedPrefabAssetKey,
-                                     std::string& selectedTilesetAssetKey,
+              std::string& selectedTilesetAssetKey,
+              std::string& selectedInputActionsAssetKey,
               const char* texturePayloadId,
               const char* audioPayloadId,
               const char* assetMovePayloadId,
@@ -1423,6 +1464,7 @@ namespace Limitless::EditorProjectPanel
                           selectedNativeScriptAssetKey,
                           selectedPrefabAssetKey,
                           selectedTilesetAssetKey,
+                          selectedInputActionsAssetKey,
                           texturePayloadId,
                           audioPayloadId,
                           assetMovePayloadId,

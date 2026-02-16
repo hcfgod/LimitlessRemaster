@@ -2,6 +2,7 @@
 
 #include "Core/Input/InputSystem.h"
 #include "Core/Input/InputAction.h"
+#include "Core/Input/InputActionAssetSerializer.h"
 
 #include <SDL3/SDL_events.h>
 
@@ -138,6 +139,47 @@ TEST_SUITE("Input Actions")
         input.BeginFrame();
         input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_A));
         input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_B));
+        input.UpdateActions();
+    }
+
+    TEST_CASE("Serializer prefers key name over stale scancode for KeyboardButton bindings")
+    {
+        auto& input = Limitless::GetInputSystem();
+        input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_SPACE));
+        input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_W));
+
+        const std::string jsonText = R"({
+            "maps": [
+                {
+                    "name": "Gameplay",
+                    "enabled": true,
+                    "actions": [
+                        {
+                            "name": "Jump",
+                            "type": "Button",
+                            "bindings": [
+                                { "binding": "KeyboardButton", "key": "Space", "scancode": 44 },
+                                { "binding": "KeyboardButton", "key": "W", "scancode": 44 }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        })";
+
+        auto asset = std::make_shared<Limitless::InputActionAsset>();
+        const auto loadResult = Limitless::InputActionAssetSerializer::LoadIntoFromString(*asset, jsonText, "TestInputActions");
+        REQUIRE(loadResult.IsSuccess());
+
+        input.SetProjectActionAsset(asset);
+
+        input.BeginFrame();
+        input.OnSdlEvent(MakeKeyDown(SDL_SCANCODE_W));
+        input.UpdateActions();
+        CHECK(input.ReadActionButton("Gameplay", "Jump") == true);
+
+        input.BeginFrame();
+        input.OnSdlEvent(MakeKeyUp(SDL_SCANCODE_W));
         input.UpdateActions();
     }
 }

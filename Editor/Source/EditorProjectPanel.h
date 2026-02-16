@@ -71,6 +71,7 @@ namespace Limitless
                   std::string& selectedNativeScriptAssetKey,
                   std::string& selectedPrefabAssetKey,
                   std::string& selectedTilesetAssetKey,
+                  std::string& selectedInputActionsAssetKey,
                   const char* texturePayloadId,
                   const char* audioPayloadId,
                   const char* assetMovePayloadId,

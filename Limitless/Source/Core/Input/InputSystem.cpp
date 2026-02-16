@@ -140,20 +140,23 @@ namespace Limitless
 
     void InputSystem::SetProjectActionAssetFromKey(const std::string& key)
     {
-        auto asset = Assets::AssetManager::LoadBlocking<Assets::InputActionsAssetResource>(key);
-        if (!asset || !asset->GetValue())
+        auto resource = Assets::AssetManager::LoadBlocking<Assets::InputActionsAssetResource>(key);
+        if (!resource || !resource->GetValue())
         {
             LT_CORE_ERROR("InputSystem: failed to load InputActions asset key='{}'", key);
             return;
         }
 
-        SetProjectActionAsset(asset->GetValue());
+        // Keep the resource alive so in-place reloads propagate to this shared InputActionAsset.
+        m_ProjectActionAssetResource = resource;
+        SetProjectActionAsset(resource->GetValue());
     }
 
     void InputSystem::SetProjectAdditionalActionAssetsFromKeys(const std::vector<std::string>& keys)
     {
         m_AdditionalProjectActionAssetKeys.clear();
         m_AdditionalProjectActionAssetsByKey.clear();
+        m_AdditionalProjectActionAssetResourcesByKey.clear();
 
         if (keys.empty())
             return;
@@ -168,15 +171,16 @@ namespace Limitless
             if (key.empty())
                 continue;
 
-            auto asset = Assets::AssetManager::LoadBlocking<Assets::InputActionsAssetResource>(key);
-            if (!asset || !asset->GetValue())
+            auto resource = Assets::AssetManager::LoadBlocking<Assets::InputActionsAssetResource>(key);
+            if (!resource || !resource->GetValue())
             {
                 LT_CORE_WARN("InputSystem: failed to load additional InputActions asset key='{}'", key);
                 continue;
             }
 
             m_AdditionalProjectActionAssetKeys.push_back(key);
-            m_AdditionalProjectActionAssetsByKey[key] = asset->GetValue();
+            m_AdditionalProjectActionAssetsByKey[key] = resource->GetValue();
+            m_AdditionalProjectActionAssetResourcesByKey[key] = std::move(resource);
         }
     }
 

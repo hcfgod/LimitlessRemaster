@@ -1116,6 +1116,7 @@ namespace Limitless
             m_SelectedNativeScriptAssetKey,
             m_SelectedPrefabAssetKey,
             m_SelectedTilesetAssetKey,
+            m_SelectedInputActionsAssetKey,
             &m_EditorUndoService);
     }
 
@@ -1131,6 +1132,7 @@ namespace Limitless
             m_SelectedNativeScriptAssetKey,
             m_SelectedPrefabAssetKey,
             m_SelectedTilesetAssetKey,
+            m_SelectedInputActionsAssetKey,
             kAssetTexturePayload,
             kAssetAudioPayload,
             kAssetMovePayload,
@@ -1178,6 +1180,8 @@ namespace Limitless
                     m_SelectedPrefabAssetKey = newAssetKey;
                 if (m_SelectedTilesetAssetKey == oldAssetKey)
                     m_SelectedTilesetAssetKey = newAssetKey;
+                if (m_SelectedInputActionsAssetKey == oldAssetKey)
+                    m_SelectedInputActionsAssetKey = newAssetKey;
 
                 if (!m_Scene)
                 {
@@ -1616,6 +1620,7 @@ namespace Limitless
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
         m_SelectedTilesetAssetKey.clear();
+        m_SelectedInputActionsAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey.clear();
         m_EditorUndoService.MarkSaved();
@@ -1916,6 +1921,7 @@ namespace Limitless
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
         m_SelectedTilesetAssetKey.clear();
+        m_SelectedInputActionsAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey = assetKey;
         if (!IsPrefabAssetKey(assetKey))
@@ -1969,6 +1975,7 @@ namespace Limitless
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
         m_SelectedTilesetAssetKey.clear();
+        m_SelectedInputActionsAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey = assetKey;
 
@@ -2513,6 +2520,7 @@ namespace Limitless
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
         m_SelectedTilesetAssetKey.clear();
+        m_SelectedInputActionsAssetKey.clear();
         m_SelectedEntity = entt::null;
         return assetKey;
     }
@@ -2614,6 +2622,7 @@ namespace Limitless
             m_SelectedNativeScriptAssetKey.clear();
             m_SelectedPrefabAssetKey.clear();
             m_SelectedTilesetAssetKey.clear();
+            m_SelectedInputActionsAssetKey.clear();
         }
         return createdEntity;
     }
@@ -2644,6 +2653,7 @@ namespace Limitless
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
         m_SelectedTilesetAssetKey.clear();
+        m_SelectedInputActionsAssetKey.clear();
         return createdEntity;
     }
 
