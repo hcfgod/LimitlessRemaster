@@ -21,6 +21,39 @@
 
 namespace Limitless
 {
+    // -------------------------------------------------------------------------
+    // Physics runtime handle types.
+    //
+    // These ensure that component structs have an identical binary layout
+    // regardless of whether LT_ENABLE_PHYSICS2D is defined. This is critical
+    // because ScriptCore.dll and the engine share the same EnTT registry but
+    // may compile Components.h with different preprocessor settings.
+    //
+    // When physics is enabled the handles are direct typedefs to Box2D's ID
+    // types. When disabled they are layout-compatible opaque POD structs.
+    // -------------------------------------------------------------------------
+
+#ifdef LT_ENABLE_PHYSICS2D
+    using Physics2DBodyHandle  = b2BodyId;
+    using Physics2DShapeHandle = b2ShapeId;
+    using Physics2DJointHandle = b2JointId;
+
+    inline constexpr Physics2DBodyHandle  kNullPhysics2DBody  = { 0, 0, 0 };
+    inline constexpr Physics2DShapeHandle kNullPhysics2DShape = { 0, 0, 0 };
+    inline constexpr Physics2DJointHandle kNullPhysics2DJoint = { 0, 0, 0 };
+#else
+    /// Opaque stand-in for b2BodyId  (8 bytes: int32_t + uint16_t + uint16_t).
+    struct Physics2DBodyHandle  { int32_t Index = 0; uint16_t World = 0; uint16_t Generation = 0; };
+    /// Opaque stand-in for b2ShapeId (same layout).
+    struct Physics2DShapeHandle { int32_t Index = 0; uint16_t World = 0; uint16_t Generation = 0; };
+    /// Opaque stand-in for b2JointId (same layout).
+    struct Physics2DJointHandle { int32_t Index = 0; uint16_t World = 0; uint16_t Generation = 0; };
+
+    inline constexpr Physics2DBodyHandle  kNullPhysics2DBody{};
+    inline constexpr Physics2DShapeHandle kNullPhysics2DShape{};
+    inline constexpr Physics2DJointHandle kNullPhysics2DJoint{};
+#endif
+
     // -----------------------------------------------------------------------------
     // Core ECS components for the scene system.
     // Unity-style: each component is a plain struct of data.
@@ -260,6 +293,7 @@ namespace Limitless
         glm::vec2 RuntimeLinearVelocity = glm::vec2(0.0f);
         int32_t RuntimeContactCount = 0;
         int32_t RuntimeContactCountExcludingSensors = 0;
+        bool RuntimeWarnedInvalidBodyParameters = false;
 
         glm::vec2 GetLinearVelocity() const
         {
@@ -301,9 +335,7 @@ namespace Limitless
             return FixedRotation;
         }
 
-#ifdef LT_ENABLE_PHYSICS2D
-        b2BodyId RuntimeBodyId = b2_nullBodyId;
-#endif
+        Physics2DBodyHandle RuntimeBodyId = kNullPhysics2DBody;
         bool RuntimeBodyCreated = false;
         glm::vec2 RuntimePreviousPosition = glm::vec2(0.0f);
         float RuntimePreviousAngleRadians = 0.0f;
@@ -324,9 +356,7 @@ namespace Limitless
         uint64_t CollisionLayer = 1ull;
         uint64_t CollisionMask = ~0ull;
 
-#ifdef LT_ENABLE_PHYSICS2D
-        b2ShapeId RuntimeShapeId = b2_nullShapeId;
-#endif
+        Physics2DShapeHandle RuntimeShapeId = kNullPhysics2DShape;
         bool RuntimeShapeCreated = false;
     };
 
@@ -341,9 +371,7 @@ namespace Limitless
         uint64_t CollisionLayer = 1ull;
         uint64_t CollisionMask = ~0ull;
 
-#ifdef LT_ENABLE_PHYSICS2D
-        b2ShapeId RuntimeShapeId = b2_nullShapeId;
-#endif
+        Physics2DShapeHandle RuntimeShapeId = kNullPhysics2DShape;
         bool RuntimeShapeCreated = false;
     };
 
@@ -359,10 +387,8 @@ namespace Limitless
         uint64_t CollisionLayer = 1ull;
         uint64_t CollisionMask = ~0ull;
 
-#ifdef LT_ENABLE_PHYSICS2D
-        b2BodyId RuntimeBodyId = b2_nullBodyId;
-        std::vector<b2ShapeId> RuntimeShapeIds;
-#endif
+        Physics2DBodyHandle RuntimeBodyId = kNullPhysics2DBody;
+        std::vector<Physics2DShapeHandle> RuntimeShapeIds;
         bool RuntimeBodyCreated = false;
         uint64_t RuntimeBuiltHash = 0ull;
     };
@@ -391,9 +417,7 @@ namespace Limitless
         float Hertz = 5.0f;
         float DampingRatio = 0.7f;
 
-#ifdef LT_ENABLE_PHYSICS2D
-        b2JointId RuntimeJointId = b2_nullJointId;
-#endif
+        Physics2DJointHandle RuntimeJointId = kNullPhysics2DJoint;
         bool RuntimeJointCreated = false;
     };
 
@@ -410,6 +434,7 @@ namespace Limitless
         bool RuntimeInitialized = false;
         uint64_t RuntimeUpdateCount = 0;
         bool RuntimeWarnedOnUpdateTransformMutation = false;
+        bool RuntimeWarnedMissingCompiledScript = false;
 
         NativeScriptEntry() = default;
 
@@ -421,7 +446,8 @@ namespace Limitless
               RuntimeInstance(nullptr),
               RuntimeInitialized(false),
               RuntimeUpdateCount(0),
-              RuntimeWarnedOnUpdateTransformMutation(false)
+              RuntimeWarnedOnUpdateTransformMutation(false),
+              RuntimeWarnedMissingCompiledScript(false)
         {
         }
 
@@ -437,6 +463,7 @@ namespace Limitless
             RuntimeInitialized = false;
             RuntimeUpdateCount = 0;
             RuntimeWarnedOnUpdateTransformMutation = false;
+            RuntimeWarnedMissingCompiledScript = false;
             return *this;
         }
 

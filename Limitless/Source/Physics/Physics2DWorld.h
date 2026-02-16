@@ -73,12 +73,22 @@ namespace Limitless
         const Physics2DDiagnostics& GetDiagnostics() const { return m_Diagnostics; }
         bool TryGetBodyDiagnostics(entt::entity entity, Physics2DBodyDiagnostics& outDiagnostics) const;
 
+        /// Controls whether the expensive per-body diagnostics collection runs
+        /// each step. Disable when the diagnostics panel is not visible to save
+        /// significant CPU time at high body counts.
+        void SetDiagnosticsEnabled(bool enabled) { m_DiagnosticsEnabled = enabled; }
+        bool IsDiagnosticsEnabled() const { return m_DiagnosticsEnabled; }
+
     private:
         void DestroyRuntimeState(Scene& scene);
-        void BuildBodiesAndShapes(Scene& scene);
+
+        /// Creates physics bodies and shapes for entities that don't have them.
+        /// Returns the number of new bodies created this call (capped by
+        /// kMaxNewBodiesPerStep to avoid allocation pressure).
+        int BuildBodiesAndShapes(Scene& scene);
+
         void BuildJoints(Scene& scene);
         void SyncAuthoringTransformsToBodies(Scene& scene, float fixedDeltaTime);
-        bool RequiresRuntimeRebuild(Scene& scene) const;
         void SyncMovedBodiesToTransforms(Scene& scene);
         void SyncBodyContactCounts(Scene& scene);
         void CollectContactEvents();
@@ -91,6 +101,12 @@ namespace Limitless
         Physics2DDiagnostics m_Diagnostics{};
         std::unordered_map<entt::entity, Physics2DBodyDiagnostics> m_BodyDiagnostics;
         bool m_RuntimeBuilt = false;
+        bool m_DiagnosticsEnabled = true;
+
+        // Cached effective substep count. Recomputed only when settings or bodies change.
+        int m_CachedEffectiveSubSteps = -1;
+        bool m_SubStepsCacheDirty = true;
+
 #ifdef LT_ENABLE_PHYSICS2D
         b2WorldId m_WorldId = b2_nullWorldId;
 #endif

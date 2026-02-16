@@ -1,5 +1,6 @@
 #include "Physics/Physics2DWorld.h"
 
+#include "Core/Debug/Log.h"
 #include "Scene/Scene.h"
 
 #include <algorithm>
@@ -10,14 +11,36 @@
 #include <vector>
 #include <glm/gtc/constants.hpp>
 
+// Verify at compile time that our handle typedefs match Box2D's actual types.
+// If Box2D ever changes its ID layout, these asserts will catch it immediately.
+#ifdef LT_ENABLE_PHYSICS2D
+static_assert(sizeof(Limitless::Physics2DBodyHandle)  == sizeof(b2BodyId),  "Physics2DBodyHandle size mismatch with b2BodyId");
+static_assert(sizeof(Limitless::Physics2DShapeHandle) == sizeof(b2ShapeId), "Physics2DShapeHandle size mismatch with b2ShapeId");
+static_assert(sizeof(Limitless::Physics2DJointHandle) == sizeof(b2JointId), "Physics2DJointHandle size mismatch with b2JointId");
+static_assert(alignof(Limitless::Physics2DBodyHandle)  == alignof(b2BodyId),  "Physics2DBodyHandle alignment mismatch");
+static_assert(alignof(Limitless::Physics2DShapeHandle) == alignof(b2ShapeId), "Physics2DShapeHandle alignment mismatch");
+static_assert(alignof(Limitless::Physics2DJointHandle) == alignof(b2JointId), "Physics2DJointHandle alignment mismatch");
+#endif
+
 namespace Limitless
 {
     namespace
     {
         constexpr float kMinimumColliderExtent = 0.001f;
         constexpr float kMinimumCircleRadius = 0.001f;
+        constexpr float kMinimumDynamicShapeDensity = 0.0001f;
+        constexpr float kMaximumShapeDensity = 100.0f;
+        // Keep authored values in a conservative range to avoid Box2D broadphase overflow/asserts.
+        constexpr float kMaximumWorldPosition = 10000.0f;
+        constexpr float kMaximumColliderExtent = 1000.0f;
+        constexpr float kMaximumColliderOffset = 1000.0f;
         constexpr float kMinimumStepDelta = 0.000001f;
         constexpr float kTransformSnapEpsilon = 0.0001f;
+
+        // Maximum number of new physics bodies to create per Step() call.
+        // Prevents Box2D allocator pressure when scripts instantiate many
+        // entities at once. Remaining entities are deferred to subsequent frames.
+        constexpr int kMaxNewBodiesPerStep = 256;
 
         entt::entity ToEntityHandle(void* userData)
         {
@@ -47,6 +70,20 @@ namespace Limitless
             while (angleRadians < -glm::pi<float>())
                 angleRadians += glm::two_pi<float>();
             return angleRadians;
+        }
+
+        float SanitizeFiniteNonNegative(float value, float fallbackValue)
+        {
+            if (!std::isfinite(value) || value < 0.0f)
+                return fallbackValue;
+            return value;
+        }
+
+        float SanitizeFinite(float value, float fallbackValue)
+        {
+            if (!std::isfinite(value))
+                return fallbackValue;
+            return value;
         }
 
         uint64_t HashCombine64(uint64_t seed, uint64_t value)
@@ -252,6 +289,14 @@ namespace Limitless
 
     void Physics2DWorld::SetSettings(const Physics2DWorldSettings& settings)
     {
+        // Invalidate cached substeps when settings change.
+        if (m_Settings.VelocitySubSteps != settings.VelocitySubSteps ||
+            m_Settings.HighContactQualityMode != settings.HighContactQualityMode ||
+            m_Settings.HighContactQualityExtraSubSteps != settings.HighContactQualityExtraSubSteps)
+        {
+            m_SubStepsCacheDirty = true;
+        }
+
         m_Settings = settings;
 #ifdef LT_ENABLE_PHYSICS2D
         if (b2World_IsValid(m_WorldId))
@@ -282,19 +327,46 @@ namespace Limitless
         if (!b2World_IsValid(m_WorldId))
             Initialize(m_Settings);
 
-        if (!m_RuntimeBuilt || RequiresRuntimeRebuild(scene))
+        if (!m_RuntimeBuilt)
+        {
+            // First time: full destroy-and-rebuild to ensure a clean slate.
             RebuildScene(scene);
+            m_SubStepsCacheDirty = true;
+        }
+        else
+        {
+            // Incremental path: only create bodies/shapes/joints for entities
+            // that don't have them yet. BuildBodiesAndShapes skips already-built
+            // entities with a cheap bool check, so calling it every step is
+            // lightweight when no new entities exist.
+            const int created = BuildBodiesAndShapes(scene);
+            if (created > 0)
+            {
+                BuildJoints(scene);
+                m_SubStepsCacheDirty = true;
+            }
+        }
 
         const float step = std::max(fixedDeltaTime, kMinimumStepDelta);
         SyncAuthoringTransformsToBodies(scene, step);
 
-        const int subSteps = ComputeEffectiveSubSteps(scene);
-        b2World_Step(m_WorldId, step, subSteps);
+        // Use cached substep count to avoid iterating all bodies every step.
+        if (m_SubStepsCacheDirty)
+        {
+            m_CachedEffectiveSubSteps = ComputeEffectiveSubSteps(scene);
+            m_SubStepsCacheDirty = false;
+        }
+        b2World_Step(m_WorldId, step, m_CachedEffectiveSubSteps);
 
         SyncMovedBodiesToTransforms(scene);
         SyncBodyContactCounts(scene);
         CollectContactEvents();
-        CollectDiagnostics(scene);
+
+        // Only collect expensive per-body diagnostics when the diagnostics
+        // panel is actually visible. This avoids O(N*C) contact queries
+        // per step when nobody is observing them.
+        if (m_DiagnosticsEnabled)
+            CollectDiagnostics(scene);
 #else
         (void)scene;
         (void)fixedDeltaTime;
@@ -306,45 +378,45 @@ namespace Limitless
         auto& registry = scene.GetRegistry();
 
         auto jointView = registry.view<Joint2DComponent>();
-        for (entt::entity entity : jointView)
+        for (auto [entity, joint] : jointView.each())
         {
-            auto& joint = jointView.get<Joint2DComponent>(entity);
+            (void)entity;
 #ifdef LT_ENABLE_PHYSICS2D
             if (joint.RuntimeJointCreated && b2Joint_IsValid(joint.RuntimeJointId))
                 b2DestroyJoint(joint.RuntimeJointId);
-            joint.RuntimeJointId = b2_nullJointId;
+            joint.RuntimeJointId = kNullPhysics2DJoint;
 #endif
             joint.RuntimeJointCreated = false;
         }
 
         auto boxColliderView = registry.view<BoxCollider2DComponent>();
-        for (entt::entity entity : boxColliderView)
+        for (auto [entity, collider] : boxColliderView.each())
         {
-            auto& collider = boxColliderView.get<BoxCollider2DComponent>(entity);
+            (void)entity;
 #ifdef LT_ENABLE_PHYSICS2D
-            collider.RuntimeShapeId = b2_nullShapeId;
+            collider.RuntimeShapeId = kNullPhysics2DShape;
 #endif
             collider.RuntimeShapeCreated = false;
         }
 
         auto circleColliderView = registry.view<CircleCollider2DComponent>();
-        for (entt::entity entity : circleColliderView)
+        for (auto [entity, collider] : circleColliderView.each())
         {
-            auto& collider = circleColliderView.get<CircleCollider2DComponent>(entity);
+            (void)entity;
 #ifdef LT_ENABLE_PHYSICS2D
-            collider.RuntimeShapeId = b2_nullShapeId;
+            collider.RuntimeShapeId = kNullPhysics2DShape;
 #endif
             collider.RuntimeShapeCreated = false;
         }
 
         auto tilemapColliderView = registry.view<TilemapCollider2DComponent>();
-        for (entt::entity entity : tilemapColliderView)
+        for (auto [entity, tilemapCollider] : tilemapColliderView.each())
         {
-            auto& tilemapCollider = tilemapColliderView.get<TilemapCollider2DComponent>(entity);
+            (void)entity;
 #ifdef LT_ENABLE_PHYSICS2D
             if (tilemapCollider.RuntimeBodyCreated && b2Body_IsValid(tilemapCollider.RuntimeBodyId))
                 b2DestroyBody(tilemapCollider.RuntimeBodyId);
-            tilemapCollider.RuntimeBodyId = b2_nullBodyId;
+            tilemapCollider.RuntimeBodyId = kNullPhysics2DBody;
             tilemapCollider.RuntimeShapeIds.clear();
 #endif
             tilemapCollider.RuntimeBodyCreated = false;
@@ -352,13 +424,13 @@ namespace Limitless
         }
 
         auto bodyView = registry.view<Rigidbody2DComponent>();
-        for (entt::entity entity : bodyView)
+        for (auto [entity, rigidbody] : bodyView.each())
         {
-            auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
+            (void)entity;
 #ifdef LT_ENABLE_PHYSICS2D
             if (rigidbody.RuntimeBodyCreated && b2Body_IsValid(rigidbody.RuntimeBodyId))
                 b2DestroyBody(rigidbody.RuntimeBodyId);
-            rigidbody.RuntimeBodyId = b2_nullBodyId;
+            rigidbody.RuntimeBodyId = kNullPhysics2DBody;
 #endif
             rigidbody.RuntimeBodyCreated = false;
             rigidbody.RuntimePreviousPosition = glm::vec2(0.0f);
@@ -376,30 +448,76 @@ namespace Limitless
             rigidbody.RuntimeHasPendingLinearVelocityY = false;
             rigidbody.RuntimeContactCount = 0;
             rigidbody.RuntimeContactCountExcludingSensors = 0;
-            rigidbody.RuntimeContactCount = 0;
-            rigidbody.RuntimeContactCountExcludingSensors = 0;
         }
         m_Diagnostics = Physics2DDiagnostics{};
         m_BodyDiagnostics.clear();
+        m_SubStepsCacheDirty = true;
     }
 
-    void Physics2DWorld::BuildBodiesAndShapes(Scene& scene)
+    int Physics2DWorld::BuildBodiesAndShapes(Scene& scene)
     {
+        int newBodiesCreatedThisStep = 0;
+
 #ifdef LT_ENABLE_PHYSICS2D
         auto& registry = scene.GetRegistry();
+
         auto bodyView = registry.view<Rigidbody2DComponent, TransformComponent>();
         for (entt::entity entity : bodyView)
         {
             auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
+
+            // Incremental guard: skip entities that already have a valid runtime body.
+            if (rigidbody.RuntimeBodyCreated && b2Body_IsValid(rigidbody.RuntimeBodyId))
+                continue;
+
+            // Engine-side batching: cap the number of new bodies per step to
+            // prevent overwhelming Box2D's allocator. Deferred entities will
+            // be created on subsequent physics steps automatically.
+            if (newBodiesCreatedThisStep >= kMaxNewBodiesPerStep)
+                break;
+
             auto& transform = bodyView.get<TransformComponent>(entity);
+
+            const float safePositionX = glm::clamp(SanitizeFinite(transform.Position.x, 0.0f), -kMaximumWorldPosition, kMaximumWorldPosition);
+            const float safePositionY = glm::clamp(SanitizeFinite(transform.Position.y, 0.0f), -kMaximumWorldPosition, kMaximumWorldPosition);
+            const float safeRotationDegrees = SanitizeFinite(transform.Rotation.z, 0.0f);
+            const float safeLinearDamping = SanitizeFiniteNonNegative(rigidbody.LinearDamping, 0.0f);
+            const float safeAngularDamping = SanitizeFiniteNonNegative(rigidbody.AngularDamping, 0.01f);
+            const float safeGravityScale = SanitizeFinite(rigidbody.GravityScale, 1.0f);
+
+            const bool hadInvalidBodyParameters =
+                (safePositionX != transform.Position.x) ||
+                (safePositionY != transform.Position.y) ||
+                (safeRotationDegrees != transform.Rotation.z) ||
+                (safeLinearDamping != rigidbody.LinearDamping) ||
+                (safeAngularDamping != rigidbody.AngularDamping) ||
+                (safeGravityScale != rigidbody.GravityScale);
+
+            if (hadInvalidBodyParameters)
+            {
+                if (!rigidbody.RuntimeWarnedInvalidBodyParameters)
+                {
+                    const auto* tag = registry.try_get<TagComponent>(entity);
+                    LT_WARN("Physics2D: sanitized invalid body parameters for entity '{}' (linearDamping={}, angularDamping={}, gravityScale={}).",
+                            tag ? tag->Tag : "Entity",
+                            rigidbody.LinearDamping,
+                            rigidbody.AngularDamping,
+                            rigidbody.GravityScale);
+                    rigidbody.RuntimeWarnedInvalidBodyParameters = true;
+                }
+            }
+            else
+            {
+                rigidbody.RuntimeWarnedInvalidBodyParameters = false;
+            }
 
             b2BodyDef bodyDefinition = b2DefaultBodyDef();
             bodyDefinition.type = ToBox2DBodyType(rigidbody.Type);
-            bodyDefinition.position = { transform.Position.x, transform.Position.y };
-            bodyDefinition.rotation = b2MakeRot(glm::radians(transform.Rotation.z));
-            bodyDefinition.linearDamping = rigidbody.LinearDamping;
-            bodyDefinition.angularDamping = rigidbody.AngularDamping;
-            bodyDefinition.gravityScale = rigidbody.GravityScale;
+            bodyDefinition.position = { safePositionX, safePositionY };
+            bodyDefinition.rotation = b2MakeRot(glm::radians(safeRotationDegrees));
+            bodyDefinition.linearDamping = safeLinearDamping;
+            bodyDefinition.angularDamping = safeAngularDamping;
+            bodyDefinition.gravityScale = safeGravityScale;
             bodyDefinition.fixedRotation = rigidbody.IsRotationLocked();
             bodyDefinition.enableSleep = rigidbody.EnableSleep;
             bodyDefinition.isAwake = rigidbody.StartAwake;
@@ -408,6 +526,7 @@ namespace Limitless
 
             rigidbody.RuntimeBodyId = b2CreateBody(m_WorldId, &bodyDefinition);
             rigidbody.RuntimeBodyCreated = b2Body_IsValid(rigidbody.RuntimeBodyId);
+            ++newBodiesCreatedThisStep;
             rigidbody.RuntimePreviousPosition = glm::vec2(transform.Position.x, transform.Position.y);
             rigidbody.RuntimePreviousAngleRadians = glm::radians(transform.Rotation.z);
             rigidbody.RuntimeRenderPreviousPosition = rigidbody.RuntimePreviousPosition;
@@ -427,21 +546,67 @@ namespace Limitless
 
             if (auto* boxCollider = registry.try_get<BoxCollider2DComponent>(entity))
             {
+                const float safeScaleX = SanitizeFinite(transform.Scale.x, 1.0f);
+                const float safeScaleY = SanitizeFinite(transform.Scale.y, 1.0f);
+                const float safeColliderSizeX = SanitizeFiniteNonNegative(boxCollider->Size.x, 1.0f);
+                const float safeColliderSizeY = SanitizeFiniteNonNegative(boxCollider->Size.y, 1.0f);
+                const float safeColliderOffsetX = SanitizeFinite(boxCollider->Offset.x, 0.0f);
+                const float safeColliderOffsetY = SanitizeFinite(boxCollider->Offset.y, 0.0f);
+                const float scaledOffsetX = glm::clamp(safeColliderOffsetX * safeScaleX, -kMaximumColliderOffset, kMaximumColliderOffset);
+                const float scaledOffsetY = glm::clamp(safeColliderOffsetY * safeScaleY, -kMaximumColliderOffset, kMaximumColliderOffset);
+                const float halfWidth = glm::clamp(
+                    std::max(kMinimumColliderExtent, safeColliderSizeX * 0.5f * std::abs(safeScaleX)),
+                    kMinimumColliderExtent,
+                    kMaximumColliderExtent);
+                const float halfHeight = glm::clamp(
+                    std::max(kMinimumColliderExtent, safeColliderSizeY * 0.5f * std::abs(safeScaleY)),
+                    kMinimumColliderExtent,
+                    kMaximumColliderExtent);
+
+                const bool hadInvalidBoxParameters =
+                    (safeScaleX != transform.Scale.x) ||
+                    (safeScaleY != transform.Scale.y) ||
+                    (safeColliderSizeX != boxCollider->Size.x) ||
+                    (safeColliderSizeY != boxCollider->Size.y) ||
+                    (safeColliderOffsetX != boxCollider->Offset.x) ||
+                    (safeColliderOffsetY != boxCollider->Offset.y);
+                if (hadInvalidBoxParameters && !rigidbody.RuntimeWarnedInvalidBodyParameters)
+                {
+                    const auto* tag = registry.try_get<TagComponent>(entity);
+                    LT_WARN("Physics2D: sanitized invalid box collider parameters for entity '{}' (size=({}, {}), offset=({}, {}), scale=({}, {})).",
+                            tag ? tag->Tag : "Entity",
+                            boxCollider->Size.x,
+                            boxCollider->Size.y,
+                            boxCollider->Offset.x,
+                            boxCollider->Offset.y,
+                            transform.Scale.x,
+                            transform.Scale.y);
+                    rigidbody.RuntimeWarnedInvalidBodyParameters = true;
+                }
+
                 b2ShapeDef shapeDefinition = b2DefaultShapeDef();
-                shapeDefinition.density = boxCollider->Density;
-                shapeDefinition.friction = boxCollider->Friction;
-                shapeDefinition.restitution = boxCollider->Restitution;
+                shapeDefinition.density = glm::clamp(
+                    SanitizeFiniteNonNegative(boxCollider->Density, 1.0f),
+                    0.0f,
+                    kMaximumShapeDensity);
+                shapeDefinition.friction = SanitizeFiniteNonNegative(boxCollider->Friction, 0.5f);
+                shapeDefinition.restitution = glm::clamp(SanitizeFiniteNonNegative(boxCollider->Restitution, 0.0f), 0.0f, 1.0f);
                 shapeDefinition.isSensor = boxCollider->IsSensor;
                 shapeDefinition.enableContactEvents = true;
                 shapeDefinition.filter.categoryBits = boxCollider->CollisionLayer;
                 shapeDefinition.filter.maskBits = boxCollider->CollisionMask;
-
-                const float halfWidth = std::max(kMinimumColliderExtent, boxCollider->Size.x * 0.5f * std::abs(transform.Scale.x));
-                const float halfHeight = std::max(kMinimumColliderExtent, boxCollider->Size.y * 0.5f * std::abs(transform.Scale.y));
+                shapeDefinition.updateBodyMass = !shapeDefinition.isSensor;
+                if (rigidbody.Type == Rigidbody2DComponent::BodyType::Dynamic && !shapeDefinition.isSensor)
+                {
+                    shapeDefinition.density = glm::clamp(
+                        shapeDefinition.density,
+                        kMinimumDynamicShapeDensity,
+                        kMaximumShapeDensity);
+                }
                 b2Polygon boxPolygon = b2MakeOffsetBox(
                     halfWidth,
                     halfHeight,
-                    { boxCollider->Offset.x * transform.Scale.x, boxCollider->Offset.y * transform.Scale.y },
+                    { scaledOffsetX, scaledOffsetY },
                     b2Rot_identity);
 
                 boxCollider->RuntimeShapeId = b2CreatePolygonShape(rigidbody.RuntimeBodyId, &shapeDefinition, &boxPolygon);
@@ -450,19 +615,61 @@ namespace Limitless
 
             if (auto* circleCollider = registry.try_get<CircleCollider2DComponent>(entity))
             {
+                const float safeScaleX = SanitizeFinite(transform.Scale.x, 1.0f);
+                const float safeScaleY = SanitizeFinite(transform.Scale.y, 1.0f);
+                const float safeCircleRadius = SanitizeFiniteNonNegative(circleCollider->Radius, 0.5f);
+                const float safeCircleOffsetX = SanitizeFinite(circleCollider->Offset.x, 0.0f);
+                const float safeCircleOffsetY = SanitizeFinite(circleCollider->Offset.y, 0.0f);
+                const float maxScale = std::max(std::abs(safeScaleX), std::abs(safeScaleY));
+                const float safeRadius = glm::clamp(
+                    std::max(kMinimumCircleRadius, safeCircleRadius * maxScale),
+                    kMinimumCircleRadius,
+                    kMaximumColliderExtent);
+
+                const bool hadInvalidCircleParameters =
+                    (safeScaleX != transform.Scale.x) ||
+                    (safeScaleY != transform.Scale.y) ||
+                    (safeCircleRadius != circleCollider->Radius) ||
+                    (safeCircleOffsetX != circleCollider->Offset.x) ||
+                    (safeCircleOffsetY != circleCollider->Offset.y);
+                if (hadInvalidCircleParameters && !rigidbody.RuntimeWarnedInvalidBodyParameters)
+                {
+                    const auto* tag = registry.try_get<TagComponent>(entity);
+                    LT_WARN("Physics2D: sanitized invalid circle collider parameters for entity '{}' (radius={}, offset=({}, {}), scale=({}, {})).",
+                            tag ? tag->Tag : "Entity",
+                            circleCollider->Radius,
+                            circleCollider->Offset.x,
+                            circleCollider->Offset.y,
+                            transform.Scale.x,
+                            transform.Scale.y);
+                    rigidbody.RuntimeWarnedInvalidBodyParameters = true;
+                }
+
                 b2ShapeDef shapeDefinition = b2DefaultShapeDef();
-                shapeDefinition.density = circleCollider->Density;
-                shapeDefinition.friction = circleCollider->Friction;
-                shapeDefinition.restitution = circleCollider->Restitution;
+                shapeDefinition.density = glm::clamp(
+                    SanitizeFiniteNonNegative(circleCollider->Density, 1.0f),
+                    0.0f,
+                    kMaximumShapeDensity);
+                shapeDefinition.friction = SanitizeFiniteNonNegative(circleCollider->Friction, 0.5f);
+                shapeDefinition.restitution = glm::clamp(SanitizeFiniteNonNegative(circleCollider->Restitution, 0.0f), 0.0f, 1.0f);
                 shapeDefinition.isSensor = circleCollider->IsSensor;
                 shapeDefinition.enableContactEvents = true;
                 shapeDefinition.filter.categoryBits = circleCollider->CollisionLayer;
                 shapeDefinition.filter.maskBits = circleCollider->CollisionMask;
-
-                const float maxScale = std::max(std::abs(transform.Scale.x), std::abs(transform.Scale.y));
+                shapeDefinition.updateBodyMass = !shapeDefinition.isSensor;
+                if (rigidbody.Type == Rigidbody2DComponent::BodyType::Dynamic && !shapeDefinition.isSensor)
+                {
+                    shapeDefinition.density = glm::clamp(
+                        shapeDefinition.density,
+                        kMinimumDynamicShapeDensity,
+                        kMaximumShapeDensity);
+                }
                 b2Circle circleShape{};
-                circleShape.center = { circleCollider->Offset.x * transform.Scale.x, circleCollider->Offset.y * transform.Scale.y };
-                circleShape.radius = std::max(kMinimumCircleRadius, circleCollider->Radius * maxScale);
+                circleShape.center = {
+                    glm::clamp(safeCircleOffsetX * safeScaleX, -kMaximumColliderOffset, kMaximumColliderOffset),
+                    glm::clamp(safeCircleOffsetY * safeScaleY, -kMaximumColliderOffset, kMaximumColliderOffset)
+                };
+                circleShape.radius = safeRadius;
 
                 circleCollider->RuntimeShapeId = b2CreateCircleShape(rigidbody.RuntimeBodyId, &shapeDefinition, &circleShape);
                 circleCollider->RuntimeShapeCreated = b2Shape_IsValid(circleCollider->RuntimeShapeId);
@@ -477,6 +684,10 @@ namespace Limitless
             tilemap.EnsureLayerStorage();
 
             if (!tilemapCollider.Enabled)
+                continue;
+
+            // Incremental guard: skip tilemap colliders that already have a valid runtime body.
+            if (tilemapCollider.RuntimeBodyCreated && b2Body_IsValid(tilemapCollider.RuntimeBodyId))
                 continue;
 
             const glm::mat4 worldTransform = scene.GetWorldTransformMatrix(entity);
@@ -505,6 +716,7 @@ namespace Limitless
             shapeDefinition.enableContactEvents = true;
             shapeDefinition.filter.categoryBits = tilemapCollider.CollisionLayer;
             shapeDefinition.filter.maskBits = tilemapCollider.CollisionMask;
+            shapeDefinition.updateBodyMass = false;
 
             const int32_t gridWidth = std::max(1, tilemap.GridSize.x);
             const int32_t gridHeight = std::max(1, tilemap.GridSize.y);
@@ -570,6 +782,7 @@ namespace Limitless
 #else
         (void)scene;
 #endif
+        return newBodiesCreatedThisStep;
     }
 
     void Physics2DWorld::SyncAuthoringTransformsToBodies(Scene& scene, float fixedDeltaTime)
@@ -585,6 +798,22 @@ namespace Limitless
             if (!rigidbody.RuntimeBodyCreated || !b2Body_IsValid(rigidbody.RuntimeBodyId))
                 continue;
 
+            // -----------------------------------------------------------
+            // Fast path: sleeping bodies are fully frozen by Box2D.
+            // Their position, velocity, and contacts don't change, and
+            // SyncMovedBodiesToTransforms already wrote the final physics
+            // position back to the authoring transform before they slept.
+            // If a script/editor wakes a body (e.g. via SetLinearVelocity
+            // or SetTransform), it will be processed next step when awake.
+            // -----------------------------------------------------------
+            const bool hasPendingVelocityWrites =
+                rigidbody.RuntimeHasPendingLinearVelocity ||
+                rigidbody.RuntimeHasPendingLinearVelocityX ||
+                rigidbody.RuntimeHasPendingLinearVelocityY;
+
+            if (!b2Body_IsAwake(rigidbody.RuntimeBodyId) && !hasPendingVelocityWrites)
+                continue;
+
             const b2BodyType expectedType = ToBox2DBodyType(rigidbody.Type);
             if (b2Body_GetType(rigidbody.RuntimeBodyId) != expectedType)
                 b2Body_SetType(rigidbody.RuntimeBodyId, expectedType);
@@ -594,12 +823,56 @@ namespace Limitless
             const bool freezeRotation = rigidbody.IsRotationLocked();
             rigidbody.FixedRotation = freezeRotation;
 
-            b2Body_SetLinearDamping(rigidbody.RuntimeBodyId, rigidbody.LinearDamping);
-            b2Body_SetAngularDamping(rigidbody.RuntimeBodyId, rigidbody.AngularDamping);
-            b2Body_SetGravityScale(rigidbody.RuntimeBodyId, rigidbody.GravityScale);
-            b2Body_SetFixedRotation(rigidbody.RuntimeBodyId, freezeRotation);
-            b2Body_EnableSleep(rigidbody.RuntimeBodyId, rigidbody.EnableSleep);
-            b2Body_SetBullet(rigidbody.RuntimeBodyId, rigidbody.UseCCD);
+            // -----------------------------------------------------------
+            // Property sync: damping, gravity scale, CCD, sleep, rotation
+            // lock. These values rarely change after body creation, so we
+            // only run the comparison for bodies that might need it:
+            //   - Kinematic bodies (editor/script driven transforms)
+            //   - Bodies with axis constraints (inspector-tuned)
+            //   - Bodies with pending velocity writes (active scripts)
+            // Pure dynamic bodies with no scripts touching them skip the
+            // 6 Box2D getter calls entirely.
+            // -----------------------------------------------------------
+            const bool hasConstraints = freezePositionX || freezePositionY || freezeRotation;
+            const bool needsPropertySync = (expectedType == b2_kinematicBody) ||
+                                           hasConstraints ||
+                                           hasPendingVelocityWrites;
+
+            if (needsPropertySync)
+            {
+                const float safeLinearDamping = SanitizeFiniteNonNegative(rigidbody.LinearDamping, 0.0f);
+                const float safeAngularDamping = SanitizeFiniteNonNegative(rigidbody.AngularDamping, 0.01f);
+                const float safeGravityScale = SanitizeFinite(rigidbody.GravityScale, 1.0f);
+                if ((safeLinearDamping != rigidbody.LinearDamping ||
+                     safeAngularDamping != rigidbody.AngularDamping ||
+                     safeGravityScale != rigidbody.GravityScale) &&
+                    !rigidbody.RuntimeWarnedInvalidBodyParameters)
+                {
+                    const auto* tag = registry.try_get<TagComponent>(entity);
+                    LT_WARN("Physics2D: sanitized runtime body properties for entity '{}' (linearDamping={}, angularDamping={}, gravityScale={}).",
+                            tag ? tag->Tag : "Entity",
+                            rigidbody.LinearDamping,
+                            rigidbody.AngularDamping,
+                            rigidbody.GravityScale);
+                    rigidbody.RuntimeWarnedInvalidBodyParameters = true;
+                }
+
+                // Only call Box2D setters when values actually differ from the
+                // current Box2D state. The getters are O(1) array lookups while
+                // setters perform validation, wake-up logic, and solver bookkeeping.
+                if (b2Body_GetLinearDamping(rigidbody.RuntimeBodyId) != safeLinearDamping)
+                    b2Body_SetLinearDamping(rigidbody.RuntimeBodyId, safeLinearDamping);
+                if (b2Body_GetAngularDamping(rigidbody.RuntimeBodyId) != safeAngularDamping)
+                    b2Body_SetAngularDamping(rigidbody.RuntimeBodyId, safeAngularDamping);
+                if (b2Body_GetGravityScale(rigidbody.RuntimeBodyId) != safeGravityScale)
+                    b2Body_SetGravityScale(rigidbody.RuntimeBodyId, safeGravityScale);
+                if (b2Body_IsFixedRotation(rigidbody.RuntimeBodyId) != freezeRotation)
+                    b2Body_SetFixedRotation(rigidbody.RuntimeBodyId, freezeRotation);
+                if (b2Body_IsSleepEnabled(rigidbody.RuntimeBodyId) != rigidbody.EnableSleep)
+                    b2Body_EnableSleep(rigidbody.RuntimeBodyId, rigidbody.EnableSleep);
+                if (b2Body_IsBullet(rigidbody.RuntimeBodyId) != rigidbody.UseCCD)
+                    b2Body_SetBullet(rigidbody.RuntimeBodyId, rigidbody.UseCCD);
+            }
 
             const b2Transform runtimeTransform = b2Body_GetTransform(rigidbody.RuntimeBodyId);
             const glm::vec2 runtimePosition(runtimeTransform.p.x, runtimeTransform.p.y);
@@ -660,10 +933,7 @@ namespace Limitless
                 continue;
             }
 
-            if (expectedType == b2_dynamicBody &&
-                (rigidbody.RuntimeHasPendingLinearVelocity ||
-                 rigidbody.RuntimeHasPendingLinearVelocityX ||
-                 rigidbody.RuntimeHasPendingLinearVelocityY))
+            if (hasPendingVelocityWrites)
             {
                 b2Vec2 runtimeVelocity = b2Body_GetLinearVelocity(rigidbody.RuntimeBodyId);
                 if (rigidbody.RuntimeHasPendingLinearVelocity)
@@ -689,7 +959,7 @@ namespace Limitless
                 rigidbody.RuntimeHasPendingLinearVelocityY = false;
             }
 
-            if ((expectedType == b2_dynamicBody || expectedType == b2_kinematicBody) && (freezePositionX || freezePositionY || freezeRotation))
+            if ((expectedType == b2_dynamicBody || expectedType == b2_kinematicBody) && hasConstraints)
             {
                 b2Vec2 runtimeVelocity = b2Body_GetLinearVelocity(rigidbody.RuntimeBodyId);
                 bool velocityChanged = false;
@@ -746,75 +1016,6 @@ namespace Limitless
 #endif
     }
 
-    bool Physics2DWorld::RequiresRuntimeRebuild(Scene& scene) const
-    {
-#ifdef LT_ENABLE_PHYSICS2D
-        auto& registry = scene.GetRegistry();
-
-        auto rigidbodyView = registry.view<Rigidbody2DComponent>();
-        for (entt::entity entity : rigidbodyView)
-        {
-            const auto& rigidbody = rigidbodyView.get<Rigidbody2DComponent>(entity);
-            if (!rigidbody.RuntimeBodyCreated || !b2Body_IsValid(rigidbody.RuntimeBodyId))
-                return true;
-        }
-
-        auto boxColliderView = registry.view<BoxCollider2DComponent, Rigidbody2DComponent>();
-        for (entt::entity entity : boxColliderView)
-        {
-            const auto& boxCollider = boxColliderView.get<BoxCollider2DComponent>(entity);
-            if (!boxCollider.RuntimeShapeCreated || !b2Shape_IsValid(boxCollider.RuntimeShapeId))
-                return true;
-        }
-
-        auto circleColliderView = registry.view<CircleCollider2DComponent, Rigidbody2DComponent>();
-        for (entt::entity entity : circleColliderView)
-        {
-            const auto& circleCollider = circleColliderView.get<CircleCollider2DComponent>(entity);
-            if (!circleCollider.RuntimeShapeCreated || !b2Shape_IsValid(circleCollider.RuntimeShapeId))
-                return true;
-        }
-
-        auto jointView = registry.view<Joint2DComponent, Rigidbody2DComponent>();
-        for (entt::entity entity : jointView)
-        {
-            const auto& joint = jointView.get<Joint2DComponent>(entity);
-            if (joint.ConnectedEntity == entt::null)
-                continue;
-            if (!joint.RuntimeJointCreated || !b2Joint_IsValid(joint.RuntimeJointId))
-                return true;
-        }
-
-        auto tilemapColliderView = registry.view<TilemapComponent, TilemapCollider2DComponent>();
-        for (entt::entity entity : tilemapColliderView)
-        {
-            const auto& tilemap = tilemapColliderView.get<TilemapComponent>(entity);
-            const auto& tilemapCollider = tilemapColliderView.get<TilemapCollider2DComponent>(entity);
-            if (!tilemapCollider.Enabled)
-                continue;
-
-            if (!tilemapCollider.RuntimeBodyCreated || !b2Body_IsValid(tilemapCollider.RuntimeBodyId))
-                return true;
-
-            const glm::mat4 worldTransform = scene.GetWorldTransformMatrix(entity);
-            const uint64_t currentHash = ComputeTilemapColliderHash(worldTransform, tilemap, tilemapCollider);
-            if (tilemapCollider.RuntimeBuiltHash != currentHash)
-                return true;
-
-#ifdef LT_ENABLE_PHYSICS2D
-            for (const b2ShapeId shapeId : tilemapCollider.RuntimeShapeIds)
-            {
-                if (!b2Shape_IsValid(shapeId))
-                    return true;
-            }
-#endif
-        }
-#else
-        (void)scene;
-#endif
-        return false;
-    }
-
     void Physics2DWorld::BuildJoints(Scene& scene)
     {
 #ifdef LT_ENABLE_PHYSICS2D
@@ -823,6 +1024,11 @@ namespace Limitless
         for (entt::entity entity : jointView)
         {
             auto& joint = jointView.get<Joint2DComponent>(entity);
+
+            // Incremental guard: skip joints that are already built and valid.
+            if (joint.RuntimeJointCreated && b2Joint_IsValid(joint.RuntimeJointId))
+                continue;
+
             auto& bodyAComponent = jointView.get<Rigidbody2DComponent>(entity);
             if (!bodyAComponent.RuntimeBodyCreated || !b2Body_IsValid(bodyAComponent.RuntimeBodyId))
                 continue;
@@ -987,11 +1193,21 @@ namespace Limitless
         for (entt::entity entity : bodyView)
         {
             auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
-            rigidbody.RuntimeContactCount = 0;
-            rigidbody.RuntimeContactCountExcludingSensors = 0;
 
             if (!rigidbody.RuntimeBodyCreated || !b2Body_IsValid(rigidbody.RuntimeBodyId))
+            {
+                rigidbody.RuntimeContactCount = 0;
+                rigidbody.RuntimeContactCountExcludingSensors = 0;
                 continue;
+            }
+
+            // Sleeping bodies have frozen contacts -- their last-known counts
+            // remain valid. Skip the expensive per-body contact query for them.
+            if (!b2Body_IsAwake(rigidbody.RuntimeBodyId))
+                continue;
+
+            rigidbody.RuntimeContactCount = 0;
+            rigidbody.RuntimeContactCountExcludingSensors = 0;
 
             const int contactCapacity = std::max(0, b2Body_GetContactCapacity(rigidbody.RuntimeBodyId));
             if (contactCapacity <= 0)

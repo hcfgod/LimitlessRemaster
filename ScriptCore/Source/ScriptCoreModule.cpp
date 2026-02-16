@@ -84,3 +84,13 @@ extern "C" LT_SCRIPTCORE_API void LT_SetScriptLogBridge(Limitless::ScriptLogBrid
 {
     Limitless::Debug::SetLogBridgeCallback(callback);
 }
+
+extern "C" LT_SCRIPTCORE_API void LT_SetScriptCreateEntityBridge(Limitless::ScriptCreateEntityBridgeCallback callback)
+{
+    Limitless::ScriptableEntity::SetCreateEntityBridgeCallback(callback);
+}
+
+extern "C" LT_SCRIPTCORE_API void LT_SetScriptDestroyEntityBridge(Limitless::ScriptDestroyEntityBridgeCallback callback)
+{
+    Limitless::ScriptableEntity::SetDestroyEntityBridgeCallback(callback);
+}

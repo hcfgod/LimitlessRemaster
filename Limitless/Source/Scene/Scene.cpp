@@ -350,9 +350,7 @@ namespace Limitless
 
             if (auto* rigidbody2D = registry.try_get<Rigidbody2DComponent>(entity))
             {
-#ifdef LT_ENABLE_PHYSICS2D
-                rigidbody2D->RuntimeBodyId = b2_nullBodyId;
-#endif
+                rigidbody2D->RuntimeBodyId = kNullPhysics2DBody;
                 rigidbody2D->RuntimeBodyCreated = false;
                 rigidbody2D->RuntimePreviousPosition = glm::vec2(0.0f);
                 rigidbody2D->RuntimePreviousAngleRadians = 0.0f;
@@ -373,35 +371,27 @@ namespace Limitless
 
             if (auto* boxCollider2D = registry.try_get<BoxCollider2DComponent>(entity))
             {
-#ifdef LT_ENABLE_PHYSICS2D
-                boxCollider2D->RuntimeShapeId = b2_nullShapeId;
-#endif
+                boxCollider2D->RuntimeShapeId = kNullPhysics2DShape;
                 boxCollider2D->RuntimeShapeCreated = false;
             }
 
             if (auto* circleCollider2D = registry.try_get<CircleCollider2DComponent>(entity))
             {
-#ifdef LT_ENABLE_PHYSICS2D
-                circleCollider2D->RuntimeShapeId = b2_nullShapeId;
-#endif
+                circleCollider2D->RuntimeShapeId = kNullPhysics2DShape;
                 circleCollider2D->RuntimeShapeCreated = false;
             }
 
             if (auto* tilemapCollider2D = registry.try_get<TilemapCollider2DComponent>(entity))
             {
-#ifdef LT_ENABLE_PHYSICS2D
-                tilemapCollider2D->RuntimeBodyId = b2_nullBodyId;
+                tilemapCollider2D->RuntimeBodyId = kNullPhysics2DBody;
                 tilemapCollider2D->RuntimeShapeIds.clear();
-#endif
                 tilemapCollider2D->RuntimeBodyCreated = false;
                 tilemapCollider2D->RuntimeBuiltHash = 0ull;
             }
 
             if (auto* joint2D = registry.try_get<Joint2DComponent>(entity))
             {
-#ifdef LT_ENABLE_PHYSICS2D
-                joint2D->RuntimeJointId = b2_nullJointId;
-#endif
+                joint2D->RuntimeJointId = kNullPhysics2DJoint;
                 joint2D->RuntimeJointCreated = false;
             }
 
@@ -750,6 +740,7 @@ namespace Limitless
                     scriptEntry.RuntimeInitialized = false;
                     scriptEntry.RuntimeUpdateCount = 0;
                     scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                    scriptEntry.RuntimeWarnedMissingCompiledScript = false;
                     continue;
                 }
 
@@ -776,11 +767,22 @@ namespace Limitless
                         scriptEntry.RuntimeInitialized = false;
                         scriptEntry.RuntimeUpdateCount = 0;
                         scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                        scriptEntry.RuntimeWarnedMissingCompiledScript = false;
                     }
                 }
 
                 if (!scriptEntry.RuntimeInstance)
+                {
+                    if (!scriptEntry.RuntimeWarnedMissingCompiledScript)
+                    {
+                        const auto* tag = m_Registry.try_get<TagComponent>(entity);
+                        LT_WARN("Script '{}' on entity '{}' is not compiled/registered in ScriptCore. Build project scripts before entering Play Mode.",
+                                scriptEntry.ScriptClassName,
+                                tag ? tag->Tag : "Entity");
+                        scriptEntry.RuntimeWarnedMissingCompiledScript = true;
+                    }
                     continue;
+                }
 
                 // Rebind runtime context every frame. NativeScriptEntry objects can move in memory
                 // when the scripts vector grows/reorders, so cached pointers must be refreshed.
@@ -851,6 +853,7 @@ namespace Limitless
                     scriptEntry.RuntimeInstance.reset();
                     scriptEntry.RuntimeInitialized = false;
                     scriptEntry.RuntimeUpdateCount = 0;
+                    scriptEntry.RuntimeWarnedMissingCompiledScript = false;
                     continue;
                 }
 
@@ -877,11 +880,22 @@ namespace Limitless
                         scriptEntry.RuntimeInitialized = false;
                         scriptEntry.RuntimeUpdateCount = 0;
                         scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                        scriptEntry.RuntimeWarnedMissingCompiledScript = false;
                     }
                 }
 
                 if (!scriptEntry.RuntimeInstance)
+                {
+                    if (!scriptEntry.RuntimeWarnedMissingCompiledScript)
+                    {
+                        const auto* tag = m_Registry.try_get<TagComponent>(entity);
+                        LT_WARN("Script '{}' on entity '{}' is not compiled/registered in ScriptCore. Build project scripts before entering Play Mode.",
+                                scriptEntry.ScriptClassName,
+                                tag ? tag->Tag : "Entity");
+                        scriptEntry.RuntimeWarnedMissingCompiledScript = true;
+                    }
                     continue;
+                }
 
                 scriptEntry.RuntimeInstance->m_Scene = this;
                 scriptEntry.RuntimeInstance->m_Registry = &m_Registry;
@@ -1032,9 +1046,7 @@ namespace Limitless
             if (const auto* rigidbody2D = sourceRegistry.try_get<Rigidbody2DComponent>(sourceEntity))
             {
                 auto& destinationRigidbody2D = destinationRegistry.emplace<Rigidbody2DComponent>(destinationEntity, *rigidbody2D);
-#ifdef LT_ENABLE_PHYSICS2D
-                destinationRigidbody2D.RuntimeBodyId = b2_nullBodyId;
-#endif
+                destinationRigidbody2D.RuntimeBodyId = kNullPhysics2DBody;
                 destinationRigidbody2D.RuntimeBodyCreated = false;
                 destinationRigidbody2D.RuntimePreviousPosition = glm::vec2(0.0f);
                 destinationRigidbody2D.RuntimePreviousAngleRadians = 0.0f;
@@ -1056,28 +1068,22 @@ namespace Limitless
             if (const auto* boxCollider2D = sourceRegistry.try_get<BoxCollider2DComponent>(sourceEntity))
             {
                 auto& destinationBoxCollider2D = destinationRegistry.emplace<BoxCollider2DComponent>(destinationEntity, *boxCollider2D);
-#ifdef LT_ENABLE_PHYSICS2D
-                destinationBoxCollider2D.RuntimeShapeId = b2_nullShapeId;
-#endif
+                destinationBoxCollider2D.RuntimeShapeId = kNullPhysics2DShape;
                 destinationBoxCollider2D.RuntimeShapeCreated = false;
             }
 
             if (const auto* circleCollider2D = sourceRegistry.try_get<CircleCollider2DComponent>(sourceEntity))
             {
                 auto& destinationCircleCollider2D = destinationRegistry.emplace<CircleCollider2DComponent>(destinationEntity, *circleCollider2D);
-#ifdef LT_ENABLE_PHYSICS2D
-                destinationCircleCollider2D.RuntimeShapeId = b2_nullShapeId;
-#endif
+                destinationCircleCollider2D.RuntimeShapeId = kNullPhysics2DShape;
                 destinationCircleCollider2D.RuntimeShapeCreated = false;
             }
 
             if (const auto* tilemapCollider2D = sourceRegistry.try_get<TilemapCollider2DComponent>(sourceEntity))
             {
                 auto& destinationTilemapCollider2D = destinationRegistry.emplace<TilemapCollider2DComponent>(destinationEntity, *tilemapCollider2D);
-#ifdef LT_ENABLE_PHYSICS2D
-                destinationTilemapCollider2D.RuntimeBodyId = b2_nullBodyId;
+                destinationTilemapCollider2D.RuntimeBodyId = kNullPhysics2DBody;
                 destinationTilemapCollider2D.RuntimeShapeIds.clear();
-#endif
                 destinationTilemapCollider2D.RuntimeBodyCreated = false;
                 destinationTilemapCollider2D.RuntimeBuiltHash = 0ull;
             }
@@ -1085,9 +1091,7 @@ namespace Limitless
             if (const auto* joint2D = sourceRegistry.try_get<Joint2DComponent>(sourceEntity))
             {
                 auto& destinationJoint2D = destinationRegistry.emplace<Joint2DComponent>(destinationEntity, *joint2D);
-#ifdef LT_ENABLE_PHYSICS2D
-                destinationJoint2D.RuntimeJointId = b2_nullJointId;
-#endif
+                destinationJoint2D.RuntimeJointId = kNullPhysics2DJoint;
                 destinationJoint2D.RuntimeJointCreated = false;
             }
 
@@ -1915,10 +1919,8 @@ namespace Limitless
                 tilemapCollider2D.IsSensor = tilemapCollider2DJson.value("IsSensor", false);
                 tilemapCollider2D.CollisionLayer = tilemapCollider2DJson.value("CollisionLayer", 1ull);
                 tilemapCollider2D.CollisionMask = tilemapCollider2DJson.value("CollisionMask", ~0ull);
-#ifdef LT_ENABLE_PHYSICS2D
-                tilemapCollider2D.RuntimeBodyId = b2_nullBodyId;
+                tilemapCollider2D.RuntimeBodyId = kNullPhysics2DBody;
                 tilemapCollider2D.RuntimeShapeIds.clear();
-#endif
                 tilemapCollider2D.RuntimeBodyCreated = false;
                 tilemapCollider2D.RuntimeBuiltHash = 0ull;
             }
@@ -2007,9 +2009,7 @@ namespace Limitless
                 rigidbody2D.GravityScale = rigidbody2DJson.value("GravityScale", 1.0f);
                 rigidbody2D.LinearDamping = rigidbody2DJson.value("LinearDamping", 0.0f);
                 rigidbody2D.AngularDamping = rigidbody2DJson.value("AngularDamping", 0.01f);
-#ifdef LT_ENABLE_PHYSICS2D
-                rigidbody2D.RuntimeBodyId = b2_nullBodyId;
-#endif
+                rigidbody2D.RuntimeBodyId = kNullPhysics2DBody;
                 rigidbody2D.RuntimeBodyCreated = false;
                 rigidbody2D.RuntimePreviousPosition = glm::vec2(0.0f);
                 rigidbody2D.RuntimePreviousAngleRadians = 0.0f;
@@ -2035,9 +2035,7 @@ namespace Limitless
                 boxCollider2D.IsSensor = boxCollider2DJson.value("IsSensor", false);
                 boxCollider2D.CollisionLayer = boxCollider2DJson.value("CollisionLayer", 1ull);
                 boxCollider2D.CollisionMask = boxCollider2DJson.value("CollisionMask", ~0ull);
-#ifdef LT_ENABLE_PHYSICS2D
-                boxCollider2D.RuntimeShapeId = b2_nullShapeId;
-#endif
+                boxCollider2D.RuntimeShapeId = kNullPhysics2DShape;
                 boxCollider2D.RuntimeShapeCreated = false;
             }
 
@@ -2055,9 +2053,7 @@ namespace Limitless
                 circleCollider2D.IsSensor = circleCollider2DJson.value("IsSensor", false);
                 circleCollider2D.CollisionLayer = circleCollider2DJson.value("CollisionLayer", 1ull);
                 circleCollider2D.CollisionMask = circleCollider2DJson.value("CollisionMask", ~0ull);
-#ifdef LT_ENABLE_PHYSICS2D
-                circleCollider2D.RuntimeShapeId = b2_nullShapeId;
-#endif
+                circleCollider2D.RuntimeShapeId = kNullPhysics2DShape;
                 circleCollider2D.RuntimeShapeCreated = false;
             }
 
@@ -2095,9 +2091,7 @@ namespace Limitless
                 joint2D.Hertz = joint2DJson.value("Hertz", 5.0f);
                 joint2D.DampingRatio = joint2DJson.value("DampingRatio", 0.7f);
                 joint2D.ConnectedEntity = entt::null;
-#ifdef LT_ENABLE_PHYSICS2D
-                joint2D.RuntimeJointId = b2_nullJointId;
-#endif
+                joint2D.RuntimeJointId = kNullPhysics2DJoint;
                 joint2D.RuntimeJointCreated = false;
             }
 

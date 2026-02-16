@@ -745,6 +745,12 @@ namespace Limitless
 
         if (m_PlayModeState == EditorPlayModeState::Play || m_PlayModeState == EditorPlayModeState::Simulate)
         {
+            // Only collect expensive per-body diagnostics when the diagnostics
+            // panel is actually visible, saving O(N*C) contact queries per step.
+            Physics2DWorld* physicsWorld = m_Scene->GetPhysics2DWorld();
+            if (physicsWorld)
+                physicsWorld->SetDiagnosticsEnabled(m_ShowPhysicsDiagnosticsWindow);
+
             m_Scene->FixedUpdate(fixedDeltaTime);
             m_Scene->StepPhysics2D(fixedDeltaTime);
         }

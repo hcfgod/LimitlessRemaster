@@ -19,6 +19,40 @@ Derive from `ScriptableEntity` and override any of:
 - `OnUpdate(float deltaTime)` called each runtime frame in Play Mode.
 - `OnDestroy()` called when the entity is destroyed, script is disabled/removed, or scene shuts down.
 
+## Entity and Component API (Unity-Style)
+
+`ScriptableEntity` now supports scene creation/destruction and component operations directly from scripts through a Unity-style `Limitless::Entity` wrapper.
+
+- `Entity CreateEntity(const std::string& name = "Entity")`
+- `void DestroyEntity(Entity entity)` or `entity.Destroy()`
+- `bool entity.HasComponent<T>()`
+- `T& entity.GetComponent<T>()`
+- `T& entity.AddComponent<T>(...)`
+- `void entity.RemoveComponent<T>()`
+
+Behavior:
+
+- `CreateEntity` returns an `Entity` value object (no manual allocation/deallocation).
+- `AddComponent<T>` is idempotent for scripting convenience: if the component already exists, the existing component is returned.
+- `RemoveComponent<T>` is safe to call even if the component is missing.
+- Advanced users can still work with raw handles through `entity.GetHandle()` and low-level overloads.
+
+Example:
+
+```cpp
+Limitless::Entity spawned = CreateEntity("RuntimeEnemy");
+auto& transform = spawned.GetComponent<Limitless::TransformComponent>();
+transform.Position = glm::vec3(4.0f, 2.0f, 0.0f);
+
+auto& sprite = spawned.AddComponent<Limitless::SpriteComponent>();
+sprite.Color = glm::vec4(1.0f, 0.3f, 0.3f, 1.0f);
+
+auto& rigidbody = spawned.AddComponent<Limitless::Rigidbody2DComponent>();
+rigidbody.Type = Limitless::Rigidbody2DComponent::BodyType::Dynamic;
+
+spawned.AddComponent<Limitless::BoxCollider2DComponent>();
+```
+
 ## Scene Management API (Unity-Style)
 
 Scripts can request scene transitions at runtime:
@@ -236,6 +270,37 @@ Important:
   - Linux/macOS: `Scripts/build-scriptcore-unix.sh`
 - Build configuration/platform are read from project build target settings when available.
 - Script classes are loaded from the platform-native ScriptCore module and hot-reloaded in Edit mode when its timestamp changes (`ScriptCore.dll` on Windows, `libScriptCore.so` on Linux, `libScriptCore.dylib` on macOS).
+
+## Stress Testing Large Entity Counts
+
+A sample stress script class can be authored in your opened project under `Assets/Scripts`:
+
+- `PhysicsStressSpawnerScript`
+
+What it does:
+
+- Spawns a grid of entities on `OnCreate()`.
+- Adds `SpriteComponent`, `Rigidbody2DComponent`, and `BoxCollider2DComponent` to each spawned entity.
+- Logs the spawned total to the script console.
+
+Key exposed fields:
+
+- `Columns` (default `120`)
+- `Rows` (default `80`)
+- `Spacing` (default `1.1`)
+- `ColliderSize` (default `0.9`)
+- `SpawnOnCreate` (default `true`)
+- `Spawned` (runtime guard to prevent duplicate spawn)
+
+Suggested workflow:
+
+1. Create `PhysicsStressSpawnerScript.h/.cpp` in your project `Assets/Scripts` folder.
+2. Build `ScriptCore` from the editor or with `Scripts/build-scriptcore-windows.bat`.
+3. Add a single empty entity in your scene.
+4. Add `Native Script` component.
+5. Select class `PhysicsStressSpawnerScript`.
+6. Tune `Rows`/`Columns` for your target stress level.
+7. Enter Play Mode and monitor the FPS/performance overlay.
 
 ## Current Scope
 

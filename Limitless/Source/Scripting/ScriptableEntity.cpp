@@ -7,6 +7,84 @@
 
 namespace Limitless
 {
+    namespace
+    {
+        ScriptCreateEntityBridgeCallback s_CreateEntityBridgeCallback = nullptr;
+        ScriptDestroyEntityBridgeCallback s_DestroyEntityBridgeCallback = nullptr;
+    }
+
+    void ScriptableEntity::SetCreateEntityBridgeCallback(ScriptCreateEntityBridgeCallback callback)
+    {
+        s_CreateEntityBridgeCallback = callback;
+    }
+
+    void ScriptableEntity::SetDestroyEntityBridgeCallback(ScriptDestroyEntityBridgeCallback callback)
+    {
+        s_DestroyEntityBridgeCallback = callback;
+    }
+
+    bool Entity::IsValid() const
+    {
+        return m_ScriptOwner && m_ScriptOwner->IsEntityValid(m_EntityHandle);
+    }
+
+    void Entity::Destroy()
+    {
+        if (!m_ScriptOwner)
+            return;
+        m_ScriptOwner->DestroyEntity(m_EntityHandle);
+        m_EntityHandle = entt::null;
+    }
+
+    Entity ScriptableEntity::CreateEntity(const std::string& name)
+    {
+        return Entity(this, CreateEntityHandle(name));
+    }
+
+    entt::entity ScriptableEntity::CreateEntityHandle(const std::string& name)
+    {
+        const char* requestedName = name.empty() ? "Entity" : name.c_str();
+        if (s_CreateEntityBridgeCallback)
+            return s_CreateEntityBridgeCallback(requestedName);
+
+#ifndef SCRIPTCORE_EXPORTS
+        if (m_Scene)
+            return m_Scene->CreateEntity(requestedName);
+#endif
+        return entt::null;
+    }
+
+    void ScriptableEntity::DestroyEntity(Entity entity)
+    {
+        DestroyEntity(entity.GetHandle());
+    }
+
+    void ScriptableEntity::DestroyEntity(entt::entity entity)
+    {
+        if (entity == entt::null)
+            return;
+
+        if (s_DestroyEntityBridgeCallback)
+        {
+            s_DestroyEntityBridgeCallback(entity);
+            return;
+        }
+
+#ifndef SCRIPTCORE_EXPORTS
+        if (m_Scene)
+            m_Scene->DestroyEntity(entity);
+#endif
+    }
+
+    bool ScriptableEntity::IsEntityValid(entt::entity entity) const
+    {
+        if (entity == entt::null)
+            return false;
+        if (m_Registry == nullptr)
+            return false;
+        return m_Registry->valid(entity);
+    }
+
     float ScriptableEntity::GetExposedFloat(const std::string& name, float fallbackValue) const
     {
         if (!m_ExposedProperties)

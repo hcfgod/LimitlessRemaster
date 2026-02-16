@@ -116,10 +116,8 @@ namespace Limitless::EditorPrefabSystem
                 if (const auto* sourceTilemapCollider2D = sourceRegistry.try_get<TilemapCollider2DComponent>(sourceEntity))
                 {
                     auto& destinationTilemapCollider2D = destinationRegistry.emplace<TilemapCollider2DComponent>(destinationEntity, *sourceTilemapCollider2D);
-#ifdef LT_ENABLE_PHYSICS2D
-                    destinationTilemapCollider2D.RuntimeBodyId = b2_nullBodyId;
+                    destinationTilemapCollider2D.RuntimeBodyId = kNullPhysics2DBody;
                     destinationTilemapCollider2D.RuntimeShapeIds.clear();
-#endif
                     destinationTilemapCollider2D.RuntimeBodyCreated = false;
                     destinationTilemapCollider2D.RuntimeBuiltHash = 0ull;
                 }

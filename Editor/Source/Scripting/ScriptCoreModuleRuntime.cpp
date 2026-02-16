@@ -4,6 +4,7 @@
 #include "Core/Input/InputSystem.h"
 #include "Platform/Platform.h"
 #include "Physics/Physics2DQueries.h"
+#include "Scene/Scene.h"
 #include "Scene/SceneManager.h"
 #include "Scripting/Physics2D.h"
 #include "Scripting/NativeScriptRegistry.h"
@@ -33,6 +34,8 @@ namespace Limitless::ScriptCoreModuleRuntime
         using SetInputActionTriggerBridgeFunction = void (*)(InputActionTriggerBridgeCallback callback);
         using SetPhysics2DRaycastBridgeFunction = void (*)(Physics2DRaycastBridgeCallback callback);
         using SetScriptLogBridgeFunction = void (*)(ScriptLogBridgeCallback callback);
+        using SetScriptCreateEntityBridgeFunction = void (*)(ScriptCreateEntityBridgeCallback callback);
+        using SetScriptDestroyEntityBridgeFunction = void (*)(ScriptDestroyEntityBridgeCallback callback);
 
         struct RuntimeState final
         {
@@ -301,6 +304,24 @@ namespace Limitless::ScriptCoreModuleRuntime
             }
         }
 
+        entt::entity ForwardScriptCreateEntityToHost(const char* name)
+        {
+            Scene* scene = Physics2DQueries::GetActiveSceneForScriptQueries();
+            if (!scene)
+                return entt::null;
+            if (!name || name[0] == '\0')
+                return scene->CreateEntity("Entity");
+            return scene->CreateEntity(name);
+        }
+
+        void ForwardScriptDestroyEntityToHost(entt::entity entity)
+        {
+            Scene* scene = Physics2DQueries::GetActiveSceneForScriptQueries();
+            if (!scene)
+                return;
+            scene->DestroyEntity(entity);
+        }
+
         bool ReloadScriptCoreModule(const std::filesystem::path& libraryPath)
         {
             ResetRuntimeScriptRegistry();
@@ -453,6 +474,16 @@ namespace Limitless::ScriptCoreModuleRuntime
             {
                 LT_WARN("ScriptCore runtime: LT_SetScriptLogBridge export missing; script logs will be suppressed.");
             }
+
+            const auto setScriptCreateEntityBridge = reinterpret_cast<SetScriptCreateEntityBridgeFunction>(
+                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetScriptCreateEntityBridge"));
+            if (setScriptCreateEntityBridge)
+                setScriptCreateEntityBridge(&ForwardScriptCreateEntityToHost);
+
+            const auto setScriptDestroyEntityBridge = reinterpret_cast<SetScriptDestroyEntityBridgeFunction>(
+                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetScriptDestroyEntityBridge"));
+            if (setScriptDestroyEntityBridge)
+                setScriptDestroyEntityBridge(&ForwardScriptDestroyEntityToHost);
 
             registerFunction(&RegisterScriptFromModule);
             s_RuntimeState.SourceLibraryPath = libraryPath;

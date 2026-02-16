@@ -1537,7 +1537,12 @@ namespace Limitless::EditorInspectorPanel
                                 const bool selectedClassCompiled =
                                     scriptEntry.ScriptClassName.empty() || NativeScriptRegistry::HasScript(scriptEntry.ScriptClassName);
                                 if (!selectedClassCompiled)
-                                    ImGui::TextDisabled("Selected script is discovered in Assets but not compiled yet. Build ScriptCore.");
+                                {
+                                    ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f),
+                                                       "Selected script is discovered in Assets but not compiled yet.");
+                                    if (ImGui::Button("Build ScriptCore From Project Scripts"))
+                                        (void)TriggerNativeScriptsBuild(nativeScriptAuthoringState);
+                                }
 
                                 if (!scriptEntry.ScriptAssetRelativePath.empty())
                                     ImGui::TextDisabled("Asset: Assets/%s", scriptEntry.ScriptAssetRelativePath.c_str());
