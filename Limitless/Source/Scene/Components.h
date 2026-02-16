@@ -95,6 +95,7 @@ namespace Limitless
         Assets::TextureAsset::Ptr CachedTexture;  ///< Runtime cache; keeps asset alive
         bool TextureLoadAttempted = false; ///< Prevents per-frame retry/log spam when texture is missing
         glm::vec4 Color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+        float TilingFactor = 1.0f;
     };
 
     /// Renders runtime text using an MSDF atlas generated from the font file path.

@@ -5,6 +5,7 @@
 #include "Scene/Components.h"
 
 #include <glm/glm.hpp>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -26,6 +27,12 @@ namespace Limitless
     class Scene
     {
     public:
+        enum class LoadState : uint8_t
+        {
+            Loading = 0,
+            Ready = 1
+        };
+
         struct EditorCameraBookmark
         {
             glm::vec3 Position{ 0.0f, 0.0f, 0.0f };
@@ -75,6 +82,16 @@ namespace Limitless
         void FixedUpdate(float fixedDeltaTime);
         void StepPhysics2D(float fixedDeltaTime);
 
+        void BeginLoadingState();
+        void MarkSceneObjectsInitialized();
+        bool InitializePhysicsWorldForLoading();
+        void SetLoadStateReady();
+
+        LoadState GetLoadState() const { return m_LoadState; }
+        bool IsReady() const { return m_LoadState == LoadState::Ready; }
+        bool IsSceneObjectsInitialized() const { return m_SceneObjectsInitialized; }
+        bool IsPhysicsWorldInitializedForLoading() const { return m_PhysicsWorldInitializedForLoading; }
+
         void SetPhysics2DSettings(const Physics2DWorldSettings& settings);
         const Physics2DWorldSettings& GetPhysics2DSettings() const { return m_Physics2DSettings; }
         Physics2DWorld* GetPhysics2DWorld();
@@ -108,6 +125,9 @@ namespace Limitless
         std::optional<EditorCameraBookmark> m_EditorCameraBookmark;
         Physics2DWorldSettings m_Physics2DSettings{};
         std::unique_ptr<Physics2DWorld> m_Physics2DWorld;
+        LoadState m_LoadState = LoadState::Ready;
+        bool m_SceneObjectsInitialized = true;
+        bool m_PhysicsWorldInitializedForLoading = true;
     };
 
     // -----------------------------------------------------------------------------

@@ -798,23 +798,23 @@ namespace Limitless
             if (!rigidbody.RuntimeBodyCreated || !b2Body_IsValid(rigidbody.RuntimeBodyId))
                 continue;
 
+            const b2BodyType expectedType = ToBox2DBodyType(rigidbody.Type);
+
             // -----------------------------------------------------------
-            // Fast path: sleeping bodies are fully frozen by Box2D.
-            // Their position, velocity, and contacts don't change, and
-            // SyncMovedBodiesToTransforms already wrote the final physics
-            // position back to the authoring transform before they slept.
-            // If a script/editor wakes a body (e.g. via SetLinearVelocity
-            // or SetTransform), it will be processed next step when awake.
+            // Fast path: skip sleeping dynamic bodies with no script writes.
+            // Keep kinematic/static bodies on the full path so transform-
+            // authored motion (e.g. rotating kinematic platforms) still
+            // drives collision updates even when Box2D marks them as sleeping.
             // -----------------------------------------------------------
             const bool hasPendingVelocityWrites =
                 rigidbody.RuntimeHasPendingLinearVelocity ||
                 rigidbody.RuntimeHasPendingLinearVelocityX ||
                 rigidbody.RuntimeHasPendingLinearVelocityY;
 
-            if (!b2Body_IsAwake(rigidbody.RuntimeBodyId) && !hasPendingVelocityWrites)
+            if (expectedType == b2_dynamicBody &&
+                !b2Body_IsAwake(rigidbody.RuntimeBodyId) &&
+                !hasPendingVelocityWrites)
                 continue;
-
-            const b2BodyType expectedType = ToBox2DBodyType(rigidbody.Type);
             if (b2Body_GetType(rigidbody.RuntimeBodyId) != expectedType)
                 b2Body_SetType(rigidbody.RuntimeBodyId, expectedType);
 

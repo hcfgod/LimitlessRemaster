@@ -24,6 +24,7 @@
 #include "Core/Input/InputSystem.h"
 #include "Graphics/Camera/PerspectiveCamera3D.h"
 #include "Graphics/Lighting2DRenderer.h"
+#include "Graphics/Renderer2D.h"
 #include "ImGui/ImGuiLayer.h"
 #include "Project/ProjectManager.h"
 #include "Project/ProjectSettings.h"
@@ -696,11 +697,12 @@ namespace Limitless
             ApplyProjectLighting2DSettings();
         }
 
-        if (m_PlayModeState == EditorPlayModeState::Play && m_Scene)
+        if (m_PlayModeState == EditorPlayModeState::Play && m_Scene && m_Scene->IsReady())
             m_Scene->Update(deltaTime);
 
         ProcessPendingSceneTransitions();
         PumpSceneAssetPrewarm();
+        UpdateSceneLoadingState();
 
         EditorPlayMode::SyncSceneCamera(
             m_PlayModeState,
@@ -743,7 +745,8 @@ namespace Limitless
         if (!m_Scene)
             return;
 
-        if (m_PlayModeState == EditorPlayModeState::Play || m_PlayModeState == EditorPlayModeState::Simulate)
+        if ((m_PlayModeState == EditorPlayModeState::Play || m_PlayModeState == EditorPlayModeState::Simulate) &&
+            m_Scene->IsReady())
         {
             // Only collect expensive per-body diagnostics when the diagnostics
             // panel is actually visible, saving O(N*C) contact queries per step.
@@ -1349,6 +1352,31 @@ namespace Limitless
                     m_SelectedAudioMixerAssetKey = newAssetKey;
                 if (m_SelectedInputActionsAssetKey == oldAssetKey)
                     m_SelectedInputActionsAssetKey = newAssetKey;
+                if (m_CurrentSceneAssetKey == oldAssetKey)
+                    m_CurrentSceneAssetKey = newAssetKey;
+                if (m_EditSceneStoredAssetKey == oldAssetKey)
+                    m_EditSceneStoredAssetKey = newAssetKey;
+                if (m_PrefabModeReturnSceneAssetKey == oldAssetKey)
+                    m_PrefabModeReturnSceneAssetKey = newAssetKey;
+
+                // Keep project/session references coherent when a scene or prefab
+                // asset currently in use gets renamed from the Project panel.
+                if (auto& projectManager = Project::ProjectManager::GetInstance(); projectManager.HasOpenProject())
+                {
+                    if (const auto definition = projectManager.GetProjectDefinition();
+                        definition.has_value() && definition->DefaultScene.Key == oldAssetKey)
+                    {
+                        const auto saveResult = projectManager.SetDefaultSceneAssetKey(newAssetKey);
+                        if (saveResult.IsFailure())
+                        {
+                            LT_WARN("Failed to update default scene after rename '{}' -> '{}': {}",
+                                oldAssetKey,
+                                newAssetKey,
+                                saveResult.GetError().GetErrorMessage());
+                        }
+                    }
+                    PersistProjectSessionState();
+                }
                 if (m_ProjectAudioSettings.MixerAssetKey == oldAssetKey)
                 {
                     m_ProjectAudioSettings.MixerAssetKey = newAssetKey;
@@ -2038,6 +2066,8 @@ namespace Limitless
     {
         m_EditorUndoService.Clear();
         m_EditorUndoService.MarkSaved();
+        m_ActiveSceneTexturePrewarmKeys.clear();
+        m_ActiveSceneMaterialPrewarmKeys.clear();
     }
 
 
@@ -2096,8 +2126,11 @@ namespace Limitless
         }
 
         m_Scene = std::move(sceneResult.GetValue());
+        m_Scene->BeginLoadingState();
+        m_Scene->MarkSceneObjectsInitialized();
         ApplyProjectPhysics2DSettingsToScenes();
         QueueSceneAssetPrewarm();
+        UpdateSceneLoadingState();
         m_SelectedEntity = entt::null;
         m_SelectedTextureAssetKey.clear();
         m_SelectedNativeScriptAssetKey.clear();
@@ -2151,8 +2184,11 @@ namespace Limitless
         }
 
         m_Scene = std::move(sceneResult.GetValue());
+        m_Scene->BeginLoadingState();
+        m_Scene->MarkSceneObjectsInitialized();
         ApplyProjectPhysics2DSettingsToScenes();
         QueueSceneAssetPrewarm();
+        UpdateSceneLoadingState();
         m_SelectedEntity = entt::null;
         m_SelectedTextureAssetKey.clear();
         m_SelectedNativeScriptAssetKey.clear();
@@ -2418,6 +2454,9 @@ namespace Limitless
 
     void EditorLayer::QueueSceneAssetPrewarm()
     {
+        m_ActiveSceneTexturePrewarmKeys.clear();
+        m_ActiveSceneMaterialPrewarmKeys.clear();
+
         if (!m_Scene)
             return;
 
@@ -2429,6 +2468,8 @@ namespace Limitless
             const auto& sprite = spriteView.get<SpriteComponent>(entity);
             if (sprite.TextureKey.empty())
                 continue;
+
+            m_ActiveSceneTexturePrewarmKeys.insert(sprite.TextureKey);
             if (m_PrewarmedTextureAssets.contains(sprite.TextureKey) || m_PendingTexturePrewarmTasks.contains(sprite.TextureKey))
                 continue;
 
@@ -2441,10 +2482,50 @@ namespace Limitless
             const auto& material = materialView.get<MaterialComponent>(entity);
             if (material.MaterialKey.empty())
                 continue;
+
+            m_ActiveSceneMaterialPrewarmKeys.insert(material.MaterialKey);
             if (m_PrewarmedMaterialAssets.contains(material.MaterialKey) || m_PendingMaterialPrewarmTasks.contains(material.MaterialKey))
                 continue;
 
             m_PendingMaterialPrewarmTasks.emplace(material.MaterialKey, Assets::MaterialAsset::LoadAsync(material.MaterialKey));
+        }
+    }
+
+    bool EditorLayer::IsSceneAssetPrewarmComplete() const
+    {
+        for (const std::string& textureKey : m_ActiveSceneTexturePrewarmKeys)
+        {
+            if (m_PendingTexturePrewarmTasks.contains(textureKey))
+                return false;
+        }
+
+        for (const std::string& materialKey : m_ActiveSceneMaterialPrewarmKeys)
+        {
+            if (m_PendingMaterialPrewarmTasks.contains(materialKey))
+                return false;
+        }
+
+        return true;
+    }
+
+    void EditorLayer::UpdateSceneLoadingState()
+    {
+        if (!m_Scene || m_Scene->GetLoadState() != Scene::LoadState::Loading)
+            return;
+
+        // Explicitly initialize physics runtime while the scene is loading so
+        // rendering only starts after colliders/bodies are fully prepared.
+        (void)m_Scene->InitializePhysicsWorldForLoading();
+
+        const bool shaderReady = Renderer2D::IsShaderReady();
+        const bool assetsReady = IsSceneAssetPrewarmComplete();
+        const bool objectsReady = m_Scene->IsSceneObjectsInitialized();
+        const bool physicsReady = m_Scene->IsPhysicsWorldInitializedForLoading();
+
+        if (shaderReady && assetsReady && objectsReady && physicsReady)
+        {
+            m_Scene->SetLoadStateReady();
+            LT_INFO("Scene load completed and is now ready for rendering.");
         }
     }
 

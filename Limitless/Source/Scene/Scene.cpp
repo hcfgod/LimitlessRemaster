@@ -915,6 +915,42 @@ namespace Limitless
         }
     }
 
+    void Scene::BeginLoadingState()
+    {
+        m_LoadState = LoadState::Loading;
+        m_SceneObjectsInitialized = false;
+        m_PhysicsWorldInitializedForLoading = false;
+    }
+
+    void Scene::MarkSceneObjectsInitialized()
+    {
+        m_SceneObjectsInitialized = true;
+    }
+
+    bool Scene::InitializePhysicsWorldForLoading()
+    {
+        if (m_PhysicsWorldInitializedForLoading)
+            return true;
+
+        if (!m_Physics2DWorld)
+            m_Physics2DWorld = std::make_unique<Physics2DWorld>();
+
+        if (!m_Physics2DWorld->IsInitialized())
+            m_Physics2DWorld->Initialize(m_Physics2DSettings);
+
+        m_Physics2DWorld->SetSettings(m_Physics2DSettings);
+        m_Physics2DWorld->RebuildScene(*this);
+        m_PhysicsWorldInitializedForLoading = true;
+        return true;
+    }
+
+    void Scene::SetLoadStateReady()
+    {
+        m_LoadState = LoadState::Ready;
+        m_SceneObjectsInitialized = true;
+        m_PhysicsWorldInitializedForLoading = true;
+    }
+
     void Scene::StepPhysics2D(float fixedDeltaTime)
     {
         Physics2DQueries::SetActiveSceneForScriptQueries(this);
@@ -924,6 +960,7 @@ namespace Limitless
             m_Physics2DWorld->Initialize(m_Physics2DSettings);
         m_Physics2DWorld->SetSettings(m_Physics2DSettings);
         m_Physics2DWorld->Step(*this, fixedDeltaTime);
+        m_PhysicsWorldInitializedForLoading = true;
     }
 
     void Scene::SetPhysics2DSettings(const Physics2DWorldSettings& settings)
@@ -981,6 +1018,7 @@ namespace Limitless
                 destinationSprite.CachedTexture.reset();
                 destinationSprite.TextureLoadAttempted = false;
                 destinationSprite.Color = sprite->Color;
+                destinationSprite.TilingFactor = sprite->TilingFactor;
             }
 
             if (const auto* material = sourceRegistry.try_get<MaterialComponent>(sourceEntity))
@@ -1261,7 +1299,8 @@ namespace Limitless
             {
                 entry["Sprite"] = {
                     { "Texture", MakeAssetReferenceJson(sprite->TextureKey, Assets::AssetType::Texture2D) },
-                    { "Color", { sprite->Color.r, sprite->Color.g, sprite->Color.b, sprite->Color.a } }
+                    { "Color", { sprite->Color.r, sprite->Color.g, sprite->Color.b, sprite->Color.a } },
+                    { "TilingFactor", sprite->TilingFactor }
                 };
             }
 
@@ -1702,6 +1741,7 @@ namespace Limitless
                 auto color = spriteJson.value("Color", std::vector<float>{ 1.0f, 1.0f, 1.0f, 1.0f });
                 if (color.size() >= 4)
                     sprite.Color = glm::vec4(color[0], color[1], color[2], color[3]);
+                sprite.TilingFactor = std::max(0.001f, spriteJson.value("TilingFactor", 1.0f));
             }
 
             if (entry.contains("Material"))
@@ -2425,7 +2465,12 @@ namespace Limitless
 
             if (materialMainTextureAsset)
             {
-                Renderer2D::DrawQuad(model, materialMainTextureAsset, sprite.Color);
+                const float safeTilingFactor = std::max(0.001f, sprite.TilingFactor);
+                Renderer2D::DrawQuad(model,
+                                     materialMainTextureAsset,
+                                     sprite.Color,
+                                     glm::vec2(0.0f, 0.0f),
+                                     glm::vec2(safeTilingFactor, safeTilingFactor));
             }
             else if (useMissingAssetFallback)
             {
@@ -2461,7 +2506,12 @@ namespace Limitless
                 }
                 if (sprite.CachedTexture)
                 {
-                    Renderer2D::DrawQuad(model, sprite.CachedTexture, sprite.Color);
+                    const float safeTilingFactor = std::max(0.001f, sprite.TilingFactor);
+                    Renderer2D::DrawQuad(model,
+                                         sprite.CachedTexture,
+                                         sprite.Color,
+                                         glm::vec2(0.0f, 0.0f),
+                                         glm::vec2(safeTilingFactor, safeTilingFactor));
                 }
                 else
                     Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, sprite.Color.a));

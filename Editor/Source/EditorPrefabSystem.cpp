@@ -61,6 +61,7 @@ namespace Limitless::EditorPrefabSystem
                     destinationSprite.CachedTexture.reset();
                     destinationSprite.TextureLoadAttempted = false;
                     destinationSprite.Color = sourceSprite->Color;
+                    destinationSprite.TilingFactor = sourceSprite->TilingFactor;
                 }
 
                 if (const auto* sourceMaterial = sourceRegistry.try_get<MaterialComponent>(sourceEntity))

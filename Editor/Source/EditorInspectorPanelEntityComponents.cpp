@@ -207,6 +207,9 @@ namespace Limitless::EditorInspectorPanel
             {
                 ImGui::ColorEdit4("Color", &sprite->Color.r);
                 TrackInteractiveMutation(undoService, "Edit Sprite Color");
+                ImGui::DragFloat("Tiling Factor", &sprite->TilingFactor, 0.05f, 0.001f, 100.0f, "%.3f");
+                sprite->TilingFactor = std::max(0.001f, sprite->TilingFactor);
+                TrackInteractiveMutation(undoService, "Edit Sprite Tiling Factor");
 
                 // Material slot (Unity-style): dropping a material assigns it to the renderer.
                 auto* material = registry.try_get<MaterialComponent>(selectedEntity);
@@ -917,6 +920,12 @@ namespace Limitless::EditorInspectorPanel
                 if (ImGui::Combo("Body Type", &bodyTypeIndex, bodyTypeNames, 3))
                     rigidbody2D->Type = static_cast<Rigidbody2DComponent::BodyType>(bodyTypeIndex);
                 TrackInteractiveMutation(undoService, "Edit Rigidbody2D Body Type");
+                if (rigidbody2D->Type == Rigidbody2DComponent::BodyType::Kinematic)
+                {
+                    ImGui::TextWrapped(
+                        "Note: Box2D kinematic bodies do not generate physical collision response against static/kinematic bodies "
+                        "(including static tilemap colliders). Use Dynamic + Gravity Scale 0 for moving collidable platforms.");
+                }
 
                 bool freezeRotation = rigidbody2D->IsRotationLocked();
                 ImGui::TextDisabled("Constraints");

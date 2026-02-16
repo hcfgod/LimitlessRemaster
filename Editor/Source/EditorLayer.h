@@ -20,6 +20,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace Limitless
 {
@@ -80,6 +81,8 @@ namespace Limitless
         bool ApplyPrefabStageChangesToInstances();
         void QueueSceneAssetPrewarm();
         void PumpSceneAssetPrewarm();
+        void UpdateSceneLoadingState();
+        bool IsSceneAssetPrewarmComplete() const;
         void ProcessPendingSceneTransitions();
         bool EnsureSceneSwitchAllowed(const std::function<void()>& deferredSwitchAction);
         void BeginSceneSwitch();
@@ -202,6 +205,8 @@ namespace Limitless
         std::unordered_map<std::string, Async::Task<Assets::MaterialAsset::Ptr>> m_PendingMaterialPrewarmTasks;
         std::unordered_map<std::string, Assets::TextureAsset::Ptr> m_PrewarmedTextureAssets;
         std::unordered_map<std::string, Assets::MaterialAsset::Ptr> m_PrewarmedMaterialAssets;
+        std::unordered_set<std::string> m_ActiveSceneTexturePrewarmKeys;
+        std::unordered_set<std::string> m_ActiveSceneMaterialPrewarmKeys;
         EditorViewportPanel::TilemapEditorState m_TilemapEditorState{};
     };
 
