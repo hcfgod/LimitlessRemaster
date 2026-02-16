@@ -8,6 +8,11 @@
 #include <spdlog/fmt/bundled/format.h>
 #include <variant>
 #include <string>
+#include <vector>
+
+#if defined(SCRIPTCORE_EXPORTS)
+#include "Scripting/Debug.h"
+#endif
 
 // Build configuration-based logging settings
 #ifdef LT_CONFIG_DEBUG
@@ -83,6 +88,13 @@ struct fmt::formatter<Limitless::ConfigValue> : formatter<std::string> {
 };
 
 namespace Limitless {
+struct LogMessageEntry
+{
+    std::string LoggerName;
+    std::string Message;
+    spdlog::level::level_enum Level = spdlog::level::info;
+};
+
 class Log {
 public:
     // Initialize with default settings
@@ -115,6 +127,9 @@ public:
     static std::shared_ptr<spdlog::logger>& GetClientLogger() {
         return s_ClientLogger;
     }
+
+    static std::vector<LogMessageEntry> GetRecentMessages();
+    static void ClearRecentMessages();
 
 private:
     static std::shared_ptr<spdlog::logger> s_CoreLogger;
@@ -472,4 +487,40 @@ private:
     #define LT_CORE_WARN_IF(condition, ...) ((void)0)
     #define LT_CORE_ERROR_IF(condition, ...) ((void)0)
     #define LT_CORE_CRITICAL_IF(condition, ...) ((void)0)
+#endif
+
+// ScriptCore compatibility:
+// Route common LT_* macros through the script debug bridge so script logs
+// appear in the Editor Console even when scripts use familiar LT_* calls.
+#if defined(SCRIPTCORE_EXPORTS)
+    #undef LT_TRACE
+    #undef LT_DBG
+    #undef LT_DEBUG
+    #undef LT_INFO
+    #undef LT_WARN
+    #undef LT_ERROR
+    #undef LT_CRITICAL
+    #undef LT_TRACE_IF
+    #undef LT_DBG_IF
+    #undef LT_DEBUG_IF
+    #undef LT_INFO_IF
+    #undef LT_WARN_IF
+    #undef LT_ERROR_IF
+    #undef LT_CRITICAL_IF
+
+    #define LT_TRACE(...) ::Limitless::Debug::Log(fmt::format(__VA_ARGS__))
+    #define LT_DBG(...) ::Limitless::Debug::Log(fmt::format(__VA_ARGS__))
+    #define LT_DEBUG(...) ::Limitless::Debug::Log(fmt::format(__VA_ARGS__))
+    #define LT_INFO(...) ::Limitless::Debug::Log(fmt::format(__VA_ARGS__))
+    #define LT_WARN(...) ::Limitless::Debug::LogWarning(fmt::format(__VA_ARGS__))
+    #define LT_ERROR(...) ::Limitless::Debug::LogError(fmt::format(__VA_ARGS__))
+    #define LT_CRITICAL(...) ::Limitless::Debug::LogError(fmt::format(__VA_ARGS__))
+
+    #define LT_TRACE_IF(condition, ...) do { if (condition) LT_TRACE(__VA_ARGS__); } while (0)
+    #define LT_DBG_IF(condition, ...) do { if (condition) LT_DBG(__VA_ARGS__); } while (0)
+    #define LT_DEBUG_IF(condition, ...) do { if (condition) LT_DEBUG(__VA_ARGS__); } while (0)
+    #define LT_INFO_IF(condition, ...) do { if (condition) LT_INFO(__VA_ARGS__); } while (0)
+    #define LT_WARN_IF(condition, ...) do { if (condition) LT_WARN(__VA_ARGS__); } while (0)
+    #define LT_ERROR_IF(condition, ...) do { if (condition) LT_ERROR(__VA_ARGS__); } while (0)
+    #define LT_CRITICAL_IF(condition, ...) do { if (condition) LT_CRITICAL(__VA_ARGS__); } while (0)
 #endif

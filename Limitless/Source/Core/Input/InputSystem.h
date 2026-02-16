@@ -12,6 +12,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Limitless
@@ -79,11 +80,23 @@ namespace Limitless
         // Gamepad (single "primary" gamepad for now; extend to player indexing later).
         bool HasGamepad() const { return m_Gamepad != nullptr; }
         bool IsGamepadButtonDown(SDL_GamepadButton button) const;
+        bool WasGamepadButtonPressedThisFrame(SDL_GamepadButton button) const;
+        bool WasGamepadButtonReleasedThisFrame(SDL_GamepadButton button) const;
         float GetGamepadAxis(SDL_GamepadAxis axis) const;
 
         // Runtime rebinding support (optional).
         void SetRebindingSession(std::shared_ptr<InputRebinding> session) { m_RebindingSession = std::move(session); }
         std::shared_ptr<InputRebinding> GetRebindingSession() const { return m_RebindingSession; }
+
+        // Unity-style input action polling helpers.
+        bool IsActionPressed(std::string_view mapName, std::string_view actionName, float deadzone = 0.0001f) const;
+        bool WasActionStartedThisFrame(std::string_view mapName, std::string_view actionName) const;
+        bool WasActionPerformedThisFrame(std::string_view mapName, std::string_view actionName) const;
+        bool WasActionCanceledThisFrame(std::string_view mapName, std::string_view actionName) const;
+        bool ReadActionButton(std::string_view mapName, std::string_view actionName) const;
+        float ReadActionAxis1D(std::string_view mapName, std::string_view actionName) const;
+        glm::vec2 ReadActionAxis2D(std::string_view mapName, std::string_view actionName) const;
+        bool HasAction(std::string_view mapName, std::string_view actionName) const;
 
     private:
         static constexpr size_t kMaxMouseButtons = 8;
@@ -97,6 +110,8 @@ namespace Limitless
         void OnGamepadRemoved(SDL_JoystickID which);
         void OnGamepadAxis(SDL_JoystickID which, SDL_GamepadAxis axis, int16_t value);
         void OnGamepadButton(SDL_JoystickID which, SDL_GamepadButton button, bool down);
+        const InputAction* FindAction(std::string_view mapName, std::string_view actionName, bool warnIfMissing) const;
+        void WarnMissingActionOnce(std::string_view mapName, std::string_view actionName) const;
 
         std::array<uint8_t, SDL_SCANCODE_COUNT> m_KeyDown{};
         std::array<uint8_t, SDL_SCANCODE_COUNT> m_KeyPressedThisFrame{};
@@ -121,6 +136,7 @@ namespace Limitless
         std::vector<std::shared_ptr<InputActionAsset>> m_ActionAssetOverrideStack;
         std::vector<std::string> m_AdditionalProjectActionAssetKeys;
         std::unordered_map<std::string, std::shared_ptr<InputActionAsset>> m_AdditionalProjectActionAssetsByKey;
+        mutable std::unordered_set<std::string> m_WarnedMissingActions;
 
         std::shared_ptr<InputRebinding> m_RebindingSession;
     };

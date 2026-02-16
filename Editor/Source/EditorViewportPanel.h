@@ -22,6 +22,29 @@ namespace Limitless
 
 namespace Limitless::EditorViewportPanel
 {
+    enum class TilemapPaintMode : uint8_t
+    {
+        Single = 0,
+        Rectangle = 1,
+        Fill = 2,
+        Erase = 3
+    };
+
+    struct TilemapEditorState
+    {
+        bool Enabled = true;
+        bool ShowGridOverlay = true;
+        bool SnapToGrid = true;
+        TilemapPaintMode PaintMode = TilemapPaintMode::Single;
+        int32_t ActiveLayerIndex = 0;
+        int32_t BrushSize = 1;
+        uint32_t ActiveTileId = 1;
+        bool PaintCustomData = false;
+        uint32_t ActiveCustomData = 0;
+        bool HasHoveredCell = false;
+        glm::ivec2 HoveredCell = glm::ivec2(0, 0);
+    };
+
     void Draw(uint32_t& viewportWidthPixels,
               uint32_t& viewportHeightPixels,
               std::shared_ptr<Framebuffer>& viewportFramebuffer,
@@ -44,5 +67,6 @@ namespace Limitless::EditorViewportPanel
               Assets::TextureAsset::Ptr& cachedTextureAsset,
               std::string& selectedMaterialAssetKey,
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
-              std::string& selectedNativeScriptAssetKey);
+              std::string& selectedNativeScriptAssetKey,
+              TilemapEditorState* tilemapEditorState);
 }

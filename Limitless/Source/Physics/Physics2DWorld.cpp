@@ -3,6 +3,7 @@
 #include "Scene/Scene.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <unordered_set>
@@ -46,6 +47,156 @@ namespace Limitless
             while (angleRadians < -glm::pi<float>())
                 angleRadians += glm::two_pi<float>();
             return angleRadians;
+        }
+
+        uint64_t HashCombine64(uint64_t seed, uint64_t value)
+        {
+            // 64-bit hash-combine variant suitable for incremental content hashes.
+            seed ^= value + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2);
+            return seed;
+        }
+
+        uint64_t HashFloat(float value)
+        {
+            return static_cast<uint64_t>(std::bit_cast<uint32_t>(value));
+        }
+
+        bool IsTileSolidForCollider(const TilemapComponent& tilemap,
+                                    const TilemapCollider2DComponent& collider,
+                                    int32_t cellX,
+                                    int32_t cellY)
+        {
+            if (!IsTilemapCellInBounds(tilemap, cellX, cellY))
+                return false;
+
+            const size_t tileIndex = TilemapCellToIndex(tilemap, cellX, cellY);
+            for (size_t layerIndex = 0; layerIndex < tilemap.Layers.size(); ++layerIndex)
+            {
+                const auto& layer = tilemap.Layers[layerIndex];
+                if (collider.UseCollisionEnabledLayers)
+                {
+                    if (!layer.CollisionEnabled)
+                        continue;
+                }
+                else if (static_cast<int32_t>(layerIndex) != collider.LayerIndex)
+                {
+                    continue;
+                }
+
+                if (tileIndex < layer.Tiles.size() && layer.Tiles[tileIndex] != 0u)
+                    return true;
+            }
+            return false;
+        }
+
+        uint64_t ComputeTilemapColliderHash(const glm::mat4& worldTransform,
+                                            const TilemapComponent& tilemap,
+                                            const TilemapCollider2DComponent& collider)
+        {
+            const glm::vec3 worldPosition = glm::vec3(worldTransform[3]);
+            const glm::vec3 basisX = glm::vec3(worldTransform[0]);
+            const glm::vec3 basisY = glm::vec3(worldTransform[1]);
+            const float worldScaleX = std::max(kMinimumColliderExtent, glm::length(basisX));
+            const float worldScaleY = std::max(kMinimumColliderExtent, glm::length(basisY));
+            const float worldAngleRadians = std::atan2(basisX.y, basisX.x);
+
+            uint64_t hash = 1469598103934665603ull;
+            hash = HashCombine64(hash, static_cast<uint64_t>(collider.Enabled));
+            hash = HashCombine64(hash, static_cast<uint64_t>(collider.MergeAdjacentTiles));
+            hash = HashCombine64(hash, static_cast<uint64_t>(collider.UseCollisionEnabledLayers));
+            hash = HashCombine64(hash, static_cast<uint64_t>(std::max(0, collider.LayerIndex)));
+            hash = HashCombine64(hash, HashFloat(worldPosition.x));
+            hash = HashCombine64(hash, HashFloat(worldPosition.y));
+            hash = HashCombine64(hash, HashFloat(worldScaleX));
+            hash = HashCombine64(hash, HashFloat(worldScaleY));
+            hash = HashCombine64(hash, HashFloat(worldAngleRadians));
+            hash = HashCombine64(hash, static_cast<uint64_t>(std::max(1, tilemap.GridSize.x)));
+            hash = HashCombine64(hash, static_cast<uint64_t>(std::max(1, tilemap.GridSize.y)));
+            hash = HashCombine64(hash, HashFloat(tilemap.CellSize.x));
+            hash = HashCombine64(hash, HashFloat(tilemap.CellSize.y));
+
+            const int32_t width = std::max(1, tilemap.GridSize.x);
+            const int32_t height = std::max(1, tilemap.GridSize.y);
+            for (int32_t y = 0; y < height; ++y)
+            {
+                for (int32_t x = 0; x < width; ++x)
+                {
+                    hash = HashCombine64(hash, static_cast<uint64_t>(IsTileSolidForCollider(tilemap, collider, x, y)));
+                }
+            }
+            return hash;
+        }
+
+        struct MergedTileRect
+        {
+            int32_t X = 0;
+            int32_t Y = 0;
+            int32_t Width = 1;
+            int32_t Height = 1;
+        };
+
+        std::vector<MergedTileRect> BuildMergedTileRectangles(const TilemapComponent& tilemap,
+                                                              const TilemapCollider2DComponent& collider)
+        {
+            const int32_t width = std::max(1, tilemap.GridSize.x);
+            const int32_t height = std::max(1, tilemap.GridSize.y);
+            std::vector<uint8_t> occupied(static_cast<size_t>(width * height), 0u);
+            std::vector<uint8_t> visited(static_cast<size_t>(width * height), 0u);
+            for (int32_t y = 0; y < height; ++y)
+            {
+                for (int32_t x = 0; x < width; ++x)
+                {
+                    if (IsTileSolidForCollider(tilemap, collider, x, y))
+                        occupied[static_cast<size_t>(y * width + x)] = 1u;
+                }
+            }
+
+            std::vector<MergedTileRect> rectangles;
+            rectangles.reserve(static_cast<size_t>(width * height) / 2);
+            for (int32_t y = 0; y < height; ++y)
+            {
+                for (int32_t x = 0; x < width; ++x)
+                {
+                    const size_t startIndex = static_cast<size_t>(y * width + x);
+                    if (occupied[startIndex] == 0u || visited[startIndex] != 0u)
+                        continue;
+
+                    int32_t rectWidth = 1;
+                    while (x + rectWidth < width)
+                    {
+                        const size_t index = static_cast<size_t>(y * width + (x + rectWidth));
+                        if (occupied[index] == 0u || visited[index] != 0u)
+                            break;
+                        ++rectWidth;
+                    }
+
+                    int32_t rectHeight = 1;
+                    bool canGrow = true;
+                    while (canGrow && y + rectHeight < height)
+                    {
+                        for (int32_t checkX = 0; checkX < rectWidth; ++checkX)
+                        {
+                            const size_t index = static_cast<size_t>((y + rectHeight) * width + (x + checkX));
+                            if (occupied[index] == 0u || visited[index] != 0u)
+                            {
+                                canGrow = false;
+                                break;
+                            }
+                        }
+                        if (canGrow)
+                            ++rectHeight;
+                    }
+
+                    for (int32_t fillY = 0; fillY < rectHeight; ++fillY)
+                    {
+                        for (int32_t fillX = 0; fillX < rectWidth; ++fillX)
+                            visited[static_cast<size_t>((y + fillY) * width + (x + fillX))] = 1u;
+                    }
+
+                    rectangles.push_back(MergedTileRect{ x, y, rectWidth, rectHeight });
+                }
+            }
+            return rectangles;
         }
     }
 
@@ -141,6 +292,7 @@ namespace Limitless
         b2World_Step(m_WorldId, step, subSteps);
 
         SyncMovedBodiesToTransforms(scene);
+        SyncBodyContactCounts(scene);
         CollectContactEvents();
         CollectDiagnostics(scene);
 #else
@@ -185,6 +337,20 @@ namespace Limitless
             collider.RuntimeShapeCreated = false;
         }
 
+        auto tilemapColliderView = registry.view<TilemapCollider2DComponent>();
+        for (entt::entity entity : tilemapColliderView)
+        {
+            auto& tilemapCollider = tilemapColliderView.get<TilemapCollider2DComponent>(entity);
+#ifdef LT_ENABLE_PHYSICS2D
+            if (tilemapCollider.RuntimeBodyCreated && b2Body_IsValid(tilemapCollider.RuntimeBodyId))
+                b2DestroyBody(tilemapCollider.RuntimeBodyId);
+            tilemapCollider.RuntimeBodyId = b2_nullBodyId;
+            tilemapCollider.RuntimeShapeIds.clear();
+#endif
+            tilemapCollider.RuntimeBodyCreated = false;
+            tilemapCollider.RuntimeBuiltHash = 0ull;
+        }
+
         auto bodyView = registry.view<Rigidbody2DComponent>();
         for (entt::entity entity : bodyView)
         {
@@ -201,6 +367,17 @@ namespace Limitless
             rigidbody.RuntimeRenderPreviousAngleRadians = 0.0f;
             rigidbody.RuntimeRenderCurrentPosition = glm::vec2(0.0f);
             rigidbody.RuntimeRenderCurrentAngleRadians = 0.0f;
+            rigidbody.RuntimeLinearVelocity = glm::vec2(0.0f);
+            rigidbody.RuntimePendingLinearVelocity = glm::vec2(0.0f);
+            rigidbody.RuntimeHasPendingLinearVelocity = false;
+            rigidbody.RuntimePendingLinearVelocityX = 0.0f;
+            rigidbody.RuntimeHasPendingLinearVelocityX = false;
+            rigidbody.RuntimePendingLinearVelocityY = 0.0f;
+            rigidbody.RuntimeHasPendingLinearVelocityY = false;
+            rigidbody.RuntimeContactCount = 0;
+            rigidbody.RuntimeContactCountExcludingSensors = 0;
+            rigidbody.RuntimeContactCount = 0;
+            rigidbody.RuntimeContactCountExcludingSensors = 0;
         }
         m_Diagnostics = Physics2DDiagnostics{};
         m_BodyDiagnostics.clear();
@@ -223,7 +400,7 @@ namespace Limitless
             bodyDefinition.linearDamping = rigidbody.LinearDamping;
             bodyDefinition.angularDamping = rigidbody.AngularDamping;
             bodyDefinition.gravityScale = rigidbody.GravityScale;
-            bodyDefinition.fixedRotation = rigidbody.FixedRotation;
+            bodyDefinition.fixedRotation = rigidbody.IsRotationLocked();
             bodyDefinition.enableSleep = rigidbody.EnableSleep;
             bodyDefinition.isAwake = rigidbody.StartAwake;
             bodyDefinition.isBullet = rigidbody.UseCCD;
@@ -237,6 +414,13 @@ namespace Limitless
             rigidbody.RuntimeRenderPreviousAngleRadians = rigidbody.RuntimePreviousAngleRadians;
             rigidbody.RuntimeRenderCurrentPosition = rigidbody.RuntimePreviousPosition;
             rigidbody.RuntimeRenderCurrentAngleRadians = rigidbody.RuntimePreviousAngleRadians;
+            rigidbody.RuntimeLinearVelocity = glm::vec2(0.0f);
+            rigidbody.RuntimePendingLinearVelocity = glm::vec2(0.0f);
+            rigidbody.RuntimeHasPendingLinearVelocity = false;
+            rigidbody.RuntimePendingLinearVelocityX = 0.0f;
+            rigidbody.RuntimeHasPendingLinearVelocityX = false;
+            rigidbody.RuntimePendingLinearVelocityY = 0.0f;
+            rigidbody.RuntimeHasPendingLinearVelocityY = false;
 
             if (!rigidbody.RuntimeBodyCreated)
                 continue;
@@ -284,6 +468,105 @@ namespace Limitless
                 circleCollider->RuntimeShapeCreated = b2Shape_IsValid(circleCollider->RuntimeShapeId);
             }
         }
+
+        auto tilemapColliderView = registry.view<TilemapComponent, TilemapCollider2DComponent>();
+        for (entt::entity entity : tilemapColliderView)
+        {
+            auto& tilemap = tilemapColliderView.get<TilemapComponent>(entity);
+            auto& tilemapCollider = tilemapColliderView.get<TilemapCollider2DComponent>(entity);
+            tilemap.EnsureLayerStorage();
+
+            if (!tilemapCollider.Enabled)
+                continue;
+
+            const glm::mat4 worldTransform = scene.GetWorldTransformMatrix(entity);
+            const glm::vec3 worldPosition = glm::vec3(worldTransform[3]);
+            const glm::vec3 basisX = glm::vec3(worldTransform[0]);
+            const glm::vec3 basisY = glm::vec3(worldTransform[1]);
+            const float worldScaleX = std::max(kMinimumColliderExtent, glm::length(basisX));
+            const float worldScaleY = std::max(kMinimumColliderExtent, glm::length(basisY));
+            const float worldAngleRadians = std::atan2(basisX.y, basisX.x);
+
+            b2BodyDef bodyDefinition = b2DefaultBodyDef();
+            bodyDefinition.type = b2_staticBody;
+            bodyDefinition.position = { worldPosition.x, worldPosition.y };
+            bodyDefinition.rotation = b2MakeRot(worldAngleRadians);
+            bodyDefinition.userData = ToUserData(entity);
+            tilemapCollider.RuntimeBodyId = b2CreateBody(m_WorldId, &bodyDefinition);
+            tilemapCollider.RuntimeBodyCreated = b2Body_IsValid(tilemapCollider.RuntimeBodyId);
+            if (!tilemapCollider.RuntimeBodyCreated)
+                continue;
+
+            b2ShapeDef shapeDefinition = b2DefaultShapeDef();
+            shapeDefinition.density = 0.0f;
+            shapeDefinition.friction = tilemapCollider.Friction;
+            shapeDefinition.restitution = tilemapCollider.Restitution;
+            shapeDefinition.isSensor = tilemapCollider.IsSensor;
+            shapeDefinition.enableContactEvents = true;
+            shapeDefinition.filter.categoryBits = tilemapCollider.CollisionLayer;
+            shapeDefinition.filter.maskBits = tilemapCollider.CollisionMask;
+
+            const int32_t gridWidth = std::max(1, tilemap.GridSize.x);
+            const int32_t gridHeight = std::max(1, tilemap.GridSize.y);
+            const glm::vec2 safeCellSize(std::max(0.001f, tilemap.CellSize.x), std::max(0.001f, tilemap.CellSize.y));
+            const glm::vec2 mapCenterOffset = -0.5f * glm::vec2(gridWidth - 1, gridHeight - 1) * safeCellSize;
+            const glm::vec2 scaledCellSize = glm::vec2(
+                safeCellSize.x * worldScaleX,
+                safeCellSize.y * worldScaleY);
+
+#ifdef LT_ENABLE_PHYSICS2D
+            tilemapCollider.RuntimeShapeIds.clear();
+#endif
+            if (tilemapCollider.MergeAdjacentTiles)
+            {
+                const auto mergedRects = BuildMergedTileRectangles(tilemap, tilemapCollider);
+                for (const auto& rect : mergedRects)
+                {
+                    const float centerX = mapCenterOffset.x + (static_cast<float>(rect.X) + (static_cast<float>(rect.Width) - 1.0f) * 0.5f) * safeCellSize.x;
+                    const float centerY = mapCenterOffset.y + (static_cast<float>(rect.Y) + (static_cast<float>(rect.Height) - 1.0f) * 0.5f) * safeCellSize.y;
+                    const float halfWidth = std::max(kMinimumColliderExtent, 0.5f * static_cast<float>(rect.Width) * scaledCellSize.x);
+                    const float halfHeight = std::max(kMinimumColliderExtent, 0.5f * static_cast<float>(rect.Height) * scaledCellSize.y);
+                    b2Polygon boxPolygon = b2MakeOffsetBox(
+                        halfWidth,
+                        halfHeight,
+                        { centerX * worldScaleX, centerY * worldScaleY },
+                        b2Rot_identity);
+                    const b2ShapeId shapeId = b2CreatePolygonShape(tilemapCollider.RuntimeBodyId, &shapeDefinition, &boxPolygon);
+#ifdef LT_ENABLE_PHYSICS2D
+                    if (b2Shape_IsValid(shapeId))
+                        tilemapCollider.RuntimeShapeIds.push_back(shapeId);
+#endif
+                }
+            }
+            else
+            {
+                for (int32_t cellY = 0; cellY < gridHeight; ++cellY)
+                {
+                    for (int32_t cellX = 0; cellX < gridWidth; ++cellX)
+                    {
+                        if (!IsTileSolidForCollider(tilemap, tilemapCollider, cellX, cellY))
+                            continue;
+
+                        const float centerX = mapCenterOffset.x + static_cast<float>(cellX) * safeCellSize.x;
+                        const float centerY = mapCenterOffset.y + static_cast<float>(cellY) * safeCellSize.y;
+                        const float halfWidth = std::max(kMinimumColliderExtent, 0.5f * scaledCellSize.x);
+                        const float halfHeight = std::max(kMinimumColliderExtent, 0.5f * scaledCellSize.y);
+                        b2Polygon boxPolygon = b2MakeOffsetBox(
+                            halfWidth,
+                            halfHeight,
+                            { centerX * worldScaleX, centerY * worldScaleY },
+                            b2Rot_identity);
+                        const b2ShapeId shapeId = b2CreatePolygonShape(tilemapCollider.RuntimeBodyId, &shapeDefinition, &boxPolygon);
+#ifdef LT_ENABLE_PHYSICS2D
+                        if (b2Shape_IsValid(shapeId))
+                            tilemapCollider.RuntimeShapeIds.push_back(shapeId);
+#endif
+                    }
+                }
+            }
+
+            tilemapCollider.RuntimeBuiltHash = ComputeTilemapColliderHash(worldTransform, tilemap, tilemapCollider);
+        }
 #else
         (void)scene;
 #endif
@@ -306,18 +589,41 @@ namespace Limitless
             if (b2Body_GetType(rigidbody.RuntimeBodyId) != expectedType)
                 b2Body_SetType(rigidbody.RuntimeBodyId, expectedType);
 
+            const bool freezePositionX = rigidbody.FreezePositionX;
+            const bool freezePositionY = rigidbody.FreezePositionY;
+            const bool freezeRotation = rigidbody.IsRotationLocked();
+            rigidbody.FixedRotation = freezeRotation;
+
             b2Body_SetLinearDamping(rigidbody.RuntimeBodyId, rigidbody.LinearDamping);
             b2Body_SetAngularDamping(rigidbody.RuntimeBodyId, rigidbody.AngularDamping);
             b2Body_SetGravityScale(rigidbody.RuntimeBodyId, rigidbody.GravityScale);
-            b2Body_SetFixedRotation(rigidbody.RuntimeBodyId, rigidbody.FixedRotation);
+            b2Body_SetFixedRotation(rigidbody.RuntimeBodyId, freezeRotation);
             b2Body_EnableSleep(rigidbody.RuntimeBodyId, rigidbody.EnableSleep);
             b2Body_SetBullet(rigidbody.RuntimeBodyId, rigidbody.UseCCD);
 
             const b2Transform runtimeTransform = b2Body_GetTransform(rigidbody.RuntimeBodyId);
-            const glm::vec2 authoringPosition(transform.Position.x, transform.Position.y);
-            const float authoringAngleRadians = glm::radians(transform.Rotation.z);
             const glm::vec2 runtimePosition(runtimeTransform.p.x, runtimeTransform.p.y);
             const float runtimeAngleRadians = b2Rot_GetAngle(runtimeTransform.q);
+            glm::vec2 authoringPosition(transform.Position.x, transform.Position.y);
+            float authoringAngleRadians = glm::radians(transform.Rotation.z);
+
+            // Constraints are authoritative during simulation.
+            // If scripts/editor mutate constrained axes directly, snap back to the body.
+            if (freezePositionX)
+            {
+                authoringPosition.x = runtimePosition.x;
+                transform.Position.x = runtimePosition.x;
+            }
+            if (freezePositionY)
+            {
+                authoringPosition.y = runtimePosition.y;
+                transform.Position.y = runtimePosition.y;
+            }
+            if (freezeRotation)
+            {
+                authoringAngleRadians = runtimeAngleRadians;
+                transform.Rotation.z = glm::degrees(runtimeAngleRadians);
+            }
 
             if (expectedType == b2_kinematicBody)
             {
@@ -332,18 +638,76 @@ namespace Limitless
                 {
                     b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, { 0.0f, 0.0f });
                     b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, 0.0f);
+                    rigidbody.RuntimePreviousPosition = authoringPosition;
+                    rigidbody.RuntimePreviousAngleRadians = authoringAngleRadians;
                     continue;
                 }
 
                 const float inverseStep = 1.0f / std::max(fixedDeltaTime, kMinimumStepDelta);
-                const glm::vec2 targetLinearVelocity = authoredPositionDelta * inverseStep;
-                const float targetAngularVelocity = authoredAngleDelta * inverseStep;
+                glm::vec2 targetLinearVelocity = authoredPositionDelta * inverseStep;
+                float targetAngularVelocity = authoredAngleDelta * inverseStep;
+                if (freezePositionX)
+                    targetLinearVelocity.x = 0.0f;
+                if (freezePositionY)
+                    targetLinearVelocity.y = 0.0f;
+                if (freezeRotation)
+                    targetAngularVelocity = 0.0f;
                 b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, { targetLinearVelocity.x, targetLinearVelocity.y });
                 b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, targetAngularVelocity);
 
                 rigidbody.RuntimePreviousPosition = authoringPosition;
                 rigidbody.RuntimePreviousAngleRadians = authoringAngleRadians;
                 continue;
+            }
+
+            if (expectedType == b2_dynamicBody &&
+                (rigidbody.RuntimeHasPendingLinearVelocity ||
+                 rigidbody.RuntimeHasPendingLinearVelocityX ||
+                 rigidbody.RuntimeHasPendingLinearVelocityY))
+            {
+                b2Vec2 runtimeVelocity = b2Body_GetLinearVelocity(rigidbody.RuntimeBodyId);
+                if (rigidbody.RuntimeHasPendingLinearVelocity)
+                {
+                    runtimeVelocity.x = rigidbody.RuntimePendingLinearVelocity.x;
+                    runtimeVelocity.y = rigidbody.RuntimePendingLinearVelocity.y;
+                }
+                else
+                {
+                    if (rigidbody.RuntimeHasPendingLinearVelocityX)
+                        runtimeVelocity.x = rigidbody.RuntimePendingLinearVelocityX;
+                    if (rigidbody.RuntimeHasPendingLinearVelocityY)
+                        runtimeVelocity.y = rigidbody.RuntimePendingLinearVelocityY;
+                }
+                if (freezePositionX)
+                    runtimeVelocity.x = 0.0f;
+                if (freezePositionY)
+                    runtimeVelocity.y = 0.0f;
+                b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, runtimeVelocity);
+                rigidbody.RuntimeLinearVelocity = glm::vec2(runtimeVelocity.x, runtimeVelocity.y);
+                rigidbody.RuntimeHasPendingLinearVelocity = false;
+                rigidbody.RuntimeHasPendingLinearVelocityX = false;
+                rigidbody.RuntimeHasPendingLinearVelocityY = false;
+            }
+
+            if ((expectedType == b2_dynamicBody || expectedType == b2_kinematicBody) && (freezePositionX || freezePositionY || freezeRotation))
+            {
+                b2Vec2 runtimeVelocity = b2Body_GetLinearVelocity(rigidbody.RuntimeBodyId);
+                bool velocityChanged = false;
+                if (freezePositionX && std::abs(runtimeVelocity.x) > kTransformSnapEpsilon)
+                {
+                    runtimeVelocity.x = 0.0f;
+                    velocityChanged = true;
+                }
+                if (freezePositionY && std::abs(runtimeVelocity.y) > kTransformSnapEpsilon)
+                {
+                    runtimeVelocity.y = 0.0f;
+                    velocityChanged = true;
+                }
+                if (velocityChanged)
+                    b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, runtimeVelocity);
+
+                if (freezeRotation)
+                    b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, 0.0f);
             }
 
             const glm::vec2 positionDelta = authoringPosition - runtimePosition;
@@ -357,6 +721,24 @@ namespace Limitless
                     { authoringPosition.x, authoringPosition.y },
                     b2MakeRot(authoringAngleRadians));
             }
+        }
+
+        auto tilemapColliderView = registry.view<TilemapCollider2DComponent>();
+        for (entt::entity entity : tilemapColliderView)
+        {
+            auto& tilemapCollider = tilemapColliderView.get<TilemapCollider2DComponent>(entity);
+            if (!tilemapCollider.RuntimeBodyCreated || !b2Body_IsValid(tilemapCollider.RuntimeBodyId))
+                continue;
+
+            const glm::mat4 worldTransform = scene.GetWorldTransformMatrix(entity);
+            const glm::vec3 worldPosition = glm::vec3(worldTransform[3]);
+            const glm::vec3 basisX = glm::vec3(worldTransform[0]);
+            const float worldAngleRadians = std::atan2(basisX.y, basisX.x);
+
+            b2Body_SetTransform(
+                tilemapCollider.RuntimeBodyId,
+                { worldPosition.x, worldPosition.y },
+                b2MakeRot(worldAngleRadians));
         }
 #else
         (void)scene;
@@ -401,6 +783,31 @@ namespace Limitless
                 continue;
             if (!joint.RuntimeJointCreated || !b2Joint_IsValid(joint.RuntimeJointId))
                 return true;
+        }
+
+        auto tilemapColliderView = registry.view<TilemapComponent, TilemapCollider2DComponent>();
+        for (entt::entity entity : tilemapColliderView)
+        {
+            const auto& tilemap = tilemapColliderView.get<TilemapComponent>(entity);
+            const auto& tilemapCollider = tilemapColliderView.get<TilemapCollider2DComponent>(entity);
+            if (!tilemapCollider.Enabled)
+                continue;
+
+            if (!tilemapCollider.RuntimeBodyCreated || !b2Body_IsValid(tilemapCollider.RuntimeBodyId))
+                return true;
+
+            const glm::mat4 worldTransform = scene.GetWorldTransformMatrix(entity);
+            const uint64_t currentHash = ComputeTilemapColliderHash(worldTransform, tilemap, tilemapCollider);
+            if (tilemapCollider.RuntimeBuiltHash != currentHash)
+                return true;
+
+#ifdef LT_ENABLE_PHYSICS2D
+            for (const b2ShapeId shapeId : tilemapCollider.RuntimeShapeIds)
+            {
+                if (!b2Shape_IsValid(shapeId))
+                    return true;
+            }
+#endif
         }
 #else
         (void)scene;
@@ -510,12 +917,51 @@ namespace Limitless
             if (!transform || !rigidbody)
                 continue;
 
-            const glm::vec2 bodyPosition(moveEvent.transform.p.x, moveEvent.transform.p.y);
-            const float bodyAngleRadians = b2Rot_GetAngle(moveEvent.transform.q);
+            const bool freezePositionX = rigidbody->FreezePositionX;
+            const bool freezePositionY = rigidbody->FreezePositionY;
+            const bool freezeRotation = rigidbody->IsRotationLocked();
+            rigidbody->FixedRotation = freezeRotation;
+
+            glm::vec2 bodyPosition(moveEvent.transform.p.x, moveEvent.transform.p.y);
+            float bodyAngleRadians = b2Rot_GetAngle(moveEvent.transform.q);
+            b2Vec2 bodyVelocity = b2Body_GetLinearVelocity(rigidbody->RuntimeBodyId);
+
+            if (freezePositionX || freezePositionY || freezeRotation)
+            {
+                glm::vec2 constrainedPosition = bodyPosition;
+                float constrainedAngleRadians = bodyAngleRadians;
+                if (freezePositionX)
+                    constrainedPosition.x = transform->Position.x;
+                if (freezePositionY)
+                    constrainedPosition.y = transform->Position.y;
+                if (freezeRotation)
+                    constrainedAngleRadians = glm::radians(transform->Rotation.z);
+
+                if (glm::distance(constrainedPosition, bodyPosition) > kTransformSnapEpsilon ||
+                    std::abs(WrapAngleRadians(constrainedAngleRadians - bodyAngleRadians)) > kTransformSnapEpsilon)
+                {
+                    b2Body_SetTransform(
+                        rigidbody->RuntimeBodyId,
+                        { constrainedPosition.x, constrainedPosition.y },
+                        b2MakeRot(constrainedAngleRadians));
+                    bodyPosition = constrainedPosition;
+                    bodyAngleRadians = constrainedAngleRadians;
+                }
+
+                if (freezePositionX)
+                    bodyVelocity.x = 0.0f;
+                if (freezePositionY)
+                    bodyVelocity.y = 0.0f;
+                b2Body_SetLinearVelocity(rigidbody->RuntimeBodyId, bodyVelocity);
+                if (freezeRotation)
+                    b2Body_SetAngularVelocity(rigidbody->RuntimeBodyId, 0.0f);
+            }
+
             rigidbody->RuntimeRenderPreviousPosition = rigidbody->RuntimeRenderCurrentPosition;
             rigidbody->RuntimeRenderPreviousAngleRadians = rigidbody->RuntimeRenderCurrentAngleRadians;
             rigidbody->RuntimeRenderCurrentPosition = bodyPosition;
             rigidbody->RuntimeRenderCurrentAngleRadians = bodyAngleRadians;
+            rigidbody->RuntimeLinearVelocity = glm::vec2(bodyVelocity.x, bodyVelocity.y);
 
             if (rigidbody->Type == Rigidbody2DComponent::BodyType::Kinematic)
                 continue;
@@ -526,6 +972,44 @@ namespace Limitless
             transform->Position.x = bodyPosition.x;
             transform->Position.y = bodyPosition.y;
             transform->Rotation.z = glm::degrees(bodyAngleRadians);
+        }
+#else
+        (void)scene;
+#endif
+    }
+
+    void Physics2DWorld::SyncBodyContactCounts(Scene& scene)
+    {
+#ifdef LT_ENABLE_PHYSICS2D
+        auto& registry = scene.GetRegistry();
+        auto bodyView = registry.view<Rigidbody2DComponent>();
+        std::vector<b2ContactData> contactBuffer;
+        for (entt::entity entity : bodyView)
+        {
+            auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
+            rigidbody.RuntimeContactCount = 0;
+            rigidbody.RuntimeContactCountExcludingSensors = 0;
+
+            if (!rigidbody.RuntimeBodyCreated || !b2Body_IsValid(rigidbody.RuntimeBodyId))
+                continue;
+
+            const int contactCapacity = std::max(0, b2Body_GetContactCapacity(rigidbody.RuntimeBodyId));
+            if (contactCapacity <= 0)
+                continue;
+
+            contactBuffer.resize(static_cast<size_t>(contactCapacity));
+            const int contactCount = b2Body_GetContactData(rigidbody.RuntimeBodyId, contactBuffer.data(), contactCapacity);
+            rigidbody.RuntimeContactCount = std::max(0, contactCount);
+
+            int nonSensorContactCount = 0;
+            for (int contactIndex = 0; contactIndex < contactCount; ++contactIndex)
+            {
+                const b2ContactData& contact = contactBuffer[static_cast<size_t>(contactIndex)];
+                const bool isSensorContact = b2Shape_IsSensor(contact.shapeIdA) || b2Shape_IsSensor(contact.shapeIdB);
+                if (!isSensorContact)
+                    ++nonSensorContactCount;
+            }
+            rigidbody.RuntimeContactCountExcludingSensors = nonSensorContactCount;
         }
 #else
         (void)scene;

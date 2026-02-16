@@ -46,6 +46,7 @@ namespace Limitless
         void Initialize(SceneGetter sceneGetter, SceneSetter sceneSetter, SceneSwap sceneSwap);
 
         bool ExecuteSceneMutation(const std::string& label, const std::function<bool(Scene&)>& mutator);
+        bool ExecuteCommand(std::unique_ptr<IEditorCommand> command);
         void BeginInteractiveSceneMutation();
         bool CommitInteractiveSceneMutation(const std::string& label);
         void CancelInteractiveSceneMutation();
@@ -60,6 +61,7 @@ namespace Limitless
         const std::string& GetUndoLabel() const { return m_UndoStack.GetUndoLabel(); }
         const std::string& GetRedoLabel() const { return m_UndoStack.GetRedoLabel(); }
         bool IsDirty() const { return m_IsDirty; }
+        Scene* GetActiveScene() const { return m_SceneGetter ? m_SceneGetter() : nullptr; }
 
     private:
         bool PushSnapshotCommand(const std::string& label, std::unique_ptr<Scene> beforeSnapshot);

@@ -2,6 +2,7 @@
 #include "EditorAssetNaming.h"
 #include "Audio/AudioEngine.h"
 #include "Assets/AssetDatabase.h"
+#include "Assets/AssetManager.h"
 #include "Assets/AudioClipAsset.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetImportPipeline.h"
@@ -35,6 +36,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <vector>
 
@@ -692,8 +694,10 @@ namespace Limitless
         DrawViewportPanel();
         DrawScenePanel();
         DrawInspectorPanel();
+        DrawTilemapPanel();
         DrawProjectPanel();
         DrawPhysicsDiagnosticsPanel();
+        DrawConsolePanel();
         DrawSaveScenePopup();
         DrawSceneSwitchConfirmationPopup();
 
@@ -723,6 +727,7 @@ namespace Limitless
             m_ShowDemoWindow,
             m_ShowAssetDiagnosticsWindow,
             m_ShowPhysicsDiagnosticsWindow,
+            m_ShowConsoleWindow,
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Open); },
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Create); },
             [this]() { m_ShowProjectSettingsWindow = true; },
@@ -895,6 +900,142 @@ namespace Limitless
         ImGui::End();
     }
 
+    void EditorLayer::DrawConsolePanel()
+    {
+        if (!m_ShowConsoleWindow)
+            return;
+
+        if (!ImGui::Begin("Console", &m_ShowConsoleWindow))
+        {
+            ImGui::End();
+            return;
+        }
+
+        const std::vector<LogMessageEntry> messages = Log::GetRecentMessages();
+        int scriptInfoCount = 0;
+        int scriptWarningCount = 0;
+        int scriptErrorCount = 0;
+        for (const LogMessageEntry& entry : messages)
+        {
+            if (!entry.Message.starts_with("[Script]"))
+                continue;
+
+            if (entry.Level >= spdlog::level::err)
+                ++scriptErrorCount;
+            else if (entry.Level == spdlog::level::warn)
+                ++scriptWarningCount;
+            else
+                ++scriptInfoCount;
+        }
+
+        if (ImGui::Button("Clear"))
+            Log::ClearRecentMessages();
+        ImGui::SameLine();
+        ImGui::Checkbox("Auto-scroll", &m_ConsoleAutoScroll);
+        ImGui::SameLine();
+        ImGui::Checkbox("Scripts", &m_ConsoleShowScriptLogs);
+        ImGui::SameLine();
+        ImGui::Checkbox("Engine", &m_ConsoleShowEngineLogs);
+        ImGui::SameLine();
+        ImGui::Checkbox("Info", &m_ConsoleShowInfo);
+        ImGui::SameLine();
+        ImGui::Checkbox("Warnings", &m_ConsoleShowWarnings);
+        ImGui::SameLine();
+        ImGui::Checkbox("Errors", &m_ConsoleShowErrors);
+        ImGui::SameLine();
+        ImGui::TextDisabled("Script Severity I:%d W:%d E:%d", scriptInfoCount, scriptWarningCount, scriptErrorCount);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(260.0f);
+        ImGui::InputTextWithHint("##ConsoleSearch", "Search logs...", m_ConsoleSearchBuffer.data(), m_ConsoleSearchBuffer.size());
+        ImGui::SameLine();
+        bool copyVisibleRequested = ImGui::Button("Copy Visible");
+
+        const std::string searchText = m_ConsoleSearchBuffer.data();
+        const auto shouldDisplayEntry = [&](const LogMessageEntry& entry) -> bool
+        {
+            const bool isScriptLog = entry.Message.starts_with("[Script]");
+            const bool isWarning = entry.Level == spdlog::level::warn;
+            const bool isError = entry.Level >= spdlog::level::err;
+            const bool isInfo = !isWarning && !isError;
+
+            if ((isScriptLog && !m_ConsoleShowScriptLogs) || (!isScriptLog && !m_ConsoleShowEngineLogs))
+                return false;
+            if ((isInfo && !m_ConsoleShowInfo) || (isWarning && !m_ConsoleShowWarnings) || (isError && !m_ConsoleShowErrors))
+                return false;
+
+            if (!searchText.empty())
+            {
+                const bool loggerMatch = entry.LoggerName.find(searchText) != std::string::npos;
+                const bool messageMatch = entry.Message.find(searchText) != std::string::npos;
+                if (!loggerMatch && !messageMatch)
+                    return false;
+            }
+
+            return true;
+        };
+
+        std::vector<const LogMessageEntry*> visibleEntries;
+        visibleEntries.reserve(messages.size());
+        for (const LogMessageEntry& entry : messages)
+        {
+            if (shouldDisplayEntry(entry))
+                visibleEntries.push_back(&entry);
+        }
+
+        if (copyVisibleRequested)
+        {
+            auto levelToLabel = [](spdlog::level::level_enum level) -> const char*
+            {
+                if (level >= spdlog::level::critical) return "Critical";
+                if (level >= spdlog::level::err) return "Error";
+                if (level >= spdlog::level::warn) return "Warning";
+                if (level >= spdlog::level::info) return "Info";
+                if (level >= spdlog::level::debug) return "Debug";
+                return "Trace";
+            };
+
+            std::string clipboardText;
+            for (const LogMessageEntry* entry : visibleEntries)
+            {
+                if (!entry)
+                    continue;
+                clipboardText += "[" + entry->LoggerName + "] ";
+                clipboardText += "[" + std::string(levelToLabel(entry->Level)) + "] ";
+                clipboardText += entry->Message;
+                clipboardText.push_back('\n');
+            }
+            ImGui::SetClipboardText(clipboardText.c_str());
+        }
+        ImGui::Separator();
+
+        if (ImGui::BeginChild("ConsoleEntries"))
+        {
+            const bool shouldScrollToBottom = m_ConsoleAutoScroll && (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 8.0f);
+            for (const LogMessageEntry* entry : visibleEntries)
+            {
+                if (!entry)
+                    continue;
+
+                const bool isWarning = entry->Level == spdlog::level::warn;
+                const bool isError = entry->Level >= spdlog::level::err;
+
+                const ImVec4 textColor = isError
+                    ? ImVec4(1.0f, 0.38f, 0.38f, 1.0f)
+                    : (isWarning ? ImVec4(1.0f, 0.85f, 0.35f, 1.0f) : ImGui::GetStyleColorVec4(ImGuiCol_Text));
+
+                ImGui::PushStyleColor(ImGuiCol_Text, textColor);
+                ImGui::TextWrapped("[%s] %s", entry->LoggerName.c_str(), entry->Message.c_str());
+                ImGui::PopStyleColor();
+            }
+
+            if (shouldScrollToBottom)
+                ImGui::SetScrollHereY(1.0f);
+        }
+        ImGui::EndChild();
+
+        ImGui::End();
+    }
+
     void EditorLayer::DrawViewportPanel()
     {
         EditorViewportPanel::Draw(
@@ -922,7 +1063,8 @@ namespace Limitless
             m_CachedTextureAsset,
             m_SelectedMaterialAssetKey,
             m_CachedMaterialAsset,
-            m_SelectedNativeScriptAssetKey);
+            m_SelectedNativeScriptAssetKey,
+            &m_TilemapEditorState);
     }
 
     void EditorLayer::DrawScenePanel()
@@ -973,6 +1115,7 @@ namespace Limitless
             m_CachedMaterialAsset,
             m_SelectedNativeScriptAssetKey,
             m_SelectedPrefabAssetKey,
+            m_SelectedTilesetAssetKey,
             &m_EditorUndoService);
     }
 
@@ -987,6 +1130,7 @@ namespace Limitless
             m_CachedMaterialAsset,
             m_SelectedNativeScriptAssetKey,
             m_SelectedPrefabAssetKey,
+            m_SelectedTilesetAssetKey,
             kAssetTexturePayload,
             kAssetAudioPayload,
             kAssetMovePayload,
@@ -1003,6 +1147,9 @@ namespace Limitless
             },
             [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
                 (void)CreateMaterialAssetInFolder(relativeFolderPath, preferredName);
+            },
+            [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
+                (void)CreateTilesetAssetInFolder(relativeFolderPath, preferredName);
             },
             [this](entt::entity entity, const std::filesystem::path& relativeFolderPath) {
                 (void)CreatePrefabFromEntityInFolder(entity, relativeFolderPath);
@@ -1029,6 +1176,8 @@ namespace Limitless
                     m_SelectedNativeScriptAssetKey = newAssetKey;
                 if (m_SelectedPrefabAssetKey == oldAssetKey)
                     m_SelectedPrefabAssetKey = newAssetKey;
+                if (m_SelectedTilesetAssetKey == oldAssetKey)
+                    m_SelectedTilesetAssetKey = newAssetKey;
 
                 if (!m_Scene)
                 {
@@ -1038,6 +1187,7 @@ namespace Limitless
 
                 bool updatedAnyMaterialReference = false;
                 bool updatedAnyAudioReference = false;
+                bool updatedAnyTilesetReference = false;
                 const auto updateMaterialReferencesInScene = [&oldAssetKey, &newAssetKey, &updatedAnyMaterialReference](Scene* scene) {
                     if (!scene)
                         return;
@@ -1074,6 +1224,26 @@ namespace Limitless
                             audioSource.RuntimeVoiceId = 0;
                             audioSource.RuntimePlaybackStarted = false;
                             updatedAnyAudioReference = true;
+                        }
+                    }
+                };
+
+                const auto updateTilesetReferencesInScene = [&oldAssetKey, &newAssetKey, &updatedAnyTilesetReference](Scene* scene) {
+                    if (!scene)
+                        return;
+
+                    auto& registry = scene->GetRegistry();
+                    auto tilemapView = registry.view<TilemapComponent>();
+                    for (entt::entity entity : tilemapView)
+                    {
+                        auto& tilemap = tilemapView.get<TilemapComponent>(entity);
+                        if (tilemap.TilesetAssetKey == oldAssetKey)
+                        {
+                            tilemap.TilesetAssetKey = newAssetKey;
+                            tilemap.TilesetAssetLoadAttempted = false;
+                            tilemap.TilesetTextureLoadAttempted = false;
+                            tilemap.CachedTilesetTexture.reset();
+                            updatedAnyTilesetReference = true;
                         }
                     }
                 };
@@ -1134,6 +1304,8 @@ namespace Limitless
                 updateMaterialReferencesInScene(m_EditSceneStored.get());
                 updateAudioReferencesInScene(m_Scene.get());
                 updateAudioReferencesInScene(m_EditSceneStored.get());
+                updateTilesetReferencesInScene(m_Scene.get());
+                updateTilesetReferencesInScene(m_EditSceneStored.get());
                 if (isScriptRename)
                 {
                     updateScriptReferencesInScene(m_Scene.get());
@@ -1141,7 +1313,7 @@ namespace Limitless
                 }
 
                 // Persist immediately so reopening the editor cannot revive stale material keys.
-                if ((updatedAnyMaterialReference || updatedAnyAudioReference || updatedAnyNativeScriptPath) &&
+                if ((updatedAnyMaterialReference || updatedAnyAudioReference || updatedAnyTilesetReference || updatedAnyNativeScriptPath) &&
                     m_PlayModeState == EditorPlayModeState::Edit &&
                     !m_CurrentSceneAssetKey.empty())
                 {
@@ -1154,6 +1326,161 @@ namespace Limitless
             [this](const std::string& scriptAssetKey) {
                 (void)EditorInspectorPanel::OpenNativeScriptEditorForAssetKey(scriptAssetKey);
             });
+    }
+
+    void EditorLayer::DrawTilemapPanel()
+    {
+        if (!m_ShowTilemapPanel)
+            return;
+
+        if (!ImGui::Begin("Tilemap", &m_ShowTilemapPanel))
+        {
+            ImGui::End();
+            return;
+        }
+
+        if (!m_Scene || m_SelectedEntity == entt::null || !m_Scene->IsValid(m_SelectedEntity))
+        {
+            ImGui::TextDisabled("Select a tilemap entity to edit.");
+            ImGui::End();
+            return;
+        }
+
+        auto& registry = m_Scene->GetRegistry();
+        auto* tilemap = registry.try_get<TilemapComponent>(m_SelectedEntity);
+        if (!tilemap)
+        {
+            ImGui::TextDisabled("Selected entity has no Tilemap component.");
+            ImGui::End();
+            return;
+        }
+        tilemap->EnsureLayerStorage();
+
+        m_TilemapEditorState.ActiveLayerIndex = std::clamp(
+            m_TilemapEditorState.ActiveLayerIndex,
+            0,
+            static_cast<int32_t>(tilemap->Layers.empty() ? 0 : tilemap->Layers.size() - 1));
+        m_TilemapEditorState.BrushSize = std::max(1, m_TilemapEditorState.BrushSize);
+
+        ImGui::Checkbox("Enable Painting", &m_TilemapEditorState.Enabled);
+        ImGui::Checkbox("Show Grid Overlay", &m_TilemapEditorState.ShowGridOverlay);
+        ImGui::Checkbox("Snap To Grid", &m_TilemapEditorState.SnapToGrid);
+
+        int paintModeIndex = static_cast<int>(m_TilemapEditorState.PaintMode);
+        const char* paintModeNames[] = { "Single", "Rectangle", "Fill", "Erase" };
+        if (ImGui::Combo("Paint Mode", &paintModeIndex, paintModeNames, 4))
+            m_TilemapEditorState.PaintMode = static_cast<EditorViewportPanel::TilemapPaintMode>(paintModeIndex);
+
+        ImGui::DragInt("Brush Size", &m_TilemapEditorState.BrushSize, 1.0f, 1, 128);
+        m_TilemapEditorState.BrushSize = std::max(1, m_TilemapEditorState.BrushSize);
+
+        int activeTileId = static_cast<int>(m_TilemapEditorState.ActiveTileId);
+        ImGui::DragInt("Active Tile ID", &activeTileId, 1.0f, 1, std::numeric_limits<int>::max());
+        if (activeTileId < 1)
+            activeTileId = 1;
+        m_TilemapEditorState.ActiveTileId = static_cast<uint32_t>(activeTileId);
+
+        ImGui::Checkbox("Paint Custom Data", &m_TilemapEditorState.PaintCustomData);
+        if (m_TilemapEditorState.PaintCustomData)
+            ImGui::InputScalar("Custom Data Value", ImGuiDataType_U32, &m_TilemapEditorState.ActiveCustomData);
+
+        if (!tilemap->Layers.empty())
+        {
+            const char* activeLayerName = tilemap->Layers[static_cast<size_t>(m_TilemapEditorState.ActiveLayerIndex)].Name.c_str();
+            if (ImGui::BeginCombo("Active Layer", activeLayerName))
+            {
+                for (size_t layerIndex = 0; layerIndex < tilemap->Layers.size(); ++layerIndex)
+                {
+                    const bool selected = static_cast<int32_t>(layerIndex) == m_TilemapEditorState.ActiveLayerIndex;
+                    if (ImGui::Selectable(tilemap->Layers[layerIndex].Name.c_str(), selected))
+                        m_TilemapEditorState.ActiveLayerIndex = static_cast<int32_t>(layerIndex);
+                    if (selected)
+                        ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+        }
+
+        if (m_TilemapEditorState.HasHoveredCell)
+        {
+            ImGui::Text("Hovered Cell: (%d, %d)", m_TilemapEditorState.HoveredCell.x, m_TilemapEditorState.HoveredCell.y);
+        }
+        else
+        {
+            ImGui::TextDisabled("Hovered Cell: (none)");
+        }
+
+        if (!tilemap->TilesetTextureKey.empty())
+        {
+            if (!tilemap->CachedTilesetTexture && !tilemap->TilesetTextureLoadAttempted)
+            {
+                tilemap->CachedTilesetTexture = std::dynamic_pointer_cast<Assets::TextureAsset>(
+                    Assets::AssetManager::GetCachedByKey(tilemap->TilesetTextureKey));
+                if (!tilemap->CachedTilesetTexture)
+                    (void)Assets::TextureAsset::LoadAsync(tilemap->TilesetTextureKey);
+                tilemap->TilesetTextureLoadAttempted = true;
+            }
+            else if (!tilemap->CachedTilesetTexture && tilemap->TilesetTextureLoadAttempted)
+            {
+                tilemap->CachedTilesetTexture = std::dynamic_pointer_cast<Assets::TextureAsset>(
+                    Assets::AssetManager::GetCachedByKey(tilemap->TilesetTextureKey));
+            }
+        }
+
+        if (!tilemap->CachedTilesetTexture || !tilemap->CachedTilesetTexture->GetTexture())
+        {
+            ImGui::TextDisabled("Assign a tileset texture in the Inspector to use palette painting.");
+            ImGui::End();
+            return;
+        }
+
+        const uint32_t textureWidth = tilemap->CachedTilesetTexture->GetTexture()->GetWidth();
+        const uint32_t textureHeight = tilemap->CachedTilesetTexture->GetTexture()->GetHeight();
+        const int32_t tileWidth = std::max(1, tilemap->TilesetTileSizePixels.x);
+        const int32_t tileHeight = std::max(1, tilemap->TilesetTileSizePixels.y);
+        const int32_t columns = static_cast<int32_t>(textureWidth) / tileWidth;
+        const int32_t rows = static_cast<int32_t>(textureHeight) / tileHeight;
+        if (columns <= 0 || rows <= 0)
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Tileset tile size is larger than texture dimensions.");
+            ImGui::End();
+            return;
+        }
+
+        const int32_t maxTileCount = columns * rows;
+        const int32_t paletteColumnCount = std::max(1, std::min(columns, 12));
+        const ImTextureID textureId = (ImTextureID)(void*)(uintptr_t)tilemap->CachedTilesetTexture->GetTexture()->GetRendererID();
+        constexpr float tileButtonSize = 30.0f;
+
+        ImGui::Separator();
+        ImGui::TextDisabled("Tile Palette");
+        for (int32_t tileIndex = 0; tileIndex < maxTileCount; ++tileIndex)
+        {
+            const int32_t tileId = tileIndex + 1;
+            const bool isTileCurrentlySelected = (tileId == static_cast<int32_t>(m_TilemapEditorState.ActiveTileId));
+            const int32_t tileX = tileIndex % columns;
+            const int32_t tileY = tileIndex / columns;
+            const float u0 = static_cast<float>(tileX * tileWidth) / static_cast<float>(textureWidth);
+            const float v0 = static_cast<float>(tileY * tileHeight) / static_cast<float>(textureHeight);
+            const float u1 = static_cast<float>((tileX + 1) * tileWidth) / static_cast<float>(textureWidth);
+            const float v1 = static_cast<float>((tileY + 1) * tileHeight) / static_cast<float>(textureHeight);
+
+            ImGui::PushID(tileId);
+            if (isTileCurrentlySelected)
+                ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(85, 200, 255, 255));
+            if (ImGui::ImageButton("##TilePaletteButton", textureId, ImVec2(tileButtonSize, tileButtonSize), ImVec2(u0, v0), ImVec2(u1, v1)))
+                m_TilemapEditorState.ActiveTileId = static_cast<uint32_t>(tileId);
+            if (isTileCurrentlySelected)
+                ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                ImGui::SetTooltip("Tile %d", tileId);
+            ImGui::PopID();
+
+            if ((tileIndex + 1) % paletteColumnCount != 0)
+                ImGui::SameLine();
+        }
+
+        ImGui::End();
     }
 
     void EditorLayer::EnsureViewportFramebuffer(uint32_t width, uint32_t height)
@@ -1288,6 +1615,7 @@ namespace Limitless
         m_SelectedTextureAssetKey.clear();
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
+        m_SelectedTilesetAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey.clear();
         m_EditorUndoService.MarkSaved();
@@ -1587,6 +1915,7 @@ namespace Limitless
         m_SelectedTextureAssetKey.clear();
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
+        m_SelectedTilesetAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey = assetKey;
         if (!IsPrefabAssetKey(assetKey))
@@ -1639,6 +1968,7 @@ namespace Limitless
         m_SelectedTextureAssetKey.clear();
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
+        m_SelectedTilesetAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey = assetKey;
 
@@ -2109,6 +2439,84 @@ namespace Limitless
         return assetKey;
     }
 
+    std::string EditorLayer::CreateTilesetAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName)
+    {
+        const auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
+        if (rootResult.IsFailure())
+        {
+            LT_ERROR("Could not create tileset asset: {}", rootResult.GetError().GetErrorMessage());
+            return {};
+        }
+
+        const std::filesystem::path assetsDirectory = rootResult.GetValue() / "Assets";
+        const std::filesystem::path targetDirectory = assetsDirectory / relativeFolderPath;
+        std::error_code errorCode;
+        std::filesystem::create_directories(targetDirectory, errorCode);
+        if (errorCode)
+        {
+            LT_ERROR("Could not create tileset folder {}: {}", targetDirectory.string(), errorCode.message());
+            return {};
+        }
+
+        const std::string baseName = preferredFileName.empty() ? std::string("New Tileset") : preferredFileName;
+        std::string finalFileName = baseName;
+        if (!finalFileName.ends_with(".tileset.json"))
+            finalFileName += ".tileset.json";
+
+        std::filesystem::path tilesetPath = targetDirectory / finalFileName;
+        if (std::filesystem::exists(tilesetPath, errorCode))
+        {
+            for (int32_t index = 1; index < 1024; ++index)
+            {
+                const std::filesystem::path candidate = targetDirectory / ("New Tileset " + std::to_string(index) + ".tileset.json");
+                if (!std::filesystem::exists(candidate, errorCode))
+                {
+                    tilesetPath = candidate;
+                    break;
+                }
+            }
+        }
+
+        nlohmann::json tilesetJson = {
+            { "TextureKey", "" },
+            { "TileSizePixels", { 16, 16 } }
+        };
+
+        {
+            std::ofstream output(tilesetPath, std::ios::out | std::ios::binary | std::ios::trunc);
+            if (!output.is_open())
+            {
+                LT_ERROR("Could not create tileset asset {}", tilesetPath.string());
+                return {};
+            }
+            output << tilesetJson.dump(2);
+        }
+
+        std::filesystem::path relativeAssetPath = std::filesystem::relative(tilesetPath, assetsDirectory, errorCode);
+        if (errorCode)
+        {
+            LT_ERROR("Could not compute tileset asset key for {}", tilesetPath.string());
+            return {};
+        }
+
+        const std::string assetKey = "Assets/" + relativeAssetPath.generic_string();
+        const auto importResult = Assets::AssetDatabase::GetInstance().ImportOrUpdate(assetKey, Assets::AssetType::Tileset);
+        if (importResult.IsFailure())
+            LT_WARN("Created tileset asset but failed to import into AssetDatabase ({}): {}", assetKey, importResult.GetError().GetErrorMessage());
+
+        LT_INFO("Created tileset asset {}", assetKey);
+        m_SelectedTilesetAssetKey = assetKey;
+        m_SelectedTextureAssetKey.clear();
+        m_CachedTextureAsset.reset();
+        m_SelectedMaterialAssetKey.clear();
+        m_CachedMaterialAsset.reset();
+        m_SelectedNativeScriptAssetKey.clear();
+        m_SelectedPrefabAssetKey.clear();
+        m_SelectedTilesetAssetKey.clear();
+        m_SelectedEntity = entt::null;
+        return assetKey;
+    }
+
     std::string EditorLayer::CreatePrefabAssetPathForEntity(entt::entity entity, const std::filesystem::path& relativeFolderPath) const
     {
         if (!m_Scene || !m_Scene->IsValid(entity))
@@ -2205,6 +2613,7 @@ namespace Limitless
             m_CachedMaterialAsset.reset();
             m_SelectedNativeScriptAssetKey.clear();
             m_SelectedPrefabAssetKey.clear();
+            m_SelectedTilesetAssetKey.clear();
         }
         return createdEntity;
     }
@@ -2234,6 +2643,7 @@ namespace Limitless
         m_CachedMaterialAsset.reset();
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
+        m_SelectedTilesetAssetKey.clear();
         return createdEntity;
     }
 

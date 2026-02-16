@@ -16,6 +16,10 @@ project "ScriptCore"
         "Source/**.h",
         "Source/**.cpp",
         "../Limitless/Source/Scene/SceneManager.cpp",
+        "../Limitless/Source/Scripting/Input.cpp",
+        "../Limitless/Source/Scripting/InputActions.cpp",
+        "../Limitless/Source/Scripting/Physics2D.cpp",
+        "../Limitless/Source/Scripting/Debug.cpp",
         "../Limitless/Source/Scripting/ScriptableEntity.cpp",
         generatedScriptCoreDirectory .. "/**.h",
         generatedScriptCoreDirectory .. "/**.cpp"

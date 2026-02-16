@@ -2,9 +2,12 @@
 #include "Core/ConfigManager.h"
 #include <filesystem>
 #include <iostream>
+#include <deque>
+#include <mutex>
 #include <spdlog/async.h>
 #include <spdlog/async_logger.h>
 #include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/base_sink.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/fmt/bundled/format.h>
@@ -15,6 +18,32 @@
 
 namespace Limitless 
 {
+    namespace
+    {
+        constexpr size_t kMaxBufferedLogMessages = 4000;
+        std::mutex s_BufferedMessagesMutex;
+        std::deque<LogMessageEntry> s_BufferedMessages;
+
+        class EditorConsoleSink final : public spdlog::sinks::base_sink<std::mutex>
+        {
+        protected:
+            void sink_it_(const spdlog::details::log_msg& message) override
+            {
+                LogMessageEntry entry{};
+                entry.LoggerName = std::string(message.logger_name.data(), message.logger_name.size());
+                entry.Message = fmt::to_string(message.payload);
+                entry.Level = message.level;
+
+                std::scoped_lock<std::mutex> lock(s_BufferedMessagesMutex);
+                s_BufferedMessages.push_back(std::move(entry));
+                if (s_BufferedMessages.size() > kMaxBufferedLogMessages)
+                    s_BufferedMessages.pop_front();
+            }
+
+            void flush_() override {}
+        };
+    }
+
     std::shared_ptr<spdlog::logger> Log::s_CoreLogger;
     std::shared_ptr<spdlog::logger> Log::s_ClientLogger;
     bool Log::s_IsShuttingDown = false;
@@ -112,6 +141,11 @@ namespace Limitless
         std::vector<spdlog::sink_ptr> coreSinks;
         std::vector<spdlog::sink_ptr> clientSinks;
 
+        // In-memory sink for the Editor Console panel.
+        auto editorConsoleSink = std::make_shared<EditorConsoleSink>();
+        coreSinks.push_back(editorConsoleSink);
+        clientSinks.push_back(editorConsoleSink);
+
         // Console sink
         #ifdef LT_CONSOLE_LOGGING_ENABLED
         if (consoleEnabled) {
@@ -177,5 +211,17 @@ namespace Limitless
         // Now safely reset our logger pointers
         s_CoreLogger.reset();
         s_ClientLogger.reset();
+    }
+
+    std::vector<LogMessageEntry> Log::GetRecentMessages()
+    {
+        std::scoped_lock<std::mutex> lock(s_BufferedMessagesMutex);
+        return std::vector<LogMessageEntry>(s_BufferedMessages.begin(), s_BufferedMessages.end());
+    }
+
+    void Log::ClearRecentMessages()
+    {
+        std::scoped_lock<std::mutex> lock(s_BufferedMessagesMutex);
+        s_BufferedMessages.clear();
     }
 } // namespace Limitless

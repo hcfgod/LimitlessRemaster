@@ -16,6 +16,7 @@ namespace Limitless::Assets
             case AssetType::Prefab: return "Prefab";
             case AssetType::Tilemap: return "Tilemap";
             case AssetType::AnimationClip: return "AnimationClip";
+            case AssetType::Tileset: return "Tileset";
             case AssetType::Unknown:
             default:                   return "Unknown";
         }
@@ -33,6 +34,7 @@ namespace Limitless::Assets
         if (s == "Prefab") return AssetType::Prefab;
         if (s == "Tilemap") return AssetType::Tilemap;
         if (s == "AnimationClip") return AssetType::AnimationClip;
+        if (s == "Tileset") return AssetType::Tileset;
         return AssetType::Unknown;
     }
 }

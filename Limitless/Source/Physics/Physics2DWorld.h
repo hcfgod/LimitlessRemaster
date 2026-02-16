@@ -80,6 +80,7 @@ namespace Limitless
         void SyncAuthoringTransformsToBodies(Scene& scene, float fixedDeltaTime);
         bool RequiresRuntimeRebuild(Scene& scene) const;
         void SyncMovedBodiesToTransforms(Scene& scene);
+        void SyncBodyContactCounts(Scene& scene);
         void CollectContactEvents();
         void CollectDiagnostics(Scene& scene);
         int ComputeEffectiveSubSteps(Scene& scene) const;

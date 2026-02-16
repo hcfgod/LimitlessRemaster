@@ -801,7 +801,7 @@ namespace Limitless
                 if (!ProjectWorldToScreen(viewProjection, worldPosition, width, height, screenPosition))
                     continue;
 
-                const glm::vec3 worldPositionRadius = worldPosition + glm::vec3(pointLight.Radius, 0.0f, 0.0f);
+                const glm::vec3 worldPositionRadius = glm::vec3(worldTransform * glm::vec4(pointLight.Radius, 0.0f, 0.0f, 1.0f));
                 glm::vec2 screenRadiusPosition(0.0f);
                 float radiusPixels = pointLight.Radius * pixelsPerUnit;
                 if (ProjectWorldToScreen(viewProjection, worldPositionRadius, width, height, screenRadiusPosition))

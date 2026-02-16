@@ -38,6 +38,72 @@ Important behavior:
 - Scene name-only loading (for example `"Level02"`) resolves through project scene records tracked by `AssetDatabase`.
 - If multiple scene assets share the same scene name, loading by name is considered ambiguous and will fail with a warning.
 
+## Physics2D API (Unity-Style)
+
+Scripts can raycast through the scripting API:
+
+- `Limitless::Physics2D::Raycast(origin, direction, maxDistance, collisionMask)`
+
+The call returns a `Limitless::RaycastHit2D` with:
+
+- `HasHit`
+- `Entity`
+- `Point`
+- `Normal`
+- `Fraction`
+
+Example grounded probe:
+
+```cpp
+const glm::vec2 origin(transform.Position.x, transform.Position.y - 0.45f);
+const Limitless::RaycastHit2D hit = Limitless::Physics2D::Raycast(
+    origin,
+    glm::vec2(0.0f, -1.0f),
+    0.2f);
+const bool grounded = hit.HasHit && hit.Entity != GetEntityHandle();
+```
+
+Rigidbody 2D constraints are available in the Inspector (Unity-style):
+
+- `Freeze Position X`
+- `Freeze Position Y`
+- `Freeze Rotation`
+
+These constraints are serialized with the scene/prefab and enforced at runtime by the physics world.
+
+## Debug Logging API (Unity-Style)
+
+Native scripts can now emit runtime logs directly:
+
+- `Limitless::Debug::Log("message")`
+- `Limitless::Debug::LogWarning("message")`
+- `Limitless::Debug::LogError("message")`
+- `LT_INFO("message")`, `LT_WARN("message")`, `LT_ERROR("message")` are also supported in ScriptCore and route to the same bridge.
+
+These calls are forwarded from `ScriptCore` into the host editor logger, so you can debug game logic without adding temporary engine-side prints.
+
+Example:
+
+```cpp
+if (jumpPressed && !grounded)
+{
+    Limitless::Debug::LogWarning("Jump pressed while grounded check returned false.");
+}
+```
+
+## Editor Console
+
+The editor now includes a **Console** window for runtime debugging:
+
+- Open it from `Window -> Console`.
+- It shows engine and script logs in one stream.
+- Script-origin logs are tagged with `[Script]`.
+- Source filters are available (`Scripts`, `Engine`), and default to script-only.
+- Script severity counters (`I`, `W`, `E`) are shown for quick debugging context.
+- Use filters (`Info`, `Warnings`, `Errors`) and search text to isolate issues quickly.
+- `Copy Visible` copies the currently filtered console lines to your clipboard.
+- `Clear` removes buffered messages from the panel.
+
 ## Exposed Variables in Inspector
 
 Each `Native Script` component automatically exposes supported `public` fields from the script header.
@@ -157,6 +223,10 @@ The inspector now supports native script authoring:
 - Mirror preserves your relative folder structure under `Assets` (for example `Assets/Gameplay/Player` mirrors to `.../Build/Generated/ScriptCore/Gameplay/Player`).
 - Build sync mirrors all paired `*.h`/`*.cpp` native scripts found under project `Assets` before compiling `ScriptCore`.
 - `Auto Build On Save` can trigger ScriptCore-only builds automatically after saving.
+- Script editor quality-of-life includes:
+  - Unsaved tab indicators (`*`) for header/source buffers.
+  - `Ctrl+S` (save), `Ctrl+B` (save + build), and `Ctrl+R` (reload from disk).
+  - `Save + Build` performs an explicit save/mirror before compilation.
 
 Important:
 

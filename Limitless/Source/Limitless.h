@@ -46,6 +46,10 @@
 #include "Scene/Scene.h"
 #include "Scripting/ScriptableEntity.h"
 #include "Scripting/NativeScriptRegistry.h"
+#include "Scripting/Input.h"
+#include "Scripting/InputActions.h"
+#include "Scripting/Physics2D.h"
+#include "Scripting/Debug.h"
 
 // Project System (Editor/tooling)
 #include "Project/ProjectDefinition.h"

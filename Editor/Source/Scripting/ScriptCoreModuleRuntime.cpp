@@ -1,15 +1,23 @@
 #include "ScriptCoreModuleRuntime.h"
 
 #include "Core/Debug/Log.h"
+#include "Core/Input/InputSystem.h"
 #include "Platform/Platform.h"
+#include "Physics/Physics2DQueries.h"
 #include "Scene/SceneManager.h"
+#include "Scripting/Physics2D.h"
 #include "Scripting/NativeScriptRegistry.h"
 #include "Scripting/ScriptCoreApi.h"
+#include "Scripting/Debug.h"
+#include "Scripting/Input.h"
+
+#include <glm/glm.hpp>
 
 #include <chrono>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Limitless::ScriptCoreModuleRuntime
@@ -18,6 +26,13 @@ namespace Limitless::ScriptCoreModuleRuntime
     {
         using RegisterScriptCoreTypesFunction = void (*)(NativeScriptRegistrationCallback registrationCallback);
         using SetSceneTransitionBridgeFunction = void (*)(SceneTransitionBridgeCallback callback);
+        using SetInputActionAxis1DBridgeFunction = void (*)(InputActionAxis1DBridgeCallback callback);
+        using SetInputActionAxis2DBridgeFunction = void (*)(InputActionAxis2DBridgeCallback callback);
+        using SetInputActionExistsBridgeFunction = void (*)(InputActionExistsBridgeCallback callback);
+        using SetInputActionPressedBridgeFunction = void (*)(InputActionPressedBridgeCallback callback);
+        using SetInputActionTriggerBridgeFunction = void (*)(InputActionTriggerBridgeCallback callback);
+        using SetPhysics2DRaycastBridgeFunction = void (*)(Physics2DRaycastBridgeCallback callback);
+        using SetScriptLogBridgeFunction = void (*)(ScriptLogBridgeCallback callback);
 
         struct RuntimeState final
         {
@@ -180,6 +195,112 @@ namespace Limitless::ScriptCoreModuleRuntime
             return false;
         }
 
+        float ForwardInputActionAxis1DToHost(const char* mapName, const char* actionName)
+        {
+            const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
+            const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
+            return InputSystem::GetInstance().ReadActionAxis1D(safeMapName, safeActionName);
+        }
+
+        glm::vec2 ForwardInputActionAxis2DToHost(const char* mapName, const char* actionName)
+        {
+            const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
+            const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
+            return InputSystem::GetInstance().ReadActionAxis2D(safeMapName, safeActionName);
+        }
+
+        bool ForwardInputActionPressedToHost(const char* mapName, const char* actionName, float deadzone)
+        {
+            const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
+            const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
+            return InputSystem::GetInstance().IsActionPressed(safeMapName, safeActionName, deadzone);
+        }
+
+        bool ForwardInputActionExistsToHost(const char* mapName, const char* actionName)
+        {
+            const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
+            const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
+            return InputSystem::GetInstance().HasAction(safeMapName, safeActionName);
+        }
+
+        bool ForwardInputActionStartedToHost(const char* mapName, const char* actionName)
+        {
+            const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
+            const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
+            return InputSystem::GetInstance().WasActionStartedThisFrame(safeMapName, safeActionName);
+        }
+
+        bool ForwardInputActionPerformedToHost(const char* mapName, const char* actionName)
+        {
+            const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
+            const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
+            return InputSystem::GetInstance().WasActionPerformedThisFrame(safeMapName, safeActionName);
+        }
+
+        bool ForwardInputActionCanceledToHost(const char* mapName, const char* actionName)
+        {
+            const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
+            const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
+            return InputSystem::GetInstance().WasActionCanceledThisFrame(safeMapName, safeActionName);
+        }
+
+        bool ForwardInputActionButtonToHost(const char* mapName, const char* actionName)
+        {
+            const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
+            const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
+            return InputSystem::GetInstance().ReadActionButton(safeMapName, safeActionName);
+        }
+
+        bool ForwardPhysics2DRaycastToHost(float originX,
+                                           float originY,
+                                           float directionX,
+                                           float directionY,
+                                           float maxDistance,
+                                           uint64_t collisionMask,
+                                           RaycastHit2D* outHit)
+        {
+            if (!outHit)
+                return false;
+
+            *outHit = RaycastHit2D{};
+            Scene* scene = Physics2DQueries::GetActiveSceneForScriptQueries();
+            if (!scene)
+                return false;
+
+            const Physics2DRaycastHit nativeHit = Physics2DQueries::RaycastClosest(
+                scene,
+                glm::vec2(originX, originY),
+                glm::vec2(directionX, directionY),
+                maxDistance,
+                collisionMask);
+            if (!nativeHit.HasHit)
+                return false;
+
+            outHit->HasHit = true;
+            outHit->Entity = nativeHit.Entity;
+            outHit->Point = nativeHit.Point;
+            outHit->Normal = nativeHit.Normal;
+            outHit->Fraction = nativeHit.Fraction;
+            return true;
+        }
+
+        void ForwardScriptLogToHost(ScriptLogSeverity severity, const char* message)
+        {
+            const std::string_view safeMessage = message ? std::string_view(message) : std::string_view();
+            switch (severity)
+            {
+                case ScriptLogSeverity::Info:
+                    LT_INFO("[Script] {}", safeMessage);
+                    break;
+                case ScriptLogSeverity::Warning:
+                    LT_WARN("[Script] {}", safeMessage);
+                    break;
+                case ScriptLogSeverity::Error:
+                    LT_ERROR("[Script] {}", safeMessage);
+                    break;
+            }
+        }
+
         bool ReloadScriptCoreModule(const std::filesystem::path& libraryPath)
         {
             ResetRuntimeScriptRegistry();
@@ -246,6 +367,91 @@ namespace Limitless::ScriptCoreModuleRuntime
             if (setSceneTransitionBridge)
             {
                 setSceneTransitionBridge(&ForwardSceneTransitionToHost);
+            }
+
+            const auto setInputActionAxis1DBridge = reinterpret_cast<SetInputActionAxis1DBridgeFunction>(
+                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionAxis1DBridge"));
+            if (setInputActionAxis1DBridge)
+            {
+                setInputActionAxis1DBridge(&ForwardInputActionAxis1DToHost);
+            }
+
+            const auto setInputActionAxis2DBridge = reinterpret_cast<SetInputActionAxis2DBridgeFunction>(
+                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionAxis2DBridge"));
+            if (setInputActionAxis2DBridge)
+            {
+                setInputActionAxis2DBridge(&ForwardInputActionAxis2DToHost);
+            }
+
+            const auto setInputActionPressedBridge = reinterpret_cast<SetInputActionPressedBridgeFunction>(
+                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionPressedBridge"));
+            if (setInputActionPressedBridge)
+            {
+                setInputActionPressedBridge(&ForwardInputActionPressedToHost);
+            }
+
+            const auto setInputActionExistsBridge = reinterpret_cast<SetInputActionExistsBridgeFunction>(
+                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionExistsBridge"));
+            if (setInputActionExistsBridge)
+            {
+                setInputActionExistsBridge(&ForwardInputActionExistsToHost);
+            }
+
+            auto setInputActionStartedBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
+                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionStartedBridge"));
+            if (!setInputActionStartedBridge)
+            {
+                setInputActionStartedBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
+                    PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputButtonDownBridge"));
+            }
+            if (setInputActionStartedBridge)
+            {
+                setInputActionStartedBridge(&ForwardInputActionStartedToHost);
+            }
+
+            const auto setInputActionPerformedBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
+                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionPerformedBridge"));
+            if (setInputActionPerformedBridge)
+            {
+                setInputActionPerformedBridge(&ForwardInputActionPerformedToHost);
+            }
+
+            const auto setInputActionCanceledBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
+                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionCanceledBridge"));
+            if (setInputActionCanceledBridge)
+            {
+                setInputActionCanceledBridge(&ForwardInputActionCanceledToHost);
+            }
+
+            auto setInputActionButtonBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
+                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionButtonBridge"));
+            if (!setInputActionButtonBridge)
+            {
+                setInputActionButtonBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
+                    PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputButtonBridge"));
+            }
+            if (setInputActionButtonBridge)
+            {
+                setInputActionButtonBridge(&ForwardInputActionButtonToHost);
+            }
+
+            const auto setPhysics2DRaycastBridge = reinterpret_cast<SetPhysics2DRaycastBridgeFunction>(
+                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetPhysics2DRaycastBridge"));
+            if (setPhysics2DRaycastBridge)
+            {
+                setPhysics2DRaycastBridge(&ForwardPhysics2DRaycastToHost);
+            }
+
+            const auto setScriptLogBridge = reinterpret_cast<SetScriptLogBridgeFunction>(
+                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetScriptLogBridge"));
+            if (setScriptLogBridge)
+            {
+                setScriptLogBridge(&ForwardScriptLogToHost);
+                LT_INFO("ScriptCore runtime: script log bridge connected.");
+            }
+            else
+            {
+                LT_WARN("ScriptCore runtime: LT_SetScriptLogBridge export missing; script logs will be suppressed.");
             }
 
             registerFunction(&RegisterScriptFromModule);

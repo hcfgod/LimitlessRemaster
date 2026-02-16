@@ -39,6 +39,7 @@ namespace Limitless
                   Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                   std::string& selectedNativeScriptAssetKey,
                   std::string& selectedPrefabAssetKey,
+                  std::string& selectedTilesetAssetKey,
                   EditorUndoService* undoService);
     }
 }

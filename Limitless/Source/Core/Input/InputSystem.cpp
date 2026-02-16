@@ -251,6 +251,24 @@ namespace Limitless
         return m_GamepadButtonDown[static_cast<size_t>(button)] != 0;
     }
 
+    bool InputSystem::WasGamepadButtonPressedThisFrame(SDL_GamepadButton button) const
+    {
+        if (button < 0 || button >= SDL_GAMEPAD_BUTTON_COUNT)
+        {
+            return false;
+        }
+        return m_GamepadButtonPressedThisFrame[static_cast<size_t>(button)] != 0;
+    }
+
+    bool InputSystem::WasGamepadButtonReleasedThisFrame(SDL_GamepadButton button) const
+    {
+        if (button < 0 || button >= SDL_GAMEPAD_BUTTON_COUNT)
+        {
+            return false;
+        }
+        return m_GamepadButtonReleasedThisFrame[static_cast<size_t>(button)] != 0;
+    }
+
     float InputSystem::GetGamepadAxis(SDL_GamepadAxis axis) const
     {
         if (axis < 0 || axis >= SDL_GAMEPAD_AXIS_COUNT)
@@ -410,6 +428,92 @@ namespace Limitless
     void InputSystem::OnMouseWheel(float x, float y)
     {
         m_MouseWheelDelta += glm::vec2(x, y);
+    }
+
+    void InputSystem::WarnMissingActionOnce(std::string_view mapName, std::string_view actionName) const
+    {
+        std::string missingKey;
+        missingKey.reserve(mapName.size() + actionName.size() + 2);
+        missingKey.append(mapName);
+        missingKey.append("::");
+        missingKey.append(actionName);
+
+        if (!m_WarnedMissingActions.insert(missingKey).second)
+            return;
+
+        LT_CORE_WARN(
+            "InputSystem: action '{}::{}' is missing from the active input actions asset.",
+            mapName,
+            actionName);
+    }
+
+    const InputAction* InputSystem::FindAction(std::string_view mapName, std::string_view actionName, bool warnIfMissing) const
+    {
+        const auto asset = GetActiveActionAsset();
+        if (!asset)
+        {
+            if (warnIfMissing)
+                WarnMissingActionOnce(mapName, actionName);
+            return nullptr;
+        }
+        const InputActionMap* map = asset->FindMap(mapName);
+        if (!map)
+        {
+            if (warnIfMissing)
+                WarnMissingActionOnce(mapName, actionName);
+            return nullptr;
+        }
+        const InputAction* action = map->FindAction(actionName);
+        if (!action && warnIfMissing)
+            WarnMissingActionOnce(mapName, actionName);
+        return action;
+    }
+
+    bool InputSystem::IsActionPressed(std::string_view mapName, std::string_view actionName, float deadzone) const
+    {
+        const InputAction* action = FindAction(mapName, actionName, true);
+        return action ? action->IsPressed(deadzone) : false;
+    }
+
+    bool InputSystem::WasActionStartedThisFrame(std::string_view mapName, std::string_view actionName) const
+    {
+        const InputAction* action = FindAction(mapName, actionName, true);
+        return action ? action->WasStartedThisFrame() : false;
+    }
+
+    bool InputSystem::WasActionPerformedThisFrame(std::string_view mapName, std::string_view actionName) const
+    {
+        const InputAction* action = FindAction(mapName, actionName, true);
+        return action ? action->WasPerformedThisFrame() : false;
+    }
+
+    bool InputSystem::WasActionCanceledThisFrame(std::string_view mapName, std::string_view actionName) const
+    {
+        const InputAction* action = FindAction(mapName, actionName, true);
+        return action ? action->WasCanceledThisFrame() : false;
+    }
+
+    bool InputSystem::ReadActionButton(std::string_view mapName, std::string_view actionName) const
+    {
+        const InputAction* action = FindAction(mapName, actionName, true);
+        return action ? action->ReadButton() : false;
+    }
+
+    float InputSystem::ReadActionAxis1D(std::string_view mapName, std::string_view actionName) const
+    {
+        const InputAction* action = FindAction(mapName, actionName, true);
+        return action ? action->ReadAxis1D() : 0.0f;
+    }
+
+    glm::vec2 InputSystem::ReadActionAxis2D(std::string_view mapName, std::string_view actionName) const
+    {
+        const InputAction* action = FindAction(mapName, actionName, true);
+        return action ? action->ReadAxis2D() : glm::vec2(0.0f);
+    }
+
+    bool InputSystem::HasAction(std::string_view mapName, std::string_view actionName) const
+    {
+        return FindAction(mapName, actionName, true) != nullptr;
     }
 }
 

@@ -3,6 +3,7 @@
 #include "EditorAssetNaming.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetPaths.h"
+#include "Assets/TilesetAsset.h"
 #include "Assets/AssetTypes.h"
 #include "Assets/AudioClipAsset.h"
 #include "Undo/EditorUndoService.h"
@@ -92,6 +93,7 @@ namespace Limitless::EditorInspectorPanel
     void DrawStandardEntityComponentSections(Scene* scene,
                                              entt::registry& registry,
                                              entt::entity selectedEntity,
+                                             const char* texturePayloadId,
                                              const char* audioPayloadId,
                                              const char* materialPayloadId,
                                              const char* fontPayloadId,
@@ -348,6 +350,333 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
+        if (auto* tilemap = registry.try_get<TilemapComponent>(selectedEntity))
+        {
+            tilemap->EnsureLayerStorage();
+            const bool tilemapOpen = ImGui::TreeNodeEx("Tilemap", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("TilemapComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##TilemapComponentOptionsButton"))
+                ImGui::OpenPopup("TilemapComponentOptions");
+
+            if (ImGui::BeginPopup("TilemapComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveTilemapComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (tilemapOpen)
+            {
+                const auto assignTilesetTextureKey = [&](const std::string& key) {
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation(key.empty() ? "Clear Tilemap Tileset Texture" : "Assign Tilemap Tileset Texture", [&](Scene& mutableScene) {
+                            auto* mutableTilemap = mutableScene.GetRegistry().try_get<TilemapComponent>(selectedEntity);
+                            if (!mutableTilemap)
+                                return false;
+                            mutableTilemap->TilesetTextureKey = key;
+                            mutableTilemap->TilesetAssetKey.clear();
+                            mutableTilemap->CachedTilesetTexture.reset();
+                            mutableTilemap->TilesetTextureLoadAttempted = false;
+                            mutableTilemap->TilesetAssetLoadAttempted = true;
+                            return true;
+                        });
+                    }
+                    else
+                    {
+                        tilemap->TilesetTextureKey = key;
+                        tilemap->TilesetAssetKey.clear();
+                        tilemap->CachedTilesetTexture.reset();
+                        tilemap->TilesetTextureLoadAttempted = false;
+                        tilemap->TilesetAssetLoadAttempted = true;
+                    }
+                };
+
+                const auto assignTilesetAssetKey = [&](const std::string& key) {
+                    const auto mutator = [&](TilemapComponent& mutableTilemap) {
+                        mutableTilemap.TilesetAssetKey = key;
+                        mutableTilemap.TilesetAssetLoadAttempted = false;
+                        mutableTilemap.CachedTilesetTexture.reset();
+                        mutableTilemap.TilesetTextureLoadAttempted = false;
+
+                        Assets::TilesetAssetDefinition definition{};
+                        if (!key.empty() && Assets::TryLoadTilesetAssetDefinition(key, definition))
+                        {
+                            mutableTilemap.TilesetTextureKey = definition.TextureKey;
+                            mutableTilemap.TilesetTileSizePixels = glm::ivec2(
+                                std::max(1, definition.TileSizePixels.x),
+                                std::max(1, definition.TileSizePixels.y));
+                        }
+                    };
+
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation(key.empty() ? "Clear Tilemap Tileset Asset" : "Assign Tilemap Tileset Asset", [&](Scene& mutableScene) {
+                            auto* mutableTilemap = mutableScene.GetRegistry().try_get<TilemapComponent>(selectedEntity);
+                            if (!mutableTilemap)
+                                return false;
+                            mutator(*mutableTilemap);
+                            return true;
+                        });
+                    }
+                    else
+                    {
+                        mutator(*tilemap);
+                    }
+                };
+
+                const std::string tilesetAssetLabel = tilemap->TilesetAssetKey.empty()
+                    ? std::string("None")
+                    : EditorAssetNaming::GetAssetDisplayNameFromAssetKey(tilemap->TilesetAssetKey);
+                ImGui::Text("Tileset Asset");
+                ImGui::SameLine(80);
+                ImGui::Button((tilesetAssetLabel + "##TilemapTilesetAsset").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 90.0f, 0.0f));
+                ImGui::SameLine();
+                if (ImGui::Button("...##TilemapTilesetAssetPicker"))
+                    ImGui::OpenPopup("TilemapTilesetAssetPicker");
+                if (ImGui::BeginPopup("TilemapTilesetAssetPicker"))
+                {
+                    std::vector<std::string> tilesetKeys;
+                    for (const auto& record : Assets::AssetDatabase::GetInstance().GetAllRecords())
+                    {
+                        if (record.Type == Assets::AssetType::Tileset && !record.Key.empty())
+                            tilesetKeys.push_back(record.Key);
+                    }
+                    std::sort(tilesetKeys.begin(), tilesetKeys.end());
+                    tilesetKeys.erase(std::unique(tilesetKeys.begin(), tilesetKeys.end()), tilesetKeys.end());
+                    for (const auto& key : tilesetKeys)
+                    {
+                        const bool isSelectedKey = (tilemap->TilesetAssetKey == key);
+                        const std::string display = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(key);
+                        if (ImGui::Selectable((display + "##TilemapTilesetAsset_" + key).c_str(), isSelectedKey))
+                            assignTilesetAssetKey(key);
+                    }
+                    ImGui::EndPopup();
+                }
+                if (ImGui::BeginDragDropTarget())
+                {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
+                    {
+                        const char* key = static_cast<const char*>(payload->Data);
+                        if (key && key[0])
+                            assignTilesetTextureKey(key);
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+                if (!tilemap->TilesetAssetKey.empty())
+                {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Clear##TilemapTilesetAsset"))
+                        assignTilesetAssetKey({});
+                }
+
+                const std::string tilesetTextureLabel = tilemap->TilesetTextureKey.empty()
+                    ? std::string("None")
+                    : EditorAssetNaming::GetAssetDisplayNameFromAssetKey(tilemap->TilesetTextureKey);
+                ImGui::Text("Texture Override");
+                ImGui::SameLine(80);
+                ImGui::Button((tilesetTextureLabel + "##TilemapTilesetTexture").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 60.0f, 0.0f));
+                if (!tilemap->TilesetTextureKey.empty())
+                {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Clear##TilemapTilesetTexture"))
+                        assignTilesetTextureKey({});
+                }
+
+                glm::ivec2 gridSize = tilemap->GridSize;
+                if (ImGui::DragInt2("Grid Size", &gridSize.x, 1.0f, 1, 4096))
+                {
+                    gridSize.x = std::max(1, gridSize.x);
+                    gridSize.y = std::max(1, gridSize.y);
+                    tilemap->ResizeGrid(gridSize);
+                }
+                TrackInteractiveMutation(undoService, "Edit Tilemap Grid Size");
+
+                ImGui::DragFloat2("Cell Size", &tilemap->CellSize.x, 0.01f, 0.001f, 1024.0f, "%.3f");
+                tilemap->CellSize.x = std::max(0.001f, tilemap->CellSize.x);
+                tilemap->CellSize.y = std::max(0.001f, tilemap->CellSize.y);
+                TrackInteractiveMutation(undoService, "Edit Tilemap Cell Size");
+
+                ImGui::DragInt2("Tile Size Pixels", &tilemap->TilesetTileSizePixels.x, 1.0f, 1, 4096);
+                tilemap->TilesetTileSizePixels.x = std::max(1, tilemap->TilesetTileSizePixels.x);
+                tilemap->TilesetTileSizePixels.y = std::max(1, tilemap->TilesetTileSizePixels.y);
+                TrackInteractiveMutation(undoService, "Edit Tilemap Tile Size Pixels");
+
+                ImGui::Checkbox("Auto Tile Enabled", &tilemap->AutoTileEnabled);
+                TrackInteractiveMutation(undoService, "Edit Tilemap Auto Tile");
+
+                ImGui::Separator();
+                ImGui::TextDisabled("Layers");
+                int removeLayerIndex = -1;
+                for (size_t layerIndex = 0; layerIndex < tilemap->Layers.size(); ++layerIndex)
+                {
+                    auto& layer = tilemap->Layers[layerIndex];
+                    ImGui::PushID(static_cast<int>(layerIndex));
+                    const bool layerOpen = ImGui::TreeNodeEx(layer.Name.empty() ? "Layer" : layer.Name.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+                    if (layerOpen)
+                    {
+                        std::array<char, 128> layerNameBuffer{};
+                        std::snprintf(layerNameBuffer.data(), layerNameBuffer.size(), "%s", layer.Name.c_str());
+                        if (ImGui::InputText("Name", layerNameBuffer.data(), layerNameBuffer.size()))
+                            layer.Name = layerNameBuffer.data();
+                        TrackInteractiveMutation(undoService, "Edit Tilemap Layer Name");
+
+                        ImGui::Checkbox("Visible", &layer.Visible);
+                        TrackInteractiveMutation(undoService, "Edit Tilemap Layer Visible");
+                        ImGui::Checkbox("Collision Enabled", &layer.CollisionEnabled);
+                        TrackInteractiveMutation(undoService, "Edit Tilemap Layer Collision");
+                        ImGui::DragInt("Render Order", &layer.RenderOrder, 1.0f, -10000, 10000);
+                        TrackInteractiveMutation(undoService, "Edit Tilemap Layer Render Order");
+                        if (tilemap->Layers.size() > 1 && ImGui::Button("Remove Layer"))
+                            removeLayerIndex = static_cast<int>(layerIndex);
+                        ImGui::TreePop();
+                    }
+                    ImGui::PopID();
+                }
+
+                if (ImGui::Button("Add Layer"))
+                {
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation("Add Tilemap Layer", [&](Scene& mutableScene) {
+                            auto* mutableTilemap = mutableScene.GetRegistry().try_get<TilemapComponent>(selectedEntity);
+                            if (!mutableTilemap)
+                                return false;
+                            TilemapLayer newLayer;
+                            newLayer.Name = "Layer";
+                            newLayer.RenderOrder = static_cast<int32_t>(mutableTilemap->Layers.size() * 10);
+                            mutableTilemap->Layers.push_back(std::move(newLayer));
+                            mutableTilemap->EnsureLayerStorage();
+                            return true;
+                        });
+                    }
+                    else
+                    {
+                        TilemapLayer newLayer;
+                        newLayer.Name = "Layer";
+                        newLayer.RenderOrder = static_cast<int32_t>(tilemap->Layers.size() * 10);
+                        tilemap->Layers.push_back(std::move(newLayer));
+                        tilemap->EnsureLayerStorage();
+                    }
+                }
+
+                if (removeLayerIndex >= 0 && removeLayerIndex < static_cast<int>(tilemap->Layers.size()))
+                {
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation("Remove Tilemap Layer", [&](Scene& mutableScene) {
+                            auto* mutableTilemap = mutableScene.GetRegistry().try_get<TilemapComponent>(selectedEntity);
+                            if (!mutableTilemap)
+                                return false;
+                            if (removeLayerIndex < 0 || removeLayerIndex >= static_cast<int>(mutableTilemap->Layers.size()))
+                                return false;
+                            mutableTilemap->Layers.erase(mutableTilemap->Layers.begin() + removeLayerIndex);
+                            mutableTilemap->EnsureLayerStorage();
+                            return true;
+                        });
+                    }
+                    else
+                    {
+                        tilemap->Layers.erase(tilemap->Layers.begin() + removeLayerIndex);
+                        tilemap->EnsureLayerStorage();
+                    }
+                }
+
+                if (!registry.all_of<TilemapCollider2DComponent>(selectedEntity))
+                {
+                    ImGui::Separator();
+                    ImGui::TextDisabled("Tilemap collision requires Tilemap Collider 2D.");
+                    if (ImGui::Button("Add Tilemap Collider 2D"))
+                    {
+                        if (undoService)
+                        {
+                            (void)undoService->ExecuteSceneMutation("Add TilemapCollider2D Component", [&](Scene& mutableScene) {
+                                mutableScene.GetRegistry().emplace<TilemapCollider2DComponent>(selectedEntity);
+                                return true;
+                            });
+                        }
+                        else
+                        {
+                            registry.emplace<TilemapCollider2DComponent>(selectedEntity);
+                        }
+                    }
+                }
+
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* tilemapCollider2D = registry.try_get<TilemapCollider2DComponent>(selectedEntity))
+        {
+            const bool tilemapColliderOpen = ImGui::TreeNodeEx("Tilemap Collider 2D", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("TilemapCollider2DComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##TilemapCollider2DComponentOptionsButton"))
+                ImGui::OpenPopup("TilemapCollider2DComponentOptions");
+
+            if (ImGui::BeginPopup("TilemapCollider2DComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveTilemapCollider2DComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (tilemapColliderOpen)
+            {
+                if (!registry.all_of<TilemapComponent>(selectedEntity))
+                    ImGui::TextDisabled("Requires Tilemap component on the same entity.");
+
+                ImGui::Checkbox("Enabled", &tilemapCollider2D->Enabled);
+                TrackInteractiveMutation(undoService, "Edit TilemapCollider2D Enabled");
+                ImGui::Checkbox("Merge Adjacent Tiles", &tilemapCollider2D->MergeAdjacentTiles);
+                TrackInteractiveMutation(undoService, "Edit TilemapCollider2D Merge");
+                ImGui::Checkbox("Use Collision Enabled Layers", &tilemapCollider2D->UseCollisionEnabledLayers);
+                TrackInteractiveMutation(undoService, "Edit TilemapCollider2D Layer Mode");
+                if (!tilemapCollider2D->UseCollisionEnabledLayers)
+                {
+                    if (const auto* tilemap = registry.try_get<TilemapComponent>(selectedEntity))
+                    {
+                        const int32_t maxLayerIndex = static_cast<int32_t>(tilemap->Layers.size()) - 1;
+                        int32_t selectedLayerIndex = maxLayerIndex >= 0
+                            ? std::clamp(tilemapCollider2D->LayerIndex, 0, maxLayerIndex)
+                            : -1;
+                        const char* layerLabel = (selectedLayerIndex < 0)
+                            ? "None"
+                            : tilemap->Layers[static_cast<size_t>(selectedLayerIndex)].Name.c_str();
+                        if (ImGui::BeginCombo("Layer", layerLabel))
+                        {
+                            for (size_t layerIndex = 0; layerIndex < tilemap->Layers.size(); ++layerIndex)
+                            {
+                                const bool isSelected = static_cast<int32_t>(layerIndex) == selectedLayerIndex;
+                                if (ImGui::Selectable(tilemap->Layers[layerIndex].Name.c_str(), isSelected))
+                                    tilemapCollider2D->LayerIndex = static_cast<int32_t>(layerIndex);
+                                if (isSelected)
+                                    ImGui::SetItemDefaultFocus();
+                            }
+                            ImGui::EndCombo();
+                        }
+                        TrackInteractiveMutation(undoService, "Edit TilemapCollider2D Layer");
+                    }
+                }
+
+                ImGui::DragFloat("Friction", &tilemapCollider2D->Friction, 0.01f, 0.0f, 1.0f);
+                TrackInteractiveMutation(undoService, "Edit TilemapCollider2D Friction");
+                ImGui::DragFloat("Restitution", &tilemapCollider2D->Restitution, 0.01f, 0.0f, 1.0f);
+                TrackInteractiveMutation(undoService, "Edit TilemapCollider2D Restitution");
+                ImGui::Checkbox("Is Sensor", &tilemapCollider2D->IsSensor);
+                TrackInteractiveMutation(undoService, "Edit TilemapCollider2D Sensor");
+                ImGui::InputScalar("Layer Bits", ImGuiDataType_U64, &tilemapCollider2D->CollisionLayer);
+                TrackInteractiveMutation(undoService, "Edit TilemapCollider2D Layer Bits");
+                ImGui::InputScalar("Mask Bits", ImGuiDataType_U64, &tilemapCollider2D->CollisionMask);
+                TrackInteractiveMutation(undoService, "Edit TilemapCollider2D Mask Bits");
+
+                ImGui::TreePop();
+            }
+        }
+
         if (auto* audioSource = registry.try_get<AudioSourceComponent>(selectedEntity))
         {
             const bool audioOpen = ImGui::TreeNodeEx("Audio Source", ImGuiTreeNodeFlags_DefaultOpen);
@@ -473,8 +802,17 @@ namespace Limitless::EditorInspectorPanel
                     rigidbody2D->Type = static_cast<Rigidbody2DComponent::BodyType>(bodyTypeIndex);
                 TrackInteractiveMutation(undoService, "Edit Rigidbody2D Body Type");
 
-                ImGui::Checkbox("Fixed Rotation", &rigidbody2D->FixedRotation);
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Fixed Rotation");
+                bool freezeRotation = rigidbody2D->IsRotationLocked();
+                ImGui::TextDisabled("Constraints");
+                ImGui::Checkbox("Freeze Position X", &rigidbody2D->FreezePositionX);
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Freeze Position X");
+                ImGui::Checkbox("Freeze Position Y", &rigidbody2D->FreezePositionY);
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Freeze Position Y");
+                if (ImGui::Checkbox("Freeze Rotation", &freezeRotation))
+                {
+                    rigidbody2D->FixedRotation = freezeRotation;
+                }
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Freeze Rotation");
                 ImGui::Checkbox("Use CCD", &rigidbody2D->UseCCD);
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
                     ImGui::SetTooltip("Continuous Collision Detection. Use for fast-moving bodies to reduce tunneling through colliders.");

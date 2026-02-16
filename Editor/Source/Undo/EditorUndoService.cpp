@@ -141,6 +141,17 @@ namespace Limitless
         return PushSnapshotCommand(label, std::move(beforeSnapshot));
     }
 
+    bool EditorUndoService::ExecuteCommand(std::unique_ptr<IEditorCommand> command)
+    {
+        if (!command)
+            return false;
+        if (!m_UndoStack.Push(std::move(command)))
+            return false;
+        m_PendingInteractiveSnapshot.reset();
+        m_IsDirty = true;
+        return true;
+    }
+
     void EditorUndoService::BeginInteractiveSceneMutation()
     {
         if (!m_PendingInteractiveSnapshot)

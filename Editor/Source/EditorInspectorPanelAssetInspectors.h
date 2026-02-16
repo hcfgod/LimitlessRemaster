@@ -22,5 +22,6 @@ namespace Limitless
 
         void DrawNativeScriptAssetInspector(std::string& selectedNativeScriptAssetKey);
         void DrawPrefabAssetInspector(std::string& selectedPrefabAssetKey);
+        void DrawTilesetAssetInspector(Scene* scene, std::string& selectedTilesetAssetKey);
     }
 }

@@ -51,6 +51,12 @@ namespace Limitless
         bool CreateMaterialPopupOpen = false;
         std::filesystem::path CreateMaterialParentRelativePath;
         std::array<char, 256> CreateMaterialNameBuffer{};
+
+        // Tileset asset creation popup state.
+        bool CreateTilesetPopupPending = false;
+        bool CreateTilesetPopupOpen = false;
+        std::filesystem::path CreateTilesetParentRelativePath;
+        std::array<char, 256> CreateTilesetNameBuffer{};
     };
 
     namespace EditorProjectPanel
@@ -64,6 +70,7 @@ namespace Limitless
                   Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                   std::string& selectedNativeScriptAssetKey,
                   std::string& selectedPrefabAssetKey,
+                  std::string& selectedTilesetAssetKey,
                   const char* texturePayloadId,
                   const char* audioPayloadId,
                   const char* assetMovePayloadId,
@@ -75,6 +82,7 @@ namespace Limitless
                   const std::function<void(const std::string&)>& onSceneActivated,
                   const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
                   const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
+                  const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
                   const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
                   const std::function<void(const std::string&)>& onPrefabOpened,
                   const std::function<void(const std::string&)>& onPrefabInstantiated,

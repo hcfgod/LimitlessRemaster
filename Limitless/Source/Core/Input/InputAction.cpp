@@ -113,9 +113,9 @@ namespace Limitless
         {
             return std::get<bool>(m_Value) ? 1.0f : 0.0f;
         }
-        // For Axis2D -> Axis1D, return magnitude (simple, useful for debug).
+        // For Axis2D -> Axis1D, return X so horizontal movement maps naturally.
         const glm::vec2 v = std::get<glm::vec2>(m_Value);
-        return std::sqrt(v.x * v.x + v.y * v.y);
+        return v.x;
     }
 
     glm::vec2 InputActionValue::AsAxis2D() const
@@ -293,15 +293,21 @@ namespace Limitless
                 {
                     if (const auto* key = std::get_if<KeyboardButtonBinding>(&b))
                     {
-                        down = down || input.IsKeyDown(key->Key);
+                        down = down ||
+                            input.IsKeyDown(key->Key) ||
+                            input.WasKeyPressedThisFrame(key->Key);
                     }
                     else if (const auto* mouse = std::get_if<MouseButtonBinding>(&b))
                     {
-                        down = down || input.IsMouseButtonDown(mouse->Button);
+                        down = down ||
+                            input.IsMouseButtonDown(mouse->Button) ||
+                            input.WasMouseButtonPressedThisFrame(mouse->Button);
                     }
                     else if (const auto* pad = std::get_if<GamepadButtonBinding>(&b))
                     {
-                        down = down || input.IsGamepadButtonDown(pad->Button);
+                        down = down ||
+                            input.IsGamepadButtonDown(pad->Button) ||
+                            input.WasGamepadButtonPressedThisFrame(pad->Button);
                     }
                 }
                 return InputActionValue::Button(down);

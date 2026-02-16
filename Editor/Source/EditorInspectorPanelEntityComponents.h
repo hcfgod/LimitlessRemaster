@@ -25,11 +25,14 @@ namespace Limitless::EditorInspectorPanel
         bool RemoveDirectionalLight2DComponent = false;
         bool RemovePointLight2DComponent = false;
         bool RemoveShadowOccluder2DComponent = false;
+        bool RemoveTilemapComponent = false;
+        bool RemoveTilemapCollider2DComponent = false;
     };
 
     void DrawStandardEntityComponentSections(Scene* scene,
                                              entt::registry& registry,
                                              entt::entity selectedEntity,
+                                             const char* texturePayloadId,
                                              const char* audioPayloadId,
                                              const char* materialPayloadId,
                                              const char* fontPayloadId,

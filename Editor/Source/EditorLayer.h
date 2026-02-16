@@ -9,6 +9,7 @@
 #include "EditorProjectSettingsPanel.h"
 #include "EditorAssetDiagnosticsPanel.h"
 #include "EditorScenePanel.h"
+#include "EditorViewportPanel.h"
 #include "Core/Concurrency/AsyncIO.h"
 #include "Undo/EditorUndoService.h"
 #include "Graphics/Texture.h"
@@ -56,6 +57,8 @@ namespace Limitless
         void DrawInspectorPanel();
         void DrawProjectPanel();
         void DrawPhysicsDiagnosticsPanel();
+        void DrawConsolePanel();
+        void DrawTilemapPanel();
 
         void EnsureViewportFramebuffer(uint32_t width, uint32_t height);
         void EnterPlayMode();
@@ -87,6 +90,7 @@ namespace Limitless
         void ApplyProjectLighting2DSettings();
         std::string CreateSceneAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         std::string CreateMaterialAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
+        std::string CreateTilesetAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         std::string CreatePrefabAssetPathForEntity(entt::entity entity, const std::filesystem::path& relativeFolderPath) const;
         bool CreatePrefabFromEntity(entt::entity entity);
         bool CreatePrefabFromEntityInFolder(entt::entity entity, const std::filesystem::path& relativeFolderPath);
@@ -139,6 +143,9 @@ namespace Limitless
         /// When non-empty, the Inspector shows prefab asset metadata preview.
         std::string m_SelectedPrefabAssetKey;
 
+        /// Selected tileset asset key when user clicks a tileset in the Project panel.
+        std::string m_SelectedTilesetAssetKey;
+
         std::string m_CurrentSceneAssetKey;
         std::string m_EditSceneStoredAssetKey;
         std::string m_PrefabModeReturnSceneAssetKey;
@@ -155,6 +162,15 @@ namespace Limitless
         bool m_ShowProjectSettingsWindow = false;
         bool m_ShowAssetDiagnosticsWindow = false;
         bool m_ShowPhysicsDiagnosticsWindow = true;
+        bool m_ShowConsoleWindow = true;
+        bool m_ShowTilemapPanel = true;
+        bool m_ConsoleAutoScroll = true;
+        bool m_ConsoleShowScriptLogs = true;
+        bool m_ConsoleShowEngineLogs = false;
+        bool m_ConsoleShowInfo = true;
+        bool m_ConsoleShowWarnings = true;
+        bool m_ConsoleShowErrors = true;
+        std::array<char, 256> m_ConsoleSearchBuffer{};
         int m_PhysicsDiagnosticsRecentPeakContactPairs = 0;
         int m_PhysicsDiagnosticsRecentPeakPenetratingPoints = 0;
         float m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth = 0.0f;
@@ -172,6 +188,7 @@ namespace Limitless
         std::unordered_map<std::string, Async::Task<Assets::MaterialAsset::Ptr>> m_PendingMaterialPrewarmTasks;
         std::unordered_map<std::string, Assets::TextureAsset::Ptr> m_PrewarmedTextureAssets;
         std::unordered_map<std::string, Assets::MaterialAsset::Ptr> m_PrewarmedMaterialAssets;
+        EditorViewportPanel::TilemapEditorState m_TilemapEditorState{};
     };
 
 }  // namespace Limitless

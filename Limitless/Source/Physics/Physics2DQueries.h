@@ -10,6 +10,9 @@ namespace Limitless
 
     namespace Physics2DQueries
     {
+        void SetActiveSceneForScriptQueries(Scene* scene);
+        Scene* GetActiveSceneForScriptQueries();
+
         Physics2DRaycastHit RaycastClosest(Scene* scene,
                                            const glm::vec2& origin,
                                            const glm::vec2& direction,

@@ -17,6 +17,8 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <queue>
+#include <unordered_map>
 
 #include <glm/glm.hpp>
 
@@ -24,6 +26,238 @@ namespace Limitless::EditorViewportPanel
 {
     namespace
     {
+        bool TryComputeDropWorldPosition(const Camera& camera,
+                                         const ImVec2& viewportMin,
+                                         const ImVec2& viewportMax,
+                                         const ImVec2& mouseScreenPosition,
+                                         glm::vec3& outWorldPosition);
+
+        struct TilemapCellEditRecord
+        {
+            int32_t LayerIndex = 0;
+            int32_t CellX = 0;
+            int32_t CellY = 0;
+            uint32_t PreviousTile = 0;
+            uint32_t NewTile = 0;
+            uint32_t PreviousData = 0;
+            uint32_t NewData = 0;
+        };
+
+        class TilemapPaintCommand final : public IEditorCommand
+        {
+        public:
+            TilemapPaintCommand(std::string label,
+                                EditorUndoService* undoService,
+                                entt::entity targetEntity,
+                                std::vector<TilemapCellEditRecord> edits)
+                : m_Label(std::move(label)),
+                  m_UndoService(undoService),
+                  m_TargetEntity(targetEntity),
+                  m_Edits(std::move(edits))
+            {
+            }
+
+            bool Undo() override
+            {
+                return Apply(false);
+            }
+
+            bool Redo() override
+            {
+                return Apply(true);
+            }
+
+            const std::string& GetLabel() const override
+            {
+                return m_Label;
+            }
+
+        private:
+            bool Apply(bool applyNewValues)
+            {
+                if (!m_UndoService)
+                    return false;
+                Scene* scene = m_UndoService->GetActiveScene();
+                if (!scene || !scene->IsValid(m_TargetEntity))
+                    return false;
+
+                auto& registry = scene->GetRegistry();
+                auto* tilemap = registry.try_get<TilemapComponent>(m_TargetEntity);
+                if (!tilemap)
+                    return false;
+                tilemap->EnsureLayerStorage();
+
+                for (const TilemapCellEditRecord& edit : m_Edits)
+                {
+                    if (edit.LayerIndex < 0 || edit.LayerIndex >= static_cast<int32_t>(tilemap->Layers.size()))
+                        continue;
+                    if (!IsTilemapCellInBounds(*tilemap, edit.CellX, edit.CellY))
+                        continue;
+
+                    const size_t cellIndex = TilemapCellToIndex(*tilemap, edit.CellX, edit.CellY);
+                    auto& layer = tilemap->Layers[static_cast<size_t>(edit.LayerIndex)];
+                    if (cellIndex >= layer.Tiles.size() || cellIndex >= layer.PerTileData.size())
+                        continue;
+
+                    layer.Tiles[cellIndex] = applyNewValues ? edit.NewTile : edit.PreviousTile;
+                    layer.PerTileData[cellIndex] = applyNewValues ? edit.NewData : edit.PreviousData;
+                }
+                return true;
+            }
+
+        private:
+            std::string m_Label;
+            EditorUndoService* m_UndoService = nullptr;
+            entt::entity m_TargetEntity = entt::null;
+            std::vector<TilemapCellEditRecord> m_Edits;
+        };
+
+        struct TilemapPaintDragState final
+        {
+            bool Active = false;
+            entt::entity Entity = entt::null;
+            glm::ivec2 StartCell = glm::ivec2(0);
+            glm::ivec2 CurrentCell = glm::ivec2(0);
+            std::unordered_map<uint64_t, TilemapCellEditRecord> PendingEdits;
+        };
+
+        TilemapPaintDragState& GetTilemapPaintDragState()
+        {
+            static TilemapPaintDragState state;
+            return state;
+        }
+
+        uint64_t BuildTilemapCellEditKey(int32_t layerIndex, size_t cellIndex)
+        {
+            return (static_cast<uint64_t>(static_cast<uint32_t>(layerIndex)) << 32u) |
+                   static_cast<uint64_t>(static_cast<uint32_t>(cellIndex));
+        }
+
+        glm::vec2 GetTilemapFirstCellCenter(const TilemapComponent& tilemap)
+        {
+            const int32_t gridWidth = std::max(1, tilemap.GridSize.x);
+            const int32_t gridHeight = std::max(1, tilemap.GridSize.y);
+            const glm::vec2 safeCellSize(std::max(0.001f, tilemap.CellSize.x), std::max(0.001f, tilemap.CellSize.y));
+            return -0.5f * glm::vec2(gridWidth - 1, gridHeight - 1) * safeCellSize;
+        }
+
+        bool TryGetTilemapHoveredCell(const Camera& camera,
+                                      const Scene& scene,
+                                      entt::entity tilemapEntity,
+                                      const TilemapComponent& tilemap,
+                                      const ImVec2& viewportMin,
+                                      const ImVec2& viewportMax,
+                                      const ImVec2& mousePosition,
+                                      glm::ivec2& outCell)
+        {
+            glm::vec3 worldPosition(0.0f);
+            if (!TryComputeDropWorldPosition(camera, viewportMin, viewportMax, mousePosition, worldPosition))
+                return false;
+
+            const glm::mat4 inverseTransform = glm::inverse(scene.GetWorldTransformMatrix(tilemapEntity));
+            const glm::vec4 localPosition = inverseTransform * glm::vec4(worldPosition, 1.0f);
+            const glm::vec2 firstCellCenter = GetTilemapFirstCellCenter(tilemap);
+            const glm::vec2 safeCellSize(std::max(0.001f, tilemap.CellSize.x), std::max(0.001f, tilemap.CellSize.y));
+            const glm::vec2 mapMin = firstCellCenter - safeCellSize * 0.5f;
+            const int32_t cellX = static_cast<int32_t>(std::floor((localPosition.x - mapMin.x) / safeCellSize.x));
+            const int32_t cellY = static_cast<int32_t>(std::floor((localPosition.y - mapMin.y) / safeCellSize.y));
+            if (!IsTilemapCellInBounds(tilemap, cellX, cellY))
+                return false;
+            outCell = glm::ivec2(cellX, cellY);
+            return true;
+        }
+
+        void AddBrushCells(const TilemapComponent& tilemap,
+                           const glm::ivec2& centerCell,
+                           int32_t brushSize,
+                           std::vector<glm::ivec2>& outCells)
+        {
+            outCells.clear();
+            const int32_t clampedBrushSize = std::max(1, brushSize);
+            const int32_t startOffset = (clampedBrushSize - 1) / 2;
+            const glm::ivec2 start = centerCell - glm::ivec2(startOffset, startOffset);
+            for (int32_t y = 0; y < clampedBrushSize; ++y)
+            {
+                for (int32_t x = 0; x < clampedBrushSize; ++x)
+                {
+                    const glm::ivec2 cell = start + glm::ivec2(x, y);
+                    if (!IsTilemapCellInBounds(tilemap, cell.x, cell.y))
+                        continue;
+                    outCells.push_back(cell);
+                }
+            }
+        }
+
+        void AddRectangleCells(const TilemapComponent& tilemap,
+                               const glm::ivec2& startCell,
+                               const glm::ivec2& endCell,
+                               std::vector<glm::ivec2>& outCells)
+        {
+            outCells.clear();
+            const int32_t minX = std::min(startCell.x, endCell.x);
+            const int32_t minY = std::min(startCell.y, endCell.y);
+            const int32_t maxX = std::max(startCell.x, endCell.x);
+            const int32_t maxY = std::max(startCell.y, endCell.y);
+            for (int32_t y = minY; y <= maxY; ++y)
+            {
+                for (int32_t x = minX; x <= maxX; ++x)
+                {
+                    if (!IsTilemapCellInBounds(tilemap, x, y))
+                        continue;
+                    outCells.emplace_back(x, y);
+                }
+            }
+        }
+
+        bool StageTilemapEdit(TilemapComponent& tilemap,
+                              int32_t layerIndex,
+                              const glm::ivec2& cell,
+                              uint32_t tileValue,
+                              bool writeCustomData,
+                              uint32_t customData,
+                              std::unordered_map<uint64_t, TilemapCellEditRecord>& pendingEdits)
+        {
+            if (layerIndex < 0 || layerIndex >= static_cast<int32_t>(tilemap.Layers.size()))
+                return false;
+            if (!IsTilemapCellInBounds(tilemap, cell.x, cell.y))
+                return false;
+
+            tilemap.EnsureLayerStorage();
+            const size_t cellIndex = TilemapCellToIndex(tilemap, cell.x, cell.y);
+            auto& layer = tilemap.Layers[static_cast<size_t>(layerIndex)];
+            if (cellIndex >= layer.Tiles.size() || cellIndex >= layer.PerTileData.size())
+                return false;
+
+            const uint32_t oldTile = layer.Tiles[cellIndex];
+            const uint32_t oldData = layer.PerTileData[cellIndex];
+            const uint32_t newData = writeCustomData ? customData : oldData;
+            if (oldTile == tileValue && oldData == newData)
+                return false;
+
+            const uint64_t key = BuildTilemapCellEditKey(layerIndex, cellIndex);
+            auto editIt = pendingEdits.find(key);
+            if (editIt == pendingEdits.end())
+            {
+                TilemapCellEditRecord edit;
+                edit.LayerIndex = layerIndex;
+                edit.CellX = cell.x;
+                edit.CellY = cell.y;
+                edit.PreviousTile = oldTile;
+                edit.NewTile = tileValue;
+                edit.PreviousData = oldData;
+                edit.NewData = newData;
+                pendingEdits.emplace(key, std::move(edit));
+            }
+            else
+            {
+                editIt->second.NewTile = tileValue;
+                editIt->second.NewData = newData;
+            }
+
+            layer.Tiles[cellIndex] = tileValue;
+            layer.PerTileData[cellIndex] = newData;
+            return true;
+        }
         // Renderer2D quad vertices in local space (must match Renderer2D::DrawQuad).
         constexpr std::array<glm::vec4, 4> kQuadLocalPositions = {
             glm::vec4(-0.5f, -0.5f, 0.0f, 1.0f),
@@ -723,6 +957,302 @@ namespace Limitless::EditorViewportPanel
             return dragState.Active;
         }
 
+        bool DrawAndHandleTilemapEditing(ImDrawList* drawList,
+                                         Scene& scene,
+                                         const Camera& camera,
+                                         entt::entity selectedEntity,
+                                         const ImVec2& viewportMin,
+                                         const ImVec2& viewportMax,
+                                         float viewportWidth,
+                                         float viewportHeight,
+                                         EditorPlayModeState playModeState,
+                                         EditorUndoService* undoService,
+                                         TilemapEditorState& tilemapEditorState)
+        {
+            tilemapEditorState.HasHoveredCell = false;
+            if (!drawList || selectedEntity == entt::null || !scene.IsValid(selectedEntity))
+                return false;
+            if (!tilemapEditorState.Enabled)
+                return false;
+
+            auto& registry = scene.GetRegistry();
+            auto* tilemap = registry.try_get<TilemapComponent>(selectedEntity);
+            if (!tilemap)
+                return false;
+            tilemap->EnsureLayerStorage();
+            if (tilemap->Layers.empty())
+                return false;
+
+            tilemapEditorState.ActiveLayerIndex = std::clamp(tilemapEditorState.ActiveLayerIndex, 0, static_cast<int32_t>(tilemap->Layers.size()) - 1);
+            tilemapEditorState.BrushSize = std::max(1, tilemapEditorState.BrushSize);
+
+            auto& paintDragState = GetTilemapPaintDragState();
+            auto finalizeStroke = [&](const char* label) {
+                if (!paintDragState.Active && paintDragState.PendingEdits.empty())
+                    return;
+                if (!undoService)
+                {
+                    paintDragState = {};
+                    return;
+                }
+
+                std::vector<TilemapCellEditRecord> edits;
+                edits.reserve(paintDragState.PendingEdits.size());
+                for (auto& [_, edit] : paintDragState.PendingEdits)
+                    edits.push_back(edit);
+
+                if (!edits.empty())
+                {
+                    std::sort(edits.begin(), edits.end(), [](const TilemapCellEditRecord& left, const TilemapCellEditRecord& right) {
+                        if (left.LayerIndex != right.LayerIndex)
+                            return left.LayerIndex < right.LayerIndex;
+                        if (left.CellY != right.CellY)
+                            return left.CellY < right.CellY;
+                        return left.CellX < right.CellX;
+                    });
+                    auto command = std::make_unique<TilemapPaintCommand>(
+                        label ? std::string(label) : std::string("Paint Tilemap"),
+                        undoService,
+                        selectedEntity,
+                        std::move(edits));
+                    (void)undoService->ExecuteCommand(std::move(command));
+                }
+
+                paintDragState = {};
+            };
+
+            if (paintDragState.Active && paintDragState.Entity != selectedEntity)
+                finalizeStroke("Paint Tilemap");
+
+            const ImVec2 mousePosition = ImGui::GetMousePos();
+            const bool mouseInViewport = mousePosition.x >= viewportMin.x && mousePosition.x <= viewportMax.x &&
+                                         mousePosition.y >= viewportMin.y && mousePosition.y <= viewportMax.y;
+            glm::ivec2 hoveredCell(0);
+            const bool hasHoveredCell = mouseInViewport &&
+                TryGetTilemapHoveredCell(camera, scene, selectedEntity, *tilemap, viewportMin, viewportMax, mousePosition, hoveredCell);
+            if (hasHoveredCell)
+            {
+                tilemapEditorState.HasHoveredCell = true;
+                tilemapEditorState.HoveredCell = hoveredCell;
+            }
+
+            const glm::vec2 safeCellSize(std::max(0.001f, tilemap->CellSize.x), std::max(0.001f, tilemap->CellSize.y));
+            const glm::vec2 firstCellCenter = GetTilemapFirstCellCenter(*tilemap);
+            const glm::vec2 gridBoundaryMin = firstCellCenter - safeCellSize * 0.5f;
+            const glm::vec2 gridBoundaryMax = gridBoundaryMin + glm::vec2(tilemap->GridSize) * safeCellSize;
+            const glm::mat4 worldTransform = scene.GetWorldTransformMatrix(selectedEntity);
+
+            if (tilemapEditorState.ShowGridOverlay)
+            {
+                for (int32_t x = 0; x <= std::max(1, tilemap->GridSize.x); ++x)
+                {
+                    const float localX = gridBoundaryMin.x + static_cast<float>(x) * safeCellSize.x;
+                    const glm::vec4 worldStart = worldTransform * glm::vec4(localX, gridBoundaryMin.y, 0.0f, 1.0f);
+                    const glm::vec4 worldEnd = worldTransform * glm::vec4(localX, gridBoundaryMax.y, 0.0f, 1.0f);
+                    ImVec2 screenStart;
+                    ImVec2 screenEnd;
+                    if (WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldStart), screenStart) &&
+                        WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldEnd), screenEnd))
+                    {
+                        drawList->AddLine(screenStart, screenEnd, IM_COL32(80, 170, 255, 120), 1.0f);
+                    }
+                }
+                for (int32_t y = 0; y <= std::max(1, tilemap->GridSize.y); ++y)
+                {
+                    const float localY = gridBoundaryMin.y + static_cast<float>(y) * safeCellSize.y;
+                    const glm::vec4 worldStart = worldTransform * glm::vec4(gridBoundaryMin.x, localY, 0.0f, 1.0f);
+                    const glm::vec4 worldEnd = worldTransform * glm::vec4(gridBoundaryMax.x, localY, 0.0f, 1.0f);
+                    ImVec2 screenStart;
+                    ImVec2 screenEnd;
+                    if (WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldStart), screenStart) &&
+                        WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldEnd), screenEnd))
+                    {
+                        drawList->AddLine(screenStart, screenEnd, IM_COL32(80, 170, 255, 120), 1.0f);
+                    }
+                }
+            }
+
+            auto drawCellHighlight = [&](const glm::ivec2& cell, ImU32 color, float thickness) {
+                const glm::vec2 localCellCenter = firstCellCenter + glm::vec2(static_cast<float>(cell.x) * safeCellSize.x, static_cast<float>(cell.y) * safeCellSize.y);
+                const glm::vec2 localMin = localCellCenter - safeCellSize * 0.5f;
+                const glm::vec2 localMax = localCellCenter + safeCellSize * 0.5f;
+                const glm::vec4 worldMin = worldTransform * glm::vec4(localMin.x, localMin.y, 0.0f, 1.0f);
+                const glm::vec4 worldMax = worldTransform * glm::vec4(localMax.x, localMax.y, 0.0f, 1.0f);
+                ImVec2 screenMin;
+                ImVec2 screenMax;
+                if (!WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldMin), screenMin))
+                    return;
+                if (!WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldMax), screenMax))
+                    return;
+                ImVec2 minPoint(std::min(screenMin.x, screenMax.x), std::min(screenMin.y, screenMax.y));
+                ImVec2 maxPoint(std::max(screenMin.x, screenMax.x), std::max(screenMin.y, screenMax.y));
+                drawList->AddRect(minPoint, maxPoint, color, 0.0f, 0, thickness);
+            };
+
+            const bool canEdit = playModeState == EditorPlayModeState::Edit;
+            const bool canCaptureMouse = canEdit && mouseInViewport && !ImGui::IsAnyItemActive();
+            const bool leftMousePressed = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+            const bool leftMouseDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+            const bool leftMouseReleased = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+            const uint32_t paintTileValue = (tilemapEditorState.PaintMode == TilemapPaintMode::Erase) ? 0u : std::max(1u, tilemapEditorState.ActiveTileId);
+
+            std::vector<glm::ivec2> pendingCells;
+
+            if (tilemapEditorState.PaintMode == TilemapPaintMode::Fill)
+            {
+                if (canCaptureMouse && leftMousePressed && hasHoveredCell)
+                {
+                    const int32_t layerIndex = tilemapEditorState.ActiveLayerIndex;
+                    if (layerIndex >= 0 && layerIndex < static_cast<int32_t>(tilemap->Layers.size()))
+                    {
+                        auto& layer = tilemap->Layers[static_cast<size_t>(layerIndex)];
+                        const size_t startIndex = TilemapCellToIndex(*tilemap, hoveredCell.x, hoveredCell.y);
+                        if (startIndex < layer.Tiles.size())
+                        {
+                            const uint32_t oldTile = layer.Tiles[startIndex];
+                            const uint32_t oldData = layer.PerTileData[startIndex];
+                            const uint32_t newData = tilemapEditorState.PaintCustomData
+                                ? tilemapEditorState.ActiveCustomData
+                                : oldData;
+                            if (!(oldTile == paintTileValue && oldData == newData))
+                            {
+                                const int32_t gridWidth = std::max(1, tilemap->GridSize.x);
+                                const int32_t gridHeight = std::max(1, tilemap->GridSize.y);
+                                std::vector<uint8_t> visited(static_cast<size_t>(gridWidth * gridHeight), 0u);
+                                std::queue<glm::ivec2> frontier;
+                                frontier.push(hoveredCell);
+                                while (!frontier.empty())
+                                {
+                                    const glm::ivec2 cell = frontier.front();
+                                    frontier.pop();
+                                    if (!IsTilemapCellInBounds(*tilemap, cell.x, cell.y))
+                                        continue;
+                                    const size_t cellIndex = TilemapCellToIndex(*tilemap, cell.x, cell.y);
+                                    if (cellIndex >= visited.size() || visited[cellIndex] != 0u)
+                                        continue;
+                                    visited[cellIndex] = 1u;
+                                    if (cellIndex >= layer.Tiles.size() || layer.Tiles[cellIndex] != oldTile)
+                                        continue;
+                                    pendingCells.push_back(cell);
+                                    frontier.push(cell + glm::ivec2(1, 0));
+                                    frontier.push(cell + glm::ivec2(-1, 0));
+                                    frontier.push(cell + glm::ivec2(0, 1));
+                                    frontier.push(cell + glm::ivec2(0, -1));
+                                }
+
+                                std::unordered_map<uint64_t, TilemapCellEditRecord> fillEdits;
+                                for (const glm::ivec2& cell : pendingCells)
+                                    (void)StageTilemapEdit(*tilemap, layerIndex, cell, paintTileValue,
+                                                           tilemapEditorState.PaintCustomData,
+                                                           tilemapEditorState.ActiveCustomData,
+                                                           fillEdits);
+
+                                if (!fillEdits.empty() && undoService)
+                                {
+                                    std::vector<TilemapCellEditRecord> edits;
+                                    edits.reserve(fillEdits.size());
+                                    for (auto& [_, edit] : fillEdits)
+                                        edits.push_back(edit);
+                                    auto command = std::make_unique<TilemapPaintCommand>("Fill Tilemap", undoService, selectedEntity, std::move(edits));
+                                    (void)undoService->ExecuteCommand(std::move(command));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            else if (tilemapEditorState.PaintMode == TilemapPaintMode::Rectangle)
+            {
+                if (canCaptureMouse && leftMousePressed && hasHoveredCell)
+                {
+                    paintDragState.Active = true;
+                    paintDragState.Entity = selectedEntity;
+                    paintDragState.StartCell = hoveredCell;
+                    paintDragState.CurrentCell = hoveredCell;
+                    paintDragState.PendingEdits.clear();
+                }
+
+                if (paintDragState.Active && paintDragState.Entity == selectedEntity)
+                {
+                    if (hasHoveredCell)
+                        paintDragState.CurrentCell = hoveredCell;
+                    AddRectangleCells(*tilemap, paintDragState.StartCell, paintDragState.CurrentCell, pendingCells);
+                    for (const glm::ivec2& cell : pendingCells)
+                        drawCellHighlight(cell, IM_COL32(255, 180, 85, 180), 2.0f);
+
+                    if (leftMouseReleased)
+                    {
+                        for (const glm::ivec2& cell : pendingCells)
+                        {
+                            (void)StageTilemapEdit(*tilemap,
+                                                   tilemapEditorState.ActiveLayerIndex,
+                                                   cell,
+                                                   paintTileValue,
+                                                   tilemapEditorState.PaintCustomData,
+                                                   tilemapEditorState.ActiveCustomData,
+                                                   paintDragState.PendingEdits);
+                        }
+                        finalizeStroke("Rectangle Paint Tilemap");
+                    }
+                    else if (!leftMouseDown)
+                    {
+                        paintDragState = {};
+                    }
+                }
+            }
+            else
+            {
+                if (canCaptureMouse && leftMousePressed && hasHoveredCell)
+                {
+                    paintDragState.Active = true;
+                    paintDragState.Entity = selectedEntity;
+                    paintDragState.StartCell = hoveredCell;
+                    paintDragState.CurrentCell = hoveredCell;
+                    paintDragState.PendingEdits.clear();
+                }
+
+                if (paintDragState.Active && paintDragState.Entity == selectedEntity && leftMouseDown)
+                {
+                    if (hasHoveredCell)
+                    {
+                        paintDragState.CurrentCell = hoveredCell;
+                        AddBrushCells(*tilemap, hoveredCell, tilemapEditorState.BrushSize, pendingCells);
+                        for (const glm::ivec2& cell : pendingCells)
+                        {
+                            (void)StageTilemapEdit(*tilemap,
+                                                   tilemapEditorState.ActiveLayerIndex,
+                                                   cell,
+                                                   paintTileValue,
+                                                   tilemapEditorState.PaintCustomData,
+                                                   tilemapEditorState.ActiveCustomData,
+                                                   paintDragState.PendingEdits);
+                        }
+                    }
+                }
+
+                if (paintDragState.Active && leftMouseReleased)
+                {
+                    finalizeStroke(tilemapEditorState.PaintMode == TilemapPaintMode::Erase ? "Erase Tilemap" : "Paint Tilemap");
+                }
+                else if (paintDragState.Active && !leftMouseDown)
+                {
+                    finalizeStroke(tilemapEditorState.PaintMode == TilemapPaintMode::Erase ? "Erase Tilemap" : "Paint Tilemap");
+                }
+            }
+
+            if (hasHoveredCell)
+            {
+                AddBrushCells(*tilemap, hoveredCell, tilemapEditorState.BrushSize, pendingCells);
+                const ImU32 previewColor = (tilemapEditorState.PaintMode == TilemapPaintMode::Erase)
+                    ? IM_COL32(255, 90, 90, 180)
+                    : IM_COL32(100, 255, 120, 180);
+                for (const glm::ivec2& cell : pendingCells)
+                    drawCellHighlight(cell, previewColor, 2.0f);
+            }
+
+            return paintDragState.Active;
+        }
+
         void DrawSelectedPhysicsOverlays(ImDrawList* drawList,
                                          Scene& scene,
                                          const Camera& camera,
@@ -763,7 +1293,8 @@ namespace Limitless::EditorViewportPanel
               Assets::TextureAsset::Ptr& cachedTextureAsset,
               std::string& selectedMaterialAssetKey,
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
-              std::string& selectedNativeScriptAssetKey)
+              std::string& selectedNativeScriptAssetKey,
+              TilemapEditorState* tilemapEditorState)
     {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         ImGui::Begin("Viewport");
@@ -822,6 +1353,20 @@ namespace Limitless::EditorViewportPanel
                                                 static_cast<float>(height),
                                                 playModeState,
                                                 undoService);
+                    if (tilemapEditorState)
+                    {
+                        (void)DrawAndHandleTilemapEditing(drawList,
+                                                          *scene,
+                                                          *camera,
+                                                          selectedEntity,
+                                                          viewportMin,
+                                                          viewportMax,
+                                                          static_cast<float>(width),
+                                                          static_cast<float>(height),
+                                                          playModeState,
+                                                          undoService,
+                                                          *tilemapEditorState);
+                    }
                 }
 
                 if (ImGui::BeginDragDropTarget())

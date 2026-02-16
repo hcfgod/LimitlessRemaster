@@ -4,6 +4,7 @@
 #include "EditorInspectorPanel.h"
 
 #include "Assets/AssetDatabase.h"
+#include "Assets/AssetImportPipeline.h"
 #include "Assets/AssetManager.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetTypes.h"
@@ -122,6 +123,61 @@ namespace Limitless::EditorInspectorPanel
             textureAsset->SetSpecification(specification);
             textureAsset->Reload();
             InvalidateSpriteCachesForTexture(scene, textureAsset->GetKey());
+        }
+
+        bool LoadTilesetJson(const std::string& tilesetKey, nlohmann::json& outJson, std::filesystem::path& outResolvedPath)
+        {
+            const auto resolvedResult = Assets::ResolveAssetKeyToPath(tilesetKey);
+            if (resolvedResult.IsFailure())
+                return false;
+
+            outResolvedPath = resolvedResult.GetValue();
+            std::ifstream input(outResolvedPath, std::ios::in | std::ios::binary);
+            if (!input.is_open())
+                return false;
+
+            try
+            {
+                input >> outJson;
+            }
+            catch (...)
+            {
+                return false;
+            }
+            return true;
+        }
+
+        bool SaveTilesetJson(Scene* scene,
+                             const std::string& selectedTilesetAssetKey,
+                             const nlohmann::json& json,
+                             const std::filesystem::path& resolvedPath)
+        {
+            std::ofstream output(resolvedPath, std::ios::out | std::ios::binary | std::ios::trunc);
+            if (!output.is_open())
+                return false;
+            output << json.dump(2);
+            output.close();
+
+            (void)Assets::AssetDatabase::GetInstance().ImportOrUpdate(selectedTilesetAssetKey, Assets::AssetType::Tileset);
+            (void)Assets::AssetImportPipeline::ReimportChanged(true);
+
+            if (!scene)
+                return true;
+
+            auto& registry = scene->GetRegistry();
+            auto tilemapView = registry.view<TilemapComponent>();
+            for (entt::entity entity : tilemapView)
+            {
+                auto& tilemap = tilemapView.get<TilemapComponent>(entity);
+                if (tilemap.TilesetAssetKey == selectedTilesetAssetKey)
+                {
+                    tilemap.TilesetAssetLoadAttempted = false;
+                    tilemap.TilesetTextureLoadAttempted = false;
+                    tilemap.CachedTilesetTexture.reset();
+                }
+            }
+
+            return true;
         }
 
         bool LoadMaterialJson(const std::string& materialKey, nlohmann::json& outJson, std::filesystem::path& outResolvedPath)
@@ -280,6 +336,94 @@ namespace Limitless::EditorInspectorPanel
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Requires texture reload to take effect.");
+    }
+
+    void DrawTilesetAssetInspector(Scene* scene, std::string& selectedTilesetAssetKey)
+    {
+        struct State
+        {
+            std::string LoadedKey;
+            std::filesystem::path ResolvedPath;
+            nlohmann::json Json = nlohmann::json::object();
+            bool Loaded = false;
+        };
+        static State s_State;
+
+        if (selectedTilesetAssetKey.empty())
+            return;
+
+        if (!s_State.Loaded || s_State.LoadedKey != selectedTilesetAssetKey)
+        {
+            s_State = {};
+            s_State.LoadedKey = selectedTilesetAssetKey;
+            s_State.Loaded = LoadTilesetJson(selectedTilesetAssetKey, s_State.Json, s_State.ResolvedPath);
+            if (!s_State.Loaded)
+            {
+                ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Failed to load tileset JSON: %s", selectedTilesetAssetKey.c_str());
+                return;
+            }
+        }
+
+        ImGui::Text("Tileset: %s", std::filesystem::path(selectedTilesetAssetKey).filename().string().c_str());
+        ImGui::TextDisabled("Asset Key: %s", selectedTilesetAssetKey.c_str());
+        ImGui::Separator();
+
+        std::string textureKey = s_State.Json.value("TextureKey", std::string{});
+        std::string textureLabel = textureKey.empty()
+            ? std::string("None")
+            : EditorAssetNaming::GetAssetDisplayNameFromAssetKey(textureKey);
+        ImGui::AlignTextToFramePadding();
+        ImGui::Text("Texture");
+        ImGui::SameLine(160.0f);
+        ImGui::Button((textureLabel + "##TilesetTexture").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 90.0f, 0.0f));
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
+            {
+                const char* key = static_cast<const char*>(payload->Data);
+                if (key && key[0] && textureKey != key)
+                {
+                    textureKey = key;
+                    s_State.Json["TextureKey"] = textureKey;
+                    (void)SaveTilesetJson(scene, selectedTilesetAssetKey, s_State.Json, s_State.ResolvedPath);
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("...##TilesetTexturePicker"))
+            ImGui::OpenPopup("TilesetTexturePickerPopup");
+        if (ImGui::BeginPopup("TilesetTexturePickerPopup"))
+        {
+            const std::vector<std::string> textureKeys = BuildAssetPickerKeysByType(Assets::AssetType::Texture2D);
+            for (const auto& key : textureKeys)
+            {
+                const std::string display = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(key);
+                if (ImGui::Selectable((display + "##TilesetTexturePicker_" + key).c_str(), textureKey == key))
+                {
+                    textureKey = key;
+                    s_State.Json["TextureKey"] = textureKey;
+                    (void)SaveTilesetJson(scene, selectedTilesetAssetKey, s_State.Json, s_State.ResolvedPath);
+                }
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("X##ClearTilesetTexture"))
+        {
+            s_State.Json["TextureKey"] = "";
+            (void)SaveTilesetJson(scene, selectedTilesetAssetKey, s_State.Json, s_State.ResolvedPath);
+        }
+
+        std::vector<int> tileSize = s_State.Json.value("TileSizePixels", std::vector<int>{ 16, 16 });
+        if (tileSize.size() < 2)
+            tileSize = { 16, 16 };
+        int32_t tileSizePixels[2] = { std::max(1, tileSize[0]), std::max(1, tileSize[1]) };
+        if (ImGui::DragInt2("Tile Size Pixels", tileSizePixels, 1.0f, 1, 4096))
+        {
+            s_State.Json["TileSizePixels"] = { std::max(1, tileSizePixels[0]), std::max(1, tileSizePixels[1]) };
+            (void)SaveTilesetJson(scene, selectedTilesetAssetKey, s_State.Json, s_State.ResolvedPath);
+        }
     }
 
     void DrawNativeScriptAssetInspector(std::string& selectedNativeScriptAssetKey)

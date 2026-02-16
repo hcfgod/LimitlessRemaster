@@ -75,6 +75,8 @@ namespace Limitless::EditorInspectorPanel
             bool ShowDebugInfo = false;
             bool SelectHeaderTabRequested = false;
             bool SelectSourceTabRequested = false;
+            bool HeaderDirty = false;
+            bool SourceDirty = false;
             std::string ClassName;
             std::string AssetRelativePath;
             std::filesystem::path HeaderPath;
@@ -909,6 +911,8 @@ namespace Limitless::EditorInspectorPanel
             state.AssetRelativePath = preferredAssetRelativePath;
             state.HeaderPath = headerPath;
             state.SourcePath = sourcePath;
+            state.HeaderDirty = false;
+            state.SourceDirty = false;
             state.EditorWindowOpen = true;
             state.FocusEditorWindowRequested = true;
             state.StatusMessage = "Editing script: " + className;
@@ -1063,7 +1067,11 @@ namespace Limitless::EditorInspectorPanel
 
             if (state.FocusEditorWindowRequested)
                 ImGui::SetNextWindowFocus();
-            if (!ImGui::Begin("Native Script Editor", &state.EditorWindowOpen))
+            const bool hasUnsavedChanges = state.HeaderDirty || state.SourceDirty;
+            const std::string windowTitle = hasUnsavedChanges
+                ? "Native Script Editor*"
+                : "Native Script Editor";
+            if (!ImGui::Begin(windowTitle.c_str(), &state.EditorWindowOpen))
             {
                 state.FocusEditorWindowRequested = false;
                 ImGui::End();
@@ -1074,6 +1082,67 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::SetWindowFocus();
                 state.FocusEditorWindowRequested = false;
             }
+
+            const auto saveEditorFiles = [&](bool forceBuildAfterSave) -> bool
+            {
+                std::string saveError;
+                const bool headerSaved = SaveBufferToTextFile(state.HeaderPath, state.HeaderBuffer, saveError);
+                const bool sourceSaved = SaveBufferToTextFile(state.SourcePath, state.SourceBuffer, saveError);
+                if (!(headerSaved && sourceSaved))
+                {
+                    state.StatusMessage = saveError;
+                    state.StatusIsError = true;
+                    return false;
+                }
+
+                state.HeaderDirty = false;
+                state.SourceDirty = false;
+
+                bool canBuild = true;
+                if (!MirrorScriptToGeneratedDirectory(state, saveError))
+                {
+                    state.StatusMessage = saveError;
+                    state.StatusIsError = true;
+                    canBuild = false;
+                }
+                else
+                {
+                    state.StatusMessage = "Script files saved and mirrored to generated build directory.";
+                    state.StatusIsError = false;
+                }
+
+                const bool shouldBuildNow = canBuild && (forceBuildAfterSave || state.AutoBuildAfterSave);
+                if (shouldBuildNow)
+                    (void)TriggerNativeScriptsBuild(state);
+
+                return canBuild;
+            };
+
+            const auto reloadEditorFiles = [&]() -> bool
+            {
+                std::string reloadError;
+                const bool headerLoaded = LoadTextFileIntoBuffer(state.HeaderPath, state.HeaderBuffer, reloadError);
+                const bool sourceLoaded = LoadTextFileIntoBuffer(state.SourcePath, state.SourceBuffer, reloadError);
+                if (headerLoaded && sourceLoaded)
+                {
+                    state.HeaderDirty = false;
+                    state.SourceDirty = false;
+                    state.StatusMessage = "Reloaded script files from disk.";
+                    state.StatusIsError = false;
+                    return true;
+                }
+
+                state.StatusMessage = reloadError;
+                state.StatusIsError = true;
+                return false;
+            };
+
+            const ImGuiIO& io = ImGui::GetIO();
+            const bool shortcutModifierDown = io.KeyCtrl || io.KeySuper;
+            const bool editorWindowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+            const bool saveShortcutPressed = editorWindowFocused && shortcutModifierDown && ImGui::IsKeyPressed(ImGuiKey_S, false);
+            const bool buildShortcutPressed = editorWindowFocused && shortcutModifierDown && ImGui::IsKeyPressed(ImGuiKey_B, false);
+            const bool reloadShortcutPressed = editorWindowFocused && shortcutModifierDown && ImGui::IsKeyPressed(ImGuiKey_R, false);
 
             ImGui::Text("Class: %s", state.ClassName.c_str());
             ImGui::Text("Header: %s", state.HeaderPath.string().c_str());
@@ -1092,60 +1161,30 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::Text("Generated Mirror: %s", mirrorPath.string().c_str());
             }
             ImGui::TextWrapped("After creating or editing scripts, run the build script to compile and register script classes.");
+            ImGui::TextDisabled("Shortcuts: Ctrl+S Save, Ctrl+B Save+Build, Ctrl+R Reload");
             ImGui::Checkbox("Auto Build On Save", &state.AutoBuildAfterSave);
+            ImGui::SameLine();
+            ImGui::TextDisabled("Unsaved: %s", hasUnsavedChanges ? "Yes" : "No");
             if (state.BuildInProgress.load(std::memory_order_relaxed))
                 ImGui::TextDisabled("Build in progress...");
 
             if (ImGui::Button("Save Files", ImVec2(140.0f, 0.0f)))
-            {
-                std::string saveError;
-                const bool headerSaved = SaveBufferToTextFile(state.HeaderPath, state.HeaderBuffer, saveError);
-                const bool sourceSaved = SaveBufferToTextFile(state.SourcePath, state.SourceBuffer, saveError);
-                if (headerSaved && sourceSaved)
-                {
-                    bool canBuild = true;
-                    if (!MirrorScriptToGeneratedDirectory(state, saveError))
-                    {
-                        state.StatusMessage = saveError;
-                        state.StatusIsError = true;
-                        canBuild = false;
-                    }
-                    else
-                    {
-                        state.StatusMessage = "Script files saved and mirrored to generated build directory.";
-                        state.StatusIsError = false;
-                    }
-                    if (state.AutoBuildAfterSave && canBuild)
-                        (void)TriggerNativeScriptsBuild(state);
-                }
-                else
-                {
-                    state.StatusMessage = saveError;
-                    state.StatusIsError = true;
-                }
-            }
+                (void)saveEditorFiles(false);
             ImGui::SameLine();
             if (ImGui::Button("Reload From Disk", ImVec2(160.0f, 0.0f)))
-            {
-                std::string reloadError;
-                const bool headerLoaded = LoadTextFileIntoBuffer(state.HeaderPath, state.HeaderBuffer, reloadError);
-                const bool sourceLoaded = LoadTextFileIntoBuffer(state.SourcePath, state.SourceBuffer, reloadError);
-                if (headerLoaded && sourceLoaded)
-                {
-                    state.StatusMessage = "Reloaded script files from disk.";
-                    state.StatusIsError = false;
-                }
-                else
-                {
-                    state.StatusMessage = reloadError;
-                    state.StatusIsError = true;
-                }
-            }
+                (void)reloadEditorFiles();
             ImGui::SameLine();
             ImGui::BeginDisabled(state.BuildInProgress.load(std::memory_order_relaxed));
-            if (ImGui::Button("Build Scripts Now", ImVec2(150.0f, 0.0f)))
-                (void)TriggerNativeScriptsBuild(state);
+            if (ImGui::Button("Save + Build", ImVec2(150.0f, 0.0f)))
+                (void)saveEditorFiles(true);
             ImGui::EndDisabled();
+
+            if (saveShortcutPressed)
+                (void)saveEditorFiles(false);
+            if (reloadShortcutPressed)
+                (void)reloadEditorFiles();
+            if (!state.BuildInProgress.load(std::memory_order_relaxed) && buildShortcutPressed)
+                (void)saveEditorFiles(true);
 
             const int finishedBuildExitCode = state.LastBuildExitCode.exchange(-1, std::memory_order_relaxed);
             if (finishedBuildExitCode >= 0)
@@ -1180,14 +1219,30 @@ namespace Limitless::EditorInspectorPanel
                 else if (state.SelectSourceTabRequested)
                     sourceTabFlags |= ImGuiTabItemFlags_SetSelected;
 
-                if (ImGui::BeginTabItem("Header (.h)", nullptr, headerTabFlags))
+                const std::string headerTabLabel = state.HeaderDirty ? "Header (.h)*" : "Header (.h)";
+                const std::string sourceTabLabel = state.SourceDirty ? "Source (.cpp)*" : "Source (.cpp)";
+                const float editorHeight = std::max(240.0f, ImGui::GetContentRegionAvail().y - 12.0f);
+
+                if (ImGui::BeginTabItem(headerTabLabel.c_str(), nullptr, headerTabFlags))
                 {
-                    ImGui::InputTextMultiline("##NativeScriptHeaderEditor", state.HeaderBuffer.data(), state.HeaderBuffer.size(), ImVec2(-1.0f, 360.0f));
+                    ImGui::InputTextMultiline("##NativeScriptHeaderEditor",
+                                              state.HeaderBuffer.data(),
+                                              state.HeaderBuffer.size(),
+                                              ImVec2(-1.0f, editorHeight),
+                                              ImGuiInputTextFlags_AllowTabInput);
+                    if (ImGui::IsItemEdited())
+                        state.HeaderDirty = true;
                     ImGui::EndTabItem();
                 }
-                if (ImGui::BeginTabItem("Source (.cpp)", nullptr, sourceTabFlags))
+                if (ImGui::BeginTabItem(sourceTabLabel.c_str(), nullptr, sourceTabFlags))
                 {
-                    ImGui::InputTextMultiline("##NativeScriptSourceEditor", state.SourceBuffer.data(), state.SourceBuffer.size(), ImVec2(-1.0f, 360.0f));
+                    ImGui::InputTextMultiline("##NativeScriptSourceEditor",
+                                              state.SourceBuffer.data(),
+                                              state.SourceBuffer.size(),
+                                              ImVec2(-1.0f, editorHeight),
+                                              ImGuiInputTextFlags_AllowTabInput);
+                    if (ImGui::IsItemEdited())
+                        state.SourceDirty = true;
                     ImGui::EndTabItem();
                 }
                 state.SelectHeaderTabRequested = false;
@@ -1212,6 +1267,7 @@ namespace Limitless::EditorInspectorPanel
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
               std::string& selectedNativeScriptAssetKey,
               std::string& selectedPrefabAssetKey,
+              std::string& selectedTilesetAssetKey,
               EditorUndoService* undoService)
     {
         auto& nativeScriptAuthoringState = GetNativeScriptAuthoringState();
@@ -1262,6 +1318,10 @@ namespace Limitless::EditorInspectorPanel
         {
             DrawPrefabAssetInspector(selectedPrefabAssetKey);
         }
+        else if (!selectedTilesetAssetKey.empty())
+        {
+            DrawTilesetAssetInspector(scene, selectedTilesetAssetKey);
+        }
         else if (!scene || selectedEntity == entt::null || !scene->IsValid(selectedEntity))
         {
             ImGui::Text("Select an object to edit.");
@@ -1278,6 +1338,7 @@ namespace Limitless::EditorInspectorPanel
                 scene,
                 registry,
                 selectedEntity,
+                texturePayloadId,
                 audioPayloadId,
                 materialPayloadId,
                 fontPayloadId,
@@ -1600,10 +1661,12 @@ namespace Limitless::EditorInspectorPanel
                 const bool hasRigidbody2DComponent = registry.all_of<Rigidbody2DComponent>(selectedEntity);
                 const bool hasBoxCollider2DComponent = registry.all_of<BoxCollider2DComponent>(selectedEntity);
                 const bool hasCircleCollider2DComponent = registry.all_of<CircleCollider2DComponent>(selectedEntity);
+                const bool hasTilemapCollider2DComponent = registry.all_of<TilemapCollider2DComponent>(selectedEntity);
                 const bool hasJoint2DComponent = registry.all_of<Joint2DComponent>(selectedEntity);
                 const bool hasDirectionalLight2DComponent = registry.all_of<DirectionalLight2DComponent>(selectedEntity);
                 const bool hasPointLight2DComponent = registry.all_of<PointLight2DComponent>(selectedEntity);
                 const bool hasShadowOccluder2DComponent = registry.all_of<ShadowOccluder2DComponent>(selectedEntity);
+                const bool hasTilemapComponent = registry.all_of<TilemapComponent>(selectedEntity);
                 if (hasSpriteComponent)
                     ImGui::BeginDisabled();
 
@@ -1753,6 +1816,23 @@ namespace Limitless::EditorInspectorPanel
                 if (hasCircleCollider2DComponent)
                     ImGui::EndDisabled();
 
+                if (hasTilemapCollider2DComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Tilemap Collider 2D"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add TilemapCollider2D Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<TilemapCollider2DComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<TilemapCollider2DComponent>(selectedEntity);
+                }
+
+                if (hasTilemapCollider2DComponent)
+                    ImGui::EndDisabled();
+
                 if (hasJoint2DComponent)
                     ImGui::BeginDisabled();
 
@@ -1819,6 +1899,30 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 if (hasShadowOccluder2DComponent)
+                    ImGui::EndDisabled();
+
+                if (hasTilemapComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Tilemap"))
+                {
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation("Add Tilemap Component", [&](Scene& mutableScene) {
+                            auto& mutableRegistry = mutableScene.GetRegistry();
+                            auto& tilemap = mutableRegistry.emplace<TilemapComponent>(selectedEntity);
+                            tilemap.EnsureLayerStorage();
+                            return true;
+                        });
+                    }
+                    else
+                    {
+                        auto& tilemap = registry.emplace<TilemapComponent>(selectedEntity);
+                        tilemap.EnsureLayerStorage();
+                    }
+                }
+
+                if (hasTilemapComponent)
                     ImGui::EndDisabled();
 
                 ImGui::EndPopup();
@@ -2049,6 +2153,36 @@ namespace Limitless::EditorInspectorPanel
                 else
                 {
                     registry.remove<ShadowOccluder2DComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveTilemapComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Tilemap Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<TilemapComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<TilemapComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveTilemapCollider2DComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove TilemapCollider2D Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<TilemapCollider2DComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<TilemapCollider2DComponent>(selectedEntity);
                 }
             }
         }

@@ -316,6 +316,15 @@ namespace Limitless
 
     void Renderer2D::DrawQuad(const glm::mat4& transform, const Assets::TextureAsset::Ptr& texture, const glm::vec4& tintColor)
     {
+        DrawQuad(transform, texture, tintColor, glm::vec2(0.0f, 0.0f), glm::vec2(1.0f, 1.0f));
+    }
+
+    void Renderer2D::DrawQuad(const glm::mat4& transform,
+                              const Assets::TextureAsset::Ptr& texture,
+                              const glm::vec4& tintColor,
+                              const glm::vec2& uvMin,
+                              const glm::vec2& uvMax)
+    {
         EnsureInitialized();
         if (!g_Data.Initialized)
         {
@@ -370,18 +379,18 @@ namespace Limitless
             glm::vec4(-0.5f,  0.5f, 0.0f, 1.0f),
         };
 
-        constexpr std::array<glm::vec2, 4> kUVs = {
-            glm::vec2(0.0f, 0.0f),
-            glm::vec2(1.0f, 0.0f),
-            glm::vec2(1.0f, 1.0f),
-            glm::vec2(0.0f, 1.0f),
+        const std::array<glm::vec2, 4> uvs = {
+            glm::vec2(uvMin.x, uvMin.y),
+            glm::vec2(uvMax.x, uvMin.y),
+            glm::vec2(uvMax.x, uvMax.y),
+            glm::vec2(uvMin.x, uvMax.y),
         };
 
         QuadVertex* v = g_Data.VertexBufferPtr;
         for (size_t i = 0; i < 4; ++i)
         {
             v->Position = glm::vec3(transform * kQuadPositions[i]);
-            v->UV = kUVs[i];
+            v->UV = uvs[i];
             v->Color = tintColor;
             v->TexIndex = texIndex;
             ++v;

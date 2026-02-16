@@ -68,6 +68,17 @@ namespace Limitless::EditorProjectPanel
                    lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
         }
 
+        bool IsTilesetExtension(const std::filesystem::path& path)
+        {
+            std::string lowerFileName = path.filename().string();
+            for (char& character : lowerFileName)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            constexpr const char* tilesetSuffix = ".tileset.json";
+            const std::string suffixString = tilesetSuffix;
+            return lowerFileName.size() >= suffixString.size() &&
+                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
+        }
+
         bool IsPrefabExtension(const std::filesystem::path& path)
         {
             std::string lowerFileName = path.filename().string();
@@ -406,6 +417,7 @@ namespace Limitless::EditorProjectPanel
                            Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                            std::string& selectedNativeScriptAssetKey,
                            std::string& selectedPrefabAssetKey,
+                           std::string& selectedTilesetAssetKey,
                            const char* texturePayloadId,
                            const char* audioPayloadId,
                            const char* assetMovePayloadId,
@@ -417,6 +429,7 @@ namespace Limitless::EditorProjectPanel
                            const std::function<void(const std::string&)>& onSceneActivated,
                            const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
                            const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
+                           const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
                            const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
                            const std::function<void(const std::string&)>& onPrefabOpened,
                            const std::function<void(const std::string&)>& onPrefabInstantiated,
@@ -489,6 +502,12 @@ namespace Limitless::EditorProjectPanel
                             state.CreateMaterialParentRelativePath = entryRelativePath;
                             CopyTextToBuffer(state.CreateMaterialNameBuffer, "New Material");
                             state.CreateMaterialPopupPending = true;
+                        }
+                        if (ImGui::MenuItem("Create Tileset"))
+                        {
+                            state.CreateTilesetParentRelativePath = entryRelativePath;
+                            CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
+                            state.CreateTilesetPopupPending = true;
                         }
                         if (ImGui::MenuItem("Create Native Script"))
                         {
@@ -584,6 +603,7 @@ namespace Limitless::EditorProjectPanel
                                       cachedMaterialAsset,
                                       selectedNativeScriptAssetKey,
                                       selectedPrefabAssetKey,
+                                      selectedTilesetAssetKey,
                                       texturePayloadId,
                                       audioPayloadId,
                                       assetMovePayloadId,
@@ -595,6 +615,7 @@ namespace Limitless::EditorProjectPanel
                                       onSceneActivated,
                                       onCreateSceneRequested,
                                       onCreateMaterialRequested,
+                                      onCreateTilesetRequested,
                                       onCreatePrefabFromSceneEntityRequested,
                                       onPrefabOpened,
                                       onPrefabInstantiated,
@@ -642,6 +663,7 @@ namespace Limitless::EditorProjectPanel
                                 selectedPrefabAssetKey.clear();
                                 selectedTextureAssetKey.clear();
                                 selectedMaterialAssetKey.clear();
+                                selectedTilesetAssetKey.clear();
                                 selectedEntity = entt::null;
                                 cachedTextureAsset.reset();
                                 cachedMaterialAsset.reset();
@@ -690,6 +712,7 @@ namespace Limitless::EditorProjectPanel
                                     selectedPrefabAssetKey.clear();
                                     selectedTextureAssetKey.clear();
                                     selectedMaterialAssetKey.clear();
+                                    selectedTilesetAssetKey.clear();
                                     selectedEntity = entt::null;
                                     cachedTextureAsset.reset();
                                     cachedMaterialAsset.reset();
@@ -704,6 +727,7 @@ namespace Limitless::EditorProjectPanel
                                     selectedPrefabAssetKey.clear();
                                     selectedTextureAssetKey.clear();
                                     selectedMaterialAssetKey.clear();
+                                    selectedTilesetAssetKey.clear();
                                     selectedEntity = entt::null;
                                     cachedTextureAsset.reset();
                                     cachedMaterialAsset.reset();
@@ -719,6 +743,7 @@ namespace Limitless::EditorProjectPanel
                     const bool isTexture = IsTextureExtension(entry);
                     const bool isScene = IsSceneExtension(entry);
                     const bool isMaterial = IsMaterialExtension(entry);
+                    const bool isTileset = IsTilesetExtension(entry);
                     const bool isPrefab = IsPrefabExtension(entry);
                     const bool isShader = IsShaderExtension(entry);
                     const bool isAudio = IsAudioExtension(entry);
@@ -736,6 +761,7 @@ namespace Limitless::EditorProjectPanel
                     const bool isSelected =
                         (isTexture && (selectedTextureAssetKey == assetKey)) ||
                         (isMaterial && (selectedMaterialAssetKey == assetKey)) ||
+                        (isTileset && (selectedTilesetAssetKey == assetKey)) ||
                         (isNativeScriptFile && (selectedNativeScriptAssetKey == assetKey)) ||
                         (isPrefab && (selectedPrefabAssetKey == assetKey));
                     ImGui::TreeNodeEx(treeLabel.c_str(), isSelected ? (flags | ImGuiTreeNodeFlags_Selected) : flags);
@@ -752,6 +778,7 @@ namespace Limitless::EditorProjectPanel
                             selectedMaterialAssetKey.clear();
                             selectedNativeScriptAssetKey.clear();
                             selectedPrefabAssetKey.clear();
+                            selectedTilesetAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedTextureAsset.reset();
                             cachedMaterialAsset.reset();
@@ -760,6 +787,18 @@ namespace Limitless::EditorProjectPanel
                         {
                             selectedMaterialAssetKey = assetKey;
                             selectedTextureAssetKey.clear();
+                            selectedNativeScriptAssetKey.clear();
+                            selectedPrefabAssetKey.clear();
+                            selectedTilesetAssetKey.clear();
+                            selectedEntity = entt::null;
+                            cachedMaterialAsset.reset();
+                            cachedTextureAsset.reset();
+                        }
+                        else if (isTileset)
+                        {
+                            selectedTilesetAssetKey = assetKey;
+                            selectedTextureAssetKey.clear();
+                            selectedMaterialAssetKey.clear();
                             selectedNativeScriptAssetKey.clear();
                             selectedPrefabAssetKey.clear();
                             selectedEntity = entt::null;
@@ -772,6 +811,7 @@ namespace Limitless::EditorProjectPanel
                             selectedTextureAssetKey.clear();
                             selectedMaterialAssetKey.clear();
                             selectedPrefabAssetKey.clear();
+                            selectedTilesetAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedMaterialAsset.reset();
                             cachedTextureAsset.reset();
@@ -782,6 +822,7 @@ namespace Limitless::EditorProjectPanel
                             selectedTextureAssetKey.clear();
                             selectedMaterialAssetKey.clear();
                             selectedNativeScriptAssetKey.clear();
+                            selectedTilesetAssetKey.clear();
                             selectedEntity = entt::null;
                             cachedMaterialAsset.reset();
                             cachedTextureAsset.reset();
@@ -793,6 +834,7 @@ namespace Limitless::EditorProjectPanel
                         selectedTextureAssetKey = assetKey;
                         selectedMaterialAssetKey.clear();
                         selectedNativeScriptAssetKey.clear();
+                        selectedTilesetAssetKey.clear();
                         selectedEntity = entt::null;
                         cachedTextureAsset.reset();
                         cachedMaterialAsset.reset();
@@ -800,11 +842,13 @@ namespace Limitless::EditorProjectPanel
                     else if (isScene && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onSceneActivated)
                     {
                         selectedNativeScriptAssetKey.clear();
+                        selectedTilesetAssetKey.clear();
                         onSceneActivated(assetKey);
                     }
                     else if (isPrefab && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onPrefabOpened)
                     {
                         selectedNativeScriptAssetKey.clear();
+                        selectedTilesetAssetKey.clear();
                         selectedPrefabAssetKey = assetKey;
                         onPrefabOpened(assetKey);
                     }
@@ -813,6 +857,18 @@ namespace Limitless::EditorProjectPanel
                         selectedMaterialAssetKey = assetKey;
                         selectedTextureAssetKey.clear();
                         selectedNativeScriptAssetKey.clear();
+                        selectedTilesetAssetKey.clear();
+                        selectedEntity = entt::null;
+                        cachedMaterialAsset.reset();
+                        cachedTextureAsset.reset();
+                    }
+                    else if (isTileset && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
+                    {
+                        selectedTilesetAssetKey = assetKey;
+                        selectedTextureAssetKey.clear();
+                        selectedMaterialAssetKey.clear();
+                        selectedNativeScriptAssetKey.clear();
+                        selectedPrefabAssetKey.clear();
                         selectedEntity = entt::null;
                         cachedMaterialAsset.reset();
                         cachedTextureAsset.reset();
@@ -916,6 +972,7 @@ namespace Limitless::EditorProjectPanel
         void DrawProjectFolderPopups(const std::filesystem::path& assetsDirectory,
                                      EditorProjectPanelState& state,
                                      const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
+                                     const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
                                      const std::function<void(const std::string&, const std::string&)>& onAssetRenamed)
         {
             if (state.FolderPopupPending == EditorProjectFolderPopup::Create)
@@ -1009,6 +1066,14 @@ namespace Limitless::EditorProjectPanel
                 ImGui::SetNextWindowFocus();
                 state.CreateMaterialPopupPending = false;
                 state.CreateMaterialPopupOpen = true;
+            }
+
+            if (state.CreateTilesetPopupPending)
+            {
+                ImGui::OpenPopup("CreateTilesetAsset");
+                ImGui::SetNextWindowFocus();
+                state.CreateTilesetPopupPending = false;
+                state.CreateTilesetPopupOpen = true;
             }
 
             if (ImGui::BeginPopupModal("RenameAsset", &state.RenameAssetPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
@@ -1145,6 +1210,33 @@ namespace Limitless::EditorProjectPanel
 
                 ImGui::EndPopup();
             }
+
+            if (ImGui::BeginPopupModal("CreateTilesetAsset", &state.CreateTilesetPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::Text("Create Tileset");
+                ImGui::Separator();
+                if (ImGui::IsWindowAppearing())
+                    ImGui::SetKeyboardFocusHere();
+
+                const bool create = ImGui::InputText("Name",
+                                                     state.CreateTilesetNameBuffer.data(),
+                                                     state.CreateTilesetNameBuffer.size(),
+                                                     ImGuiInputTextFlags_EnterReturnsTrue);
+                if (ImGui::Button("Create", ImVec2(120, 0)) || create)
+                {
+                    const std::string requestedName = state.CreateTilesetNameBuffer.data();
+                    if (!requestedName.empty() && onCreateTilesetRequested)
+                    {
+                        onCreateTilesetRequested(state.CreateTilesetParentRelativePath, requestedName);
+                        state.CreateTilesetPopupOpen = false;
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                    state.CreateTilesetPopupOpen = false;
+
+                ImGui::EndPopup();
+            }
         }
     }
 
@@ -1156,6 +1248,7 @@ namespace Limitless::EditorProjectPanel
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
               std::string& selectedNativeScriptAssetKey,
               std::string& selectedPrefabAssetKey,
+                                     std::string& selectedTilesetAssetKey,
               const char* texturePayloadId,
               const char* audioPayloadId,
               const char* assetMovePayloadId,
@@ -1167,6 +1260,7 @@ namespace Limitless::EditorProjectPanel
               const std::function<void(const std::string&)>& onSceneActivated,
               const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
               const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
+                                     const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
               const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
               const std::function<void(const std::string&)>& onPrefabOpened,
               const std::function<void(const std::string&)>& onPrefabInstantiated,
@@ -1210,6 +1304,12 @@ namespace Limitless::EditorProjectPanel
                 CopyTextToBuffer(state.CreateMaterialNameBuffer, "New Material");
                 state.CreateMaterialPopupPending = true;
             }
+            if (ImGui::MenuItem("Create Tileset"))
+            {
+                state.CreateTilesetParentRelativePath = "";
+                CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
+                state.CreateTilesetPopupPending = true;
+            }
             if (ImGui::MenuItem("Create Native Script"))
             {
                 state.CreateNativeScriptParentRelativePath = "";
@@ -1241,6 +1341,12 @@ namespace Limitless::EditorProjectPanel
                     state.CreateMaterialParentRelativePath = "";
                     CopyTextToBuffer(state.CreateMaterialNameBuffer, "New Material");
                     state.CreateMaterialPopupPending = true;
+                }
+                if (ImGui::MenuItem("Create Tileset"))
+                {
+                    state.CreateTilesetParentRelativePath = "";
+                    CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
+                    state.CreateTilesetPopupPending = true;
                 }
                 if (ImGui::MenuItem("Create Native Script"))
                 {
@@ -1316,6 +1422,7 @@ namespace Limitless::EditorProjectPanel
                           cachedMaterialAsset,
                           selectedNativeScriptAssetKey,
                           selectedPrefabAssetKey,
+                          selectedTilesetAssetKey,
                           texturePayloadId,
                           audioPayloadId,
                           assetMovePayloadId,
@@ -1327,6 +1434,7 @@ namespace Limitless::EditorProjectPanel
                           onSceneActivated,
                           onCreateSceneRequested,
                           onCreateMaterialRequested,
+                          onCreateTilesetRequested,
                           onCreatePrefabFromSceneEntityRequested,
                           onPrefabOpened,
                           onPrefabInstantiated,
@@ -1351,7 +1459,7 @@ namespace Limitless::EditorProjectPanel
             state.PendingExternalDropPaths.clear();
         }
 
-        DrawProjectFolderPopups(assetsDirectory, state, onCreateMaterialRequested, onAssetRenamed);
+        DrawProjectFolderPopups(assetsDirectory, state, onCreateMaterialRequested, onCreateTilesetRequested, onAssetRenamed);
         ImGui::End();
     }
 }
