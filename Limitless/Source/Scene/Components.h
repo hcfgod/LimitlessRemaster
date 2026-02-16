@@ -63,6 +63,7 @@ namespace Limitless
     struct TagComponent
     {
         std::string Tag = "Entity";
+        bool Enabled = true; ///< Unity-style active state. Disabled entities do not update or render.
     };
 
     /// Position, rotation (euler degrees), and scale. Used for rendering and hierarchy.
@@ -95,7 +96,9 @@ namespace Limitless
         Assets::TextureAsset::Ptr CachedTexture;  ///< Runtime cache; keeps asset alive
         bool TextureLoadAttempted = false; ///< Prevents per-frame retry/log spam when texture is missing
         glm::vec4 Color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
-        float TilingFactor = 1.0f;
+        glm::vec2 TilingFactor = glm::vec2(1.0f, 1.0f);
+        bool CastShadows = true;
+        bool ReceiveShadows = true;
     };
 
     /// Renders runtime text using an MSDF atlas generated from the font file path.
@@ -500,7 +503,7 @@ namespace Limitless
     /// Uses a single tileset texture and per-layer tile arrays.
     struct TilemapComponent
     {
-        glm::ivec2 GridSize = glm::ivec2(32, 18);
+        glm::ivec2 GridSize = glm::ivec2(256, 256);
         glm::vec2 CellSize = glm::vec2(1.0f, 1.0f);
         glm::ivec2 TilesetTileSizePixels = glm::ivec2(16, 16);
         std::string TilesetAssetKey;

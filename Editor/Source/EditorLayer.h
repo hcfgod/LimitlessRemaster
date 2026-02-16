@@ -61,7 +61,10 @@ namespace Limitless
         void DrawConsolePanel();
         void DrawTilemapPanel();
 
-        void EnsureViewportFramebuffer(uint32_t width, uint32_t height);
+        void EnsureSceneViewFramebuffer(uint32_t width, uint32_t height);
+        void EnsureGameViewFramebuffer(uint32_t width, uint32_t height);
+        Camera* ResolveGameViewCamera(uint32_t viewportWidthPixels, uint32_t viewportHeightPixels, bool& outMissingGameplayCamera);
+        void DestroyGameViewPreviewCamera();
         void EnterPlayMode();
         void EnterSimulateMode();
         void ExitPlayMode();
@@ -87,6 +90,8 @@ namespace Limitless
         bool EnsureSceneSwitchAllowed(const std::function<void()>& deferredSwitchAction);
         void BeginSceneSwitch();
         void PersistProjectSessionState();
+        void RefreshProjectRenderSettings();
+        void ApplyProjectRenderSettings();
         void RefreshProjectPhysics2DSettings();
         void ApplyProjectPhysics2DSettingsToScenes();
         void RefreshProjectAudioSettings();
@@ -107,16 +112,22 @@ namespace Limitless
         bool UnpackPrefabEntity(entt::entity entity);
         void SetProjectDefaultSceneAssetKey(const std::string& sceneAssetKey);
 
-        uint32_t m_ViewportWidthPixels = 1280;
-        uint32_t m_ViewportHeightPixels = 720;
+        uint32_t m_SceneViewWidthPixels = 1280;
+        uint32_t m_SceneViewHeightPixels = 720;
+        uint32_t m_GameViewWidthPixels = 1280;
+        uint32_t m_GameViewHeightPixels = 720;
 
-        std::shared_ptr<Framebuffer> m_ViewportFramebuffer;
-        bool m_ViewportFocused = false;
-        bool m_ViewportHovered = false;
+        std::shared_ptr<Framebuffer> m_SceneViewFramebuffer;
+        std::shared_ptr<Framebuffer> m_GameViewFramebuffer;
+        bool m_SceneViewFocused = false;
+        bool m_SceneViewHovered = false;
+        bool m_GameViewFocused = false;
+        bool m_GameViewHovered = false;
 
         CameraManager m_CameraManager;
         CameraId m_EditorCameraId{};
         CameraId m_CachedGameplayCameraId{};
+        CameraId m_GameViewPreviewCameraId{};
         bool m_CreatedGameplayCameraFromScene = false;
         std::unique_ptr<EditorCameraController> m_EditorCameraController;
 
@@ -192,6 +203,11 @@ namespace Limitless
         EditorProjectPanelState m_ProjectPanelState;
         EditorProjectDialog::EditorProjectDialogState m_ProjectDialogState;
         EditorProjectSettingsPanel::EditorProjectSettingsPanelState m_ProjectSettingsPanelState;
+        Project::RenderSettings m_ProjectRenderSettings{};
+        bool m_ProjectRenderSettingsLoaded = false;
+        bool m_ProjectRenderVSyncApplied = false;
+        bool m_ProjectRenderAppliedVSyncValue = false;
+        glm::vec4 m_ProjectRenderAppliedClearColor = glm::vec4(-1.0f);
         Project::AudioSettings m_ProjectAudioSettings{};
         bool m_ProjectAudioSettingsLoaded = false;
         std::string m_ProjectAppliedAudioMixerAssetKey;

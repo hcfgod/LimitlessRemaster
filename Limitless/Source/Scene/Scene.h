@@ -17,6 +17,7 @@ namespace Limitless
     class Camera;
     class Framebuffer;
     class Physics2DWorld;
+    inline constexpr int kSceneSerializationVersion = 12;
 
     // -----------------------------------------------------------------------------
     // Scene
@@ -54,6 +55,7 @@ namespace Limitless
 
         /// Check if entity exists.
         bool IsValid(entt::entity entity) const;
+        bool IsEntityEnabledInHierarchy(entt::entity entity) const;
 
         /// Set parent-child relation. Use entt::null parent to make entity root-level.
         bool SetParent(entt::entity child, entt::entity parent);
@@ -139,6 +141,11 @@ namespace Limitless
     public:
         /// Render scene to the given camera (draws to whatever framebuffer is currently bound).
         static void Render(Scene& scene, const Camera& camera);
+
+        /// Sets the viewport background clear color used before scene rendering.
+        static void SetViewportClearColor(const glm::vec4& clearColor);
+        /// Gets the currently configured viewport background clear color.
+        static glm::vec4 GetViewportClearColor();
 
         /// Render scene to a viewport framebuffer (binds, clears, draws, unbinds).
         /// Use this for editor viewports or off-screen rendering.

@@ -39,6 +39,7 @@ uniform sampler2D u_AlbedoTexture;
 uniform sampler2D u_NormalTexture;
 uniform vec4 u_Color;
 uniform float u_NormalStrength;
+uniform int u_ReceiveShadows;
 
 void main()
 {
@@ -54,6 +55,7 @@ void main()
     vec3 worldNormal = normalize(vec3(worldXY, max(0.0001, tangentNormal.z)));
     vec3 encodedNormal = worldNormal * 0.5 + 0.5;
 
-    FragColor = vec4(encodedNormal, 1.0);
+    // A channel carries whether this pixel should receive shadows.
+    FragColor = vec4(encodedNormal, u_ReceiveShadows != 0 ? 1.0 : 0.0);
 }
 

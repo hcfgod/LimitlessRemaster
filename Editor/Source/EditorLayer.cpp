@@ -9,6 +9,7 @@
 #include "Assets/AssetImportPipeline.h"
 #include "Assets/AssetTypes.h"
 #include "Assets/TextureAsset.h"
+#include "Core/Application.h"
 #include "Core/Debug/Log.h"
 #include "Editor/EditorCameraController.h"
 #include "EditorInspectorPanel.h"
@@ -22,6 +23,8 @@
 #include "EditorViewportPanel.h"
 #include "Scripting/ScriptCoreModuleRuntime.h"
 #include "Core/Input/InputSystem.h"
+#include "Graphics/Camera/Camera.h"
+#include "Graphics/Camera/OrthographicCamera2D.h"
 #include "Graphics/Camera/PerspectiveCamera3D.h"
 #include "Graphics/Lighting2DRenderer.h"
 #include "Graphics/Renderer2D.h"
@@ -36,6 +39,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -57,13 +61,15 @@ namespace Limitless
         constexpr const char* kDefaultSceneFileName = "SampleScene.scene.json";
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 2;
+        constexpr uint32_t kEditorSessionStateVersion = 3;
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
         struct EditorSessionStateData final
         {
             std::string LastOpenedSceneAssetKey;
             EditorInspectorPanel::NativeScriptEditorSessionState NativeScriptEditorState;
+            bool ShowProjectSettingsWindow = false;
+            bool ShowAssetDiagnosticsWindow = false;
         };
 
         std::string NormalizeSlashes(std::string pathText)
@@ -259,6 +265,8 @@ namespace Limitless
                 state.NativeScriptEditorState.LastEditedScriptClassName = root.value("nativeScriptEditorLastClassName", std::string{});
                 state.NativeScriptEditorState.LastEditedScriptAssetRelativePath = root.value("nativeScriptEditorLastAssetRelativePath", std::string{});
                 state.NativeScriptEditorState.ShowDebugInfo = root.value("nativeScriptEditorShowDebugInfo", false);
+                state.ShowProjectSettingsWindow = root.value("showProjectSettingsWindow", false);
+                state.ShowAssetDiagnosticsWindow = root.value("showAssetDiagnosticsWindow", false);
                 return state;
             }
             catch (...)
@@ -296,6 +304,8 @@ namespace Limitless
                 root["nativeScriptEditorLastClassName"] = state.NativeScriptEditorState.LastEditedScriptClassName;
                 root["nativeScriptEditorLastAssetRelativePath"] = state.NativeScriptEditorState.LastEditedScriptAssetRelativePath;
                 root["nativeScriptEditorShowDebugInfo"] = state.NativeScriptEditorState.ShowDebugInfo;
+                root["showProjectSettingsWindow"] = state.ShowProjectSettingsWindow;
+                root["showAssetDiagnosticsWindow"] = state.ShowAssetDiagnosticsWindow;
 
                 const std::filesystem::path tmpPath = statePath.string() + ".tmp";
                 {
@@ -429,6 +439,8 @@ namespace Limitless
             auto listenerView = registry.view<AudioListener2DComponent>();
             for (entt::entity entity : listenerView)
             {
+                if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
                 const auto& listener = listenerView.get<AudioListener2DComponent>(entity);
                 if (!listener.Enabled)
                     continue;
@@ -510,10 +522,19 @@ namespace Limitless
             for (entt::entity entity : audioView)
             {
                 auto& audioSource = audioView.get<AudioSourceComponent>(entity);
+                const bool entityEnabled = scene->IsEntityEnabledInHierarchy(entity);
                 if (audioSource.RuntimeVoiceId != 0 &&
                     !Audio::AudioEngine::GetInstance().IsVoiceActive(audioSource.RuntimeVoiceId))
                 {
                     audioSource.RuntimeVoiceId = 0;
+                }
+                if (!entityEnabled)
+                {
+                    if (audioSource.RuntimeVoiceId != 0)
+                        Audio::AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
+                    audioSource.RuntimeVoiceId = 0;
+                    audioSource.RuntimePlaybackStarted = false;
+                    continue;
                 }
                 if (!runtimePlaybackAllowed)
                 {
@@ -595,13 +616,13 @@ namespace Limitless
         EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Open);
 
         EditorRuntimeOperations::Attach(
-            m_ViewportWidthPixels,
-            m_ViewportHeightPixels,
+            m_SceneViewWidthPixels,
+            m_SceneViewHeightPixels,
             m_Scene,
             m_CameraManager,
             m_EditorCameraId,
             m_EditorCameraController,
-            m_ViewportFramebuffer);
+            m_SceneViewFramebuffer);
 
         Application::GetInstance().GetWindow().SetFileDropCallback([this](const std::vector<std::filesystem::path>& droppedPaths) {
             if (droppedPaths.empty())
@@ -672,18 +693,25 @@ namespace Limitless
             m_Scene,
             m_EditSceneStored,
             m_EditorCameraController,
-            m_ViewportFramebuffer);
+            m_SceneViewFramebuffer);
+        DestroyGameViewPreviewCamera();
+        m_GameViewFramebuffer.reset();
         ScriptCoreModuleRuntime::Shutdown();
     }
 
     void EditorLayer::OnUpdate(float deltaTime)
     {
         ScriptCoreModuleRuntime::Update(m_PlayModeState);
+        ApplyProjectRenderSettings();
         UpdateSceneAudioSources(m_Scene.get(), m_PlayModeState);
         ApplyProjectAudioSettings();
 
         if (m_ProjectSettingsPanelState.Loaded)
         {
+            m_ProjectRenderSettings = m_ProjectSettingsPanelState.Render;
+            m_ProjectRenderSettingsLoaded = true;
+            ApplyProjectRenderSettings();
+
             m_ProjectAudioSettings = m_ProjectSettingsPanelState.Audio;
             m_ProjectAudioSettingsLoaded = true;
             ApplyProjectAudioSettings();
@@ -714,7 +742,7 @@ namespace Limitless
         const ImGuiIO& io = ImGui::GetIO();
         EditorRuntimeOperations::Update(
             m_PlayModeState,
-            m_ViewportHovered,
+            m_SceneViewHovered,
             io.WantTextInput,
             deltaTime,
             m_EditorCameraController.get());
@@ -811,12 +839,28 @@ namespace Limitless
             }
 
             RefreshProjectPhysics2DSettings();
+            RefreshProjectRenderSettings();
             RefreshProjectAudioSettings();
             RefreshProjectLighting2DSettings();
 
+            const auto isMissingSceneAssetKey = [](const std::string& sceneAssetKey) -> bool {
+                if (sceneAssetKey.empty())
+                    return true;
+                const auto resolvedPathResult = Assets::ResolveAssetKeyToPath(sceneAssetKey);
+                if (resolvedPathResult.IsFailure())
+                    return true;
+                std::error_code errorCode;
+                return !std::filesystem::exists(resolvedPathResult.GetValue(), errorCode);
+            };
+
             bool loadedScene = false;
+            const auto initialProjectDefinition = pm.GetProjectDefinition();
+            const bool defaultSceneWasMissing = !initialProjectDefinition.has_value() ||
+                isMissingSceneAssetKey(initialProjectDefinition->DefaultScene.Key);
             const EditorSessionStateData sessionState = ReadProjectSessionState(projectRoot);
             EditorInspectorPanel::ApplyNativeScriptEditorSessionState(sessionState.NativeScriptEditorState);
+            m_ShowProjectSettingsWindow = sessionState.ShowProjectSettingsWindow;
+            m_ShowAssetDiagnosticsWindow = sessionState.ShowAssetDiagnosticsWindow;
             const std::string lastOpenedSceneAssetKey = sessionState.LastOpenedSceneAssetKey;
             if (!lastOpenedSceneAssetKey.empty())
             {
@@ -827,9 +871,9 @@ namespace Limitless
 
             if (!loadedScene)
             {
-                if (const auto definition = pm.GetProjectDefinition(); definition.has_value() && !definition->DefaultScene.Key.empty())
+                if (initialProjectDefinition.has_value() && !initialProjectDefinition->DefaultScene.Key.empty())
                 {
-                    loadedScene = LoadSceneFromAssetKey(definition->DefaultScene.Key);
+                    loadedScene = LoadSceneFromAssetKey(initialProjectDefinition->DefaultScene.Key);
                     if (!loadedScene && (m_RequestOpenSceneSwitchConfirmationPopup || m_SceneSwitchConfirmationPopupOpen))
                         loadedScene = true;
                 }
@@ -841,9 +885,17 @@ namespace Limitless
                 const std::string defaultSceneAssetKey = CreateSceneAssetInFolder("Scenes", kDefaultSceneFileName);
                 if (!defaultSceneAssetKey.empty())
                 {
-                    (void)LoadSceneFromAssetKey(defaultSceneAssetKey);
+                    loadedScene = LoadSceneFromAssetKey(defaultSceneAssetKey);
+                    if (loadedScene)
+                        SetProjectDefaultSceneAssetKey(defaultSceneAssetKey);
                 }
             }
+
+            // Self-heal stale default scene keys (for example after scene rename/delete).
+            // If startup succeeded by loading a valid scene, persist that as the new
+            // default so Asset Diagnostics no longer reports a missing default scene.
+            if (defaultSceneWasMissing && loadedScene && !m_CurrentSceneAssetKey.empty())
+                SetProjectDefaultSceneAssetKey(m_CurrentSceneAssetKey);
         }
 
         DrawMenuBar();
@@ -868,9 +920,9 @@ namespace Limitless
         EditorRuntimeOperations::HandleWindowResize(
             event.GetWidth(),
             event.GetHeight(),
-            m_ViewportWidthPixels,
-            m_ViewportHeightPixels,
-            m_ViewportFramebuffer,
+            m_SceneViewWidthPixels,
+            m_SceneViewHeightPixels,
+            m_SceneViewFramebuffer,
             m_EditorCameraController.get());
     }
 
@@ -1197,18 +1249,28 @@ namespace Limitless
 
     void EditorLayer::DrawViewportPanel()
     {
+        Camera* sceneViewCamera = m_CameraManager.GetCamera(m_EditorCameraId);
+        bool missingGameplayCamera = false;
+        Camera* gameViewCamera = ResolveGameViewCamera(m_GameViewWidthPixels, m_GameViewHeightPixels, missingGameplayCamera);
+
         EditorViewportPanel::Draw(
-            m_ViewportWidthPixels,
-            m_ViewportHeightPixels,
-            m_ViewportFramebuffer,
-            m_ViewportFocused,
-            m_ViewportHovered,
+            m_SceneViewWidthPixels,
+            m_SceneViewHeightPixels,
+            m_SceneViewFramebuffer,
+            m_SceneViewFocused,
+            m_SceneViewHovered,
+            m_GameViewWidthPixels,
+            m_GameViewHeightPixels,
+            m_GameViewFramebuffer,
+            m_GameViewFocused,
+            m_GameViewHovered,
             m_EditorCameraController.get(),
-            m_CameraManager,
+            sceneViewCamera,
+            gameViewCamera,
             m_Scene.get(),
             m_PlayModeState,
-            m_PlayModeMissingGameplayCamera,
-            [this](uint32_t width, uint32_t height) { EnsureViewportFramebuffer(width, height); },
+            [this](uint32_t width, uint32_t height) { EnsureSceneViewFramebuffer(width, height); },
+            [this](uint32_t width, uint32_t height) { EnsureGameViewFramebuffer(width, height); },
             kAssetScenePayload,
             [this](const std::string& assetKey) { LoadSceneFromAssetKey(assetKey); },
             kAssetPrefabPayload,
@@ -1224,7 +1286,8 @@ namespace Limitless
             m_CachedMaterialAsset,
             m_SelectedNativeScriptAssetKey,
             m_ShowEditorFpsOverlay,
-            &m_TilemapEditorState);
+            &m_TilemapEditorState,
+            missingGameplayCamera);
     }
 
     void EditorLayer::DrawScenePanel()
@@ -1696,21 +1759,226 @@ namespace Limitless
         ImGui::End();
     }
 
-    void EditorLayer::EnsureViewportFramebuffer(uint32_t width, uint32_t height)
+    void EditorLayer::EnsureSceneViewFramebuffer(uint32_t width, uint32_t height)
     {
         EditorRuntimeOperations::EnsureViewportFramebuffer(
             width,
             height,
-            m_ViewportFramebuffer,
-            m_ViewportWidthPixels,
-            m_ViewportHeightPixels,
+            m_SceneViewFramebuffer,
+            m_SceneViewWidthPixels,
+            m_SceneViewHeightPixels,
             m_EditorCameraController.get());
+    }
+
+    void EditorLayer::EnsureGameViewFramebuffer(uint32_t width, uint32_t height)
+    {
+        EditorRuntimeOperations::EnsureViewportFramebuffer(
+            width,
+            height,
+            m_GameViewFramebuffer,
+            m_GameViewWidthPixels,
+            m_GameViewHeightPixels,
+            nullptr);
+    }
+
+    Camera* EditorLayer::ResolveGameViewCamera(uint32_t viewportWidthPixels,
+                                               uint32_t viewportHeightPixels,
+                                               bool& outMissingGameplayCamera)
+    {
+        outMissingGameplayCamera = false;
+
+        const auto findFirstGameplayCamera = [this]() -> Camera* {
+            for (CameraId id : m_CameraManager.GetAllCameraIds())
+            {
+                Camera* camera = m_CameraManager.GetCamera(id);
+                if (camera && camera->GetUsage() == CameraUsage::Gameplay)
+                    return camera;
+            }
+            return nullptr;
+        };
+
+        if (m_PlayModeState != EditorPlayModeState::Edit)
+        {
+            if (Camera* camera = m_CameraManager.GetCamera(m_CachedGameplayCameraId))
+            {
+                camera->SetViewportSize(viewportWidthPixels, viewportHeightPixels);
+                return camera;
+            }
+
+            if (Camera* fallbackCamera = findFirstGameplayCamera())
+            {
+                fallbackCamera->SetViewportSize(viewportWidthPixels, viewportHeightPixels);
+                return fallbackCamera;
+            }
+
+            outMissingGameplayCamera = true;
+            return nullptr;
+        }
+
+        if (!m_Scene)
+        {
+            outMissingGameplayCamera = true;
+            return nullptr;
+        }
+
+        struct GameplaySceneCameraSelection final
+        {
+            entt::entity Entity = entt::null;
+            CameraComponent Component{};
+        };
+
+        const auto findGameplaySceneCamera = [this]() -> std::optional<GameplaySceneCameraSelection> {
+            auto& registry = m_Scene->GetRegistry();
+            auto view = registry.view<CameraComponent>();
+            std::optional<GameplaySceneCameraSelection> fallback{};
+            for (entt::entity entity : view)
+            {
+                const auto& cameraComponent = view.get<CameraComponent>(entity);
+                if (!fallback.has_value())
+                    fallback = GameplaySceneCameraSelection{ entity, cameraComponent };
+                if (cameraComponent.IsPrimary)
+                    return GameplaySceneCameraSelection{ entity, cameraComponent };
+            }
+
+            return fallback;
+        };
+
+        // Edit Mode Game View mirrors Unity/Godot behavior:
+        // render from the scene's Primary camera even when runtime is not active.
+        const std::optional<GameplaySceneCameraSelection> selection = findGameplaySceneCamera();
+        if (!selection.has_value())
+        {
+            DestroyGameViewPreviewCamera();
+            outMissingGameplayCamera = true;
+            return nullptr;
+        }
+
+        const CameraType expectedType = (selection->Component.Projection == CameraComponent::ProjectionType::Perspective3D)
+            ? CameraType::Perspective3D
+            : CameraType::Orthographic2D;
+
+        Camera* previewCamera = m_CameraManager.GetCamera(m_GameViewPreviewCameraId);
+        if (!previewCamera || previewCamera->GetType() != expectedType || previewCamera->GetUsage() != CameraUsage::Gameplay)
+        {
+            DestroyGameViewPreviewCamera();
+
+            if (expectedType == CameraType::Perspective3D)
+            {
+                CameraManager::Perspective3DCreateInfo createInfo{};
+                createInfo.Name = "GameView Preview Camera";
+                createInfo.Usage = CameraUsage::Gameplay;
+                createInfo.ViewportWidthPixels = viewportWidthPixels;
+                createInfo.ViewportHeightPixels = viewportHeightPixels;
+                createInfo.FieldOfViewYDegrees = selection->Component.FieldOfViewYDegrees;
+                if (selection->Component.NearPlane <= 0.0f && selection->Component.FarPlane <= 1.0f)
+                {
+                    createInfo.NearPlane = 0.1f;
+                    createInfo.FarPlane = 1000.0f;
+                }
+                else
+                {
+                    createInfo.NearPlane = selection->Component.NearPlane > 0.0f ? selection->Component.NearPlane : 0.01f;
+                    createInfo.FarPlane = selection->Component.FarPlane > createInfo.NearPlane
+                        ? selection->Component.FarPlane
+                        : (createInfo.NearPlane + 1000.0f);
+                }
+                m_GameViewPreviewCameraId = m_CameraManager.CreatePerspective3D(createInfo);
+            }
+            else
+            {
+                CameraManager::Orthographic2DCreateInfo createInfo{};
+                createInfo.Name = "GameView Preview Camera";
+                createInfo.Usage = CameraUsage::Gameplay;
+                createInfo.ViewportWidthPixels = viewportWidthPixels;
+                createInfo.ViewportHeightPixels = viewportHeightPixels;
+                createInfo.Zoom = selection->Component.Zoom > 0.0f ? selection->Component.Zoom : 1.0f;
+                createInfo.NearPlane = selection->Component.NearPlane;
+                createInfo.FarPlane = selection->Component.FarPlane > selection->Component.NearPlane
+                    ? selection->Component.FarPlane
+                    : (selection->Component.NearPlane + 2.0f);
+                m_GameViewPreviewCameraId = m_CameraManager.CreateOrthographic2D(createInfo);
+            }
+
+            previewCamera = m_CameraManager.GetCamera(m_GameViewPreviewCameraId);
+        }
+
+        if (!previewCamera)
+        {
+            outMissingGameplayCamera = true;
+            return nullptr;
+        }
+
+        previewCamera->SetViewportSize(viewportWidthPixels, viewportHeightPixels);
+        if (selection->Component.Projection == CameraComponent::ProjectionType::Orthographic2D)
+        {
+            auto* orthographicCamera = m_CameraManager.GetOrthographic2D(m_GameViewPreviewCameraId);
+            if (!orthographicCamera)
+            {
+                outMissingGameplayCamera = true;
+                return nullptr;
+            }
+
+            const float zoom = selection->Component.Zoom > 0.0f ? selection->Component.Zoom : 1.0f;
+            const float nearPlane = selection->Component.NearPlane;
+            const float farPlane = selection->Component.FarPlane > nearPlane
+                ? selection->Component.FarPlane
+                : (nearPlane + 2.0f);
+            orthographicCamera->SetProjection(zoom, nearPlane, farPlane);
+        }
+        else
+        {
+            auto* perspectiveCamera = m_CameraManager.GetPerspective3D(m_GameViewPreviewCameraId);
+            if (!perspectiveCamera)
+            {
+                outMissingGameplayCamera = true;
+                return nullptr;
+            }
+
+            const float fieldOfViewY = selection->Component.FieldOfViewYDegrees > 1.0f ? selection->Component.FieldOfViewYDegrees : 60.0f;
+            float nearPlane = selection->Component.NearPlane > 0.0f ? selection->Component.NearPlane : 0.01f;
+            float farPlane = selection->Component.FarPlane > nearPlane ? selection->Component.FarPlane : nearPlane + 1000.0f;
+            if (selection->Component.NearPlane <= 0.0f && selection->Component.FarPlane <= 1.0f)
+            {
+                nearPlane = 0.1f;
+                farPlane = 1000.0f;
+            }
+            perspectiveCamera->SetPerspective(fieldOfViewY, nearPlane, farPlane);
+        }
+
+        const glm::mat4 worldTransform = m_Scene->GetWorldTransformMatrix(selection->Entity);
+        const glm::vec3 position = glm::vec3(worldTransform[3]);
+        if (auto* orthographicCamera = m_CameraManager.GetOrthographic2D(m_GameViewPreviewCameraId))
+        {
+            orthographicCamera->SetPosition(position);
+            const float rotationRadians = std::atan2(worldTransform[1][0], worldTransform[0][0]);
+            orthographicCamera->SetRotationRadians(rotationRadians);
+        }
+        else if (auto* perspectiveCamera = m_CameraManager.GetPerspective3D(m_GameViewPreviewCameraId))
+        {
+            perspectiveCamera->SetPosition(position);
+            const glm::vec3 forward = glm::normalize(glm::vec3(worldTransform * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
+            const float yawDegrees = glm::degrees(std::atan2(forward.z, forward.x));
+            const float pitchDegrees = glm::degrees(std::asin(glm::clamp(forward.y, -1.0f, 1.0f)));
+            perspectiveCamera->SetYawPitchDegrees(yawDegrees, pitchDegrees);
+        }
+
+        return previewCamera;
+    }
+
+    void EditorLayer::DestroyGameViewPreviewCamera()
+    {
+        if (m_GameViewPreviewCameraId)
+        {
+            (void)m_CameraManager.DestroyCamera(m_GameViewPreviewCameraId);
+            m_GameViewPreviewCameraId = {};
+        }
     }
 
     void EditorLayer::EnterPlayMode()
     {
         if (m_PlayModeState != EditorPlayModeState::Edit)
             return;
+        DestroyGameViewPreviewCamera();
 
         // Unity-style: Playing from Prefab Mode first returns to the previous scene.
         if (IsPrefabAssetKey(m_CurrentSceneAssetKey) && !m_PrefabModeReturnSceneAssetKey.empty())
@@ -1740,8 +2008,8 @@ namespace Limitless
             m_EditSceneStored,
             m_CameraManager,
             m_EditorCameraId,
-            m_ViewportWidthPixels,
-            m_ViewportHeightPixels,
+            m_GameViewWidthPixels,
+            m_GameViewHeightPixels,
             m_CachedGameplayCameraId,
             m_CreatedGameplayCameraFromScene,
             m_PlayModeMissingGameplayCamera,
@@ -1754,6 +2022,7 @@ namespace Limitless
     {
         if (m_PlayModeState != EditorPlayModeState::Edit)
             return;
+        DestroyGameViewPreviewCamera();
 
         StopAudioSourcesInScene(m_Scene.get());
         StopAudioSourcesInScene(m_EditSceneStored.get());
@@ -1765,8 +2034,8 @@ namespace Limitless
             m_EditSceneStored,
             m_CameraManager,
             m_EditorCameraId,
-            m_ViewportWidthPixels,
-            m_ViewportHeightPixels,
+            m_GameViewWidthPixels,
+            m_GameViewHeightPixels,
             m_CachedGameplayCameraId,
             m_CreatedGameplayCameraFromScene,
             m_PlayModeMissingGameplayCamera,
@@ -1796,6 +2065,7 @@ namespace Limitless
         // Restore the edit scene identity after Play Mode runtime scene changes.
         m_CurrentSceneAssetKey = m_EditSceneStoredAssetKey;
         m_EditSceneStoredAssetKey.clear();
+        DestroyGameViewPreviewCamera();
     }
 
     void EditorLayer::TogglePausePlayMode()
@@ -2064,6 +2334,7 @@ namespace Limitless
 
     void EditorLayer::BeginSceneSwitch()
     {
+        DestroyGameViewPreviewCamera();
         m_EditorUndoService.Clear();
         m_EditorUndoService.MarkSaved();
         m_ActiveSceneTexturePrewarmKeys.clear();
@@ -2085,6 +2356,8 @@ namespace Limitless
         else
             state.LastOpenedSceneAssetKey = m_CurrentSceneAssetKey;
         EditorInspectorPanel::GetNativeScriptEditorSessionState(state.NativeScriptEditorState);
+        state.ShowProjectSettingsWindow = m_ShowProjectSettingsWindow;
+        state.ShowAssetDiagnosticsWindow = m_ShowAssetDiagnosticsWindow;
         WriteProjectSessionState(projectManager.GetProjectRoot(), state);
     }
 
@@ -2324,6 +2597,61 @@ namespace Limitless
         {
             LT_WARN("Failed to load project audio settings: {}", audioSettingsResult.GetError().GetErrorMessage());
             m_ProjectAudioSettingsLoaded = false;
+        }
+    }
+
+    void EditorLayer::RefreshProjectRenderSettings()
+    {
+        const auto& projectManager = Project::ProjectManager::GetInstance();
+        if (!projectManager.HasOpenProject())
+            return;
+
+        const auto renderSettingsResult = Project::LoadRenderSettings(projectManager.GetProjectRoot());
+        if (renderSettingsResult.IsSuccess())
+        {
+            m_ProjectRenderSettings = renderSettingsResult.GetValue();
+            m_ProjectRenderSettingsLoaded = true;
+            m_ProjectSettingsPanelState.Render = m_ProjectRenderSettings;
+            ApplyProjectRenderSettings();
+        }
+        else
+        {
+            LT_WARN("Failed to load project render settings: {}", renderSettingsResult.GetError().GetErrorMessage());
+            m_ProjectRenderSettingsLoaded = false;
+        }
+    }
+
+    void EditorLayer::ApplyProjectRenderSettings()
+    {
+        if (!m_ProjectRenderSettingsLoaded)
+            return;
+
+        const glm::vec4 clearColor(
+            std::clamp(m_ProjectRenderSettings.ClearColor[0], 0.0f, 1.0f),
+            std::clamp(m_ProjectRenderSettings.ClearColor[1], 0.0f, 1.0f),
+            std::clamp(m_ProjectRenderSettings.ClearColor[2], 0.0f, 1.0f),
+            std::clamp(m_ProjectRenderSettings.ClearColor[3], 0.0f, 1.0f));
+
+        if (!m_ProjectRenderVSyncApplied || m_ProjectRenderAppliedVSyncValue != m_ProjectRenderSettings.VSync)
+        {
+            auto& window = Application::GetInstance().GetWindow();
+            window.SetVSync(m_ProjectRenderSettings.VSync);
+            m_ProjectRenderAppliedVSyncValue = m_ProjectRenderSettings.VSync;
+            m_ProjectRenderVSyncApplied = true;
+        }
+
+        const auto clearColorChanged = [](const glm::vec4& a, const glm::vec4& b) {
+            constexpr float epsilon = 0.0001f;
+            return std::abs(a.r - b.r) > epsilon ||
+                   std::abs(a.g - b.g) > epsilon ||
+                   std::abs(a.b - b.b) > epsilon ||
+                   std::abs(a.a - b.a) > epsilon;
+        };
+
+        if (clearColorChanged(clearColor, m_ProjectRenderAppliedClearColor))
+        {
+            SceneRenderer::SetViewportClearColor(clearColor);
+            m_ProjectRenderAppliedClearColor = clearColor;
         }
     }
 

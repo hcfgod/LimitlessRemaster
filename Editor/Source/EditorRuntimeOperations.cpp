@@ -85,10 +85,10 @@ namespace Limitless::EditorRuntimeOperations
         if (!editorCameraController)
             return;
 
-        const bool allowCameraInput =
-            (playModeState == EditorPlayModeState::Edit) &&
-            viewportHovered &&
-            !textInputWanted;
+        (void)playModeState;
+        // Unity-style behavior: Scene View camera remains controllable in all play states.
+        // Input is still gated by Scene View hover and text input focus.
+        const bool allowCameraInput = viewportHovered && !textInputWanted;
 
         editorCameraController->SetInputEnabled(allowCameraInput);
         editorCameraController->Update(deltaTime);

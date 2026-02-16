@@ -70,6 +70,10 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition)
     float totalWeight = 0.0;
     float softness = max(u_ShadowSoftness, 0.0);
     float halfSoftness = max(softness * 0.5, 0.0001);
+    // Directional light is conceptually infinite. Ensure ray tests always span
+    // the visible view to avoid apparent "falloff" from short shadow distances.
+    float viewportDiagonal = length(u_ViewportSize);
+    float effectiveShadowDistance = max(max(u_ShadowDistance, 1.0), viewportDiagonal * 1.5);
 
     for (int sampleIndex = 0; sampleIndex < samples; ++sampleIndex)
     {
@@ -78,7 +82,7 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition)
         float sampleWeight = 1.0 - clamp(abs(sampleOffset) / halfSoftness, 0.0, 1.0);
         sampleWeight = max(sampleWeight, 0.01);
         vec2 sampleOrigin = fragmentScreenPosition + rayDirection * max(u_ShadowBias, 0.0) + perpendicular * sampleOffset;
-        vec2 sampleEnd = sampleOrigin + rayDirection * max(u_ShadowDistance, 1.0);
+        vec2 sampleEnd = sampleOrigin + rayDirection * effectiveShadowDistance;
 
         bool occluded = false;
         int segmentCount = min(u_ShadowSegmentCount, MAX_SHADOW_SEGMENTS);
@@ -111,18 +115,14 @@ void main()
     }
 
     vec4 normalSample = texture(u_NormalTexture, v_UV);
-    vec3 encodedNormal = normalSample.xyz;
-    vec3 normal = normalize(encodedNormal * 2.0 - 1.0);
-    vec3 lightVector = normalize(vec3(-u_LightDirection, 1.0));
-    float ndotl = max(dot(normal, lightVector), 0.0);
-    // Quantization-safe flat-normal detection for sprites without a dedicated normal map.
-    bool hasAuthoredNormal = normalSample.a > 0.5;
-    bool usesFlatFallbackNormal = distance(encodedNormal, vec3(0.5, 0.5, 1.0)) <= 0.02;
-    if (hasAuthoredNormal && usesFlatFallbackNormal)
-        ndotl = 1.0;
+
+    // N dot L is disabled for 2D sprites by default. Directional lights
+    // illuminate all surfaces evenly. Per-pixel bump shading will activate
+    // once normal-map support on materials is fully enabled.
+    float ndotl = 1.0;
 
     vec2 fragmentScreenPosition = gl_FragCoord.xy;
-    float shadowFactor = ComputeShadowFactor(fragmentScreenPosition);
+    float shadowFactor = normalSample.a > 0.5 ? ComputeShadowFactor(fragmentScreenPosition) : 1.0;
 
     vec3 lighting = u_LightColor * (u_LightIntensity * ndotl * shadowFactor);
     FragColor = vec4(lighting, 1.0);

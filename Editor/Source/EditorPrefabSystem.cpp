@@ -51,6 +51,8 @@ namespace Limitless::EditorPrefabSystem
 
                 const entt::entity destinationEntity = destinationScene.CreateEntity(sourceTag->Tag);
                 entityMap.emplace(sourceEntity, destinationEntity);
+                if (auto* destinationTag = destinationRegistry.try_get<TagComponent>(destinationEntity))
+                    destinationTag->Enabled = sourceTag->Enabled;
 
                 destinationRegistry.replace<TransformComponent>(destinationEntity, *sourceTransform);
 
@@ -62,6 +64,8 @@ namespace Limitless::EditorPrefabSystem
                     destinationSprite.TextureLoadAttempted = false;
                     destinationSprite.Color = sourceSprite->Color;
                     destinationSprite.TilingFactor = sourceSprite->TilingFactor;
+                    destinationSprite.CastShadows = sourceSprite->CastShadows;
+                    destinationSprite.ReceiveShadows = sourceSprite->ReceiveShadows;
                 }
 
                 if (const auto* sourceMaterial = sourceRegistry.try_get<MaterialComponent>(sourceEntity))

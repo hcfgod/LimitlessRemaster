@@ -13,7 +13,7 @@
 
 namespace Limitless
 {
-    class CameraManager;
+    class Camera;
     class EditorCameraController;
     class EditorUndoService;
     class Framebuffer;
@@ -45,17 +45,23 @@ namespace Limitless::EditorViewportPanel
         glm::ivec2 HoveredCell = glm::ivec2(0, 0);
     };
 
-    void Draw(uint32_t& viewportWidthPixels,
-              uint32_t& viewportHeightPixels,
-              std::shared_ptr<Framebuffer>& viewportFramebuffer,
-              bool& viewportFocused,
-              bool& viewportHovered,
+    void Draw(uint32_t& sceneViewWidthPixels,
+              uint32_t& sceneViewHeightPixels,
+              std::shared_ptr<Framebuffer>& sceneViewFramebuffer,
+              bool& sceneViewFocused,
+              bool& sceneViewHovered,
+              uint32_t& gameViewWidthPixels,
+              uint32_t& gameViewHeightPixels,
+              std::shared_ptr<Framebuffer>& gameViewFramebuffer,
+              bool& gameViewFocused,
+              bool& gameViewHovered,
               EditorCameraController* editorCameraController,
-              CameraManager& cameraManager,
+              Camera* sceneViewCamera,
+              Camera* gameViewCamera,
               Scene* scene,
               EditorPlayModeState playModeState,
-              bool playModeMissingGameplayCamera,
-              const std::function<void(uint32_t, uint32_t)>& ensureViewportFramebuffer,
+              const std::function<void(uint32_t, uint32_t)>& ensureSceneViewFramebuffer,
+              const std::function<void(uint32_t, uint32_t)>& ensureGameViewFramebuffer,
               const char* scenePayloadId,
               const std::function<void(const std::string&)>& onSceneDropped,
               const char* prefabPayloadId,
@@ -69,5 +75,6 @@ namespace Limitless::EditorViewportPanel
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
               std::string& selectedNativeScriptAssetKey,
               bool showFpsOverlay,
-              TilemapEditorState* tilemapEditorState);
+              TilemapEditorState* tilemapEditorState,
+              bool showMissingGameplayCameraOverlay);
 }

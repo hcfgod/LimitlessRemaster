@@ -39,6 +39,7 @@ namespace Limitless
         constexpr int32_t kSiblingOrderStep = 10;
         std::unordered_map<std::string, Async::Task<Assets::TextureAsset::Ptr>> g_PendingTextureLoads;
         std::unordered_map<std::string, Async::Task<Assets::MaterialAsset::Ptr>> g_PendingMaterialLoads;
+        glm::vec4 g_ViewportClearColor = glm::vec4(0.08f, 0.08f, 0.10f, 1.0f);
 
         // Resolve legacy/stale asset keys to the latest known key in AssetDatabase.
         // This keeps scene references resilient across asset moves/renames.
@@ -444,7 +445,10 @@ namespace Limitless
     entt::entity Scene::CreateEntity(const std::string& name)
     {
         entt::entity entity = m_Registry.create();
-        m_Registry.emplace<TagComponent>(entity, TagComponent{ name });
+        TagComponent tag{};
+        tag.Tag = name;
+        tag.Enabled = true;
+        m_Registry.emplace<TagComponent>(entity, std::move(tag));
         m_Registry.emplace<TransformComponent>(entity);
         auto& hierarchy = m_Registry.emplace<HierarchyComponent>(entity);
 
@@ -491,6 +495,22 @@ namespace Limitless
     bool Scene::IsValid(entt::entity entity) const
     {
         return m_Registry.valid(entity);
+    }
+
+    bool Scene::IsEntityEnabledInHierarchy(entt::entity entity) const
+    {
+        if (!IsValid(entity))
+            return false;
+
+        entt::entity current = entity;
+        while (current != entt::null)
+        {
+            const auto* tag = m_Registry.try_get<TagComponent>(current);
+            if (tag && !tag->Enabled)
+                return false;
+            current = GetParent(current);
+        }
+        return true;
     }
 
     bool Scene::SetParent(entt::entity child, entt::entity parent)
@@ -732,7 +752,7 @@ namespace Limitless
             auto& nativeScript = view.get<NativeScriptComponent>(entity);
             for (auto& scriptEntry : nativeScript.Scripts)
             {
-                if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty())
+                if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty() || !IsEntityEnabledInHierarchy(entity))
                 {
                     if (scriptEntry.RuntimeInstance && scriptEntry.RuntimeInitialized)
                         scriptEntry.RuntimeInstance->OnDestroy();
@@ -846,7 +866,7 @@ namespace Limitless
             auto& nativeScript = view.get<NativeScriptComponent>(entity);
             for (auto& scriptEntry : nativeScript.Scripts)
             {
-                if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty())
+                if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty() || !IsEntityEnabledInHierarchy(entity))
                 {
                     if (scriptEntry.RuntimeInstance && scriptEntry.RuntimeInitialized)
                         scriptEntry.RuntimeInstance->OnDestroy();
@@ -1009,6 +1029,8 @@ namespace Limitless
             // CreateEntity ensures default baseline components are initialized first.
             entt::entity destinationEntity = clone->CreateEntity(tag.Tag);
             entityMap.emplace(sourceEntity, destinationEntity);
+            if (auto* destinationTag = destinationRegistry.try_get<TagComponent>(destinationEntity))
+                destinationTag->Enabled = tag.Enabled;
             destinationRegistry.replace<TransformComponent>(destinationEntity, transform);
 
             if (const auto* sprite = sourceRegistry.try_get<SpriteComponent>(sourceEntity))
@@ -1019,6 +1041,8 @@ namespace Limitless
                 destinationSprite.TextureLoadAttempted = false;
                 destinationSprite.Color = sprite->Color;
                 destinationSprite.TilingFactor = sprite->TilingFactor;
+                destinationSprite.CastShadows = sprite->CastShadows;
+                destinationSprite.ReceiveShadows = sprite->ReceiveShadows;
             }
 
             if (const auto* material = sourceRegistry.try_get<MaterialComponent>(sourceEntity))
@@ -1246,7 +1270,7 @@ namespace Limitless
             indexByEntity.emplace(entities[index], static_cast<int32_t>(index));
 
         nlohmann::json root = nlohmann::json::object();
-        root["Version"] = 10;
+        root["Version"] = kSceneSerializationVersion;
         if (m_EditorCameraBookmark.has_value())
         {
             root["EditorCamera"] = {
@@ -1274,6 +1298,7 @@ namespace Limitless
             const auto& transform = view.get<TransformComponent>(entity);
             nlohmann::json entry = nlohmann::json::object();
             entry["Tag"] = tag.Tag;
+            entry["EntityEnabled"] = tag.Enabled;
             entry["Transform"] = {
                 { "Position", { transform.Position.x, transform.Position.y, transform.Position.z } },
                 { "Rotation", { transform.Rotation.x, transform.Rotation.y, transform.Rotation.z } },
@@ -1300,7 +1325,9 @@ namespace Limitless
                 entry["Sprite"] = {
                     { "Texture", MakeAssetReferenceJson(sprite->TextureKey, Assets::AssetType::Texture2D) },
                     { "Color", { sprite->Color.r, sprite->Color.g, sprite->Color.b, sprite->Color.a } },
-                    { "TilingFactor", sprite->TilingFactor }
+                    { "TilingFactor", { sprite->TilingFactor.x, sprite->TilingFactor.y } },
+                    { "CastShadows", sprite->CastShadows },
+                    { "ReceiveShadows", sprite->ReceiveShadows }
                 };
             }
 
@@ -1706,6 +1733,8 @@ namespace Limitless
         {
             const std::string tag = entry.value("Tag", "Entity");
             const entt::entity entity = scene->CreateEntity(tag);
+            if (auto* tagComponent = scene->GetRegistry().try_get<TagComponent>(entity))
+                tagComponent->Enabled = entry.value("EntityEnabled", true);
             auto& transform = scene->GetRegistry().get<TransformComponent>(entity);
 
             if (entry.contains("Transform"))
@@ -1741,7 +1770,27 @@ namespace Limitless
                 auto color = spriteJson.value("Color", std::vector<float>{ 1.0f, 1.0f, 1.0f, 1.0f });
                 if (color.size() >= 4)
                     sprite.Color = glm::vec4(color[0], color[1], color[2], color[3]);
-                sprite.TilingFactor = std::max(0.001f, spriteJson.value("TilingFactor", 1.0f));
+
+                // Backward compatible:
+                // - v1-v10: TilingFactor as scalar float
+                // - v11+:   TilingFactor as [x, y]
+                const auto tilingValue = spriteJson.find("TilingFactor");
+                if (tilingValue != spriteJson.end())
+                {
+                    if (tilingValue->is_number())
+                    {
+                        const float uniformTiling = std::max(0.001f, tilingValue->get<float>());
+                        sprite.TilingFactor = glm::vec2(uniformTiling, uniformTiling);
+                    }
+                    else if (tilingValue->is_array() && tilingValue->size() >= 2)
+                    {
+                        const float tilingX = std::max(0.001f, (*tilingValue)[0].get<float>());
+                        const float tilingY = std::max(0.001f, (*tilingValue)[1].get<float>());
+                        sprite.TilingFactor = glm::vec2(tilingX, tilingY);
+                    }
+                }
+                sprite.CastShadows = spriteJson.value("CastShadows", true);
+                sprite.ReceiveShadows = spriteJson.value("ReceiveShadows", true);
             }
 
             if (entry.contains("Material"))
@@ -2266,6 +2315,8 @@ namespace Limitless
 
             for (entt::entity entity : tilemapRenderEntities)
             {
+                if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
                 auto& tilemap = registry.get<TilemapComponent>(entity);
                 tilemap.EnsureLayerStorage();
                 if (tilemap.Layers.empty())
@@ -2416,6 +2467,8 @@ namespace Limitless
 
         for (entt::entity entity : renderEntities)
         {
+            if (!scene.IsEntityEnabledInHierarchy(entity))
+                continue;
             auto& sprite = registry.get<SpriteComponent>(entity);
 
             glm::mat4 model = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
@@ -2465,12 +2518,14 @@ namespace Limitless
 
             if (materialMainTextureAsset)
             {
-                const float safeTilingFactor = std::max(0.001f, sprite.TilingFactor);
+                const glm::vec2 safeTilingFactor(
+                    std::max(0.001f, sprite.TilingFactor.x),
+                    std::max(0.001f, sprite.TilingFactor.y));
                 Renderer2D::DrawQuad(model,
                                      materialMainTextureAsset,
                                      sprite.Color,
                                      glm::vec2(0.0f, 0.0f),
-                                     glm::vec2(safeTilingFactor, safeTilingFactor));
+                                     safeTilingFactor);
             }
             else if (useMissingAssetFallback)
             {
@@ -2506,12 +2561,14 @@ namespace Limitless
                 }
                 if (sprite.CachedTexture)
                 {
-                    const float safeTilingFactor = std::max(0.001f, sprite.TilingFactor);
+                    const glm::vec2 safeTilingFactor(
+                        std::max(0.001f, sprite.TilingFactor.x),
+                        std::max(0.001f, sprite.TilingFactor.y));
                     Renderer2D::DrawQuad(model,
                                          sprite.CachedTexture,
                                          sprite.Color,
                                          glm::vec2(0.0f, 0.0f),
-                                         glm::vec2(safeTilingFactor, safeTilingFactor));
+                                         safeTilingFactor);
                 }
                 else
                     Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, sprite.Color.a));
@@ -2550,6 +2607,8 @@ namespace Limitless
 
         for (entt::entity entity : textRenderEntities)
         {
+            if (!scene.IsEntityEnabledInHierarchy(entity))
+                continue;
             auto& text = registry.get<TextComponent>(entity);
             if (text.Space != TextComponent::RenderSpace::World)
             {
@@ -2580,6 +2639,20 @@ namespace Limitless
         }
 
         Renderer2D::EndScene();
+    }
+
+    void SceneRenderer::SetViewportClearColor(const glm::vec4& clearColor)
+    {
+        g_ViewportClearColor = glm::vec4(
+            std::clamp(clearColor.r, 0.0f, 1.0f),
+            std::clamp(clearColor.g, 0.0f, 1.0f),
+            std::clamp(clearColor.b, 0.0f, 1.0f),
+            std::clamp(clearColor.a, 0.0f, 1.0f));
+    }
+
+    glm::vec4 SceneRenderer::GetViewportClearColor()
+    {
+        return g_ViewportClearColor;
     }
 
     namespace
@@ -2658,6 +2731,8 @@ namespace Limitless
 
             for (entt::entity entity : textRenderEntities)
             {
+                if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
                 auto& text = registry.get<TextComponent>(entity);
                 if (text.Space != TextComponent::RenderSpace::Screen)
                 {
@@ -2721,12 +2796,7 @@ namespace Limitless
         {
             renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(framebuffer));
             renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
-
-            // Mirror Lighting2DRenderer target clear color for a stable fallback path.
-            // This keeps editor and built runtime visuals consistent when Lighting2D is off
-            // or when lighting resources are still loading.
-            const Lighting2DSettings& lightingSettings = Lighting2DRenderer::GetSettings();
-            const glm::vec3 fallbackClearColor = glm::max(lightingSettings.AmbientColor, glm::vec3(0.0f));
+            const glm::vec4 fallbackClearColor = SceneRenderer::GetViewportClearColor();
 
             ClearCommand::ClearFlags clearFlags;
             clearFlags.color = true;
@@ -2737,7 +2807,7 @@ namespace Limitless
                 fallbackClearColor.r,
                 fallbackClearColor.g,
                 fallbackClearColor.b,
-                1.0f));
+                fallbackClearColor.a));
 
             Render(scene, camera);
         }

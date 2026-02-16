@@ -51,6 +51,7 @@ namespace Limitless
             glm::mat4 Model = glm::mat4(1.0f);
             glm::vec4 Color = glm::vec4(1.0f);
             float NormalStrength = 1.0f;
+            bool ReceiveShadows = true;
             std::shared_ptr<Texture2D> AlbedoTexture;
             std::shared_ptr<Texture2D> NormalTexture;
         };
@@ -307,7 +308,11 @@ namespace Limitless
             std::vector<entt::entity> entities;
             entities.reserve(view.size_hint());
             for (entt::entity entity : view)
+            {
+                if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
                 entities.push_back(entity);
+            }
 
             std::sort(entities.begin(), entities.end(), [&scene, &registry, interpolationAlpha](entt::entity left, entt::entity right) {
                 const glm::mat4 leftWorld = scene.GetWorldTransformMatrixForRendering(left, interpolationAlpha);
@@ -380,6 +385,7 @@ namespace Limitless
                 draw.AlbedoTexture = g_State.WhiteTexture;
                 draw.NormalTexture = g_State.FlatNormalTexture;
                 draw.NormalStrength = 1.0f;
+                draw.ReceiveShadows = sprite.ReceiveShadows;
 
                 bool hasMaterialButFailed = false;
                 if (auto* material = registry.try_get<MaterialComponent>(entity))
@@ -437,9 +443,9 @@ namespace Limitless
         void SubmitClearNormalAttachment()
         {
             Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([](GraphicsContext*) {
-                // Alpha marks whether this pixel received an authored normal pass write.
-                // Keep alpha=0 for untouched pixels (e.g. world text/background) so lighting fallback logic can distinguish them.
-                const GLfloat flatNormal[4] = { 0.5f, 0.5f, 1.0f, 0.0f };
+                // Alpha is the receive-shadows mask.
+                // Default to 1 so scene pixels receive shadows unless explicitly opted out.
+                const GLfloat flatNormal[4] = { 0.5f, 0.5f, 1.0f, 1.0f };
                 glClearBufferfv(GL_COLOR, 1, flatNormal);
             }, "Lighting2D/ClearNormalAttachment"));
         }
@@ -466,7 +472,8 @@ namespace Limitless
                 const glm::mat4 model = draw.Model;
                 const glm::vec4 color = draw.Color;
                 const float normalStrength = draw.NormalStrength;
-                Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, viewProjection, model, color, normalStrength](GraphicsContext*) {
+                const int receiveShadows = draw.ReceiveShadows ? 1 : 0;
+                Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, viewProjection, model, color, normalStrength, receiveShadows](GraphicsContext*) {
                     auto* glShader = dynamic_cast<OpenGLShader*>(shaderRef.get());
                     auto* glVertexArray = dynamic_cast<OpenGLVertexArray*>(vertexArrayRef.get());
                     auto* glAlbedoTexture = dynamic_cast<OpenGLTexture2D*>(albedoRef.get());
@@ -490,6 +497,8 @@ namespace Limitless
                         glUniform4f(location, color.r, color.g, color.b, color.a);
                     if (GLint location = glGetUniformLocation(shaderProgram, "u_NormalStrength"); location != -1)
                         glUniform1f(location, normalStrength);
+                    if (GLint location = glGetUniformLocation(shaderProgram, "u_ReceiveShadows"); location != -1)
+                        glUniform1i(location, receiveShadows);
                     if (GLint location = glGetUniformLocation(shaderProgram, "u_AlbedoTexture"); location != -1)
                         glUniform1i(location, 0);
                     if (GLint location = glGetUniformLocation(shaderProgram, "u_NormalTexture"); location != -1)
@@ -630,10 +639,14 @@ namespace Limitless
             {
                 if (segments.size() >= maxSegments)
                     break;
+                if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
 
                 auto& occluder = occluderView.get<ShadowOccluder2DComponent>(entity);
                 explicitOccluderEntities.insert(entity);
                 if (!occluder.Enabled)
+                    continue;
+                if (const auto* sprite = registry.try_get<SpriteComponent>(entity); sprite && !sprite->CastShadows)
                     continue;
 
                 std::vector<glm::vec2> localPoints = ResolveOccluderLocalPolygon(registry, entity, occluder);
@@ -649,6 +662,10 @@ namespace Limitless
                     break;
                 if (explicitOccluderEntities.contains(entity))
                     continue;
+                if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
+                if (const auto* sprite = registry.try_get<SpriteComponent>(entity); sprite && !sprite->CastShadows)
+                    continue;
 
                 std::vector<glm::vec2> localPoints;
                 BuildPhysicsOccluderPolygon(registry, entity, localPoints);
@@ -661,6 +678,10 @@ namespace Limitless
                 if (segments.size() >= maxSegments)
                     break;
                 if (explicitOccluderEntities.contains(entity) || registry.all_of<BoxCollider2DComponent>(entity))
+                    continue;
+                if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
+                if (const auto* sprite = registry.try_get<SpriteComponent>(entity); sprite && !sprite->CastShadows)
                     continue;
 
                 std::vector<glm::vec2> localPoints;
@@ -719,6 +740,8 @@ namespace Limitless
             {
                 if (lights.size() >= maxDirectionalLights)
                     break;
+                if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
 
                 auto& directional = directionalView.get<DirectionalLight2DComponent>(entity);
                 if (!directional.Enabled || directional.Intensity <= 0.0f)
@@ -790,6 +813,8 @@ namespace Limitless
             {
                 if (lights.size() >= maxPointLights)
                     break;
+                if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
 
                 auto& pointLight = pointView.get<PointLight2DComponent>(entity);
                 if (!pointLight.Enabled || pointLight.Intensity <= 0.0f || pointLight.Radius <= 0.01f)
@@ -1164,9 +1189,8 @@ namespace Limitless
             renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(targetFramebuffer));
             renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
 
-            // Keep target clear color in sync with the unlit fallback path in SceneRenderer.
-            // This prevents editor/runtime mismatches if lighting is disabled or resources are unavailable.
-            const glm::vec3 fallbackClearColor = glm::max(g_State.Settings.AmbientColor, glm::vec3(0.0f));
+            // Keep target clear color in sync with SceneRenderer's configured viewport clear color.
+            const glm::vec4 fallbackClearColor = SceneRenderer::GetViewportClearColor();
 
             ClearCommand::ClearFlags targetClearFlags{};
             targetClearFlags.color = true;
@@ -1177,11 +1201,13 @@ namespace Limitless
                 fallbackClearColor.r,
                 fallbackClearColor.g,
                 fallbackClearColor.b,
-                1.0f));
+                fallbackClearColor.a));
 
             renderer.SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
             renderer.SubmitCommand(std::make_unique<SetCullFaceCommand>(false));
-            renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::Zero, false));
+            // Composite should preserve the target clear color where albedo is transparent.
+            // Use standard alpha blending instead of full overwrite.
+            renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::SrcAlpha, BlendFactor::OneMinusSrcAlpha, true));
             SubmitCompositePass(gBufferAlbedo, g_State.LightFramebuffer->GetColorAttachment(0));
 
             const auto submitEnd = std::chrono::high_resolution_clock::now();

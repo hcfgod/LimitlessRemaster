@@ -131,7 +131,8 @@ namespace Limitless::EditorInspectorPanel
             ImGui::AlignTextToFramePadding();
             ImGui::Text("Name");
             ImGui::SameLine(80);
-            ImGui::SetNextItemWidth(-1.0f);
+            const float enabledCheckboxWidth = ImGui::CalcTextSize("Enabled").x + ImGui::GetStyle().FramePadding.x * 2.0f + 28.0f;
+            ImGui::SetNextItemWidth(std::max(40.0f, ImGui::GetContentRegionAvail().x - enabledCheckboxWidth));
             ImGui::InputText("##EntityName", renameBuffer.data(), renameBuffer.size());
             if (ImGui::IsItemDeactivatedAfterEdit())
             {
@@ -151,6 +152,10 @@ namespace Limitless::EditorInspectorPanel
                     tag->Tag = updatedName;
                 }
             }
+
+            ImGui::SameLine();
+            ImGui::Checkbox("Enabled##EntityEnabled", &tag->Enabled);
+            TrackInteractiveMutation(undoService, "Edit Entity Enabled");
         }
 
         ImGui::Spacing();
@@ -207,9 +212,14 @@ namespace Limitless::EditorInspectorPanel
             {
                 ImGui::ColorEdit4("Color", &sprite->Color.r);
                 TrackInteractiveMutation(undoService, "Edit Sprite Color");
-                ImGui::DragFloat("Tiling Factor", &sprite->TilingFactor, 0.05f, 0.001f, 100.0f, "%.3f");
-                sprite->TilingFactor = std::max(0.001f, sprite->TilingFactor);
+                ImGui::DragFloat2("Tiling Factor", &sprite->TilingFactor.x, 0.05f, 0.001f, 100.0f, "%.3f");
+                sprite->TilingFactor.x = std::max(0.001f, sprite->TilingFactor.x);
+                sprite->TilingFactor.y = std::max(0.001f, sprite->TilingFactor.y);
                 TrackInteractiveMutation(undoService, "Edit Sprite Tiling Factor");
+                ImGui::Checkbox("Cast Shadows", &sprite->CastShadows);
+                TrackInteractiveMutation(undoService, "Edit Sprite Cast Shadows");
+                ImGui::Checkbox("Receive Shadows", &sprite->ReceiveShadows);
+                TrackInteractiveMutation(undoService, "Edit Sprite Receive Shadows");
 
                 // Material slot (Unity-style): dropping a material assigns it to the renderer.
                 auto* material = registry.try_get<MaterialComponent>(selectedEntity);
@@ -534,7 +544,7 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 glm::ivec2 gridSize = tilemap->GridSize;
-                if (ImGui::DragInt2("Grid Size", &gridSize.x, 1.0f, 1, 4096))
+                if (ImGui::DragInt2("Grid Size", &gridSize.x, 1.0f, 1, 16384))
                 {
                     gridSize.x = std::max(1, gridSize.x);
                     gridSize.y = std::max(1, gridSize.y);
@@ -1128,6 +1138,7 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::DragInt("Shadow Samples", &directionalLight->ShadowSamples, 1.0f, 1, 32);
                 directionalLight->ShadowSamples = std::clamp(directionalLight->ShadowSamples, 1, 32);
                 TrackInteractiveMutation(undoService, "Edit Directional Light Shadow Samples");
+                ImGui::TextDisabled("Directional light intensity is global (no distance falloff).");
                 ImGui::DragFloat("Shadow Distance", &directionalLight->ShadowDistance, 0.05f, 0.0f, 10000.0f, "%.2f");
                 directionalLight->ShadowDistance = std::max(0.0f, directionalLight->ShadowDistance);
                 TrackInteractiveMutation(undoService, "Edit Directional Light Shadow Distance");

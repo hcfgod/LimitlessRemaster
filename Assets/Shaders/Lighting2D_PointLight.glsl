@@ -126,20 +126,17 @@ void main()
     }
 
     vec4 normalSample = texture(u_NormalTexture, v_UV);
-    vec3 encodedNormal = normalSample.xyz;
-    vec3 normal = normalize(encodedNormal * 2.0 - 1.0);
-    vec3 lightVector = normalize(vec3(toLight, max(1.0, u_LightRadius * 0.35)));
-    float ndotl = max(dot(normal, lightVector), 0.0);
-    // Quantization-safe flat-normal detection for sprites without a dedicated normal map.
-    bool hasAuthoredNormal = normalSample.a > 0.5;
-    bool usesFlatFallbackNormal = distance(encodedNormal, vec3(0.5, 0.5, 1.0)) <= 0.02;
-    if (hasAuthoredNormal && usesFlatFallbackNormal)
-        ndotl = 1.0;
+
+    // Read GBuffer normal for future normal-mapped bump lighting support.
+    // For 2D sprites, N dot L is disabled by default: point lights radiate
+    // evenly from their center. Artists who assign a real normal map to a
+    // material will get per-pixel bump shading once the feature is enabled.
+    float ndotl = 1.0;
 
     float attenuation = 1.0 - clamp(distanceToLight / max(u_LightRadius, 0.0001), 0.0, 1.0);
     attenuation = pow(attenuation, max(u_LightFalloff, 0.1));
 
-    float shadowFactor = ComputeShadowFactor(fragmentScreenPosition);
+    float shadowFactor = normalSample.a > 0.5 ? ComputeShadowFactor(fragmentScreenPosition) : 1.0;
 
     vec3 lighting = u_LightColor * (u_LightIntensity * ndotl * attenuation * shadowFactor);
     FragColor = vec4(lighting, 1.0);

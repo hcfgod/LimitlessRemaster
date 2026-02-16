@@ -499,6 +499,14 @@ namespace Limitless::EditorViewportPanel
                 return false;
 
             auto& dragState = GetColliderDragState();
+            if (!scene.IsEntityEnabledInHierarchy(selectedEntity))
+            {
+                if (dragState.Active && dragState.Entity == selectedEntity && undoService)
+                    undoService->CancelInteractiveSceneMutation();
+                if (dragState.Entity == selectedEntity)
+                    dragState = {};
+                return false;
+            }
             auto& registry = scene.GetRegistry();
             if (!registry.try_get<TransformComponent>(selectedEntity))
                 return false;
@@ -744,6 +752,14 @@ namespace Limitless::EditorViewportPanel
                 return false;
 
             auto& dragState = GetLightingDragState();
+            if (!scene.IsEntityEnabledInHierarchy(selectedEntity))
+            {
+                if (dragState.Active && dragState.Entity == selectedEntity && undoService)
+                    undoService->CancelInteractiveSceneMutation();
+                if (dragState.Entity == selectedEntity)
+                    dragState = {};
+                return false;
+            }
             auto& registry = scene.GetRegistry();
             auto* transform = registry.try_get<TransformComponent>(selectedEntity);
             if (!transform)
@@ -976,6 +992,13 @@ namespace Limitless::EditorViewportPanel
                 return false;
             if (!tilemapEditorState.Enabled)
                 return false;
+            if (!scene.IsEntityEnabledInHierarchy(selectedEntity))
+            {
+                auto& paintDragState = GetTilemapPaintDragState();
+                if (paintDragState.Active && paintDragState.Entity == selectedEntity)
+                    paintDragState = {};
+                return false;
+            }
 
             auto& registry = scene.GetRegistry();
             auto* tilemap = registry.try_get<TilemapComponent>(selectedEntity);
@@ -1273,17 +1296,23 @@ namespace Limitless::EditorViewportPanel
         }
     }
 
-    void Draw(uint32_t& viewportWidthPixels,
-              uint32_t& viewportHeightPixels,
-              std::shared_ptr<Framebuffer>& viewportFramebuffer,
-              bool& viewportFocused,
-              bool& viewportHovered,
+    void Draw(uint32_t& sceneViewWidthPixels,
+              uint32_t& sceneViewHeightPixels,
+              std::shared_ptr<Framebuffer>& sceneViewFramebuffer,
+              bool& sceneViewFocused,
+              bool& sceneViewHovered,
+              uint32_t& gameViewWidthPixels,
+              uint32_t& gameViewHeightPixels,
+              std::shared_ptr<Framebuffer>& gameViewFramebuffer,
+              bool& gameViewFocused,
+              bool& gameViewHovered,
               EditorCameraController* editorCameraController,
-              CameraManager& cameraManager,
+              Camera* sceneViewCamera,
+              Camera* gameViewCamera,
               Scene* scene,
               EditorPlayModeState playModeState,
-              bool playModeMissingGameplayCamera,
-              const std::function<void(uint32_t, uint32_t)>& ensureViewportFramebuffer,
+              const std::function<void(uint32_t, uint32_t)>& ensureSceneViewFramebuffer,
+              const std::function<void(uint32_t, uint32_t)>& ensureGameViewFramebuffer,
               const char* scenePayloadId,
               const std::function<void(const std::string&)>& onSceneDropped,
               const char* prefabPayloadId,
@@ -1297,76 +1326,170 @@ namespace Limitless::EditorViewportPanel
               Assets::MaterialAsset::Ptr& cachedMaterialAsset,
               std::string& selectedNativeScriptAssetKey,
               bool showFpsOverlay,
-              TilemapEditorState* tilemapEditorState)
+              TilemapEditorState* tilemapEditorState,
+              bool showMissingGameplayCameraOverlay)
     {
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        ImGui::Begin("Viewport");
+        (void)editorCameraController;
 
-        viewportFocused = ImGui::IsWindowFocused();
-        viewportHovered = ImGui::IsWindowHovered();
-        const bool skipRender = ImGui::IsWindowCollapsed();
-
-        const ImVec2 viewportSize = ImGui::GetContentRegionAvail();
         auto sanitizeViewportDimension = [](float value) -> uint32_t {
             if (!std::isfinite(value) || value <= 1.0f)
                 return 0;
             return static_cast<uint32_t>(std::floor(value));
         };
-        const uint32_t width = sanitizeViewportDimension(viewportSize.x);
-        const uint32_t height = sanitizeViewportDimension(viewportSize.y);
 
-        if (!skipRender && width > 0 && height > 0)
-        {
-            ensureViewportFramebuffer(width, height);
+        auto drawLoadingOverlay = [scene](const ImVec2& minPos, const ImVec2& maxPos) {
+            const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 255));
 
-            if (viewportWidthPixels != width || viewportHeightPixels != height)
+            bool sceneObjectsReady = scene ? scene->IsSceneObjectsInitialized() : false;
+            bool physicsReady = scene ? scene->IsPhysicsWorldInitializedForLoading() : false;
+            const bool shaderReady = Renderer2D::IsShaderReady();
+
+            float assetProgressAverage = 1.0f;
+            std::string assetStatusText;
+            const std::vector<std::string> activeProgressKeys = Assets::AssetLoadProgress::GetActiveKeys();
+            if (!activeProgressKeys.empty())
             {
-                viewportWidthPixels = width;
-                viewportHeightPixels = height;
-                if (editorCameraController)
-                    editorCameraController->OnWindowResize(width, height);
+                float accumulatedProgress = 0.0f;
+                for (const std::string& key : activeProgressKeys)
+                {
+                    const auto info = Assets::AssetLoadProgress::GetProgress(key);
+                    if (!info.has_value())
+                    {
+                        accumulatedProgress += 1.0f;
+                        continue;
+                    }
+
+                    accumulatedProgress += std::clamp(info->Progress, 0.0f, 1.0f);
+                    if (assetStatusText.empty() && !info->Status.empty())
+                        assetStatusText = info->Status;
+                }
+                assetProgressAverage = accumulatedProgress / static_cast<float>(activeProgressKeys.size());
             }
 
-            Camera* camera = cameraManager.GetActiveCamera();
-            if (camera)
-                camera->SetViewportSize(width, height);
-            const bool isSceneLoading = scene && scene->GetLoadState() == Scene::LoadState::Loading;
-            if (camera && scene && viewportFramebuffer && !isSceneLoading)
-                SceneRenderer::RenderToViewport(*scene, *camera, viewportFramebuffer, width, height);
+            std::string loadingText = "Loading scene...";
+            if (!sceneObjectsReady)
+                loadingText = "Initializing scene objects...";
+            else if (!physicsReady)
+                loadingText = "Initializing physics world...";
+            else if (!shaderReady)
+                loadingText = "Compiling shaders...";
+            else if (!assetStatusText.empty())
+                loadingText = assetStatusText;
+            else
+                loadingText = "Loading assets...";
 
-            if (viewportFramebuffer && viewportFramebuffer->GetColorAttachment())
+            const float sceneObjectsProgress = sceneObjectsReady ? 1.0f : 0.0f;
+            const float physicsProgress = physicsReady ? 1.0f : 0.0f;
+            const float shaderProgress = shaderReady ? 1.0f : 0.0f;
+            const float progressValue = std::clamp(
+                (sceneObjectsProgress + physicsProgress + shaderProgress + assetProgressAverage) * 0.25f,
+                0.0f,
+                1.0f);
+
+            const ImVec2 textSize = ImGui::CalcTextSize(loadingText.c_str());
+            drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f - 24.0f),
+                              IM_COL32(255, 255, 255, 255),
+                              loadingText.c_str());
+
+            const float barWidth = 200.0f;
+            const float barHeight = 8.0f;
+            const ImVec2 barMin(center.x - barWidth * 0.5f, center.y - barHeight * 0.5f + 8.0f);
+            const ImVec2 barMax(center.x + barWidth * 0.5f, center.y + barHeight * 0.5f + 8.0f);
+            drawList->AddRectFilled(barMin, barMax, IM_COL32(50, 50, 55, 255));
+            const ImVec2 fillMax(barMin.x + barWidth * progressValue, barMax.y);
+            drawList->AddRectFilled(barMin, fillMax, IM_COL32(80, 140, 220, 255));
+        };
+
+        auto drawShaderCompileOverlay = [](const ImVec2& minPos, const ImVec2& maxPos) {
+            const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 255));
+
+            const char* loadingText = "Compiling shaders...";
+            float progressValue = 0.0f;
+            const auto progressInfo = Assets::AssetLoadProgress::GetProgress(Renderer2D::GetDefaultShaderKey());
+            if (progressInfo.has_value())
+            {
+                loadingText = progressInfo->Status.empty() ? "Compiling shaders..." : progressInfo->Status.c_str();
+                progressValue = progressInfo->Progress;
+            }
+            else
+            {
+                progressValue = std::fmod(static_cast<float>(ImGui::GetTime() * 0.8), 1.0f);
+            }
+
+            const ImVec2 textSize = ImGui::CalcTextSize(loadingText);
+            drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f - 24.0f),
+                              IM_COL32(255, 255, 255, 255),
+                              loadingText);
+
+            const float barWidth = 200.0f;
+            const float barHeight = 8.0f;
+            const ImVec2 barMin(center.x - barWidth * 0.5f, center.y - barHeight * 0.5f + 8.0f);
+            const ImVec2 barMax(center.x + barWidth * 0.5f, center.y + barHeight * 0.5f + 8.0f);
+            drawList->AddRectFilled(barMin, barMax, IM_COL32(50, 50, 55, 255));
+            const ImVec2 fillMax(barMin.x + barWidth * progressValue, barMax.y);
+            drawList->AddRectFilled(barMin, fillMax, IM_COL32(80, 140, 220, 255));
+        };
+
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        ImGui::Begin("Scene View");
+
+        sceneViewFocused = ImGui::IsWindowFocused();
+        sceneViewHovered = ImGui::IsWindowHovered();
+        const bool skipSceneRender = ImGui::IsWindowCollapsed();
+        const ImVec2 sceneViewSize = ImGui::GetContentRegionAvail();
+        const uint32_t sceneWidth = sanitizeViewportDimension(sceneViewSize.x);
+        const uint32_t sceneHeight = sanitizeViewportDimension(sceneViewSize.y);
+
+        if (!skipSceneRender && sceneWidth > 0 && sceneHeight > 0)
+        {
+            ensureSceneViewFramebuffer(sceneWidth, sceneHeight);
+            sceneViewWidthPixels = sceneWidth;
+            sceneViewHeightPixels = sceneHeight;
+
+            if (sceneViewCamera)
+                sceneViewCamera->SetViewportSize(sceneWidth, sceneHeight);
+
+            const bool isSceneLoading = scene && scene->GetLoadState() == Scene::LoadState::Loading;
+            if (sceneViewCamera && scene && sceneViewFramebuffer && !isSceneLoading)
+                SceneRenderer::RenderToViewport(*scene, *sceneViewCamera, sceneViewFramebuffer, sceneWidth, sceneHeight);
+
+            if (sceneViewFramebuffer && sceneViewFramebuffer->GetColorAttachment())
             {
                 ImGui::Image(
-                    (ImTextureID)(void*)(uintptr_t)viewportFramebuffer->GetColorAttachment()->GetRendererID(),
-                    ImVec2(static_cast<float>(width), static_cast<float>(height)),
+                    (ImTextureID)(void*)(uintptr_t)sceneViewFramebuffer->GetColorAttachment()->GetRendererID(),
+                    ImVec2(static_cast<float>(sceneWidth), static_cast<float>(sceneHeight)),
                     ImVec2(0, 1),
                     ImVec2(1, 0));
 
-                if (scene && camera && !isSceneLoading)
+                if (scene && sceneViewCamera && !isSceneLoading)
                 {
                     const ImVec2 viewportMin = ImGui::GetItemRectMin();
                     const ImVec2 viewportMax = ImGui::GetItemRectMax();
                     ImDrawList* drawList = ImGui::GetWindowDrawList();
                     DrawSelectedPhysicsOverlays(drawList,
                                                 *scene,
-                                                *camera,
+                                                *sceneViewCamera,
                                                 selectedEntity,
                                                 viewportMin,
                                                 viewportMax,
-                                                static_cast<float>(width),
-                                                static_cast<float>(height),
+                                                static_cast<float>(sceneWidth),
+                                                static_cast<float>(sceneHeight),
                                                 playModeState,
                                                 undoService);
                     if (tilemapEditorState)
                     {
                         (void)DrawAndHandleTilemapEditing(drawList,
                                                           *scene,
-                                                          *camera,
+                                                          *sceneViewCamera,
                                                           selectedEntity,
                                                           viewportMin,
                                                           viewportMax,
-                                                          static_cast<float>(width),
-                                                          static_cast<float>(height),
+                                                          static_cast<float>(sceneWidth),
+                                                          static_cast<float>(sceneHeight),
                                                           playModeState,
                                                           undoService,
                                                           *tilemapEditorState);
@@ -1389,12 +1512,12 @@ namespace Limitless::EditorViewportPanel
                             if (key && key[0] && onPrefabDropped)
                             {
                                 glm::vec3 worldPosition(0.0f);
-                                if (camera)
+                                if (sceneViewCamera)
                                 {
                                     const ImVec2 viewportMin = ImGui::GetItemRectMin();
                                     const ImVec2 viewportMax = ImGui::GetItemRectMax();
                                     const ImVec2 mousePos = ImGui::GetMousePos();
-                                    if (!TryComputeDropWorldPosition(*camera, viewportMin, viewportMax, mousePos, worldPosition))
+                                    if (!TryComputeDropWorldPosition(*sceneViewCamera, viewportMin, viewportMax, mousePos, worldPosition))
                                         worldPosition = glm::vec3(0.0f);
                                 }
                                 onPrefabDropped(key, worldPosition);
@@ -1406,10 +1529,8 @@ namespace Limitless::EditorViewportPanel
                         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(materialPayloadId))
                         {
                             const char* key = static_cast<const char*>(payload->Data);
-                            if (key && key[0] && scene && camera)
+                            if (key && key[0] && scene && sceneViewCamera)
                             {
-                                // Unity-style: dropping a material onto the Scene viewport assigns it to the hovered renderer.
-                                // We do a simple CPU pick against projected sprite quads.
                                 const ImVec2 viewportMin = ImGui::GetItemRectMin();
                                 const ImVec2 viewportMax = ImGui::GetItemRectMax();
                                 const ImVec2 mousePos = ImGui::GetMousePos();
@@ -1420,12 +1541,11 @@ namespace Limitless::EditorViewportPanel
                                 {
                                     const float viewportWidth = viewportMax.x - viewportMin.x;
                                     const float viewportHeight = viewportMax.y - viewportMin.y;
-                                    const auto picked = PickTopmostSpriteEntityAtPoint(*scene, *camera, viewportMin, viewportWidth, viewportHeight, mousePos);
+                                    const auto picked = PickTopmostSpriteEntityAtPoint(*scene, *sceneViewCamera, viewportMin, viewportWidth, viewportHeight, mousePos);
                                     if (picked.has_value())
                                         targetEntity = *picked;
                                 }
 
-                                // Fallback: if we didn't hit anything, apply to current selection.
                                 if (targetEntity == entt::null && selectedEntity != entt::null && scene->IsValid(selectedEntity))
                                     targetEntity = selectedEntity;
 
@@ -1443,8 +1563,6 @@ namespace Limitless::EditorViewportPanel
                                         material->MaterialLoadAttempted = false;
 
                                         selectedEntity = targetEntity;
-
-                                        // Keep the Inspector focused on the object selection.
                                         selectedTextureAssetKey.clear();
                                         cachedTextureAsset.reset();
                                         selectedMaterialAssetKey.clear();
@@ -1460,117 +1578,20 @@ namespace Limitless::EditorViewportPanel
 
                 if (isSceneLoading)
                 {
-                    const ImVec2 minPos = ImGui::GetItemRectMin();
-                    const ImVec2 maxPos = ImGui::GetItemRectMax();
-                    const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
-                    ImDrawList* drawList = ImGui::GetWindowDrawList();
-                    drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 255));
-
-                    bool sceneObjectsReady = scene ? scene->IsSceneObjectsInitialized() : false;
-                    bool physicsReady = scene ? scene->IsPhysicsWorldInitializedForLoading() : false;
-                    const bool shaderReady = Renderer2D::IsShaderReady();
-
-                    float assetProgressAverage = 1.0f;
-                    std::string assetStatusText;
-                    const std::vector<std::string> activeProgressKeys = Assets::AssetLoadProgress::GetActiveKeys();
-                    if (!activeProgressKeys.empty())
-                    {
-                        float accumulatedProgress = 0.0f;
-                        for (const std::string& key : activeProgressKeys)
-                        {
-                            const auto info = Assets::AssetLoadProgress::GetProgress(key);
-                            if (!info.has_value())
-                            {
-                                accumulatedProgress += 1.0f;
-                                continue;
-                            }
-
-                            accumulatedProgress += std::clamp(info->Progress, 0.0f, 1.0f);
-                            if (assetStatusText.empty() && !info->Status.empty())
-                                assetStatusText = info->Status;
-                        }
-                        assetProgressAverage = accumulatedProgress / static_cast<float>(activeProgressKeys.size());
-                    }
-                    else
-                    {
-                        assetProgressAverage = 1.0f;
-                    }
-
-                    std::string loadingText = "Loading scene...";
-                    if (!sceneObjectsReady)
-                        loadingText = "Initializing scene objects...";
-                    else if (!physicsReady)
-                        loadingText = "Initializing physics world...";
-                    else if (!shaderReady)
-                        loadingText = "Compiling shaders...";
-                    else if (!assetStatusText.empty())
-                        loadingText = assetStatusText;
-                    else
-                        loadingText = "Loading assets...";
-
-                    const float sceneObjectsProgress = sceneObjectsReady ? 1.0f : 0.0f;
-                    const float physicsProgress = physicsReady ? 1.0f : 0.0f;
-                    const float shaderProgress = shaderReady ? 1.0f : 0.0f;
-                    const float progressValue = std::clamp(
-                        (sceneObjectsProgress + physicsProgress + shaderProgress + assetProgressAverage) * 0.25f,
-                        0.0f,
-                        1.0f);
-
-                    const ImVec2 textSize = ImGui::CalcTextSize(loadingText.c_str());
-                    drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f - 24.0f),
-                                      IM_COL32(255, 255, 255, 255),
-                                      loadingText.c_str());
-
-                    const float barWidth = 200.0f;
-                    const float barHeight = 8.0f;
-                    const ImVec2 barMin(center.x - barWidth * 0.5f, center.y - barHeight * 0.5f + 8.0f);
-                    const ImVec2 barMax(center.x + barWidth * 0.5f, center.y + barHeight * 0.5f + 8.0f);
-                    drawList->AddRectFilled(barMin, barMax, IM_COL32(50, 50, 55, 255));
-                    const ImVec2 fillMax(barMin.x + barWidth * progressValue, barMax.y);
-                    drawList->AddRectFilled(barMin, fillMax, IM_COL32(80, 140, 220, 255));
+                    drawLoadingOverlay(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
                 }
                 else if (!Renderer2D::IsShaderReady())
                 {
-                    const ImVec2 minPos = ImGui::GetItemRectMin();
-                    const ImVec2 maxPos = ImGui::GetItemRectMax();
-                    const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
-                    ImDrawList* drawList = ImGui::GetWindowDrawList();
-                    drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 255));
-
-                    const char* loadingText = "Compiling shaders...";
-                    float progressValue = 0.0f;
-                    const auto progressInfo = Assets::AssetLoadProgress::GetProgress(Renderer2D::GetDefaultShaderKey());
-                    if (progressInfo.has_value())
-                    {
-                        loadingText = progressInfo->Status.empty() ? "Compiling shaders..." : progressInfo->Status.c_str();
-                        progressValue = progressInfo->Progress;
-                    }
-                    else
-                    {
-                        progressValue = std::fmod(static_cast<float>(ImGui::GetTime() * 0.8), 1.0f);
-                    }
-
-                    const ImVec2 textSize = ImGui::CalcTextSize(loadingText);
-                    drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f - 24.0f),
-                                      IM_COL32(255, 255, 255, 255),
-                                      loadingText);
-
-                    const float barWidth = 200.0f;
-                    const float barHeight = 8.0f;
-                    const ImVec2 barMin(center.x - barWidth * 0.5f, center.y - barHeight * 0.5f + 8.0f);
-                    const ImVec2 barMax(center.x + barWidth * 0.5f, center.y + barHeight * 0.5f + 8.0f);
-                    drawList->AddRectFilled(barMin, barMax, IM_COL32(50, 50, 55, 255));
-                    const ImVec2 fillMax(barMin.x + barWidth * progressValue, barMax.y);
-                    drawList->AddRectFilled(barMin, fillMax, IM_COL32(80, 140, 220, 255));
+                    drawShaderCompileOverlay(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
                 }
-                else if (playModeState != EditorPlayModeState::Edit && playModeMissingGameplayCamera)
+                else if (!sceneViewCamera)
                 {
                     const ImVec2 minPos = ImGui::GetItemRectMin();
                     const ImVec2 maxPos = ImGui::GetItemRectMax();
                     ImDrawList* drawList = ImGui::GetWindowDrawList();
-                    drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 140));
+                    drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 180));
 
-                    const char* text = "Play Mode: No active gameplay camera.\nAdd a Camera Component to an entity and set it as Primary.";
+                    const char* text = "Scene View: Editor camera is unavailable.";
                     const ImVec2 textSize = ImGui::CalcTextSize(text);
                     const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
                     drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f), IM_COL32(255, 200, 120, 255), text);
@@ -1683,6 +1704,63 @@ namespace Limitless::EditorViewportPanel
 
                         drawList->AddCircleFilled(ImVec2(graphMax.x, msToY(deltaTimeMs)), 2.5f, statusColor);
                     }
+                }
+            }
+        }
+
+        ImGui::End();
+        ImGui::PopStyleVar();
+
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        ImGui::Begin("Game View");
+
+        gameViewFocused = ImGui::IsWindowFocused();
+        gameViewHovered = ImGui::IsWindowHovered();
+        const bool skipGameRender = ImGui::IsWindowCollapsed();
+        const ImVec2 gameViewSize = ImGui::GetContentRegionAvail();
+        const uint32_t gameWidth = sanitizeViewportDimension(gameViewSize.x);
+        const uint32_t gameHeight = sanitizeViewportDimension(gameViewSize.y);
+
+        if (!skipGameRender && gameWidth > 0 && gameHeight > 0)
+        {
+            ensureGameViewFramebuffer(gameWidth, gameHeight);
+            gameViewWidthPixels = gameWidth;
+            gameViewHeightPixels = gameHeight;
+
+            if (gameViewCamera)
+                gameViewCamera->SetViewportSize(gameWidth, gameHeight);
+
+            const bool isSceneLoading = scene && scene->GetLoadState() == Scene::LoadState::Loading;
+            if (gameViewCamera && scene && gameViewFramebuffer && !isSceneLoading)
+                SceneRenderer::RenderToViewport(*scene, *gameViewCamera, gameViewFramebuffer, gameWidth, gameHeight);
+
+            if (gameViewFramebuffer && gameViewFramebuffer->GetColorAttachment())
+            {
+                ImGui::Image(
+                    (ImTextureID)(void*)(uintptr_t)gameViewFramebuffer->GetColorAttachment()->GetRendererID(),
+                    ImVec2(static_cast<float>(gameWidth), static_cast<float>(gameHeight)),
+                    ImVec2(0, 1),
+                    ImVec2(1, 0));
+
+                const ImVec2 minPos = ImGui::GetItemRectMin();
+                const ImVec2 maxPos = ImGui::GetItemRectMax();
+                if (isSceneLoading)
+                {
+                    drawLoadingOverlay(minPos, maxPos);
+                }
+                else if (!Renderer2D::IsShaderReady())
+                {
+                    drawShaderCompileOverlay(minPos, maxPos);
+                }
+                else if (showMissingGameplayCameraOverlay)
+                {
+                    ImDrawList* drawList = ImGui::GetWindowDrawList();
+                    drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 180));
+
+                    const char* text = "Game View: No active gameplay camera.\nAdd a Camera Component to an entity and set it as Primary.";
+                    const ImVec2 textSize = ImGui::CalcTextSize(text);
+                    const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
+                    drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f), IM_COL32(255, 200, 120, 255), text);
                 }
             }
         }

@@ -465,6 +465,26 @@ namespace Limitless
         for (entt::entity entity : bodyView)
         {
             auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
+            if (!scene.IsEntityEnabledInHierarchy(entity))
+            {
+                if (rigidbody.RuntimeBodyCreated && b2Body_IsValid(rigidbody.RuntimeBodyId))
+                    b2DestroyBody(rigidbody.RuntimeBodyId);
+                rigidbody.RuntimeBodyId = kNullPhysics2DBody;
+                rigidbody.RuntimeBodyCreated = false;
+                rigidbody.RuntimeContactCount = 0;
+                rigidbody.RuntimeContactCountExcludingSensors = 0;
+                if (auto* boxCollider = registry.try_get<BoxCollider2DComponent>(entity))
+                {
+                    boxCollider->RuntimeShapeId = kNullPhysics2DShape;
+                    boxCollider->RuntimeShapeCreated = false;
+                }
+                if (auto* circleCollider = registry.try_get<CircleCollider2DComponent>(entity))
+                {
+                    circleCollider->RuntimeShapeId = kNullPhysics2DShape;
+                    circleCollider->RuntimeShapeCreated = false;
+                }
+                continue;
+            }
 
             // Incremental guard: skip entities that already have a valid runtime body.
             if (rigidbody.RuntimeBodyCreated && b2Body_IsValid(rigidbody.RuntimeBodyId))
@@ -682,6 +702,16 @@ namespace Limitless
             auto& tilemap = tilemapColliderView.get<TilemapComponent>(entity);
             auto& tilemapCollider = tilemapColliderView.get<TilemapCollider2DComponent>(entity);
             tilemap.EnsureLayerStorage();
+            if (!scene.IsEntityEnabledInHierarchy(entity))
+            {
+                if (tilemapCollider.RuntimeBodyCreated && b2Body_IsValid(tilemapCollider.RuntimeBodyId))
+                    b2DestroyBody(tilemapCollider.RuntimeBodyId);
+                tilemapCollider.RuntimeBodyId = kNullPhysics2DBody;
+                tilemapCollider.RuntimeBodyCreated = false;
+                tilemapCollider.RuntimeShapeIds.clear();
+                tilemapCollider.RuntimeBuiltHash = 0ull;
+                continue;
+            }
 
             if (!tilemapCollider.Enabled)
                 continue;
@@ -792,6 +822,8 @@ namespace Limitless
         auto bodyView = registry.view<Rigidbody2DComponent, TransformComponent>();
         for (entt::entity entity : bodyView)
         {
+            if (!scene.IsEntityEnabledInHierarchy(entity))
+                continue;
             auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
             auto& transform = bodyView.get<TransformComponent>(entity);
 
@@ -996,6 +1028,8 @@ namespace Limitless
         auto tilemapColliderView = registry.view<TilemapCollider2DComponent>();
         for (entt::entity entity : tilemapColliderView)
         {
+            if (!scene.IsEntityEnabledInHierarchy(entity))
+                continue;
             auto& tilemapCollider = tilemapColliderView.get<TilemapCollider2DComponent>(entity);
             if (!tilemapCollider.RuntimeBodyCreated || !b2Body_IsValid(tilemapCollider.RuntimeBodyId))
                 continue;
@@ -1023,6 +1057,8 @@ namespace Limitless
         auto jointView = registry.view<Joint2DComponent, Rigidbody2DComponent>();
         for (entt::entity entity : jointView)
         {
+            if (!scene.IsEntityEnabledInHierarchy(entity))
+                continue;
             auto& joint = jointView.get<Joint2DComponent>(entity);
 
             // Incremental guard: skip joints that are already built and valid.
@@ -1034,6 +1070,8 @@ namespace Limitless
                 continue;
 
             if (joint.ConnectedEntity == entt::null || !scene.IsValid(joint.ConnectedEntity))
+                continue;
+            if (!scene.IsEntityEnabledInHierarchy(joint.ConnectedEntity))
                 continue;
 
             auto* bodyBComponent = registry.try_get<Rigidbody2DComponent>(joint.ConnectedEntity);
@@ -1117,6 +1155,8 @@ namespace Limitless
             const entt::entity entity = ToEntityHandle(moveEvent.userData);
             if (!scene.IsValid(entity))
                 continue;
+            if (!scene.IsEntityEnabledInHierarchy(entity))
+                continue;
 
             auto* transform = registry.try_get<TransformComponent>(entity);
             auto* rigidbody = registry.try_get<Rigidbody2DComponent>(entity);
@@ -1193,6 +1233,12 @@ namespace Limitless
         for (entt::entity entity : bodyView)
         {
             auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
+            if (!scene.IsEntityEnabledInHierarchy(entity))
+            {
+                rigidbody.RuntimeContactCount = 0;
+                rigidbody.RuntimeContactCountExcludingSensors = 0;
+                continue;
+            }
 
             if (!rigidbody.RuntimeBodyCreated || !b2Body_IsValid(rigidbody.RuntimeBodyId))
             {
