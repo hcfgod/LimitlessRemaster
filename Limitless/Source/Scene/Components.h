@@ -88,6 +88,32 @@ namespace Limitless
         int32_t SiblingOrder = 0;
     };
 
+    /// Marks an entity as a UI canvas root.
+    /// Child entities under the canvas are rendered in UI space.
+    struct CanvasComponent
+    {
+        enum class RenderMode
+        {
+            ScreenSpace = 0,
+            WorldSpace = 1
+        };
+
+        RenderMode Mode = RenderMode::ScreenSpace;
+        int32_t SortOrder = 0;
+        glm::vec2 ReferenceResolution = glm::vec2(1920.0f, 1080.0f);
+    };
+
+    /// Unity-style UI transform model.
+    /// Layout is resolved in a canvas-aware pass instead of normal world transforms.
+    struct RectTransformComponent
+    {
+        glm::vec2 AnchorMin = glm::vec2(0.5f, 0.5f);
+        glm::vec2 AnchorMax = glm::vec2(0.5f, 0.5f);
+        glm::vec2 Pivot = glm::vec2(0.5f, 0.5f);
+        glm::vec2 SizeDelta = glm::vec2(100.0f, 40.0f);
+        glm::vec2 AnchoredPosition = glm::vec2(0.0f, 0.0f);
+    };
+
     /// Renders a 2D sprite (quad). Size comes from TransformComponent::Scale.
     /// TextureKey is empty for color-only; non-empty for textured sprites (e.g. "Assets/Textures/sissy.jpg").
     /// CachedTexture holds a reference to keep the asset alive (avoids per-frame reload / GC).
@@ -231,32 +257,48 @@ namespace Limitless
     /// Renders runtime text using an MSDF atlas generated from the font file path.
     struct TextComponent
     {
-        enum class RenderSpace
-        {
-            World = 0,
-            Screen = 1
-        };
-        enum class ScreenAnchor
-        {
-            Center = 0,
-            TopLeft = 1,
-            TopCenter = 2,
-            TopRight = 3,
-            MiddleLeft = 4,
-            MiddleRight = 5,
-            BottomLeft = 6,
-            BottomCenter = 7,
-            BottomRight = 8
-        };
-
         std::string Text = "Text";
         std::string FontFilePath; ///< Relative or absolute font file path.
         Font::Ptr CachedFont;
         bool FontLoadAttempted = false;
         float FontSize = 32.0f;
         glm::vec4 Color = glm::vec4(1.0f);
-        RenderSpace Space = RenderSpace::World;
-        ScreenAnchor Anchor = ScreenAnchor::Center;
+    };
+
+    /// Marks a SpriteComponent as a UI image for UI-specific tooling and scripts.
+    struct UIImageComponent
+    {
+        bool RaycastTarget = true;
+    };
+
+    /// Marks a TextComponent as UI text for UI-specific tooling and scripts.
+    struct UITextComponent
+    {
+        bool RaycastTarget = false;
+    };
+
+    /// Minimal button state and script event hooks.
+    struct UIButtonComponent
+    {
+        bool Interactable = true;
+        bool IsHovered = false;
+        bool IsPressed = false;
+
+        // Event names are consumed by scripting bridges.
+        std::string OnClickEvent;
+        std::string OnHoverEnterEvent;
+        std::string OnHoverExitEvent;
+        std::string OnPressedEvent;
+    };
+
+    /// Minimal slider state and value range.
+    struct UISliderComponent
+    {
+        bool Interactable = true;
+        float MinValue = 0.0f;
+        float MaxValue = 1.0f;
+        float Value = 0.0f;
+        std::string OnValueChangedEvent;
     };
 
     /// Optional material reference (Unity-style).

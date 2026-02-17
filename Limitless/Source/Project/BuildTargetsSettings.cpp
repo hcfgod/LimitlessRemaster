@@ -70,17 +70,9 @@ namespace Limitless::Project
             s = DefaultBuildTargets();
         }
 
-        // Backward compatibility: migrate legacy "Sandbox" target ids/names.
-        if (s.ActiveTargetId == "Sandbox")
-            s.ActiveTargetId = "Runtime";
-
         bool hasRuntimeTarget = false;
         for (auto& target : s.Targets)
         {
-            if (target.Id == "Sandbox")
-                target.Id = "Runtime";
-            if (target.ProjectName == "Sandbox")
-                target.ProjectName = "Runtime";
             if (target.Id == "Runtime")
                 hasRuntimeTarget = true;
         }

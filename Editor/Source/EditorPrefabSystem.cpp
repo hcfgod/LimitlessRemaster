@@ -56,6 +56,16 @@ namespace Limitless::EditorPrefabSystem
 
                 destinationRegistry.replace<TransformComponent>(destinationEntity, *sourceTransform);
 
+                if (const auto* sourceCanvas = sourceRegistry.try_get<CanvasComponent>(sourceEntity))
+                {
+                    destinationRegistry.emplace<CanvasComponent>(destinationEntity, *sourceCanvas);
+                }
+
+                if (const auto* sourceRectTransform = sourceRegistry.try_get<RectTransformComponent>(sourceEntity))
+                {
+                    destinationRegistry.emplace<RectTransformComponent>(destinationEntity, *sourceRectTransform);
+                }
+
                 if (const auto* sourceSprite = sourceRegistry.try_get<SpriteComponent>(sourceEntity))
                 {
                     auto& destinationSprite = destinationRegistry.emplace<SpriteComponent>(destinationEntity);
@@ -105,8 +115,29 @@ namespace Limitless::EditorPrefabSystem
                     destinationText.FontLoadAttempted = false;
                     destinationText.FontSize = sourceText->FontSize;
                     destinationText.Color = sourceText->Color;
-                    destinationText.Space = sourceText->Space;
-                    destinationText.Anchor = sourceText->Anchor;
+                }
+
+                if (const auto* sourceUIImage = sourceRegistry.try_get<UIImageComponent>(sourceEntity))
+                {
+                    destinationRegistry.emplace<UIImageComponent>(destinationEntity, *sourceUIImage);
+                }
+
+                if (const auto* sourceUIText = sourceRegistry.try_get<UITextComponent>(sourceEntity))
+                {
+                    destinationRegistry.emplace<UITextComponent>(destinationEntity, *sourceUIText);
+                }
+
+                if (const auto* sourceUIButton = sourceRegistry.try_get<UIButtonComponent>(sourceEntity))
+                {
+                    auto& destinationUIButton = destinationRegistry.emplace<UIButtonComponent>(destinationEntity, *sourceUIButton);
+                    destinationUIButton.IsHovered = false;
+                    destinationUIButton.IsPressed = false;
+                }
+
+                if (const auto* sourceUISlider = sourceRegistry.try_get<UISliderComponent>(sourceEntity))
+                {
+                    auto& destinationUISlider = destinationRegistry.emplace<UISliderComponent>(destinationEntity, *sourceUISlider);
+                    destinationUISlider.Value = std::clamp(destinationUISlider.Value, destinationUISlider.MinValue, destinationUISlider.MaxValue);
                 }
 
                 if (const auto* sourceTilemap = sourceRegistry.try_get<TilemapComponent>(sourceEntity))

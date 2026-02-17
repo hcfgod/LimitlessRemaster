@@ -13,6 +13,12 @@ namespace Limitless::EditorInspectorPanel
 {
     struct PendingEntityComponentRemovals
     {
+        bool RemoveCanvasComponent = false;
+        bool RemoveRectTransformComponent = false;
+        bool RemoveUIImageComponent = false;
+        bool RemoveUITextComponent = false;
+        bool RemoveUIButtonComponent = false;
+        bool RemoveUISliderComponent = false;
         bool RemoveSpriteComponent = false;
         bool RemoveCameraComponent = false;
         bool RemoveAudioListener2DComponent = false;

@@ -137,6 +137,35 @@ namespace Limitless
             return {};
         }
 
+        bool TryGetOwningCanvasEntity(const entt::registry& registry, entt::entity entity, entt::entity& outCanvasEntity)
+        {
+            entt::entity current = entity;
+            while (current != entt::null)
+            {
+                if (registry.all_of<CanvasComponent>(current))
+                {
+                    outCanvasEntity = current;
+                    return true;
+                }
+
+                const auto* hierarchy = registry.try_get<HierarchyComponent>(current);
+                if (!hierarchy)
+                    break;
+                current = hierarchy->Parent;
+            }
+
+            return false;
+        }
+
+        bool IsEntityInCanvasUiHierarchy(const entt::registry& registry, entt::entity entity)
+        {
+            if (!registry.all_of<RectTransformComponent>(entity))
+                return false;
+
+            entt::entity canvasEntity = entt::null;
+            return TryGetOwningCanvasEntity(registry, entity, canvasEntity);
+        }
+
         bool TryComputeTileUvRect(const TilemapComponent& tilemap,
                                   const Assets::TextureAsset::Ptr& tilesetTexture,
                                   uint32_t tileId,
@@ -1610,6 +1639,16 @@ namespace Limitless
                 destinationTag->Enabled = tag.Enabled;
             destinationRegistry.replace<TransformComponent>(destinationEntity, transform);
 
+            if (const auto* canvas = sourceRegistry.try_get<CanvasComponent>(sourceEntity))
+            {
+                destinationRegistry.emplace<CanvasComponent>(destinationEntity, *canvas);
+            }
+
+            if (const auto* rectTransform = sourceRegistry.try_get<RectTransformComponent>(sourceEntity))
+            {
+                destinationRegistry.emplace<RectTransformComponent>(destinationEntity, *rectTransform);
+            }
+
             if (const auto* sprite = sourceRegistry.try_get<SpriteComponent>(sourceEntity))
             {
                 auto& destinationSprite = destinationRegistry.emplace<SpriteComponent>(destinationEntity);
@@ -1671,8 +1710,29 @@ namespace Limitless
                 destinationText.FontLoadAttempted = false;
                 destinationText.FontSize = text->FontSize;
                 destinationText.Color = text->Color;
-                destinationText.Space = text->Space;
-                destinationText.Anchor = text->Anchor;
+            }
+
+            if (const auto* uiImage = sourceRegistry.try_get<UIImageComponent>(sourceEntity))
+            {
+                destinationRegistry.emplace<UIImageComponent>(destinationEntity, *uiImage);
+            }
+
+            if (const auto* uiText = sourceRegistry.try_get<UITextComponent>(sourceEntity))
+            {
+                destinationRegistry.emplace<UITextComponent>(destinationEntity, *uiText);
+            }
+
+            if (const auto* uiButton = sourceRegistry.try_get<UIButtonComponent>(sourceEntity))
+            {
+                auto& destinationButton = destinationRegistry.emplace<UIButtonComponent>(destinationEntity, *uiButton);
+                destinationButton.IsHovered = false;
+                destinationButton.IsPressed = false;
+            }
+
+            if (const auto* uiSlider = sourceRegistry.try_get<UISliderComponent>(sourceEntity))
+            {
+                auto& destinationSlider = destinationRegistry.emplace<UISliderComponent>(destinationEntity, *uiSlider);
+                destinationSlider.Value = std::clamp(destinationSlider.Value, destinationSlider.MinValue, destinationSlider.MaxValue);
             }
 
             if (const auto* tilemap = sourceRegistry.try_get<TilemapComponent>(sourceEntity))
@@ -1909,6 +1969,26 @@ namespace Limitless
                 { "SiblingOrder", hierarchy ? hierarchy->SiblingOrder : 0 }
             };
 
+            if (const auto* canvas = m_Registry.try_get<CanvasComponent>(entity))
+            {
+                entry["Canvas"] = {
+                    { "RenderMode", canvas->Mode == CanvasComponent::RenderMode::WorldSpace ? "WorldSpace" : "ScreenSpace" },
+                    { "SortOrder", canvas->SortOrder },
+                    { "ReferenceResolution", { canvas->ReferenceResolution.x, canvas->ReferenceResolution.y } }
+                };
+            }
+
+            if (const auto* rectTransform = m_Registry.try_get<RectTransformComponent>(entity))
+            {
+                entry["RectTransform"] = {
+                    { "AnchorMin", { rectTransform->AnchorMin.x, rectTransform->AnchorMin.y } },
+                    { "AnchorMax", { rectTransform->AnchorMax.x, rectTransform->AnchorMax.y } },
+                    { "Pivot", { rectTransform->Pivot.x, rectTransform->Pivot.y } },
+                    { "SizeDelta", { rectTransform->SizeDelta.x, rectTransform->SizeDelta.y } },
+                    { "AnchoredPosition", { rectTransform->AnchoredPosition.x, rectTransform->AnchoredPosition.y } }
+                };
+            }
+
             if (const auto* sprite = m_Registry.try_get<SpriteComponent>(entity))
             {
                 entry["Sprite"] = {
@@ -2019,30 +2099,47 @@ namespace Limitless
 
             if (const auto* text = m_Registry.try_get<TextComponent>(entity))
             {
-                auto toAnchorString = [](TextComponent::ScreenAnchor anchor) -> const char*
-                {
-                    switch (anchor)
-                    {
-                    case TextComponent::ScreenAnchor::TopLeft: return "TopLeft";
-                    case TextComponent::ScreenAnchor::TopCenter: return "TopCenter";
-                    case TextComponent::ScreenAnchor::TopRight: return "TopRight";
-                    case TextComponent::ScreenAnchor::MiddleLeft: return "MiddleLeft";
-                    case TextComponent::ScreenAnchor::MiddleRight: return "MiddleRight";
-                    case TextComponent::ScreenAnchor::BottomLeft: return "BottomLeft";
-                    case TextComponent::ScreenAnchor::BottomCenter: return "BottomCenter";
-                    case TextComponent::ScreenAnchor::BottomRight: return "BottomRight";
-                    case TextComponent::ScreenAnchor::Center:
-                    default:
-                        return "Center";
-                    }
-                };
                 entry["Text"] = {
                     { "Value", text->Text },
                     { "FontFilePath", text->FontFilePath },
                     { "FontSize", text->FontSize },
-                    { "Color", { text->Color.r, text->Color.g, text->Color.b, text->Color.a } },
-                    { "Space", text->Space == TextComponent::RenderSpace::Screen ? "Screen" : "World" },
-                    { "Anchor", toAnchorString(text->Anchor) }
+                    { "Color", { text->Color.r, text->Color.g, text->Color.b, text->Color.a } }
+                };
+            }
+
+            if (const auto* uiImage = m_Registry.try_get<UIImageComponent>(entity))
+            {
+                entry["UIImage"] = {
+                    { "RaycastTarget", uiImage->RaycastTarget }
+                };
+            }
+
+            if (const auto* uiText = m_Registry.try_get<UITextComponent>(entity))
+            {
+                entry["UIText"] = {
+                    { "RaycastTarget", uiText->RaycastTarget }
+                };
+            }
+
+            if (const auto* uiButton = m_Registry.try_get<UIButtonComponent>(entity))
+            {
+                entry["UIButton"] = {
+                    { "Interactable", uiButton->Interactable },
+                    { "OnClickEvent", uiButton->OnClickEvent },
+                    { "OnHoverEnterEvent", uiButton->OnHoverEnterEvent },
+                    { "OnHoverExitEvent", uiButton->OnHoverExitEvent },
+                    { "OnPressedEvent", uiButton->OnPressedEvent }
+                };
+            }
+
+            if (const auto* uiSlider = m_Registry.try_get<UISliderComponent>(entity))
+            {
+                entry["UISlider"] = {
+                    { "Interactable", uiSlider->Interactable },
+                    { "MinValue", uiSlider->MinValue },
+                    { "MaxValue", uiSlider->MaxValue },
+                    { "Value", uiSlider->Value },
+                    { "OnValueChangedEvent", uiSlider->OnValueChangedEvent }
                 };
             }
 
@@ -2380,6 +2477,47 @@ namespace Limitless
                     transform.Scale = glm::vec3(scale[0], scale[1], scale[2]);
             }
 
+            if (entry.contains("Canvas") && entry["Canvas"].is_object())
+            {
+                const auto& canvasJson = entry["Canvas"];
+                auto& canvas = scene->GetRegistry().emplace<CanvasComponent>(entity);
+                const std::string renderMode = canvasJson.value("RenderMode", std::string("ScreenSpace"));
+                canvas.Mode = (renderMode == "WorldSpace")
+                    ? CanvasComponent::RenderMode::WorldSpace
+                    : CanvasComponent::RenderMode::ScreenSpace;
+                canvas.SortOrder = canvasJson.value("SortOrder", 0);
+                auto referenceResolution = canvasJson.value("ReferenceResolution",
+                    std::vector<float>{ canvas.ReferenceResolution.x, canvas.ReferenceResolution.y });
+                if (referenceResolution.size() >= 2)
+                {
+                    canvas.ReferenceResolution = glm::vec2(
+                        std::max(1.0f, referenceResolution[0]),
+                        std::max(1.0f, referenceResolution[1]));
+                }
+            }
+
+            if (entry.contains("RectTransform") && entry["RectTransform"].is_object())
+            {
+                const auto& rectJson = entry["RectTransform"];
+                auto& rect = scene->GetRegistry().emplace<RectTransformComponent>(entity);
+                auto anchorMin = rectJson.value("AnchorMin", std::vector<float>{ rect.AnchorMin.x, rect.AnchorMin.y });
+                if (anchorMin.size() >= 2)
+                    rect.AnchorMin = glm::vec2(anchorMin[0], anchorMin[1]);
+                auto anchorMax = rectJson.value("AnchorMax", std::vector<float>{ rect.AnchorMax.x, rect.AnchorMax.y });
+                if (anchorMax.size() >= 2)
+                    rect.AnchorMax = glm::vec2(anchorMax[0], anchorMax[1]);
+                auto pivot = rectJson.value("Pivot", std::vector<float>{ rect.Pivot.x, rect.Pivot.y });
+                if (pivot.size() >= 2)
+                    rect.Pivot = glm::vec2(pivot[0], pivot[1]);
+                auto sizeDelta = rectJson.value("SizeDelta", std::vector<float>{ rect.SizeDelta.x, rect.SizeDelta.y });
+                if (sizeDelta.size() >= 2)
+                    rect.SizeDelta = glm::vec2(sizeDelta[0], sizeDelta[1]);
+                auto anchoredPosition = rectJson.value("AnchoredPosition",
+                    std::vector<float>{ rect.AnchoredPosition.x, rect.AnchoredPosition.y });
+                if (anchoredPosition.size() >= 2)
+                    rect.AnchoredPosition = glm::vec2(anchoredPosition[0], anchoredPosition[1]);
+            }
+
             if (entry.contains("Sprite"))
             {
                 const auto& spriteJson = entry["Sprite"];
@@ -2594,34 +2732,49 @@ namespace Limitless
                 text.Text = textJson.value("Value", std::string("Text"));
                 text.FontFilePath = textJson.value("FontFilePath", std::string{});
                 text.FontSize = textJson.value("FontSize", 32.0f);
-                const std::string renderSpace = textJson.value("Space", std::string("World"));
-                text.Space = (renderSpace == "Screen")
-                    ? TextComponent::RenderSpace::Screen
-                    : TextComponent::RenderSpace::World;
-                const std::string anchorName = textJson.value("Anchor", std::string("Center"));
-                if (anchorName == "TopLeft")
-                    text.Anchor = TextComponent::ScreenAnchor::TopLeft;
-                else if (anchorName == "TopCenter")
-                    text.Anchor = TextComponent::ScreenAnchor::TopCenter;
-                else if (anchorName == "TopRight")
-                    text.Anchor = TextComponent::ScreenAnchor::TopRight;
-                else if (anchorName == "MiddleLeft")
-                    text.Anchor = TextComponent::ScreenAnchor::MiddleLeft;
-                else if (anchorName == "MiddleRight")
-                    text.Anchor = TextComponent::ScreenAnchor::MiddleRight;
-                else if (anchorName == "BottomLeft")
-                    text.Anchor = TextComponent::ScreenAnchor::BottomLeft;
-                else if (anchorName == "BottomCenter")
-                    text.Anchor = TextComponent::ScreenAnchor::BottomCenter;
-                else if (anchorName == "BottomRight")
-                    text.Anchor = TextComponent::ScreenAnchor::BottomRight;
-                else
-                    text.Anchor = TextComponent::ScreenAnchor::Center;
                 auto color = textJson.value("Color", std::vector<float>{ 1.0f, 1.0f, 1.0f, 1.0f });
                 if (color.size() >= 4)
                     text.Color = glm::vec4(color[0], color[1], color[2], color[3]);
                 text.CachedFont.reset();
                 text.FontLoadAttempted = false;
+            }
+
+            if (entry.contains("UIImage") && entry["UIImage"].is_object())
+            {
+                const auto& uiImageJson = entry["UIImage"];
+                auto& uiImage = scene->GetRegistry().emplace<UIImageComponent>(entity);
+                uiImage.RaycastTarget = uiImageJson.value("RaycastTarget", true);
+            }
+
+            if (entry.contains("UIText") && entry["UIText"].is_object())
+            {
+                const auto& uiTextJson = entry["UIText"];
+                auto& uiText = scene->GetRegistry().emplace<UITextComponent>(entity);
+                uiText.RaycastTarget = uiTextJson.value("RaycastTarget", false);
+            }
+
+            if (entry.contains("UIButton") && entry["UIButton"].is_object())
+            {
+                const auto& uiButtonJson = entry["UIButton"];
+                auto& uiButton = scene->GetRegistry().emplace<UIButtonComponent>(entity);
+                uiButton.Interactable = uiButtonJson.value("Interactable", true);
+                uiButton.OnClickEvent = uiButtonJson.value("OnClickEvent", std::string{});
+                uiButton.OnHoverEnterEvent = uiButtonJson.value("OnHoverEnterEvent", std::string{});
+                uiButton.OnHoverExitEvent = uiButtonJson.value("OnHoverExitEvent", std::string{});
+                uiButton.OnPressedEvent = uiButtonJson.value("OnPressedEvent", std::string{});
+                uiButton.IsHovered = false;
+                uiButton.IsPressed = false;
+            }
+
+            if (entry.contains("UISlider") && entry["UISlider"].is_object())
+            {
+                const auto& uiSliderJson = entry["UISlider"];
+                auto& uiSlider = scene->GetRegistry().emplace<UISliderComponent>(entity);
+                uiSlider.Interactable = uiSliderJson.value("Interactable", true);
+                uiSlider.MinValue = uiSliderJson.value("MinValue", 0.0f);
+                uiSlider.MaxValue = std::max(uiSlider.MinValue, uiSliderJson.value("MaxValue", 1.0f));
+                uiSlider.Value = std::clamp(uiSliderJson.value("Value", uiSlider.MinValue), uiSlider.MinValue, uiSlider.MaxValue);
+                uiSlider.OnValueChangedEvent = uiSliderJson.value("OnValueChangedEvent", std::string{});
             }
 
             if (entry.contains("Tilemap") && entry["Tilemap"].is_object())
@@ -3162,6 +3315,8 @@ namespace Limitless
         {
             if (!scene.IsEntityEnabledInHierarchy(entity))
                 continue;
+            if (IsEntityInCanvasUiHierarchy(registry, entity))
+                continue;
             auto& sprite = registry.get<SpriteComponent>(entity);
             auto* animator = registry.try_get<AnimatorComponent>(entity);
 
@@ -3340,11 +3495,9 @@ namespace Limitless
         {
             if (!scene.IsEntityEnabledInHierarchy(entity))
                 continue;
-            auto& text = registry.get<TextComponent>(entity);
-            if (text.Space != TextComponent::RenderSpace::World)
-            {
+            if (IsEntityInCanvasUiHierarchy(registry, entity))
                 continue;
-            }
+            auto& text = registry.get<TextComponent>(entity);
             if (text.Text.empty() || text.FontFilePath.empty())
             {
                 continue;
@@ -3388,124 +3541,249 @@ namespace Limitless
 
     namespace
     {
-        glm::vec2 GetScreenAnchorBasePosition(TextComponent::ScreenAnchor anchor, float halfWidth, float halfHeight)
+        struct UiLayoutRect
         {
-            switch (anchor)
-            {
-            case TextComponent::ScreenAnchor::TopLeft:
-                return glm::vec2(-halfWidth, halfHeight);
-            case TextComponent::ScreenAnchor::TopCenter:
-                return glm::vec2(0.0f, halfHeight);
-            case TextComponent::ScreenAnchor::TopRight:
-                return glm::vec2(halfWidth, halfHeight);
-            case TextComponent::ScreenAnchor::MiddleLeft:
-                return glm::vec2(-halfWidth, 0.0f);
-            case TextComponent::ScreenAnchor::MiddleRight:
-                return glm::vec2(halfWidth, 0.0f);
-            case TextComponent::ScreenAnchor::BottomLeft:
-                return glm::vec2(-halfWidth, -halfHeight);
-            case TextComponent::ScreenAnchor::BottomCenter:
-                return glm::vec2(0.0f, -halfHeight);
-            case TextComponent::ScreenAnchor::BottomRight:
-                return glm::vec2(halfWidth, -halfHeight);
-            case TextComponent::ScreenAnchor::Center:
-            default:
-                return glm::vec2(0.0f, 0.0f);
-            }
+            glm::vec2 Min = glm::vec2(0.0f);
+            glm::vec2 Max = glm::vec2(0.0f);
+        };
+
+        glm::vec2 Clamp01(const glm::vec2& value)
+        {
+            return glm::vec2(
+                std::clamp(value.x, 0.0f, 1.0f),
+                std::clamp(value.y, 0.0f, 1.0f));
         }
 
-        void RenderScreenSpaceTextPass(Scene& scene, uint32_t width, uint32_t height)
+        UiLayoutRect GetCanvasRootRect(const CanvasComponent& canvas, uint32_t width, uint32_t height)
+        {
+            const float fallbackWidth = std::max(1.0f, static_cast<float>(width));
+            const float fallbackHeight = std::max(1.0f, static_cast<float>(height));
+            const float canvasWidth = std::max(1.0f, canvas.ReferenceResolution.x > 0.0f ? canvas.ReferenceResolution.x : fallbackWidth);
+            const float canvasHeight = std::max(1.0f, canvas.ReferenceResolution.y > 0.0f ? canvas.ReferenceResolution.y : fallbackHeight);
+            const float halfWidth = canvasWidth * 0.5f;
+            const float halfHeight = canvasHeight * 0.5f;
+            return {
+                glm::vec2(-halfWidth, -halfHeight),
+                glm::vec2(halfWidth, halfHeight)
+            };
+        }
+
+        UiLayoutRect ResolveUiLayoutRect(const entt::registry& registry,
+                                         entt::entity entity,
+                                         entt::entity canvasEntity,
+                                         const UiLayoutRect& canvasRootRect,
+                                         std::unordered_map<entt::entity, UiLayoutRect>& cache)
+        {
+            const auto cached = cache.find(entity);
+            if (cached != cache.end())
+                return cached->second;
+
+            UiLayoutRect parentRect = canvasRootRect;
+            if (const auto* hierarchy = registry.try_get<HierarchyComponent>(entity))
+            {
+                const entt::entity parent = hierarchy->Parent;
+                if (parent != entt::null &&
+                    parent != canvasEntity &&
+                    registry.all_of<RectTransformComponent>(parent))
+                {
+                    parentRect = ResolveUiLayoutRect(registry, parent, canvasEntity, canvasRootRect, cache);
+                }
+            }
+
+            const auto& rect = registry.get<RectTransformComponent>(entity);
+            glm::vec2 anchorMin = Clamp01(rect.AnchorMin);
+            glm::vec2 anchorMax = Clamp01(rect.AnchorMax);
+            if (anchorMin.x > anchorMax.x)
+                std::swap(anchorMin.x, anchorMax.x);
+            if (anchorMin.y > anchorMax.y)
+                std::swap(anchorMin.y, anchorMax.y);
+
+            const glm::vec2 parentSize = parentRect.Max - parentRect.Min;
+            const glm::vec2 anchorMinPosition = parentRect.Min + parentSize * anchorMin;
+            const glm::vec2 anchorMaxPosition = parentRect.Min + parentSize * anchorMax;
+            glm::vec2 size = (anchorMaxPosition - anchorMinPosition) + rect.SizeDelta;
+            size.x = std::max(1.0f, size.x);
+            size.y = std::max(1.0f, size.y);
+
+            const glm::vec2 pivot = Clamp01(rect.Pivot);
+            const glm::vec2 anchorCenter = (anchorMinPosition + anchorMaxPosition) * 0.5f;
+            const glm::vec2 pivotPosition = anchorCenter + rect.AnchoredPosition;
+            const glm::vec2 centerPosition = pivotPosition + (glm::vec2(0.5f, 0.5f) - pivot) * size;
+
+            UiLayoutRect result;
+            result.Min = centerPosition - size * 0.5f;
+            result.Max = centerPosition + size * 0.5f;
+            cache.emplace(entity, result);
+            return result;
+        }
+
+        Assets::TextureAsset::Ptr ResolveUiSpriteTexture(SpriteComponent& sprite)
+        {
+            if (sprite.TextureKey.empty())
+                return nullptr;
+
+            if (!sprite.CachedTexture && !sprite.TextureLoadAttempted)
+            {
+                sprite.CachedTexture = std::dynamic_pointer_cast<Assets::TextureAsset>(
+                    Assets::AssetManager::GetCachedByKey(sprite.TextureKey));
+                if (!sprite.CachedTexture && !g_PendingTextureLoads.contains(sprite.TextureKey))
+                    g_PendingTextureLoads.emplace(sprite.TextureKey, Assets::TextureAsset::LoadAsync(sprite.TextureKey));
+                sprite.TextureLoadAttempted = true;
+            }
+            else if (!sprite.CachedTexture)
+            {
+                sprite.CachedTexture = std::dynamic_pointer_cast<Assets::TextureAsset>(
+                    Assets::AssetManager::GetCachedByKey(sprite.TextureKey));
+                if (!sprite.CachedTexture)
+                {
+                    const auto pendingLoad = g_PendingTextureLoads.find(sprite.TextureKey);
+                    if (pendingLoad != g_PendingTextureLoads.end() && pendingLoad->second.IsDone())
+                    {
+                        sprite.CachedTexture = pendingLoad->second.Get();
+                        g_PendingTextureLoads.erase(pendingLoad);
+                    }
+                }
+            }
+            return sprite.CachedTexture;
+        }
+
+        void RenderCanvasUiPass(Scene& scene, const Camera& camera, uint32_t width, uint32_t height)
         {
             if (width == 0 || height == 0)
-            {
                 return;
-            }
 
             auto& registry = scene.GetRegistry();
-            auto textView = registry.view<TransformComponent, TextComponent>();
-            std::vector<entt::entity> textRenderEntities;
-            textRenderEntities.reserve(textView.size_hint());
-            for (entt::entity entity : textView)
+
+            auto canvasView = registry.view<CanvasComponent>();
+            std::vector<entt::entity> canvases;
+            for (entt::entity entity : canvasView)
             {
-                textRenderEntities.push_back(entity);
+                if (scene.IsEntityEnabledInHierarchy(entity))
+                    canvases.push_back(entity);
             }
 
-            std::sort(textRenderEntities.begin(), textRenderEntities.end(), [&scene, &registry](entt::entity left, entt::entity right) {
-                const glm::mat4 leftWorld = scene.GetWorldTransformMatrix(left);
-                const glm::mat4 rightWorld = scene.GetWorldTransformMatrix(right);
-                const float leftZ = leftWorld[3].z;
-                const float rightZ = rightWorld[3].z;
-                if (leftZ != rightZ)
-                    return leftZ < rightZ;
-
-                const auto* leftHierarchy = registry.try_get<HierarchyComponent>(left);
-                const auto* rightHierarchy = registry.try_get<HierarchyComponent>(right);
-                const int32_t leftOrder = leftHierarchy ? leftHierarchy->SiblingOrder : 0;
-                const int32_t rightOrder = rightHierarchy ? rightHierarchy->SiblingOrder : 0;
-                if (leftOrder != rightOrder)
-                    return leftOrder < rightOrder;
-
+            std::sort(canvases.begin(), canvases.end(), [&registry](entt::entity left, entt::entity right) {
+                const auto& leftCanvas = registry.get<CanvasComponent>(left);
+                const auto& rightCanvas = registry.get<CanvasComponent>(right);
+                if (leftCanvas.SortOrder != rightCanvas.SortOrder)
+                    return leftCanvas.SortOrder < rightCanvas.SortOrder;
                 return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
             });
 
-            // Screen-space UI uses centered pixel coordinates so existing world-origin text
-            // (near X=0,Y=0) remains visible when switching to screen space.
-            // Use a wide depth range for overlays so non-trivial entity Z values do not clip.
-            // Depth testing is disabled for this pass, so Z is not used for occlusion.
-            const float halfWidth = static_cast<float>(width) * 0.5f;
-            const float halfHeight = static_cast<float>(height) * 0.5f;
-            const glm::mat4 screenProjection = glm::ortho(
-                -halfWidth, halfWidth,
-                -halfHeight, halfHeight,
-                -10000.0f, 10000.0f);
-            Renderer2D::BeginScene(screenProjection, false);
-
-            for (entt::entity entity : textRenderEntities)
+            for (entt::entity canvasEntity : canvases)
             {
-                if (!scene.IsEntityEnabledInHierarchy(entity))
-                    continue;
-                auto& text = registry.get<TextComponent>(entity);
-                if (text.Space != TextComponent::RenderSpace::Screen)
+                const auto& canvas = registry.get<CanvasComponent>(canvasEntity);
+                const UiLayoutRect canvasRect = GetCanvasRootRect(canvas, width, height);
+                std::unordered_map<entt::entity, UiLayoutRect> layoutCache;
+
+                if (canvas.Mode == CanvasComponent::RenderMode::ScreenSpace)
                 {
-                    continue;
+                    const glm::mat4 screenProjection = glm::ortho(
+                        canvasRect.Min.x, canvasRect.Max.x,
+                        canvasRect.Min.y, canvasRect.Max.y,
+                        -10000.0f, 10000.0f);
+                    Renderer2D::BeginScene(screenProjection, false);
+                }
+                else
+                {
+                    Renderer2D::BeginScene(camera);
                 }
 
-                if (text.Text.empty() || text.FontFilePath.empty())
+                std::vector<entt::entity> uiEntities;
+                auto rectView = registry.view<RectTransformComponent>();
+                for (entt::entity entity : rectView)
                 {
-                    continue;
+                    if (!scene.IsEntityEnabledInHierarchy(entity))
+                        continue;
+                    if (!registry.any_of<SpriteComponent, TextComponent>(entity))
+                        continue;
+
+                    entt::entity owningCanvas = entt::null;
+                    if (TryGetOwningCanvasEntity(registry, entity, owningCanvas) && owningCanvas == canvasEntity)
+                        uiEntities.push_back(entity);
                 }
 
-                if (!text.CachedFont && !text.FontLoadAttempted)
+                std::sort(uiEntities.begin(), uiEntities.end(), [&registry](entt::entity left, entt::entity right) {
+                    const auto* leftTransform = registry.try_get<TransformComponent>(left);
+                    const auto* rightTransform = registry.try_get<TransformComponent>(right);
+                    const float leftZ = leftTransform ? leftTransform->Position.z : 0.0f;
+                    const float rightZ = rightTransform ? rightTransform->Position.z : 0.0f;
+                    if (leftZ != rightZ)
+                        return leftZ < rightZ;
+
+                    const auto* leftHierarchy = registry.try_get<HierarchyComponent>(left);
+                    const auto* rightHierarchy = registry.try_get<HierarchyComponent>(right);
+                    const int32_t leftOrder = leftHierarchy ? leftHierarchy->SiblingOrder : 0;
+                    const int32_t rightOrder = rightHierarchy ? rightHierarchy->SiblingOrder : 0;
+                    if (leftOrder != rightOrder)
+                        return leftOrder < rightOrder;
+
+                    return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
+                });
+
+                const glm::mat4 canvasWorldTransform = (canvas.Mode == CanvasComponent::RenderMode::WorldSpace)
+                    ? scene.GetWorldTransformMatrix(canvasEntity)
+                    : glm::mat4(1.0f);
+
+                for (entt::entity uiEntity : uiEntities)
                 {
-                    text.CachedFont = Font::CreateFromFile(text.FontFilePath);
-                    text.FontLoadAttempted = true;
-                    if (!text.CachedFont)
+                    const UiLayoutRect layoutRect = ResolveUiLayoutRect(registry, uiEntity, canvasEntity, canvasRect, layoutCache);
+                    const glm::vec2 layoutSize = layoutRect.Max - layoutRect.Min;
+                    if (layoutSize.x <= 0.0f || layoutSize.y <= 0.0f)
+                        continue;
+
+                    const auto& transform = registry.get<TransformComponent>(uiEntity);
+                    glm::vec2 center = (layoutRect.Min + layoutRect.Max) * 0.5f;
+                    center += glm::vec2(transform.Position.x, transform.Position.y);
+
+                    const glm::vec2 scaledSize = glm::vec2(
+                        layoutSize.x * std::max(0.001f, transform.Scale.x),
+                        layoutSize.y * std::max(0.001f, transform.Scale.y));
+                    glm::mat4 model = glm::translate(glm::mat4(1.0f), glm::vec3(center.x, center.y, transform.Position.z));
+                    model = glm::rotate(model, glm::radians(transform.Rotation.z), glm::vec3(0.0f, 0.0f, 1.0f));
+                    model = glm::scale(model, glm::vec3(scaledSize, 1.0f));
+
+                    if (canvas.Mode == CanvasComponent::RenderMode::WorldSpace)
+                        model = canvasWorldTransform * model;
+
+                    if (auto* sprite = registry.try_get<SpriteComponent>(uiEntity))
                     {
-                        LT_CORE_WARN("SceneRenderer: failed to load text font '{}'", text.FontFilePath);
+                        Assets::TextureAsset::Ptr textureAsset = ResolveUiSpriteTexture(*sprite);
+                        if (textureAsset)
+                            Renderer2D::DrawQuad(model, textureAsset, sprite->Color);
+                        else if (!sprite->TextureKey.empty())
+                            Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, sprite->Color.a));
+                        else
+                            Renderer2D::DrawQuad(model, sprite->Color);
+                    }
+
+                    if (auto* text = registry.try_get<TextComponent>(uiEntity))
+                    {
+                        if (text->Text.empty() || text->FontFilePath.empty())
+                            continue;
+
+                        if (!text->CachedFont && !text->FontLoadAttempted)
+                        {
+                            text->CachedFont = Font::CreateFromFile(text->FontFilePath);
+                            text->FontLoadAttempted = true;
+                            if (!text->CachedFont)
+                                LT_CORE_WARN("SceneRenderer: failed to load text font '{}'", text->FontFilePath);
+                        }
+
+                        if (!text->CachedFont)
+                            continue;
+
+                        float fontSize = text->FontSize;
+                        if (canvas.Mode == CanvasComponent::RenderMode::ScreenSpace)
+                            fontSize *= std::max(1.0f, text->CachedFont->GetEmSize());
+
+                        Renderer2D::DrawText(model, text->Text, text->CachedFont, fontSize, text->Color);
                     }
                 }
 
-                if (!text.CachedFont)
-                {
-                    continue;
-                }
-
-                // Screen-space text should not inherit world hierarchy transforms.
-                // Use the entity's local transform directly and force Z to 0 for overlay usage.
-                const auto& transform = registry.get<TransformComponent>(entity);
-                glm::mat4 model = transform.GetLocalMatrix();
-                const glm::vec2 anchorBase = GetScreenAnchorBasePosition(text.Anchor, halfWidth, halfHeight);
-                model[3].x += anchorBase.x;
-                model[3].y += anchorBase.y;
-                model[3].z = 0.0f;
-                // Renderer2D text sizing is normalized by font em-size for world-space rendering.
-                // Convert to pixel-like sizing for screen-space UI so a FontSize of 32 behaves
-                // like ~32 px instead of sub-pixel world units.
-                const float screenSpaceFontSize = text.FontSize * std::max(1.0f, text.CachedFont->GetEmSize());
-                Renderer2D::DrawText(model, text.Text, text.CachedFont, screenSpaceFontSize, text.Color);
+                Renderer2D::EndScene();
             }
 
-            Renderer2D::EndScene();
         }
     }
 
@@ -3543,7 +3821,7 @@ namespace Limitless
 
             Render(scene, camera);
         }
-        RenderScreenSpaceTextPass(scene, width, height);
+        RenderCanvasUiPass(scene, camera, width, height);
 
         renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(nullptr));
     }

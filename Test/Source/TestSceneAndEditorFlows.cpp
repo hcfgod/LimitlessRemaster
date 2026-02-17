@@ -151,8 +151,6 @@ TEST_SUITE("Scene And Editor Flows")
         text.FontFilePath = "Assets/Fonts/Inter-Regular.ttf";
         text.FontSize = 42.0f;
         text.Color = { 1.0f, 0.9f, 0.2f, 1.0f };
-        text.Space = Limitless::TextComponent::RenderSpace::Screen;
-        text.Anchor = Limitless::TextComponent::ScreenAnchor::TopRight;
         text.FontLoadAttempted = true; // runtime-only behavior should reset in clone
 
         auto& tilemap = registry.emplace<Limitless::TilemapComponent>(child);
@@ -270,8 +268,6 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(clonedText.Text == text.Text);
         CHECK(clonedText.FontFilePath == text.FontFilePath);
         CHECK(clonedText.FontSize == doctest::Approx(text.FontSize));
-        CHECK(clonedText.Space == Limitless::TextComponent::RenderSpace::Screen);
-        CHECK(clonedText.Anchor == Limitless::TextComponent::ScreenAnchor::TopRight);
         CHECK(clonedText.FontLoadAttempted == false);
 
         const auto& clonedTilemap = cloneRegistry.get<Limitless::TilemapComponent>(clonedChild);
@@ -371,8 +367,6 @@ TEST_SUITE("Scene And Editor Flows")
         text.Text = "Score: 999";
         text.FontFilePath = "Assets/Fonts/ScoreFont.ttf";
         text.FontSize = 24.0f;
-        text.Space = Limitless::TextComponent::RenderSpace::Screen;
-        text.Anchor = Limitless::TextComponent::ScreenAnchor::BottomCenter;
 
         auto& sprite = registry.emplace<Limitless::SpriteComponent>(root);
         sprite.TextureKey = "Assets/Textures/Backgrounds/Stage01.png";
@@ -492,8 +486,6 @@ TEST_SUITE("Scene And Editor Flows")
         const auto& loadedText = loadedRegistry.get<Limitless::TextComponent>(loadedHud);
         CHECK(loadedText.Text == "Score: 999");
         CHECK(loadedText.FontFilePath == "Assets/Fonts/ScoreFont.ttf");
-        CHECK(loadedText.Space == Limitless::TextComponent::RenderSpace::Screen);
-        CHECK(loadedText.Anchor == Limitless::TextComponent::ScreenAnchor::BottomCenter);
 
         REQUIRE(loadedRegistry.all_of<Limitless::PrefabInstanceComponent>(loadedRoot));
         const auto& loadedPrefabInstance = loadedRegistry.get<Limitless::PrefabInstanceComponent>(loadedRoot);
@@ -611,8 +603,6 @@ TEST_SUITE("Scene And Editor Flows")
 
         auto& text = registry.emplace<Limitless::TextComponent>(player);
         text.Text = "Player";
-        text.Space = Limitless::TextComponent::RenderSpace::World;
-        text.Anchor = Limitless::TextComponent::ScreenAnchor::Center;
 
         const std::filesystem::path scenePath = MakeTempScenePath("EditorEntityFlow.scene.json");
         const auto saveResult = scene.SaveToFile(scenePath);
@@ -638,8 +628,6 @@ TEST_SUITE("Scene And Editor Flows")
 
         const auto& loadedText = loadedRegistry.get<Limitless::TextComponent>(loadedPlayer);
         CHECK(loadedText.Text == "Player");
-        CHECK(loadedText.Space == Limitless::TextComponent::RenderSpace::World);
-        CHECK(loadedText.Anchor == Limitless::TextComponent::ScreenAnchor::Center);
 
         std::error_code errorCode;
         std::filesystem::remove(scenePath, errorCode);

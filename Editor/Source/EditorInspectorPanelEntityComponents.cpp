@@ -228,6 +228,89 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
+        if (auto* canvas = registry.try_get<CanvasComponent>(selectedEntity))
+        {
+            const bool canvasOpen = ImGui::TreeNodeEx("Canvas", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("CanvasComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##CanvasComponentOptionsButton"))
+                ImGui::OpenPopup("CanvasComponentOptions");
+
+            if (ImGui::BeginPopup("CanvasComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveCanvasComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (canvasOpen)
+            {
+                int renderModeIndex = static_cast<int>(canvas->Mode);
+                const char* renderModes[] = { "Screen Space", "World Space" };
+                if (ImGui::Combo("Render Mode", &renderModeIndex, renderModes, 2))
+                    canvas->Mode = static_cast<CanvasComponent::RenderMode>(renderModeIndex);
+                TrackInteractiveMutation(undoService, "Edit Canvas Render Mode");
+
+                ImGui::DragInt("Sort Order", &canvas->SortOrder, 1.0f);
+                TrackInteractiveMutation(undoService, "Edit Canvas Sort Order");
+
+                ImGui::DragFloat2("Reference Resolution", &canvas->ReferenceResolution.x, 1.0f, 1.0f, 16384.0f, "%.0f");
+                canvas->ReferenceResolution.x = std::max(1.0f, canvas->ReferenceResolution.x);
+                canvas->ReferenceResolution.y = std::max(1.0f, canvas->ReferenceResolution.y);
+                TrackInteractiveMutation(undoService, "Edit Canvas Reference Resolution");
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* rectTransform = registry.try_get<RectTransformComponent>(selectedEntity))
+        {
+            const bool rectTransformOpen = ImGui::TreeNodeEx("RectTransform", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("RectTransformComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##RectTransformComponentOptionsButton"))
+                ImGui::OpenPopup("RectTransformComponentOptions");
+
+            if (ImGui::BeginPopup("RectTransformComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveRectTransformComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (rectTransformOpen)
+            {
+                ImGui::DragFloat2("Anchor Min", &rectTransform->AnchorMin.x, 0.01f, 0.0f, 1.0f);
+                rectTransform->AnchorMin.x = std::clamp(rectTransform->AnchorMin.x, 0.0f, 1.0f);
+                rectTransform->AnchorMin.y = std::clamp(rectTransform->AnchorMin.y, 0.0f, 1.0f);
+                TrackInteractiveMutation(undoService, "Edit RectTransform Anchor Min");
+
+                ImGui::DragFloat2("Anchor Max", &rectTransform->AnchorMax.x, 0.01f, 0.0f, 1.0f);
+                rectTransform->AnchorMax.x = std::clamp(rectTransform->AnchorMax.x, 0.0f, 1.0f);
+                rectTransform->AnchorMax.y = std::clamp(rectTransform->AnchorMax.y, 0.0f, 1.0f);
+                TrackInteractiveMutation(undoService, "Edit RectTransform Anchor Max");
+
+                if (rectTransform->AnchorMin.x > rectTransform->AnchorMax.x)
+                    std::swap(rectTransform->AnchorMin.x, rectTransform->AnchorMax.x);
+                if (rectTransform->AnchorMin.y > rectTransform->AnchorMax.y)
+                    std::swap(rectTransform->AnchorMin.y, rectTransform->AnchorMax.y);
+
+                ImGui::DragFloat2("Pivot", &rectTransform->Pivot.x, 0.01f, 0.0f, 1.0f);
+                rectTransform->Pivot.x = std::clamp(rectTransform->Pivot.x, 0.0f, 1.0f);
+                rectTransform->Pivot.y = std::clamp(rectTransform->Pivot.y, 0.0f, 1.0f);
+                TrackInteractiveMutation(undoService, "Edit RectTransform Pivot");
+
+                ImGui::DragFloat2("Size Delta", &rectTransform->SizeDelta.x, 1.0f, -16384.0f, 16384.0f);
+                TrackInteractiveMutation(undoService, "Edit RectTransform Size Delta");
+
+                ImGui::DragFloat2("Anchored Position", &rectTransform->AnchoredPosition.x, 1.0f);
+                TrackInteractiveMutation(undoService, "Edit RectTransform Anchored Position");
+
+                ImGui::TreePop();
+            }
+        }
+
         if (auto* sprite = registry.try_get<SpriteComponent>(selectedEntity))
         {
             const bool spriteOpen = ImGui::TreeNodeEx("Sprite", ImGuiTreeNodeFlags_DefaultOpen);
@@ -1886,34 +1969,140 @@ namespace Limitless::EditorInspectorPanel
                 if (ImGui::DragFloat("Font Size", &text->FontSize, 1.0f, 4.0f, 512.0f))
                     text->FontSize = std::max(4.0f, text->FontSize);
                 TrackInteractiveMutation(undoService, "Edit Font Size");
-                int textRenderSpaceIndex = static_cast<int>(text->Space);
-                const char* textRenderSpaceOptions[] = { "World", "Screen" };
-                if (ImGui::Combo("Render Space", &textRenderSpaceIndex, textRenderSpaceOptions, 2))
-                    text->Space = static_cast<TextComponent::RenderSpace>(textRenderSpaceIndex);
-                TrackInteractiveMutation(undoService, "Edit Text Render Space");
-                if (text->Space == TextComponent::RenderSpace::Screen && ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Screen text uses viewport-centered pixel coordinates (0,0 = center, X right, Y up).");
-                if (text->Space == TextComponent::RenderSpace::Screen)
-                {
-                    int screenAnchorIndex = static_cast<int>(text->Anchor);
-                    const char* screenAnchorOptions[] = {
-                        "Center",
-                        "Top Left",
-                        "Top Center",
-                        "Top Right",
-                        "Middle Left",
-                        "Middle Right",
-                        "Bottom Left",
-                        "Bottom Center",
-                        "Bottom Right"
-                    };
-                    if (ImGui::Combo("Screen Anchor", &screenAnchorIndex, screenAnchorOptions, 9))
-                        text->Anchor = static_cast<TextComponent::ScreenAnchor>(screenAnchorIndex);
-                    TrackInteractiveMutation(undoService, "Edit Text Anchor");
-                }
+                ImGui::TextDisabled("Render mode is driven by Canvas + RectTransform.");
                 ImGui::ColorEdit4("Color", &text->Color.r);
                 TrackInteractiveMutation(undoService, "Edit Text Color");
 
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* uiImage = registry.try_get<UIImageComponent>(selectedEntity))
+        {
+            const bool uiImageOpen = ImGui::TreeNodeEx("UI Image", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("UIImageComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##UIImageComponentOptionsButton"))
+                ImGui::OpenPopup("UIImageComponentOptions");
+
+            if (ImGui::BeginPopup("UIImageComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveUIImageComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (uiImageOpen)
+            {
+                ImGui::Checkbox("Raycast Target", &uiImage->RaycastTarget);
+                TrackInteractiveMutation(undoService, "Edit UIImage Raycast Target");
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* uiText = registry.try_get<UITextComponent>(selectedEntity))
+        {
+            const bool uiTextOpen = ImGui::TreeNodeEx("UI Text", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("UITextComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##UITextComponentOptionsButton"))
+                ImGui::OpenPopup("UITextComponentOptions");
+
+            if (ImGui::BeginPopup("UITextComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveUITextComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (uiTextOpen)
+            {
+                ImGui::Checkbox("Raycast Target", &uiText->RaycastTarget);
+                TrackInteractiveMutation(undoService, "Edit UIText Raycast Target");
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* uiButton = registry.try_get<UIButtonComponent>(selectedEntity))
+        {
+            const bool uiButtonOpen = ImGui::TreeNodeEx("UI Button", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("UIButtonComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##UIButtonComponentOptionsButton"))
+                ImGui::OpenPopup("UIButtonComponentOptions");
+
+            if (ImGui::BeginPopup("UIButtonComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveUIButtonComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (uiButtonOpen)
+            {
+                ImGui::Checkbox("Interactable", &uiButton->Interactable);
+                TrackInteractiveMutation(undoService, "Edit UIButton Interactable");
+                std::array<char, 256> onClickEventBuffer{};
+                std::snprintf(onClickEventBuffer.data(), onClickEventBuffer.size(), "%s", uiButton->OnClickEvent.c_str());
+                if (ImGui::InputText("On Click Event", onClickEventBuffer.data(), onClickEventBuffer.size()))
+                    uiButton->OnClickEvent = onClickEventBuffer.data();
+                TrackInteractiveMutation(undoService, "Edit UIButton OnClick Event");
+                std::array<char, 256> onHoverEnterEventBuffer{};
+                std::snprintf(onHoverEnterEventBuffer.data(), onHoverEnterEventBuffer.size(), "%s", uiButton->OnHoverEnterEvent.c_str());
+                if (ImGui::InputText("On Hover Enter Event", onHoverEnterEventBuffer.data(), onHoverEnterEventBuffer.size()))
+                    uiButton->OnHoverEnterEvent = onHoverEnterEventBuffer.data();
+                TrackInteractiveMutation(undoService, "Edit UIButton OnHoverEnter Event");
+                std::array<char, 256> onHoverExitEventBuffer{};
+                std::snprintf(onHoverExitEventBuffer.data(), onHoverExitEventBuffer.size(), "%s", uiButton->OnHoverExitEvent.c_str());
+                if (ImGui::InputText("On Hover Exit Event", onHoverExitEventBuffer.data(), onHoverExitEventBuffer.size()))
+                    uiButton->OnHoverExitEvent = onHoverExitEventBuffer.data();
+                TrackInteractiveMutation(undoService, "Edit UIButton OnHoverExit Event");
+                std::array<char, 256> onPressedEventBuffer{};
+                std::snprintf(onPressedEventBuffer.data(), onPressedEventBuffer.size(), "%s", uiButton->OnPressedEvent.c_str());
+                if (ImGui::InputText("On Pressed Event", onPressedEventBuffer.data(), onPressedEventBuffer.size()))
+                    uiButton->OnPressedEvent = onPressedEventBuffer.data();
+                TrackInteractiveMutation(undoService, "Edit UIButton OnPressed Event");
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* uiSlider = registry.try_get<UISliderComponent>(selectedEntity))
+        {
+            const bool uiSliderOpen = ImGui::TreeNodeEx("UI Slider", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("UISliderComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##UISliderComponentOptionsButton"))
+                ImGui::OpenPopup("UISliderComponentOptions");
+
+            if (ImGui::BeginPopup("UISliderComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveUISliderComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (uiSliderOpen)
+            {
+                ImGui::Checkbox("Interactable", &uiSlider->Interactable);
+                TrackInteractiveMutation(undoService, "Edit UISlider Interactable");
+                ImGui::DragFloat("Min Value", &uiSlider->MinValue, 0.1f);
+                TrackInteractiveMutation(undoService, "Edit UISlider Min Value");
+                ImGui::DragFloat("Max Value", &uiSlider->MaxValue, 0.1f);
+                if (uiSlider->MaxValue < uiSlider->MinValue)
+                    uiSlider->MaxValue = uiSlider->MinValue;
+                TrackInteractiveMutation(undoService, "Edit UISlider Max Value");
+                ImGui::SliderFloat("Value", &uiSlider->Value, uiSlider->MinValue, uiSlider->MaxValue);
+                uiSlider->Value = std::clamp(uiSlider->Value, uiSlider->MinValue, uiSlider->MaxValue);
+                TrackInteractiveMutation(undoService, "Edit UISlider Value");
+                std::array<char, 256> onValueChangedEventBuffer{};
+                std::snprintf(onValueChangedEventBuffer.data(), onValueChangedEventBuffer.size(), "%s", uiSlider->OnValueChangedEvent.c_str());
+                if (ImGui::InputText("On Value Changed Event", onValueChangedEventBuffer.data(), onValueChangedEventBuffer.size()))
+                    uiSlider->OnValueChangedEvent = onValueChangedEventBuffer.data();
+                TrackInteractiveMutation(undoService, "Edit UISlider OnValueChanged Event");
                 ImGui::TreePop();
             }
         }

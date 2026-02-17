@@ -1901,6 +1901,115 @@ namespace Limitless::EditorInspectorPanel
                 const bool hasPointLight2DComponent = registry.all_of<PointLight2DComponent>(selectedEntity);
                 const bool hasShadowOccluder2DComponent = registry.all_of<ShadowOccluder2DComponent>(selectedEntity);
                 const bool hasTilemapComponent = registry.all_of<TilemapComponent>(selectedEntity);
+                const bool hasCanvasComponent = registry.all_of<CanvasComponent>(selectedEntity);
+                const bool hasRectTransformComponent = registry.all_of<RectTransformComponent>(selectedEntity);
+                const bool hasUIImageComponent = registry.all_of<UIImageComponent>(selectedEntity);
+                const bool hasUITextComponent = registry.all_of<UITextComponent>(selectedEntity);
+                const bool hasUIButtonComponent = registry.all_of<UIButtonComponent>(selectedEntity);
+                const bool hasUISliderComponent = registry.all_of<UISliderComponent>(selectedEntity);
+
+                if (hasCanvasComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Canvas"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add Canvas Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<CanvasComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<CanvasComponent>(selectedEntity);
+                }
+
+                if (hasCanvasComponent)
+                    ImGui::EndDisabled();
+
+                if (hasRectTransformComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("RectTransform"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add RectTransform Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<RectTransformComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<RectTransformComponent>(selectedEntity);
+                }
+
+                if (hasRectTransformComponent)
+                    ImGui::EndDisabled();
+
+                if (hasUIImageComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("UI Image"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add UIImage Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<UIImageComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<UIImageComponent>(selectedEntity);
+                }
+
+                if (hasUIImageComponent)
+                    ImGui::EndDisabled();
+
+                if (hasUITextComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("UI Text"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add UIText Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<UITextComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<UITextComponent>(selectedEntity);
+                }
+
+                if (hasUITextComponent)
+                    ImGui::EndDisabled();
+
+                if (hasUIButtonComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("UI Button"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add UIButton Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<UIButtonComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<UIButtonComponent>(selectedEntity);
+                }
+
+                if (hasUIButtonComponent)
+                    ImGui::EndDisabled();
+
+                if (hasUISliderComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("UI Slider"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add UISlider Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<UISliderComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<UISliderComponent>(selectedEntity);
+                }
+
+                if (hasUISliderComponent)
+                    ImGui::EndDisabled();
+
                 if (hasSpriteComponent)
                     ImGui::BeginDisabled();
 
@@ -2211,6 +2320,96 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::EndDisabled();
 
                 ImGui::EndPopup();
+            }
+
+            if (pendingRemovals.RemoveCanvasComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Canvas Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<CanvasComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<CanvasComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveRectTransformComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove RectTransform Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<RectTransformComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<RectTransformComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveUIImageComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove UIImage Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<UIImageComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<UIImageComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveUITextComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove UIText Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<UITextComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<UITextComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveUIButtonComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove UIButton Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<UIButtonComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<UIButtonComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveUISliderComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove UISlider Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<UISliderComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<UISliderComponent>(selectedEntity);
+                }
             }
 
             if (pendingRemovals.RemoveSpriteComponent)
