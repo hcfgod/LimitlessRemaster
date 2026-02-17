@@ -13,6 +13,8 @@ namespace Limitless::EditorMenuBar
               bool& showPhysicsDiagnosticsWindow,
               bool& showConsoleWindow,
               bool& showEditorFpsOverlay,
+              bool& showAnimationTimelinePanel,
+              bool& showAnimatorGraphPanel,
               const std::function<void()>& onOpenProject,
               const std::function<void()>& onCreateProject,
               const std::function<void()>& onProjectSettings,

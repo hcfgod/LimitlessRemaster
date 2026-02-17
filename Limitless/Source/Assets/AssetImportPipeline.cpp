@@ -35,6 +35,8 @@ namespace Limitless::Assets::AssetImportPipeline
             if (EndsWith(name, ".tileset.json")) return AssetType::Tileset;
             if (EndsWith(name, ".animationclip.json") || EndsWith(name, ".animation.json") || EndsWith(name, ".anim.json"))
                 return AssetType::AnimationClip;
+            if (EndsWith(name, ".animcontroller.json") || EndsWith(name, ".animatorcontroller.json"))
+                return AssetType::AnimatorController;
             if (EndsWith(name, ".material.json")) return AssetType::Material;
             if (EndsWith(name, ".inputactions.json")) return AssetType::InputActions;
             if (EndsWith(name, ".audiomixer.json")) return AssetType::AudioMixer;

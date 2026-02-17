@@ -1,5 +1,7 @@
 #include "Scripting/ScriptableEntity.h"
 
+#include "Scene/Components.h"
+
 #ifndef SCRIPTCORE_EXPORTS
     #include "Physics/Physics2DQueries.h"
     #include "Scene/Scene.h"
@@ -85,6 +87,29 @@ namespace Limitless
         return m_Registry->valid(entity);
     }
 
+    Entity ScriptableEntity::GetEntity(entt::entity entity) const
+    {
+        if (!IsEntityValid(entity))
+            return Entity{};
+        return Entity(const_cast<ScriptableEntity*>(this), entity);
+    }
+
+    Entity ScriptableEntity::FindEntityByTag(const std::string& tag) const
+    {
+        if (tag.empty() || m_Registry == nullptr)
+            return Entity{};
+
+        auto view = m_Registry->view<TagComponent>();
+        for (entt::entity entity : view)
+        {
+            const auto& tagComponent = view.get<TagComponent>(entity);
+            if (tagComponent.Tag == tag)
+                return Entity(const_cast<ScriptableEntity*>(this), entity);
+        }
+
+        return Entity{};
+    }
+
     float ScriptableEntity::GetExposedFloat(const std::string& name, float fallbackValue) const
     {
         if (!m_ExposedProperties)
@@ -145,6 +170,26 @@ namespace Limitless
         return fallbackValue;
     }
 
+    Entity ScriptableEntity::GetExposedEntity(const std::string& name, const Entity& fallbackValue) const
+    {
+        if (!m_ExposedProperties)
+            return fallbackValue;
+        const auto found = m_ExposedProperties->find(name);
+        if (found == m_ExposedProperties->end())
+            return fallbackValue;
+        if (const auto* value = std::get_if<ScriptEntityReference>(&found->second))
+        {
+            if (!value->Tag.empty())
+            {
+                const Entity resolved = FindEntityByTag(value->Tag);
+                if (resolved)
+                    return resolved;
+            }
+            return Entity{};
+        }
+        return fallbackValue;
+    }
+
     void ScriptableEntity::SetExposedFloat(const std::string& name, float value)
     {
         if (m_ExposedProperties)
@@ -173,6 +218,20 @@ namespace Limitless
     {
         if (m_ExposedProperties)
             (*m_ExposedProperties)[name] = value;
+    }
+
+    void ScriptableEntity::SetExposedEntity(const std::string& name, const Entity& value)
+    {
+        if (!m_ExposedProperties)
+            return;
+
+        ScriptEntityReference entityReference{};
+        if (value && m_Registry && m_Registry->valid(value.GetHandle()))
+        {
+            if (const auto* tagComponent = m_Registry->try_get<TagComponent>(value.GetHandle()))
+                entityReference.Tag = tagComponent->Tag;
+        }
+        (*m_ExposedProperties)[name] = std::move(entityReference);
     }
 
     bool ScriptableEntity::Raycast2D(const glm::vec2& origin,
@@ -261,6 +320,132 @@ namespace Limitless
         }
         return contactCount;
 #endif
+    }
+
+    bool ScriptableEntity::HasAnimator() const
+    {
+        return m_Registry != nullptr && m_Registry->valid(m_EntityHandle) && m_Registry->all_of<AnimatorComponent>(m_EntityHandle);
+    }
+
+    bool ScriptableEntity::PlayAnimatorState(const std::string& stateName, bool restartIfSameState)
+    {
+        if (!HasAnimator() || stateName.empty())
+            return false;
+
+        auto& animator = m_Registry->get<AnimatorComponent>(m_EntityHandle);
+        if (!restartIfSameState && animator.RuntimeCurrentStateName == stateName)
+            return true;
+
+        animator.RuntimeCurrentStateName = stateName;
+        animator.RuntimeCurrentClipKey.clear();
+        animator.RuntimeStateTimeSeconds = 0.0f;
+        animator.RuntimePreviousStateTimeSeconds = 0.0f;
+        animator.RuntimeCurrentStateDurationSeconds = 1.0f;
+        animator.RuntimeInitialized = true;
+        return true;
+    }
+
+    bool ScriptableEntity::PlayAnimatorClip(const std::string& clipKey, bool restartIfSameClip)
+    {
+        if (!HasAnimator() || clipKey.empty())
+            return false;
+
+        auto& animator = m_Registry->get<AnimatorComponent>(m_EntityHandle);
+        if (!restartIfSameClip && animator.RuntimeCurrentClipKey == clipKey)
+            return true;
+
+        animator.RuntimeCurrentStateName.clear();
+        animator.RuntimeCurrentClipKey = clipKey;
+        animator.RuntimeStateTimeSeconds = 0.0f;
+        animator.RuntimePreviousStateTimeSeconds = 0.0f;
+        animator.RuntimeCurrentStateDurationSeconds = 1.0f;
+        animator.RuntimeInitialized = true;
+        return true;
+    }
+
+    bool ScriptableEntity::SetAnimatorBool(const std::string& parameterName, bool value)
+    {
+        if (!HasAnimator() || parameterName.empty())
+            return false;
+        auto& animator = m_Registry->get<AnimatorComponent>(m_EntityHandle);
+        animator.SetBoolParameter(parameterName, value);
+        return true;
+    }
+
+    bool ScriptableEntity::GetAnimatorBool(const std::string& parameterName, bool fallback) const
+    {
+        if (!HasAnimator() || parameterName.empty())
+            return fallback;
+        const auto& animator = m_Registry->get<AnimatorComponent>(m_EntityHandle);
+        return animator.GetBoolParameter(parameterName, fallback);
+    }
+
+    bool ScriptableEntity::SetAnimatorFloat(const std::string& parameterName, float value)
+    {
+        if (!HasAnimator() || parameterName.empty())
+            return false;
+        auto& animator = m_Registry->get<AnimatorComponent>(m_EntityHandle);
+        animator.SetFloatParameter(parameterName, value);
+        return true;
+    }
+
+    float ScriptableEntity::GetAnimatorFloat(const std::string& parameterName, float fallback) const
+    {
+        if (!HasAnimator() || parameterName.empty())
+            return fallback;
+        const auto& animator = m_Registry->get<AnimatorComponent>(m_EntityHandle);
+        return animator.GetFloatParameter(parameterName, fallback);
+    }
+
+    bool ScriptableEntity::SetAnimatorInteger(const std::string& parameterName, int32_t value)
+    {
+        if (!HasAnimator() || parameterName.empty())
+            return false;
+        auto& animator = m_Registry->get<AnimatorComponent>(m_EntityHandle);
+        animator.SetIntegerParameter(parameterName, value);
+        return true;
+    }
+
+    int32_t ScriptableEntity::GetAnimatorInteger(const std::string& parameterName, int32_t fallback) const
+    {
+        if (!HasAnimator() || parameterName.empty())
+            return fallback;
+        const auto& animator = m_Registry->get<AnimatorComponent>(m_EntityHandle);
+        return animator.GetIntegerParameter(parameterName, fallback);
+    }
+
+    bool ScriptableEntity::SetAnimatorTrigger(const std::string& parameterName)
+    {
+        if (!HasAnimator() || parameterName.empty())
+            return false;
+        auto& animator = m_Registry->get<AnimatorComponent>(m_EntityHandle);
+        animator.SetTrigger(parameterName);
+        return true;
+    }
+
+    bool ScriptableEntity::ResetAnimatorTrigger(const std::string& parameterName)
+    {
+        if (!HasAnimator() || parameterName.empty())
+            return false;
+        auto& animator = m_Registry->get<AnimatorComponent>(m_EntityHandle);
+        animator.ResetTrigger(parameterName);
+        return true;
+    }
+
+    std::string ScriptableEntity::GetAnimatorCurrentStateName() const
+    {
+        if (!HasAnimator())
+            return {};
+        const auto& animator = m_Registry->get<AnimatorComponent>(m_EntityHandle);
+        return animator.RuntimeCurrentStateName;
+    }
+
+    float ScriptableEntity::GetAnimatorStateTimeSeconds() const
+    {
+        if (!HasAnimator())
+            return 0.0f;
+        const auto& animator = m_Registry->get<AnimatorComponent>(m_EntityHandle);
+        return animator.RuntimeStateTimeSeconds;
     }
 
 }

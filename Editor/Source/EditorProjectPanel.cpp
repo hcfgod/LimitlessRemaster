@@ -9,11 +9,13 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <regex>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -22,6 +24,264 @@ namespace Limitless::EditorProjectPanel
     namespace
     {
         constexpr const char* kSceneEntityPayload = "SCENE_ENTITY";
+        constexpr const char* kAssetMultiSelectionPayload = "ASSET_MULTI_KEYS";
+
+        std::vector<std::string> ParseAssetKeyListPayload(const void* payloadData, int payloadSize)
+        {
+            std::vector<std::string> keys;
+            if (!payloadData || payloadSize <= 0)
+                return keys;
+
+            std::string payloadText(static_cast<const char*>(payloadData), static_cast<size_t>(payloadSize));
+            while (!payloadText.empty() && payloadText.back() == '\0')
+                payloadText.pop_back();
+            if (payloadText.empty())
+                return keys;
+
+            size_t lineStart = 0;
+            while (lineStart < payloadText.size())
+            {
+                const size_t lineEnd = payloadText.find('\n', lineStart);
+                const size_t count = (lineEnd == std::string::npos) ? (payloadText.size() - lineStart) : (lineEnd - lineStart);
+                std::string key = payloadText.substr(lineStart, count);
+                if (!key.empty())
+                    keys.push_back(std::move(key));
+                if (lineEnd == std::string::npos)
+                    break;
+                lineStart = lineEnd + 1;
+            }
+
+            return keys;
+        }
+
+        std::string EncodeAssetKeyListPayload(const std::vector<std::string>& keys)
+        {
+            std::string payloadText;
+            for (const auto& key : keys)
+            {
+                if (key.empty())
+                    continue;
+                if (!payloadText.empty())
+                    payloadText.push_back('\n');
+                payloadText += key;
+            }
+            return payloadText;
+        }
+        constexpr uint8_t kScriptPairHeaderBit = 1u << 0u;
+        constexpr uint8_t kScriptPairSourceBit = 1u << 1u;
+        constexpr std::chrono::milliseconds kDirectoryCacheRefreshInterval(250);
+
+        struct ProjectAssetTreeEntry
+        {
+            std::filesystem::path AbsolutePath;
+            std::filesystem::path RelativePath;
+            std::string FileName;
+            std::string LowerFileName;
+            std::string LowerExtension;
+            std::string AssetKey;
+            bool IsDirectory = false;
+        };
+
+        struct ProjectAssetDirectoryCacheEntry
+        {
+            std::vector<ProjectAssetTreeEntry> Entries;
+            std::chrono::steady_clock::time_point LastRefreshTime = {};
+        };
+
+        std::unordered_map<std::string, ProjectAssetDirectoryCacheEntry> gProjectAssetDirectoryCache;
+
+        std::string ToLowerAscii(std::string value)
+        {
+            for (char& character : value)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            return value;
+        }
+
+        bool IsTextureExtensionLower(const std::string& lowerExtension)
+        {
+            return lowerExtension == ".png" || lowerExtension == ".jpg" || lowerExtension == ".jpeg" ||
+                   lowerExtension == ".ppm" || lowerExtension == ".pnm" || lowerExtension == ".bmp" ||
+                   lowerExtension == ".tga" || lowerExtension == ".gif";
+        }
+
+        bool IsSceneFileNameLower(const std::string& lowerFileName)
+        {
+            return lowerFileName.size() >= 11 && lowerFileName.rfind(".scene.json") == (lowerFileName.size() - 11);
+        }
+
+        bool IsMaterialFileNameLower(const std::string& lowerFileName)
+        {
+            constexpr const char* materialSuffix = ".material.json";
+            const std::string suffixString = materialSuffix;
+            return lowerFileName.size() >= suffixString.size() &&
+                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
+        }
+
+        bool IsTilesetFileNameLower(const std::string& lowerFileName)
+        {
+            constexpr const char* tilesetSuffix = ".tileset.json";
+            const std::string suffixString = tilesetSuffix;
+            return lowerFileName.size() >= suffixString.size() &&
+                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
+        }
+
+        bool IsAudioMixerFileNameLower(const std::string& lowerFileName)
+        {
+            constexpr const char* audioMixerSuffix = ".audiomixer.json";
+            const std::string suffixString = audioMixerSuffix;
+            return lowerFileName.size() >= suffixString.size() &&
+                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
+        }
+
+        bool IsInputActionsFileNameLower(const std::string& lowerFileName)
+        {
+            constexpr const char* inputActionsSuffix = ".inputactions.json";
+            const std::string suffixString = inputActionsSuffix;
+            return lowerFileName.size() >= suffixString.size() &&
+                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
+        }
+
+        bool IsPrefabFileNameLower(const std::string& lowerFileName)
+        {
+            constexpr const char* prefabSuffix = ".prefab.json";
+            const std::string suffixString = prefabSuffix;
+            return lowerFileName.size() >= suffixString.size() &&
+                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
+        }
+
+        bool IsAnimationClipFileNameLower(const std::string& lowerFileName)
+        {
+            return lowerFileName.ends_with(".animationclip.json") ||
+                   lowerFileName.ends_with(".animation.json") ||
+                   lowerFileName.ends_with(".anim.json");
+        }
+
+        bool IsAnimatorControllerFileNameLower(const std::string& lowerFileName)
+        {
+            return lowerFileName.ends_with(".animcontroller.json") ||
+                   lowerFileName.ends_with(".animatorcontroller.json");
+        }
+
+        bool IsShaderExtensionLower(const std::string& lowerExtension)
+        {
+            return lowerExtension == ".glsl";
+        }
+
+        bool IsAudioExtensionLower(const std::string& lowerExtension)
+        {
+            return lowerExtension == ".wav" || lowerExtension == ".mp3" || lowerExtension == ".ogg" || lowerExtension == ".flac";
+        }
+
+        bool IsFontExtensionLower(const std::string& lowerExtension)
+        {
+            return lowerExtension == ".ttf" || lowerExtension == ".otf";
+        }
+
+        bool IsNativeScriptExtensionLower(const std::string& lowerExtension)
+        {
+            return lowerExtension == ".h" || lowerExtension == ".cpp";
+        }
+
+        std::vector<ProjectAssetTreeEntry> ScanProjectDirectoryEntries(const std::filesystem::path& assetsDirectory,
+                                                                       const std::filesystem::path& relativePath)
+        {
+            std::vector<ProjectAssetTreeEntry> entries;
+            const std::filesystem::path currentDirectory = assetsDirectory / relativePath;
+            std::error_code errorCode;
+            for (const auto& entry : std::filesystem::directory_iterator(currentDirectory, errorCode))
+            {
+                if (errorCode)
+                    continue;
+
+                ProjectAssetTreeEntry nextEntry;
+                nextEntry.AbsolutePath = entry.path();
+                nextEntry.FileName = nextEntry.AbsolutePath.filename().string();
+                if (nextEntry.FileName.empty() || nextEntry.FileName[0] == '.')
+                    continue;
+                if (nextEntry.FileName == "Cache")
+                    continue;
+
+                std::error_code isDirectoryError;
+                nextEntry.IsDirectory = entry.is_directory(isDirectoryError);
+                if (isDirectoryError)
+                    nextEntry.IsDirectory = false;
+
+                nextEntry.LowerFileName = ToLowerAscii(nextEntry.FileName);
+                if (!nextEntry.IsDirectory)
+                {
+                    nextEntry.LowerExtension = ToLowerAscii(nextEntry.AbsolutePath.extension().string());
+                    if (nextEntry.LowerExtension == ".meta")
+                        continue;
+                }
+
+                nextEntry.RelativePath = relativePath / nextEntry.FileName;
+                nextEntry.AssetKey = "Assets/" + nextEntry.RelativePath.generic_string();
+                entries.push_back(std::move(nextEntry));
+            }
+
+            std::sort(entries.begin(), entries.end(), [](const ProjectAssetTreeEntry& left, const ProjectAssetTreeEntry& right) {
+                if (left.IsDirectory != right.IsDirectory)
+                    return left.IsDirectory;
+                return left.FileName < right.FileName;
+            });
+
+            return entries;
+        }
+
+        const std::vector<ProjectAssetTreeEntry>& GetCachedProjectDirectoryEntries(const std::filesystem::path& assetsDirectory,
+                                                                                    const std::filesystem::path& relativePath)
+        {
+            const std::filesystem::path currentDirectory = assetsDirectory / relativePath;
+            const std::string cacheKey = currentDirectory.lexically_normal().generic_string();
+            ProjectAssetDirectoryCacheEntry& cacheEntry = gProjectAssetDirectoryCache[cacheKey];
+
+            const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+            const bool shouldRefresh = cacheEntry.Entries.empty() ||
+                (now - cacheEntry.LastRefreshTime) >= kDirectoryCacheRefreshInterval;
+            if (shouldRefresh)
+            {
+                cacheEntry.Entries = ScanProjectDirectoryEntries(assetsDirectory, relativePath);
+                cacheEntry.LastRefreshTime = now;
+            }
+
+            return cacheEntry.Entries;
+        }
+
+        void InvalidateProjectDirectoryCache()
+        {
+            gProjectAssetDirectoryCache.clear();
+        }
+
+        void MoveAssetOrFolderToTargetFolder(const char* assetOrFolderKey,
+                                             const std::filesystem::path& destinationFolderRelativePath)
+        {
+            if (!assetOrFolderKey || !assetOrFolderKey[0])
+                return;
+
+            const bool moved = std::filesystem::path(assetOrFolderKey).extension().empty()
+                ? ProjectAssetOperations::MoveFolderToFolder(assetOrFolderKey, destinationFolderRelativePath)
+                : ProjectAssetOperations::MoveAssetToFolder(assetOrFolderKey, destinationFolderRelativePath);
+            if (moved)
+                InvalidateProjectDirectoryCache();
+        }
+
+        void MoveAssetListToTargetFolder(const std::vector<std::string>& assetKeys,
+                                         const std::filesystem::path& destinationFolderRelativePath)
+        {
+            bool movedAny = false;
+            for (const auto& key : assetKeys)
+            {
+                if (key.empty())
+                    continue;
+                const bool moved = std::filesystem::path(key).extension().empty()
+                    ? ProjectAssetOperations::MoveFolderToFolder(key.c_str(), destinationFolderRelativePath)
+                    : ProjectAssetOperations::MoveAssetToFolder(key.c_str(), destinationFolderRelativePath);
+                movedAny |= moved;
+            }
+
+            if (movedAny)
+                InvalidateProjectDirectoryCache();
+        }
 
         void CopyTextToBuffer(std::array<char, 256>& destination, const char* source)
         {
@@ -32,129 +292,6 @@ namespace Limitless::EditorProjectPanel
             }
 
             std::snprintf(destination.data(), destination.size(), "%s", source);
-        }
-
-        bool IsTextureExtension(const std::filesystem::path& path)
-        {
-            const std::string extension = path.extension().string();
-            if (extension.empty())
-                return false;
-
-            std::string extensionLower = extension;
-            for (char& character : extensionLower)
-                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-
-            return extensionLower == ".png" || extensionLower == ".jpg" || extensionLower == ".jpeg" ||
-                   extensionLower == ".ppm" || extensionLower == ".pnm" || extensionLower == ".bmp" ||
-                   extensionLower == ".tga" || extensionLower == ".gif";
-        }
-
-        bool IsSceneExtension(const std::filesystem::path& path)
-        {
-            std::string lowerFileName = path.filename().string();
-            for (char& character : lowerFileName)
-                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-            return lowerFileName.size() >= 11 && lowerFileName.rfind(".scene.json") == (lowerFileName.size() - 11);
-        }
-
-        bool IsMaterialExtension(const std::filesystem::path& path)
-        {
-            std::string lowerFileName = path.filename().string();
-            for (char& character : lowerFileName)
-                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-            constexpr const char* materialSuffix = ".material.json";
-            const std::string suffixString = materialSuffix;
-            return lowerFileName.size() >= suffixString.size() &&
-                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
-        }
-
-        bool IsTilesetExtension(const std::filesystem::path& path)
-        {
-            std::string lowerFileName = path.filename().string();
-            for (char& character : lowerFileName)
-                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-            constexpr const char* tilesetSuffix = ".tileset.json";
-            const std::string suffixString = tilesetSuffix;
-            return lowerFileName.size() >= suffixString.size() &&
-                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
-        }
-
-        bool IsAudioMixerExtension(const std::filesystem::path& path)
-        {
-            std::string lowerFileName = path.filename().string();
-            for (char& character : lowerFileName)
-                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-            constexpr const char* audioMixerSuffix = ".audiomixer.json";
-            const std::string suffixString = audioMixerSuffix;
-            return lowerFileName.size() >= suffixString.size() &&
-                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
-        }
-
-        bool IsInputActionsExtension(const std::filesystem::path& path)
-        {
-            std::string lowerFileName = path.filename().string();
-            for (char& character : lowerFileName)
-                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-            constexpr const char* inputActionsSuffix = ".inputactions.json";
-            const std::string suffixString = inputActionsSuffix;
-            return lowerFileName.size() >= suffixString.size() &&
-                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
-        }
-
-        bool IsPrefabExtension(const std::filesystem::path& path)
-        {
-            std::string lowerFileName = path.filename().string();
-            for (char& character : lowerFileName)
-                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-            constexpr const char* prefabSuffix = ".prefab.json";
-            const std::string suffixString = prefabSuffix;
-            return lowerFileName.size() >= suffixString.size() &&
-                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
-        }
-
-        bool IsShaderExtension(const std::filesystem::path& path)
-        {
-            std::string lowerExtension = path.extension().string();
-            for (char& character : lowerExtension)
-                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-            return lowerExtension == ".glsl";
-        }
-
-        bool IsAudioExtension(const std::filesystem::path& path)
-        {
-            std::string lowerExtension = path.extension().string();
-            for (char& character : lowerExtension)
-                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-            return lowerExtension == ".wav" || lowerExtension == ".mp3" || lowerExtension == ".ogg" || lowerExtension == ".flac";
-        }
-
-        bool IsFontExtension(const std::filesystem::path& path)
-        {
-            std::string lowerExtension = path.extension().string();
-            for (char& character : lowerExtension)
-                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-            return lowerExtension == ".ttf" || lowerExtension == ".otf";
-        }
-
-        bool IsNativeScriptExtension(const std::filesystem::path& path)
-        {
-            std::string lowerExtension = path.extension().string();
-            for (char& character : lowerExtension)
-                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-            return lowerExtension == ".h" || lowerExtension == ".cpp";
-        }
-
-        std::filesystem::path GetPairedScriptRelativePath(const std::filesystem::path& scriptRelativePath)
-        {
-            std::filesystem::path pairPath = scriptRelativePath;
-            std::string extension = pairPath.extension().string();
-            for (char& character : extension)
-                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-            if (extension == ".cpp")
-                pairPath.replace_extension(".h");
-            else
-                pairPath.replace_extension(".cpp");
-            return pairPath;
         }
 
         std::string BuildScriptAssetDisplayName(const std::filesystem::path& path)
@@ -273,6 +410,7 @@ namespace Limitless::EditorProjectPanel
             (void)Assets::AssetImportPipeline::ReimportChanged(true);
             outCreatedSourceAssetKey = "Assets/" + (parentRelativePath / (className + ".cpp")).generic_string();
             outError.clear();
+            InvalidateProjectDirectoryCache();
             return true;
         }
 
@@ -395,6 +533,7 @@ namespace Limitless::EditorProjectPanel
             (void)ReplaceWholeWordInFile(newHeaderPath, oldClassName, newClassName);
             (void)ReplaceWholeWordInFile(newSourcePath, oldClassName, newClassName);
             (void)Assets::AssetImportPipeline::ReimportChanged(true);
+            InvalidateProjectDirectoryCache();
             return true;
         }
 
@@ -420,7 +559,10 @@ namespace Limitless::EditorProjectPanel
             std::filesystem::remove(sourceMetaPath, errorCode);
 
             if (removedAny)
+            {
                 (void)Assets::AssetImportPipeline::ReimportChanged(true);
+                InvalidateProjectDirectoryCache();
+            }
             return removedAny;
         }
 
@@ -442,6 +584,8 @@ namespace Limitless::EditorProjectPanel
                            std::string& selectedTilesetAssetKey,
                            std::string& selectedAudioMixerAssetKey,
                            std::string& selectedInputActionsAssetKey,
+                          std::string& selectedAnimationClipAssetKey,
+                          std::string& selectedAnimatorControllerAssetKey,
                            const char* texturePayloadId,
                            const char* audioPayloadId,
                            const char* assetMovePayloadId,
@@ -455,6 +599,8 @@ namespace Limitless::EditorProjectPanel
                            const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
                            const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
                            const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAudioMixerRequested,
+                          const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimationClipRequested,
+                          const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimatorControllerRequested,
                            const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
                            const std::function<void(const std::string&)>& onPrefabOpened,
                            const std::function<void(const std::string&)>& onPrefabInstantiated,
@@ -467,42 +613,38 @@ namespace Limitless::EditorProjectPanel
             if (!std::filesystem::exists(currentDirectory, errorCode) || !std::filesystem::is_directory(currentDirectory, errorCode))
                 return;
 
-            std::vector<std::filesystem::path> entries;
-            for (const auto& entry : std::filesystem::directory_iterator(currentDirectory, errorCode))
-            {
-                if (errorCode)
-                    continue;
-
-                const std::string name = entry.path().filename().string();
-                if (name.empty() || name[0] == '.')
-                    continue;
-                if (name == "Cache")
-                    continue;
-
-                std::string extension = entry.path().extension().string();
-                for (char& character : extension)
-                    character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-                if (extension == ".meta")
-                    continue;
-
-                entries.push_back(entry.path());
-            }
-
-            std::sort(entries.begin(), entries.end(), [](const auto& left, const auto& right) {
-                const bool leftDirectory = std::filesystem::is_directory(left);
-                const bool rightDirectory = std::filesystem::is_directory(right);
-                if (leftDirectory != rightDirectory)
-                    return leftDirectory;
-                return left.filename().string() < right.filename().string();
-            });
-
-            std::unordered_set<std::string> renderedScriptBasePaths;
+            const std::vector<ProjectAssetTreeEntry>& entries = GetCachedProjectDirectoryEntries(assetsDirectory, relativePath);
+            std::vector<std::string> directoryAssetKeys;
+            directoryAssetKeys.reserve(entries.size());
             for (const auto& entry : entries)
             {
-                const std::string fileName = entry.filename().string();
-                const bool isDirectory = std::filesystem::is_directory(entry);
-                const std::string assetKey = "Assets/" + (relativePath / fileName).generic_string();
-                const std::filesystem::path entryRelativePath = relativePath / fileName;
+                if (!entry.IsDirectory && !entry.AssetKey.empty())
+                    directoryAssetKeys.push_back(entry.AssetKey);
+            }
+
+            std::unordered_map<std::string, uint8_t> scriptPairPresenceByBasePath;
+            scriptPairPresenceByBasePath.reserve(entries.size());
+            for (const ProjectAssetTreeEntry& entry : entries)
+            {
+                if (entry.IsDirectory || !IsNativeScriptExtensionLower(entry.LowerExtension))
+                    continue;
+
+                const std::filesystem::path scriptBaseRelativePath = entry.RelativePath.parent_path() / std::filesystem::path(entry.FileName).stem();
+                const std::string scriptBaseKey = scriptBaseRelativePath.generic_string();
+                uint8_t& presenceBits = scriptPairPresenceByBasePath[scriptBaseKey];
+                if (entry.LowerExtension == ".h")
+                    presenceBits |= kScriptPairHeaderBit;
+                else if (entry.LowerExtension == ".cpp")
+                    presenceBits |= kScriptPairSourceBit;
+            }
+
+            std::unordered_set<std::string> renderedScriptBasePaths;
+            for (const ProjectAssetTreeEntry& entry : entries)
+            {
+                const std::string& fileName = entry.FileName;
+                const bool isDirectory = entry.IsDirectory;
+                const std::string& assetKey = entry.AssetKey;
+                const std::filesystem::path& entryRelativePath = entry.RelativePath;
 
                 if (isDirectory)
                 {
@@ -540,6 +682,18 @@ namespace Limitless::EditorProjectPanel
                             CopyTextToBuffer(state.CreateAudioMixerNameBuffer, "New Audio Mixer");
                             state.CreateAudioMixerPopupPending = true;
                         }
+                        if (ImGui::MenuItem("Create Animation Clip"))
+                        {
+                            state.CreateAnimationClipParentRelativePath = entryRelativePath;
+                            CopyTextToBuffer(state.CreateAnimationClipNameBuffer, "New Animation Clip");
+                            state.CreateAnimationClipPopupPending = true;
+                        }
+                        if (ImGui::MenuItem("Create Animator Controller"))
+                        {
+                            state.CreateAnimatorControllerParentRelativePath = entryRelativePath;
+                            CopyTextToBuffer(state.CreateAnimatorControllerNameBuffer, "New Animator Controller");
+                            state.CreateAnimatorControllerPopupPending = true;
+                        }
                         if (ImGui::MenuItem("Create Native Script"))
                         {
                             state.CreateNativeScriptParentRelativePath = entryRelativePath;
@@ -555,56 +709,41 @@ namespace Limitless::EditorProjectPanel
                         if (ImGui::MenuItem("Delete"))
                         {
                             if (ProjectAssetOperations::DeleteFolderInAssets(assetsDirectory, entryRelativePath))
+                            {
+                                InvalidateProjectDirectoryCache();
                                 LT_INFO("Deleted folder {}", entryRelativePath.generic_string());
+                            }
                         }
                         ImGui::EndPopup();
                     }
 
                     if (ImGui::BeginDragDropTarget())
                     {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kAssetMultiSelectionPayload))
+                        {
+                            const std::vector<std::string> keys = ParseAssetKeyListPayload(payload->Data, payload->DataSize);
+                            MoveAssetListToTargetFolder(keys, entryRelativePath);
+                        }
+                        else
                         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
                         {
                             const char* key = static_cast<const char*>(payload->Data);
-                            if (key && key[0])
-                            {
-                                if (std::filesystem::path(key).extension().empty())
-                                    ProjectAssetOperations::MoveFolderToFolder(key, entryRelativePath);
-                                else
-                                    ProjectAssetOperations::MoveAssetToFolder(key, entryRelativePath);
-                            }
+                            MoveAssetOrFolderToTargetFolder(key, entryRelativePath);
                         }
                         else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(assetMovePayloadId))
                         {
                             const char* key = static_cast<const char*>(payload->Data);
-                            if (key && key[0])
-                            {
-                                if (std::filesystem::path(key).extension().empty())
-                                    ProjectAssetOperations::MoveFolderToFolder(key, entryRelativePath);
-                                else
-                                    ProjectAssetOperations::MoveAssetToFolder(key, entryRelativePath);
-                            }
+                            MoveAssetOrFolderToTargetFolder(key, entryRelativePath);
                         }
                         else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(audioPayloadId))
                         {
                             const char* key = static_cast<const char*>(payload->Data);
-                            if (key && key[0])
-                            {
-                                if (std::filesystem::path(key).extension().empty())
-                                    ProjectAssetOperations::MoveFolderToFolder(key, entryRelativePath);
-                                else
-                                    ProjectAssetOperations::MoveAssetToFolder(key, entryRelativePath);
-                            }
+                            MoveAssetOrFolderToTargetFolder(key, entryRelativePath);
                         }
                         else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(fontPayloadId))
                         {
                             const char* key = static_cast<const char*>(payload->Data);
-                            if (key && key[0])
-                            {
-                                if (std::filesystem::path(key).extension().empty())
-                                    ProjectAssetOperations::MoveFolderToFolder(key, entryRelativePath);
-                                else
-                                    ProjectAssetOperations::MoveAssetToFolder(key, entryRelativePath);
-                            }
+                            MoveAssetOrFolderToTargetFolder(key, entryRelativePath);
                         }
                         else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSceneEntityPayload))
                         {
@@ -637,6 +776,8 @@ namespace Limitless::EditorProjectPanel
                                       selectedTilesetAssetKey,
                                       selectedAudioMixerAssetKey,
                                       selectedInputActionsAssetKey,
+                                      selectedAnimationClipAssetKey,
+                                      selectedAnimatorControllerAssetKey,
                                       texturePayloadId,
                                       audioPayloadId,
                                       assetMovePayloadId,
@@ -650,6 +791,8 @@ namespace Limitless::EditorProjectPanel
                                       onCreateMaterialRequested,
                                       onCreateTilesetRequested,
                                       onCreateAudioMixerRequested,
+                                      onCreateAnimationClipRequested,
+                                      onCreateAnimatorControllerRequested,
                                       onCreatePrefabFromSceneEntityRequested,
                                       onPrefabOpened,
                                       onPrefabInstantiated,
@@ -661,7 +804,7 @@ namespace Limitless::EditorProjectPanel
                 }
                 else
                 {
-                    if (IsNativeScriptExtension(entry))
+                    if (IsNativeScriptExtensionLower(entry.LowerExtension))
                     {
                         const std::filesystem::path scriptBaseRelativePath = entryRelativePath.parent_path() / entryRelativePath.stem();
                         const std::string scriptBaseKey = scriptBaseRelativePath.generic_string();
@@ -670,9 +813,12 @@ namespace Limitless::EditorProjectPanel
 
                         const std::filesystem::path headerRelativePath = scriptBaseRelativePath.string() + ".h";
                         const std::filesystem::path sourceRelativePath = scriptBaseRelativePath.string() + ".cpp";
-                        const bool hasHeader = std::filesystem::exists(assetsDirectory / headerRelativePath);
-                        const bool hasSource = std::filesystem::exists(assetsDirectory / sourceRelativePath);
-                        if (hasHeader && hasSource)
+                        const auto scriptPairPresenceIt = scriptPairPresenceByBasePath.find(scriptBaseKey);
+                        const bool hasScriptPair =
+                            scriptPairPresenceIt != scriptPairPresenceByBasePath.end() &&
+                            (scriptPairPresenceIt->second & (kScriptPairHeaderBit | kScriptPairSourceBit)) ==
+                                (kScriptPairHeaderBit | kScriptPairSourceBit);
+                        if (hasScriptPair)
                         {
                             renderedScriptBasePaths.insert(scriptBaseKey);
                             const std::string scriptBaseName = scriptBaseRelativePath.stem().string();
@@ -693,6 +839,9 @@ namespace Limitless::EditorProjectPanel
                                 (ImGui::GetDragDropPayload() == nullptr);
                             if (selectedScriptPairWithoutDrag)
                             {
+                                state.MultiSelectedAssetKeys.clear();
+                                state.MultiSelectedAssetKeys.push_back(sourceAssetKey);
+                                state.SelectionAnchorAssetKey = sourceAssetKey;
                                 selectedNativeScriptAssetKey = sourceAssetKey;
                                 selectedPrefabAssetKey.clear();
                                 selectedTextureAssetKey.clear();
@@ -700,6 +849,8 @@ namespace Limitless::EditorProjectPanel
                                 selectedTilesetAssetKey.clear();
                                 selectedAudioMixerAssetKey.clear();
                                 selectedInputActionsAssetKey.clear();
+                                selectedAnimationClipAssetKey.clear();
+                                selectedAnimatorControllerAssetKey.clear();
                                 selectedEntity = entt::null;
                                 cachedTextureAsset.reset();
                                 cachedMaterialAsset.reset();
@@ -725,7 +876,10 @@ namespace Limitless::EditorProjectPanel
                                 {
                                     const bool removed = DeleteNativeScriptPairInAssets(assetsDirectory, sourceRelativePath);
                                     if (removed)
+                                    {
+                                        InvalidateProjectDirectoryCache();
                                         LT_INFO("Deleted native script pair {}", scriptBaseName);
+                                    }
                                 }
                                 ImGui::EndPopup();
                             }
@@ -744,6 +898,9 @@ namespace Limitless::EditorProjectPanel
                                 ImGui::TreeNodeEx(headerItemLabel.c_str(), headerItemFlags);
                                 if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0) && (ImGui::GetDragDropPayload() == nullptr))
                                 {
+                                    state.MultiSelectedAssetKeys.clear();
+                                    state.MultiSelectedAssetKeys.push_back(headerAssetKey);
+                                    state.SelectionAnchorAssetKey = headerAssetKey;
                                     selectedNativeScriptAssetKey = headerAssetKey;
                                     selectedPrefabAssetKey.clear();
                                     selectedTextureAssetKey.clear();
@@ -751,6 +908,8 @@ namespace Limitless::EditorProjectPanel
                                     selectedTilesetAssetKey.clear();
                                     selectedAudioMixerAssetKey.clear();
                                     selectedInputActionsAssetKey.clear();
+                                    selectedAnimationClipAssetKey.clear();
+                                    selectedAnimatorControllerAssetKey.clear();
                                     selectedEntity = entt::null;
                                     cachedTextureAsset.reset();
                                     cachedMaterialAsset.reset();
@@ -761,6 +920,9 @@ namespace Limitless::EditorProjectPanel
                                 ImGui::TreeNodeEx(sourceItemLabel.c_str(), sourceItemFlags);
                                 if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0) && (ImGui::GetDragDropPayload() == nullptr))
                                 {
+                                    state.MultiSelectedAssetKeys.clear();
+                                    state.MultiSelectedAssetKeys.push_back(sourceAssetKey);
+                                    state.SelectionAnchorAssetKey = sourceAssetKey;
                                     selectedNativeScriptAssetKey = sourceAssetKey;
                                     selectedPrefabAssetKey.clear();
                                     selectedTextureAssetKey.clear();
@@ -768,6 +930,8 @@ namespace Limitless::EditorProjectPanel
                                     selectedTilesetAssetKey.clear();
                                     selectedAudioMixerAssetKey.clear();
                                     selectedInputActionsAssetKey.clear();
+                                    selectedAnimationClipAssetKey.clear();
+                                    selectedAnimatorControllerAssetKey.clear();
                                     selectedEntity = entt::null;
                                     cachedTextureAsset.reset();
                                     cachedMaterialAsset.reset();
@@ -780,204 +944,223 @@ namespace Limitless::EditorProjectPanel
                         }
                     }
 
-                    const bool isTexture = IsTextureExtension(entry);
-                    const bool isScene = IsSceneExtension(entry);
-                    const bool isMaterial = IsMaterialExtension(entry);
-                    const bool isTileset = IsTilesetExtension(entry);
-                    const bool isAudioMixer = IsAudioMixerExtension(entry);
-                    const bool isInputActions = IsInputActionsExtension(entry);
-                    const bool isPrefab = IsPrefabExtension(entry);
-                    const bool isShader = IsShaderExtension(entry);
-                    const bool isAudio = IsAudioExtension(entry);
-                    const bool isFont = IsFontExtension(entry);
-                    const bool isNativeScriptFile = IsNativeScriptExtension(entry);
-                    const std::filesystem::path pairedScriptRelativePath = isNativeScriptFile
-                        ? GetPairedScriptRelativePath(entryRelativePath)
-                        : std::filesystem::path{};
-                    const bool hasPairedScriptFile = isNativeScriptFile && std::filesystem::exists(assetsDirectory / pairedScriptRelativePath);
+                    const bool isTexture = IsTextureExtensionLower(entry.LowerExtension);
+                    const bool isScene = IsSceneFileNameLower(entry.LowerFileName);
+                    const bool isMaterial = IsMaterialFileNameLower(entry.LowerFileName);
+                    const bool isTileset = IsTilesetFileNameLower(entry.LowerFileName);
+                    const bool isAudioMixer = IsAudioMixerFileNameLower(entry.LowerFileName);
+                    const bool isInputActions = IsInputActionsFileNameLower(entry.LowerFileName);
+                    const bool isAnimationClip = IsAnimationClipFileNameLower(entry.LowerFileName);
+                    const bool isAnimatorController = IsAnimatorControllerFileNameLower(entry.LowerFileName);
+                    const bool isPrefab = IsPrefabFileNameLower(entry.LowerFileName);
+                    const bool isShader = IsShaderExtensionLower(entry.LowerExtension);
+                    const bool isAudio = IsAudioExtensionLower(entry.LowerExtension);
+                    const bool isFont = IsFontExtensionLower(entry.LowerExtension);
+                    const bool isNativeScriptFile = IsNativeScriptExtensionLower(entry.LowerExtension);
+                    const bool hasPairedScriptFile = isNativeScriptFile
+                        && ([&]() {
+                               const std::filesystem::path scriptBaseRelativePath = entryRelativePath.parent_path() / entryRelativePath.stem();
+                               const auto scriptPairPresenceIt = scriptPairPresenceByBasePath.find(scriptBaseRelativePath.generic_string());
+                               return scriptPairPresenceIt != scriptPairPresenceByBasePath.end() &&
+                                      (scriptPairPresenceIt->second & (kScriptPairHeaderBit | kScriptPairSourceBit)) ==
+                                          (kScriptPairHeaderBit | kScriptPairSourceBit);
+                           })();
                     const std::string displayName = isNativeScriptFile
-                        ? BuildScriptAssetDisplayName(entry)
-                        : GetAssetDisplayName(entry);
+                        ? BuildScriptAssetDisplayName(entry.AbsolutePath)
+                        : GetAssetDisplayName(entry.AbsolutePath);
                     const std::string treeLabel = displayName + "###" + fileName;
                     const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
-                    const bool isSelected =
+                    const bool isPrimarySelected =
                         (isTexture && (selectedTextureAssetKey == assetKey)) ||
                         (isMaterial && (selectedMaterialAssetKey == assetKey)) ||
                         (isTileset && (selectedTilesetAssetKey == assetKey)) ||
                         (isAudioMixer && (selectedAudioMixerAssetKey == assetKey)) ||
                         (isInputActions && (selectedInputActionsAssetKey == assetKey)) ||
+                        (isAnimationClip && (selectedAnimationClipAssetKey == assetKey)) ||
+                        (isAnimatorController && (selectedAnimatorControllerAssetKey == assetKey)) ||
                         (isNativeScriptFile && (selectedNativeScriptAssetKey == assetKey)) ||
                         (isPrefab && (selectedPrefabAssetKey == assetKey));
-                    ImGui::TreeNodeEx(treeLabel.c_str(), isSelected ? (flags | ImGuiTreeNodeFlags_Selected) : flags);
+                    const bool isMultiSelected = std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), assetKey) != state.MultiSelectedAssetKeys.end();
+                    ImGui::TreeNodeEx(treeLabel.c_str(), (isPrimarySelected || isMultiSelected) ? (flags | ImGuiTreeNodeFlags_Selected) : flags);
 
                     const bool releasedOnItemWithoutDrag =
                         ImGui::IsItemHovered() &&
                         ImGui::IsMouseReleased(0) &&
                         (ImGui::GetDragDropPayload() == nullptr);
+                    const auto clearAssetSelection = [&]() {
+                        selectedTextureAssetKey.clear();
+                        selectedMaterialAssetKey.clear();
+                        selectedNativeScriptAssetKey.clear();
+                        selectedPrefabAssetKey.clear();
+                        selectedTilesetAssetKey.clear();
+                        selectedAudioMixerAssetKey.clear();
+                        selectedInputActionsAssetKey.clear();
+                        selectedAnimationClipAssetKey.clear();
+                        selectedAnimatorControllerAssetKey.clear();
+                        selectedEntity = entt::null;
+                        cachedTextureAsset.reset();
+                        cachedMaterialAsset.reset();
+                    };
+                    const auto setPrimarySelectionForClickedAsset = [&]() {
+                        clearAssetSelection();
+                        if (isTexture)
+                            selectedTextureAssetKey = assetKey;
+                        else if (isMaterial)
+                            selectedMaterialAssetKey = assetKey;
+                        else if (isTileset)
+                            selectedTilesetAssetKey = assetKey;
+                        else if (isNativeScriptFile)
+                            selectedNativeScriptAssetKey = assetKey;
+                        else if (isPrefab)
+                            selectedPrefabAssetKey = assetKey;
+                        else if (isAudioMixer)
+                            selectedAudioMixerAssetKey = assetKey;
+                        else if (isInputActions)
+                            selectedInputActionsAssetKey = assetKey;
+                        else if (isAnimationClip)
+                            selectedAnimationClipAssetKey = assetKey;
+                        else if (isAnimatorController)
+                            selectedAnimatorControllerAssetKey = assetKey;
+                    };
                     if (releasedOnItemWithoutDrag)
                     {
-                        if (isTexture)
+                        const ImGuiIO& io = ImGui::GetIO();
+                        const bool shiftPressed = io.KeyShift;
+                        const bool controlPressed = io.KeyCtrl;
+
+                        if (shiftPressed)
                         {
-                            selectedTextureAssetKey = assetKey;
-                            selectedMaterialAssetKey.clear();
-                            selectedNativeScriptAssetKey.clear();
-                            selectedPrefabAssetKey.clear();
-                            selectedTilesetAssetKey.clear();
-                            selectedAudioMixerAssetKey.clear();
-                            selectedInputActionsAssetKey.clear();
-                            selectedEntity = entt::null;
-                            cachedTextureAsset.reset();
-                            cachedMaterialAsset.reset();
+                            auto findIndex = [&](const std::string& key) -> int32_t {
+                                for (size_t index = 0; index < directoryAssetKeys.size(); ++index)
+                                {
+                                    if (directoryAssetKeys[index] == key)
+                                        return static_cast<int32_t>(index);
+                                }
+                                return -1;
+                            };
+
+                            const int32_t anchorIndex = findIndex(state.SelectionAnchorAssetKey);
+                            const int32_t clickedIndex = findIndex(assetKey);
+                            if (!controlPressed)
+                                state.MultiSelectedAssetKeys.clear();
+
+                            if (anchorIndex >= 0 && clickedIndex >= 0)
+                            {
+                                const int32_t minIndex = std::min(anchorIndex, clickedIndex);
+                                const int32_t maxIndex = std::max(anchorIndex, clickedIndex);
+                                for (int32_t index = minIndex; index <= maxIndex; ++index)
+                                {
+                                    const std::string& rangeKey = directoryAssetKeys[static_cast<size_t>(index)];
+                                    if (std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), rangeKey) == state.MultiSelectedAssetKeys.end())
+                                        state.MultiSelectedAssetKeys.push_back(rangeKey);
+                                }
+                            }
+                            else if (std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), assetKey) == state.MultiSelectedAssetKeys.end())
+                            {
+                                state.MultiSelectedAssetKeys.push_back(assetKey);
+                            }
+
+                            setPrimarySelectionForClickedAsset();
                         }
-                        else if (isMaterial)
+                        else if (controlPressed)
                         {
-                            selectedMaterialAssetKey = assetKey;
-                            selectedTextureAssetKey.clear();
-                            selectedNativeScriptAssetKey.clear();
-                            selectedPrefabAssetKey.clear();
-                            selectedTilesetAssetKey.clear();
-                            selectedAudioMixerAssetKey.clear();
-                            selectedInputActionsAssetKey.clear();
-                            selectedEntity = entt::null;
-                            cachedMaterialAsset.reset();
-                            cachedTextureAsset.reset();
+                            const auto foundIt = std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), assetKey);
+                            const bool wasSelected = foundIt != state.MultiSelectedAssetKeys.end();
+                            if (wasSelected)
+                            {
+                                state.MultiSelectedAssetKeys.erase(foundIt);
+                                if (state.MultiSelectedAssetKeys.empty())
+                                    clearAssetSelection();
+                            }
+                            else
+                            {
+                                state.MultiSelectedAssetKeys.push_back(assetKey);
+                                setPrimarySelectionForClickedAsset();
+                            }
+                            state.SelectionAnchorAssetKey = assetKey;
                         }
-                        else if (isTileset)
+                        else
                         {
-                            selectedTilesetAssetKey = assetKey;
-                            selectedTextureAssetKey.clear();
-                            selectedMaterialAssetKey.clear();
-                            selectedNativeScriptAssetKey.clear();
-                            selectedPrefabAssetKey.clear();
-                            selectedAudioMixerAssetKey.clear();
-                            selectedInputActionsAssetKey.clear();
-                            selectedEntity = entt::null;
-                            cachedMaterialAsset.reset();
-                            cachedTextureAsset.reset();
-                        }
-                        else if (isNativeScriptFile)
-                        {
-                            selectedNativeScriptAssetKey = assetKey;
-                            selectedTextureAssetKey.clear();
-                            selectedMaterialAssetKey.clear();
-                            selectedPrefabAssetKey.clear();
-                            selectedTilesetAssetKey.clear();
-                            selectedAudioMixerAssetKey.clear();
-                            selectedInputActionsAssetKey.clear();
-                            selectedEntity = entt::null;
-                            cachedMaterialAsset.reset();
-                            cachedTextureAsset.reset();
-                        }
-                        else if (isPrefab)
-                        {
-                            selectedPrefabAssetKey = assetKey;
-                            selectedTextureAssetKey.clear();
-                            selectedMaterialAssetKey.clear();
-                            selectedNativeScriptAssetKey.clear();
-                            selectedTilesetAssetKey.clear();
-                            selectedAudioMixerAssetKey.clear();
-                            selectedInputActionsAssetKey.clear();
-                            selectedEntity = entt::null;
-                            cachedMaterialAsset.reset();
-                            cachedTextureAsset.reset();
-                        }
-                        else if (isAudioMixer)
-                        {
-                            selectedAudioMixerAssetKey = assetKey;
-                            selectedTextureAssetKey.clear();
-                            selectedMaterialAssetKey.clear();
-                            selectedNativeScriptAssetKey.clear();
-                            selectedPrefabAssetKey.clear();
-                            selectedTilesetAssetKey.clear();
-                            selectedInputActionsAssetKey.clear();
-                            selectedEntity = entt::null;
-                            cachedMaterialAsset.reset();
-                            cachedTextureAsset.reset();
-                        }
-                        else if (isInputActions)
-                        {
-                            selectedInputActionsAssetKey = assetKey;
-                            selectedTextureAssetKey.clear();
-                            selectedMaterialAssetKey.clear();
-                            selectedNativeScriptAssetKey.clear();
-                            selectedPrefabAssetKey.clear();
-                            selectedTilesetAssetKey.clear();
-                            selectedAudioMixerAssetKey.clear();
-                            selectedEntity = entt::null;
-                            cachedMaterialAsset.reset();
-                            cachedTextureAsset.reset();
+                            state.MultiSelectedAssetKeys.clear();
+                            state.MultiSelectedAssetKeys.push_back(assetKey);
+                            state.SelectionAnchorAssetKey = assetKey;
+                            setPrimarySelectionForClickedAsset();
                         }
                     }
 
                     if (isTexture && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
                     {
+                        state.MultiSelectedAssetKeys.clear();
+                        state.MultiSelectedAssetKeys.push_back(assetKey);
+                        state.SelectionAnchorAssetKey = assetKey;
+                        clearAssetSelection();
                         selectedTextureAssetKey = assetKey;
-                        selectedMaterialAssetKey.clear();
-                        selectedNativeScriptAssetKey.clear();
-                        selectedTilesetAssetKey.clear();
-                        selectedAudioMixerAssetKey.clear();
-                        selectedInputActionsAssetKey.clear();
-                        selectedEntity = entt::null;
-                        cachedTextureAsset.reset();
-                        cachedMaterialAsset.reset();
                     }
                     else if (isScene && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onSceneActivated)
                     {
+                        state.MultiSelectedAssetKeys.clear();
+                        state.MultiSelectedAssetKeys.push_back(assetKey);
+                        state.SelectionAnchorAssetKey = assetKey;
+                        clearAssetSelection();
                         selectedNativeScriptAssetKey.clear();
-                        selectedTilesetAssetKey.clear();
-                        selectedAudioMixerAssetKey.clear();
-                        selectedInputActionsAssetKey.clear();
                         onSceneActivated(assetKey);
                     }
                     else if (isPrefab && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onPrefabOpened)
                     {
-                        selectedNativeScriptAssetKey.clear();
-                        selectedTilesetAssetKey.clear();
-                        selectedAudioMixerAssetKey.clear();
-                        selectedInputActionsAssetKey.clear();
+                        state.MultiSelectedAssetKeys.clear();
+                        state.MultiSelectedAssetKeys.push_back(assetKey);
+                        state.SelectionAnchorAssetKey = assetKey;
+                        clearAssetSelection();
                         selectedPrefabAssetKey = assetKey;
                         onPrefabOpened(assetKey);
                     }
                     else if (isMaterial && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
                     {
+                        state.MultiSelectedAssetKeys.clear();
+                        state.MultiSelectedAssetKeys.push_back(assetKey);
+                        state.SelectionAnchorAssetKey = assetKey;
+                        clearAssetSelection();
                         selectedMaterialAssetKey = assetKey;
-                        selectedTextureAssetKey.clear();
-                        selectedNativeScriptAssetKey.clear();
-                        selectedTilesetAssetKey.clear();
-                        selectedAudioMixerAssetKey.clear();
-                        selectedInputActionsAssetKey.clear();
-                        selectedEntity = entt::null;
-                        cachedMaterialAsset.reset();
-                        cachedTextureAsset.reset();
                     }
                     else if (isTileset && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
                     {
+                        state.MultiSelectedAssetKeys.clear();
+                        state.MultiSelectedAssetKeys.push_back(assetKey);
+                        state.SelectionAnchorAssetKey = assetKey;
+                        clearAssetSelection();
                         selectedTilesetAssetKey = assetKey;
-                        selectedTextureAssetKey.clear();
-                        selectedMaterialAssetKey.clear();
-                        selectedNativeScriptAssetKey.clear();
-                        selectedPrefabAssetKey.clear();
-                        selectedAudioMixerAssetKey.clear();
-                        selectedInputActionsAssetKey.clear();
-                        selectedEntity = entt::null;
-                        cachedMaterialAsset.reset();
-                        cachedTextureAsset.reset();
                     }
                     else if (isAudioMixer && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
                     {
+                        state.MultiSelectedAssetKeys.clear();
+                        state.MultiSelectedAssetKeys.push_back(assetKey);
+                        state.SelectionAnchorAssetKey = assetKey;
+                        clearAssetSelection();
                         selectedAudioMixerAssetKey = assetKey;
-                        selectedTextureAssetKey.clear();
-                        selectedMaterialAssetKey.clear();
-                        selectedNativeScriptAssetKey.clear();
-                        selectedPrefabAssetKey.clear();
-                        selectedTilesetAssetKey.clear();
-                        selectedInputActionsAssetKey.clear();
-                        selectedEntity = entt::null;
-                        cachedMaterialAsset.reset();
-                        cachedTextureAsset.reset();
+                    }
+                    else if (isAnimationClip && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
+                    {
+                        state.MultiSelectedAssetKeys.clear();
+                        state.MultiSelectedAssetKeys.push_back(assetKey);
+                        state.SelectionAnchorAssetKey = assetKey;
+                        clearAssetSelection();
+                        selectedAnimationClipAssetKey = assetKey;
+                    }
+                    else if (isAnimatorController && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
+                    {
+                        state.MultiSelectedAssetKeys.clear();
+                        state.MultiSelectedAssetKeys.push_back(assetKey);
+                        state.SelectionAnchorAssetKey = assetKey;
+                        clearAssetSelection();
+                        selectedAnimatorControllerAssetKey = assetKey;
                     }
                     else if (isNativeScriptFile && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
                     {
+                        state.MultiSelectedAssetKeys.clear();
+                        state.MultiSelectedAssetKeys.push_back(assetKey);
+                        state.SelectionAnchorAssetKey = assetKey;
+                        clearAssetSelection();
+                        selectedNativeScriptAssetKey = assetKey;
                         onNativeScriptAssetActivated(assetKey);
                     }
 
@@ -1016,7 +1199,7 @@ namespace Limitless::EditorProjectPanel
                         {
                             state.RenameAssetRelativePath = entryRelativePath;
                             if (hasPairedScriptFile)
-                                CopyTextToBuffer(state.RenameAssetBuffer, entry.stem().string().c_str());
+                                CopyTextToBuffer(state.RenameAssetBuffer, entry.AbsolutePath.stem().string().c_str());
                             else
                                 CopyTextToBuffer(state.RenameAssetBuffer, displayName.c_str());
                             state.RenameAssetAsNativeScriptPair = hasPairedScriptFile;
@@ -1032,12 +1215,13 @@ namespace Limitless::EditorProjectPanel
                             else
                             {
                                 std::error_code deleteErrorCode;
-                                removed = std::filesystem::remove(entry, deleteErrorCode);
+                                removed = std::filesystem::remove(entry.AbsolutePath, deleteErrorCode);
                                 if (removed && !deleteErrorCode)
                                 {
-                                    const std::filesystem::path metaPath = entry.parent_path() / (entry.filename().string() + ".meta");
+                                    const std::filesystem::path metaPath = entry.AbsolutePath.parent_path() / (entry.AbsolutePath.filename().string() + ".meta");
                                     std::filesystem::remove(metaPath, deleteErrorCode);
                                     (void)Assets::AssetImportPipeline::ReimportChanged(true);
+                                    InvalidateProjectDirectoryCache();
                                 }
                             }
                             if (removed)
@@ -1048,24 +1232,44 @@ namespace Limitless::EditorProjectPanel
 
                     if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
                     {
-                        if (isTexture)
-                            ImGui::SetDragDropPayload(texturePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
-                        else if (isScene)
-                            ImGui::SetDragDropPayload(scenePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
-                        else if (isPrefab)
-                            ImGui::SetDragDropPayload(prefabPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
-                        else if (isMaterial)
-                            ImGui::SetDragDropPayload(materialPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
-                        else if (isShader)
-                            ImGui::SetDragDropPayload(shaderPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
-                        else if (isAudio)
-                            ImGui::SetDragDropPayload(audioPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
-                        else if (isFont)
-                            ImGui::SetDragDropPayload(fontPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
-                        else
-                            ImGui::SetDragDropPayload(assetMovePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                        const bool draggingMultiSelection =
+                            state.MultiSelectedAssetKeys.size() > 1 &&
+                            std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), assetKey) != state.MultiSelectedAssetKeys.end();
 
-                        ImGui::Text("%s", displayName.c_str());
+                        if (draggingMultiSelection)
+                        {
+                            const std::string payloadText = EncodeAssetKeyListPayload(state.MultiSelectedAssetKeys);
+                            if (!payloadText.empty())
+                            {
+                                ImGui::SetDragDropPayload(
+                                    kAssetMultiSelectionPayload,
+                                    payloadText.c_str(),
+                                    static_cast<uint32_t>(payloadText.size() + 1),
+                                    ImGuiCond_Once);
+                            }
+                            ImGui::Text("%zu assets", state.MultiSelectedAssetKeys.size());
+                        }
+                        else
+                        {
+                            if (isTexture)
+                                ImGui::SetDragDropPayload(texturePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                            else if (isScene)
+                                ImGui::SetDragDropPayload(scenePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                            else if (isPrefab)
+                                ImGui::SetDragDropPayload(prefabPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                            else if (isMaterial)
+                                ImGui::SetDragDropPayload(materialPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                            else if (isShader)
+                                ImGui::SetDragDropPayload(shaderPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                            else if (isAudio)
+                                ImGui::SetDragDropPayload(audioPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                            else if (isFont)
+                                ImGui::SetDragDropPayload(fontPayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                            else
+                                ImGui::SetDragDropPayload(assetMovePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+
+                            ImGui::Text("%s", displayName.c_str());
+                        }
                         ImGui::EndDragDropSource();
                     }
                 }
@@ -1077,6 +1281,8 @@ namespace Limitless::EditorProjectPanel
                                      const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
                                      const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
                                      const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAudioMixerRequested,
+                                     const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimationClipRequested,
+                                     const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimatorControllerRequested,
                                      const std::function<void(const std::string&, const std::string&)>& onAssetRenamed)
         {
             if (state.FolderPopupPending == EditorProjectFolderPopup::Create)
@@ -1110,7 +1316,10 @@ namespace Limitless::EditorProjectPanel
                     if (state.FolderPopupBuffer[0] != '\0')
                     {
                         if (ProjectAssetOperations::CreateFolderInDirectory(assetsDirectory, state.FolderPopupParent, state.FolderPopupBuffer.data()))
+                        {
+                            InvalidateProjectDirectoryCache();
                             LT_INFO("Created folder {}", state.FolderPopupBuffer.data());
+                        }
                         state.CreateFolderPopupOpen = false;
                     }
                 }
@@ -1137,7 +1346,10 @@ namespace Limitless::EditorProjectPanel
                     if (state.FolderPopupBuffer[0] != '\0')
                     {
                         if (ProjectAssetOperations::RenameFolderInAssets(assetsDirectory, state.FolderPopupParent, state.FolderPopupBuffer.data()))
+                        {
+                            InvalidateProjectDirectoryCache();
                             LT_INFO("Renamed folder to {}", state.FolderPopupBuffer.data());
+                        }
                         state.RenameFolderPopupOpen = false;
                     }
                 }
@@ -1188,6 +1400,22 @@ namespace Limitless::EditorProjectPanel
                 state.CreateAudioMixerPopupOpen = true;
             }
 
+            if (state.CreateAnimationClipPopupPending)
+            {
+                ImGui::OpenPopup("CreateAnimationClipAsset");
+                ImGui::SetNextWindowFocus();
+                state.CreateAnimationClipPopupPending = false;
+                state.CreateAnimationClipPopupOpen = true;
+            }
+
+            if (state.CreateAnimatorControllerPopupPending)
+            {
+                ImGui::OpenPopup("CreateAnimatorControllerAsset");
+                ImGui::SetNextWindowFocus();
+                state.CreateAnimatorControllerPopupPending = false;
+                state.CreateAnimatorControllerPopupOpen = true;
+            }
+
             if (ImGui::BeginPopupModal("RenameAsset", &state.RenameAssetPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
             {
                 ImGui::Text("Rename Asset");
@@ -1233,6 +1461,7 @@ namespace Limitless::EditorProjectPanel
                                     state.RenameAssetBuffer.data(),
                                     &newAssetRelativePath))
                             {
+                                InvalidateProjectDirectoryCache();
                                 if (onAssetRenamed)
                                 {
                                     const std::string newAssetKey = "Assets/" + newAssetRelativePath.generic_string();
@@ -1376,6 +1605,60 @@ namespace Limitless::EditorProjectPanel
 
                 ImGui::EndPopup();
             }
+
+            if (ImGui::BeginPopupModal("CreateAnimationClipAsset", &state.CreateAnimationClipPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::Text("Create Animation Clip");
+                ImGui::Separator();
+                if (ImGui::IsWindowAppearing())
+                    ImGui::SetKeyboardFocusHere();
+
+                const bool create = ImGui::InputText("Name",
+                                                     state.CreateAnimationClipNameBuffer.data(),
+                                                     state.CreateAnimationClipNameBuffer.size(),
+                                                     ImGuiInputTextFlags_EnterReturnsTrue);
+                if (ImGui::Button("Create", ImVec2(120, 0)) || create)
+                {
+                    const std::string requestedName = state.CreateAnimationClipNameBuffer.data();
+                    if (!requestedName.empty() && onCreateAnimationClipRequested)
+                    {
+                        onCreateAnimationClipRequested(state.CreateAnimationClipParentRelativePath, requestedName);
+                        state.CreateAnimationClipPopupOpen = false;
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                    state.CreateAnimationClipPopupOpen = false;
+
+                ImGui::EndPopup();
+            }
+
+            if (ImGui::BeginPopupModal("CreateAnimatorControllerAsset", &state.CreateAnimatorControllerPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::Text("Create Animator Controller");
+                ImGui::Separator();
+                if (ImGui::IsWindowAppearing())
+                    ImGui::SetKeyboardFocusHere();
+
+                const bool create = ImGui::InputText("Name",
+                                                     state.CreateAnimatorControllerNameBuffer.data(),
+                                                     state.CreateAnimatorControllerNameBuffer.size(),
+                                                     ImGuiInputTextFlags_EnterReturnsTrue);
+                if (ImGui::Button("Create", ImVec2(120, 0)) || create)
+                {
+                    const std::string requestedName = state.CreateAnimatorControllerNameBuffer.data();
+                    if (!requestedName.empty() && onCreateAnimatorControllerRequested)
+                    {
+                        onCreateAnimatorControllerRequested(state.CreateAnimatorControllerParentRelativePath, requestedName);
+                        state.CreateAnimatorControllerPopupOpen = false;
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                    state.CreateAnimatorControllerPopupOpen = false;
+
+                ImGui::EndPopup();
+            }
         }
     }
 
@@ -1390,6 +1673,8 @@ namespace Limitless::EditorProjectPanel
               std::string& selectedTilesetAssetKey,
               std::string& selectedAudioMixerAssetKey,
               std::string& selectedInputActionsAssetKey,
+              std::string& selectedAnimationClipAssetKey,
+              std::string& selectedAnimatorControllerAssetKey,
               const char* texturePayloadId,
               const char* audioPayloadId,
               const char* assetMovePayloadId,
@@ -1403,6 +1688,8 @@ namespace Limitless::EditorProjectPanel
               const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
               const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
               const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAudioMixerRequested,
+              const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimationClipRequested,
+              const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimatorControllerRequested,
               const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
               const std::function<void(const std::string&)>& onPrefabOpened,
               const std::function<void(const std::string&)>& onPrefabInstantiated,
@@ -1458,6 +1745,18 @@ namespace Limitless::EditorProjectPanel
                 CopyTextToBuffer(state.CreateAudioMixerNameBuffer, "New Audio Mixer");
                 state.CreateAudioMixerPopupPending = true;
             }
+            if (ImGui::MenuItem("Create Animation Clip"))
+            {
+                state.CreateAnimationClipParentRelativePath = "";
+                CopyTextToBuffer(state.CreateAnimationClipNameBuffer, "New Animation Clip");
+                state.CreateAnimationClipPopupPending = true;
+            }
+            if (ImGui::MenuItem("Create Animator Controller"))
+            {
+                state.CreateAnimatorControllerParentRelativePath = "";
+                CopyTextToBuffer(state.CreateAnimatorControllerNameBuffer, "New Animator Controller");
+                state.CreateAnimatorControllerPopupPending = true;
+            }
             if (ImGui::MenuItem("Create Native Script"))
             {
                 state.CreateNativeScriptParentRelativePath = "";
@@ -1502,6 +1801,18 @@ namespace Limitless::EditorProjectPanel
                     CopyTextToBuffer(state.CreateAudioMixerNameBuffer, "New Audio Mixer");
                     state.CreateAudioMixerPopupPending = true;
                 }
+                if (ImGui::MenuItem("Create Animation Clip"))
+                {
+                    state.CreateAnimationClipParentRelativePath = "";
+                    CopyTextToBuffer(state.CreateAnimationClipNameBuffer, "New Animation Clip");
+                    state.CreateAnimationClipPopupPending = true;
+                }
+                if (ImGui::MenuItem("Create Animator Controller"))
+                {
+                    state.CreateAnimatorControllerParentRelativePath = "";
+                    CopyTextToBuffer(state.CreateAnimatorControllerNameBuffer, "New Animator Controller");
+                    state.CreateAnimatorControllerPopupPending = true;
+                }
                 if (ImGui::MenuItem("Create Native Script"))
                 {
                     state.CreateNativeScriptParentRelativePath = "";
@@ -1513,49 +1824,31 @@ namespace Limitless::EditorProjectPanel
 
             if (ImGui::BeginDragDropTarget())
             {
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kAssetMultiSelectionPayload))
+                {
+                    const std::vector<std::string> keys = ParseAssetKeyListPayload(payload->Data, payload->DataSize);
+                    MoveAssetListToTargetFolder(keys, "");
+                }
+                else
                 if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
                 {
                     const char* key = static_cast<const char*>(payload->Data);
-                    if (key && key[0])
-                    {
-                        if (std::filesystem::path(key).extension().empty())
-                            ProjectAssetOperations::MoveFolderToFolder(key, "");
-                        else
-                            ProjectAssetOperations::MoveAssetToFolder(key, "");
-                    }
+                    MoveAssetOrFolderToTargetFolder(key, "");
                 }
                 else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(assetMovePayloadId))
                 {
                     const char* key = static_cast<const char*>(payload->Data);
-                    if (key && key[0])
-                    {
-                        if (std::filesystem::path(key).extension().empty())
-                            ProjectAssetOperations::MoveFolderToFolder(key, "");
-                        else
-                            ProjectAssetOperations::MoveAssetToFolder(key, "");
-                    }
+                    MoveAssetOrFolderToTargetFolder(key, "");
                 }
                 else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(audioPayloadId))
                 {
                     const char* key = static_cast<const char*>(payload->Data);
-                    if (key && key[0])
-                    {
-                        if (std::filesystem::path(key).extension().empty())
-                            ProjectAssetOperations::MoveFolderToFolder(key, "");
-                        else
-                            ProjectAssetOperations::MoveAssetToFolder(key, "");
-                    }
+                    MoveAssetOrFolderToTargetFolder(key, "");
                 }
                 else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(fontPayloadId))
                 {
                     const char* key = static_cast<const char*>(payload->Data);
-                    if (key && key[0])
-                    {
-                        if (std::filesystem::path(key).extension().empty())
-                            ProjectAssetOperations::MoveFolderToFolder(key, "");
-                        else
-                            ProjectAssetOperations::MoveAssetToFolder(key, "");
-                    }
+                    MoveAssetOrFolderToTargetFolder(key, "");
                 }
                 else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSceneEntityPayload))
                 {
@@ -1579,6 +1872,8 @@ namespace Limitless::EditorProjectPanel
                           selectedTilesetAssetKey,
                           selectedAudioMixerAssetKey,
                           selectedInputActionsAssetKey,
+                          selectedAnimationClipAssetKey,
+                          selectedAnimatorControllerAssetKey,
                           texturePayloadId,
                           audioPayloadId,
                           assetMovePayloadId,
@@ -1592,6 +1887,8 @@ namespace Limitless::EditorProjectPanel
                           onCreateMaterialRequested,
                           onCreateTilesetRequested,
                           onCreateAudioMixerRequested,
+                          onCreateAnimationClipRequested,
+                          onCreateAnimatorControllerRequested,
                           onCreatePrefabFromSceneEntityRequested,
                           onPrefabOpened,
                           onPrefabInstantiated,
@@ -1609,6 +1906,7 @@ namespace Limitless::EditorProjectPanel
                 state.PendingExternalDropPaths, targetFolder);
             if (importedAny)
             {
+                InvalidateProjectDirectoryCache();
                 LT_INFO("Imported {} external path(s) into Assets/{}",
                         state.PendingExternalDropPaths.size(),
                         targetFolder.generic_string());
@@ -1616,7 +1914,15 @@ namespace Limitless::EditorProjectPanel
             state.PendingExternalDropPaths.clear();
         }
 
-        DrawProjectFolderPopups(assetsDirectory, state, onCreateMaterialRequested, onCreateTilesetRequested, onCreateAudioMixerRequested, onAssetRenamed);
+        DrawProjectFolderPopups(
+            assetsDirectory,
+            state,
+            onCreateMaterialRequested,
+            onCreateTilesetRequested,
+            onCreateAudioMixerRequested,
+            onCreateAnimationClipRequested,
+            onCreateAnimatorControllerRequested,
+            onAssetRenamed);
         ImGui::End();
     }
 }

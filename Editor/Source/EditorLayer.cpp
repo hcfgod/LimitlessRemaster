@@ -645,6 +645,12 @@ namespace Limitless
         if (m_PlayModeState != EditorPlayModeState::Edit)
             ExitPlayMode();
 
+        // Persist pending animation asset editor changes before shutdown.
+        if (!EditorAnimationTimelinePanel::ApplyPendingChanges(&m_EditorUndoService))
+            LT_WARN("Editor exit: failed to auto-save pending Animation Clip edits.");
+        if (!EditorAnimatorGraphPanel::ApplyPendingChanges(&m_EditorUndoService))
+            LT_WARN("Editor exit: failed to auto-save pending Animator Controller edits.");
+
         // Save current scene on editor exit when possible.
         if (m_Scene && m_PlayModeState == EditorPlayModeState::Edit)
         {
@@ -906,6 +912,8 @@ namespace Limitless
         DrawInspectorPanel();
         DrawTilemapPanel();
         DrawProjectPanel();
+        DrawAnimationTimelinePanel();
+        DrawAnimatorGraphPanel();
         DrawPhysicsDiagnosticsPanel();
         DrawConsolePanel();
         DrawSaveScenePopup();
@@ -939,6 +947,8 @@ namespace Limitless
             m_ShowPhysicsDiagnosticsWindow,
             m_ShowConsoleWindow,
             m_ShowEditorFpsOverlay,
+            m_ShowAnimationTimelinePanel,
+            m_ShowAnimatorGraphPanel,
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Open); },
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Create); },
             [this]() { m_ShowProjectSettingsWindow = true; },
@@ -1344,6 +1354,8 @@ namespace Limitless
             m_SelectedTilesetAssetKey,
             m_SelectedAudioMixerAssetKey,
             m_SelectedInputActionsAssetKey,
+            m_SelectedAnimationClipAssetKey,
+            m_SelectedAnimatorControllerAssetKey,
             &m_EditorUndoService);
     }
 
@@ -1361,6 +1373,8 @@ namespace Limitless
             m_SelectedTilesetAssetKey,
             m_SelectedAudioMixerAssetKey,
             m_SelectedInputActionsAssetKey,
+            m_SelectedAnimationClipAssetKey,
+            m_SelectedAnimatorControllerAssetKey,
             kAssetTexturePayload,
             kAssetAudioPayload,
             kAssetMovePayload,
@@ -1383,6 +1397,12 @@ namespace Limitless
             },
             [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
                 (void)CreateAudioMixerAssetInFolder(relativeFolderPath, preferredName);
+            },
+            [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
+                (void)CreateAnimationClipAssetInFolder(relativeFolderPath, preferredName);
+            },
+            [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
+                (void)CreateAnimatorControllerAssetInFolder(relativeFolderPath, preferredName);
             },
             [this](entt::entity entity, const std::filesystem::path& relativeFolderPath) {
                 (void)CreatePrefabFromEntityInFolder(entity, relativeFolderPath);
@@ -1415,6 +1435,10 @@ namespace Limitless
                     m_SelectedAudioMixerAssetKey = newAssetKey;
                 if (m_SelectedInputActionsAssetKey == oldAssetKey)
                     m_SelectedInputActionsAssetKey = newAssetKey;
+                if (m_SelectedAnimationClipAssetKey == oldAssetKey)
+                    m_SelectedAnimationClipAssetKey = newAssetKey;
+                if (m_SelectedAnimatorControllerAssetKey == oldAssetKey)
+                    m_SelectedAnimatorControllerAssetKey = newAssetKey;
                 if (m_CurrentSceneAssetKey == oldAssetKey)
                     m_CurrentSceneAssetKey = newAssetKey;
                 if (m_EditSceneStoredAssetKey == oldAssetKey)
@@ -1464,6 +1488,7 @@ namespace Limitless
                 bool updatedAnyMaterialReference = false;
                 bool updatedAnyAudioReference = false;
                 bool updatedAnyTilesetReference = false;
+                bool updatedAnyAnimationReference = false;
                 const auto updateMaterialReferencesInScene = [&oldAssetKey, &newAssetKey, &updatedAnyMaterialReference](Scene* scene) {
                     if (!scene)
                         return;
@@ -1520,6 +1545,41 @@ namespace Limitless
                             tilemap.TilesetTextureLoadAttempted = false;
                             tilemap.CachedTilesetTexture.reset();
                             updatedAnyTilesetReference = true;
+                        }
+                    }
+                };
+
+                const auto updateAnimationReferencesInScene = [&oldAssetKey, &newAssetKey, &updatedAnyAnimationReference](Scene* scene) {
+                    if (!scene)
+                        return;
+
+                    auto& registry = scene->GetRegistry();
+                    auto animatorView = registry.view<AnimatorComponent>();
+                    for (entt::entity entity : animatorView)
+                    {
+                        auto& animator = animatorView.get<AnimatorComponent>(entity);
+                        if (animator.ControllerKey == oldAssetKey)
+                        {
+                            animator.ControllerKey = newAssetKey;
+                            animator.CachedController.reset();
+                            animator.ControllerLoadAttempted = false;
+                            animator.RuntimeInitialized = false;
+                            updatedAnyAnimationReference = true;
+                        }
+                        if (animator.DefaultClipKey == oldAssetKey)
+                        {
+                            animator.DefaultClipKey = newAssetKey;
+                            animator.CachedDefaultClip.reset();
+                            animator.DefaultClipLoadAttempted = false;
+                            animator.RuntimeInitialized = false;
+                            updatedAnyAnimationReference = true;
+                        }
+                        if (animator.RuntimeSpriteTextureOverrideKey == oldAssetKey)
+                        {
+                            animator.RuntimeSpriteTextureOverrideKey = newAssetKey;
+                            animator.RuntimeCachedSpriteTextureOverride.reset();
+                            animator.RuntimeSpriteTextureOverrideLoadAttempted = false;
+                            updatedAnyAnimationReference = true;
                         }
                     }
                 };
@@ -1582,6 +1642,8 @@ namespace Limitless
                 updateAudioReferencesInScene(m_EditSceneStored.get());
                 updateTilesetReferencesInScene(m_Scene.get());
                 updateTilesetReferencesInScene(m_EditSceneStored.get());
+                updateAnimationReferencesInScene(m_Scene.get());
+                updateAnimationReferencesInScene(m_EditSceneStored.get());
                 if (isScriptRename)
                 {
                     updateScriptReferencesInScene(m_Scene.get());
@@ -1589,7 +1651,7 @@ namespace Limitless
                 }
 
                 // Persist immediately so reopening the editor cannot revive stale material keys.
-                if ((updatedAnyMaterialReference || updatedAnyAudioReference || updatedAnyTilesetReference || updatedAnyNativeScriptPath) &&
+                if ((updatedAnyMaterialReference || updatedAnyAudioReference || updatedAnyTilesetReference || updatedAnyAnimationReference || updatedAnyNativeScriptPath) &&
                     m_PlayModeState == EditorPlayModeState::Edit &&
                     !m_CurrentSceneAssetKey.empty())
                 {
@@ -1602,6 +1664,16 @@ namespace Limitless
             [this](const std::string& scriptAssetKey) {
                 (void)EditorInspectorPanel::OpenNativeScriptEditorForAssetKey(scriptAssetKey);
             });
+    }
+
+    void EditorLayer::DrawAnimationTimelinePanel()
+    {
+        EditorAnimationTimelinePanel::Draw(m_ShowAnimationTimelinePanel, m_SelectedAnimationClipAssetKey, &m_EditorUndoService);
+    }
+
+    void EditorLayer::DrawAnimatorGraphPanel()
+    {
+        EditorAnimatorGraphPanel::Draw(m_ShowAnimatorGraphPanel, m_SelectedAnimatorControllerAssetKey, &m_EditorUndoService);
     }
 
     void EditorLayer::DrawTilemapPanel()
@@ -1980,6 +2052,18 @@ namespace Limitless
             return;
         DestroyGameViewPreviewCamera();
 
+        // Ensure Play Mode uses the latest animation authoring edits even if user did not click Apply.
+        if (!EditorAnimationTimelinePanel::ApplyPendingChanges(&m_EditorUndoService))
+        {
+            LT_ERROR("Cannot enter Play Mode: failed to auto-apply pending Animation Clip edits.");
+            return;
+        }
+        if (!EditorAnimatorGraphPanel::ApplyPendingChanges(&m_EditorUndoService))
+        {
+            LT_ERROR("Cannot enter Play Mode: failed to auto-apply pending Animator Controller edits.");
+            return;
+        }
+
         // Unity-style: Playing from Prefab Mode first returns to the previous scene.
         if (IsPrefabAssetKey(m_CurrentSceneAssetKey) && !m_PrefabModeReturnSceneAssetKey.empty())
         {
@@ -2023,6 +2107,18 @@ namespace Limitless
         if (m_PlayModeState != EditorPlayModeState::Edit)
             return;
         DestroyGameViewPreviewCamera();
+
+        // Keep Simulate Mode consistent with authored animation panel changes.
+        if (!EditorAnimationTimelinePanel::ApplyPendingChanges(&m_EditorUndoService))
+        {
+            LT_ERROR("Cannot enter Simulate Mode: failed to auto-apply pending Animation Clip edits.");
+            return;
+        }
+        if (!EditorAnimatorGraphPanel::ApplyPendingChanges(&m_EditorUndoService))
+        {
+            LT_ERROR("Cannot enter Simulate Mode: failed to auto-apply pending Animator Controller edits.");
+            return;
+        }
 
         StopAudioSourcesInScene(m_Scene.get());
         StopAudioSourcesInScene(m_EditSceneStored.get());
@@ -2101,6 +2197,8 @@ namespace Limitless
         m_SelectedTilesetAssetKey.clear();
         m_SelectedAudioMixerAssetKey.clear();
         m_SelectedInputActionsAssetKey.clear();
+        m_SelectedAnimationClipAssetKey.clear();
+        m_SelectedAnimatorControllerAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey.clear();
         m_EditorUndoService.MarkSaved();
@@ -2411,6 +2509,8 @@ namespace Limitless
         m_SelectedTilesetAssetKey.clear();
         m_SelectedAudioMixerAssetKey.clear();
         m_SelectedInputActionsAssetKey.clear();
+        m_SelectedAnimationClipAssetKey.clear();
+        m_SelectedAnimatorControllerAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey = assetKey;
         if (!IsPrefabAssetKey(assetKey))
@@ -2469,6 +2569,8 @@ namespace Limitless
         m_SelectedTilesetAssetKey.clear();
         m_SelectedAudioMixerAssetKey.clear();
         m_SelectedInputActionsAssetKey.clear();
+        m_SelectedAnimationClipAssetKey.clear();
+        m_SelectedAnimatorControllerAssetKey.clear();
         m_CachedTextureAsset.reset();
         m_CurrentSceneAssetKey = assetKey;
 
@@ -2533,6 +2635,18 @@ namespace Limitless
     {
         if (assetKey.empty() || !m_Scene)
             return false;
+
+        // Save scene should also flush pending animation authoring asset edits.
+        if (!EditorAnimationTimelinePanel::ApplyPendingChanges(&m_EditorUndoService))
+        {
+            LT_ERROR("Failed to save scene because pending Animation Clip edits could not be persisted.");
+            return false;
+        }
+        if (!EditorAnimatorGraphPanel::ApplyPendingChanges(&m_EditorUndoService))
+        {
+            LT_ERROR("Failed to save scene because pending Animator Controller edits could not be persisted.");
+            return false;
+        }
 
         if (auto* editorCamera = m_CameraManager.GetPerspective3D(m_EditorCameraId))
         {
@@ -3176,6 +3290,8 @@ namespace Limitless
         m_SelectedTilesetAssetKey.clear();
         m_SelectedAudioMixerAssetKey.clear();
         m_SelectedInputActionsAssetKey.clear();
+        m_SelectedAnimationClipAssetKey.clear();
+        m_SelectedAnimatorControllerAssetKey.clear();
         m_SelectedEntity = entt::null;
         return assetKey;
     }
@@ -3247,6 +3363,181 @@ namespace Limitless
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
         m_SelectedTilesetAssetKey.clear();
+        m_SelectedInputActionsAssetKey.clear();
+        m_SelectedAnimationClipAssetKey.clear();
+        m_SelectedAnimatorControllerAssetKey.clear();
+        m_SelectedEntity = entt::null;
+        return assetKey;
+    }
+
+    std::string EditorLayer::CreateAnimationClipAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName)
+    {
+        const auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
+        if (rootResult.IsFailure())
+        {
+            LT_ERROR("Could not create animation clip asset: {}", rootResult.GetError().GetErrorMessage());
+            return {};
+        }
+
+        const std::filesystem::path assetsDirectory = rootResult.GetValue() / "Assets";
+        const std::filesystem::path targetDirectory = assetsDirectory / relativeFolderPath;
+        std::error_code errorCode;
+        std::filesystem::create_directories(targetDirectory, errorCode);
+        if (errorCode)
+        {
+            LT_ERROR("Could not create animation clip folder {}: {}", targetDirectory.string(), errorCode.message());
+            return {};
+        }
+
+        const std::string baseName = preferredFileName.empty() ? std::string("New Animation Clip") : preferredFileName;
+        std::string finalFileName = baseName;
+        if (!finalFileName.ends_with(".animationclip.json"))
+            finalFileName += ".animationclip.json";
+
+        std::filesystem::path clipPath = targetDirectory / finalFileName;
+        if (std::filesystem::exists(clipPath, errorCode))
+        {
+            for (int32_t index = 1; index < 1024; ++index)
+            {
+                const std::filesystem::path candidate = targetDirectory / ("New Animation Clip " + std::to_string(index) + ".animationclip.json");
+                if (!std::filesystem::exists(candidate, errorCode))
+                {
+                    clipPath = candidate;
+                    break;
+                }
+            }
+        }
+
+        nlohmann::json clipJson = {
+            {"Version", 1},
+            {"Name", clipPath.stem().string()},
+            {"Loop", true},
+            {"DurationSeconds", 1.0f},
+            {"SamplesPerSecond", 30.0f},
+            {"SpriteSubRectTrack", nlohmann::json::array()},
+            {"SpriteTextureTrack", nlohmann::json::array()},
+            {"PositionTrack", nlohmann::json::array()},
+            {"ScaleTrack", nlohmann::json::array()},
+            {"RotationZTrack", nlohmann::json::array()},
+            {"EventTrack", nlohmann::json::array()}
+        };
+
+        {
+            std::ofstream output(clipPath, std::ios::out | std::ios::binary | std::ios::trunc);
+            if (!output.is_open())
+            {
+                LT_ERROR("Could not create animation clip asset {}", clipPath.string());
+                return {};
+            }
+            output << clipJson.dump(2);
+        }
+
+        std::filesystem::path relativeAssetPath = std::filesystem::relative(clipPath, assetsDirectory, errorCode);
+        if (errorCode)
+        {
+            LT_ERROR("Could not compute animation clip asset key for {}", clipPath.string());
+            return {};
+        }
+
+        const std::string assetKey = "Assets/" + relativeAssetPath.generic_string();
+        const auto importResult = Assets::AssetDatabase::GetInstance().ImportOrUpdate(assetKey, Assets::AssetType::AnimationClip);
+        if (importResult.IsFailure())
+            LT_WARN("Created animation clip asset but failed to import into AssetDatabase ({}): {}", assetKey, importResult.GetError().GetErrorMessage());
+
+        LT_INFO("Created animation clip asset {}", assetKey);
+        m_SelectedAnimationClipAssetKey = assetKey;
+        m_SelectedAnimatorControllerAssetKey.clear();
+        m_SelectedTextureAssetKey.clear();
+        m_CachedTextureAsset.reset();
+        m_SelectedMaterialAssetKey.clear();
+        m_CachedMaterialAsset.reset();
+        m_SelectedNativeScriptAssetKey.clear();
+        m_SelectedPrefabAssetKey.clear();
+        m_SelectedTilesetAssetKey.clear();
+        m_SelectedAudioMixerAssetKey.clear();
+        m_SelectedInputActionsAssetKey.clear();
+        m_SelectedEntity = entt::null;
+        return assetKey;
+    }
+
+    std::string EditorLayer::CreateAnimatorControllerAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName)
+    {
+        const auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
+        if (rootResult.IsFailure())
+        {
+            LT_ERROR("Could not create animator controller asset: {}", rootResult.GetError().GetErrorMessage());
+            return {};
+        }
+
+        const std::filesystem::path assetsDirectory = rootResult.GetValue() / "Assets";
+        const std::filesystem::path targetDirectory = assetsDirectory / relativeFolderPath;
+        std::error_code errorCode;
+        std::filesystem::create_directories(targetDirectory, errorCode);
+        if (errorCode)
+        {
+            LT_ERROR("Could not create animator controller folder {}: {}", targetDirectory.string(), errorCode.message());
+            return {};
+        }
+
+        const std::string baseName = preferredFileName.empty() ? std::string("New Animator Controller") : preferredFileName;
+        std::string finalFileName = baseName;
+        if (!finalFileName.ends_with(".animcontroller.json"))
+            finalFileName += ".animcontroller.json";
+
+        std::filesystem::path controllerPath = targetDirectory / finalFileName;
+        if (std::filesystem::exists(controllerPath, errorCode))
+        {
+            for (int32_t index = 1; index < 1024; ++index)
+            {
+                const std::filesystem::path candidate = targetDirectory / ("New Animator Controller " + std::to_string(index) + ".animcontroller.json");
+                if (!std::filesystem::exists(candidate, errorCode))
+                {
+                    controllerPath = candidate;
+                    break;
+                }
+            }
+        }
+
+        nlohmann::json controllerJson = {
+            {"Name", controllerPath.stem().string()},
+            {"DefaultStateName", ""},
+            {"Parameters", nlohmann::json::array()},
+            {"States", nlohmann::json::array()}
+        };
+
+        {
+            std::ofstream output(controllerPath, std::ios::out | std::ios::binary | std::ios::trunc);
+            if (!output.is_open())
+            {
+                LT_ERROR("Could not create animator controller asset {}", controllerPath.string());
+                return {};
+            }
+            output << controllerJson.dump(2);
+        }
+
+        std::filesystem::path relativeAssetPath = std::filesystem::relative(controllerPath, assetsDirectory, errorCode);
+        if (errorCode)
+        {
+            LT_ERROR("Could not compute animator controller asset key for {}", controllerPath.string());
+            return {};
+        }
+
+        const std::string assetKey = "Assets/" + relativeAssetPath.generic_string();
+        const auto importResult = Assets::AssetDatabase::GetInstance().ImportOrUpdate(assetKey, Assets::AssetType::AnimatorController);
+        if (importResult.IsFailure())
+            LT_WARN("Created animator controller asset but failed to import into AssetDatabase ({}): {}", assetKey, importResult.GetError().GetErrorMessage());
+
+        LT_INFO("Created animator controller asset {}", assetKey);
+        m_SelectedAnimatorControllerAssetKey = assetKey;
+        m_SelectedAnimationClipAssetKey.clear();
+        m_SelectedTextureAssetKey.clear();
+        m_CachedTextureAsset.reset();
+        m_SelectedMaterialAssetKey.clear();
+        m_CachedMaterialAsset.reset();
+        m_SelectedNativeScriptAssetKey.clear();
+        m_SelectedPrefabAssetKey.clear();
+        m_SelectedTilesetAssetKey.clear();
+        m_SelectedAudioMixerAssetKey.clear();
         m_SelectedInputActionsAssetKey.clear();
         m_SelectedEntity = entt::null;
         return assetKey;
@@ -3351,6 +3642,8 @@ namespace Limitless
             m_SelectedTilesetAssetKey.clear();
             m_SelectedAudioMixerAssetKey.clear();
             m_SelectedInputActionsAssetKey.clear();
+            m_SelectedAnimationClipAssetKey.clear();
+            m_SelectedAnimatorControllerAssetKey.clear();
         }
         return createdEntity;
     }
@@ -3383,6 +3676,8 @@ namespace Limitless
         m_SelectedTilesetAssetKey.clear();
         m_SelectedAudioMixerAssetKey.clear();
         m_SelectedInputActionsAssetKey.clear();
+        m_SelectedAnimationClipAssetKey.clear();
+        m_SelectedAnimatorControllerAssetKey.clear();
         return createdEntity;
     }
 

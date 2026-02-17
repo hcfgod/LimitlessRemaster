@@ -63,6 +63,22 @@ namespace Limitless
         bool CreateAudioMixerPopupOpen = false;
         std::filesystem::path CreateAudioMixerParentRelativePath;
         std::array<char, 256> CreateAudioMixerNameBuffer{};
+
+        // Animation clip asset creation popup state.
+        bool CreateAnimationClipPopupPending = false;
+        bool CreateAnimationClipPopupOpen = false;
+        std::filesystem::path CreateAnimationClipParentRelativePath;
+        std::array<char, 256> CreateAnimationClipNameBuffer{};
+
+        // Animator controller asset creation popup state.
+        bool CreateAnimatorControllerPopupPending = false;
+        bool CreateAnimatorControllerPopupOpen = false;
+        std::filesystem::path CreateAnimatorControllerParentRelativePath;
+        std::array<char, 256> CreateAnimatorControllerNameBuffer{};
+
+        // Multi-select state for Project assets (Ctrl/Shift click + multi-drag).
+        std::vector<std::string> MultiSelectedAssetKeys;
+        std::string SelectionAnchorAssetKey;
     };
 
     namespace EditorProjectPanel
@@ -79,6 +95,8 @@ namespace Limitless
                   std::string& selectedTilesetAssetKey,
                   std::string& selectedAudioMixerAssetKey,
                   std::string& selectedInputActionsAssetKey,
+                  std::string& selectedAnimationClipAssetKey,
+                  std::string& selectedAnimatorControllerAssetKey,
                   const char* texturePayloadId,
                   const char* audioPayloadId,
                   const char* assetMovePayloadId,
@@ -92,6 +110,8 @@ namespace Limitless
                   const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
                   const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
                   const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAudioMixerRequested,
+                  const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimationClipRequested,
+                  const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimatorControllerRequested,
                   const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
                   const std::function<void(const std::string&)>& onPrefabOpened,
                   const std::function<void(const std::string&)>& onPrefabInstantiated,

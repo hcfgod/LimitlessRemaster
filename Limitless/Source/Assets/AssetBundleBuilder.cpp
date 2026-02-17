@@ -68,6 +68,8 @@ namespace Limitless::Assets
         if (EndsWith(name, ".tileset.json")) return AssetType::Tileset;
         if (EndsWith(name, ".animationclip.json") || EndsWith(name, ".animation.json") || EndsWith(name, ".anim.json"))
             return AssetType::AnimationClip;
+        if (EndsWith(name, ".animcontroller.json") || EndsWith(name, ".animatorcontroller.json"))
+            return AssetType::AnimatorController;
         if (EndsWith(name, ".material.json")) return AssetType::Material;
         if (EndsWith(name, ".inputactions.json")) return AssetType::InputActions;
         if (ext == ".glsl") return AssetType::Shader;
@@ -456,6 +458,7 @@ namespace Limitless::Assets
                 r.Type != AssetType::Tilemap &&
                 r.Type != AssetType::Tileset &&
                 r.Type != AssetType::AnimationClip &&
+                r.Type != AssetType::AnimatorController &&
                 r.Type != AssetType::InputActions &&
                 r.Type != AssetType::AudioClip)
             {

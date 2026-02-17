@@ -52,6 +52,7 @@ namespace Limitless::EditorInspectorPanel
     namespace
     {
         // Asset inspector implementations moved to EditorInspectorPanelAssetInspectors.cpp
+        constexpr const char* kSceneEntityPayload = "SCENE_ENTITY";
 
         void ClearPrimaryFlagFromOtherCameras(entt::registry& registry, entt::entity currentEntity)
         {
@@ -64,6 +65,52 @@ namespace Limitless::EditorInspectorPanel
                 auto& otherCamera = view.get<CameraComponent>(entity);
                 otherCamera.IsPrimary = false;
             }
+        }
+
+        entt::entity FindFirstEntityByTag(const Scene* scene, const std::string& tag)
+        {
+            if (!scene || tag.empty())
+                return entt::null;
+
+            const auto& registry = scene->GetRegistry();
+            auto view = registry.view<TagComponent>();
+            for (entt::entity entity : view)
+            {
+                const auto& tagComponent = view.get<TagComponent>(entity);
+                if (tagComponent.Tag == tag)
+                    return entity;
+            }
+
+            return entt::null;
+        }
+
+        int CountEntitiesByTag(const Scene* scene, const std::string& tag)
+        {
+            if (!scene || tag.empty())
+                return 0;
+
+            int tagMatchCount = 0;
+            const auto& registry = scene->GetRegistry();
+            auto view = registry.view<TagComponent>();
+            for (entt::entity entity : view)
+            {
+                const auto& tagComponent = view.get<TagComponent>(entity);
+                if (tagComponent.Tag == tag)
+                    ++tagMatchCount;
+            }
+            return tagMatchCount;
+        }
+
+        std::string BuildEntityReferencePreviewLabel(const Scene* scene, const ScriptEntityReference& value)
+        {
+            if (value.Tag.empty())
+                return "None (Entity)";
+
+            const entt::entity resolvedEntity = FindFirstEntityByTag(scene, value.Tag);
+            if (!scene || resolvedEntity == entt::null)
+                return value.Tag + " (Missing)";
+
+            return value.Tag + "##" + std::to_string(static_cast<uint32_t>(resolvedEntity));
         }
 
         constexpr size_t kNativeScriptEditorBufferSize = 256 * 1024;
@@ -629,6 +676,32 @@ namespace Limitless::EditorInspectorPanel
                 outValue = value;
                 return true;
             }
+            if (typeName == "Limitless::Entity" || typeName == "Entity")
+            {
+                ScriptEntityReference value{};
+                if (!initializer.empty())
+                {
+                    if (initializer == "{}" ||
+                        initializer == "Entity{}" ||
+                        initializer == "Limitless::Entity{}" ||
+                        initializer == "Entity()" ||
+                        initializer == "Limitless::Entity()")
+                    {
+                        value.Tag.clear();
+                    }
+                    else if (initializer.size() >= 2 && initializer.front() == '"' && initializer.back() == '"')
+                    {
+                        // Optional shorthand: treat string initializer as tag reference.
+                        value.Tag = initializer.substr(1, initializer.size() - 2);
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+                outValue = value;
+                return true;
+            }
 
             return false;
         }
@@ -650,8 +723,9 @@ namespace Limitless::EditorInspectorPanel
             // bool Enabled = true;
             // glm::vec3 Offset = glm::vec3(0.0f, 1.0f, 0.0f);
             // std::string Label = "Player";
+            // Limitless::Entity TargetEntity;
             const std::regex fieldPattern(
-                R"(^\s*(?:const\s+)?(?:static\s+)?(float|int32_t|int|bool|glm::vec3|std::string)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*([^;]+))?\s*;\s*$)");
+                R"(^\s*(?:const\s+)?(?:static\s+)?(float|int32_t|int|bool|glm::vec3|std::string|Limitless::Entity|Entity)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*([^;]+))?\s*;\s*$)");
 
             bool insidePublicSection = false;
             std::string line;
@@ -711,7 +785,7 @@ namespace Limitless::EditorInspectorPanel
             }
 
             const std::regex callPattern(
-                R"LT(GetExposed(Float|Integer|Boolean|Vector3|String)\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*,\s*([^)]+)\))LT");
+                R"LT(GetExposed(Float|Integer|Boolean|Vector3|String|Entity)\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*,\s*([^)]+)\))LT");
 
             std::unordered_set<std::string> existingNames;
             for (const auto& existingField : outFields)
@@ -776,6 +850,22 @@ namespace Limitless::EditorInspectorPanel
                         fieldDefinition.DefaultValue = fallbackExpression.substr(1, fallbackExpression.size() - 2);
                         parsed = true;
                     }
+                }
+                else if (functionSuffix == "Entity")
+                {
+                    ScriptEntityReference value{};
+                    if (fallbackExpression == "{}" || fallbackExpression == "Entity{}" || fallbackExpression == "Limitless::Entity{}")
+                    {
+                        parsed = true;
+                    }
+                    else if (fallbackExpression.size() >= 2 && fallbackExpression.front() == '"' && fallbackExpression.back() == '"')
+                    {
+                        value.Tag = fallbackExpression.substr(1, fallbackExpression.size() - 2);
+                        parsed = true;
+                    }
+
+                    if (parsed)
+                        fieldDefinition.DefaultValue = std::move(value);
                 }
 
                 if (!parsed)
@@ -1270,6 +1360,8 @@ namespace Limitless::EditorInspectorPanel
               std::string& selectedTilesetAssetKey,
               std::string& selectedAudioMixerAssetKey,
               std::string& selectedInputActionsAssetKey,
+              std::string& selectedAnimationClipAssetKey,
+              std::string& selectedAnimatorControllerAssetKey,
               EditorUndoService* undoService)
     {
         auto& nativeScriptAuthoringState = GetNativeScriptAuthoringState();
@@ -1315,11 +1407,21 @@ namespace Limitless::EditorInspectorPanel
             selectedNativeScriptAssetKey.clear();
             selectedPrefabAssetKey.clear();
             selectedTilesetAssetKey.clear();
+            selectedAnimationClipAssetKey.clear();
+            selectedAnimatorControllerAssetKey.clear();
         }
 
         if (!selectedInputActionsAssetKey.empty())
         {
             DrawInputActionsAssetInspector(selectedInputActionsAssetKey);
+        }
+        else if (!selectedAnimationClipAssetKey.empty())
+        {
+            DrawAnimationClipAssetInspector(selectedAnimationClipAssetKey);
+        }
+        else if (!selectedAnimatorControllerAssetKey.empty())
+        {
+            DrawAnimatorControllerAssetInspector(selectedAnimatorControllerAssetKey);
         }
         else if (!selectedAudioMixerAssetKey.empty())
         {
@@ -1563,7 +1665,7 @@ namespace Limitless::EditorInspectorPanel
                                 else if (!syncedFromScript)
                                 {
                                     ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", fieldSyncError.c_str());
-                                    ImGui::TextDisabled("Supported public field types: float, int/int32_t, bool, glm::vec3, std::string.");
+                                    ImGui::TextDisabled("Supported public field types: float, int/int32_t, bool, glm::vec3, std::string, Limitless::Entity.");
                                 }
                                 else if (declaredFieldNames.empty())
                                 {
@@ -1638,6 +1740,98 @@ namespace Limitless::EditorInspectorPanel
                                                     (void)undoService->CommitInteractiveSceneMutation(propertyEditLabel);
                                             }
                                         }
+                                        else if (auto* entityValue = std::get_if<ScriptEntityReference>(&propertyValue))
+                                        {
+                                            auto assignEntityTag = [&](const std::string& tagValue) {
+                                                if (undoService)
+                                                {
+                                                    return undoService->ExecuteSceneMutation(propertyEditLabel, [&](Scene& mutableScene) {
+                                                        auto* mutableNativeScript = mutableScene.GetRegistry().try_get<NativeScriptComponent>(selectedEntity);
+                                                        if (!mutableNativeScript || scriptIndex >= mutableNativeScript->Scripts.size())
+                                                            return false;
+
+                                                        auto& mutableEntry = mutableNativeScript->Scripts[scriptIndex];
+                                                        auto propertyIt = mutableEntry.ExposedProperties.find(propertyName);
+                                                        if (propertyIt == mutableEntry.ExposedProperties.end() ||
+                                                            !std::holds_alternative<ScriptEntityReference>(propertyIt->second))
+                                                        {
+                                                            mutableEntry.ExposedProperties[propertyName] = ScriptEntityReference{ tagValue };
+                                                            return true;
+                                                        }
+
+                                                        auto* mutableReference = std::get_if<ScriptEntityReference>(&propertyIt->second);
+                                                        if (!mutableReference)
+                                                            return false;
+                                                        mutableReference->Tag = tagValue;
+                                                        return true;
+                                                    });
+                                                }
+
+                                                entityValue->Tag = tagValue;
+                                                return true;
+                                            };
+
+                                            const std::string previewLabel = BuildEntityReferencePreviewLabel(scene, *entityValue);
+                                            if (ImGui::BeginCombo(propertyName.c_str(), previewLabel.c_str()))
+                                            {
+                                                const bool noneSelected = entityValue->Tag.empty();
+                                                if (ImGui::Selectable("None (Entity)", noneSelected))
+                                                    (void)assignEntityTag({});
+                                                if (noneSelected)
+                                                    ImGui::SetItemDefaultFocus();
+
+                                                if (scene)
+                                                {
+                                                    const auto& sceneRegistry = scene->GetRegistry();
+                                                    auto entityView = sceneRegistry.view<TagComponent>();
+                                                    for (entt::entity candidateEntity : entityView)
+                                                    {
+                                                        const auto& candidateTag = entityView.get<TagComponent>(candidateEntity).Tag;
+                                                        const bool isSelected = candidateTag == entityValue->Tag;
+                                                        std::string optionLabel = candidateTag.empty() ? "Entity" : candidateTag;
+                                                        optionLabel += "##EntityReferenceOption_" + std::to_string(static_cast<uint32_t>(candidateEntity));
+                                                        if (ImGui::Selectable(optionLabel.c_str(), isSelected))
+                                                            (void)assignEntityTag(candidateTag);
+                                                        if (isSelected)
+                                                            ImGui::SetItemDefaultFocus();
+                                                    }
+                                                }
+                                                ImGui::EndCombo();
+                                            }
+
+                                            if (ImGui::BeginDragDropTarget())
+                                            {
+                                                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSceneEntityPayload))
+                                                {
+                                                    if (scene && payload->Data && payload->DataSize == sizeof(entt::entity))
+                                                    {
+                                                        const entt::entity droppedEntity = *static_cast<const entt::entity*>(payload->Data);
+                                                        if (scene->IsValid(droppedEntity))
+                                                        {
+                                                            if (const auto* tagComponent = scene->GetRegistry().try_get<TagComponent>(droppedEntity))
+                                                                (void)assignEntityTag(tagComponent->Tag);
+                                                        }
+                                                    }
+                                                }
+                                                ImGui::EndDragDropTarget();
+                                            }
+
+                                            if (!entityValue->Tag.empty())
+                                            {
+                                                ImGui::SameLine();
+                                                if (ImGui::Button("X##ClearEntityReference"))
+                                                    (void)assignEntityTag({});
+                                            }
+
+                                            const int matchingTagCount = CountEntitiesByTag(scene, entityValue->Tag);
+                                            if (!entityValue->Tag.empty() && matchingTagCount > 1)
+                                            {
+                                                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
+                                                                   "Tag '%s' matches %d entities. Entity references by tag require unique tags.",
+                                                                   entityValue->Tag.c_str(),
+                                                                   matchingTagCount);
+                                            }
+                                        }
                                         ImGui::PopID();
                                     }
                                 }
@@ -1687,6 +1881,8 @@ namespace Limitless::EditorInspectorPanel
                 const bool hasAudioSourceComponent = registry.all_of<AudioSourceComponent>(selectedEntity);
                 const bool hasTextComponent = registry.all_of<TextComponent>(selectedEntity);
                 const bool hasNativeScriptComponent = registry.all_of<NativeScriptComponent>(selectedEntity);
+                const bool hasAnimatorComponent = registry.all_of<AnimatorComponent>(selectedEntity);
+                const bool hasAnimationEventReceiverComponent = registry.all_of<AnimationEventReceiverComponent>(selectedEntity);
                 const bool hasRigidbody2DComponent = registry.all_of<Rigidbody2DComponent>(selectedEntity);
                 const bool hasBoxCollider2DComponent = registry.all_of<BoxCollider2DComponent>(selectedEntity);
                 const bool hasCircleCollider2DComponent = registry.all_of<CircleCollider2DComponent>(selectedEntity);
@@ -1809,6 +2005,40 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 if (hasNativeScriptComponent)
+                    ImGui::EndDisabled();
+
+                if (hasAnimatorComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Animator"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add Animator Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<AnimatorComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<AnimatorComponent>(selectedEntity);
+                }
+
+                if (hasAnimatorComponent)
+                    ImGui::EndDisabled();
+
+                if (hasAnimationEventReceiverComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Animation Event Receiver"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add Animation Event Receiver Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<AnimationEventReceiverComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<AnimationEventReceiverComponent>(selectedEntity);
+                }
+
+                if (hasAnimationEventReceiverComponent)
                     ImGui::EndDisabled();
 
                 if (hasRigidbody2DComponent)
@@ -2109,6 +2339,36 @@ namespace Limitless::EditorInspectorPanel
                 else
                 {
                     registry.remove<NativeScriptComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveAnimatorComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Animator Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<AnimatorComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<AnimatorComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveAnimationEventReceiverComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Animation Event Receiver Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<AnimationEventReceiverComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<AnimationEventReceiverComponent>(selectedEntity);
                 }
             }
 

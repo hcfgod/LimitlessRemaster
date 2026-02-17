@@ -99,6 +99,42 @@ namespace Limitless::EditorInspectorPanel
             return keys;
         }
 
+        std::vector<std::string> BuildAnimationClipPickerKeys()
+        {
+            std::vector<std::string> keys;
+            std::unordered_set<std::string> seen;
+
+            const auto records = Assets::AssetDatabase::GetInstance().GetAllRecords();
+            for (const auto& record : records)
+            {
+                if (record.Type != Assets::AssetType::AnimationClip || record.Key.empty())
+                    continue;
+                if (seen.insert(record.Key).second)
+                    keys.push_back(record.Key);
+            }
+
+            std::sort(keys.begin(), keys.end());
+            return keys;
+        }
+
+        std::vector<std::string> BuildAnimatorControllerPickerKeys()
+        {
+            std::vector<std::string> keys;
+            std::unordered_set<std::string> seen;
+
+            const auto records = Assets::AssetDatabase::GetInstance().GetAllRecords();
+            for (const auto& record : records)
+            {
+                if (record.Type != Assets::AssetType::AnimatorController || record.Key.empty())
+                    continue;
+                if (seen.insert(record.Key).second)
+                    keys.push_back(record.Key);
+            }
+
+            std::sort(keys.begin(), keys.end());
+            return keys;
+        }
+
         glm::vec2 NormalizeDirectionOrFallback(const glm::vec2& direction, const glm::vec2& fallback = glm::vec2(0.0f, -1.0f))
         {
             const float length = glm::length(direction);
@@ -295,6 +331,408 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::SameLine();
                     if (ImGui::Button("Clear##Material"))
                         assignMaterialKey({});
+                }
+
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* animator = registry.try_get<AnimatorComponent>(selectedEntity))
+        {
+            const bool animatorOpen = ImGui::TreeNodeEx("Animator", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("AnimatorComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##AnimatorComponentOptionsButton"))
+                ImGui::OpenPopup("AnimatorComponentOptions");
+
+            if (ImGui::BeginPopup("AnimatorComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveAnimatorComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (animatorOpen)
+            {
+                ImGui::Checkbox("Enabled", &animator->Enabled);
+                TrackInteractiveMutation(undoService, "Edit Animator Enabled");
+
+                ImGui::Checkbox("Auto Play", &animator->AutoPlay);
+                TrackInteractiveMutation(undoService, "Edit Animator Auto Play");
+
+                ImGui::Checkbox("Apply To Sprite", &animator->ApplyToSprite);
+                TrackInteractiveMutation(undoService, "Edit Animator Apply To Sprite");
+
+                ImGui::Checkbox("Apply To Transform", &animator->ApplyToTransform);
+                TrackInteractiveMutation(undoService, "Edit Animator Apply To Transform");
+
+                ImGui::DragFloat("Playback Speed", &animator->PlaybackSpeed, 0.01f, 0.0f, 10.0f);
+                animator->PlaybackSpeed = std::max(0.0f, animator->PlaybackSpeed);
+                TrackInteractiveMutation(undoService, "Edit Animator Playback Speed");
+
+                const auto assignControllerKey = [&](const std::string& key) {
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation(key.empty() ? "Clear Animator Controller" : "Assign Animator Controller", [&](Scene& mutableScene) {
+                            auto* mutableAnimator = mutableScene.GetRegistry().try_get<AnimatorComponent>(selectedEntity);
+                            if (!mutableAnimator)
+                                return false;
+                            mutableAnimator->ControllerKey = key;
+                            mutableAnimator->CachedController.reset();
+                            mutableAnimator->ControllerLoadAttempted = false;
+                            mutableAnimator->RuntimeInitialized = false;
+                            return true;
+                        });
+                    }
+                    else
+                    {
+                        animator->ControllerKey = key;
+                        animator->CachedController.reset();
+                        animator->ControllerLoadAttempted = false;
+                        animator->RuntimeInitialized = false;
+                    }
+                };
+
+                const auto assignDefaultClipKey = [&](const std::string& key) {
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation(key.empty() ? "Clear Animator Default Clip" : "Assign Animator Default Clip", [&](Scene& mutableScene) {
+                            auto* mutableAnimator = mutableScene.GetRegistry().try_get<AnimatorComponent>(selectedEntity);
+                            if (!mutableAnimator)
+                                return false;
+                            mutableAnimator->DefaultClipKey = key;
+                            mutableAnimator->CachedDefaultClip.reset();
+                            mutableAnimator->DefaultClipLoadAttempted = false;
+                            mutableAnimator->RuntimeInitialized = false;
+                            return true;
+                        });
+                    }
+                    else
+                    {
+                        animator->DefaultClipKey = key;
+                        animator->CachedDefaultClip.reset();
+                        animator->DefaultClipLoadAttempted = false;
+                        animator->RuntimeInitialized = false;
+                    }
+                };
+
+                const std::string controllerLabel = animator->ControllerKey.empty()
+                    ? std::string("None")
+                    : EditorAssetNaming::GetAssetDisplayNameFromAssetKey(animator->ControllerKey);
+                ImGui::Text("Controller");
+                ImGui::SameLine(100.0f);
+                ImGui::Button((controllerLabel + "##AnimatorController").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 90.0f, 0.0f));
+                if (ImGui::BeginPopupContextItem("AnimatorControllerContext"))
+                {
+                    if (ImGui::Selectable("Clear"))
+                        assignControllerKey({});
+                    ImGui::EndPopup();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("...##AnimatorControllerPicker"))
+                    ImGui::OpenPopup("AnimatorControllerPickerPopup");
+                if (ImGui::BeginPopup("AnimatorControllerPickerPopup"))
+                {
+                    if (ImGui::Selectable("None##AnimatorControllerNone"))
+                        assignControllerKey({});
+                    ImGui::Separator();
+                    const auto controllerKeys = BuildAnimatorControllerPickerKeys();
+                    for (const auto& key : controllerKeys)
+                    {
+                        const bool isSelected = animator->ControllerKey == key;
+                        const std::string display = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(key);
+                        if (ImGui::Selectable((display + "##AnimatorController_" + key).c_str(), isSelected))
+                            assignControllerKey(key);
+                    }
+                    ImGui::EndPopup();
+                }
+
+                const std::string clipLabel = animator->DefaultClipKey.empty()
+                    ? std::string("None")
+                    : EditorAssetNaming::GetAssetDisplayNameFromAssetKey(animator->DefaultClipKey);
+                ImGui::Text("Default Clip");
+                ImGui::SameLine(100.0f);
+                ImGui::Button((clipLabel + "##AnimatorDefaultClip").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 90.0f, 0.0f));
+                if (ImGui::BeginPopupContextItem("AnimatorDefaultClipContext"))
+                {
+                    if (ImGui::Selectable("Clear"))
+                        assignDefaultClipKey({});
+                    ImGui::EndPopup();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("...##AnimatorDefaultClipPicker"))
+                    ImGui::OpenPopup("AnimatorDefaultClipPickerPopup");
+                if (ImGui::BeginPopup("AnimatorDefaultClipPickerPopup"))
+                {
+                    if (ImGui::Selectable("None##AnimatorDefaultClipNone"))
+                        assignDefaultClipKey({});
+                    ImGui::Separator();
+                    const auto clipKeys = BuildAnimationClipPickerKeys();
+                    for (const auto& key : clipKeys)
+                    {
+                        const bool isSelected = animator->DefaultClipKey == key;
+                        const std::string display = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(key);
+                        if (ImGui::Selectable((display + "##AnimatorDefaultClip_" + key).c_str(), isSelected))
+                            assignDefaultClipKey(key);
+                    }
+                    ImGui::EndPopup();
+                }
+
+                if (ImGui::TreeNodeEx("Parameter Overrides", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    if (ImGui::Button("Add Bool"))
+                    {
+                        std::string parameterName = "BoolParameter";
+                        int32_t suffix = 1;
+                        while (animator->BoolParameters.contains(parameterName))
+                        {
+                            ++suffix;
+                            parameterName = "BoolParameter" + std::to_string(suffix);
+                        }
+                        animator->BoolParameters[parameterName] = false;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Add Float"))
+                    {
+                        std::string parameterName = "FloatParameter";
+                        int32_t suffix = 1;
+                        while (animator->FloatParameters.contains(parameterName))
+                        {
+                            ++suffix;
+                            parameterName = "FloatParameter" + std::to_string(suffix);
+                        }
+                        animator->FloatParameters[parameterName] = 0.0f;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Add Integer"))
+                    {
+                        std::string parameterName = "IntegerParameter";
+                        int32_t suffix = 1;
+                        while (animator->IntegerParameters.contains(parameterName))
+                        {
+                            ++suffix;
+                            parameterName = "IntegerParameter" + std::to_string(suffix);
+                        }
+                        animator->IntegerParameters[parameterName] = 0;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Add Trigger"))
+                    {
+                        std::string parameterName = "TriggerParameter";
+                        int32_t suffix = 1;
+                        while (animator->TriggerParameters.contains(parameterName))
+                        {
+                            ++suffix;
+                            parameterName = "TriggerParameter" + std::to_string(suffix);
+                        }
+                        animator->TriggerParameters[parameterName] = false;
+                    }
+
+                    int32_t removeBoolIndex = -1;
+                    int32_t boolIndex = 0;
+                    for (auto it = animator->BoolParameters.begin(); it != animator->BoolParameters.end(); ++it, ++boolIndex)
+                    {
+                        ImGui::PushID(("AnimatorBool_" + it->first).c_str());
+                        std::array<char, 128> nameBuffer{};
+                        std::snprintf(nameBuffer.data(), nameBuffer.size(), "%s", it->first.c_str());
+                        bool renameRequested = ImGui::InputText("Name", nameBuffer.data(), nameBuffer.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+                        ImGui::SameLine();
+                        ImGui::Checkbox("Value", &it->second);
+                        ImGui::SameLine();
+                        if (ImGui::Button("X"))
+                            removeBoolIndex = boolIndex;
+                        if (renameRequested)
+                        {
+                            const std::string newName = nameBuffer.data();
+                            if (!newName.empty() && !animator->BoolParameters.contains(newName))
+                            {
+                                const bool value = it->second;
+                                animator->BoolParameters.erase(it);
+                                animator->BoolParameters[newName] = value;
+                                ImGui::PopID();
+                                break;
+                            }
+                        }
+                        ImGui::PopID();
+                    }
+                    if (removeBoolIndex >= 0)
+                    {
+                        int32_t currentIndex = 0;
+                        for (auto it = animator->BoolParameters.begin(); it != animator->BoolParameters.end(); ++it, ++currentIndex)
+                        {
+                            if (currentIndex == removeBoolIndex)
+                            {
+                                animator->BoolParameters.erase(it);
+                                break;
+                            }
+                        }
+                    }
+
+                    int32_t removeFloatIndex = -1;
+                    int32_t floatIndex = 0;
+                    for (auto it = animator->FloatParameters.begin(); it != animator->FloatParameters.end(); ++it, ++floatIndex)
+                    {
+                        ImGui::PushID(("AnimatorFloat_" + it->first).c_str());
+                        std::array<char, 128> nameBuffer{};
+                        std::snprintf(nameBuffer.data(), nameBuffer.size(), "%s", it->first.c_str());
+                        bool renameRequested = ImGui::InputText("Name", nameBuffer.data(), nameBuffer.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+                        ImGui::SameLine();
+                        ImGui::DragFloat("Value", &it->second, 0.01f);
+                        ImGui::SameLine();
+                        if (ImGui::Button("X"))
+                            removeFloatIndex = floatIndex;
+                        if (renameRequested)
+                        {
+                            const std::string newName = nameBuffer.data();
+                            if (!newName.empty() && !animator->FloatParameters.contains(newName))
+                            {
+                                const float value = it->second;
+                                animator->FloatParameters.erase(it);
+                                animator->FloatParameters[newName] = value;
+                                ImGui::PopID();
+                                break;
+                            }
+                        }
+                        ImGui::PopID();
+                    }
+                    if (removeFloatIndex >= 0)
+                    {
+                        int32_t currentIndex = 0;
+                        for (auto it = animator->FloatParameters.begin(); it != animator->FloatParameters.end(); ++it, ++currentIndex)
+                        {
+                            if (currentIndex == removeFloatIndex)
+                            {
+                                animator->FloatParameters.erase(it);
+                                break;
+                            }
+                        }
+                    }
+
+                    int32_t removeIntegerIndex = -1;
+                    int32_t integerIndex = 0;
+                    for (auto it = animator->IntegerParameters.begin(); it != animator->IntegerParameters.end(); ++it, ++integerIndex)
+                    {
+                        ImGui::PushID(("AnimatorInteger_" + it->first).c_str());
+                        std::array<char, 128> nameBuffer{};
+                        std::snprintf(nameBuffer.data(), nameBuffer.size(), "%s", it->first.c_str());
+                        bool renameRequested = ImGui::InputText("Name", nameBuffer.data(), nameBuffer.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+                        ImGui::SameLine();
+                        ImGui::DragInt("Value", &it->second);
+                        ImGui::SameLine();
+                        if (ImGui::Button("X"))
+                            removeIntegerIndex = integerIndex;
+                        if (renameRequested)
+                        {
+                            const std::string newName = nameBuffer.data();
+                            if (!newName.empty() && !animator->IntegerParameters.contains(newName))
+                            {
+                                const int32_t value = it->second;
+                                animator->IntegerParameters.erase(it);
+                                animator->IntegerParameters[newName] = value;
+                                ImGui::PopID();
+                                break;
+                            }
+                        }
+                        ImGui::PopID();
+                    }
+                    if (removeIntegerIndex >= 0)
+                    {
+                        int32_t currentIndex = 0;
+                        for (auto it = animator->IntegerParameters.begin(); it != animator->IntegerParameters.end(); ++it, ++currentIndex)
+                        {
+                            if (currentIndex == removeIntegerIndex)
+                            {
+                                animator->IntegerParameters.erase(it);
+                                break;
+                            }
+                        }
+                    }
+
+                    int32_t removeTriggerIndex = -1;
+                    int32_t triggerIndex = 0;
+                    for (auto it = animator->TriggerParameters.begin(); it != animator->TriggerParameters.end(); ++it, ++triggerIndex)
+                    {
+                        ImGui::PushID(("AnimatorTrigger_" + it->first).c_str());
+                        std::array<char, 128> nameBuffer{};
+                        std::snprintf(nameBuffer.data(), nameBuffer.size(), "%s", it->first.c_str());
+                        bool renameRequested = ImGui::InputText("Name", nameBuffer.data(), nameBuffer.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+                        ImGui::SameLine();
+                        ImGui::Checkbox("Active", &it->second);
+                        ImGui::SameLine();
+                        if (ImGui::Button("X"))
+                            removeTriggerIndex = triggerIndex;
+                        if (renameRequested)
+                        {
+                            const std::string newName = nameBuffer.data();
+                            if (!newName.empty() && !animator->TriggerParameters.contains(newName))
+                            {
+                                const bool value = it->second;
+                                animator->TriggerParameters.erase(it);
+                                animator->TriggerParameters[newName] = value;
+                                ImGui::PopID();
+                                break;
+                            }
+                        }
+                        ImGui::PopID();
+                    }
+                    if (removeTriggerIndex >= 0)
+                    {
+                        int32_t currentIndex = 0;
+                        for (auto it = animator->TriggerParameters.begin(); it != animator->TriggerParameters.end(); ++it, ++currentIndex)
+                        {
+                            if (currentIndex == removeTriggerIndex)
+                            {
+                                animator->TriggerParameters.erase(it);
+                                break;
+                            }
+                        }
+                    }
+
+                    TrackInteractiveMutation(undoService, "Edit Animator Parameters");
+                    ImGui::TreePop();
+                }
+
+                ImGui::Separator();
+                ImGui::TextDisabled("Runtime");
+                ImGui::Text("State: %s", animator->RuntimeCurrentStateName.empty() ? "<none>" : animator->RuntimeCurrentStateName.c_str());
+                ImGui::Text("Clip: %s", animator->RuntimeCurrentClipKey.empty() ? "<none>" : animator->RuntimeCurrentClipKey.c_str());
+                ImGui::Text("State Time: %.3f", animator->RuntimeStateTimeSeconds);
+                ImGui::Text("Duration: %.3f", animator->RuntimeCurrentStateDurationSeconds);
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* animationEventReceiver = registry.try_get<AnimationEventReceiverComponent>(selectedEntity))
+        {
+            const bool receiverOpen = ImGui::TreeNodeEx("Animation Event Receiver", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("AnimationEventReceiverComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##AnimationEventReceiverComponentOptionsButton"))
+                ImGui::OpenPopup("AnimationEventReceiverComponentOptions");
+
+            if (ImGui::BeginPopup("AnimationEventReceiverComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveAnimationEventReceiverComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (receiverOpen)
+            {
+                ImGui::Checkbox("Enabled", &animationEventReceiver->Enabled);
+                TrackInteractiveMutation(undoService, "Edit Animation Event Receiver Enabled");
+
+                ImGui::Text("Received Events This Frame: %u", static_cast<uint32_t>(animationEventReceiver->RuntimeDispatchedEvents.size()));
+                for (const auto& eventMessage : animationEventReceiver->RuntimeDispatchedEvents)
+                {
+                    ImGui::BulletText("%s | string='%s' float=%.3f int=%d bool=%s",
+                                      eventMessage.Name.c_str(),
+                                      eventMessage.StringPayload.c_str(),
+                                      eventMessage.FloatPayload,
+                                      eventMessage.IntegerPayload,
+                                      eventMessage.BooleanPayload ? "true" : "false");
                 }
 
                 ImGui::TreePop();

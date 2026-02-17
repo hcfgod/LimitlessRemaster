@@ -3,6 +3,7 @@
 #include "Scene/Components.h"
 #include "Scene/Scene.h"
 #include "Undo/EditorUndoService.h"
+#include "Undo/EditorTextAssetCommand.h"
 
 namespace
 {
@@ -90,5 +91,33 @@ TEST_SUITE("Editor Undo Redo")
         CHECK_FALSE(IsNullEntity(FindEntityByTag(*activeScene, "A")));
         CHECK(IsNullEntity(FindEntityByTag(*activeScene, "B")));
         CHECK_FALSE(IsNullEntity(FindEntityByTag(*activeScene, "C")));
+    }
+
+    TEST_CASE("Text asset command supports undo and redo")
+    {
+        std::string documentText = "Before";
+        auto applyText = [&documentText](const std::string& text) {
+            documentText = text;
+            return true;
+        };
+
+        auto command = std::make_unique<Limitless::EditorTextAssetCommand>(
+            "Edit Animation Asset",
+            "Before",
+            "After",
+            applyText);
+
+        Limitless::EditorUndoStack stack;
+        REQUIRE(stack.Push(std::move(command)));
+
+        // Command application is performed by the caller before push.
+        REQUIRE(applyText("After"));
+        CHECK(documentText == "After");
+
+        CHECK(stack.Undo());
+        CHECK(documentText == "Before");
+
+        CHECK(stack.Redo());
+        CHECK(documentText == "After");
     }
 }

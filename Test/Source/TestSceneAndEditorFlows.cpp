@@ -230,6 +230,7 @@ TEST_SUITE("Scene And Editor Flows")
         scripts.Scripts[0].Enabled = true;
         scripts.Scripts[0].RuntimeInitialized = true;
         scripts.Scripts[0].RuntimeUpdateCount = 123;
+        scripts.Scripts[0].ExposedProperties["FollowTarget"] = Limitless::ScriptEntityReference{ "Parent" };
 
         auto clone = scene.Clone();
         REQUIRE(clone != nullptr);
@@ -303,6 +304,10 @@ TEST_SUITE("Scene And Editor Flows")
         const auto& clonedScripts = cloneRegistry.get<Limitless::NativeScriptComponent>(clonedChild);
         REQUIRE(clonedScripts.Scripts.size() == 1);
         CHECK(clonedScripts.Scripts[0].ScriptClassName == "ButtonScript");
+        REQUIRE(clonedScripts.Scripts[0].ExposedProperties.contains("FollowTarget"));
+        const auto* clonedFollowTarget = std::get_if<Limitless::ScriptEntityReference>(&clonedScripts.Scripts[0].ExposedProperties.at("FollowTarget"));
+        REQUIRE(clonedFollowTarget != nullptr);
+        CHECK(clonedFollowTarget->Tag == "Parent");
         CHECK(clonedScripts.Scripts[0].RuntimeInitialized == false);
         CHECK(clonedScripts.Scripts[0].RuntimeUpdateCount == 0);
 
@@ -453,6 +458,13 @@ TEST_SUITE("Scene And Editor Flows")
         audioSource.StereoPanStrength = 0.8f;
         audioSource.AttenuationCurveKey = "Assets/Audio/Curves/MusicDistance.curve.json";
 
+        auto& nativeScripts = registry.emplace<Limitless::NativeScriptComponent>(hud);
+        nativeScripts.Scripts.emplace_back();
+        nativeScripts.Scripts[0].ScriptClassName = "HudScript";
+        nativeScripts.Scripts[0].ScriptAssetRelativePath = "Gameplay/Ui/HudScript";
+        nativeScripts.Scripts[0].ExposedProperties["FollowTarget"] = Limitless::ScriptEntityReference{ "Root" };
+        nativeScripts.Scripts[0].ExposedProperties["DisplayName"] = std::string("HudLabel");
+
         const std::filesystem::path scenePath = MakeTempScenePath("SceneRoundTrip.scene.json");
         const auto saveResult = scene.SaveToFile(scenePath);
         REQUIRE(saveResult.IsSuccess());
@@ -560,6 +572,14 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(loadedAudioSource.AttenuationCurveKey == "Assets/Audio/Curves/MusicDistance.curve.json");
         CHECK(loadedAudioSource.RuntimeVoiceId == 0);
         CHECK(loadedAudioSource.RuntimePlaybackStarted == false);
+
+        REQUIRE(loadedRegistry.all_of<Limitless::NativeScriptComponent>(loadedHud));
+        const auto& loadedNativeScripts = loadedRegistry.get<Limitless::NativeScriptComponent>(loadedHud);
+        REQUIRE(loadedNativeScripts.Scripts.size() == 1);
+        REQUIRE(loadedNativeScripts.Scripts[0].ExposedProperties.contains("FollowTarget"));
+        const auto* loadedFollowTarget = std::get_if<Limitless::ScriptEntityReference>(&loadedNativeScripts.Scripts[0].ExposedProperties.at("FollowTarget"));
+        REQUIRE(loadedFollowTarget != nullptr);
+        CHECK(loadedFollowTarget->Tag == "Root");
 
         REQUIRE(loadedScene.GetEditorCameraBookmark().has_value());
         CHECK(loadedScene.GetEditorCameraBookmark()->YawDegrees == doctest::Approx(-45.0f));
@@ -710,5 +730,108 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(clampedSettings.MaxShadowSamplesPerLight == 1);
 
         std::filesystem::remove_all(projectRoot, errorCode);
+    }
+
+    TEST_CASE("Animator components clone and serialize authored data")
+    {
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+
+        const entt::entity animatedEntity = scene.CreateEntity("Animated");
+        auto& animator = registry.emplace<Limitless::AnimatorComponent>(animatedEntity);
+        animator.ControllerKey = "Assets/Animation/Character.animcontroller.json";
+        animator.DefaultClipKey = "Assets/Animation/Idle.animationclip.json";
+        animator.PlaybackSpeed = 1.25f;
+        animator.Enabled = true;
+        animator.ApplyToSprite = true;
+        animator.ApplyToTransform = true;
+        animator.AutoPlay = true;
+        animator.BoolParameters["Grounded"] = true;
+        animator.FloatParameters["Speed"] = 3.5f;
+        animator.IntegerParameters["Combo"] = 2;
+        animator.TriggerParameters["Fire"] = true;
+        animator.RuntimeInitialized = true;
+        animator.RuntimeCurrentStateName = "Run";
+        animator.RuntimeCurrentClipKey = "Assets/Animation/Run.animationclip.json";
+        animator.RuntimeStateTimeSeconds = 0.65f;
+        animator.RuntimeCurrentStateDurationSeconds = 0.9f;
+        animator.RuntimeSpriteTextureOverrideKey = "Assets/Textures/Character_Run.png";
+        animator.RuntimeSpriteTextureOverrideLoadAttempted = true;
+
+        auto& receiver = registry.emplace<Limitless::AnimationEventReceiverComponent>(animatedEntity);
+        receiver.Enabled = true;
+        receiver.RuntimeDispatchedEvents.push_back({
+            "Footstep",
+            "Left",
+            0.15f,
+            1,
+            true,
+            0.25f,
+            0.5f
+        });
+
+        auto clone = scene.Clone();
+        REQUIRE(clone != nullptr);
+        const entt::entity clonedEntity = FindEntityByTag(*clone, "Animated");
+        REQUIRE_FALSE(IsNullEntity(clonedEntity));
+
+        const auto& cloneRegistry = clone->GetRegistry();
+        REQUIRE(cloneRegistry.all_of<Limitless::AnimatorComponent>(clonedEntity));
+        REQUIRE(cloneRegistry.all_of<Limitless::AnimationEventReceiverComponent>(clonedEntity));
+
+        const auto& clonedAnimator = cloneRegistry.get<Limitless::AnimatorComponent>(clonedEntity);
+        CHECK(clonedAnimator.ControllerKey == animator.ControllerKey);
+        CHECK(clonedAnimator.DefaultClipKey == animator.DefaultClipKey);
+        CHECK(clonedAnimator.PlaybackSpeed == doctest::Approx(1.25f));
+        CHECK(clonedAnimator.GetBoolParameter("Grounded", false));
+        CHECK(clonedAnimator.GetFloatParameter("Speed", 0.0f) == doctest::Approx(3.5f));
+        CHECK(clonedAnimator.GetIntegerParameter("Combo", 0) == 2);
+        CHECK(clonedAnimator.TriggerParameters.contains("Fire"));
+        CHECK_FALSE(clonedAnimator.TriggerParameters.at("Fire"));
+        CHECK_FALSE(clonedAnimator.RuntimeInitialized);
+        CHECK(clonedAnimator.RuntimeCurrentStateName.empty());
+        CHECK(clonedAnimator.RuntimeCurrentClipKey.empty());
+        CHECK(clonedAnimator.RuntimeStateTimeSeconds == doctest::Approx(0.0f));
+        CHECK(clonedAnimator.RuntimeCurrentStateDurationSeconds == doctest::Approx(1.0f));
+        CHECK(clonedAnimator.RuntimeSpriteTextureOverrideKey.empty());
+        CHECK_FALSE(clonedAnimator.RuntimeSpriteTextureOverrideLoadAttempted);
+
+        const auto& clonedReceiver = cloneRegistry.get<Limitless::AnimationEventReceiverComponent>(clonedEntity);
+        CHECK(clonedReceiver.Enabled);
+        CHECK(clonedReceiver.RuntimeDispatchedEvents.empty());
+
+        const std::filesystem::path tempScenePath = MakeTempScenePath("AnimatorSerialization.scene.json");
+        std::error_code errorCode;
+        std::filesystem::create_directories(tempScenePath.parent_path(), errorCode);
+        REQUIRE(!errorCode);
+
+        const auto saveResult = scene.SaveToFile(tempScenePath);
+        REQUIRE(saveResult.IsSuccess());
+
+        const auto loadResult = Limitless::Scene::LoadFromFile(tempScenePath);
+        REQUIRE(loadResult.IsSuccess());
+        REQUIRE(loadResult.GetValue() != nullptr);
+
+        const entt::entity loadedEntity = FindEntityByTag(*loadResult.GetValue(), "Animated");
+        REQUIRE_FALSE(IsNullEntity(loadedEntity));
+        const auto& loadedRegistry = loadResult.GetValue()->GetRegistry();
+        REQUIRE(loadedRegistry.all_of<Limitless::AnimatorComponent>(loadedEntity));
+        REQUIRE(loadedRegistry.all_of<Limitless::AnimationEventReceiverComponent>(loadedEntity));
+
+        const auto& loadedAnimator = loadedRegistry.get<Limitless::AnimatorComponent>(loadedEntity);
+        CHECK(loadedAnimator.ControllerKey == animator.ControllerKey);
+        CHECK(loadedAnimator.DefaultClipKey == animator.DefaultClipKey);
+        CHECK(loadedAnimator.PlaybackSpeed == doctest::Approx(1.25f));
+        CHECK(loadedAnimator.GetBoolParameter("Grounded", false));
+        CHECK(loadedAnimator.GetFloatParameter("Speed", 0.0f) == doctest::Approx(3.5f));
+        CHECK(loadedAnimator.GetIntegerParameter("Combo", 0) == 2);
+        CHECK(loadedAnimator.TriggerParameters.contains("Fire"));
+        CHECK_FALSE(loadedAnimator.TriggerParameters.at("Fire"));
+
+        const auto& loadedReceiver = loadedRegistry.get<Limitless::AnimationEventReceiverComponent>(loadedEntity);
+        CHECK(loadedReceiver.Enabled);
+        CHECK(loadedReceiver.RuntimeDispatchedEvents.empty());
+
+        std::filesystem::remove(tempScenePath, errorCode);
     }
 }

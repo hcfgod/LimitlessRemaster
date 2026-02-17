@@ -42,6 +42,8 @@ namespace Limitless
                   std::string& selectedTilesetAssetKey,
                   std::string& selectedAudioMixerAssetKey,
                   std::string& selectedInputActionsAssetKey,
+                  std::string& selectedAnimationClipAssetKey,
+                  std::string& selectedAnimatorControllerAssetKey,
                   EditorUndoService* undoService);
     }
 }

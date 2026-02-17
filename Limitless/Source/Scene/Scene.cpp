@@ -5,6 +5,10 @@
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetTypes.h"
 #include "Assets/AssetUtils.h"
+#include "Assets/AnimationClipAsset.h"
+#include "Assets/AnimationClipAssetImporter.h"
+#include "Assets/AnimatorControllerAsset.h"
+#include "Assets/AnimatorControllerAssetImporter.h"
 #include "Assets/MaterialAsset.h"
 #include "Assets/MaterialAssetImporter.h"
 #include "Assets/TilesetAsset.h"
@@ -31,6 +35,7 @@
 #include <cmath>
 #include <fstream>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace Limitless
 {
@@ -238,6 +243,13 @@ namespace Limitless
                 root["Type"] = "String";
                 root["Value"] = *stringValue;
             }
+            else if (const auto* entityValue = std::get_if<ScriptEntityReference>(&value))
+            {
+                root["Type"] = "Entity";
+                root["Value"] = {
+                    { "Tag", entityValue->Tag }
+                };
+            }
             return root;
         }
 
@@ -276,6 +288,20 @@ namespace Limitless
                 outValue = root.value("Value", std::string{});
                 return true;
             }
+            if (typeName == "Entity")
+            {
+                ScriptEntityReference entityReference{};
+                if (root.contains("Value"))
+                {
+                    const auto& value = root["Value"];
+                    if (value.is_object())
+                        entityReference.Tag = value.value("Tag", std::string{});
+                    else if (value.is_string())
+                        entityReference.Tag = value.get<std::string>();
+                }
+                outValue = std::move(entityReference);
+                return true;
+            }
 
             return false;
         }
@@ -304,6 +330,526 @@ namespace Limitless
             if (spaceName == "Spatial2D")
                 return AudioSourceComponent::PlaybackSpace::Spatial2D;
             return AudioSourceComponent::PlaybackSpace::Global;
+        }
+
+        void ResetAnimatorRuntimeOutput(AnimatorComponent& animator, bool clearSpriteTextureOverrideCache)
+        {
+            animator.RuntimeHasSpriteSubRect = false;
+            animator.RuntimeSpriteUvMin = glm::vec2(0.0f, 0.0f);
+            animator.RuntimeSpriteUvMax = glm::vec2(1.0f, 1.0f);
+            animator.RuntimeSpriteTextureOverrideKey.clear();
+            if (clearSpriteTextureOverrideCache)
+            {
+                animator.RuntimeCachedSpriteTextureOverride.reset();
+                animator.RuntimeSpriteTextureOverrideLoadAttempted = false;
+            }
+            animator.RuntimeHasPosition = false;
+            animator.RuntimeHasScale = false;
+            animator.RuntimeHasRotationZ = false;
+            animator.RuntimePosition = glm::vec3(0.0f);
+            animator.RuntimeScale = glm::vec3(1.0f);
+            animator.RuntimeRotationZDegrees = 0.0f;
+        }
+
+        bool TryResolveAnimatorControllerAsset(AnimatorComponent& animator)
+        {
+            if (animator.ControllerKey.empty())
+            {
+                animator.CachedController.reset();
+                animator.ControllerLoadAttempted = false;
+                return false;
+            }
+
+            if (animator.CachedController && animator.CachedController->GetKey() == animator.ControllerKey)
+                return true;
+
+            animator.CachedController = std::dynamic_pointer_cast<Assets::AnimatorControllerAsset>(
+                Assets::AssetManager::GetCachedByKey(animator.ControllerKey));
+            if (!animator.CachedController)
+            {
+                animator.CachedController = Assets::AssetManager::LoadBlocking<Assets::AnimatorControllerAsset>(animator.ControllerKey);
+            }
+
+            animator.ControllerLoadAttempted = true;
+            return (animator.CachedController != nullptr);
+        }
+
+        bool TryResolveAnimationClipAssetByKey(const std::string& clipKey, Assets::AnimationClipAsset::Ptr& outClip)
+        {
+            outClip.reset();
+            if (clipKey.empty())
+                return false;
+
+            outClip = std::dynamic_pointer_cast<Assets::AnimationClipAsset>(Assets::AssetManager::GetCachedByKey(clipKey));
+            if (!outClip)
+                outClip = Assets::AssetManager::LoadBlocking<Assets::AnimationClipAsset>(clipKey);
+            return (outClip != nullptr);
+        }
+
+        bool TryResolveDefaultClipAsset(AnimatorComponent& animator)
+        {
+            if (animator.DefaultClipKey.empty())
+            {
+                animator.CachedDefaultClip.reset();
+                animator.DefaultClipLoadAttempted = false;
+                return false;
+            }
+
+            if (animator.CachedDefaultClip && animator.CachedDefaultClip->GetKey() == animator.DefaultClipKey)
+                return true;
+
+            animator.CachedDefaultClip = std::dynamic_pointer_cast<Assets::AnimationClipAsset>(
+                Assets::AssetManager::GetCachedByKey(animator.DefaultClipKey));
+            if (!animator.CachedDefaultClip)
+                animator.CachedDefaultClip = Assets::AssetManager::LoadBlocking<Assets::AnimationClipAsset>(animator.DefaultClipKey);
+
+            animator.DefaultClipLoadAttempted = true;
+            return (animator.CachedDefaultClip != nullptr);
+        }
+
+        const Assets::AnimatorControllerAsset::StateDefinition* FindControllerState(
+            const Assets::AnimatorControllerAsset::Data& controllerData,
+            const std::string& stateName)
+        {
+            for (const auto& state : controllerData.States)
+            {
+                if (state.Name == stateName)
+                    return &state;
+            }
+            return nullptr;
+        }
+
+        void EnsureAnimatorParametersFromControllerDefaults(
+            AnimatorComponent& animator,
+            const Assets::AnimatorControllerAsset::Data& controllerData)
+        {
+            for (const auto& parameter : controllerData.Parameters)
+            {
+                switch (parameter.Type)
+                {
+                    case Assets::AnimatorControllerAsset::ParameterType::Bool:
+                    {
+                        if (!animator.BoolParameters.contains(parameter.Name))
+                            animator.BoolParameters[parameter.Name] = parameter.DefaultBool;
+                        break;
+                    }
+                    case Assets::AnimatorControllerAsset::ParameterType::Float:
+                    {
+                        if (!animator.FloatParameters.contains(parameter.Name))
+                            animator.FloatParameters[parameter.Name] = parameter.DefaultFloat;
+                        break;
+                    }
+                    case Assets::AnimatorControllerAsset::ParameterType::Integer:
+                    {
+                        if (!animator.IntegerParameters.contains(parameter.Name))
+                            animator.IntegerParameters[parameter.Name] = parameter.DefaultInteger;
+                        break;
+                    }
+                    case Assets::AnimatorControllerAsset::ParameterType::Trigger:
+                    {
+                        if (!animator.TriggerParameters.contains(parameter.Name))
+                            animator.TriggerParameters[parameter.Name] = false;
+                        break;
+                    }
+                }
+            }
+        }
+
+        bool EvaluateAnimatorTransitionConditions(
+            const Assets::AnimatorControllerAsset::TransitionDefinition& transition,
+            AnimatorComponent& animator,
+            std::vector<std::string>& outTriggersToConsume)
+        {
+            outTriggersToConsume.clear();
+            for (const auto& condition : transition.Conditions)
+            {
+                switch (condition.Mode)
+                {
+                    case Assets::AnimatorControllerAsset::ConditionMode::If:
+                    {
+                        const bool value = animator.GetBoolParameter(condition.ParameterName, false);
+                        if (!value)
+                            return false;
+                        break;
+                    }
+                    case Assets::AnimatorControllerAsset::ConditionMode::IfNot:
+                    {
+                        const bool value = animator.GetBoolParameter(condition.ParameterName, false);
+                        if (value)
+                            return false;
+                        break;
+                    }
+                    case Assets::AnimatorControllerAsset::ConditionMode::Greater:
+                    {
+                        const float value = animator.GetFloatParameter(condition.ParameterName, 0.0f);
+                        if (!(value > condition.FloatThreshold))
+                            return false;
+                        break;
+                    }
+                    case Assets::AnimatorControllerAsset::ConditionMode::Less:
+                    {
+                        const float value = animator.GetFloatParameter(condition.ParameterName, 0.0f);
+                        if (!(value < condition.FloatThreshold))
+                            return false;
+                        break;
+                    }
+                    case Assets::AnimatorControllerAsset::ConditionMode::Equals:
+                    {
+                        const int32_t value = animator.GetIntegerParameter(condition.ParameterName, 0);
+                        if (value != condition.IntegerThreshold)
+                            return false;
+                        break;
+                    }
+                    case Assets::AnimatorControllerAsset::ConditionMode::NotEquals:
+                    {
+                        const int32_t value = animator.GetIntegerParameter(condition.ParameterName, 0);
+                        if (value == condition.IntegerThreshold)
+                            return false;
+                        break;
+                    }
+                    case Assets::AnimatorControllerAsset::ConditionMode::Triggered:
+                    {
+                        const auto found = animator.TriggerParameters.find(condition.ParameterName);
+                        if (found == animator.TriggerParameters.end() || !found->second)
+                            return false;
+                        outTriggersToConsume.push_back(condition.ParameterName);
+                        break;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        template<typename TTrackKeyframe>
+        const TTrackKeyframe* SampleStepTrackKeyframe(const std::vector<TTrackKeyframe>& track, float timeSeconds)
+        {
+            if (track.empty())
+                return nullptr;
+            const TTrackKeyframe* sampled = &track.front();
+            for (const auto& keyframe : track)
+            {
+                if (keyframe.TimeSeconds <= timeSeconds)
+                {
+                    sampled = &keyframe;
+                    continue;
+                }
+                break;
+            }
+            return sampled;
+        }
+
+        glm::vec3 SampleVector3Track(const std::vector<Assets::AnimationClipAsset::Vector3Keyframe>& track,
+                                     float timeSeconds,
+                                     bool& outHasSample)
+        {
+            outHasSample = false;
+            if (track.empty())
+                return glm::vec3(0.0f);
+
+            outHasSample = true;
+            if (track.size() == 1 || timeSeconds <= track.front().TimeSeconds)
+                return track.front().Value;
+            if (timeSeconds >= track.back().TimeSeconds)
+                return track.back().Value;
+
+            for (size_t index = 1; index < track.size(); ++index)
+            {
+                const auto& right = track[index];
+                if (timeSeconds > right.TimeSeconds)
+                    continue;
+
+                const auto& left = track[index - 1];
+                const float segmentLength = std::max(0.0001f, right.TimeSeconds - left.TimeSeconds);
+                const float interpolation = std::clamp((timeSeconds - left.TimeSeconds) / segmentLength, 0.0f, 1.0f);
+                if (left.Interpolation == Assets::AnimationClipAsset::InterpolationMode::Step)
+                    return left.Value;
+                return glm::mix(left.Value, right.Value, interpolation);
+            }
+
+            return track.back().Value;
+        }
+
+        float SampleFloatTrack(const std::vector<Assets::AnimationClipAsset::FloatKeyframe>& track,
+                               float timeSeconds,
+                               bool& outHasSample)
+        {
+            outHasSample = false;
+            if (track.empty())
+                return 0.0f;
+
+            outHasSample = true;
+            if (track.size() == 1 || timeSeconds <= track.front().TimeSeconds)
+                return track.front().Value;
+            if (timeSeconds >= track.back().TimeSeconds)
+                return track.back().Value;
+
+            for (size_t index = 1; index < track.size(); ++index)
+            {
+                const auto& right = track[index];
+                if (timeSeconds > right.TimeSeconds)
+                    continue;
+
+                const auto& left = track[index - 1];
+                const float segmentLength = std::max(0.0001f, right.TimeSeconds - left.TimeSeconds);
+                const float interpolation = std::clamp((timeSeconds - left.TimeSeconds) / segmentLength, 0.0f, 1.0f);
+                if (left.Interpolation == Assets::AnimationClipAsset::InterpolationMode::Step)
+                    return left.Value;
+                return glm::mix(left.Value, right.Value, interpolation);
+            }
+
+            return track.back().Value;
+        }
+
+        bool ShouldDispatchAnimationEventAtTime(float eventTimeSeconds,
+                                                float previousTimeSeconds,
+                                                float currentTimeSeconds,
+                                                bool loopedThisFrame,
+                                                float durationSeconds)
+        {
+            if (durationSeconds <= 0.0001f)
+                return false;
+
+            if (!loopedThisFrame)
+            {
+                if (currentTimeSeconds < previousTimeSeconds)
+                    return false;
+                if (previousTimeSeconds <= 0.0001f)
+                    return eventTimeSeconds >= previousTimeSeconds && eventTimeSeconds <= currentTimeSeconds;
+                return eventTimeSeconds > previousTimeSeconds && eventTimeSeconds <= currentTimeSeconds;
+            }
+
+            // Wrapped around clip end this frame.
+            const bool inTail = eventTimeSeconds > previousTimeSeconds && eventTimeSeconds <= durationSeconds;
+            const bool inHead = eventTimeSeconds >= 0.0f && eventTimeSeconds <= currentTimeSeconds;
+            return inTail || inHead;
+        }
+
+        void UpdateAnimatorComponentForEntity(Scene& scene, entt::entity entity, float deltaTime, uint64_t dispatchFrame)
+        {
+            auto& registry = scene.GetRegistry();
+            auto* animator = registry.try_get<AnimatorComponent>(entity);
+            if (!animator)
+                return;
+
+            auto* eventReceiver = registry.try_get<AnimationEventReceiverComponent>(entity);
+            if (eventReceiver)
+            {
+                eventReceiver->RuntimeDispatchedEvents.clear();
+                eventReceiver->RuntimeDispatchFrame = dispatchFrame;
+            }
+
+            const std::string previousSpriteTextureOverrideKey = animator->RuntimeSpriteTextureOverrideKey;
+            ResetAnimatorRuntimeOutput(*animator, false);
+
+            if (!animator->Enabled || !scene.IsEntityEnabledInHierarchy(entity))
+                return;
+
+            const bool hasController = TryResolveAnimatorControllerAsset(*animator);
+            const bool hasDefaultClip = TryResolveDefaultClipAsset(*animator);
+
+            const Assets::AnimatorControllerAsset::Data* controllerData = nullptr;
+            const Assets::AnimatorControllerAsset::StateDefinition* activeState = nullptr;
+            if (hasController && animator->CachedController)
+            {
+                controllerData = &animator->CachedController->GetData();
+                EnsureAnimatorParametersFromControllerDefaults(*animator, *controllerData);
+
+                if (!animator->RuntimeInitialized)
+                {
+                    if (!controllerData->DefaultStateName.empty())
+                        animator->RuntimeCurrentStateName = controllerData->DefaultStateName;
+                    else if (!controllerData->States.empty())
+                        animator->RuntimeCurrentStateName = controllerData->States.front().Name;
+                    animator->RuntimeStateTimeSeconds = 0.0f;
+                    animator->RuntimePreviousStateTimeSeconds = 0.0f;
+                    animator->RuntimeInitialized = true;
+                }
+
+                activeState = FindControllerState(*controllerData, animator->RuntimeCurrentStateName);
+                if (!activeState && !controllerData->States.empty())
+                {
+                    activeState = &controllerData->States.front();
+                    animator->RuntimeCurrentStateName = activeState->Name;
+                    animator->RuntimeStateTimeSeconds = 0.0f;
+                    animator->RuntimePreviousStateTimeSeconds = 0.0f;
+                }
+
+                if (activeState)
+                {
+                    for (const auto& transition : activeState->Transitions)
+                    {
+                        if (!transition.CanTransitionToSelf && transition.ToState == activeState->Name)
+                            continue;
+
+                        if (transition.HasExitTime)
+                        {
+                            const float duration = std::max(0.0001f, animator->RuntimeCurrentStateDurationSeconds);
+                            float normalizedTime = animator->RuntimeStateTimeSeconds / duration;
+                            normalizedTime = std::clamp(normalizedTime, 0.0f, 1.0f);
+                            if (normalizedTime < transition.ExitTimeNormalized)
+                                continue;
+                        }
+
+                        std::vector<std::string> triggersToConsume;
+                        if (!EvaluateAnimatorTransitionConditions(transition, *animator, triggersToConsume))
+                            continue;
+
+                        const auto* nextState = FindControllerState(*controllerData, transition.ToState);
+                        if (!nextState)
+                            continue;
+
+                        for (const auto& triggerName : triggersToConsume)
+                            animator->ResetTrigger(triggerName);
+
+                        animator->RuntimeCurrentStateName = nextState->Name;
+                        animator->RuntimeStateTimeSeconds = 0.0f;
+                        animator->RuntimePreviousStateTimeSeconds = 0.0f;
+                        activeState = nextState;
+                        break;
+                    }
+                }
+            }
+
+            std::string resolvedClipKey;
+            bool loopOverrideEnabled = false;
+            bool loopOverrideValue = true;
+            animator->RuntimeStateSpeedMultiplier = 1.0f;
+
+            if (activeState)
+            {
+                resolvedClipKey = activeState->ClipKey;
+                loopOverrideEnabled = activeState->LoopOverrideEnabled;
+                loopOverrideValue = activeState->LoopOverride;
+                animator->RuntimeStateSpeedMultiplier = std::max(0.0f, activeState->SpeedMultiplier);
+            }
+
+            if (resolvedClipKey.empty())
+                resolvedClipKey = animator->DefaultClipKey;
+
+            Assets::AnimationClipAsset::Ptr clipAsset;
+            if (!resolvedClipKey.empty())
+                (void)TryResolveAnimationClipAssetByKey(resolvedClipKey, clipAsset);
+            if (!clipAsset && hasDefaultClip && animator->CachedDefaultClip)
+                clipAsset = animator->CachedDefaultClip;
+
+            if (!clipAsset)
+            {
+                animator->RuntimeCurrentClipKey.clear();
+                animator->RuntimeCurrentStateDurationSeconds = 1.0f;
+                return;
+            }
+
+            animator->RuntimeCurrentClipKey = clipAsset->GetKey();
+            const auto& clipData = clipAsset->GetData();
+            const float durationSeconds = std::max(0.0001f, clipData.DurationSeconds);
+            animator->RuntimeCurrentStateDurationSeconds = durationSeconds;
+            const bool clipLoops = loopOverrideEnabled ? loopOverrideValue : clipData.Loop;
+
+            const float safeDeltaSeconds = std::max(0.0f, deltaTime);
+            const float speed = std::max(0.0f, animator->PlaybackSpeed) * std::max(0.0f, animator->RuntimeStateSpeedMultiplier);
+
+            const float previousTime = animator->RuntimeStateTimeSeconds;
+            float currentTime = previousTime + safeDeltaSeconds * speed;
+            bool loopedThisFrame = false;
+            if (clipLoops)
+            {
+                if (currentTime >= durationSeconds)
+                {
+                    currentTime = std::fmod(currentTime, durationSeconds);
+                    loopedThisFrame = true;
+                }
+            }
+            else
+            {
+                currentTime = std::clamp(currentTime, 0.0f, durationSeconds);
+            }
+
+            animator->RuntimePreviousStateTimeSeconds = previousTime;
+            animator->RuntimeStateTimeSeconds = currentTime;
+
+            if (const auto* spriteSubRect = SampleStepTrackKeyframe(clipData.SpriteSubRectTrack, currentTime))
+            {
+                animator->RuntimeHasSpriteSubRect = true;
+                animator->RuntimeSpriteUvMin = spriteSubRect->UvMin;
+                animator->RuntimeSpriteUvMax = spriteSubRect->UvMax;
+            }
+
+            if (const auto* spriteTexture = SampleStepTrackKeyframe(clipData.SpriteTextureTrack, currentTime))
+            {
+                animator->RuntimeSpriteTextureOverrideKey = spriteTexture->TextureKey;
+            }
+
+            if (animator->RuntimeSpriteTextureOverrideKey != previousSpriteTextureOverrideKey)
+            {
+                animator->RuntimeCachedSpriteTextureOverride.reset();
+                animator->RuntimeSpriteTextureOverrideLoadAttempted = false;
+            }
+
+            bool hasPositionSample = false;
+            const glm::vec3 sampledPosition = SampleVector3Track(clipData.PositionTrack, currentTime, hasPositionSample);
+            animator->RuntimeHasPosition = hasPositionSample;
+            animator->RuntimePosition = sampledPosition;
+
+            bool hasScaleSample = false;
+            const glm::vec3 sampledScale = SampleVector3Track(clipData.ScaleTrack, currentTime, hasScaleSample);
+            animator->RuntimeHasScale = hasScaleSample;
+            animator->RuntimeScale = sampledScale;
+
+            bool hasRotationSample = false;
+            const float sampledRotation = SampleFloatTrack(clipData.RotationZTrack, currentTime, hasRotationSample);
+            animator->RuntimeHasRotationZ = hasRotationSample;
+            animator->RuntimeRotationZDegrees = sampledRotation;
+
+            if (animator->ApplyToTransform)
+            {
+                if (auto* transform = registry.try_get<TransformComponent>(entity))
+                {
+                    if (animator->RuntimeHasPosition)
+                        transform->Position = animator->RuntimePosition;
+                    if (animator->RuntimeHasScale)
+                        transform->Scale = animator->RuntimeScale;
+                    if (animator->RuntimeHasRotationZ)
+                        transform->Rotation.z = animator->RuntimeRotationZDegrees;
+                }
+            }
+
+            if (eventReceiver && eventReceiver->Enabled && !clipData.EventTrack.empty())
+            {
+                const float normalizedTime = std::clamp(currentTime / durationSeconds, 0.0f, 1.0f);
+                for (const auto& eventKeyframe : clipData.EventTrack)
+                {
+                    if (!ShouldDispatchAnimationEventAtTime(
+                            eventKeyframe.TimeSeconds,
+                            previousTime,
+                            currentTime,
+                            loopedThisFrame,
+                            durationSeconds))
+                    {
+                        continue;
+                    }
+
+                    AnimationEventMessage message{};
+                    message.Name = eventKeyframe.Name;
+                    message.StringPayload = eventKeyframe.StringPayload;
+                    message.FloatPayload = eventKeyframe.FloatPayload;
+                    message.IntegerPayload = eventKeyframe.IntegerPayload;
+                    message.BooleanPayload = eventKeyframe.BooleanPayload;
+                    message.TimeSeconds = eventKeyframe.TimeSeconds;
+                    message.NormalizedTime = normalizedTime;
+                    eventReceiver->RuntimeDispatchedEvents.push_back(std::move(message));
+                }
+            }
+        }
+
+        void UpdateAnimation2DSystem(Scene& scene, float deltaTime, uint64_t dispatchFrame)
+        {
+            auto& registry = scene.GetRegistry();
+            auto view = registry.view<AnimatorComponent>();
+            for (entt::entity entity : view)
+            {
+                UpdateAnimatorComponentForEntity(scene, entity, deltaTime, dispatchFrame);
+            }
         }
 
         // Keep clone/load runtime cleanup centralized so newly added components
@@ -402,6 +948,29 @@ namespace Limitless
                 tilemap->TilesetTextureLoadAttempted = false;
                 tilemap->TilesetAssetLoadAttempted = false;
                 tilemap->EnsureLayerStorage();
+            }
+
+            if (auto* animator = registry.try_get<AnimatorComponent>(entity))
+            {
+                animator->CachedController.reset();
+                animator->ControllerLoadAttempted = false;
+                animator->CachedDefaultClip.reset();
+                animator->DefaultClipLoadAttempted = false;
+                animator->RuntimeInitialized = false;
+                animator->RuntimeCurrentStateName.clear();
+                animator->RuntimeCurrentClipKey.clear();
+                animator->RuntimePreviousStateTimeSeconds = 0.0f;
+                animator->RuntimeStateTimeSeconds = 0.0f;
+                animator->RuntimeCurrentStateDurationSeconds = 1.0f;
+                animator->RuntimeStateSpeedMultiplier = 1.0f;
+                animator->ResetAllTriggers();
+                ResetAnimatorRuntimeOutput(*animator, true);
+            }
+
+            if (auto* eventReceiver = registry.try_get<AnimationEventReceiverComponent>(entity))
+            {
+                eventReceiver->RuntimeDispatchedEvents.clear();
+                eventReceiver->RuntimeDispatchFrame = 0;
             }
 
             if (auto* nativeScript = registry.try_get<NativeScriptComponent>(entity))
@@ -746,6 +1315,7 @@ namespace Limitless
     void Scene::Update(float deltaTime)
     {
         Physics2DQueries::SetActiveSceneForScriptQueries(this);
+        static uint64_t s_AnimationDispatchFrameCounter = 0;
         auto view = m_Registry.view<NativeScriptComponent>();
         for (entt::entity entity : view)
         {
@@ -855,6 +1425,8 @@ namespace Limitless
                 }
             }
         }
+
+        UpdateAnimation2DSystem(*this, deltaTime, ++s_AnimationDispatchFrameCounter);
     }
 
     void Scene::FixedUpdate(float fixedDeltaTime)
@@ -1043,6 +1615,18 @@ namespace Limitless
                 destinationSprite.TilingFactor = sprite->TilingFactor;
                 destinationSprite.CastShadows = sprite->CastShadows;
                 destinationSprite.ReceiveShadows = sprite->ReceiveShadows;
+            }
+
+            if (const auto* animator = sourceRegistry.try_get<AnimatorComponent>(sourceEntity))
+            {
+                destinationRegistry.emplace<AnimatorComponent>(destinationEntity, *animator);
+            }
+
+            if (const auto* animationEventReceiver = sourceRegistry.try_get<AnimationEventReceiverComponent>(sourceEntity))
+            {
+                auto& destinationReceiver = destinationRegistry.emplace<AnimationEventReceiverComponent>(destinationEntity, *animationEventReceiver);
+                destinationReceiver.RuntimeDispatchedEvents.clear();
+                destinationReceiver.RuntimeDispatchFrame = 0;
             }
 
             if (const auto* material = sourceRegistry.try_get<MaterialComponent>(sourceEntity))
@@ -1328,6 +1912,46 @@ namespace Limitless
                     { "TilingFactor", { sprite->TilingFactor.x, sprite->TilingFactor.y } },
                     { "CastShadows", sprite->CastShadows },
                     { "ReceiveShadows", sprite->ReceiveShadows }
+                };
+            }
+
+            if (const auto* animator = m_Registry.try_get<AnimatorComponent>(entity))
+            {
+                nlohmann::json boolParameters = nlohmann::json::object();
+                for (const auto& [name, value] : animator->BoolParameters)
+                    boolParameters[name] = value;
+
+                nlohmann::json floatParameters = nlohmann::json::object();
+                for (const auto& [name, value] : animator->FloatParameters)
+                    floatParameters[name] = value;
+
+                nlohmann::json integerParameters = nlohmann::json::object();
+                for (const auto& [name, value] : animator->IntegerParameters)
+                    integerParameters[name] = value;
+
+                nlohmann::json triggerParameters = nlohmann::json::object();
+                for (const auto& [name, value] : animator->TriggerParameters)
+                    triggerParameters[name] = value;
+
+                entry["Animator"] = {
+                    { "Controller", MakeAssetReferenceJson(animator->ControllerKey, Assets::AssetType::AnimatorController) },
+                    { "DefaultClip", MakeAssetReferenceJson(animator->DefaultClipKey, Assets::AssetType::AnimationClip) },
+                    { "PlaybackSpeed", animator->PlaybackSpeed },
+                    { "Enabled", animator->Enabled },
+                    { "ApplyToSprite", animator->ApplyToSprite },
+                    { "ApplyToTransform", animator->ApplyToTransform },
+                    { "AutoPlay", animator->AutoPlay },
+                    { "BoolParameters", std::move(boolParameters) },
+                    { "FloatParameters", std::move(floatParameters) },
+                    { "IntegerParameters", std::move(integerParameters) },
+                    { "TriggerParameters", std::move(triggerParameters) }
+                };
+            }
+
+            if (const auto* animationEventReceiver = m_Registry.try_get<AnimationEventReceiverComponent>(entity))
+            {
+                entry["AnimationEventReceiver"] = {
+                    { "Enabled", animationEventReceiver->Enabled }
                 };
             }
 
@@ -1791,6 +2415,70 @@ namespace Limitless
                 }
                 sprite.CastShadows = spriteJson.value("CastShadows", true);
                 sprite.ReceiveShadows = spriteJson.value("ReceiveShadows", true);
+            }
+
+            if (entry.contains("Animator") && entry["Animator"].is_object())
+            {
+                const auto& animatorJson = entry["Animator"];
+                auto& animator = scene->GetRegistry().emplace<AnimatorComponent>(entity);
+
+                if (animatorJson.contains("Controller"))
+                    animator.ControllerKey = ResolveAssetKeyFromSceneJson(animatorJson["Controller"]);
+                else
+                    animator.ControllerKey = ResolveLatestKeyFromDatabase(animatorJson.value("ControllerKey", std::string{}));
+
+                if (animatorJson.contains("DefaultClip"))
+                    animator.DefaultClipKey = ResolveAssetKeyFromSceneJson(animatorJson["DefaultClip"]);
+                else
+                    animator.DefaultClipKey = ResolveLatestKeyFromDatabase(animatorJson.value("DefaultClipKey", std::string{}));
+
+                animator.PlaybackSpeed = animatorJson.value("PlaybackSpeed", 1.0f);
+                animator.Enabled = animatorJson.value("Enabled", true);
+                animator.ApplyToSprite = animatorJson.value("ApplyToSprite", true);
+                animator.ApplyToTransform = animatorJson.value("ApplyToTransform", true);
+                animator.AutoPlay = animatorJson.value("AutoPlay", true);
+
+                if (animatorJson.contains("BoolParameters") && animatorJson["BoolParameters"].is_object())
+                {
+                    for (auto it = animatorJson["BoolParameters"].begin(); it != animatorJson["BoolParameters"].end(); ++it)
+                    {
+                        if (it.value().is_boolean())
+                            animator.BoolParameters[it.key()] = it.value().get<bool>();
+                    }
+                }
+                if (animatorJson.contains("FloatParameters") && animatorJson["FloatParameters"].is_object())
+                {
+                    for (auto it = animatorJson["FloatParameters"].begin(); it != animatorJson["FloatParameters"].end(); ++it)
+                    {
+                        if (it.value().is_number())
+                            animator.FloatParameters[it.key()] = it.value().get<float>();
+                    }
+                }
+                if (animatorJson.contains("IntegerParameters") && animatorJson["IntegerParameters"].is_object())
+                {
+                    for (auto it = animatorJson["IntegerParameters"].begin(); it != animatorJson["IntegerParameters"].end(); ++it)
+                    {
+                        if (it.value().is_number_integer())
+                            animator.IntegerParameters[it.key()] = it.value().get<int32_t>();
+                    }
+                }
+                if (animatorJson.contains("TriggerParameters") && animatorJson["TriggerParameters"].is_object())
+                {
+                    for (auto it = animatorJson["TriggerParameters"].begin(); it != animatorJson["TriggerParameters"].end(); ++it)
+                    {
+                        if (it.value().is_boolean())
+                            animator.TriggerParameters[it.key()] = it.value().get<bool>();
+                    }
+                }
+            }
+
+            if (entry.contains("AnimationEventReceiver") && entry["AnimationEventReceiver"].is_object())
+            {
+                const auto& receiverJson = entry["AnimationEventReceiver"];
+                auto& receiver = scene->GetRegistry().emplace<AnimationEventReceiverComponent>(entity);
+                receiver.Enabled = receiverJson.value("Enabled", true);
+                receiver.RuntimeDispatchedEvents.clear();
+                receiver.RuntimeDispatchFrame = 0;
             }
 
             if (entry.contains("Material"))
@@ -2470,11 +3158,60 @@ namespace Limitless
             if (!scene.IsEntityEnabledInHierarchy(entity))
                 continue;
             auto& sprite = registry.get<SpriteComponent>(entity);
+            auto* animator = registry.try_get<AnimatorComponent>(entity);
 
             glm::mat4 model = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
             bool useMissingAssetFallback = false;
 
+            const glm::vec2 safeTilingFactor(
+                std::max(0.001f, sprite.TilingFactor.x),
+                std::max(0.001f, sprite.TilingFactor.y));
+            glm::vec2 renderUvMin(0.0f, 0.0f);
+            glm::vec2 renderUvMax = safeTilingFactor;
+            if (animator && animator->Enabled && animator->ApplyToSprite && animator->RuntimeHasSpriteSubRect)
+            {
+                renderUvMin = animator->RuntimeSpriteUvMin;
+                glm::vec2 frameSpan = animator->RuntimeSpriteUvMax - animator->RuntimeSpriteUvMin;
+                if (frameSpan.x <= 0.0001f || frameSpan.y <= 0.0001f)
+                    frameSpan = glm::vec2(1.0f, 1.0f);
+                renderUvMax = animator->RuntimeSpriteUvMin + frameSpan * safeTilingFactor;
+            }
+
+            Assets::TextureAsset::Ptr animatedTextureAsset;
+            std::string animatedTextureKey;
+            if (animator && animator->Enabled && animator->ApplyToSprite && !animator->RuntimeSpriteTextureOverrideKey.empty())
+            {
+                animatedTextureKey = animator->RuntimeSpriteTextureOverrideKey;
+                if (!animator->RuntimeCachedSpriteTextureOverride && !animator->RuntimeSpriteTextureOverrideLoadAttempted)
+                {
+                    animator->RuntimeCachedSpriteTextureOverride = std::dynamic_pointer_cast<Assets::TextureAsset>(
+                        Assets::AssetManager::GetCachedByKey(animatedTextureKey));
+                    if (!animator->RuntimeCachedSpriteTextureOverride)
+                    {
+                        if (!g_PendingTextureLoads.contains(animatedTextureKey))
+                            g_PendingTextureLoads.emplace(animatedTextureKey, Assets::TextureAsset::LoadAsync(animatedTextureKey));
+                    }
+                    animator->RuntimeSpriteTextureOverrideLoadAttempted = true;
+                }
+                else if (!animator->RuntimeCachedSpriteTextureOverride && animator->RuntimeSpriteTextureOverrideLoadAttempted)
+                {
+                    animator->RuntimeCachedSpriteTextureOverride = std::dynamic_pointer_cast<Assets::TextureAsset>(
+                        Assets::AssetManager::GetCachedByKey(animatedTextureKey));
+                    if (!animator->RuntimeCachedSpriteTextureOverride)
+                    {
+                        const auto pendingIt = g_PendingTextureLoads.find(animatedTextureKey);
+                        if (pendingIt != g_PendingTextureLoads.end() && pendingIt->second.IsDone())
+                        {
+                            animator->RuntimeCachedSpriteTextureOverride = pendingIt->second.Get();
+                            g_PendingTextureLoads.erase(pendingIt);
+                        }
+                    }
+                }
+                animatedTextureAsset = animator->RuntimeCachedSpriteTextureOverride;
+            }
+
             // Material override (Unity-style): if the entity has a MaterialComponent, prefer its main texture.
+            // Animator texture override still has highest priority so animation remains visible.
             Assets::TextureAsset::Ptr materialMainTextureAsset;
             if (auto* material = registry.try_get<MaterialComponent>(entity))
             {
@@ -2516,22 +3253,10 @@ namespace Limitless
                 }
             }
 
-            if (materialMainTextureAsset)
-            {
-                const glm::vec2 safeTilingFactor(
-                    std::max(0.001f, sprite.TilingFactor.x),
-                    std::max(0.001f, sprite.TilingFactor.y));
-                Renderer2D::DrawQuad(model,
-                                     materialMainTextureAsset,
-                                     sprite.Color,
-                                     glm::vec2(0.0f, 0.0f),
-                                     safeTilingFactor);
-            }
-            else if (useMissingAssetFallback)
-            {
-                Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, sprite.Color.a));
-            }
-            else if (!sprite.TextureKey.empty())
+            Assets::TextureAsset::Ptr resolvedTextureAsset = animatedTextureAsset ? animatedTextureAsset : materialMainTextureAsset;
+
+            // Fallback to Sprite texture when no animated texture override/material texture is active/ready.
+            if (!resolvedTextureAsset && !sprite.TextureKey.empty())
             {
                 if (!sprite.CachedTexture && !sprite.TextureLoadAttempted)
                 {
@@ -2559,19 +3284,20 @@ namespace Limitless
                         }
                     }
                 }
-                if (sprite.CachedTexture)
-                {
-                    const glm::vec2 safeTilingFactor(
-                        std::max(0.001f, sprite.TilingFactor.x),
-                        std::max(0.001f, sprite.TilingFactor.y));
-                    Renderer2D::DrawQuad(model,
-                                         sprite.CachedTexture,
-                                         sprite.Color,
-                                         glm::vec2(0.0f, 0.0f),
-                                         safeTilingFactor);
-                }
-                else
-                    Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, sprite.Color.a));
+                resolvedTextureAsset = sprite.CachedTexture;
+            }
+
+            if (resolvedTextureAsset)
+            {
+                Renderer2D::DrawQuad(model,
+                                     resolvedTextureAsset,
+                                     sprite.Color,
+                                     renderUvMin,
+                                     renderUvMax);
+            }
+            else if (useMissingAssetFallback || !sprite.TextureKey.empty() || !animatedTextureKey.empty())
+            {
+                Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, sprite.Color.a));
             }
             else
             {

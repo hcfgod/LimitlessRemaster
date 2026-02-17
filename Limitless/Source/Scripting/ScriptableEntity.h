@@ -14,6 +14,7 @@ namespace Limitless
 {
     class Scene;
     class ScriptableEntity;
+    struct AnimatorComponent;
     using ScriptCreateEntityBridgeCallback = entt::entity (*)(const char* name);
     using ScriptDestroyEntityBridgeCallback = void (*)(entt::entity entity);
 
@@ -162,6 +163,8 @@ namespace Limitless
         void DestroyEntity(Entity entity);
         void DestroyEntity(entt::entity entity);
         bool IsEntityValid(entt::entity entity) const;
+        Entity GetEntity(entt::entity entity) const;
+        Entity FindEntityByTag(const std::string& tag) const;
 
         static void SetCreateEntityBridgeCallback(ScriptCreateEntityBridgeCallback callback);
         static void SetDestroyEntityBridgeCallback(ScriptDestroyEntityBridgeCallback callback);
@@ -172,18 +175,21 @@ namespace Limitless
         bool GetExposedBoolean(const std::string& name, bool fallbackValue = false) const;
         glm::vec3 GetExposedVector3(const std::string& name, const glm::vec3& fallbackValue = glm::vec3(0.0f)) const;
         std::string GetExposedString(const std::string& name, const std::string& fallbackValue = {}) const;
+        Entity GetExposedEntity(const std::string& name, const Entity& fallbackValue = Entity{}) const;
 
         void SetExposedFloat(const std::string& name, float value);
         void SetExposedInteger(const std::string& name, int32_t value);
         void SetExposedBoolean(const std::string& name, bool value);
         void SetExposedVector3(const std::string& name, const glm::vec3& value);
         void SetExposedString(const std::string& name, const std::string& value);
+        void SetExposedEntity(const std::string& name, const Entity& value);
 
         void SyncExposedField(const std::string& name, float& value) { value = GetExposedFloat(name, value); }
         void SyncExposedField(const std::string& name, int32_t& value) { value = GetExposedInteger(name, value); }
         void SyncExposedField(const std::string& name, bool& value) { value = GetExposedBoolean(name, value); }
         void SyncExposedField(const std::string& name, glm::vec3& value) { value = GetExposedVector3(name, value); }
         void SyncExposedField(const std::string& name, std::string& value) { value = GetExposedString(name, value); }
+        void SyncExposedField(const std::string& name, Entity& value) { value = GetExposedEntity(name, value); }
 
         bool Raycast2D(const glm::vec2& origin,
                        const glm::vec2& direction,
@@ -196,6 +202,21 @@ namespace Limitless
 
         bool HasContactWith(entt::entity otherEntity, bool includeSensorContacts = true) const;
         int GetContactCount(bool includeSensorContacts = true) const;
+
+        // Animator 2D runtime controls.
+        bool HasAnimator() const;
+        bool PlayAnimatorState(const std::string& stateName, bool restartIfSameState = true);
+        bool PlayAnimatorClip(const std::string& clipKey, bool restartIfSameClip = true);
+        bool SetAnimatorBool(const std::string& parameterName, bool value);
+        bool GetAnimatorBool(const std::string& parameterName, bool fallback = false) const;
+        bool SetAnimatorFloat(const std::string& parameterName, float value);
+        float GetAnimatorFloat(const std::string& parameterName, float fallback = 0.0f) const;
+        bool SetAnimatorInteger(const std::string& parameterName, int32_t value);
+        int32_t GetAnimatorInteger(const std::string& parameterName, int32_t fallback = 0) const;
+        bool SetAnimatorTrigger(const std::string& parameterName);
+        bool ResetAnimatorTrigger(const std::string& parameterName);
+        std::string GetAnimatorCurrentStateName() const;
+        float GetAnimatorStateTimeSeconds() const;
 
         virtual void OnSynchronizeExposedFields() {}
 

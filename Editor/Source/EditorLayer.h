@@ -4,6 +4,8 @@
 #include "Assets/MaterialAsset.h"
 #include "Assets/TextureAsset.h"
 #include "EditorPlayMode.h"
+#include "EditorAnimationTimelinePanel.h"
+#include "EditorAnimatorGraphPanel.h"
 #include "EditorProjectPanel.h"
 #include "EditorProjectDialog.h"
 #include "EditorProjectSettingsPanel.h"
@@ -57,6 +59,8 @@ namespace Limitless
         void DrawScenePanel();
         void DrawInspectorPanel();
         void DrawProjectPanel();
+        void DrawAnimationTimelinePanel();
+        void DrawAnimatorGraphPanel();
         void DrawPhysicsDiagnosticsPanel();
         void DrawConsolePanel();
         void DrawTilemapPanel();
@@ -102,6 +106,8 @@ namespace Limitless
         std::string CreateMaterialAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         std::string CreateTilesetAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         std::string CreateAudioMixerAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
+        std::string CreateAnimationClipAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
+        std::string CreateAnimatorControllerAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         std::string CreatePrefabAssetPathForEntity(entt::entity entity, const std::filesystem::path& relativeFolderPath) const;
         bool CreatePrefabFromEntity(entt::entity entity);
         bool CreatePrefabFromEntityInFolder(entt::entity entity, const std::filesystem::path& relativeFolderPath);
@@ -169,6 +175,12 @@ namespace Limitless
         /// Selected input actions asset key when user clicks an input actions asset in the Project panel.
         std::string m_SelectedInputActionsAssetKey;
 
+        /// Selected animation clip asset key when user clicks an animation clip asset in the Project panel.
+        std::string m_SelectedAnimationClipAssetKey;
+
+        /// Selected animator controller asset key when user clicks an animator controller asset in the Project panel.
+        std::string m_SelectedAnimatorControllerAssetKey;
+
         std::string m_CurrentSceneAssetKey;
         std::string m_EditSceneStoredAssetKey;
         std::string m_PrefabModeReturnSceneAssetKey;
@@ -188,6 +200,8 @@ namespace Limitless
         bool m_ShowConsoleWindow = true;
         bool m_ShowEditorFpsOverlay = true;
         bool m_ShowTilemapPanel = true;
+        bool m_ShowAnimationTimelinePanel = true;
+        bool m_ShowAnimatorGraphPanel = true;
         bool m_ConsoleAutoScroll = true;
         bool m_ConsoleShowScriptLogs = true;
         bool m_ConsoleShowEngineLogs = false;

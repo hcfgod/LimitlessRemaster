@@ -18,6 +18,7 @@ namespace Limitless::Assets
             case AssetType::AnimationClip: return "AnimationClip";
             case AssetType::Tileset: return "Tileset";
             case AssetType::AudioMixer: return "AudioMixer";
+            case AssetType::AnimatorController: return "AnimatorController";
             case AssetType::Unknown:
             default:                   return "Unknown";
         }
@@ -37,6 +38,7 @@ namespace Limitless::Assets
         if (s == "AnimationClip") return AssetType::AnimationClip;
         if (s == "Tileset") return AssetType::Tileset;
         if (s == "AudioMixer") return AssetType::AudioMixer;
+        if (s == "AnimatorController") return AssetType::AnimatorController;
         return AssetType::Unknown;
     }
 }

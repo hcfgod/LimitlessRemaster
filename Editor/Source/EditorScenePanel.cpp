@@ -142,19 +142,8 @@ namespace Limitless::EditorScenePanel
             if (isPrefabLinkedEntity)
                 DrawPrefabBadgeForLastItem();
 
-            if (ImGui::IsItemClicked())
-            {
-                selectedEntity = entity;
-                selectedTextureAssetKey.clear();
-                cachedTextureAsset.reset();
-                selectedMaterialAssetKey.clear();
-                cachedMaterialAsset.reset();
-                selectedNativeScriptAssetKey.clear();
-                selectedPrefabAssetKey.clear();
-                selectedTilesetAssetKey.clear();
-                selectedAudioMixerAssetKey.clear();
-                selectedInputActionsAssetKey.clear();
-            }
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+                state.PendingClickSelectionEntity = entity;
 
             if (ImGui::BeginPopupContextItem())
             {
@@ -237,6 +226,8 @@ namespace Limitless::EditorScenePanel
 
             if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
             {
+                // Dragging from hierarchy should not immediately retarget Inspector selection.
+                state.PendingClickSelectionEntity = entt::null;
                 entt::entity payloadEntity = entity;
                 ImGui::SetDragDropPayload(kSceneEntityPayload, &payloadEntity, sizeof(payloadEntity), ImGuiCond_Once);
                 ImGui::Text("%s", label.c_str());
@@ -501,6 +492,7 @@ namespace Limitless::EditorScenePanel
             ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
             !ImGui::IsAnyItemHovered())
         {
+            state.PendingClickSelectionEntity = entt::null;
             selectedEntity = entt::null;
             selectedTextureAssetKey.clear();
             cachedTextureAsset.reset();
@@ -722,6 +714,25 @@ namespace Limitless::EditorScenePanel
 
                 ImGui::TreePop();
             }
+        }
+
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+        {
+            if (state.PendingClickSelectionEntity != entt::null && ImGui::GetDragDropPayload() == nullptr)
+            {
+                selectedEntity = state.PendingClickSelectionEntity;
+                selectedTextureAssetKey.clear();
+                cachedTextureAsset.reset();
+                selectedMaterialAssetKey.clear();
+                cachedMaterialAsset.reset();
+                selectedNativeScriptAssetKey.clear();
+                selectedPrefabAssetKey.clear();
+                selectedTilesetAssetKey.clear();
+                selectedAudioMixerAssetKey.clear();
+                selectedInputActionsAssetKey.clear();
+            }
+
+            state.PendingClickSelectionEntity = entt::null;
         }
 
         if (state.RenamePopupOpen)

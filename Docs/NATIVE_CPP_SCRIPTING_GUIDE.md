@@ -144,12 +144,17 @@ Each `Native Script` component automatically exposes supported `public` fields f
 
 - Declare fields in your script class (not in the inspector UI).
 - Inspector values are serialized with the scene.
-- Supported field types: `float`, `int`/`int32_t`, `bool`, `glm::vec3`, `std::string`.
+- Supported field types: `float`, `int`/`int32_t`, `bool`, `glm::vec3`, `std::string`, `Limitless::Entity`.
+- `Limitless::Entity` fields are Unity-style object slots in Inspector:
+  - Choose from a dropdown of scene entities
+  - Drag an entity from the Scene panel directly into the slot
+  - Clear with `X`
+  - Runtime resolution is tag-based, so tags should be unique.
 
 From script code, read/write these values with the field name:
 
-- `GetExposedFloat`, `GetExposedInteger`, `GetExposedBoolean`, `GetExposedVector3`, `GetExposedString`
-- `SetExposedFloat`, `SetExposedInteger`, `SetExposedBoolean`, `SetExposedVector3`, `SetExposedString`
+- `GetExposedFloat`, `GetExposedInteger`, `GetExposedBoolean`, `GetExposedVector3`, `GetExposedString`, `GetExposedEntity`
+- `SetExposedFloat`, `SetExposedInteger`, `SetExposedBoolean`, `SetExposedVector3`, `SetExposedString`, `SetExposedEntity`
 - `LT_SYNC_EXPOSED_FIELD(FieldName)` for manual sync when needed
 - `LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()` / `LT_AUTO_EXPOSED_FIELD(FieldName)` / `LT_END_AUTO_EXPOSED_FIELD_SYNC()` to auto-sync fields in the background (recommended)
 

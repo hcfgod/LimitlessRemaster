@@ -4,6 +4,8 @@
 #include "EditorInspectorPanel.h"
 
 #include "Audio/AudioMixerAsset.h"
+#include "Assets/AnimationClipAsset.h"
+#include "Assets/AnimatorControllerAsset.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetImportPipeline.h"
 #include "Assets/AssetManager.h"
@@ -1916,5 +1918,74 @@ namespace Limitless::EditorInspectorPanel
             s_State.Json["specularIntensity"] = std::clamp(specularIntensity, 0.0f, 8.0f);
             (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
         }
+    }
+
+    void DrawAnimationClipAssetInspector(std::string& selectedAnimationClipAssetKey)
+    {
+        if (selectedAnimationClipAssetKey.empty())
+            return;
+
+        auto clipAsset = Assets::AnimationClipAsset::LoadBlocking(selectedAnimationClipAssetKey);
+        if (!clipAsset)
+        {
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
+                "Failed to load animation clip asset: %s",
+                selectedAnimationClipAssetKey.c_str());
+            return;
+        }
+
+        const auto& clipData = clipAsset->GetData();
+        ImGui::Text("Animation Clip: %s", std::filesystem::path(selectedAnimationClipAssetKey).filename().string().c_str());
+        ImGui::TextDisabled("Asset Key: %s", selectedAnimationClipAssetKey.c_str());
+        ImGui::Separator();
+
+        ImGui::Text("Name: %s", clipData.Name.empty() ? "<unnamed>" : clipData.Name.c_str());
+        ImGui::Text("Duration: %.3f sec", clipData.DurationSeconds);
+        ImGui::Text("Samples Per Second: %.1f", clipData.SamplesPerSecond);
+        ImGui::Text("Loop: %s", clipData.Loop ? "Yes" : "No");
+        ImGui::Separator();
+        ImGui::Text("Tracks");
+        ImGui::BulletText("Sprite Sub-Rect Keys: %u", static_cast<uint32_t>(clipData.SpriteSubRectTrack.size()));
+        ImGui::BulletText("Sprite Texture Keys: %u", static_cast<uint32_t>(clipData.SpriteTextureTrack.size()));
+        ImGui::BulletText("Position Keys: %u", static_cast<uint32_t>(clipData.PositionTrack.size()));
+        ImGui::BulletText("Scale Keys: %u", static_cast<uint32_t>(clipData.ScaleTrack.size()));
+        ImGui::BulletText("Rotation Z Keys: %u", static_cast<uint32_t>(clipData.RotationZTrack.size()));
+        ImGui::BulletText("Events: %u", static_cast<uint32_t>(clipData.EventTrack.size()));
+        ImGui::Spacing();
+        ImGui::TextDisabled("Edit detailed tracks in the Animation Timeline panel.");
+    }
+
+    void DrawAnimatorControllerAssetInspector(std::string& selectedAnimatorControllerAssetKey)
+    {
+        if (selectedAnimatorControllerAssetKey.empty())
+            return;
+
+        auto controllerAsset = Assets::AnimatorControllerAsset::LoadBlocking(selectedAnimatorControllerAssetKey);
+        if (!controllerAsset)
+        {
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
+                "Failed to load animator controller asset: %s",
+                selectedAnimatorControllerAssetKey.c_str());
+            return;
+        }
+
+        const auto& controllerData = controllerAsset->GetData();
+        ImGui::Text("Animator Controller: %s", std::filesystem::path(selectedAnimatorControllerAssetKey).filename().string().c_str());
+        ImGui::TextDisabled("Asset Key: %s", selectedAnimatorControllerAssetKey.c_str());
+        ImGui::Separator();
+
+        ImGui::Text("Name: %s", controllerData.Name.empty() ? "<unnamed>" : controllerData.Name.c_str());
+        ImGui::Text("Default State: %s", controllerData.DefaultStateName.empty() ? "<none>" : controllerData.DefaultStateName.c_str());
+        ImGui::Text("Parameters: %u", static_cast<uint32_t>(controllerData.Parameters.size()));
+        ImGui::Text("States: %u", static_cast<uint32_t>(controllerData.States.size()));
+
+        uint32_t transitionCount = 0;
+        for (const auto& state : controllerData.States)
+            transitionCount += static_cast<uint32_t>(state.Transitions.size());
+        ImGui::Text("Transitions: %u", transitionCount);
+        ImGui::Spacing();
+        ImGui::TextDisabled("Edit states, transitions, and conditions in the Animator Graph panel.");
     }
 }

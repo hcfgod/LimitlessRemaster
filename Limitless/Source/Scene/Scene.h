@@ -17,7 +17,7 @@ namespace Limitless
     class Camera;
     class Framebuffer;
     class Physics2DWorld;
-    inline constexpr int kSceneSerializationVersion = 12;
+    inline constexpr int kSceneSerializationVersion = 13;
 
     // -----------------------------------------------------------------------------
     // Scene

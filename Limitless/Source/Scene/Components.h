@@ -2,6 +2,8 @@
 
 #include "Assets/MaterialAsset.h"
 #include "Assets/AudioClipAsset.h"
+#include "Assets/AnimationClipAsset.h"
+#include "Assets/AnimatorControllerAsset.h"
 #include "Assets/TextureAsset.h"
 #include "Graphics/Font.h"
 #include "Scripting/ScriptableEntity.h"
@@ -99,6 +101,131 @@ namespace Limitless
         glm::vec2 TilingFactor = glm::vec2(1.0f, 1.0f);
         bool CastShadows = true;
         bool ReceiveShadows = true;
+    };
+
+    struct AnimationEventMessage
+    {
+        std::string Name;
+        std::string StringPayload;
+        float FloatPayload = 0.0f;
+        int32_t IntegerPayload = 0;
+        bool BooleanPayload = false;
+        float TimeSeconds = 0.0f;
+        float NormalizedTime = 0.0f;
+    };
+
+    struct AnimationEventReceiverComponent
+    {
+        bool Enabled = true;
+
+        // Runtime-only events dispatched in the most recent animation update.
+        std::vector<AnimationEventMessage> RuntimeDispatchedEvents;
+        uint64_t RuntimeDispatchFrame = 0;
+    };
+
+    struct AnimatorComponent
+    {
+        // Authoring state (serialized).
+        std::string ControllerKey;
+        std::string DefaultClipKey;
+        float PlaybackSpeed = 1.0f;
+        bool Enabled = true;
+        bool ApplyToSprite = true;
+        bool ApplyToTransform = true;
+        bool AutoPlay = true;
+        std::unordered_map<std::string, bool> BoolParameters;
+        std::unordered_map<std::string, float> FloatParameters;
+        std::unordered_map<std::string, int32_t> IntegerParameters;
+        std::unordered_map<std::string, bool> TriggerParameters;
+
+        // Runtime caches.
+        Assets::AnimatorControllerAsset::Ptr CachedController;
+        bool ControllerLoadAttempted = false;
+        Assets::AnimationClipAsset::Ptr CachedDefaultClip;
+        bool DefaultClipLoadAttempted = false;
+
+        // Runtime playback state.
+        bool RuntimeInitialized = false;
+        std::string RuntimeCurrentStateName;
+        std::string RuntimeCurrentClipKey;
+        float RuntimePreviousStateTimeSeconds = 0.0f;
+        float RuntimeStateTimeSeconds = 0.0f;
+        float RuntimeCurrentStateDurationSeconds = 1.0f;
+        float RuntimeStateSpeedMultiplier = 1.0f;
+
+        // Runtime sampled sprite output.
+        bool RuntimeHasSpriteSubRect = false;
+        glm::vec2 RuntimeSpriteUvMin = glm::vec2(0.0f, 0.0f);
+        glm::vec2 RuntimeSpriteUvMax = glm::vec2(1.0f, 1.0f);
+        std::string RuntimeSpriteTextureOverrideKey;
+        Assets::TextureAsset::Ptr RuntimeCachedSpriteTextureOverride;
+        bool RuntimeSpriteTextureOverrideLoadAttempted = false;
+
+        // Runtime sampled transform output.
+        bool RuntimeHasPosition = false;
+        bool RuntimeHasScale = false;
+        bool RuntimeHasRotationZ = false;
+        glm::vec3 RuntimePosition = glm::vec3(0.0f);
+        glm::vec3 RuntimeScale = glm::vec3(1.0f);
+        float RuntimeRotationZDegrees = 0.0f;
+
+        void SetBoolParameter(const std::string& name, bool value)
+        {
+            BoolParameters[name] = value;
+        }
+
+        bool GetBoolParameter(const std::string& name, bool fallback = false) const
+        {
+            const auto found = BoolParameters.find(name);
+            if (found == BoolParameters.end())
+                return fallback;
+            return found->second;
+        }
+
+        void SetFloatParameter(const std::string& name, float value)
+        {
+            FloatParameters[name] = value;
+        }
+
+        float GetFloatParameter(const std::string& name, float fallback = 0.0f) const
+        {
+            const auto found = FloatParameters.find(name);
+            if (found == FloatParameters.end())
+                return fallback;
+            return found->second;
+        }
+
+        void SetIntegerParameter(const std::string& name, int32_t value)
+        {
+            IntegerParameters[name] = value;
+        }
+
+        int32_t GetIntegerParameter(const std::string& name, int32_t fallback = 0) const
+        {
+            const auto found = IntegerParameters.find(name);
+            if (found == IntegerParameters.end())
+                return fallback;
+            return found->second;
+        }
+
+        void SetTrigger(const std::string& name)
+        {
+            TriggerParameters[name] = true;
+        }
+
+        void ResetTrigger(const std::string& name)
+        {
+            TriggerParameters[name] = false;
+        }
+
+        void ResetAllTriggers()
+        {
+            for (auto& [name, value] : TriggerParameters)
+            {
+                (void)name;
+                value = false;
+            }
+        }
     };
 
     /// Renders runtime text using an MSDF atlas generated from the font file path.

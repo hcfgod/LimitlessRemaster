@@ -17,6 +17,7 @@ namespace Limitless
     {
         entt::entity PendingDeleteEntity = entt::null;
         entt::entity RenameEntity = entt::null;
+        entt::entity PendingClickSelectionEntity = entt::null;
         bool RenamePopupOpen = false;
         std::array<char, 256> RenameBuffer{};
     };

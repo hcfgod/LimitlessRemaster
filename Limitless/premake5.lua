@@ -168,7 +168,8 @@ project "Limitless"
             buildoptions
             {
                 "/utf-8",
-                "/FS" -- Prevent PDB contention in parallel builds
+                "/FS",    -- Prevent PDB contention in parallel builds
+                "/bigobj" -- Required for large translation units (e.g. Scene.cpp)
             }
 
     filter "system:macosx"
