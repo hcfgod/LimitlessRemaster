@@ -17,7 +17,9 @@ namespace Limitless::Assets
     // IMPORTANT: this cache must be invalidated when callers set an explicit override.
     static std::mutex s_CacheMutex;
     static bool s_HasCached = false;
-    static Result<std::filesystem::path> s_CachedResult(ErrorCode::InvalidState, "Project root not cached");
+    // Keep this as a trivial success value during static initialization.
+    // Error object construction may query platform info, which is unsafe this early.
+    static Result<std::filesystem::path> s_CachedResult(std::filesystem::path{});
 
     static std::optional<std::filesystem::path> TryResolveSharedEditorRoot()
     {

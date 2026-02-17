@@ -40,6 +40,28 @@ if [[ "$COMPILER" != "gcc" && "$COMPILER" != "clang" ]]; then
     exit 1
 fi
 
+can_use_sudo() {
+    command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1
+}
+
+has_linkable_library() {
+    local library_name="$1"
+    local compiler_binary="cc"
+    if command -v gcc >/dev/null 2>&1; then
+        compiler_binary="gcc"
+    elif command -v clang >/dev/null 2>&1; then
+        compiler_binary="clang"
+    fi
+
+    local test_binary="/tmp/limitless_link_test_$$"
+    if printf 'int main(void){return 0;}\n' | "$compiler_binary" -x c - -l"${library_name}" -o "$test_binary" >/dev/null 2>&1; then
+        rm -f "$test_binary"
+        return 0
+    fi
+    rm -f "$test_binary"
+    return 1
+}
+
 # Function to check and install dependencies
 check_dependencies() {
     echo "Checking for required dependencies..."
@@ -118,7 +140,7 @@ check_dependencies() {
         if ! pkg-config --exists xxf86vm 2>/dev/null; then
             missing_deps+=("libxxf86vm-dev")
         fi
-        if ! pkg-config --exists xss 2>/dev/null; then
+        if ! pkg-config --exists xss 2>/dev/null && ! has_linkable_library "Xss"; then
             missing_deps+=("libxss-dev")
         fi
 
@@ -137,10 +159,13 @@ check_dependencies() {
         fi
 
         if [[ ${#missing_deps[@]} -gt 0 ]]; then
-            echo "Installing missing Linux dependencies..."
-            echo "Missing: ${missing_deps[*]}"
+            echo "Missing Linux dependencies detected: ${missing_deps[*]}"
 
-            if command -v apt-get >/dev/null 2>&1; then
+            if ! can_use_sudo; then
+                echo "Warning: sudo is unavailable. Continuing without package installation."
+                echo "Warning: install these packages manually if the build fails."
+            elif command -v apt-get >/dev/null 2>&1; then
+                echo "Installing missing Linux dependencies with apt..."
                 sudo apt-get update
                 sudo apt-get install -y "${missing_deps[@]}"
             elif command -v pacman >/dev/null 2>&1; then
@@ -151,7 +176,6 @@ check_dependencies() {
                 echo "Error: Unsupported Linux package manager. Install dependencies manually and retry."
                 return 1
             fi
-            echo "Linux system dependencies installed successfully."
         fi
 
         if ! install_box2d_v3_linux; then
@@ -161,9 +185,9 @@ check_dependencies() {
         # Check for SDL3 and install from package manager / source as fallback
         if ! pkg-config --exists sdl3 2>/dev/null; then
             echo "SDL3 not found. Attempting package manager install first..."
-            if command -v apt-get >/dev/null 2>&1 && sudo apt-get install -y libsdl3-dev 2>/dev/null; then
+            if can_use_sudo && command -v apt-get >/dev/null 2>&1 && sudo apt-get install -y libsdl3-dev 2>/dev/null; then
                 echo "SDL3 installed from apt."
-            elif command -v pacman >/dev/null 2>&1 && sudo pacman -S --needed sdl3 >/dev/null 2>&1; then
+            elif can_use_sudo && command -v pacman >/dev/null 2>&1 && sudo pacman -S --needed sdl3 >/dev/null 2>&1; then
                 echo "SDL3 installed from pacman."
             else
                 echo "SDL3 package unavailable. Building SDL3 from source..."
@@ -172,9 +196,9 @@ check_dependencies() {
                 pushd "$temp_dir" >/dev/null
 
                 if ! command -v git >/dev/null 2>&1; then
-                    if command -v apt-get >/dev/null 2>&1; then
+                    if can_use_sudo && command -v apt-get >/dev/null 2>&1; then
                         sudo apt-get install -y git
-                    elif command -v pacman >/dev/null 2>&1; then
+                    elif can_use_sudo && command -v pacman >/dev/null 2>&1; then
                         sudo pacman -S --needed git
                     else
                         echo "Error: git is required to build SDL3 from source."
@@ -185,9 +209,9 @@ check_dependencies() {
                 fi
 
                 if ! command -v cmake >/dev/null 2>&1; then
-                    if command -v apt-get >/dev/null 2>&1; then
+                    if can_use_sudo && command -v apt-get >/dev/null 2>&1; then
                         sudo apt-get install -y cmake
-                    elif command -v pacman >/dev/null 2>&1; then
+                    elif can_use_sudo && command -v pacman >/dev/null 2>&1; then
                         sudo pacman -S --needed cmake
                     else
                         echo "Error: cmake is required to build SDL3 from source."
@@ -203,6 +227,12 @@ check_dependencies() {
                 mkdir build && cd build
                 cmake .. -DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_TEST=OFF -DSDL_OPENGL=ON -DSDL_OPENGLES=ON
                 make -j"$(get_job_count)"
+                if ! can_use_sudo; then
+                    echo "Error: sudo is required to install SDL3 system-wide."
+                    popd >/dev/null
+                    rm -rf "$temp_dir"
+                    return 1
+                fi
                 sudo make install
                 if command -v ldconfig >/dev/null 2>&1; then
                     sudo ldconfig
@@ -232,15 +262,30 @@ get_job_count() {
 }
 
 has_box2d_v3_linux() {
+    local local_lib_dir
+    local local_static_lib
+    local local_shared_lib
+    local_lib_dir="$(pwd)/Limitless/Vendor/box2d/libs/linux"
+    local_static_lib="${local_lib_dir}/libbox2d.a"
+    local_shared_lib="${local_lib_dir}/libbox2d.so"
+
+    if [[ -f "$local_static_lib" ]] && nm "$local_static_lib" 2>/dev/null | grep "b2World_IsValid" >/dev/null; then
+        return 0
+    fi
+
+    if [[ -f "$local_shared_lib" ]] && nm -D "$local_shared_lib" 2>/dev/null | grep "b2World_IsValid" >/dev/null; then
+        return 0
+    fi
+
     if command -v ldconfig >/dev/null 2>&1; then
         local installed_path
         installed_path="$(ldconfig -p 2>/dev/null | awk '/libbox2d\.so/{print $NF; exit}')"
-        if [[ -n "${installed_path:-}" ]] && nm -D "$installed_path" 2>/dev/null | grep -q "b2World_IsValid"; then
+        if [[ -n "${installed_path:-}" ]] && nm -D "$installed_path" 2>/dev/null | grep "b2World_IsValid" >/dev/null; then
             return 0
         fi
     fi
 
-    if [[ -f "/usr/local/lib/libbox2d.so" ]] && nm -D "/usr/local/lib/libbox2d.so" 2>/dev/null | grep -q "b2World_IsValid"; then
+    if [[ -f "/usr/local/lib/libbox2d.so" ]] && nm -D "/usr/local/lib/libbox2d.so" 2>/dev/null | grep "b2World_IsValid" >/dev/null; then
         return 0
     fi
 
@@ -255,13 +300,15 @@ install_box2d_v3_linux() {
     echo "Box2D 3.x not found (missing b2World_IsValid). Building from source..."
 
     local temp_dir="/tmp/box2d_build_$$"
+    local local_lib_dir
+    local_lib_dir="$(pwd)/Limitless/Vendor/box2d/libs/linux"
     mkdir -p "$temp_dir"
     pushd "$temp_dir" >/dev/null
 
     if ! command -v git >/dev/null 2>&1; then
-        if command -v apt-get >/dev/null 2>&1; then
+        if can_use_sudo && command -v apt-get >/dev/null 2>&1; then
             sudo apt-get install -y git
-        elif command -v pacman >/dev/null 2>&1; then
+        elif can_use_sudo && command -v pacman >/dev/null 2>&1; then
             sudo pacman -S --needed git
         else
             echo "Error: git is required to install Box2D from source."
@@ -272,9 +319,9 @@ install_box2d_v3_linux() {
     fi
 
     if ! command -v cmake >/dev/null 2>&1; then
-        if command -v apt-get >/dev/null 2>&1; then
+        if can_use_sudo && command -v apt-get >/dev/null 2>&1; then
             sudo apt-get install -y cmake
-        elif command -v pacman >/dev/null 2>&1; then
+        elif can_use_sudo && command -v pacman >/dev/null 2>&1; then
             sudo pacman -S --needed cmake
         else
             echo "Error: cmake is required to install Box2D from source."
@@ -285,12 +332,17 @@ install_box2d_v3_linux() {
     fi
 
     git clone --depth 1 --branch v3.1.1 https://github.com/erincatto/box2d.git
-    cmake -S box2d -B box2d/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
+    cmake -S box2d -B box2d/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DBOX2D_UNIT_TESTS=OFF -DBOX2D_SAMPLES=OFF
     cmake --build box2d/build --parallel "$(get_job_count)"
-    sudo cmake --install box2d/build
-    if command -v ldconfig >/dev/null 2>&1; then
-        sudo ldconfig
+
+    mkdir -p "$local_lib_dir"
+    if [[ ! -f "box2d/build/src/libbox2d.a" ]]; then
+        echo "Error: Box2D static library output was not found."
+        popd >/dev/null
+        rm -rf "$temp_dir"
+        return 1
     fi
+    cp "box2d/build/src/libbox2d.a" "${local_lib_dir}/libbox2d.a"
 
     popd >/dev/null
     rm -rf "$temp_dir"
@@ -300,7 +352,7 @@ install_box2d_v3_linux() {
         return 1
     fi
 
-    echo "Box2D 3.x installed successfully."
+    echo "Box2D 3.x built successfully at ${local_lib_dir}/libbox2d.a."
     return 0
 }
 
@@ -356,7 +408,7 @@ setup_premake() {
     
     # Extract premake5
     echo "Extracting premake5..."
-    if ! tar -xzf "$temp_file" -C "$premake_dir"; then
+    if ! tar --no-same-owner -xzf "$temp_file" -C "$premake_dir"; then
         echo "Error: Failed to extract premake5"
         rm -f "$temp_file"
         return 1
