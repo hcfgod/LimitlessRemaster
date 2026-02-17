@@ -39,7 +39,7 @@ The hot reload system consists of several components:
 
 ### 1. Start the Application
 ```bash
-./Sandbox.exe
+./Runtime.exe
 ```
 
 You should see output like:
@@ -221,10 +221,10 @@ The engine prints the active config path at startup:
 - `[Limitless] Working directory: ...`
 - `[Limitless] Using config file: ...\config.json`
 
-When running from Visual Studio, the working directory is often `Sandbox/`, so `Sandbox/config.json` is used.
+When running from Visual Studio, the working directory is often `Runtime/`, so `Runtime/config.json` is used.
 When running the built executable directly, the working directory is usually the output folder, so the config next to the `.exe` is used.
 
-To reduce confusion, the `Sandbox` project copies `Sandbox/config.json` into the build output folder on every build so both locations stay in sync.
+To reduce confusion, the `Runtime` project copies `Runtime/config.json` into the build output folder on every build so both locations stay in sync.
 
 ### Logging Changes Not Visible
 1. **Log Level**: Make sure the new log level is lower than the current messages

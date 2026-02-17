@@ -1,4 +1,4 @@
-project "Sandbox"
+project "Runtime"
     location "."
     kind "ConsoleApp"
     language "C++"
@@ -48,7 +48,7 @@ project "Sandbox"
     -- ----------------------------------------------------------------------------------
     -- Runtime data
     --
-    -- Visual Studio often runs Sandbox with working directory set to `Sandbox/`, while
+    -- Visual Studio often runs Runtime with working directory set to `Runtime/`, while
     -- double-clicking the built .exe runs with working directory set to the output folder.
     --
     -- To avoid "editing the wrong config.json", we copy the source-of-truth config next to
@@ -57,23 +57,24 @@ project "Sandbox"
     postbuildcommands
     {
         -- NOTE:
-        -- `%{wks.location}` is relative to the project location for some generators (e.g. gmake2),
-        -- so we must include an explicit path separator. Without it, the path becomes `..Sandbox/...`
-        -- on Linux/macOS and the CI build fails.
-        "{COPY} \"%{wks.location}/Sandbox/config.json\" \"%{cfg.targetdir}\""
+        -- Use the project location directly to avoid duplicated path segments
+        -- segments on some generators after project renames.
+        "{COPY} \"%{prj.location}/config.json\" \"%{cfg.targetdir}\""
     }
 
     filter "system:windows"
         cppdialect "C++20"
         staticruntime "Off"
         systemversion "latest"
-        -- Sandbox links a mixed third-party stack (some prebuilt libs may request
+        -- Runtime links a mixed third-party stack (some prebuilt libs may request
         -- static CRT defaults). Ignore LIBCMT defaults so we consistently use /MD.
         ignoredefaultlibraries { "LIBCMT", "LIBCMTD" }
 
         defines
         {
             "LT_PLATFORM_WINDOWS",
+            "_CRT_SECURE_NO_WARNINGS",
+            "_CRT_NONSTDC_NO_WARNINGS",
             "LT_ENABLE_PHYSICS2D"
         }
 
@@ -122,6 +123,9 @@ project "Sandbox"
                 "shaderc_sharedd",
                 "box2DD"
             }
+            -- box2DD prebuilt libs may ship without matching PDBs.
+            -- Keep debug link output clean while retaining symbols for our code.
+            linkoptions { "/ignore:4099" }
 
         filter { "system:windows", "configurations:Release or Dist" }
             links

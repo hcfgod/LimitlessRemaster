@@ -142,7 +142,7 @@ if ! setup_premake; then
     exit 1
 fi
 
-echo "Generating makefiles for Sandbox build..."
+echo "Generating makefiles for Runtime build..."
 if [[ "$COMPILER" == "clang" ]]; then
     Vendor/Premake/premake5 gmake2 --cc=clang
 else
@@ -154,8 +154,8 @@ PLATFORM_LOWER="$(echo "$PLATFORM" | tr '[:upper:]' '[:lower:]')"
 CFG_SHORTNAME="${CONFIG_LOWER}_${PLATFORM_LOWER}"
 
 JOBS="$(get_job_count)"
-echo "Building Sandbox only: config=${CFG_SHORTNAME}, compiler=${COMPILER}, jobs=${JOBS}"
-make -j"${JOBS}" Sandbox config="${CFG_SHORTNAME}"
+echo "Building Runtime only: config=${CFG_SHORTNAME}, compiler=${COMPILER}, jobs=${JOBS}"
+make -j"${JOBS}" Runtime config="${CFG_SHORTNAME}"
 
-echo "Sandbox build completed successfully."
-echo "Output directory: Build/${CFG_SHORTNAME}-${SYSTEM_NAME}-${PLATFORM}/Sandbox/"
+echo "Runtime build completed successfully."
+echo "Output directory: Build/${CFG_SHORTNAME}-${SYSTEM_NAME}-${PLATFORM}/Runtime/"

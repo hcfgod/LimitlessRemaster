@@ -77,7 +77,7 @@ workspace "LimitlessRemaster"
 
 -- Include sub-projects
 include "Limitless"
-include "Sandbox"
+include "Runtime"
 include "Editor"
 include "Test"
 include "ScriptCore"

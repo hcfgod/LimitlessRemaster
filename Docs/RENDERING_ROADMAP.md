@@ -59,7 +59,7 @@ Deliverables:
 - Implement `BindShaderCommand` (real shader bind/unbind)
 - Implement `BindVertexArrayCommand` / `BindVertexBufferCommand` / `BindIndexBufferCommand` as needed
 - Implement `DrawArraysCommand` with a real `glDrawArrays`
-- Add a minimal “triangle example” in `Sandbox` (or a dedicated sample target) that exercises the command system end-to-end
+- Add a minimal “triangle example” in `Runtime` (or a dedicated sample target) that exercises the command system end-to-end
 
 Acceptance criteria:
 - A triangle renders on Windows with OpenGL backend.
@@ -94,7 +94,7 @@ Acceptance criteria:
 Goal: move from raw command lists to a stable renderer-facing API.
 
 Deliverables:
-- ~~`Renderer2D` or `Renderer` helpers that build command sequences safely~~ **Done**: `Renderer2D` exists and is used by `SceneRenderer` and Sandbox (BeginScene/DrawQuad/DrawText/EndScene, batching, stats). See `Docs/RENDERER2D_GUIDE.md`.
+- ~~`Renderer2D` or `Renderer` helpers that build command sequences safely~~ **Done**: `Renderer2D` exists and is used by `SceneRenderer` and Runtime (BeginScene/DrawQuad/DrawText/EndScene, batching, stats). See `Docs/RENDERER2D_GUIDE.md`.
 - Clear ownership rules for GPU resources referenced by queued commands
 - Decide how multi-threaded *GPU execution* will be handled (OpenGL context ownership vs future Vulkan/Metal)
 

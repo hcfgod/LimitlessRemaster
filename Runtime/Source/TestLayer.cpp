@@ -42,7 +42,7 @@ namespace Limitless
         // Load project-wide input actions from a Unity-style asset (JSON in Assets/).
         // EditorCameraController will still push its own override (Unity/editor style), but this validates the
         // project-wide asset path and ensures gameplay code can rely on it.
-        GetInputSystem().SetProjectActionAssetFromKey("Assets/InputActions/Sandbox.inputactions.json");
+        GetInputSystem().SetProjectActionAssetFromKey("Assets/InputActions/Runtime.inputactions.json");
 
         // Create an editor camera (3D) and make it active.
         CameraManager::Perspective3DCreateInfo cameraInfo{};
@@ -145,7 +145,7 @@ namespace Limitless
             Assets::AssetManager::ClearCaches();
 
             // Reload demo and input assets so we prove the new source works.
-            GetInputSystem().SetProjectActionAssetFromKey("Assets/InputActions/Sandbox.inputactions.json");
+            GetInputSystem().SetProjectActionAssetFromKey("Assets/InputActions/Runtime.inputactions.json");
 
             if (m_Renderer2DDemo)
             {

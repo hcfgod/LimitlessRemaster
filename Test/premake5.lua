@@ -52,10 +52,15 @@ project "Test"
         cppdialect "C++20"
         staticruntime "Off"
         systemversion "latest"
+        -- Match Runtime behavior: prefer dynamic CRT and ignore static CRT defaults
+        -- from prebuilt third-party libraries.
+        ignoredefaultlibraries { "LIBCMT", "LIBCMTD" }
 
         defines
         {
             "LT_PLATFORM_WINDOWS",
+            "_CRT_SECURE_NO_WARNINGS",
+            "_CRT_NONSTDC_NO_WARNINGS",
             "LT_ENABLE_PHYSICS2D"
         }
 
@@ -104,6 +109,9 @@ project "Test"
                 "shaderc_sharedd",
                 "box2DD"
             }
+            -- box2DD prebuilt libs may ship without matching PDBs.
+            -- Keep debug link output clean while retaining symbols for our code.
+            linkoptions { "/ignore:4099" }
 
         filter { "system:windows", "configurations:Release or Dist" }
             links

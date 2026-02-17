@@ -9,7 +9,7 @@ namespace Limitless
 {
     // -----------------------------------------------------------------------------
     // AudioDemo
-    // Minimal Sandbox-side validation for the Unity-style audio stack:
+    // Minimal Runtime-side validation for the Unity-style audio stack:
     // - Loads an AudioClip asset via AssetManager (FFmpeg decode)
     // - Plays it through AudioEngine when triggered
     // -----------------------------------------------------------------------------

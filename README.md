@@ -36,7 +36,7 @@ LimitlessRemaster/
 │   │   └── ImGui/      # ImGui layer
 │   └── Vendor/         # Third-party dependencies (SDL3, imgui, etc.)
 ├── Editor/             # Unity-style editor (start project): viewport, scene hierarchy, inspector, project panel, play mode
-├── Sandbox/            # Example game app (TestLayer, Renderer2D demo, audio demo)
+├── Runtime/            # Example runtime app (TestLayer, Renderer2D demo, audio demo)
 ├── ScriptCore/        # Native C++ script DLL built and loaded by the editor
 ├── Test/               # Unit tests (doctest)
 ├── Scripts/            # Build scripts (build-windows.bat, build-unix.sh, build-scriptcore-*, BootstrapPremake)
@@ -92,7 +92,7 @@ LimitlessRemaster/
 
 ## 🚀 **Quick Start**
 
-The **start project** is **Editor** (Unity-style editor). Sandbox is an alternate app for demos.
+The **start project** is **Editor** (Unity-style editor). Runtime is an alternate app for demos.
 
 ### **Building**
 
@@ -160,7 +160,7 @@ Start here:
 
 ### **Basic Usage**
 
-Your app implements `Limitless::Application` and defines `CreateApplication()`. The engine provides `main()` (see `Limitless/Source/Core/EntryPoint.h`; used when `LT_ENABLE_ENTRYPOINT` is defined, as in Editor and Sandbox).
+Your app implements `Limitless::Application` and defines `CreateApplication()`. The engine provides `main()` (see `Limitless/Source/Core/EntryPoint.h`; used when `LT_ENABLE_ENTRYPOINT` is defined, as in Editor and Runtime).
 
 ```cpp
 #include "Limitless.h"
@@ -505,7 +505,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Issues**: Report bugs and request features on GitHub
 - **Discussions**: Ask questions and share ideas
 - **Documentation**: Comprehensive guides and examples
-- **Examples**: Sandbox application demonstrating all features
+- **Examples**: Runtime application demonstrating all features
 
 ---
 

@@ -26,7 +26,7 @@ LimitlessRemaster/
 ├── premake5.lua              # Main workspace (start project: Editor)
 ├── Limitless/premake5.lua    # Core engine library
 ├── Editor/premake5.lua      # Unity-style editor (default start project)
-├── Sandbox/premake5.lua      # Example game application
+├── Runtime/premake5.lua      # Example runtime application
 ├── ScriptCore/premake5.lua   # Native C++ script DLL (loaded by Editor)
 ├── Test/premake5.lua         # Unit tests
 └── Scripts/                  # Build scripts

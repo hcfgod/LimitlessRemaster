@@ -4,11 +4,11 @@ This document describes the **engine-owned** editor camera module:
 
 - `Limitless/Source/Editor/EditorCameraController.{h,cpp}`
 
-The goal is to provide a reusable, “engine product” quality controller for tools/editor-style camera navigation that is **not Sandbox-specific**.
+The goal is to provide a reusable, “engine product” quality controller for tools/editor-style camera navigation that is **not Runtime-specific**.
 
 ## Design Goals
 
-- Reusable engine module (Sandbox is only a consumer).
+- Reusable engine module (Runtime is only a consumer).
 - Data-driven input using Unity-style **Input Action Assets** (`InputActionAsset`).
 - Does not overwrite project gameplay input: uses the **override action asset stack**.
 
@@ -45,7 +45,7 @@ This is implemented using the engine window API (`Window::SetCursorLocked`, `Win
 
 ## Typical Usage
 
-Sandbox (or an editor app) typically:
+Runtime (or an editor app) typically:
 
 - Creates a `PerspectiveCamera3D` via `CameraManager`
 - Initializes `EditorCameraController` with that camera id

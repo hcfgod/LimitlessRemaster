@@ -57,11 +57,11 @@ The default `Renderer2D` material is an asset:
 
 This keeps the shader pipeline editor-friendly and consistent with the engine's existing asset workflow.
 
-## Example usage (Sandbox)
+## Example usage (Runtime)
 
-The sandbox layer uses `Renderer2D` here:
+The runtime layer uses `Renderer2D` here:
 
-- `Sandbox/Source/Renderer2DDemo.cpp`
+- `Runtime/Source/Renderer2DDemo.cpp`
 
 It draws a grid of textured quads and logs `Renderer2D` statistics once per second.
 

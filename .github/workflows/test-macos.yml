@@ -14,6 +14,12 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Ensure Unix build scripts are executable
+      run: |
+        chmod +x Scripts/build-unix.sh
+        chmod +x Scripts/build-scriptcore-unix.sh
+        chmod +x Scripts/build-runtime-unix.sh
       
     - name: Install macOS dependencies
       run: |

@@ -3,6 +3,8 @@ project "VendorZstd"
     kind "StaticLib"
     language "C"
     cdialect "C11"
+    -- Upstream vendor library: keep warnings in engine code paths only.
+    warnings "Off"
     staticruntime "off"
 
     -- Keep vendor build outputs alongside the rest of the workspace.

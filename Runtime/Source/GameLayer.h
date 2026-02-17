@@ -17,7 +17,7 @@ namespace Limitless
     // loads the startup scene, runs scripts/physics/animation, and renders using
     // the primary in-scene CameraComponent. No ImGui, no editor panels.
     //
-    // Activated by SandboxApp when GameBootstrap.json is detected next to the
+    // Activated by RuntimeApp when GameBootstrap.json is detected next to the
     // executable (shipped game mode).
     // -------------------------------------------------------------------------
     class GameLayer : public Layer

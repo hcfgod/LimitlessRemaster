@@ -14,7 +14,7 @@ namespace Limitless::Assets
     // In code we typically refer to assets by a project-relative key like:
     //   "Assets/Textures/Checker.ppm"
     //
-    // At runtime, the working directory may be `Sandbox/`, `Build/.../Sandbox/`, etc.
+    // At runtime, the working directory may be `Runtime/`, `Build/.../Runtime/`, etc.
     // We resolve keys to a real filesystem path by walking up from the current
     // working directory until we find a directory containing an `Assets/` folder.
     // -----------------------------------------------------------------------------

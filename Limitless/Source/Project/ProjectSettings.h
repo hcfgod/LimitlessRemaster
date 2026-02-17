@@ -41,7 +41,7 @@ namespace Limitless::Project
     {
         uint32_t Version = 1;
 
-        // Project-wide default InputActions asset key (example: "Assets/InputActions/Sandbox.inputactions.json").
+        // Project-wide default InputActions asset key (example: "Assets/InputActions/Runtime.inputactions.json").
         std::string ProjectInputActionsKey;
 
         // Additional project-level InputActions assets with logical aliases.

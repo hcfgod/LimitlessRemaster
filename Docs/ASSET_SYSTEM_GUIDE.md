@@ -136,11 +136,11 @@ Unity-style input actions as a first-class Asset:
 
 - File: `Limitless/Source/Assets/InputActionsAssetResource.{h,cpp}`
 - Importer: `Limitless/Source/Assets/InputActionsAssetImporter.h`
-- Example: `Assets/InputActions/Sandbox.inputactions.json`
+- Example: `Assets/InputActions/Runtime.inputactions.json`
 
 To set project-wide actions from a key:
 
-- `InputSystem::SetProjectActionAssetFromKey("Assets/InputActions/Sandbox.inputactions.json")`
+- `InputSystem::SetProjectActionAssetFromKey("Assets/InputActions/Runtime.inputactions.json")`
 
 ### `.meta` utilities (`AssetUtils`)
 
@@ -191,9 +191,9 @@ File: `Limitless/Source/Assets/TextureAsset.{h,cpp}`
 - Decode image to RGBA8 on an AsyncIO worker thread (stb_image)
 - Upload RGBA8 to GPU on render thread via `Texture2D::CreateFromRGBA8Async`
 
-## Sandbox Proof
+## Runtime Proof
 
-The Sandbox demo now loads a **material asset** (and the material pulls in its shader + texture deps):
+The Runtime demo now loads a **material asset** (and the material pulls in its shader + texture deps):
 
 - `Assets/Materials/TexturedTriangle.material.json`
 
@@ -208,7 +208,7 @@ Related files:
 
 - `Assets/Textures/Checker.ppm`
 - `Assets/Materials/TexturedTriangle.material.json`
-- `Sandbox/Source/TexturedTriangleDemo.{h,cpp}`
+- `Runtime/Source/TexturedTriangleDemo.{h,cpp}`
 
 ## Current limitations / next steps
 

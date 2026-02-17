@@ -86,7 +86,7 @@ Premake will automatically:
 
 - Define `LT_ENABLE_FFMPEG`
 - Link `avcodec`, `avformat`, `avutil`, `swresample`
-- Copy DLLs next to the built executables (e.g. Editor, Sandbox) in a post-build step where applicable
+- Copy DLLs next to the built executables (e.g. Editor, Runtime) in a post-build step where applicable
 
 After adding FFmpeg binaries, **regenerate project files** (Premake) so the new link/copy rules apply.
 
@@ -106,16 +106,16 @@ Then load like any other Unity-style asset:
 
 Create an `AudioSource`, assign the clip (via `AssetHandle`), then call `Play()`.
 
-## Sandbox Demo
+## Runtime Demo
 
-Sandbox includes a minimal audio validation demo:
+Runtime includes a minimal audio validation demo:
 
 - Default clip key: `Assets/Audio/Example.wav`
 - Controls:
   - **P**: play
   - **O**: stop
 
-Drop an audio file at that path and run Sandbox. If AssetBundle is enabled, rebuild the bundle so the file is packaged.
+Drop an audio file at that path and run Runtime. If AssetBundle is enabled, rebuild the bundle so the file is packaged.
 
 ## Next Steps (Planned)
 

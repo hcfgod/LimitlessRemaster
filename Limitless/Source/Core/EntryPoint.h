@@ -31,7 +31,7 @@ int main(int argc, char** argv)
     // ---------------------------------------------------------------------------------
     // Config file resolution
     //
-    // Many dev setups have multiple config.json files (project root, Sandbox/, build output).
+    // Many dev setups have multiple config.json files (project root, Runtime/, build output).
     // To make behavior deterministic, we pick the first existing path in this order:
     // - Current working directory: ./config.json
     // - Executable directory: <exeDir>/config.json

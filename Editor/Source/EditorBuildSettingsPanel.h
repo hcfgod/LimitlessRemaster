@@ -44,6 +44,9 @@ namespace Limitless::EditorBuildSettingsPanel
 
         /// Status message shown in the panel (set by build thread / UI).
         std::string StatusMessage;
+
+        /// Scene list helper status shown near the "Add Current Scene" action.
+        std::string SceneListStatusMessage;
     };
 
     /// Draw the Build Settings window. Returns true if the window is still open.

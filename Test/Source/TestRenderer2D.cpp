@@ -45,5 +45,5 @@ TEST_SUITE("Renderer2D")
     }
 
     // Full Renderer2D tests (BeginScene, DrawQuad, EndScene) require graphics context
-    // initialization. See Sandbox/Renderer2DDemo for integration usage.
+    // initialization. See Runtime/Renderer2DDemo for integration usage.
 }

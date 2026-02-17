@@ -1,6 +1,7 @@
 #include "PrecompiledHeader.h"
 #include "EditorBuildSettingsPanel.h"
 
+#include "Assets/AssetDatabase.h"
 #include "Project/BuildSettings.h"
 #include "Project/GameBuilder.h"
 #include "Project/ProjectManager.h"
@@ -187,7 +188,7 @@ namespace Limitless::EditorBuildSettingsPanel
     void Draw(bool& showWindow,
               EditorBuildSettingsPanelState& state,
               const std::string& currentSceneAssetKey,
-              Scene* /*currentScene*/)
+              Scene* currentScene)
     {
         if (!showWindow)
             return;
@@ -270,29 +271,50 @@ namespace Limitless::EditorBuildSettingsPanel
         if (moveDownIndex >= 0 && moveDownIndex < static_cast<int>(scenes.size()) - 1)
             std::swap(scenes[moveDownIndex], scenes[moveDownIndex + 1]);
 
-        // Add Open Scene button.
-        if (ImGui::Button("Add Open Scene"))
+        // Unity-style convenience action: add the currently open scene.
+        const bool hasOpenScene = currentScene != nullptr;
+        const bool canAddCurrentScene = hasOpenScene && !currentSceneAssetKey.empty();
+        ImGui::BeginDisabled(!canAddCurrentScene);
+        if (ImGui::Button("Add Current Scene"))
         {
-            if (!currentSceneAssetKey.empty())
+            // Check for duplicates.
+            const auto it = std::find_if(scenes.begin(), scenes.end(),
+                [&currentSceneAssetKey](const Project::BuildSceneEntry& entry)
+                {
+                    return entry.Key == currentSceneAssetKey;
+                });
+
+            if (it == scenes.end())
             {
-                // Check for duplicates.
-                bool alreadyAdded = false;
-                for (const auto& entry : scenes)
-                {
-                    if (entry.Key == currentSceneAssetKey)
-                    {
-                        alreadyAdded = true;
-                        break;
-                    }
-                }
-                if (!alreadyAdded)
-                {
-                    Project::BuildSceneEntry newEntry;
-                    newEntry.Key = currentSceneAssetKey;
-                    newEntry.Enabled = true;
-                    scenes.push_back(std::move(newEntry));
-                }
+                Project::BuildSceneEntry newEntry;
+                newEntry.Key = currentSceneAssetKey;
+                newEntry.Enabled = true;
+
+                // Capture GUID when available so the entry remains stable on renames.
+                const auto recordResult = Assets::AssetDatabase::GetInstance().FindByKey(currentSceneAssetKey);
+                if (recordResult.IsSuccess())
+                    newEntry.Guid = recordResult.GetValue().Guid;
+
+                scenes.push_back(std::move(newEntry));
+                state.SceneListStatusMessage = "Added current scene to build list.";
             }
+            else
+            {
+                state.SceneListStatusMessage = "Current scene is already in build list.";
+            }
+        }
+        ImGui::EndDisabled();
+        if (!canAddCurrentScene && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            if (!hasOpenScene)
+                ImGui::SetTooltip("No scene is currently open.");
+            else
+                ImGui::SetTooltip("Save the current scene first, then add it to the build list.");
+        }
+        if (!state.SceneListStatusMessage.empty())
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", state.SceneListStatusMessage.c_str());
         }
 
         ImGui::Spacing();

@@ -33,11 +33,11 @@ The engine supports two common patterns:
 
 ### APIs
 
-- **Project-wide**: `InputSystem::SetProjectActionAsset(asset)` or `InputSystem::SetProjectActionAssetFromKey(assetKey)` to load and set by asset key (e.g. `"Assets/InputActions/Sandbox.inputactions.json"`).
+- **Project-wide**: `InputSystem::SetProjectActionAsset(asset)` or `InputSystem::SetProjectActionAssetFromKey(assetKey)` to load and set by asset key (e.g. `"Assets/InputActions/Runtime.inputactions.json"`).
 - **Override**: `InputSystem::PushOverrideActionAsset(asset)` / `PopOverrideActionAsset(...)`
 - **Evaluation**: `InputSystem::UpdateActions()` uses the **top override** if present, otherwise the project default.
 
-`Sandbox/Source/TestLayer.cpp` sets the **project** input actions via `SetProjectActionAssetFromKey("Assets/InputActions/Sandbox.inputactions.json")`.
+`Runtime/Source/TestLayer.cpp` sets the **project** input actions via `SetProjectActionAssetFromKey("Assets/InputActions/Runtime.inputactions.json")`.
 The engine-owned `EditorCameraController` pushes its own override so editor controls do not affect gameplay actions.
 
 ## Project Settings InputActions (Default + Aliases)
@@ -115,7 +115,7 @@ Actions expose simplified Unity-like phases:
 
 ## Example: Editor Camera (WASD + Mouse Look)
 
-This is exactly what `Sandbox/Source/TestLayer.cpp` does now:
+This is exactly what `Runtime/Source/TestLayer.cpp` does now:
 
 - Editor input is defined in `Assets/InputActions/EditorCamera.inputactions.json`
 - Map: `"Editor"`
@@ -162,5 +162,5 @@ This is a low-level API intended for editor/UI code to build on top (no UI is pr
 - `Limitless/Source/Core/Input/InputAction.{h,cpp}`
 - `Limitless/Source/Core/Input/InputActionAssetSerializer.{h,cpp}`
 - `Limitless/Source/Core/Input/InputRebinding.{h,cpp}`
-- `Limitless/Source/Editor/EditorCameraController.{h,cpp}` (engine module; Editor and Sandbox both use it)
+- `Limitless/Source/Editor/EditorCameraController.{h,cpp}` (engine module; Editor and Runtime both use it)
 

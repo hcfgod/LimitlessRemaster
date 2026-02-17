@@ -33,9 +33,9 @@ At runtime:
 
 When enabled, supported asset loaders will attempt to read from the bundle **before** reading from disk.
 
-## Sandbox test (button press)
+## Runtime test (button press)
 
-In Sandbox:
+In Runtime:
 
 - Press **B** to:
   - Build the bundle
@@ -57,7 +57,7 @@ For a packaged game, copy the bundle folder next to the executable, for example:
 - `AssetBundle/AssetBundleManifest.json`
 - `AssetBundle/AssetBundle.bin`
 
-Sandbox will also **auto-enable** the bundle at startup if it finds this layout next to the executable.
+Runtime will also **auto-enable** the bundle at startup if it finds this layout next to the executable.
 
 ## Current limitations / next steps
 

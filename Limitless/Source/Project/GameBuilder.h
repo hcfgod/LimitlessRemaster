@@ -15,7 +15,7 @@ namespace Limitless::Project
     //   1. Validate build scenes and output directory
     //   2. Build asset bundle to output/AssetBundle/
     //   3. Build ScriptCore DLL/SO for the selected configuration
-    //   4. Copy Sandbox runtime executable (renamed to project name)
+    //   4. Copy Runtime executable (renamed to project name)
     //   5. Copy runtime DLLs (shaderc, ScriptCore) and config.json
     //   6. Write GameBootstrap.json with startup scene and scene list
     // -------------------------------------------------------------------------

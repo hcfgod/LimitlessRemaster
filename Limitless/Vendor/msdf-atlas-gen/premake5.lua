@@ -4,6 +4,8 @@ project "msdf-atlas-gen"
 	kind "StaticLib"
 	language "C++"
 	cppdialect "C++20"
+	-- Upstream vendor library: keep warnings in engine code paths only.
+	warnings "Off"
     staticruntime "off"
 
 	targetdir ("%{wks.location}/Build/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")

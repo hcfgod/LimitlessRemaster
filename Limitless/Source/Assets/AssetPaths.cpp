@@ -231,7 +231,7 @@ namespace Limitless::Assets
         // Walk upward until we find a directory containing `Assets/`.
         //
         // IMPORTANT:
-        // The working directory may be `Sandbox/`, and that directory can also contain an `Assets/` folder.
+        // The working directory may be `Runtime/`, and that directory can also contain an `Assets/` folder.
         // If you have multiple `Assets/` trees on disk, prefer using SetAssetRootDirectory() or LIMITLESS_ASSET_ROOT.
         std::filesystem::path probeAssets = current;
         for (int depth = 0; depth < 32; ++depth)

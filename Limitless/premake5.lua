@@ -51,6 +51,8 @@ project "Limitless"
 
     filter "files:Vendor/**"
         flags { "NoPCH" }
+        -- Keep build logs focused on engine/game code.
+        warnings "Off"
     filter "files:**.c"
         flags { "NoPCH" }
         language "C"
@@ -102,6 +104,8 @@ project "Limitless"
         defines
         {
             "LT_PLATFORM_WINDOWS",
+            "_CRT_SECURE_NO_WARNINGS",
+            "_CRT_NONSTDC_NO_WARNINGS",
             -- Enable shaderc-based compilation on Windows where we vendor prebuilt libs.
             "LT_ENABLE_SHADERC",
             "LT_ENABLE_ZSTD",

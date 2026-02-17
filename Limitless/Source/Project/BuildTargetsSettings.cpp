@@ -24,7 +24,7 @@ namespace Limitless::Project
         s.AutoRunAfterBuild = false;
         s.Targets = {
             {"Editor", "Editor", ""},
-            {"Sandbox", "Sandbox", ""}
+            {"Runtime", "Runtime", ""}
         };
         s.ActiveTargetId = "Editor";
         return s;
@@ -69,6 +69,24 @@ namespace Limitless::Project
         {
             s = DefaultBuildTargets();
         }
+
+        // Backward compatibility: migrate legacy "Sandbox" target ids/names.
+        if (s.ActiveTargetId == "Sandbox")
+            s.ActiveTargetId = "Runtime";
+
+        bool hasRuntimeTarget = false;
+        for (auto& target : s.Targets)
+        {
+            if (target.Id == "Sandbox")
+                target.Id = "Runtime";
+            if (target.ProjectName == "Sandbox")
+                target.ProjectName = "Runtime";
+            if (target.Id == "Runtime")
+                hasRuntimeTarget = true;
+        }
+
+        if (!hasRuntimeTarget)
+            s.Targets.push_back({ "Runtime", "Runtime", "" });
 
         if (s.ActiveTargetId.empty() && !s.Targets.empty())
         {

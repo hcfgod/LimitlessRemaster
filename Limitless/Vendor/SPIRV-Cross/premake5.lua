@@ -3,6 +3,8 @@ project "VendorSpirvCross"
     kind "StaticLib"
     language "C++"
     cppdialect "C++20"
+    -- Upstream vendor library: keep warnings in engine code paths only.
+    warnings "Off"
     staticruntime "off"
 
     -- Keep vendor build outputs alongside the rest of the workspace.

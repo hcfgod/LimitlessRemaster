@@ -8,7 +8,7 @@ if "%1"=="Release" set CONFIGURATION=Release
 if "%1"=="Dist" set CONFIGURATION=Dist
 if "%2"=="ARM64" set PLATFORM=ARM64
 
-echo Building Sandbox runtime in %CONFIGURATION% configuration for %PLATFORM%...
+echo Building Runtime in %CONFIGURATION% configuration for %PLATFORM%...
 
 call "%~dp0BootstrapPremake.bat"
 if errorlevel 1 (
@@ -50,12 +50,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Building Sandbox project only...
-"%MSBUILD_EXE%" Sandbox\Sandbox.vcxproj /p:Configuration=%CONFIGURATION% /p:Platform=%PLATFORM% /m
+echo Building Runtime project only...
+"%MSBUILD_EXE%" Runtime\Runtime.vcxproj /p:Configuration=%CONFIGURATION% /p:Platform=%PLATFORM% /m
 if errorlevel 1 (
-    echo Error: Sandbox build failed
+    echo Error: Runtime build failed
     exit /b 1
 )
 
-echo Sandbox build completed successfully!
+echo Runtime build completed successfully!
 endlocal

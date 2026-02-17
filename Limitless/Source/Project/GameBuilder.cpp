@@ -42,9 +42,9 @@ namespace Limitless::Project
 #endif
         }
 
-        /// Returns the Sandbox build output directory for a given config.
-        /// Example: <EngineRoot>/Build/release_x64-windows-x64/Sandbox/
-        std::filesystem::path GetSandboxBuildDirectory(const std::filesystem::path& engineRoot, const std::string& configuration)
+        /// Returns the Runtime build output directory for a given config.
+        /// Example: <EngineRoot>/Build/release_x64-windows-x64/Runtime/
+        std::filesystem::path GetRuntimeBuildDirectory(const std::filesystem::path& engineRoot, const std::string& configuration)
         {
 #if defined(LT_PLATFORM_WINDOWS)
             const std::string platformToken = "windows";
@@ -62,7 +62,7 @@ namespace Limitless::Project
 
             const std::string shortname = ToPremakeShortname(configuration);
             const std::string folderName = shortname + "-" + platformToken + "-" + architectureToken;
-            return engineRoot / "Build" / folderName / "Sandbox";
+            return engineRoot / "Build" / folderName / "Runtime";
         }
 
         /// Returns the ScriptCore build output directory for a given config.
@@ -87,12 +87,12 @@ namespace Limitless::Project
             return engineRoot / "Build" / folderName / "Editor";
         }
 
-        std::string GetSandboxExecutableName()
+        std::string GetRuntimeExecutableName()
         {
 #if defined(LT_PLATFORM_WINDOWS)
-            return "Sandbox.exe";
+            return "Runtime.exe";
 #else
-            return "Sandbox";
+            return "Runtime";
 #endif
         }
 
@@ -286,66 +286,66 @@ namespace Limitless::Project
         const std::string projectName = request.ProjectName.empty() ? "Game" : request.ProjectName;
 
         // Always build the runtime executable for the selected configuration before copying.
-        // This prevents shipping stale binaries (e.g. old Sandbox.exe still booting TestLayer).
+        // This prevents shipping stale binaries (e.g. old Runtime.exe still booting TestLayer).
 #if defined(LT_PLATFORM_WINDOWS)
-        const auto sandboxBuildScript = request.EngineRoot / "Scripts" / "build-sandbox-windows.bat";
+        const auto runtimeBuildScript = request.EngineRoot / "Scripts" / "build-runtime-windows.bat";
         const auto fallbackBuildScript = request.EngineRoot / "Scripts" / "build-windows.bat";
-        const auto mainBuildScript = std::filesystem::exists(sandboxBuildScript)
-            ? sandboxBuildScript
+        const auto mainBuildScript = std::filesystem::exists(runtimeBuildScript)
+            ? runtimeBuildScript
             : fallbackBuildScript;
         if (std::filesystem::exists(mainBuildScript))
         {
-            result.StepLog.push_back("Building Sandbox runtime (" + config + ")...");
+            result.StepLog.push_back("Building Runtime (" + config + ")...");
             const std::string buildCommand = "cd /d \"" + request.EngineRoot.string()
                 + "\" && call \"" + mainBuildScript.string() + "\" " + config + " " + GetBuildPlatformArg();
             const int buildExitCode = RunCommand(buildCommand);
             if (buildExitCode != 0)
             {
-                result.ErrorMessage = "Failed to build Sandbox runtime (exit code " + std::to_string(buildExitCode) + ").";
+                result.ErrorMessage = "Failed to build Runtime (exit code " + std::to_string(buildExitCode) + ").";
                 return false;
             }
         }
 #else
-        const auto sandboxBuildScript = request.EngineRoot / "Scripts" / "build-sandbox-unix.sh";
+        const auto runtimeBuildScript = request.EngineRoot / "Scripts" / "build-runtime-unix.sh";
         const auto fallbackBuildScript = request.EngineRoot / "Scripts" / "build-unix.sh";
-        const auto mainBuildScript = std::filesystem::exists(sandboxBuildScript)
-            ? sandboxBuildScript
+        const auto mainBuildScript = std::filesystem::exists(runtimeBuildScript)
+            ? runtimeBuildScript
             : fallbackBuildScript;
         if (std::filesystem::exists(mainBuildScript))
         {
-            result.StepLog.push_back("Building Sandbox runtime (" + config + ")...");
+            result.StepLog.push_back("Building Runtime (" + config + ")...");
             std::string buildCommand = "cd \"" + request.EngineRoot.string()
                 + "\" && bash \"" + mainBuildScript.string() + "\" --config " + config;
-            if (mainBuildScript.filename() == "build-sandbox-unix.sh")
+            if (mainBuildScript.filename() == "build-runtime-unix.sh")
                 buildCommand += " --platform " + GetBuildPlatformArg();
             const int buildExitCode = RunCommand(buildCommand);
             if (buildExitCode != 0)
             {
-                result.ErrorMessage = "Failed to build Sandbox runtime (exit code " + std::to_string(buildExitCode) + ").";
+                result.ErrorMessage = "Failed to build Runtime (exit code " + std::to_string(buildExitCode) + ").";
                 return false;
             }
         }
 #endif
 
-        // 1. Copy Sandbox executable (renamed to project name).
-        const auto sandboxDir = GetSandboxBuildDirectory(request.EngineRoot, config);
-        const auto sandboxExePath = sandboxDir / GetSandboxExecutableName();
+        // 1. Copy Runtime executable (renamed to project name).
+        const auto runtimeDir = GetRuntimeBuildDirectory(request.EngineRoot, config);
+        const auto runtimeExePath = runtimeDir / GetRuntimeExecutableName();
         const auto gameExePath = request.OutputDirectory / GetGameExecutableName(projectName);
-        if (!std::filesystem::exists(sandboxExePath))
+        if (!std::filesystem::exists(runtimeExePath))
         {
-            result.ErrorMessage = "Sandbox executable not found after build: " + sandboxExePath.string();
+            result.ErrorMessage = "Runtime executable not found after build: " + runtimeExePath.string();
             return false;
         }
 
-        if (!CopySingleFile(sandboxExePath, gameExePath, result))
+        if (!CopySingleFile(runtimeExePath, gameExePath, result))
         {
-            result.ErrorMessage = "Failed to copy Sandbox executable to output.";
+            result.ErrorMessage = "Failed to copy Runtime executable to output.";
             return false;
         }
         result.OutputExecutablePath = gameExePath;
 
         // 2. Copy config.json.
-        const auto sourceConfig = sandboxDir / "config.json";
+        const auto sourceConfig = runtimeDir / "config.json";
         if (std::filesystem::exists(sourceConfig))
         {
             CopySingleFile(sourceConfig, request.OutputDirectory / "config.json", result);
@@ -391,13 +391,13 @@ namespace Limitless::Project
             result.StepLog.push_back("Warning: ScriptCore library not found at " + scriptCorePath.string());
         }
 
-        // 4. Copy runtime DLLs (shaderc, ffmpeg, etc.) from the Sandbox build directory.
+        // 4. Copy runtime DLLs (shaderc, ffmpeg, etc.) from the Runtime build directory.
 #if defined(LT_PLATFORM_WINDOWS)
-        if (std::filesystem::is_directory(sandboxDir))
-            CopyDllsFromDirectory(sandboxDir, request.OutputDirectory, ".dll", result);
+        if (std::filesystem::is_directory(runtimeDir))
+            CopyDllsFromDirectory(runtimeDir, request.OutputDirectory, ".dll", result);
 #elif defined(LT_PLATFORM_LINUX)
-        if (std::filesystem::is_directory(sandboxDir))
-            CopyDllsFromDirectory(sandboxDir, request.OutputDirectory, ".so", result);
+        if (std::filesystem::is_directory(runtimeDir))
+            CopyDllsFromDirectory(runtimeDir, request.OutputDirectory, ".so", result);
 #endif
 
         result.StepLog.push_back("Runtime files copied.");
