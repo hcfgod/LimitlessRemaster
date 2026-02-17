@@ -38,3 +38,13 @@ project "VendorSpirvCross"
             "/FS"
         }
 
+    -- SPIRV-Cross is vendored third-party code. In C++20, implicit `this`
+    -- capture via `[=]` is deprecated and emits warning C4855 on MSVC.
+    -- Keep vendor output clean without modifying upstream source files.
+    filter "toolset:msc"
+        disablewarnings { "4855" }
+
+    filter "toolset:clang"
+        buildoptions { "-Wno-deprecated-this-capture" }
+
+    filter {}

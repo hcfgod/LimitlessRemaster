@@ -5,14 +5,96 @@
 #include "Graphics/Camera/PerspectiveCamera3D.h"
 #include "Scene/Scene.h"
 
+#include <algorithm>
 #include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace Limitless
 {
     namespace
     {
+        struct EntitySelectionPath final
+        {
+            std::vector<size_t> ChildIndices;
+            std::vector<std::string> Tags;
+        };
+
+        std::string GetEntityTag(const Scene& scene, entt::entity entity)
+        {
+            if (!scene.IsValid(entity))
+                return {};
+
+            const auto* tag = scene.GetRegistry().try_get<TagComponent>(entity);
+            return tag ? tag->Tag : std::string{};
+        }
+
+        EntitySelectionPath CaptureSelectionPath(const Scene* scene, entt::entity selectedEntity)
+        {
+            EntitySelectionPath path{};
+            if (!scene || !scene->IsValid(selectedEntity))
+                return path;
+
+            entt::entity current = selectedEntity;
+            while (current != entt::null && scene->IsValid(current))
+            {
+                const entt::entity parent = scene->GetParent(current);
+                const std::vector<entt::entity> siblings = scene->GetChildren(parent);
+                const auto foundSibling = std::find(siblings.begin(), siblings.end(), current);
+                if (foundSibling == siblings.end())
+                    return {};
+
+                path.ChildIndices.push_back(static_cast<size_t>(std::distance(siblings.begin(), foundSibling)));
+                path.Tags.push_back(GetEntityTag(*scene, current));
+                current = parent;
+            }
+
+            std::reverse(path.ChildIndices.begin(), path.ChildIndices.end());
+            std::reverse(path.Tags.begin(), path.Tags.end());
+            return path;
+        }
+
+        entt::entity ResolveSelectionPath(Scene* scene, const EntitySelectionPath& path)
+        {
+            if (!scene || path.ChildIndices.empty() || path.ChildIndices.size() != path.Tags.size())
+                return entt::null;
+
+            entt::entity parent = entt::null;
+            entt::entity current = entt::null;
+            for (size_t level = 0; level < path.ChildIndices.size(); ++level)
+            {
+                const std::vector<entt::entity> siblings = scene->GetChildren(parent);
+                if (siblings.empty())
+                    return entt::null;
+
+                const size_t siblingIndex = path.ChildIndices[level];
+                entt::entity candidate = siblingIndex < siblings.size() ? siblings[siblingIndex] : entt::null;
+                const std::string& expectedTag = path.Tags[level];
+
+                // When sibling order changed during runtime, use tag as a fallback heuristic.
+                if (!expectedTag.empty() &&
+                    (candidate == entt::null || GetEntityTag(*scene, candidate) != expectedTag))
+                {
+                    const auto tagMatch = std::find_if(
+                        siblings.begin(),
+                        siblings.end(),
+                        [&](entt::entity sibling) { return GetEntityTag(*scene, sibling) == expectedTag; });
+                    if (tagMatch != siblings.end())
+                        candidate = *tagMatch;
+                }
+
+                if (candidate == entt::null || !scene->IsValid(candidate))
+                    return entt::null;
+
+                current = candidate;
+                parent = candidate;
+            }
+
+            return current;
+        }
+
         std::optional<CameraId> FindFirstGameplayCamera(CameraManager& cameraManager)
         {
             for (CameraId id : cameraManager.GetAllCameraIds())
@@ -197,12 +279,13 @@ namespace Limitless
             if (playModeState != EditorPlayModeState::Edit)
                 return;
 
-            selectedEntity = entt::null;
+            const EntitySelectionPath selectedEntityPath = CaptureSelectionPath(scene.get(), selectedEntity);
             selectedTextureAssetKey.clear();
             cachedTextureAsset.reset();
 
             editSceneStored = std::move(scene);
             scene = editSceneStored ? editSceneStored->Clone() : std::make_unique<Scene>();
+            selectedEntity = ResolveSelectionPath(scene.get(), selectedEntityPath);
 
             playModeMissingGameplayCamera = false;
             createdGameplayCameraFromScene = false;
@@ -282,12 +365,14 @@ namespace Limitless
             if (playModeState == EditorPlayModeState::Edit)
                 return;
 
-            selectedEntity = entt::null;
+            const EntitySelectionPath selectedEntityPath = CaptureSelectionPath(scene.get(), selectedEntity);
             selectedTextureAssetKey.clear();
             cachedTextureAsset.reset();
 
             if (editSceneStored)
                 scene = std::move(editSceneStored);
+
+            selectedEntity = ResolveSelectionPath(scene.get(), selectedEntityPath);
 
             if (createdGameplayCameraFromScene && cachedGameplayCameraId)
                 cameraManager.DestroyCamera(cachedGameplayCameraId);

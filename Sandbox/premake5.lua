@@ -67,6 +67,9 @@ project "Sandbox"
         cppdialect "C++20"
         staticruntime "Off"
         systemversion "latest"
+        -- Sandbox links a mixed third-party stack (some prebuilt libs may request
+        -- static CRT defaults). Ignore LIBCMT defaults so we consistently use /MD.
+        ignoredefaultlibraries { "LIBCMT", "LIBCMTD" }
 
         defines
         {
