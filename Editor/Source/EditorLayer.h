@@ -10,6 +10,7 @@
 #include "EditorProjectDialog.h"
 #include "EditorProjectSettingsPanel.h"
 #include "EditorAssetDiagnosticsPanel.h"
+#include "EditorBuildSettingsPanel.h"
 #include "EditorScenePanel.h"
 #include "EditorViewportPanel.h"
 #include "Core/Concurrency/AsyncIO.h"
@@ -202,6 +203,7 @@ namespace Limitless
         bool m_ShowTilemapPanel = true;
         bool m_ShowAnimationTimelinePanel = true;
         bool m_ShowAnimatorGraphPanel = true;
+        bool m_ShowBuildSettingsWindow = false;
         bool m_ConsoleAutoScroll = true;
         bool m_ConsoleShowScriptLogs = true;
         bool m_ConsoleShowEngineLogs = false;
@@ -237,6 +239,7 @@ namespace Limitless
         std::unordered_map<std::string, Assets::MaterialAsset::Ptr> m_PrewarmedMaterialAssets;
         std::unordered_set<std::string> m_ActiveSceneTexturePrewarmKeys;
         std::unordered_set<std::string> m_ActiveSceneMaterialPrewarmKeys;
+        EditorBuildSettingsPanel::EditorBuildSettingsPanelState m_BuildSettingsPanelState;
         EditorViewportPanel::TilemapEditorState m_TilemapEditorState{};
     };
 

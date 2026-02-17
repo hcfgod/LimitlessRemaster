@@ -297,6 +297,11 @@ namespace Limitless::Assets
         }
     }
 
+    Async::Task<AnimatorControllerAsset::Ptr> AnimatorControllerAsset::LoadAsync(const std::string& key)
+    {
+        return LoadAsync(key, Settings{});
+    }
+
     Async::Task<AnimatorControllerAsset::Ptr> AnimatorControllerAsset::LoadAsync(const std::string& key, Settings settings)
     {
         const uint64_t generation = AssetLoadCoordinator::GetGeneration();
@@ -336,6 +341,11 @@ namespace Limitless::Assets
         });
 
         return Async::Task<Ptr>(std::move(shared));
+    }
+
+    AnimatorControllerAsset::Ptr AnimatorControllerAsset::LoadBlocking(const std::string& key)
+    {
+        return LoadBlocking(key, Settings{});
     }
 
     AnimatorControllerAsset::Ptr AnimatorControllerAsset::LoadBlocking(const std::string& key, Settings settings)

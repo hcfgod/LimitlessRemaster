@@ -16,6 +16,7 @@ namespace Limitless::EditorMenuBar
               const std::function<void()>& onOpenProject,
               const std::function<void()>& onCreateProject,
               const std::function<void()>& onProjectSettings,
+              const std::function<void()>& onBuildSettings,
               const std::function<void()>& onReimportChangedAssets,
               const std::function<void()>& onReimportAllAssets,
               const std::function<void()>& onValidateAssetDatabase,
@@ -57,6 +58,8 @@ namespace Limitless::EditorMenuBar
                 onCreateProject();
             if (ImGui::MenuItem("Project Settings..."))
                 onProjectSettings();
+            if (ImGui::MenuItem("Build Settings..."))
+                onBuildSettings();
             ImGui::Separator();
             if (ImGui::MenuItem("New Scene"))
                 onNewScene();

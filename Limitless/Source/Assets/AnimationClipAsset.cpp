@@ -392,6 +392,11 @@ namespace Limitless::Assets
         }
     }
 
+    Async::Task<AnimationClipAsset::Ptr> AnimationClipAsset::LoadAsync(const std::string& key)
+    {
+        return LoadAsync(key, Settings{});
+    }
+
     Async::Task<AnimationClipAsset::Ptr> AnimationClipAsset::LoadAsync(const std::string& key, Settings settings)
     {
         const uint64_t generation = AssetLoadCoordinator::GetGeneration();
@@ -432,6 +437,11 @@ namespace Limitless::Assets
         });
 
         return Async::Task<Ptr>(std::move(shared));
+    }
+
+    AnimationClipAsset::Ptr AnimationClipAsset::LoadBlocking(const std::string& key)
+    {
+        return LoadBlocking(key, Settings{});
     }
 
     AnimationClipAsset::Ptr AnimationClipAsset::LoadBlocking(const std::string& key, Settings settings)

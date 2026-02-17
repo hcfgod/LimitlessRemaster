@@ -1109,7 +1109,7 @@ namespace Limitless
         {
             g_State.Diagnostics = {};
 
-            if (!g_State.Settings.Enabled || !targetFramebuffer || width == 0 || height == 0)
+            if (!g_State.Settings.Enabled || width == 0 || height == 0)
                 return false;
 
             auto& renderer = Renderer::GetInstance();
@@ -1186,6 +1186,7 @@ namespace Limitless
             renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::Zero, false));
 
             // 3) Composite (albedo * accumulated lighting) into target framebuffer.
+            // Null targetFramebuffer means default backbuffer.
             renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(targetFramebuffer));
             renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
 

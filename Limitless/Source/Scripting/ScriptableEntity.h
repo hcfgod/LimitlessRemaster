@@ -2,6 +2,7 @@
 
 #include "Core/Error.h"
 #include "EnTT/entt.hpp"
+#include "Scene/Entity.h"
 #include "Scripting/ScriptProperty.h"
 
 #include <glm/glm.hpp>
@@ -17,44 +18,6 @@ namespace Limitless
     struct AnimatorComponent;
     using ScriptCreateEntityBridgeCallback = entt::entity (*)(const char* name);
     using ScriptDestroyEntityBridgeCallback = void (*)(entt::entity entity);
-
-    // Unity-style script-facing entity wrapper.
-    // This keeps script code ergonomic while preserving explicit native ownership rules.
-    class Entity final
-    {
-    public:
-        Entity() = default;
-
-        bool IsValid() const;
-        explicit operator bool() const { return IsValid(); }
-
-        entt::entity GetHandle() const { return m_EntityHandle; }
-
-        template<typename ComponentType>
-        bool HasComponent() const;
-
-        template<typename ComponentType>
-        ComponentType& GetComponent() const;
-
-        template<typename ComponentType, typename... ConstructorArgs>
-        ComponentType& AddComponent(ConstructorArgs&&... args) const;
-
-        template<typename ComponentType>
-        void RemoveComponent() const;
-
-        void Destroy();
-
-    private:
-        friend class ScriptableEntity;
-
-        Entity(ScriptableEntity* scriptOwner, entt::entity entityHandle)
-            : m_ScriptOwner(scriptOwner), m_EntityHandle(entityHandle)
-        {
-        }
-
-        ScriptableEntity* m_ScriptOwner = nullptr;
-        entt::entity m_EntityHandle = entt::null;
-    };
 
     // Base type for native C++ entity scripts.
     // Derive from this, register in NativeScriptRegistry, then assign in NativeScriptComponent.
@@ -79,14 +42,15 @@ namespace Limitless
             return m_Scene;
         }
 
+        /// Returns the engine Entity wrapper for this script's own entity.
         Entity GetEntity()
         {
-            return Entity(this, m_EntityHandle);
+            return Entity(m_Registry, m_EntityHandle);
         }
 
         Entity GetEntity() const
         {
-            return Entity(const_cast<ScriptableEntity*>(this), m_EntityHandle);
+            return Entity(m_Registry, m_EntityHandle);
         }
 
         template<typename ComponentType>
@@ -231,36 +195,6 @@ namespace Limitless
         entt::entity m_EntityHandle = entt::null;
         std::unordered_map<std::string, ScriptPropertyValue>* m_ExposedProperties = nullptr;
     };
-
-    template<typename ComponentType>
-    inline bool Entity::HasComponent() const
-    {
-        return m_ScriptOwner ? m_ScriptOwner->HasComponent<ComponentType>(m_EntityHandle) : false;
-    }
-
-    template<typename ComponentType>
-    inline ComponentType& Entity::GetComponent() const
-    {
-        if (!m_ScriptOwner)
-            throw std::runtime_error("Entity has no owning script context");
-        return m_ScriptOwner->GetComponent<ComponentType>(m_EntityHandle);
-    }
-
-    template<typename ComponentType, typename... ConstructorArgs>
-    inline ComponentType& Entity::AddComponent(ConstructorArgs&&... args) const
-    {
-        if (!m_ScriptOwner)
-            throw std::runtime_error("Entity has no owning script context");
-        return m_ScriptOwner->AddComponent<ComponentType>(m_EntityHandle, std::forward<ConstructorArgs>(args)...);
-    }
-
-    template<typename ComponentType>
-    inline void Entity::RemoveComponent() const
-    {
-        if (!m_ScriptOwner)
-            return;
-        m_ScriptOwner->RemoveComponent<ComponentType>(m_EntityHandle);
-    }
 }
 
 #define LT_SYNC_EXPOSED_FIELD(FieldName) SyncExposedField(#FieldName, FieldName)

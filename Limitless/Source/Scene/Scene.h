@@ -3,6 +3,7 @@
 #include "Core/Error.h"
 #include "Physics/Physics2DWorld.h"
 #include "Scene/Components.h"
+#include "Scene/Entity.h"
 
 #include <glm/glm.hpp>
 #include <cstdint>
@@ -49,6 +50,9 @@ namespace Limitless
 
         /// Create a new entity with TagComponent. Returns entity handle.
         entt::entity CreateEntity(const std::string& name = "Entity");
+
+        /// Create a new entity and return an Entity wrapper (for scripts / new code).
+        Entity CreateEntityWrapped(const std::string& name = "Entity");
 
         /// Destroy an entity and all its components.
         void DestroyEntity(entt::entity entity);

@@ -25,22 +25,9 @@ namespace Limitless
         s_DestroyEntityBridgeCallback = callback;
     }
 
-    bool Entity::IsValid() const
-    {
-        return m_ScriptOwner && m_ScriptOwner->IsEntityValid(m_EntityHandle);
-    }
-
-    void Entity::Destroy()
-    {
-        if (!m_ScriptOwner)
-            return;
-        m_ScriptOwner->DestroyEntity(m_EntityHandle);
-        m_EntityHandle = entt::null;
-    }
-
     Entity ScriptableEntity::CreateEntity(const std::string& name)
     {
-        return Entity(this, CreateEntityHandle(name));
+        return Entity(m_Registry, CreateEntityHandle(name));
     }
 
     entt::entity ScriptableEntity::CreateEntityHandle(const std::string& name)
@@ -91,7 +78,7 @@ namespace Limitless
     {
         if (!IsEntityValid(entity))
             return Entity{};
-        return Entity(const_cast<ScriptableEntity*>(this), entity);
+        return Entity(m_Registry, entity);
     }
 
     Entity ScriptableEntity::FindEntityByTag(const std::string& tag) const
@@ -104,7 +91,7 @@ namespace Limitless
         {
             const auto& tagComponent = view.get<TagComponent>(entity);
             if (tagComponent.Tag == tag)
-                return Entity(const_cast<ScriptableEntity*>(this), entity);
+                return Entity(m_Registry, entity);
         }
 
         return Entity{};

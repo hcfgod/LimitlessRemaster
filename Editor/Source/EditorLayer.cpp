@@ -906,6 +906,8 @@ namespace Limitless
 
         DrawMenuBar();
         EditorProjectSettingsPanel::Draw(m_ShowProjectSettingsWindow, m_ProjectSettingsPanelState);
+        EditorBuildSettingsPanel::Draw(m_ShowBuildSettingsWindow, m_BuildSettingsPanelState,
+                                       m_CurrentSceneAssetKey, m_Scene.get());
         EditorAssetDiagnosticsPanel::Draw(m_ShowAssetDiagnosticsWindow);
         DrawViewportPanel();
         DrawScenePanel();
@@ -952,6 +954,7 @@ namespace Limitless
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Open); },
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Create); },
             [this]() { m_ShowProjectSettingsWindow = true; },
+            [this]() { m_ShowBuildSettingsWindow = true; },
             [this]() {
                 const auto result = Assets::AssetImportPipeline::ReimportChanged(true);
                 if (result.IsFailure())

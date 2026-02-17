@@ -1035,6 +1035,11 @@ namespace Limitless
         return entity;
     }
 
+    Entity Scene::CreateEntityWrapped(const std::string& name)
+    {
+        return Entity(&m_Registry, CreateEntity(name));
+    }
+
     void Scene::DestroyEntity(entt::entity entity)
     {
         if (!IsValid(entity))
@@ -3507,7 +3512,7 @@ namespace Limitless
     void SceneRenderer::RenderToViewport(Scene& scene, const Camera& camera,
         const std::shared_ptr<Framebuffer>& framebuffer, uint32_t width, uint32_t height)
     {
-        if (!framebuffer || width == 0 || height == 0)
+        if (width == 0 || height == 0)
             return;
 
         auto& renderer = Renderer::GetInstance();
@@ -3520,6 +3525,7 @@ namespace Limitless
 
         if (!renderedWithLighting)
         {
+            // Null framebuffer means render directly to the default backbuffer.
             renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(framebuffer));
             renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
             const glm::vec4 fallbackClearColor = SceneRenderer::GetViewportClearColor();

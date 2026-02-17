@@ -1,7 +1,11 @@
 #include "SandboxApp.h"
 #include "TestLayer.h"
+#include "GameLayer.h"
+
+#include "Platform/Platform.h"
+
+#include <filesystem>
 #include <iostream>
-#include <random>
 
 namespace Limitless
 {
@@ -19,11 +23,33 @@ namespace Limitless
 	{
 		LT_INFO("SandboxApp Initialize");
 
-		// Create and push the test layer
-		auto testLayer = CreateLayer<TestLayer>();
-		PushLayer(testLayer);
-		
-		LT_INFO("TestLayer pushed to layer stack");
+		// Detect shipped game mode: if GameBootstrap.json exists next to
+		// the executable, launch as a standalone game (no editor, no test layer).
+		bool isShippedGame = false;
+
+		const auto& platformInfo = PlatformDetection::GetPlatformInfo();
+		if (!platformInfo.executablePath.empty())
+		{
+			const auto exeDir = std::filesystem::path(platformInfo.executablePath).parent_path();
+			if (std::filesystem::exists(exeDir / "GameBootstrap.json"))
+				isShippedGame = true;
+		}
+
+		if (!isShippedGame && std::filesystem::exists(std::filesystem::current_path() / "GameBootstrap.json"))
+			isShippedGame = true;
+
+		if (isShippedGame)
+		{
+			LT_INFO("Shipped game detected (GameBootstrap.json found). Starting GameLayer.");
+			auto gameLayer = CreateLayer<GameLayer>();
+			PushLayer(gameLayer);
+		}
+		else
+		{
+			LT_INFO("Dev sandbox mode. Starting TestLayer.");
+			auto testLayer = CreateLayer<TestLayer>();
+			PushLayer(testLayer);
+		}
 
 		return true;
 	}

@@ -21,23 +21,72 @@ Derive from `ScriptableEntity` and override any of:
 
 ## Entity and Component API (Unity-Style)
 
-`ScriptableEntity` now supports scene creation/destruction and component operations directly from scripts through a Unity-style `Limitless::Entity` wrapper.
+`Limitless::Entity` is an engine-level wrapper that holds an `entt::registry*` and `entt::entity` handle. It is used from scripts, editor code, and engine code alike. It does not require a `ScriptableEntity` owner -- it is self-contained.
 
 - `Entity CreateEntity(const std::string& name = "Entity")`
 - `void DestroyEntity(Entity entity)` or `entity.Destroy()`
 - `bool entity.HasComponent<T>()`
-- `T& entity.GetComponent<T>()`
+- `T& entity.GetComponent<T>()` -- throws if component is missing
+- `T* entity.TryGetComponent<T>()` -- returns `nullptr` if missing (**recommended**)
 - `T& entity.AddComponent<T>(...)`
 - `void entity.RemoveComponent<T>()`
+- `bool entity.IsValid()` / `operator bool()`
+- `entt::entity entity.GetHandle()`
 
 Behavior:
 
 - `CreateEntity` returns an `Entity` value object (no manual allocation/deallocation).
 - `AddComponent<T>` is idempotent for scripting convenience: if the component already exists, the existing component is returned.
 - `RemoveComponent<T>` is safe to call even if the component is missing.
+- `TryGetComponent<T>` is the preferred null-safe accessor. Use it to avoid exceptions when a component may not exist.
 - Advanced users can still work with raw handles through `entity.GetHandle()` and low-level overloads.
 
-Example:
+### GetComponent vs TryGetComponent
+
+Use `GetComponent<T>()` when you are certain the component exists (throws on missing). Use `TryGetComponent<T>()` when the component may not exist -- it returns a raw pointer that is `nullptr` on failure.
+
+```cpp
+// GetComponent -- throws if TransformComponent is missing
+auto& transform = entity.GetComponent<Limitless::TransformComponent>();
+transform.Position.x += 1.0f;
+
+// TryGetComponent -- safe, returns nullptr if missing
+if (auto* sprite = entity.TryGetComponent<Limitless::SpriteComponent>())
+{
+    sprite->Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+}
+```
+
+### Entity References in Scripts
+
+You can declare `Limitless::Entity` as a public field on your script class. The Inspector will show a dropdown / drag-drop slot to assign a scene entity. At runtime the entity is resolved by tag.
+
+```cpp
+class CameraFollowScript final : public Limitless::ScriptableEntity
+{
+public:
+    Limitless::Entity TargetEntity;
+
+protected:
+    LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()
+        LT_AUTO_EXPOSED_FIELD(TargetEntity)
+    LT_END_AUTO_EXPOSED_FIELD_SYNC()
+
+    void OnUpdate(float deltaTime) override
+    {
+        if (auto* targetTransform = TargetEntity.TryGetComponent<Limitless::TransformComponent>())
+        {
+            auto& cameraTransform = GetComponent<Limitless::TransformComponent>();
+            cameraTransform.Position = glm::mix(
+                cameraTransform.Position,
+                targetTransform->Position + glm::vec3(0.0f, 1.5f, 0.0f),
+                1.0f - std::exp(-10.0f * deltaTime));
+        }
+    }
+};
+```
+
+### Basic Example
 
 ```cpp
 Limitless::Entity spawned = CreateEntity("RuntimeEnemy");

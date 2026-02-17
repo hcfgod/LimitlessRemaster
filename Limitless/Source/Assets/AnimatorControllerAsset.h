@@ -85,8 +85,15 @@ namespace Limitless::Assets
             bool ValidateStrictly = false;
         };
 
-        static Async::Task<Ptr> LoadAsync(const std::string& key, Settings settings = {});
-        static Ptr LoadBlocking(const std::string& key, Settings settings = {});
+        // NOTE(macOS/Linux Clang/GCC):
+        // Avoid default arguments like `Settings settings = {}` for nested settings types
+        // that rely on default member initializers. Some toolchains reject this pattern
+        // while the enclosing class definition is still being parsed.
+        // Use overloads for portable defaults.
+        static Async::Task<Ptr> LoadAsync(const std::string& key);
+        static Async::Task<Ptr> LoadAsync(const std::string& key, Settings settings);
+        static Ptr LoadBlocking(const std::string& key);
+        static Ptr LoadBlocking(const std::string& key, Settings settings);
 
         bool Reload() override;
 
