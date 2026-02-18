@@ -45,7 +45,8 @@ namespace Limitless::Audio
                           float volume = 1.0f,
                           bool loop = false,
                           const std::string& mixerGroup = "Master",
-                          float pan = 0.0f);
+                          float pan = 0.0f,
+                          float pitch = 1.0f);
 
         // Backward-compatible alias for non-looping playback.
         uint32_t PlayOneShot(std::shared_ptr<const AudioClip> clip, float volume = 1.0f);
@@ -57,7 +58,7 @@ namespace Limitless::Audio
         bool IsVoiceActive(uint32_t voiceId) const;
 
         // Update per-voice volume/pan/group at runtime (used by spatial audio updates).
-        bool SetVoiceMixParameters(uint32_t voiceId, float volume, float pan, const std::string& mixerGroup);
+        bool SetVoiceMixParameters(uint32_t voiceId, float volume, float pan, const std::string& mixerGroup, float pitch = 1.0f);
 
         // Update/read mixer group faders at runtime.
         void SetMixerGroupVolume(const std::string& mixerGroup, float volume);
@@ -77,9 +78,10 @@ namespace Limitless::Audio
         {
             uint32_t Id = 0;
             std::shared_ptr<const AudioClip> Clip;
-            uint64_t FrameCursor = 0;
+            double FrameCursor = 0.0;
             float Volume = 1.0f;
             float Pan = 0.0f;
+            float Pitch = 1.0f;
             std::string MixerGroup = "Master";
             bool Loop = false;
             bool Active = false;

@@ -94,3 +94,8 @@ extern "C" LT_SCRIPTCORE_API void LT_SetScriptDestroyEntityBridge(Limitless::Scr
 {
     Limitless::ScriptableEntity::SetDestroyEntityBridgeCallback(callback);
 }
+
+extern "C" LT_SCRIPTCORE_API void LT_SetScriptInstantiatePrefabBridge(Limitless::ScriptInstantiatePrefabBridgeCallback callback)
+{
+    Limitless::ScriptableEntity::SetInstantiatePrefabBridgeCallback(callback);
+}

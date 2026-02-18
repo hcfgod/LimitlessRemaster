@@ -366,6 +366,13 @@ namespace Limitless
                     { "Tag", entityValue->Tag }
                 };
             }
+            else if (const auto* prefabValue = std::get_if<ScriptPrefabReference>(&value))
+            {
+                root["Type"] = "Prefab";
+                root["Value"] = {
+                    { "AssetKey", prefabValue->AssetKey }
+                };
+            }
             return root;
         }
 
@@ -416,6 +423,20 @@ namespace Limitless
                         entityReference.Tag = value.get<std::string>();
                 }
                 outValue = std::move(entityReference);
+                return true;
+            }
+            if (typeName == "Prefab")
+            {
+                ScriptPrefabReference prefabReference{};
+                if (root.contains("Value"))
+                {
+                    const auto& value = root["Value"];
+                    if (value.is_object())
+                        prefabReference.AssetKey = value.value("AssetKey", std::string{});
+                    else if (value.is_string())
+                        prefabReference.AssetKey = value.get<std::string>();
+                }
+                outValue = std::move(prefabReference);
                 return true;
             }
 
@@ -1117,6 +1138,271 @@ namespace Limitless
             }
         }
 
+        bool CopyEntitySubtreeToScene(const Scene& sourceScene,
+                                      Scene& destinationScene,
+                                      entt::entity sourceRootEntity,
+                                      entt::entity destinationParentEntity,
+                                      entt::entity* outDestinationRootEntity)
+        {
+            if (!sourceScene.IsValid(sourceRootEntity))
+                return false;
+
+            const auto& sourceRegistry = sourceScene.GetRegistry();
+            auto& destinationRegistry = destinationScene.GetRegistry();
+            const entt::entity resolvedDestinationParentEntity =
+                (destinationParentEntity != entt::null && destinationScene.IsValid(destinationParentEntity))
+                ? destinationParentEntity
+                : entt::null;
+
+            std::vector<entt::entity> sourceEntities;
+            sourceEntities.push_back(sourceRootEntity);
+            for (size_t index = 0; index < sourceEntities.size(); ++index)
+            {
+                const auto children = sourceScene.GetChildren(sourceEntities[index]);
+                sourceEntities.insert(sourceEntities.end(), children.begin(), children.end());
+            }
+
+            std::unordered_map<entt::entity, entt::entity> entityMap;
+            entityMap.reserve(sourceEntities.size());
+
+            for (entt::entity sourceEntity : sourceEntities)
+            {
+                const auto* sourceTag = sourceRegistry.try_get<TagComponent>(sourceEntity);
+                const auto* sourceTransform = sourceRegistry.try_get<TransformComponent>(sourceEntity);
+                if (!sourceTag || !sourceTransform)
+                    return false;
+
+                const entt::entity destinationEntity = destinationScene.CreateEntity(sourceTag->Tag);
+                entityMap.emplace(sourceEntity, destinationEntity);
+                if (auto* destinationTag = destinationRegistry.try_get<TagComponent>(destinationEntity))
+                    destinationTag->Enabled = sourceTag->Enabled;
+                destinationRegistry.replace<TransformComponent>(destinationEntity, *sourceTransform);
+
+                if (const auto* sourceCanvas = sourceRegistry.try_get<CanvasComponent>(sourceEntity))
+                    destinationRegistry.emplace<CanvasComponent>(destinationEntity, *sourceCanvas);
+
+                if (const auto* sourceRectTransform = sourceRegistry.try_get<RectTransformComponent>(sourceEntity))
+                    destinationRegistry.emplace<RectTransformComponent>(destinationEntity, *sourceRectTransform);
+
+                if (const auto* sourceSprite = sourceRegistry.try_get<SpriteComponent>(sourceEntity))
+                {
+                    auto& destinationSprite = destinationRegistry.emplace<SpriteComponent>(destinationEntity);
+                    destinationSprite.TextureKey = sourceSprite->TextureKey;
+                    destinationSprite.CachedTexture.reset();
+                    destinationSprite.TextureLoadAttempted = false;
+                    destinationSprite.Color = sourceSprite->Color;
+                    destinationSprite.TilingFactor = sourceSprite->TilingFactor;
+                    destinationSprite.CastShadows = sourceSprite->CastShadows;
+                    destinationSprite.ReceiveShadows = sourceSprite->ReceiveShadows;
+                }
+
+                if (const auto* sourceAnimator = sourceRegistry.try_get<AnimatorComponent>(sourceEntity))
+                    destinationRegistry.emplace<AnimatorComponent>(destinationEntity, *sourceAnimator);
+
+                if (const auto* sourceAnimationEventReceiver = sourceRegistry.try_get<AnimationEventReceiverComponent>(sourceEntity))
+                    destinationRegistry.emplace<AnimationEventReceiverComponent>(destinationEntity, *sourceAnimationEventReceiver);
+
+                if (const auto* sourceMaterial = sourceRegistry.try_get<MaterialComponent>(sourceEntity))
+                {
+                    auto& destinationMaterial = destinationRegistry.emplace<MaterialComponent>(destinationEntity);
+                    destinationMaterial.MaterialKey = sourceMaterial->MaterialKey;
+                    destinationMaterial.CachedMaterial.reset();
+                    destinationMaterial.MaterialLoadAttempted = false;
+                }
+
+                if (const auto* sourceDirectionalLight = sourceRegistry.try_get<DirectionalLight2DComponent>(sourceEntity))
+                    destinationRegistry.emplace<DirectionalLight2DComponent>(destinationEntity, *sourceDirectionalLight);
+
+                if (const auto* sourcePointLight = sourceRegistry.try_get<PointLight2DComponent>(sourceEntity))
+                    destinationRegistry.emplace<PointLight2DComponent>(destinationEntity, *sourcePointLight);
+
+                if (const auto* sourceShadowOccluder = sourceRegistry.try_get<ShadowOccluder2DComponent>(sourceEntity))
+                    destinationRegistry.emplace<ShadowOccluder2DComponent>(destinationEntity, *sourceShadowOccluder);
+
+                if (const auto* sourceUIImage = sourceRegistry.try_get<UIImageComponent>(sourceEntity))
+                    destinationRegistry.emplace<UIImageComponent>(destinationEntity, *sourceUIImage);
+
+                if (const auto* sourceUIPanel = sourceRegistry.try_get<UIPanelComponent>(sourceEntity))
+                    destinationRegistry.emplace<UIPanelComponent>(destinationEntity, *sourceUIPanel);
+
+                if (const auto* sourceUIText = sourceRegistry.try_get<UITextComponent>(sourceEntity))
+                {
+                    auto& destinationUIText = destinationRegistry.emplace<UITextComponent>(destinationEntity);
+                    destinationUIText.Text = sourceUIText->Text;
+                    destinationUIText.FontFilePath = sourceUIText->FontFilePath;
+                    destinationUIText.CachedFont.reset();
+                    destinationUIText.FontLoadAttempted = false;
+                    destinationUIText.FontSize = sourceUIText->FontSize;
+                    destinationUIText.Color = sourceUIText->Color;
+                    destinationUIText.RaycastTarget = sourceUIText->RaycastTarget;
+                }
+
+                if (const auto* sourceUIButton = sourceRegistry.try_get<UIButtonComponent>(sourceEntity))
+                    destinationRegistry.emplace<UIButtonComponent>(destinationEntity, *sourceUIButton);
+
+                if (const auto* sourceUISlider = sourceRegistry.try_get<UISliderComponent>(sourceEntity))
+                    destinationRegistry.emplace<UISliderComponent>(destinationEntity, *sourceUISlider);
+
+                if (const auto* sourceTilemap = sourceRegistry.try_get<TilemapComponent>(sourceEntity))
+                {
+                    auto& destinationTilemap = destinationRegistry.emplace<TilemapComponent>(destinationEntity, *sourceTilemap);
+                    destinationTilemap.CachedTilesetTexture.reset();
+                    destinationTilemap.TilesetTextureLoadAttempted = false;
+                    destinationTilemap.TilesetAssetLoadAttempted = false;
+                    destinationTilemap.EnsureLayerStorage();
+                }
+
+                if (const auto* sourceCamera = sourceRegistry.try_get<CameraComponent>(sourceEntity))
+                    destinationRegistry.emplace<CameraComponent>(destinationEntity, *sourceCamera);
+
+                if (const auto* sourceAudioListener = sourceRegistry.try_get<AudioListener2DComponent>(sourceEntity))
+                    destinationRegistry.emplace<AudioListener2DComponent>(destinationEntity, *sourceAudioListener);
+
+                if (const auto* sourceAudio = sourceRegistry.try_get<AudioSourceComponent>(sourceEntity))
+                {
+                    auto& destinationAudio = destinationRegistry.emplace<AudioSourceComponent>(destinationEntity);
+                    destinationAudio.AudioClipKey = sourceAudio->AudioClipKey;
+                    destinationAudio.Volume = sourceAudio->Volume;
+                    destinationAudio.Pitch = sourceAudio->Pitch;
+                    destinationAudio.PlayOnStart = sourceAudio->PlayOnStart;
+                    destinationAudio.Loop = sourceAudio->Loop;
+                    destinationAudio.Muted = sourceAudio->Muted;
+                    destinationAudio.Space = sourceAudio->Space;
+                    destinationAudio.MixerGroup = sourceAudio->MixerGroup;
+                    destinationAudio.SpatialMinDistance = sourceAudio->SpatialMinDistance;
+                    destinationAudio.SpatialMaxDistance = sourceAudio->SpatialMaxDistance;
+                    destinationAudio.SpatialRolloffExponent = sourceAudio->SpatialRolloffExponent;
+                    destinationAudio.StereoPanStrength = sourceAudio->StereoPanStrength;
+                    destinationAudio.AttenuationCurveKey = sourceAudio->AttenuationCurveKey;
+                    destinationAudio.RuntimeVoiceId = 0;
+                    destinationAudio.RuntimePlaybackStarted = false;
+                }
+
+                if (const auto* sourceRigidbody2D = sourceRegistry.try_get<Rigidbody2DComponent>(sourceEntity))
+                    destinationRegistry.emplace<Rigidbody2DComponent>(destinationEntity, *sourceRigidbody2D);
+
+                if (const auto* sourceBoxCollider2D = sourceRegistry.try_get<BoxCollider2DComponent>(sourceEntity))
+                    destinationRegistry.emplace<BoxCollider2DComponent>(destinationEntity, *sourceBoxCollider2D);
+
+                if (const auto* sourceCircleCollider2D = sourceRegistry.try_get<CircleCollider2DComponent>(sourceEntity))
+                    destinationRegistry.emplace<CircleCollider2DComponent>(destinationEntity, *sourceCircleCollider2D);
+
+                if (const auto* sourceTilemapCollider2D = sourceRegistry.try_get<TilemapCollider2DComponent>(sourceEntity))
+                    destinationRegistry.emplace<TilemapCollider2DComponent>(destinationEntity, *sourceTilemapCollider2D);
+
+                if (const auto* sourceJoint2D = sourceRegistry.try_get<Joint2DComponent>(sourceEntity))
+                    destinationRegistry.emplace<Joint2DComponent>(destinationEntity, *sourceJoint2D);
+
+                if (const auto* sourceScripts = sourceRegistry.try_get<NativeScriptComponent>(sourceEntity))
+                {
+                    auto& destinationScripts = destinationRegistry.emplace<NativeScriptComponent>(destinationEntity);
+                    destinationScripts.Scripts.reserve(sourceScripts->Scripts.size());
+                    for (const auto& sourceScriptEntry : sourceScripts->Scripts)
+                    {
+                        auto& destinationScriptEntry = destinationScripts.Scripts.emplace_back();
+                        destinationScriptEntry.ScriptClassName = sourceScriptEntry.ScriptClassName;
+                        destinationScriptEntry.ScriptAssetRelativePath = sourceScriptEntry.ScriptAssetRelativePath;
+                        destinationScriptEntry.Enabled = sourceScriptEntry.Enabled;
+                        destinationScriptEntry.ExposedProperties = sourceScriptEntry.ExposedProperties;
+                        destinationScriptEntry.RuntimeInitialized = false;
+                        destinationScriptEntry.RuntimeInstance.reset();
+                    }
+                }
+
+                if (const auto* sourcePrefabInstance = sourceRegistry.try_get<PrefabInstanceComponent>(sourceEntity))
+                    destinationRegistry.emplace<PrefabInstanceComponent>(destinationEntity, *sourcePrefabInstance);
+
+                ResetRuntimeStateForEntity(destinationRegistry, destinationEntity);
+            }
+
+            for (entt::entity sourceEntity : sourceEntities)
+            {
+                const auto mappedEntity = entityMap.find(sourceEntity);
+                if (mappedEntity == entityMap.end())
+                    continue;
+                const entt::entity destinationEntity = mappedEntity->second;
+
+                auto* destinationHierarchy = destinationRegistry.try_get<HierarchyComponent>(destinationEntity);
+                if (!destinationHierarchy)
+                    destinationHierarchy = &destinationRegistry.emplace<HierarchyComponent>(destinationEntity);
+
+                const entt::entity sourceParent = sourceScene.GetParent(sourceEntity);
+                if (sourceParent != entt::null)
+                {
+                    const auto mappedParent = entityMap.find(sourceParent);
+                    destinationHierarchy->Parent = (mappedParent != entityMap.end()) ? mappedParent->second : resolvedDestinationParentEntity;
+                }
+                else
+                {
+                    destinationHierarchy->Parent = resolvedDestinationParentEntity;
+                }
+
+                if (const auto* sourceHierarchy = sourceRegistry.try_get<HierarchyComponent>(sourceEntity))
+                    destinationHierarchy->SiblingOrder = sourceHierarchy->SiblingOrder;
+                else
+                    destinationHierarchy->SiblingOrder = 0;
+
+                // Preserve prefab-authored root world transform even when instantiated under
+                // a non-null parent. Without this, direct parent assignment can skew scale/size
+                // and offset position due to inherited parent transforms.
+                if (sourceEntity == sourceRootEntity && resolvedDestinationParentEntity != entt::null)
+                {
+                    if (auto* destinationTransform = destinationRegistry.try_get<TransformComponent>(destinationEntity))
+                    {
+                        const glm::mat4 sourceRootWorld = sourceScene.GetWorldTransformMatrix(sourceEntity);
+                        const glm::mat4 parentWorld = destinationScene.GetWorldTransformMatrix(resolvedDestinationParentEntity);
+                        const glm::mat4 childLocal = glm::inverse(parentWorld) * sourceRootWorld;
+
+                        glm::vec3 skew(0.0f);
+                        glm::vec4 perspective(0.0f);
+                        glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
+                        glm::vec3 translation(0.0f);
+                        glm::vec3 scale(1.0f);
+                        if (glm::decompose(childLocal, scale, orientation, translation, skew, perspective))
+                        {
+                            destinationTransform->Position = translation;
+                            destinationTransform->Rotation = glm::degrees(glm::eulerAngles(orientation));
+                            destinationTransform->Scale = scale;
+                        }
+                    }
+                }
+            }
+
+            for (entt::entity sourceEntity : sourceEntities)
+            {
+                const auto* sourceJoint = sourceRegistry.try_get<Joint2DComponent>(sourceEntity);
+                if (!sourceJoint)
+                    continue;
+
+                const auto mappedEntity = entityMap.find(sourceEntity);
+                if (mappedEntity == entityMap.end())
+                    continue;
+
+                auto* destinationJoint = destinationRegistry.try_get<Joint2DComponent>(mappedEntity->second);
+                if (!destinationJoint)
+                    continue;
+
+                if (sourceJoint->ConnectedEntity == entt::null)
+                {
+                    destinationJoint->ConnectedEntity = entt::null;
+                    continue;
+                }
+
+                const auto mappedConnectedEntity = entityMap.find(sourceJoint->ConnectedEntity);
+                destinationJoint->ConnectedEntity = (mappedConnectedEntity != entityMap.end())
+                    ? mappedConnectedEntity->second
+                    : entt::null;
+            }
+
+            const auto mappedRoot = entityMap.find(sourceRootEntity);
+            if (mappedRoot == entityMap.end())
+                return false;
+
+            if (outDestinationRootEntity)
+                *outDestinationRootEntity = mappedRoot->second;
+            return true;
+        }
+
     }
 
     Scene::Scene() = default;
@@ -1170,6 +1456,44 @@ namespace Limitless
     Entity Scene::CreateEntityWrapped(const std::string& name)
     {
         return Entity(&m_Registry, CreateEntity(name));
+    }
+
+    entt::entity Scene::InstantiatePrefab(const std::string& prefabAssetKey, entt::entity parentEntity)
+    {
+        if (prefabAssetKey.empty())
+            return entt::null;
+
+        auto loadedPrefabSceneResult = Scene::LoadFromFile(prefabAssetKey);
+        if (const auto resolvedPath = Assets::ResolveAssetKeyToPath(prefabAssetKey); resolvedPath.IsSuccess())
+        {
+            auto resolvedLoadResult = Scene::LoadFromFile(resolvedPath.GetValue());
+            if (!resolvedLoadResult.IsFailure())
+                loadedPrefabSceneResult = std::move(resolvedLoadResult);
+        }
+
+        if (loadedPrefabSceneResult.IsFailure())
+        {
+            LT_WARN("Scene::InstantiatePrefab failed for '{}': {}",
+                    prefabAssetKey,
+                    loadedPrefabSceneResult.GetError().GetErrorMessage());
+            return entt::null;
+        }
+
+        auto& loadedPrefabScene = *loadedPrefabSceneResult.GetValue();
+        const auto prefabRoots = loadedPrefabScene.GetChildren(entt::null);
+        if (prefabRoots.empty())
+            return entt::null;
+
+        entt::entity createdRoot = entt::null;
+        if (!CopyEntitySubtreeToScene(loadedPrefabScene, *this, prefabRoots.front(), parentEntity, &createdRoot))
+            return entt::null;
+
+        if (createdRoot == entt::null || !IsValid(createdRoot))
+            return entt::null;
+
+        auto& prefabInstance = m_Registry.emplace_or_replace<PrefabInstanceComponent>(createdRoot);
+        prefabInstance.PrefabAssetKey = prefabAssetKey;
+        return createdRoot;
     }
 
     void Scene::DestroyEntity(entt::entity entity)
@@ -1818,6 +2142,11 @@ namespace Limitless
                 destinationRegistry.emplace<UIImageComponent>(destinationEntity, *uiImage);
             }
 
+            if (const auto* uiPanel = sourceRegistry.try_get<UIPanelComponent>(sourceEntity))
+            {
+                destinationRegistry.emplace<UIPanelComponent>(destinationEntity, *uiPanel);
+            }
+
             if (const auto* uiText = sourceRegistry.try_get<UITextComponent>(sourceEntity))
             {
                 auto& destinationUIText = destinationRegistry.emplace<UITextComponent>(destinationEntity);
@@ -1925,6 +2254,7 @@ namespace Limitless
                 auto& destinationAudioSource = destinationRegistry.emplace<AudioSourceComponent>(destinationEntity);
                 destinationAudioSource.AudioClipKey = audioSource->AudioClipKey;
                 destinationAudioSource.Volume = audioSource->Volume;
+                destinationAudioSource.Pitch = audioSource->Pitch;
                 destinationAudioSource.PlayOnStart = audioSource->PlayOnStart;
                 destinationAudioSource.Loop = audioSource->Loop;
                 destinationAudioSource.Muted = audioSource->Muted;
@@ -2218,6 +2548,15 @@ namespace Limitless
                 };
             }
 
+            if (const auto* uiPanel = m_Registry.try_get<UIPanelComponent>(entity))
+            {
+                entry["UIPanel"] = {
+                    { "BackgroundColor", { uiPanel->BackgroundColor.r, uiPanel->BackgroundColor.g, uiPanel->BackgroundColor.b, uiPanel->BackgroundColor.a } },
+                    { "UseSpriteTexture", uiPanel->UseSpriteTexture },
+                    { "RaycastTarget", uiPanel->RaycastTarget }
+                };
+            }
+
             if (const auto* uiText = m_Registry.try_get<UITextComponent>(entity))
             {
                 entry["UIText"] = {
@@ -2332,6 +2671,7 @@ namespace Limitless
                 entry["AudioSource"] = {
                     { "AudioClip", MakeAssetReferenceJson(audioSource->AudioClipKey, Assets::AssetType::AudioClip) },
                     { "Volume", audioSource->Volume },
+                    { "Pitch", audioSource->Pitch },
                     { "PlayOnStart", audioSource->PlayOnStart },
                     { "Loop", audioSource->Loop },
                     { "Muted", audioSource->Muted },
@@ -2851,6 +3191,17 @@ namespace Limitless
                 uiImage.RaycastTarget = uiImageJson.value("RaycastTarget", true);
             }
 
+            if (entry.contains("UIPanel") && entry["UIPanel"].is_object())
+            {
+                const auto& uiPanelJson = entry["UIPanel"];
+                auto& uiPanel = scene->GetRegistry().emplace<UIPanelComponent>(entity);
+                auto color = uiPanelJson.value("BackgroundColor", std::vector<float>{ uiPanel.BackgroundColor.r, uiPanel.BackgroundColor.g, uiPanel.BackgroundColor.b, uiPanel.BackgroundColor.a });
+                if (color.size() >= 4)
+                    uiPanel.BackgroundColor = glm::vec4(color[0], color[1], color[2], color[3]);
+                uiPanel.UseSpriteTexture = uiPanelJson.value("UseSpriteTexture", false);
+                uiPanel.RaycastTarget = uiPanelJson.value("RaycastTarget", false);
+            }
+
             if (entry.contains("UIText") && entry["UIText"].is_object())
             {
                 const auto& uiTextJson = entry["UIText"];
@@ -2932,6 +3283,12 @@ namespace Limitless
             }
 
             if (scene->GetRegistry().all_of<UISliderComponent>(entity))
+            {
+                if (!scene->GetRegistry().all_of<RectTransformComponent>(entity))
+                    scene->GetRegistry().emplace<RectTransformComponent>(entity);
+            }
+
+            if (scene->GetRegistry().all_of<UIPanelComponent>(entity))
             {
                 if (!scene->GetRegistry().all_of<RectTransformComponent>(entity))
                     scene->GetRegistry().emplace<RectTransformComponent>(entity);
@@ -3060,6 +3417,7 @@ namespace Limitless
                     audioSource.Volume = audioSourceJson.value("Volume", 1.0f);
                     if (audioSource.Volume < 0.0f)
                         audioSource.Volume = 0.0f;
+                    audioSource.Pitch = std::max(0.01f, audioSourceJson.value("Pitch", 1.0f));
                     audioSource.PlayOnStart = audioSourceJson.value("PlayOnStart", true);
                     audioSource.Loop = audioSourceJson.value("Loop", false);
                     audioSource.Muted = audioSourceJson.value("Muted", false);
@@ -4189,7 +4547,7 @@ namespace Limitless
                 {
                     if (!scene.IsEntityEnabledInHierarchy(entity))
                         continue;
-                    if (!registry.any_of<SpriteComponent, UITextComponent>(entity))
+                    if (!registry.any_of<SpriteComponent, UITextComponent, UIPanelComponent>(entity))
                         continue;
 
                     entt::entity owningCanvas = entt::null;
@@ -4241,6 +4599,7 @@ namespace Limitless
                         model = canvasWorldTransform * model;
 
                     SpriteComponent* sprite = registry.try_get<SpriteComponent>(uiEntity);
+                    UIPanelComponent* panel = registry.try_get<UIPanelComponent>(uiEntity);
                     UIButtonComponent* button = registry.try_get<UIButtonComponent>(uiEntity);
                     UISliderComponent* slider = registry.try_get<UISliderComponent>(uiEntity);
                     const entt::entity sliderBackgroundVisualEntity = slider ? FindDirectChildByTag(registry, uiEntity, "Slider Background") : entt::null;
@@ -4303,7 +4662,7 @@ namespace Limitless
                             Renderer2D::DrawQuad(handleModel, handleColor);
                         }
                     }
-                    else if (sprite && !sliderHasVisualChildren)
+                    else if (sprite && !panel && !sliderHasVisualChildren)
                     {
                         glm::vec4 resolvedColor = sprite->Color;
                         if (button && button->UseStateColors)
@@ -4325,6 +4684,36 @@ namespace Limitless
                             Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, resolvedColor.a));
                         else
                             Renderer2D::DrawQuad(model, resolvedColor);
+                    }
+                    else if (panel && !sliderHasVisualChildren)
+                    {
+                        glm::vec4 resolvedPanelColor = panel->BackgroundColor;
+                        if (button && button->UseStateColors)
+                        {
+                            if (!button->Interactable)
+                                resolvedPanelColor = button->DisabledColor;
+                            else if (button->IsPressed)
+                                resolvedPanelColor = button->PressedColor;
+                            else if (button->IsHovered)
+                                resolvedPanelColor = button->HoveredColor;
+                            else
+                                resolvedPanelColor = button->NormalColor;
+                        }
+
+                        if (panel->UseSpriteTexture && sprite)
+                        {
+                            Assets::TextureAsset::Ptr textureAsset = ResolveUiSpriteTexture(*sprite);
+                            if (textureAsset)
+                                Renderer2D::DrawQuad(model, textureAsset, resolvedPanelColor);
+                            else if (!sprite->TextureKey.empty())
+                                Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, resolvedPanelColor.a));
+                            else
+                                Renderer2D::DrawQuad(model, resolvedPanelColor);
+                        }
+                        else
+                        {
+                            Renderer2D::DrawQuad(model, resolvedPanelColor);
+                        }
                     }
                     else if (!sliderHasVisualChildren && button && button->UseStateColors)
                     {

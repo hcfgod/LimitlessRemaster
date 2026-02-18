@@ -260,6 +260,14 @@ namespace Limitless
         bool RaycastTarget = true;
     };
 
+    /// Unity-style UI panel for colored backgrounds and optional sprite-backed fills.
+    struct UIPanelComponent
+    {
+        glm::vec4 BackgroundColor = glm::vec4(0.12f, 0.12f, 0.12f, 0.9f);
+        bool UseSpriteTexture = false;
+        bool RaycastTarget = false;
+    };
+
     /// Runtime UI text payload and interaction metadata for Canvas-based UI.
     struct UITextComponent
     {
@@ -402,6 +410,7 @@ namespace Limitless
 
         std::string AudioClipKey; ///< Asset key for audio clip (example: "Assets/Audio/MyClip.wav")
         float Volume = 1.0f;
+        float Pitch = 1.0f;
         bool PlayOnStart = true;
         bool Loop = false;
         bool Muted = false;

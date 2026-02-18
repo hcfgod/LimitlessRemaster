@@ -36,6 +36,7 @@ Scene-authored 2D spatial audio is now supported through ECS components:
   - `Enabled`
   - `UsePrimaryCameraPosition` (listener can follow the scene primary camera)
 - **`AudioSourceComponent`** (extended):
+  - `Pitch` (playback rate multiplier; `1.0` = authored speed)
   - `PlaybackSpace`: `Global` or `Spatial2D`
   - `SpatialMinDistance`, `SpatialMaxDistance`
   - `SpatialRolloffExponent`
@@ -48,8 +49,8 @@ At runtime, play mode computes listener/source world positions, applies attenuat
 
 `AudioEngine` now supports per-voice mixer routing and group faders:
 
-- Per-voice routing: `PlayClip(..., mixerGroup, pan)`
-- Runtime voice updates: `SetVoiceMixParameters(...)`
+- Per-voice routing: `PlayClip(..., mixerGroup, pan, pitch)`
+- Runtime voice updates: `SetVoiceMixParameters(..., pitch)`
 - Group faders: `SetMixerGroupVolume(...)`, `GetMixerGroupVolume(...)`
 
 Default groups initialized by the engine:

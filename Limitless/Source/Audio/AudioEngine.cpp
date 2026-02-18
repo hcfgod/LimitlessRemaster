@@ -97,7 +97,7 @@ namespace Limitless::Audio
         m_MasterVolume = std::max(0.0f, volume);
     }
 
-    uint32_t AudioEngine::PlayClip(std::shared_ptr<const AudioClip> clip, float volume, bool loop, const std::string& mixerGroup, float pan)
+    uint32_t AudioEngine::PlayClip(std::shared_ptr<const AudioClip> clip, float volume, bool loop, const std::string& mixerGroup, float pan, float pitch)
     {
         if (!clip || clip->Samples.empty())
         {
@@ -122,9 +122,10 @@ namespace Limitless::Audio
             {
                 v.Id = id;
                 v.Clip = std::move(clip);
-                v.FrameCursor = 0;
+                v.FrameCursor = 0.0;
                 v.Volume = std::max(0.0f, volume);
                 v.Pan = std::clamp(pan, -1.0f, 1.0f);
+                v.Pitch = std::max(0.01f, pitch);
                 v.MixerGroup = mixerGroup.empty() ? "Master" : mixerGroup;
                 v.Loop = loop;
                 v.Active = true;
@@ -135,9 +136,10 @@ namespace Limitless::Audio
         Voice v{};
         v.Id = id;
         v.Clip = std::move(clip);
-        v.FrameCursor = 0;
+        v.FrameCursor = 0.0;
         v.Volume = std::max(0.0f, volume);
         v.Pan = std::clamp(pan, -1.0f, 1.0f);
+        v.Pitch = std::max(0.01f, pitch);
         v.MixerGroup = mixerGroup.empty() ? "Master" : mixerGroup;
         v.Loop = loop;
         v.Active = true;
@@ -165,7 +167,7 @@ namespace Limitless::Audio
             {
                 v.Active = false;
                 v.Clip.reset();
-                v.FrameCursor = 0;
+                v.FrameCursor = 0.0;
                 return;
             }
         }
@@ -186,7 +188,7 @@ namespace Limitless::Audio
         return false;
     }
 
-    bool AudioEngine::SetVoiceMixParameters(uint32_t voiceId, float volume, float pan, const std::string& mixerGroup)
+    bool AudioEngine::SetVoiceMixParameters(uint32_t voiceId, float volume, float pan, const std::string& mixerGroup, float pitch)
     {
         if (voiceId == 0)
             return false;
@@ -198,6 +200,7 @@ namespace Limitless::Audio
             {
                 v.Volume = std::max(0.0f, volume);
                 v.Pan = std::clamp(pan, -1.0f, 1.0f);
+                v.Pitch = std::max(0.01f, pitch);
                 v.MixerGroup = mixerGroup.empty() ? "Master" : mixerGroup;
                 return true;
             }
@@ -234,7 +237,7 @@ namespace Limitless::Audio
         {
             v.Active = false;
             v.Clip.reset();
-            v.FrameCursor = 0;
+            v.FrameCursor = 0.0;
         }
         m_Voices.clear();
     }
@@ -316,22 +319,26 @@ namespace Limitless::Audio
                 continue;
             }
 
-            uint64_t cursor = v.FrameCursor;
+            double cursor = std::max(0.0, v.FrameCursor);
             const float mixerGroupVolume = ResolveMixerGroupVolumeLocked(v.MixerGroup);
             const float voiceVolume = v.Volume * mixerGroupVolume;
             const float clampedPan = std::clamp(v.Pan, -1.0f, 1.0f);
+            const float clampedPitch = std::max(0.01f, v.Pitch);
             constexpr float kHalfPi = 1.57079632679f;
             const float panAngle = (clampedPan + 1.0f) * 0.5f * kHalfPi;
             const float panLeftGain = std::cos(panAngle);
             const float panRightGain = std::sin(panAngle);
+            const double clipFrameCount = static_cast<double>(clipFrames);
 
             for (uint32_t f = 0; f < frameCount; ++f)
             {
-                if (cursor >= clipFrames)
+                if (cursor >= clipFrameCount)
                 {
                     if (v.Loop)
                     {
-                        cursor = 0;
+                        cursor = std::fmod(cursor, clipFrameCount);
+                        if (cursor < 0.0)
+                            cursor += clipFrameCount;
                     }
                     else
                     {
@@ -341,15 +348,26 @@ namespace Limitless::Audio
                     }
                 }
 
-                const uint64_t base = cursor * kMixerChannels;
-                const float inL = samples[static_cast<size_t>(base + 0)];
-                const float inR = samples[static_cast<size_t>(base + 1)];
+                const uint64_t frameIndex0 = static_cast<uint64_t>(cursor);
+                uint64_t frameIndex1 = frameIndex0 + 1ull;
+                if (frameIndex1 >= clipFrames)
+                    frameIndex1 = v.Loop ? 0ull : frameIndex0;
+
+                const float sampleAlpha = static_cast<float>(cursor - static_cast<double>(frameIndex0));
+                const uint64_t base0 = frameIndex0 * kMixerChannels;
+                const uint64_t base1 = frameIndex1 * kMixerChannels;
+                const float sample0L = samples[static_cast<size_t>(base0 + 0)];
+                const float sample0R = samples[static_cast<size_t>(base0 + 1)];
+                const float sample1L = samples[static_cast<size_t>(base1 + 0)];
+                const float sample1R = samples[static_cast<size_t>(base1 + 1)];
+                const float inL = sample0L + (sample1L - sample0L) * sampleAlpha;
+                const float inR = sample0R + (sample1R - sample0R) * sampleAlpha;
 
                 const uint32_t outBase = f * kMixerChannels;
                 outInterleavedStereoF32[outBase + 0] += inL * voiceVolume * panLeftGain;
                 outInterleavedStereoF32[outBase + 1] += inR * voiceVolume * panRightGain;
 
-                ++cursor;
+                cursor += static_cast<double>(clampedPitch);
             }
 
             v.FrameCursor = cursor;

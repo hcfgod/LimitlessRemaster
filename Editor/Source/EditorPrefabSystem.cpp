@@ -4,6 +4,10 @@
 #include "Core/Debug/Log.h"
 #include "Scene/Scene.h"
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/matrix_decompose.hpp>
+#include <glm/gtx/quaternion.hpp>
+
 #include <algorithm>
 #include <fstream>
 #include <unordered_map>
@@ -30,6 +34,10 @@ namespace Limitless::EditorPrefabSystem
 
             const auto& sourceRegistry = sourceScene.GetRegistry();
             auto& destinationRegistry = destinationScene.GetRegistry();
+            const entt::entity resolvedDestinationParentEntity =
+                (destinationParentEntity != entt::null && destinationScene.IsValid(destinationParentEntity))
+                ? destinationParentEntity
+                : entt::null;
 
             std::vector<entt::entity> sourceEntities;
             sourceEntities.push_back(sourceRootEntity);
@@ -111,6 +119,11 @@ namespace Limitless::EditorPrefabSystem
                     destinationRegistry.emplace<UIImageComponent>(destinationEntity, *sourceUIImage);
                 }
 
+                if (const auto* sourceUIPanel = sourceRegistry.try_get<UIPanelComponent>(sourceEntity))
+                {
+                    destinationRegistry.emplace<UIPanelComponent>(destinationEntity, *sourceUIPanel);
+                }
+
                 if (const auto* sourceUIText = sourceRegistry.try_get<UITextComponent>(sourceEntity))
                 {
                     auto& destinationUIText = destinationRegistry.emplace<UITextComponent>(destinationEntity);
@@ -171,6 +184,7 @@ namespace Limitless::EditorPrefabSystem
                     auto& destinationAudio = destinationRegistry.emplace<AudioSourceComponent>(destinationEntity);
                     destinationAudio.AudioClipKey = sourceAudio->AudioClipKey;
                     destinationAudio.Volume = sourceAudio->Volume;
+                    destinationAudio.Pitch = sourceAudio->Pitch;
                     destinationAudio.PlayOnStart = sourceAudio->PlayOnStart;
                     destinationAudio.Loop = sourceAudio->Loop;
                     destinationAudio.Muted = sourceAudio->Muted;
@@ -217,17 +231,40 @@ namespace Limitless::EditorPrefabSystem
                 if (sourceParent != entt::null)
                 {
                     const auto mappedParent = entityMap.find(sourceParent);
-                    destinationHierarchy->Parent = (mappedParent != entityMap.end()) ? mappedParent->second : destinationParentEntity;
+                    destinationHierarchy->Parent = (mappedParent != entityMap.end()) ? mappedParent->second : resolvedDestinationParentEntity;
                 }
                 else
                 {
-                    destinationHierarchy->Parent = destinationParentEntity;
+                    destinationHierarchy->Parent = resolvedDestinationParentEntity;
                 }
 
                 if (const auto* sourceHierarchy = sourceRegistry.try_get<HierarchyComponent>(sourceEntity))
                     destinationHierarchy->SiblingOrder = sourceHierarchy->SiblingOrder;
                 else
                     destinationHierarchy->SiblingOrder = 0;
+
+                // Keep prefab root world transform stable when instantiating under a parent.
+                if (sourceEntity == sourceRootEntity && resolvedDestinationParentEntity != entt::null)
+                {
+                    if (auto* destinationTransform = destinationRegistry.try_get<TransformComponent>(destinationEntity))
+                    {
+                        const glm::mat4 sourceRootWorld = sourceScene.GetWorldTransformMatrix(sourceEntity);
+                        const glm::mat4 parentWorld = destinationScene.GetWorldTransformMatrix(resolvedDestinationParentEntity);
+                        const glm::mat4 childLocal = glm::inverse(parentWorld) * sourceRootWorld;
+
+                        glm::vec3 skew(0.0f);
+                        glm::vec4 perspective(0.0f);
+                        glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
+                        glm::vec3 translation(0.0f);
+                        glm::vec3 scale(1.0f);
+                        if (glm::decompose(childLocal, scale, orientation, translation, skew, perspective))
+                        {
+                            destinationTransform->Position = translation;
+                            destinationTransform->Rotation = glm::degrees(glm::eulerAngles(orientation));
+                            destinationTransform->Scale = scale;
+                        }
+                    }
+                }
             }
 
             const auto mappedRoot = entityMap.find(sourceRootEntity);

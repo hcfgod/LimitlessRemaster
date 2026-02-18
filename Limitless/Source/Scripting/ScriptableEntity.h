@@ -18,6 +18,7 @@ namespace Limitless
     struct AnimatorComponent;
     using ScriptCreateEntityBridgeCallback = entt::entity (*)(const char* name);
     using ScriptDestroyEntityBridgeCallback = void (*)(entt::entity entity);
+    using ScriptInstantiatePrefabBridgeCallback = entt::entity (*)(const char* prefabAssetKey, entt::entity parentEntity);
 
     // Base type for native C++ entity scripts.
     // Derive from this, register in NativeScriptRegistry, then assign in NativeScriptComponent.
@@ -124,6 +125,8 @@ namespace Limitless
 
         Entity CreateEntity(const std::string& name = "Entity");
         entt::entity CreateEntityHandle(const std::string& name = "Entity");
+        Entity Instantiate(const std::string& prefabAssetKey, entt::entity parentEntity = entt::null);
+        Entity Instantiate(const ScriptPrefabReference& prefabReference, entt::entity parentEntity = entt::null);
         void DestroyEntity(Entity entity);
         void DestroyEntity(entt::entity entity);
         bool IsEntityValid(entt::entity entity) const;
@@ -132,6 +135,7 @@ namespace Limitless
 
         static void SetCreateEntityBridgeCallback(ScriptCreateEntityBridgeCallback callback);
         static void SetDestroyEntityBridgeCallback(ScriptDestroyEntityBridgeCallback callback);
+        static void SetInstantiatePrefabBridgeCallback(ScriptInstantiatePrefabBridgeCallback callback);
 
     protected:
         float GetExposedFloat(const std::string& name, float fallbackValue = 0.0f) const;
@@ -140,6 +144,7 @@ namespace Limitless
         glm::vec3 GetExposedVector3(const std::string& name, const glm::vec3& fallbackValue = glm::vec3(0.0f)) const;
         std::string GetExposedString(const std::string& name, const std::string& fallbackValue = {}) const;
         Entity GetExposedEntity(const std::string& name, const Entity& fallbackValue = Entity{}) const;
+        ScriptPrefabReference GetExposedPrefab(const std::string& name, const ScriptPrefabReference& fallbackValue = {}) const;
 
         void SetExposedFloat(const std::string& name, float value);
         void SetExposedInteger(const std::string& name, int32_t value);
@@ -147,6 +152,7 @@ namespace Limitless
         void SetExposedVector3(const std::string& name, const glm::vec3& value);
         void SetExposedString(const std::string& name, const std::string& value);
         void SetExposedEntity(const std::string& name, const Entity& value);
+        void SetExposedPrefab(const std::string& name, const ScriptPrefabReference& value);
 
         void SyncExposedField(const std::string& name, float& value) { value = GetExposedFloat(name, value); }
         void SyncExposedField(const std::string& name, int32_t& value) { value = GetExposedInteger(name, value); }
@@ -154,6 +160,7 @@ namespace Limitless
         void SyncExposedField(const std::string& name, glm::vec3& value) { value = GetExposedVector3(name, value); }
         void SyncExposedField(const std::string& name, std::string& value) { value = GetExposedString(name, value); }
         void SyncExposedField(const std::string& name, Entity& value) { value = GetExposedEntity(name, value); }
+        void SyncExposedField(const std::string& name, ScriptPrefabReference& value) { value = GetExposedPrefab(name, value); }
 
         bool Raycast2D(const glm::vec2& origin,
                        const glm::vec2& direction,

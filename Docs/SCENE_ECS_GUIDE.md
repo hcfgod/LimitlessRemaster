@@ -17,9 +17,10 @@ The Limitless engine uses the [EnTT](https://github.com/skypjack/entt) library f
 | `HierarchyComponent` | Parent entity for hierarchy (optional; `entt::null` = root) |
 | `SpriteComponent` | Renders a 2D sprite (color + optional texture); size from TransformComponent::Scale |
 | `MaterialComponent` | Optional material asset; overrides Sprite defaults when set |
+| `UIPanelComponent` | Canvas UI panel background (solid color, optional sprite-backed fill, raycast metadata) |
 | `UITextComponent` | Canvas UI text payload (text, font path, size, color, raycast target) |
 | `CameraComponent` | Gameplay camera (orthographic 2D or perspective 3D; primary flag for active camera) |
-| `AudioSourceComponent` | Plays an AudioClip asset (volume, play-on-start, loop, mute) |
+| `AudioSourceComponent` | Plays an AudioClip asset (volume, pitch, play-on-start, loop, mute) |
 | `NativeScriptComponent` | List of native C++ script entries (class, asset path, exposed properties); see `Docs/NATIVE_CPP_SCRIPTING_GUIDE.md` |
 
 ## Usage

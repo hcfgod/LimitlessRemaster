@@ -36,6 +36,7 @@ namespace Limitless::ScriptCoreModuleRuntime
         using SetScriptLogBridgeFunction = void (*)(ScriptLogBridgeCallback callback);
         using SetScriptCreateEntityBridgeFunction = void (*)(ScriptCreateEntityBridgeCallback callback);
         using SetScriptDestroyEntityBridgeFunction = void (*)(ScriptDestroyEntityBridgeCallback callback);
+        using SetScriptInstantiatePrefabBridgeFunction = void (*)(ScriptInstantiatePrefabBridgeCallback callback);
 
         struct RuntimeState final
         {
@@ -322,6 +323,14 @@ namespace Limitless::ScriptCoreModuleRuntime
             scene->DestroyEntity(entity);
         }
 
+        entt::entity ForwardScriptInstantiatePrefabToHost(const char* prefabAssetKey, entt::entity parentEntity)
+        {
+            Scene* scene = Physics2DQueries::GetActiveSceneForScriptQueries();
+            if (!scene || !prefabAssetKey || prefabAssetKey[0] == '\0')
+                return entt::null;
+            return scene->InstantiatePrefab(prefabAssetKey, parentEntity);
+        }
+
         bool ReloadScriptCoreModule(const std::filesystem::path& libraryPath)
         {
             ResetRuntimeScriptRegistry();
@@ -484,6 +493,11 @@ namespace Limitless::ScriptCoreModuleRuntime
                 PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetScriptDestroyEntityBridge"));
             if (setScriptDestroyEntityBridge)
                 setScriptDestroyEntityBridge(&ForwardScriptDestroyEntityToHost);
+
+            const auto setScriptInstantiatePrefabBridge = reinterpret_cast<SetScriptInstantiatePrefabBridgeFunction>(
+                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetScriptInstantiatePrefabBridge"));
+            if (setScriptInstantiatePrefabBridge)
+                setScriptInstantiatePrefabBridge(&ForwardScriptInstantiatePrefabToHost);
 
             registerFunction(&RegisterScriptFromModule);
             s_RuntimeState.SourceLibraryPath = libraryPath;

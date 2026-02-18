@@ -27,6 +27,9 @@ namespace Limitless::Audio
         void SetVolume(float volume) { m_Volume = (volume < 0.0f) ? 0.0f : volume; }
         float GetVolume() const { return m_Volume; }
 
+        void SetPitch(float pitch) { m_Pitch = (pitch < 0.01f) ? 0.01f : pitch; }
+        float GetPitch() const { return m_Pitch; }
+
         // Starts playback (one-shot for now).
         // Returns true if a voice started.
         bool Play();
@@ -39,6 +42,7 @@ namespace Limitless::Audio
         Assets::AssetHandle<Assets::AudioClipAsset> m_Clip;
         std::shared_ptr<Assets::AudioClipAsset> m_ClipAssetPinned;
         float m_Volume = 1.0f;
+        float m_Pitch = 1.0f;
         uint32_t m_VoiceId = 0;
     };
 }

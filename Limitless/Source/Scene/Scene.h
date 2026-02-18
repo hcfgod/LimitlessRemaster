@@ -18,7 +18,7 @@ namespace Limitless
     class Camera;
     class Framebuffer;
     class Physics2DWorld;
-    inline constexpr int kSceneSerializationVersion = 16;
+    inline constexpr int kSceneSerializationVersion = 18;
 
     // -----------------------------------------------------------------------------
     // Scene
@@ -53,6 +53,10 @@ namespace Limitless
 
         /// Create a new entity and return an Entity wrapper (for scripts / new code).
         Entity CreateEntityWrapped(const std::string& name = "Entity");
+
+        /// Instantiate a prefab asset and parent the resulting root entity.
+        /// Returns entt::null on failure.
+        entt::entity InstantiatePrefab(const std::string& prefabAssetKey, entt::entity parentEntity = entt::null);
 
         /// Destroy an entity and all its components.
         void DestroyEntity(entt::entity entity);

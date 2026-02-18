@@ -13,6 +13,7 @@ The runtime now supports a Canvas-driven UI workflow:
 Minimum UI component set currently available:
 
 - `UIImageComponent`
+- `UIPanelComponent`
 - `UITextComponent`
 - `UIButtonComponent`
 - `UISliderComponent`
@@ -21,6 +22,7 @@ These components are intended to be composed with:
 
 - `RectTransformComponent`
 - `SpriteComponent` (for images)
+- `UIPanelComponent` (for solid-color or optional sprite-backed backgrounds)
 - `UITextComponent` (for text payload and styling)
 
 ## Rendering Model
@@ -46,9 +48,16 @@ UI placement is exclusively driven by `CanvasComponent` + `RectTransformComponen
 
 1. Add `CanvasComponent` on a root entity.
 2. Add `RectTransformComponent` on each child UI entity.
-3. Add `SpriteComponent` + `UIImageComponent` for image elements.
-4. Add `UITextComponent` for text elements.
-5. Add `UIButtonComponent` or `UISliderComponent` for interaction/state metadata.
+3. Add `UIPanelComponent` for background blocks and container visuals.
+4. Add `SpriteComponent` + `UIImageComponent` for image elements.
+5. Add `UITextComponent` for text elements.
+6. Add `UIButtonComponent` or `UISliderComponent` for interaction/state metadata.
+
+`UIPanelComponent` supports:
+
+- `BackgroundColor` for solid fills.
+- `UseSpriteTexture` to optionally use `SpriteComponent::TextureKey` as the panel background.
+- `RaycastTarget` metadata for UI tooling parity.
 
 Button and slider visuals now follow Unity-style defaults:
 
@@ -62,7 +71,7 @@ Button and slider visuals now follow Unity-style defaults:
 Each child can have its own `SpriteComponent`/texture assignment for Unity-like customization.
 `Slider Fill` and `Slider Handle` are auto-driven from slider value at runtime.
 
-When adding UI components from the inspector (`Canvas`, `UI Image`, `UI Text`, `UI Button`, `UI Slider`),
+When adding UI components from the inspector (`Canvas`, `UI Image`, `UI Panel`, `UI Text`, `UI Button`, `UI Slider`),
 the editor automatically ensures a `RectTransformComponent` exists on the target entity.
 
 ## Current Scope

@@ -113,6 +113,36 @@ namespace Limitless::EditorInspectorPanel
             return value.Tag + "##" + std::to_string(static_cast<uint32_t>(resolvedEntity));
         }
 
+        std::vector<std::string> BuildPrefabReferencePickerKeys()
+        {
+            std::vector<std::string> keys;
+            std::unordered_set<std::string> seen;
+
+            const auto records = Assets::AssetDatabase::GetInstance().GetAllRecords();
+            for (const auto& record : records)
+            {
+                if (record.Type != Assets::AssetType::Prefab || record.Key.empty())
+                    continue;
+                if (seen.insert(record.Key).second)
+                    keys.push_back(record.Key);
+            }
+
+            std::sort(keys.begin(), keys.end());
+            return keys;
+        }
+
+        std::string BuildPrefabReferencePreviewLabel(const ScriptPrefabReference& value)
+        {
+            if (value.AssetKey.empty())
+                return "None (Prefab)";
+
+            const auto record = Assets::AssetDatabase::GetInstance().FindByKey(value.AssetKey);
+            if (record.IsFailure())
+                return value.AssetKey + " (Missing)";
+
+            return EditorAssetNaming::GetAssetDisplayNameFromAssetKey(value.AssetKey);
+        }
+
         constexpr size_t kNativeScriptEditorBufferSize = 256 * 1024;
 
         struct NativeScriptAuthoringState
@@ -702,6 +732,31 @@ namespace Limitless::EditorInspectorPanel
                 outValue = value;
                 return true;
             }
+            if (typeName == "Limitless::ScriptPrefabReference" || typeName == "ScriptPrefabReference")
+            {
+                ScriptPrefabReference value{};
+                if (!initializer.empty())
+                {
+                    if (initializer == "{}" ||
+                        initializer == "ScriptPrefabReference{}" ||
+                        initializer == "Limitless::ScriptPrefabReference{}" ||
+                        initializer == "ScriptPrefabReference()" ||
+                        initializer == "Limitless::ScriptPrefabReference()")
+                    {
+                        value.AssetKey.clear();
+                    }
+                    else if (initializer.size() >= 2 && initializer.front() == '"' && initializer.back() == '"')
+                    {
+                        value.AssetKey = initializer.substr(1, initializer.size() - 2);
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+                outValue = std::move(value);
+                return true;
+            }
 
             return false;
         }
@@ -724,8 +779,9 @@ namespace Limitless::EditorInspectorPanel
             // glm::vec3 Offset = glm::vec3(0.0f, 1.0f, 0.0f);
             // std::string Label = "Player";
             // Limitless::Entity TargetEntity;
+            // Limitless::ScriptPrefabReference EnemyPrefab = "Assets/Prefabs/Enemy.prefab.json";
             const std::regex fieldPattern(
-                R"(^\s*(?:const\s+)?(?:static\s+)?(float|int32_t|int|bool|glm::vec3|std::string|Limitless::Entity|Entity)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*([^;]+))?\s*;\s*$)");
+                R"(^\s*(?:const\s+)?(?:static\s+)?(float|int32_t|int|bool|glm::vec3|std::string|Limitless::Entity|Entity|Limitless::ScriptPrefabReference|ScriptPrefabReference)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*([^;]+))?\s*;\s*$)");
 
             bool insidePublicSection = false;
             std::string line;
@@ -785,7 +841,7 @@ namespace Limitless::EditorInspectorPanel
             }
 
             const std::regex callPattern(
-                R"LT(GetExposed(Float|Integer|Boolean|Vector3|String|Entity)\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*,\s*([^)]+)\))LT");
+                R"LT(GetExposed(Float|Integer|Boolean|Vector3|String|Entity|Prefab)\s*\(\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*,\s*([^)]+)\))LT");
 
             std::unordered_set<std::string> existingNames;
             for (const auto& existingField : outFields)
@@ -861,6 +917,24 @@ namespace Limitless::EditorInspectorPanel
                     else if (fallbackExpression.size() >= 2 && fallbackExpression.front() == '"' && fallbackExpression.back() == '"')
                     {
                         value.Tag = fallbackExpression.substr(1, fallbackExpression.size() - 2);
+                        parsed = true;
+                    }
+
+                    if (parsed)
+                        fieldDefinition.DefaultValue = std::move(value);
+                }
+                else if (functionSuffix == "Prefab")
+                {
+                    ScriptPrefabReference value{};
+                    if (fallbackExpression == "{}" ||
+                        fallbackExpression == "ScriptPrefabReference{}" ||
+                        fallbackExpression == "Limitless::ScriptPrefabReference{}")
+                    {
+                        parsed = true;
+                    }
+                    else if (fallbackExpression.size() >= 2 && fallbackExpression.front() == '"' && fallbackExpression.back() == '"')
+                    {
+                        value.AssetKey = fallbackExpression.substr(1, fallbackExpression.size() - 2);
                         parsed = true;
                     }
 
@@ -1674,7 +1748,7 @@ namespace Limitless::EditorInspectorPanel
                                 else if (!syncedFromScript)
                                 {
                                     ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", fieldSyncError.c_str());
-                                    ImGui::TextDisabled("Supported public field types: float, int/int32_t, bool, glm::vec3, std::string, Limitless::Entity.");
+                                    ImGui::TextDisabled("Supported public field types: float, int/int32_t, bool, glm::vec3, std::string, Limitless::Entity, Limitless::ScriptPrefabReference.");
                                 }
                                 else if (declaredFieldNames.empty())
                                 {
@@ -1841,6 +1915,82 @@ namespace Limitless::EditorInspectorPanel
                                                                    matchingTagCount);
                                             }
                                         }
+                                        else if (auto* prefabValue = std::get_if<ScriptPrefabReference>(&propertyValue))
+                                        {
+                                            auto assignPrefabKey = [&](const std::string& prefabKey) {
+                                                if (undoService)
+                                                {
+                                                    return undoService->ExecuteSceneMutation(propertyEditLabel, [&](Scene& mutableScene) {
+                                                        auto* mutableNativeScript = mutableScene.GetRegistry().try_get<NativeScriptComponent>(selectedEntity);
+                                                        if (!mutableNativeScript || scriptIndex >= mutableNativeScript->Scripts.size())
+                                                            return false;
+
+                                                        auto& mutableEntry = mutableNativeScript->Scripts[scriptIndex];
+                                                        auto propertyIt = mutableEntry.ExposedProperties.find(propertyName);
+                                                        if (propertyIt == mutableEntry.ExposedProperties.end() ||
+                                                            !std::holds_alternative<ScriptPrefabReference>(propertyIt->second))
+                                                        {
+                                                            mutableEntry.ExposedProperties[propertyName] = ScriptPrefabReference{ prefabKey };
+                                                            return true;
+                                                        }
+
+                                                        auto* mutableReference = std::get_if<ScriptPrefabReference>(&propertyIt->second);
+                                                        if (!mutableReference)
+                                                            return false;
+                                                        mutableReference->AssetKey = prefabKey;
+                                                        return true;
+                                                    });
+                                                }
+
+                                                prefabValue->AssetKey = prefabKey;
+                                                return true;
+                                            };
+
+                                            const std::string previewLabel = BuildPrefabReferencePreviewLabel(*prefabValue);
+                                            if (ImGui::BeginCombo(propertyName.c_str(), previewLabel.c_str()))
+                                            {
+                                                const bool noneSelected = prefabValue->AssetKey.empty();
+                                                if (ImGui::Selectable("None (Prefab)", noneSelected))
+                                                    (void)assignPrefabKey({});
+                                                if (noneSelected)
+                                                    ImGui::SetItemDefaultFocus();
+
+                                                const std::vector<std::string> prefabKeys = BuildPrefabReferencePickerKeys();
+                                                for (const std::string& prefabKey : prefabKeys)
+                                                {
+                                                    const bool isSelected = prefabKey == prefabValue->AssetKey;
+                                                    const std::string displayName = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(prefabKey);
+                                                    if (ImGui::Selectable((displayName + "##PrefabReferenceOption_" + prefabKey).c_str(), isSelected))
+                                                        (void)assignPrefabKey(prefabKey);
+                                                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                                                        ImGui::SetTooltip("%s", prefabKey.c_str());
+                                                    if (isSelected)
+                                                        ImGui::SetItemDefaultFocus();
+                                                }
+                                                ImGui::EndCombo();
+                                            }
+
+                                            if (ImGui::BeginDragDropTarget())
+                                            {
+                                                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_PREFAB"))
+                                                {
+                                                    if (payload->Data && payload->DataSize > 0)
+                                                    {
+                                                        const char* prefabKey = static_cast<const char*>(payload->Data);
+                                                        if (prefabKey && prefabKey[0])
+                                                            (void)assignPrefabKey(prefabKey);
+                                                    }
+                                                }
+                                                ImGui::EndDragDropTarget();
+                                            }
+
+                                            if (!prefabValue->AssetKey.empty())
+                                            {
+                                                ImGui::SameLine();
+                                                if (ImGui::Button("X##ClearPrefabReference"))
+                                                    (void)assignPrefabKey({});
+                                            }
+                                        }
                                         ImGui::PopID();
                                     }
                                 }
@@ -1903,6 +2053,7 @@ namespace Limitless::EditorInspectorPanel
                 const bool hasCanvasComponent = registry.all_of<CanvasComponent>(selectedEntity);
                 const bool hasRectTransformComponent = registry.all_of<RectTransformComponent>(selectedEntity);
                 const bool hasUIImageComponent = registry.all_of<UIImageComponent>(selectedEntity);
+                const bool hasUIPanelComponent = registry.all_of<UIPanelComponent>(selectedEntity);
                 const bool hasUITextComponent = registry.all_of<UITextComponent>(selectedEntity);
                 const bool hasUIButtonComponent = registry.all_of<UIButtonComponent>(selectedEntity);
                 const bool hasUISliderComponent = registry.all_of<UISliderComponent>(selectedEntity);
@@ -1972,6 +2123,40 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 if (hasUIImageComponent)
+                    ImGui::EndDisabled();
+
+                if (hasUIPanelComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("UI Panel"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add UIPanel Component", [&](Scene& mutableScene) {
+                            auto& mutableRegistry = mutableScene.GetRegistry();
+                            auto& panel = mutableRegistry.emplace<UIPanelComponent>(selectedEntity);
+                            if (!mutableRegistry.all_of<RectTransformComponent>(selectedEntity))
+                                mutableRegistry.emplace<RectTransformComponent>(selectedEntity);
+                            if (!mutableRegistry.all_of<SpriteComponent>(selectedEntity))
+                            {
+                                auto& sprite = mutableRegistry.emplace<SpriteComponent>(selectedEntity);
+                                sprite.Color = panel.BackgroundColor;
+                            }
+                            return true;
+                        });
+                    else
+                    {
+                        auto& panel = registry.emplace<UIPanelComponent>(selectedEntity);
+                        if (!registry.all_of<RectTransformComponent>(selectedEntity))
+                            registry.emplace<RectTransformComponent>(selectedEntity);
+                        if (!registry.all_of<SpriteComponent>(selectedEntity))
+                        {
+                            auto& sprite = registry.emplace<SpriteComponent>(selectedEntity);
+                            sprite.Color = panel.BackgroundColor;
+                        }
+                    }
+                }
+
+                if (hasUIPanelComponent)
                     ImGui::EndDisabled();
 
                 if (hasUITextComponent)
@@ -2553,6 +2738,21 @@ namespace Limitless::EditorInspectorPanel
                 else
                 {
                     registry.remove<UIImageComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveUIPanelComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove UIPanel Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<UIPanelComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<UIPanelComponent>(selectedEntity);
                 }
             }
 

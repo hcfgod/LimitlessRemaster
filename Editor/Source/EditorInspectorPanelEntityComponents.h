@@ -16,6 +16,7 @@ namespace Limitless::EditorInspectorPanel
         bool RemoveCanvasComponent = false;
         bool RemoveRectTransformComponent = false;
         bool RemoveUIImageComponent = false;
+        bool RemoveUIPanelComponent = false;
         bool RemoveUITextComponent = false;
         bool RemoveUIButtonComponent = false;
         bool RemoveUISliderComponent = false;

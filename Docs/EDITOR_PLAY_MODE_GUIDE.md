@@ -40,7 +40,7 @@ Play Mode uses `Scene::Clone()` (see `Limitless/Source/Scene/Scene.cpp`). The cl
 - **MaterialComponent** — material key; runtime cache cleared
 - **UITextComponent** — text, font path, size, color, raycast target; font cache cleared
 - **CameraComponent** — projection type, primary flag, zoom, planes, FOV (full copy)
-- **AudioSourceComponent** — clip key, volume, play-on-start, loop, muted; runtime voice state reset
+- **AudioSourceComponent** — clip key, volume, pitch, play-on-start, loop, muted; runtime voice state reset
 - **NativeScriptComponent** — all script entries (class name, asset path, enabled, exposed properties); runtime instances are not copied (scripts are re-instantiated when the clone runs)
 
 **Hierarchy:**

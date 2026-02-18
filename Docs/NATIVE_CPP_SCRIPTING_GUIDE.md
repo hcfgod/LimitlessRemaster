@@ -24,6 +24,8 @@ Derive from `ScriptableEntity` and override any of:
 `Limitless::Entity` is an engine-level wrapper that holds an `entt::registry*` and `entt::entity` handle. It is used from scripts, editor code, and engine code alike. It does not require a `ScriptableEntity` owner -- it is self-contained.
 
 - `Entity CreateEntity(const std::string& name = "Entity")`
+- `Entity Instantiate(const std::string& prefabAssetKey, entt::entity parentEntity = entt::null)`
+- `Entity Instantiate(const ScriptPrefabReference& prefabReference, entt::entity parentEntity = entt::null)`
 - `void DestroyEntity(Entity entity)` or `entity.Destroy()`
 - `bool entity.HasComponent<T>()`
 - `T& entity.GetComponent<T>()` -- throws if component is missing
@@ -174,6 +176,30 @@ if (jumpPressed && !grounded)
 }
 ```
 
+### Prefab References and Instantiate
+
+You can expose prefab references directly in native scripts and spawn them at runtime:
+
+```cpp
+class EnemySpawnerScript final : public Limitless::ScriptableEntity
+{
+public:
+    Limitless::ScriptPrefabReference EnemyPrefab = "Assets/Prefabs/Enemy.prefab.json";
+
+protected:
+    LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()
+        LT_AUTO_EXPOSED_FIELD(EnemyPrefab)
+    LT_END_AUTO_EXPOSED_FIELD_SYNC()
+
+    void OnCreate() override
+    {
+        Limitless::Entity spawnedEnemy = Instantiate(EnemyPrefab);
+        if (auto* transform = spawnedEnemy.TryGetComponent<Limitless::TransformComponent>())
+            transform->Position = glm::vec3(2.0f, 0.0f, 0.0f);
+    }
+};
+```
+
 ## Editor Console
 
 The editor now includes a **Console** window for runtime debugging:
@@ -193,17 +219,21 @@ Each `Native Script` component automatically exposes supported `public` fields f
 
 - Declare fields in your script class (not in the inspector UI).
 - Inspector values are serialized with the scene.
-- Supported field types: `float`, `int`/`int32_t`, `bool`, `glm::vec3`, `std::string`, `Limitless::Entity`.
+- Supported field types: `float`, `int`/`int32_t`, `bool`, `glm::vec3`, `std::string`, `Limitless::Entity`, `Limitless::ScriptPrefabReference`.
 - `Limitless::Entity` fields are Unity-style object slots in Inspector:
   - Choose from a dropdown of scene entities
   - Drag an entity from the Scene panel directly into the slot
   - Clear with `X`
   - Runtime resolution is tag-based, so tags should be unique.
+- `Limitless::ScriptPrefabReference` fields are prefab asset slots in Inspector:
+  - Choose from a prefab dropdown
+  - Drag prefab assets from the Project panel
+  - Clear with `X`
 
 From script code, read/write these values with the field name:
 
-- `GetExposedFloat`, `GetExposedInteger`, `GetExposedBoolean`, `GetExposedVector3`, `GetExposedString`, `GetExposedEntity`
-- `SetExposedFloat`, `SetExposedInteger`, `SetExposedBoolean`, `SetExposedVector3`, `SetExposedString`, `SetExposedEntity`
+- `GetExposedFloat`, `GetExposedInteger`, `GetExposedBoolean`, `GetExposedVector3`, `GetExposedString`, `GetExposedEntity`, `GetExposedPrefab`
+- `SetExposedFloat`, `SetExposedInteger`, `SetExposedBoolean`, `SetExposedVector3`, `SetExposedString`, `SetExposedEntity`, `SetExposedPrefab`
 - `LT_SYNC_EXPOSED_FIELD(FieldName)` for manual sync when needed
 - `LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()` / `LT_AUTO_EXPOSED_FIELD(FieldName)` / `LT_END_AUTO_EXPOSED_FIELD_SYNC()` to auto-sync fields in the background (recommended)
 

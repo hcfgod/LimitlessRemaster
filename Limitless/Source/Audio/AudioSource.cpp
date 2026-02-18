@@ -40,7 +40,7 @@ namespace Limitless::Audio
             return false;
         }
 
-        m_VoiceId = engine.PlayOneShot(clip, m_Volume);
+        m_VoiceId = engine.PlayClip(clip, m_Volume, false, "Master", 0.0f, m_Pitch);
         return m_VoiceId != 0;
     }
 

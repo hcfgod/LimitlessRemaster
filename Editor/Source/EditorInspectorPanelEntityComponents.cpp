@@ -1441,6 +1441,9 @@ namespace Limitless::EditorInspectorPanel
                 TrackInteractiveMutation(undoService, "Edit Audio Muted");
                 ImGui::SliderFloat("Volume", &audioSource->Volume, 0.0f, 2.0f, "%.2f");
                 TrackInteractiveMutation(undoService, "Edit Audio Volume");
+                ImGui::SliderFloat("Pitch", &audioSource->Pitch, 0.1f, 4.0f, "%.2f");
+                audioSource->Pitch = std::max(0.01f, audioSource->Pitch);
+                TrackInteractiveMutation(undoService, "Edit Audio Pitch");
 
                 int playbackSpaceIndex = static_cast<int>(audioSource->Space);
                 const char* playbackSpaceNames[] = { "Global", "Spatial 2D" };
@@ -1512,7 +1515,8 @@ namespace Limitless::EditorInspectorPanel
                                     volume,
                                     audioSource->Loop,
                                     audioSource->MixerGroup,
-                                    0.0f);
+                                    0.0f,
+                                    audioSource->Pitch);
                                 audioSource->RuntimePlaybackStarted = (audioSource->RuntimeVoiceId != 0);
                             }
                         }
@@ -2041,6 +2045,85 @@ namespace Limitless::EditorInspectorPanel
 
                 ImGui::Checkbox("Raycast Target", &uiImage->RaycastTarget);
                 TrackInteractiveMutation(undoService, "Edit UIImage Raycast Target");
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* uiPanel = registry.try_get<UIPanelComponent>(selectedEntity))
+        {
+            const bool uiPanelOpen = ImGui::TreeNodeEx("UI Panel", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("UIPanelComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##UIPanelComponentOptionsButton"))
+                ImGui::OpenPopup("UIPanelComponentOptions");
+
+            if (ImGui::BeginPopup("UIPanelComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveUIPanelComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (uiPanelOpen)
+            {
+                const auto assignUiPanelTextureKey = [&](const std::string& key) {
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation(key.empty() ? "Clear UI Panel Texture" : "Assign UI Panel Texture", [&](Scene& mutableScene) {
+                            auto& mutableRegistry = mutableScene.GetRegistry();
+                            auto* mutableSprite = mutableRegistry.try_get<SpriteComponent>(selectedEntity);
+                            if (!mutableSprite)
+                                mutableSprite = &mutableRegistry.emplace<SpriteComponent>(selectedEntity);
+                            mutableSprite->TextureKey = key;
+                            mutableSprite->CachedTexture.reset();
+                            mutableSprite->TextureLoadAttempted = false;
+                            return true;
+                        });
+                    }
+                    else
+                    {
+                        auto* sprite = registry.try_get<SpriteComponent>(selectedEntity);
+                        if (!sprite)
+                            sprite = &registry.emplace<SpriteComponent>(selectedEntity);
+                        sprite->TextureKey = key;
+                        sprite->CachedTexture.reset();
+                        sprite->TextureLoadAttempted = false;
+                    }
+                };
+
+                auto* panelSprite = registry.try_get<SpriteComponent>(selectedEntity);
+                const std::string panelTextureLabel = (panelSprite && !panelSprite->TextureKey.empty())
+                    ? EditorAssetNaming::GetAssetDisplayNameFromAssetKey(panelSprite->TextureKey)
+                    : std::string("None (Solid Color)");
+                ImGui::Text("Background");
+                ImGui::SameLine(80);
+                ImGui::Button((panelTextureLabel + "##UIPanelTexture").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 60.0f, 0.0f));
+                if (ImGui::BeginDragDropTarget())
+                {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
+                    {
+                        const char* key = static_cast<const char*>(payload->Data);
+                        if (key && key[0])
+                            assignUiPanelTextureKey(key);
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+                if (panelSprite && !panelSprite->TextureKey.empty())
+                {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Clear##UIPanelTexture"))
+                        assignUiPanelTextureKey({});
+                }
+
+                ImGui::ColorEdit4("Background Color##UIPanel", &uiPanel->BackgroundColor.r);
+                TrackInteractiveMutation(undoService, "Edit UIPanel Background Color");
+
+                ImGui::Checkbox("Use Sprite Texture##UIPanel", &uiPanel->UseSpriteTexture);
+                TrackInteractiveMutation(undoService, "Edit UIPanel Use Sprite Texture");
+
+                ImGui::Checkbox("Raycast Target##UIPanel", &uiPanel->RaycastTarget);
+                TrackInteractiveMutation(undoService, "Edit UIPanel Raycast Target");
                 ImGui::TreePop();
             }
         }

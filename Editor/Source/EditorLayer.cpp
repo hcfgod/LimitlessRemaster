@@ -547,6 +547,7 @@ namespace Limitless
                 const float authoredVolume = audioSource.Muted ? 0.0f : std::max(0.0f, audioSource.Volume);
                 const float runtimeVolume = authoredVolume * spatialMix.Gain;
                 const float runtimePan = spatialMix.Pan;
+                const float runtimePitch = std::max(0.01f, audioSource.Pitch);
 
                 const bool shouldPlayOnStart =
                     audioSource.PlayOnStart &&
@@ -562,7 +563,8 @@ namespace Limitless
                             runtimeVolume,
                             audioSource.Loop,
                             audioSource.MixerGroup,
-                            runtimePan);
+                            runtimePan,
+                            runtimePitch);
                         audioSource.RuntimePlaybackStarted = (audioSource.RuntimeVoiceId != 0);
                     }
                 }
@@ -572,7 +574,8 @@ namespace Limitless
                         audioSource.RuntimeVoiceId,
                         runtimeVolume,
                         runtimePan,
-                        audioSource.MixerGroup);
+                        audioSource.MixerGroup,
+                        runtimePitch);
                 }
                 else if (!shouldPlayOnStart && audioSource.RuntimeVoiceId != 0)
                 {

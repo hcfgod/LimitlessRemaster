@@ -13,6 +13,7 @@ namespace Limitless
     {
         ScriptCreateEntityBridgeCallback s_CreateEntityBridgeCallback = nullptr;
         ScriptDestroyEntityBridgeCallback s_DestroyEntityBridgeCallback = nullptr;
+        ScriptInstantiatePrefabBridgeCallback s_InstantiatePrefabBridgeCallback = nullptr;
     }
 
     void ScriptableEntity::SetCreateEntityBridgeCallback(ScriptCreateEntityBridgeCallback callback)
@@ -23,6 +24,11 @@ namespace Limitless
     void ScriptableEntity::SetDestroyEntityBridgeCallback(ScriptDestroyEntityBridgeCallback callback)
     {
         s_DestroyEntityBridgeCallback = callback;
+    }
+
+    void ScriptableEntity::SetInstantiatePrefabBridgeCallback(ScriptInstantiatePrefabBridgeCallback callback)
+    {
+        s_InstantiatePrefabBridgeCallback = callback;
     }
 
     Entity ScriptableEntity::CreateEntity(const std::string& name)
@@ -41,6 +47,26 @@ namespace Limitless
             return m_Scene->CreateEntity(requestedName);
 #endif
         return entt::null;
+    }
+
+    Entity ScriptableEntity::Instantiate(const std::string& prefabAssetKey, entt::entity parentEntity)
+    {
+        if (prefabAssetKey.empty())
+            return Entity{};
+
+        if (s_InstantiatePrefabBridgeCallback)
+            return Entity(m_Registry, s_InstantiatePrefabBridgeCallback(prefabAssetKey.c_str(), parentEntity));
+
+#ifndef SCRIPTCORE_EXPORTS
+        if (m_Scene)
+            return Entity(m_Registry, m_Scene->InstantiatePrefab(prefabAssetKey, parentEntity));
+#endif
+        return Entity{};
+    }
+
+    Entity ScriptableEntity::Instantiate(const ScriptPrefabReference& prefabReference, entt::entity parentEntity)
+    {
+        return Instantiate(prefabReference.AssetKey, parentEntity);
     }
 
     void ScriptableEntity::DestroyEntity(Entity entity)
@@ -177,6 +203,18 @@ namespace Limitless
         return fallbackValue;
     }
 
+    ScriptPrefabReference ScriptableEntity::GetExposedPrefab(const std::string& name, const ScriptPrefabReference& fallbackValue) const
+    {
+        if (!m_ExposedProperties)
+            return fallbackValue;
+        const auto found = m_ExposedProperties->find(name);
+        if (found == m_ExposedProperties->end())
+            return fallbackValue;
+        if (const auto* value = std::get_if<ScriptPrefabReference>(&found->second))
+            return *value;
+        return fallbackValue;
+    }
+
     void ScriptableEntity::SetExposedFloat(const std::string& name, float value)
     {
         if (m_ExposedProperties)
@@ -219,6 +257,13 @@ namespace Limitless
                 entityReference.Tag = tagComponent->Tag;
         }
         (*m_ExposedProperties)[name] = std::move(entityReference);
+    }
+
+    void ScriptableEntity::SetExposedPrefab(const std::string& name, const ScriptPrefabReference& value)
+    {
+        if (!m_ExposedProperties)
+            return;
+        (*m_ExposedProperties)[name] = value;
     }
 
     bool ScriptableEntity::Raycast2D(const glm::vec2& origin,
