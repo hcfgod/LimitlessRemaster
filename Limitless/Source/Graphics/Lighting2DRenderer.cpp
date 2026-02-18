@@ -62,7 +62,6 @@ namespace Limitless
             glm::vec3 Color = glm::vec3(1.0f);
             float Intensity = 1.0f;
             glm::vec2 Direction = glm::vec2(0.0f, -1.0f);
-            glm::vec2 WorldDirection = glm::vec2(0.0f, -1.0f);
             bool CastShadows = true;
             float ShadowStrength = 1.0f;
             float ShadowSoftnessPixels = 0.0f;
@@ -239,30 +238,27 @@ namespace Limitless
 
         float EstimatePixelsPerWorldUnit(const glm::mat4& viewProjection, uint32_t width, uint32_t height)
         {
-            // Project two world-space points to screen and measure the distance.
-            // Uses the original (rejecting) projection to avoid the extreme
-            // coordinates that the clamped variant produces when a point
-            // grazes the near plane -- those turned pixelsPerUnit into ~10000,
-            // making shadow bias/distance absurdly large and causing shadows
-            // to disappear for a frame (white flicker).
-            glm::vec2 originScreen, unitXScreen;
-            if (ProjectWorldToScreen(viewProjection, glm::vec3(0.0f), width, height, originScreen) &&
-                ProjectWorldToScreen(viewProjection, glm::vec3(1.0f, 0.0f, 0.0f), width, height, unitXScreen))
-            {
-                const float pixelsPerUnit = glm::length(unitXScreen - originScreen);
-                const float maxReasonable = static_cast<float>(std::max(width, height)) * 2.0f;
-                return std::clamp(pixelsPerUnit, 1.0f, maxReasonable);
-            }
-
-            // Analytical fallback when the world origin is behind the camera.
-            // For a standard perspective VP matrix at the Z=0 scene plane:
-            //   pixelsPerUnit ≈ |VP[0][0] / VP[3][3]| * width / 2
-            // This varies smoothly with camera movement, preventing pops.
+            // Analytically derive the screen-space scale at the viewport
+            // center for a unit step along the world X-axis.  Using only
+            // matrix coefficients avoids the discontinuity that projection-
+            // based estimation caused: when test points crossed the near
+            // plane during camera rotation, pixelsPerUnit jumped between the
+            // projected value and the analytical fallback, making shadow
+            // bias/distance/softness flash between frames.
+            //
+            // For a perspective VP matrix at the Z=0 scene plane, the world
+            // X-axis (1,0,0,0) maps to VP column 0 in clip space.  The
+            // screen-space length of that vector is:
+            //   sqrt(VP[0][0]^2 + VP[0][1]^2) / |VP[3][3]| * halfWidth
+            // Using both clip X and Y handles camera rotations that project
+            // the world X-axis partially into the screen Y direction.
             const float vpW = std::abs(viewProjection[3][3]);
             if (vpW > kEpsilon)
             {
-                const float scaleX = std::abs(viewProjection[0][0]) / vpW;
-                const float estimate = scaleX * static_cast<float>(width) * 0.5f;
+                const float clipLenXY = std::sqrt(
+                    viewProjection[0][0] * viewProjection[0][0] +
+                    viewProjection[0][1] * viewProjection[0][1]);
+                const float estimate = (clipLenXY / vpW) * static_cast<float>(width) * 0.5f;
                 const float maxReasonable = static_cast<float>(std::max(width, height)) * 2.0f;
                 return std::clamp(estimate, 1.0f, maxReasonable);
             }
@@ -936,7 +932,6 @@ namespace Limitless
                 screenLight.Color = glm::max(directional.Color, glm::vec3(0.0f));
                 screenLight.Intensity = directional.Intensity;
                 screenLight.Direction = screenDirection;
-                screenLight.WorldDirection = worldDirection;
                 screenLight.CastShadows = g_State.Settings.EnableShadows && directional.CastShadows;
                 screenLight.ShadowStrength = std::clamp(directional.ShadowStrength, 0.0f, 1.0f);
                 screenLight.ShadowSoftnessPixels = std::max(0.0f, directional.ShadowSoftness * g_State.Settings.ShadowSoftnessScale * pixelsPerUnit);
@@ -1015,7 +1010,6 @@ namespace Limitless
                                         const std::shared_ptr<Texture2D>& normalTexture,
                                         const std::vector<glm::vec4>& shadowSegments,
                                         const ScreenDirectionalLight& light,
-                                        const glm::mat4& viewProjection,
                                         uint32_t width,
                                         uint32_t height,
                                         float shadowSegmentSnapPixels)
@@ -1031,9 +1025,6 @@ namespace Limitless
             const glm::vec3 lightColor = light.Color;
             const float intensity = light.Intensity;
             const glm::vec2 lightDirection = light.Direction;
-            const glm::vec2 worldLightDirection = light.WorldDirection;
-            const glm::mat4 vp = viewProjection;
-            const glm::mat4 invVP = glm::inverse(viewProjection);
             const int useShadows = light.CastShadows ? 1 : 0;
             const float shadowStrength = light.ShadowStrength;
             const float shadowSoftness = light.ShadowSoftnessPixels;
@@ -1050,7 +1041,7 @@ namespace Limitless
             // to pop edges in/out and produce shadow flicker.
             const std::vector<glm::vec4>& segments = shadowSegments;
 
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, lightColor, intensity, lightDirection, worldLightDirection, vp, invVP, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowDistance, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segments = std::move(segments)](GraphicsContext*) {
+            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, lightColor, intensity, lightDirection, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowDistance, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segments = std::move(segments)](GraphicsContext*) {
                 auto* glShader = dynamic_cast<OpenGLShader*>(shaderRef.get());
                 auto* glVertexArray = dynamic_cast<OpenGLVertexArray*>(vertexArrayRef.get());
                 auto* glAlbedoTexture = dynamic_cast<OpenGLTexture2D*>(albedoRef.get());
@@ -1079,12 +1070,6 @@ namespace Limitless
                     glUniform1f(location, intensity);
                 if (GLint location = glGetUniformLocation(program, "u_LightDirection"); location != -1)
                     glUniform2f(location, lightDirection.x, lightDirection.y);
-                if (GLint location = glGetUniformLocation(program, "u_WorldLightDirection"); location != -1)
-                    glUniform2f(location, worldLightDirection.x, worldLightDirection.y);
-                if (GLint location = glGetUniformLocation(program, "u_ViewProjection"); location != -1)
-                    glUniformMatrix4fv(location, 1, GL_FALSE, &vp[0][0]);
-                if (GLint location = glGetUniformLocation(program, "u_InverseViewProjection"); location != -1)
-                    glUniformMatrix4fv(location, 1, GL_FALSE, &invVP[0][0]);
                 if (GLint location = glGetUniformLocation(program, "u_UseShadows"); location != -1)
                     glUniform1i(location, useShadows);
                 if (GLint location = glGetUniformLocation(program, "u_ShadowStrength"); location != -1)
@@ -1338,8 +1323,16 @@ namespace Limitless
                 // far more distracting than the sub-pixel shimmer it prevents.
                 effectiveShadowSegmentSnapPixels = 0.0f;
             }
-            const bool allowAngularVelocityShadowFreeze = g_State.Settings.EnableHighAngularVelocityShadowFreeze
-                && camera.GetUsage() == CameraUsage::Gameplay;
+            // Shadow freeze during fast camera rotation prevents temporal
+            // aliasing of the screen-space shadow system.  Freezing reuses
+            // cached segments from the last static frame.  Only enabled for
+            // gameplay cameras -- the editor camera updates segments every
+            // frame so the light direction and segments are always consistent.
+            // Freezing the editor camera caused shadow position mismatch
+            // (frozen segments + live direction) and brightness flashes when
+            // the freeze released.
+            const bool allowAngularVelocityShadowFreeze =
+                g_State.Settings.EnableHighAngularVelocityShadowFreeze && camera.GetUsage() == CameraUsage::Gameplay;
             const glm::quat currentCameraRotation = ExtractCameraRotationFromViewMatrix(cameraViewMatrix);
             float cameraAngularVelocityDegreesPerSecond = 0.0f;
             if (allowAngularVelocityShadowFreeze && g_State.HasPreviousCameraRotation)
@@ -1361,10 +1354,13 @@ namespace Limitless
                 g_State.ShadowFreezeFramesRemaining = 0;
             }
 
+            const float freezeThreshold = g_State.Settings.ShadowFreezeAngularVelocityDegreesPerSecond;
+            const int freezeFrameCount = g_State.Settings.ShadowFreezeFrameCount;
+
             if (allowAngularVelocityShadowFreeze &&
-                cameraAngularVelocityDegreesPerSecond >= g_State.Settings.ShadowFreezeAngularVelocityDegreesPerSecond)
+                cameraAngularVelocityDegreesPerSecond >= freezeThreshold)
             {
-                const uint32_t requestedFreezeFrames = static_cast<uint32_t>(std::max(1, g_State.Settings.ShadowFreezeFrameCount));
+                const uint32_t requestedFreezeFrames = static_cast<uint32_t>(std::max(1, freezeFrameCount));
                 g_State.ShadowFreezeFramesRemaining = std::max(g_State.ShadowFreezeFramesRemaining, requestedFreezeFrames);
             }
 
@@ -1440,7 +1436,7 @@ namespace Limitless
             const auto gBufferNormal = g_State.GBufferFramebuffer->GetColorAttachment(1);
             for (const ScreenDirectionalLight& directionalLight : directionalLights)
             {
-                SubmitDirectionalLightPass(gBufferAlbedo, gBufferNormal, shadowSegments, directionalLight, viewProjection, width, height, effectiveShadowSegmentSnapPixels);
+                SubmitDirectionalLightPass(gBufferAlbedo, gBufferNormal, shadowSegments, directionalLight, width, height, effectiveShadowSegmentSnapPixels);
             }
             for (const ScreenPointLight& pointLight : pointLights)
             {

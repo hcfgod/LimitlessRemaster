@@ -27,9 +27,6 @@ uniform vec2 u_ViewportSize;
 uniform vec3 u_LightColor;
 uniform float u_LightIntensity;
 uniform vec2 u_LightDirection;
-uniform vec2 u_WorldLightDirection;
-uniform mat4 u_ViewProjection;
-uniform mat4 u_InverseViewProjection;
 
 uniform int u_UseShadows;
 uniform float u_ShadowStrength;
@@ -61,48 +58,6 @@ bool IntersectSegment(vec2 p0, vec2 p1, vec2 q0, vec2 q1)
     float t = Cross2D(qp, s) / denominator;
     float u = Cross2D(qp, r) / denominator;
     return (t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0);
-}
-
-// Compute the screen-space light direction at this pixel by projecting a
-// world-space step along the light direction on the Z=0 scene plane.
-// Under perspective projection parallel world-space rays converge on
-// screen, so a single uniform direction produces shadow distortion at
-// oblique camera angles.
-vec2 ComputePerPixelLightDirection(vec2 screenPos)
-{
-    vec2 ndc = (screenPos / u_ViewportSize) * 2.0 - 1.0;
-
-    // Unproject the fragment onto the Z=0 world plane by casting a ray
-    // from the near clip plane to the far clip plane and intersecting.
-    // The previous version used ndc.z=0 which maps to an arbitrary depth
-    // (typically near the camera), causing large direction errors.
-    vec4 nearPoint = u_InverseViewProjection * vec4(ndc, -1.0, 1.0);
-    vec4 farPoint  = u_InverseViewProjection * vec4(ndc,  1.0, 1.0);
-    if (abs(nearPoint.w) < 0.0001 || abs(farPoint.w) < 0.0001)
-        return normalize(u_LightDirection);
-    nearPoint /= nearPoint.w;
-    farPoint  /= farPoint.w;
-
-    float dz = farPoint.z - nearPoint.z;
-    if (abs(dz) < 0.0001)
-        return normalize(u_LightDirection);
-
-    float t = -nearPoint.z / dz;
-    vec3 worldOnZ0 = mix(nearPoint.xyz, farPoint.xyz, t);
-
-    // Step along the world light direction on the Z=0 plane and reproject.
-    vec3 worldOffset = worldOnZ0 + vec3(u_WorldLightDirection, 0.0);
-    vec4 clipOffset = u_ViewProjection * vec4(worldOffset, 1.0);
-    if (abs(clipOffset.w) < 0.0001)
-        return normalize(u_LightDirection);
-    vec2 ndcOffset = clipOffset.xy / clipOffset.w;
-    vec2 screenOffset = (ndcOffset * 0.5 + 0.5) * u_ViewportSize;
-
-    vec2 dir = screenOffset - screenPos;
-    float len = length(dir);
-    if (len < 0.0001)
-        return normalize(u_LightDirection);
-    return dir / len;
 }
 
 float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 rayDirection)
@@ -171,10 +126,7 @@ void main()
     float ndotl = 1.0;
 
     vec2 fragmentScreenPosition = gl_FragCoord.xy;
-
-    // Compute perspective-correct shadow ray direction at this pixel.
-    vec2 perPixelDir = ComputePerPixelLightDirection(fragmentScreenPosition);
-    vec2 shadowRayDir = -perPixelDir;
+    vec2 shadowRayDir = -normalize(u_LightDirection);
 
     float shadowAlphaCutoff = clamp(u_ShadowAlphaCutoff, 0.0, 1.0);
     float shadowReceiver = clamp(normalSample.a, 0.0, 1.0);
@@ -184,4 +136,3 @@ void main()
     vec3 lighting = u_LightColor * (u_LightIntensity * ndotl * shadowFactor);
     FragColor = vec4(lighting, 1.0);
 }
-
