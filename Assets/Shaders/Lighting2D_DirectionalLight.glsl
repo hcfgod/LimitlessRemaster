@@ -27,6 +27,9 @@ uniform vec2 u_ViewportSize;
 uniform vec3 u_LightColor;
 uniform float u_LightIntensity;
 uniform vec2 u_LightDirection;
+uniform vec2 u_WorldLightDirection;
+uniform mat4 u_ViewProjection;
+uniform mat4 u_InverseViewProjection;
 
 uniform int u_UseShadows;
 uniform float u_ShadowStrength;
@@ -60,7 +63,49 @@ bool IntersectSegment(vec2 p0, vec2 p1, vec2 q0, vec2 q1)
     return (t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0);
 }
 
-float ComputeShadowFactor(vec2 fragmentScreenPosition)
+// Compute the screen-space light direction at this pixel by projecting a
+// world-space step along the light direction on the Z=0 scene plane.
+// Under perspective projection parallel world-space rays converge on
+// screen, so a single uniform direction produces shadow distortion at
+// oblique camera angles.
+vec2 ComputePerPixelLightDirection(vec2 screenPos)
+{
+    vec2 ndc = (screenPos / u_ViewportSize) * 2.0 - 1.0;
+
+    // Unproject the fragment onto the Z=0 world plane by casting a ray
+    // from the near clip plane to the far clip plane and intersecting.
+    // The previous version used ndc.z=0 which maps to an arbitrary depth
+    // (typically near the camera), causing large direction errors.
+    vec4 nearPoint = u_InverseViewProjection * vec4(ndc, -1.0, 1.0);
+    vec4 farPoint  = u_InverseViewProjection * vec4(ndc,  1.0, 1.0);
+    if (abs(nearPoint.w) < 0.0001 || abs(farPoint.w) < 0.0001)
+        return normalize(u_LightDirection);
+    nearPoint /= nearPoint.w;
+    farPoint  /= farPoint.w;
+
+    float dz = farPoint.z - nearPoint.z;
+    if (abs(dz) < 0.0001)
+        return normalize(u_LightDirection);
+
+    float t = -nearPoint.z / dz;
+    vec3 worldOnZ0 = mix(nearPoint.xyz, farPoint.xyz, t);
+
+    // Step along the world light direction on the Z=0 plane and reproject.
+    vec3 worldOffset = worldOnZ0 + vec3(u_WorldLightDirection, 0.0);
+    vec4 clipOffset = u_ViewProjection * vec4(worldOffset, 1.0);
+    if (abs(clipOffset.w) < 0.0001)
+        return normalize(u_LightDirection);
+    vec2 ndcOffset = clipOffset.xy / clipOffset.w;
+    vec2 screenOffset = (ndcOffset * 0.5 + 0.5) * u_ViewportSize;
+
+    vec2 dir = screenOffset - screenPos;
+    float len = length(dir);
+    if (len < 0.0001)
+        return normalize(u_LightDirection);
+    return dir / len;
+}
+
+float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 rayDirection)
 {
     if (u_UseShadows == 0 || u_ShadowSegmentCount <= 0 || u_ShadowStrength <= 0.001)
         return 1.0;
@@ -69,15 +114,12 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition)
     if (snapPixels > 0.0001)
         fragmentScreenPosition = round(fragmentScreenPosition / snapPixels) * snapPixels;
 
-    vec2 rayDirection = -normalize(u_LightDirection);
     vec2 perpendicular = vec2(-rayDirection.y, rayDirection.x);
     int samples = max(u_ShadowSamples, 1);
     float weightedBlocked = 0.0;
     float totalWeight = 0.0;
     float softness = max(u_ShadowSoftness, 0.0);
     float halfSoftness = max(softness * 0.5, 0.0001);
-    // Directional light is conceptually infinite. Ensure ray tests always span
-    // the visible view to avoid apparent "falloff" from short shadow distances.
     float viewportDiagonal = length(u_ViewportSize);
     float effectiveShadowDistance = max(max(u_ShadowDistance, 1.0), viewportDiagonal * 1.5);
 
@@ -119,7 +161,6 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition)
 void main()
 {
     vec4 albedo = texture(u_AlbedoTexture, v_UV);
-    // Ignore near-transparent texels to reduce alpha-edge shimmer on fast camera motion.
     if (albedo.a <= 0.01)
     {
         FragColor = vec4(0.0);
@@ -127,17 +168,17 @@ void main()
     }
 
     vec4 normalSample = texture(u_NormalTexture, v_UV);
-
-    // N dot L is disabled for 2D sprites by default. Directional lights
-    // illuminate all surfaces evenly. Per-pixel bump shading will activate
-    // once normal-map support on materials is fully enabled.
     float ndotl = 1.0;
 
     vec2 fragmentScreenPosition = gl_FragCoord.xy;
+
+    // Compute perspective-correct shadow ray direction at this pixel.
+    vec2 perPixelDir = ComputePerPixelLightDirection(fragmentScreenPosition);
+    vec2 shadowRayDir = -perPixelDir;
+
     float shadowAlphaCutoff = clamp(u_ShadowAlphaCutoff, 0.0, 1.0);
     float shadowReceiver = clamp(normalSample.a, 0.0, 1.0);
-    // Soft receiver weight from GBuffer prevents edge threshold popping.
-    float computedShadowFactor = (albedo.a >= max(0.01, shadowAlphaCutoff - 0.12)) ? ComputeShadowFactor(fragmentScreenPosition) : 1.0;
+    float computedShadowFactor = (albedo.a >= max(0.01, shadowAlphaCutoff - 0.12)) ? ComputeShadowFactor(fragmentScreenPosition, shadowRayDir) : 1.0;
     float shadowFactor = mix(1.0, computedShadowFactor, shadowReceiver);
 
     vec3 lighting = u_LightColor * (u_LightIntensity * ndotl * shadowFactor);

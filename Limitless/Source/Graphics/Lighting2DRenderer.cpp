@@ -62,6 +62,7 @@ namespace Limitless
             glm::vec3 Color = glm::vec3(1.0f);
             float Intensity = 1.0f;
             glm::vec2 Direction = glm::vec2(0.0f, -1.0f);
+            glm::vec2 WorldDirection = glm::vec2(0.0f, -1.0f);
             bool CastShadows = true;
             float ShadowStrength = 1.0f;
             float ShadowSoftnessPixels = 0.0f;
@@ -206,16 +207,67 @@ namespace Limitless
             return true;
         }
 
+        // Shadow-specific variant that never rejects.  When a point is behind
+        // (or very close to) the camera, the clip-space W is clamped to a small
+        // positive value so the perspective divide still produces a finite
+        // screen position pushed far off-screen in the correct direction.
+        // This prevents entire occluder polygons from being dropped when a
+        // single corner grazes the near plane during camera rotation.
+        glm::vec2 ProjectWorldToScreenClamped(const glm::mat4& viewProjection,
+                                              const glm::vec3& worldPosition,
+                                              uint32_t width,
+                                              uint32_t height)
+        {
+            const glm::vec4 clip = viewProjection * glm::vec4(worldPosition, 1.0f);
+            const float safeW = std::max(clip.w, 0.001f);
+            const float ndcX = clip.x / safeW;
+            const float ndcY = clip.y / safeW;
+
+            const float fWidth = static_cast<float>(width);
+            const float fHeight = static_cast<float>(height);
+
+            float sx = (ndcX * 0.5f + 0.5f) * fWidth;
+            float sy = (ndcY * 0.5f + 0.5f) * fHeight;
+
+            // Clamp to a generous off-screen range so shadow ray-segment
+            // intersection math stays numerically stable.
+            const float limit = std::max(fWidth, fHeight) * 4.0f;
+            sx = std::clamp(sx, -limit, limit);
+            sy = std::clamp(sy, -limit, limit);
+            return { sx, sy };
+        }
+
         float EstimatePixelsPerWorldUnit(const glm::mat4& viewProjection, uint32_t width, uint32_t height)
         {
-            glm::vec2 originScreen;
-            glm::vec2 unitXScreen;
-            if (!ProjectWorldToScreen(viewProjection, glm::vec3(0.0f, 0.0f, 0.0f), width, height, originScreen))
-                return 64.0f;
-            if (!ProjectWorldToScreen(viewProjection, glm::vec3(1.0f, 0.0f, 0.0f), width, height, unitXScreen))
-                return 64.0f;
-            const float pixelsPerUnit = glm::length(unitXScreen - originScreen);
-            return std::max(1.0f, pixelsPerUnit);
+            // Project two world-space points to screen and measure the distance.
+            // Uses the original (rejecting) projection to avoid the extreme
+            // coordinates that the clamped variant produces when a point
+            // grazes the near plane -- those turned pixelsPerUnit into ~10000,
+            // making shadow bias/distance absurdly large and causing shadows
+            // to disappear for a frame (white flicker).
+            glm::vec2 originScreen, unitXScreen;
+            if (ProjectWorldToScreen(viewProjection, glm::vec3(0.0f), width, height, originScreen) &&
+                ProjectWorldToScreen(viewProjection, glm::vec3(1.0f, 0.0f, 0.0f), width, height, unitXScreen))
+            {
+                const float pixelsPerUnit = glm::length(unitXScreen - originScreen);
+                const float maxReasonable = static_cast<float>(std::max(width, height)) * 2.0f;
+                return std::clamp(pixelsPerUnit, 1.0f, maxReasonable);
+            }
+
+            // Analytical fallback when the world origin is behind the camera.
+            // For a standard perspective VP matrix at the Z=0 scene plane:
+            //   pixelsPerUnit ≈ |VP[0][0] / VP[3][3]| * width / 2
+            // This varies smoothly with camera movement, preventing pops.
+            const float vpW = std::abs(viewProjection[3][3]);
+            if (vpW > kEpsilon)
+            {
+                const float scaleX = std::abs(viewProjection[0][0]) / vpW;
+                const float estimate = scaleX * static_cast<float>(width) * 0.5f;
+                const float maxReasonable = static_cast<float>(std::max(width, height)) * 2.0f;
+                return std::clamp(estimate, 1.0f, maxReasonable);
+            }
+
+            return static_cast<float>(std::max(width, height)) * 0.1f;
         }
 
         float ComputeInterpolationAlpha()
@@ -641,45 +693,23 @@ namespace Limitless
 
                 const glm::mat4 worldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
 
-                std::vector<glm::vec2> screenPoints;
-                screenPoints.reserve(localPoints.size());
-                bool projectionFailed = false;
+                // Work in clip space so we can clip edges at the near plane
+                // instead of clamping vertices to extreme off-screen positions.
+                // Clamping caused discontinuous segment jumps when clip.w
+                // crossed the threshold, which was the main source of shadow
+                // flicker during camera rotation.
+                std::vector<glm::vec4> clipPoints;
+                clipPoints.reserve(localPoints.size());
                 for (const glm::vec2& localPoint : localPoints)
                 {
-                    const glm::vec4 worldPoint4 = worldTransform * glm::vec4(localPoint, 0.0f, 1.0f);
-                    glm::vec2 screenPoint(0.0f);
-                    if (!ProjectWorldToScreen(viewProjection, glm::vec3(worldPoint4), width, height, screenPoint))
-                    {
-                        projectionFailed = true;
-                        break;
-                    }
-                    if (!std::isfinite(screenPoint.x) || !std::isfinite(screenPoint.y))
-                    {
-                        projectionFailed = true;
-                        break;
-                    }
-                    if (snappedPixels > kEpsilon)
-                    {
-                        screenPoint.x = std::round(screenPoint.x / snappedPixels) * snappedPixels;
-                        screenPoint.y = std::round(screenPoint.y / snappedPixels) * snappedPixels;
-                    }
-                    screenPoints.push_back(screenPoint);
+                    const glm::vec4 worldPoint = worldTransform * glm::vec4(localPoint, 0.0f, 1.0f);
+                    clipPoints.push_back(viewProjection * worldPoint);
                 }
 
-                // Conservative stability guard: if any point fails projection, skip this occluder
-                // for the current frame instead of emitting malformed screen-space segments.
-                if (projectionFailed)
-                    return;
-
-                if (screenPoints.size() < 2)
-                    return;
-
-                if (closed && screenPoints.size() >= 3)
+                if (closed && clipPoints.size() >= 3)
                 {
                     // Compute signed area from world-space XY so the winding
                     // stays stable regardless of perspective camera orientation.
-                    // Screen-space signed area can flip near zero under rotation,
-                    // causing shadow edges to pop on/off.
                     float worldSignedArea = 0.0f;
                     for (size_t index = 0; index < localPoints.size(); ++index)
                     {
@@ -689,29 +719,80 @@ namespace Limitless
                     }
 
                     if (worldSignedArea < 0.0f)
-                        std::reverse(screenPoints.begin(), screenPoints.end());
+                        std::reverse(clipPoints.begin(), clipPoints.end());
                 }
 
                 ++outOccluderCount;
-                const float maxSegmentLength = glm::max(16.0f, glm::length(glm::vec2(static_cast<float>(width), static_cast<float>(height))) * 2.0f);
-                for (size_t index = 0; index + 1 < screenPoints.size(); ++index)
-                {
-                    if (segments.size() >= maxSegments)
-                        break;
-                    const glm::vec2 edge = screenPoints[index + 1] - screenPoints[index];
-                    const float edgeLength = glm::length(edge);
-                    if (edgeLength <= kEpsilon || edgeLength > maxSegmentLength)
-                        continue;
-                    segments.emplace_back(screenPoints[index].x, screenPoints[index].y, screenPoints[index + 1].x, screenPoints[index + 1].y);
-                }
 
-                if (closed && screenPoints.size() >= 3 && segments.size() < maxSegments)
-                {
-                    const glm::vec2 closingEdge = screenPoints.front() - screenPoints.back();
-                    const float closingEdgeLength = glm::length(closingEdge);
-                    if (closingEdgeLength > kEpsilon && closingEdgeLength <= maxSegmentLength)
-                        segments.emplace_back(screenPoints.back().x, screenPoints.back().y, screenPoints.front().x, screenPoints.front().y);
-                }
+                constexpr float kNearW = 0.01f;
+                const float fWidth = static_cast<float>(width);
+                const float fHeight = static_cast<float>(height);
+
+                // Project a clip-space point (with w >= kNearW) to screen space.
+                // Coordinates are clamped to a generous off-screen range to
+                // keep the shader's ray-segment intersection numerically stable.
+                // For visible pixels the intersection point is always near the
+                // on-screen segment endpoint, so this clamp does not affect
+                // shadow correctness on screen.
+                const float coordLimit = std::max(fWidth, fHeight) * 4.0f;
+                auto projectToScreen = [fWidth, fHeight, snappedPixels, coordLimit](const glm::vec4& clip) -> glm::vec2 {
+                    const float ndcX = clip.x / clip.w;
+                    const float ndcY = clip.y / clip.w;
+                    float sx = (ndcX * 0.5f + 0.5f) * fWidth;
+                    float sy = (ndcY * 0.5f + 0.5f) * fHeight;
+                    sx = std::clamp(sx, -coordLimit, coordLimit);
+                    sy = std::clamp(sy, -coordLimit, coordLimit);
+                    if (snappedPixels > kEpsilon)
+                    {
+                        sx = std::round(sx / snappedPixels) * snappedPixels;
+                        sy = std::round(sy / snappedPixels) * snappedPixels;
+                    }
+                    return { sx, sy };
+                };
+
+                // Clip a single edge to the camera near plane and emit as a
+                // screen-space segment.  When one vertex is behind the camera
+                // the edge is smoothly clipped at the near plane boundary
+                // (interpolating along the edge) instead of clamping the vertex
+                // to an extreme coordinate.
+                auto addClippedEdge = [&](const glm::vec4& clipA, const glm::vec4& clipB) {
+                    if (segments.size() >= maxSegments)
+                        return;
+
+                    const bool behindA = clipA.w < kNearW;
+                    const bool behindB = clipB.w < kNearW;
+
+                    if (behindA && behindB)
+                        return;
+
+                    glm::vec4 ca = clipA;
+                    glm::vec4 cb = clipB;
+
+                    if (behindA)
+                    {
+                        const float t = (kNearW - ca.w) / (cb.w - ca.w);
+                        ca = glm::mix(ca, cb, t);
+                    }
+                    else if (behindB)
+                    {
+                        const float t = (kNearW - cb.w) / (ca.w - cb.w);
+                        cb = glm::mix(cb, ca, t);
+                    }
+
+                    const glm::vec2 screenA = projectToScreen(ca);
+                    const glm::vec2 screenB = projectToScreen(cb);
+                    const float edgeLength = glm::length(screenB - screenA);
+                    if (edgeLength <= kEpsilon)
+                        return;
+
+                    segments.emplace_back(screenA.x, screenA.y, screenB.x, screenB.y);
+                };
+
+                for (size_t index = 0; index + 1 < clipPoints.size(); ++index)
+                    addClippedEdge(clipPoints[index], clipPoints[index + 1]);
+
+                if (closed && clipPoints.size() >= 3 && segments.size() < maxSegments)
+                    addClippedEdge(clipPoints.back(), clipPoints.front());
             };
 
             auto occluderView = registry.view<ShadowOccluder2DComponent>();
@@ -841,13 +922,9 @@ namespace Limitless
                 glm::vec2 screenDirection(viewDirection4.x, viewDirection4.y);
                 if (glm::length(screenDirection) <= kEpsilon)
                 {
-                    glm::vec2 originScreen(0.0f);
-                    glm::vec2 endScreen(0.0f);
-                    if (ProjectWorldToScreen(viewProjection, glm::vec3(0.0f, 0.0f, 0.0f), width, height, originScreen) &&
-                        ProjectWorldToScreen(viewProjection, glm::vec3(worldDirection, 0.0f), width, height, endScreen))
-                    {
-                        screenDirection = endScreen - originScreen;
-                    }
+                    const glm::vec2 originScreen = ProjectWorldToScreenClamped(viewProjection, glm::vec3(0.0f, 0.0f, 0.0f), width, height);
+                    const glm::vec2 endScreen = ProjectWorldToScreenClamped(viewProjection, glm::vec3(worldDirection, 0.0f), width, height);
+                    screenDirection = endScreen - originScreen;
                 }
                 if (glm::length(screenDirection) <= kEpsilon)
                     screenDirection = glm::vec2(0.0f, -1.0f);
@@ -859,6 +936,7 @@ namespace Limitless
                 screenLight.Color = glm::max(directional.Color, glm::vec3(0.0f));
                 screenLight.Intensity = directional.Intensity;
                 screenLight.Direction = screenDirection;
+                screenLight.WorldDirection = worldDirection;
                 screenLight.CastShadows = g_State.Settings.EnableShadows && directional.CastShadows;
                 screenLight.ShadowStrength = std::clamp(directional.ShadowStrength, 0.0f, 1.0f);
                 screenLight.ShadowSoftnessPixels = std::max(0.0f, directional.ShadowSoftness * g_State.Settings.ShadowSoftnessScale * pixelsPerUnit);
@@ -902,15 +980,19 @@ namespace Limitless
 
                 const glm::mat4 worldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
                 const glm::vec3 worldPosition = glm::vec3(worldTransform[3]);
-                glm::vec2 screenPosition(0.0f);
-                if (!ProjectWorldToScreen(viewProjection, worldPosition, width, height, screenPosition))
-                    continue;
+
+                // Use the clamped projection so lights near the camera's near
+                // plane are pushed off-screen instead of being dropped entirely.
+                // A dropped light causes the lit area to flash to ambient-only
+                // for one frame, which is the primary cause of flicker during
+                // combined strafe + rotation.
+                const glm::vec2 screenPosition = ProjectWorldToScreenClamped(viewProjection, worldPosition, width, height);
 
                 const glm::vec3 worldPositionRadius = glm::vec3(worldTransform * glm::vec4(pointLight.Radius, 0.0f, 0.0f, 1.0f));
-                glm::vec2 screenRadiusPosition(0.0f);
-                float radiusPixels = pointLight.Radius * pixelsPerUnit;
-                if (ProjectWorldToScreen(viewProjection, worldPositionRadius, width, height, screenRadiusPosition))
-                    radiusPixels = glm::length(screenRadiusPosition - screenPosition);
+                const glm::vec2 screenRadiusPosition = ProjectWorldToScreenClamped(viewProjection, worldPositionRadius, width, height);
+                float radiusPixels = glm::length(screenRadiusPosition - screenPosition);
+                if (radiusPixels < 1.0f)
+                    radiusPixels = pointLight.Radius * pixelsPerUnit;
 
                 ScreenPointLight screenLight{};
                 screenLight.Color = glm::max(pointLight.Color, glm::vec3(0.0f));
@@ -933,6 +1015,7 @@ namespace Limitless
                                         const std::shared_ptr<Texture2D>& normalTexture,
                                         const std::vector<glm::vec4>& shadowSegments,
                                         const ScreenDirectionalLight& light,
+                                        const glm::mat4& viewProjection,
                                         uint32_t width,
                                         uint32_t height,
                                         float shadowSegmentSnapPixels)
@@ -948,6 +1031,9 @@ namespace Limitless
             const glm::vec3 lightColor = light.Color;
             const float intensity = light.Intensity;
             const glm::vec2 lightDirection = light.Direction;
+            const glm::vec2 worldLightDirection = light.WorldDirection;
+            const glm::mat4 vp = viewProjection;
+            const glm::mat4 invVP = glm::inverse(viewProjection);
             const int useShadows = light.CastShadows ? 1 : 0;
             const float shadowStrength = light.ShadowStrength;
             const float shadowSoftness = light.ShadowSoftnessPixels;
@@ -956,9 +1042,15 @@ namespace Limitless
             const float shadowBias = light.ShadowBiasPixels;
             const float shadowAlphaCutoff = std::clamp(g_State.Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
             const float shadowSegmentSnapPixelsClamped = std::max(0.0f, shadowSegmentSnapPixels);
-            std::vector<glm::vec4> segments = FilterDirectionalShadowSegmentsByFacing(shadowSegments, lightDirection);
+            // Use all shadow segments without screen-space facing filter.
+            // The ray-segment intersection in the shader is geometrically
+            // correct regardless of edge orientation, so the filter was purely
+            // a performance optimization.  Under perspective camera rotation
+            // the screen-space edge normals shift rapidly, causing the filter
+            // to pop edges in/out and produce shadow flicker.
+            const std::vector<glm::vec4>& segments = shadowSegments;
 
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, lightColor, intensity, lightDirection, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowDistance, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segments = std::move(segments)](GraphicsContext*) {
+            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, lightColor, intensity, lightDirection, worldLightDirection, vp, invVP, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowDistance, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segments = std::move(segments)](GraphicsContext*) {
                 auto* glShader = dynamic_cast<OpenGLShader*>(shaderRef.get());
                 auto* glVertexArray = dynamic_cast<OpenGLVertexArray*>(vertexArrayRef.get());
                 auto* glAlbedoTexture = dynamic_cast<OpenGLTexture2D*>(albedoRef.get());
@@ -987,6 +1079,12 @@ namespace Limitless
                     glUniform1f(location, intensity);
                 if (GLint location = glGetUniformLocation(program, "u_LightDirection"); location != -1)
                     glUniform2f(location, lightDirection.x, lightDirection.y);
+                if (GLint location = glGetUniformLocation(program, "u_WorldLightDirection"); location != -1)
+                    glUniform2f(location, worldLightDirection.x, worldLightDirection.y);
+                if (GLint location = glGetUniformLocation(program, "u_ViewProjection"); location != -1)
+                    glUniformMatrix4fv(location, 1, GL_FALSE, &vp[0][0]);
+                if (GLint location = glGetUniformLocation(program, "u_InverseViewProjection"); location != -1)
+                    glUniformMatrix4fv(location, 1, GL_FALSE, &invVP[0][0]);
                 if (GLint location = glGetUniformLocation(program, "u_UseShadows"); location != -1)
                     glUniform1i(location, useShadows);
                 if (GLint location = glGetUniformLocation(program, "u_ShadowStrength"); location != -1)
@@ -1231,9 +1329,14 @@ namespace Limitless
             float effectiveShadowSegmentSnapPixels = std::max(0.0f, g_State.Settings.ShadowSegmentSnapPixels);
             if (camera.GetUsage() == CameraUsage::Editor)
             {
-                // Editor viewport prioritizes visual stability while orbiting over exact
-                // shadow edge fidelity, so apply stronger snapping in editor camera mode.
-                effectiveShadowSegmentSnapPixels = std::max(effectiveShadowSegmentSnapPixels, 1.5f);
+                // Disable screen-space snapping for the editor camera.
+                // Snapping rounds segment endpoints to a fixed screen-space grid,
+                // which helps prevent sub-pixel shimmer on a STATIC camera.
+                // But when the editor camera rotates, the world moves relative to
+                // the fixed grid, causing endpoints to jump between grid positions
+                // every frame.  This produces visible shadow edge flicker that is
+                // far more distracting than the sub-pixel shimmer it prevents.
+                effectiveShadowSegmentSnapPixels = 0.0f;
             }
             const bool allowAngularVelocityShadowFreeze = g_State.Settings.EnableHighAngularVelocityShadowFreeze
                 && camera.GetUsage() == CameraUsage::Gameplay;
@@ -1337,7 +1440,7 @@ namespace Limitless
             const auto gBufferNormal = g_State.GBufferFramebuffer->GetColorAttachment(1);
             for (const ScreenDirectionalLight& directionalLight : directionalLights)
             {
-                SubmitDirectionalLightPass(gBufferAlbedo, gBufferNormal, shadowSegments, directionalLight, width, height, effectiveShadowSegmentSnapPixels);
+                SubmitDirectionalLightPass(gBufferAlbedo, gBufferNormal, shadowSegments, directionalLight, viewProjection, width, height, effectiveShadowSegmentSnapPixels);
             }
             for (const ScreenPointLight& pointLight : pointLights)
             {
@@ -1367,9 +1470,14 @@ namespace Limitless
 
             renderer.SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
             renderer.SubmitCommand(std::make_unique<SetCullFaceCommand>(false));
-            // Composite should preserve the target clear color where albedo is transparent.
-            // Use standard alpha blending instead of full overwrite.
-            renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::SrcAlpha, BlendFactor::OneMinusSrcAlpha, true));
+            // The GBuffer albedo was rendered with standard alpha blending over
+            // a black-transparent background, which produces premultiplied-alpha
+            // output (RGB = color * alpha).  The composite must use premultiplied
+            // blending (One, OneMinusSrcAlpha) to avoid squaring the alpha at
+            // semi-transparent edges. The old SrcAlpha mode doubled the alpha
+            // contribution, amplifying sub-pixel coverage changes into visible
+            // per-frame flicker during camera movement.
+            renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::OneMinusSrcAlpha, true));
             SubmitCompositePass(gBufferAlbedo, g_State.LightFramebuffer->GetColorAttachment(0));
 
             const auto submitEnd = std::chrono::high_resolution_clock::now();
