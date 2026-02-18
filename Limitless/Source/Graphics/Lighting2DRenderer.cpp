@@ -333,7 +333,7 @@ namespace Limitless
             return true;
         }
 
-        std::vector<entt::entity> BuildSortedSpriteRenderList(Scene& scene, float interpolationAlpha, const glm::mat4& cameraViewMatrix)
+        std::vector<entt::entity> BuildSortedSpriteRenderList(Scene& scene, float interpolationAlpha)
         {
             auto& registry = scene.GetRegistry();
             auto view = registry.view<TransformComponent, SpriteComponent>();
@@ -347,16 +347,16 @@ namespace Limitless
                 entities.push_back(entity);
             }
 
-            std::sort(entities.begin(), entities.end(), [&scene, &registry, interpolationAlpha, &cameraViewMatrix](entt::entity left, entt::entity right) {
+            std::sort(entities.begin(), entities.end(), [&scene, &registry, interpolationAlpha](entt::entity left, entt::entity right) {
                 const glm::mat4 leftWorld = scene.GetWorldTransformMatrixForRendering(left, interpolationAlpha);
                 const glm::mat4 rightWorld = scene.GetWorldTransformMatrixForRendering(right, interpolationAlpha);
-                const glm::vec4 leftViewPosition = cameraViewMatrix * glm::vec4(leftWorld[3][0], leftWorld[3][1], leftWorld[3][2], 1.0f);
-                const glm::vec4 rightViewPosition = cameraViewMatrix * glm::vec4(rightWorld[3][0], rightWorld[3][1], rightWorld[3][2], 1.0f);
-                const float leftViewDepth = leftViewPosition.z;
-                const float rightViewDepth = rightViewPosition.z;
+                // Sort by world-space Z rather than view-space Z so the order stays
+                // stable regardless of the editor camera orientation.
+                const float leftWorldZ = leftWorld[3][2];
+                const float rightWorldZ = rightWorld[3][2];
                 constexpr float kDepthSortEpsilon = 0.005f;
-                if (std::abs(leftViewDepth - rightViewDepth) > kDepthSortEpsilon)
-                    return leftViewDepth < rightViewDepth;
+                if (std::abs(leftWorldZ - rightWorldZ) > kDepthSortEpsilon)
+                    return leftWorldZ < rightWorldZ;
 
                 const auto* leftHierarchy = registry.try_get<HierarchyComponent>(left);
                 const auto* rightHierarchy = registry.try_get<HierarchyComponent>(right);
@@ -404,10 +404,10 @@ namespace Limitless
             }
         }
 
-        std::vector<NormalPassSpriteDraw> BuildNormalPassDrawList(Scene& scene, float interpolationAlpha, const glm::mat4& cameraViewMatrix)
+        std::vector<NormalPassSpriteDraw> BuildNormalPassDrawList(Scene& scene, float interpolationAlpha)
         {
             std::vector<NormalPassSpriteDraw> drawList;
-            auto sortedEntities = BuildSortedSpriteRenderList(scene, interpolationAlpha, cameraViewMatrix);
+            auto sortedEntities = BuildSortedSpriteRenderList(scene, interpolationAlpha);
             drawList.reserve(sortedEntities.size());
 
             auto& registry = scene.GetRegistry();
@@ -467,6 +467,13 @@ namespace Limitless
                 const GLenum drawBuffers[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
                 glDrawBuffers(2, drawBuffers);
             }, "Lighting2D/SetGBufferDrawBuffers"));
+        }
+
+        void SubmitSelectAlbedoAttachmentOnly()
+        {
+            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([](GraphicsContext*) {
+                glDrawBuffer(GL_COLOR_ATTACHMENT0);
+            }, "Lighting2D/SetAlbedoAttachmentOnly"));
         }
 
         void SubmitSelectNormalAttachmentOnly()
@@ -669,16 +676,19 @@ namespace Limitless
 
                 if (closed && screenPoints.size() >= 3)
                 {
-                    float signedArea = 0.0f;
-                    for (size_t index = 0; index < screenPoints.size(); ++index)
+                    // Compute signed area from world-space XY so the winding
+                    // stays stable regardless of perspective camera orientation.
+                    // Screen-space signed area can flip near zero under rotation,
+                    // causing shadow edges to pop on/off.
+                    float worldSignedArea = 0.0f;
+                    for (size_t index = 0; index < localPoints.size(); ++index)
                     {
-                        const glm::vec2& a = screenPoints[index];
-                        const glm::vec2& b = screenPoints[(index + 1) % screenPoints.size()];
-                        signedArea += (a.x * b.y) - (b.x * a.y);
+                        const glm::vec4 wa = worldTransform * glm::vec4(localPoints[index], 0.0f, 1.0f);
+                        const glm::vec4 wb = worldTransform * glm::vec4(localPoints[(index + 1) % localPoints.size()], 0.0f, 1.0f);
+                        worldSignedArea += (wa.x * wb.y) - (wb.x * wa.y);
                     }
 
-                    // Normalize winding for stable one-sided directional shadow edge selection.
-                    if (signedArea < 0.0f)
+                    if (worldSignedArea < 0.0f)
                         std::reverse(screenPoints.begin(), screenPoints.end());
                 }
 
@@ -1215,7 +1225,7 @@ namespace Limitless
             const float pixelsPerUnit = EstimatePixelsPerWorldUnit(viewProjection, width, height);
 
             const glm::mat4 cameraViewMatrix = camera.GetViewMatrix();
-            std::vector<NormalPassSpriteDraw> normalPassDraws = BuildNormalPassDrawList(scene, interpolationAlpha, cameraViewMatrix);
+            std::vector<NormalPassSpriteDraw> normalPassDraws = BuildNormalPassDrawList(scene, interpolationAlpha);
             uint32_t occluderCount = 0;
             const uint32_t maxShadowSegments = ClampSegmentsByQuality(g_State.Settings);
             float effectiveShadowSegmentSnapPixels = std::max(0.0f, g_State.Settings.ShadowSegmentSnapPixels);
@@ -1296,6 +1306,13 @@ namespace Limitless
             renderer.SubmitCommand(std::make_unique<ClearCommand>(gBufferClearFlags, 0.0f, 0.0f, 0.0f, 0.0f));
             SubmitClearNormalAttachment();
 
+            // Restrict the albedo pass to attachment 0 only.  The Renderer2D
+            // shader has a single output at location 0; leaving attachment 1
+            // active produces undefined fragment output on the normal channel
+            // per the OpenGL spec, which some drivers handle by corrupting the
+            // normal attachment in view-dependent ways (visible as color flashes
+            // when rotating the editor camera).
+            SubmitSelectAlbedoAttachmentOnly();
             if (renderWorldAlbedoPass)
                 renderWorldAlbedoPass();
 

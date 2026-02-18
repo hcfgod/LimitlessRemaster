@@ -3371,17 +3371,16 @@ namespace Limitless
             for (entt::entity entity : tilemapViewRender)
                 tilemapRenderEntities.push_back(entity);
 
-            const glm::mat4 cameraViewMatrix = camera.GetViewMatrix();
-            std::sort(tilemapRenderEntities.begin(), tilemapRenderEntities.end(), [&scene, &registry, interpolationAlpha, &cameraViewMatrix](entt::entity left, entt::entity right) {
+            std::sort(tilemapRenderEntities.begin(), tilemapRenderEntities.end(), [&scene, &registry, interpolationAlpha](entt::entity left, entt::entity right) {
                 const glm::mat4 leftWorld = scene.GetWorldTransformMatrixForRendering(left, interpolationAlpha);
                 const glm::mat4 rightWorld = scene.GetWorldTransformMatrixForRendering(right, interpolationAlpha);
-                const glm::vec4 leftViewPosition = cameraViewMatrix * glm::vec4(leftWorld[3][0], leftWorld[3][1], leftWorld[3][2], 1.0f);
-                const glm::vec4 rightViewPosition = cameraViewMatrix * glm::vec4(rightWorld[3][0], rightWorld[3][1], rightWorld[3][2], 1.0f);
-                const float leftViewDepth = leftViewPosition.z;
-                const float rightViewDepth = rightViewPosition.z;
+                // Sort by world-space Z rather than view-space Z so the order stays
+                // stable regardless of the editor camera orientation.
+                const float leftWorldZ = leftWorld[3][2];
+                const float rightWorldZ = rightWorld[3][2];
                 constexpr float kDepthSortEpsilon = 0.005f;
-                if (std::abs(leftViewDepth - rightViewDepth) > kDepthSortEpsilon)
-                    return leftViewDepth < rightViewDepth;
+                if (std::abs(leftWorldZ - rightWorldZ) > kDepthSortEpsilon)
+                    return leftWorldZ < rightWorldZ;
 
                 const auto* leftHierarchy = registry.try_get<HierarchyComponent>(left);
                 const auto* rightHierarchy = registry.try_get<HierarchyComponent>(right);
@@ -3527,17 +3526,16 @@ namespace Limitless
         for (entt::entity entity : view)
             renderEntities.push_back(entity);
 
-        const glm::mat4 cameraViewMatrix = camera.GetViewMatrix();
-        std::sort(renderEntities.begin(), renderEntities.end(), [&scene, &registry, interpolationAlpha, &cameraViewMatrix](entt::entity left, entt::entity right) {
+        std::sort(renderEntities.begin(), renderEntities.end(), [&scene, &registry, interpolationAlpha](entt::entity left, entt::entity right) {
             const glm::mat4 leftWorld = scene.GetWorldTransformMatrixForRendering(left, interpolationAlpha);
             const glm::mat4 rightWorld = scene.GetWorldTransformMatrixForRendering(right, interpolationAlpha);
-            const glm::vec4 leftViewPosition = cameraViewMatrix * glm::vec4(leftWorld[3][0], leftWorld[3][1], leftWorld[3][2], 1.0f);
-            const glm::vec4 rightViewPosition = cameraViewMatrix * glm::vec4(rightWorld[3][0], rightWorld[3][1], rightWorld[3][2], 1.0f);
-            const float leftViewDepth = leftViewPosition.z;
-            const float rightViewDepth = rightViewPosition.z;
+            // Sort by world-space Z rather than view-space Z so the order stays
+            // stable regardless of the editor camera orientation.
+            const float leftWorldZ = leftWorld[3][2];
+            const float rightWorldZ = rightWorld[3][2];
             constexpr float kDepthSortEpsilon = 0.005f;
-            if (std::abs(leftViewDepth - rightViewDepth) > kDepthSortEpsilon)
-                return leftViewDepth < rightViewDepth; // More negative view Z is farther; render far-to-near.
+            if (std::abs(leftWorldZ - rightWorldZ) > kDepthSortEpsilon)
+                return leftWorldZ < rightWorldZ;
 
             const auto* leftHierarchy = registry.try_get<HierarchyComponent>(left);
             const auto* rightHierarchy = registry.try_get<HierarchyComponent>(right);
