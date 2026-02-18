@@ -1713,6 +1713,7 @@ namespace Limitless::EditorViewportPanel
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         ImGui::Begin("Game View");
+        SceneRenderer::SetUiInputViewportRectPixels(0.0f, 0.0f, 0.0f, 0.0f, false);
 
         gameViewFocused = ImGui::IsWindowFocused();
         gameViewHovered = ImGui::IsWindowHovered();
@@ -1744,6 +1745,12 @@ namespace Limitless::EditorViewportPanel
 
                 const ImVec2 minPos = ImGui::GetItemRectMin();
                 const ImVec2 maxPos = ImGui::GetItemRectMax();
+                SceneRenderer::SetUiInputViewportRectPixels(
+                    minPos.x,
+                    minPos.y,
+                    maxPos.x - minPos.x,
+                    maxPos.y - minPos.y,
+                    true);
                 if (isSceneLoading)
                 {
                     drawLoadingOverlay(minPos, maxPos);

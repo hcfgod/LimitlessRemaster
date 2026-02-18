@@ -106,17 +106,6 @@ namespace Limitless::EditorPrefabSystem
                     destinationShadowOccluder.RuntimeGeometryRevision = 0;
                 }
 
-                if (const auto* sourceText = sourceRegistry.try_get<TextComponent>(sourceEntity))
-                {
-                    auto& destinationText = destinationRegistry.emplace<TextComponent>(destinationEntity);
-                    destinationText.Text = sourceText->Text;
-                    destinationText.FontFilePath = sourceText->FontFilePath;
-                    destinationText.CachedFont.reset();
-                    destinationText.FontLoadAttempted = false;
-                    destinationText.FontSize = sourceText->FontSize;
-                    destinationText.Color = sourceText->Color;
-                }
-
                 if (const auto* sourceUIImage = sourceRegistry.try_get<UIImageComponent>(sourceEntity))
                 {
                     destinationRegistry.emplace<UIImageComponent>(destinationEntity, *sourceUIImage);
@@ -124,7 +113,14 @@ namespace Limitless::EditorPrefabSystem
 
                 if (const auto* sourceUIText = sourceRegistry.try_get<UITextComponent>(sourceEntity))
                 {
-                    destinationRegistry.emplace<UITextComponent>(destinationEntity, *sourceUIText);
+                    auto& destinationUIText = destinationRegistry.emplace<UITextComponent>(destinationEntity);
+                    destinationUIText.Text = sourceUIText->Text;
+                    destinationUIText.FontFilePath = sourceUIText->FontFilePath;
+                    destinationUIText.CachedFont.reset();
+                    destinationUIText.FontLoadAttempted = false;
+                    destinationUIText.FontSize = sourceUIText->FontSize;
+                    destinationUIText.Color = sourceUIText->Color;
+                    destinationUIText.RaycastTarget = sourceUIText->RaycastTarget;
                 }
 
                 if (const auto* sourceUIButton = sourceRegistry.try_get<UIButtonComponent>(sourceEntity))
@@ -132,12 +128,18 @@ namespace Limitless::EditorPrefabSystem
                     auto& destinationUIButton = destinationRegistry.emplace<UIButtonComponent>(destinationEntity, *sourceUIButton);
                     destinationUIButton.IsHovered = false;
                     destinationUIButton.IsPressed = false;
+                    destinationUIButton.RuntimeHoverEnteredThisFrame = false;
+                    destinationUIButton.RuntimeHoverExitedThisFrame = false;
+                    destinationUIButton.RuntimePressedThisFrame = false;
+                    destinationUIButton.RuntimeClickedThisFrame = false;
                 }
 
                 if (const auto* sourceUISlider = sourceRegistry.try_get<UISliderComponent>(sourceEntity))
                 {
                     auto& destinationUISlider = destinationRegistry.emplace<UISliderComponent>(destinationEntity, *sourceUISlider);
                     destinationUISlider.Value = std::clamp(destinationUISlider.Value, destinationUISlider.MinValue, destinationUISlider.MaxValue);
+                    destinationUISlider.RuntimeDragging = false;
+                    destinationUISlider.RuntimeValueChangedThisFrame = false;
                 }
 
                 if (const auto* sourceTilemap = sourceRegistry.try_get<TilemapComponent>(sourceEntity))

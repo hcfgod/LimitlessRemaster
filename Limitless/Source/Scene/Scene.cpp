@@ -19,8 +19,11 @@
 #include "Graphics/RenderCommand.h"
 #include "Graphics/Renderer.h"
 #include "Graphics/Renderer2D.h"
+#include "Core/Application.h"
+#include "Core/Input/InputSystem.h"
 #include "Core/Concurrency/AsyncIO.h"
 #include "Core/Time.h"
+#include "Platform/Window.h"
 #include "Physics/Physics2DQueries.h"
 #include "Physics/Physics2DWorld.h"
 #include "Scripting/NativeScriptRegistry.h"
@@ -31,6 +34,7 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtx/quaternion.hpp>
+#include <SDL3/SDL_mouse.h>
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -45,6 +49,13 @@ namespace Limitless
         std::unordered_map<std::string, Async::Task<Assets::TextureAsset::Ptr>> g_PendingTextureLoads;
         std::unordered_map<std::string, Async::Task<Assets::MaterialAsset::Ptr>> g_PendingMaterialLoads;
         glm::vec4 g_ViewportClearColor = glm::vec4(0.08f, 0.08f, 0.10f, 1.0f);
+        struct UiInputViewportRect
+        {
+            bool Enabled = false;
+            glm::vec2 MinPixels = glm::vec2(0.0f);
+            glm::vec2 SizePixels = glm::vec2(0.0f);
+        };
+        UiInputViewportRect g_UiInputViewportRect{};
 
         // Resolve legacy/stale asset keys to the latest known key in AssetDatabase.
         // This keeps scene references resilient across asset moves/renames.
@@ -165,6 +176,56 @@ namespace Limitless
             entt::entity canvasEntity = entt::null;
             return TryGetOwningCanvasEntity(registry, entity, canvasEntity);
         }
+
+        entt::entity FindDirectChildByTag(const entt::registry& registry, entt::entity parent, std::string_view childTag)
+        {
+            auto childView = registry.view<HierarchyComponent, TagComponent>();
+            for (entt::entity child : childView)
+            {
+                const auto& hierarchy = childView.get<HierarchyComponent>(child);
+                if (hierarchy.Parent != parent)
+                    continue;
+                const auto& tag = childView.get<TagComponent>(child);
+                if (tag.Tag == childTag)
+                    return child;
+            }
+            return entt::null;
+        }
+
+        void SyncSliderVisualChildren(entt::registry& registry, entt::entity sliderEntity, const UISliderComponent& slider)
+        {
+            const float valueRange = std::max(0.0f, slider.MaxValue - slider.MinValue);
+            const float normalizedValue = (valueRange > 0.0001f)
+                ? std::clamp((slider.Value - slider.MinValue) / valueRange, 0.0f, 1.0f)
+                : 0.0f;
+
+            if (const entt::entity fillEntity = FindDirectChildByTag(registry, sliderEntity, "Slider Fill");
+                fillEntity != entt::null)
+            {
+                if (auto* fillRect = registry.try_get<RectTransformComponent>(fillEntity))
+                {
+                    fillRect->AnchorMin.x = 0.0f;
+                    fillRect->AnchorMax.x = normalizedValue;
+                    if (fillRect->AnchorMax.x < fillRect->AnchorMin.x)
+                        fillRect->AnchorMax.x = fillRect->AnchorMin.x;
+                }
+            }
+
+            if (const entt::entity handleEntity = FindDirectChildByTag(registry, sliderEntity, "Slider Handle");
+                handleEntity != entt::null)
+            {
+                if (auto* handleRect = registry.try_get<RectTransformComponent>(handleEntity))
+                {
+                    handleRect->AnchorMin.x = normalizedValue;
+                    handleRect->AnchorMax.x = normalizedValue;
+                    handleRect->AnchoredPosition.x = 0.0f;
+                }
+                if (auto* handleTag = registry.try_get<TagComponent>(handleEntity))
+                    handleTag->Enabled = slider.ShowHandle;
+            }
+        }
+
+        void ProcessUiInteractionSystem(Scene& scene, uint32_t windowWidth, uint32_t windowHeight);
 
         bool TryComputeTileUvRect(const TilemapComponent& tilemap,
                                   const Assets::TextureAsset::Ptr& tilesetTexture,
@@ -897,10 +958,26 @@ namespace Limitless
                 material->MaterialLoadAttempted = false;
             }
 
-            if (auto* text = registry.try_get<TextComponent>(entity))
+            if (auto* uiText = registry.try_get<UITextComponent>(entity))
             {
-                text->CachedFont.reset();
-                text->FontLoadAttempted = false;
+                uiText->CachedFont.reset();
+                uiText->FontLoadAttempted = false;
+            }
+
+            if (auto* uiButton = registry.try_get<UIButtonComponent>(entity))
+            {
+                uiButton->IsHovered = false;
+                uiButton->IsPressed = false;
+                uiButton->RuntimeHoverEnteredThisFrame = false;
+                uiButton->RuntimeHoverExitedThisFrame = false;
+                uiButton->RuntimePressedThisFrame = false;
+                uiButton->RuntimeClickedThisFrame = false;
+            }
+
+            if (auto* uiSlider = registry.try_get<UISliderComponent>(entity))
+            {
+                uiSlider->RuntimeDragging = false;
+                uiSlider->RuntimeValueChangedThisFrame = false;
             }
 
             if (auto* directionalLight = registry.try_get<DirectionalLight2DComponent>(entity))
@@ -1349,6 +1426,15 @@ namespace Limitless
     void Scene::Update(float deltaTime)
     {
         Physics2DQueries::SetActiveSceneForScriptQueries(this);
+        if (Application::HasInstance())
+        {
+            auto& window = Application::GetInstance().GetWindow();
+            ProcessUiInteractionSystem(*this, window.GetWidth(), window.GetHeight());
+        }
+        else
+        {
+            ProcessUiInteractionSystem(*this, 0, 0);
+        }
         static uint64_t s_AnimationDispatchFrameCounter = 0;
         auto view = m_Registry.view<NativeScriptComponent>();
         for (entt::entity entity : view)
@@ -1701,17 +1787,6 @@ namespace Limitless
                 destinationShadowOccluder.RuntimeGeometryRevision = 0;
             }
 
-            if (const auto* text = sourceRegistry.try_get<TextComponent>(sourceEntity))
-            {
-                auto& destinationText = destinationRegistry.emplace<TextComponent>(destinationEntity);
-                destinationText.Text = text->Text;
-                destinationText.FontFilePath = text->FontFilePath;
-                destinationText.CachedFont.reset();
-                destinationText.FontLoadAttempted = false;
-                destinationText.FontSize = text->FontSize;
-                destinationText.Color = text->Color;
-            }
-
             if (const auto* uiImage = sourceRegistry.try_get<UIImageComponent>(sourceEntity))
             {
                 destinationRegistry.emplace<UIImageComponent>(destinationEntity, *uiImage);
@@ -1719,7 +1794,14 @@ namespace Limitless
 
             if (const auto* uiText = sourceRegistry.try_get<UITextComponent>(sourceEntity))
             {
-                destinationRegistry.emplace<UITextComponent>(destinationEntity, *uiText);
+                auto& destinationUIText = destinationRegistry.emplace<UITextComponent>(destinationEntity);
+                destinationUIText.Text = uiText->Text;
+                destinationUIText.FontFilePath = uiText->FontFilePath;
+                destinationUIText.CachedFont.reset();
+                destinationUIText.FontLoadAttempted = false;
+                destinationUIText.FontSize = uiText->FontSize;
+                destinationUIText.Color = uiText->Color;
+                destinationUIText.RaycastTarget = uiText->RaycastTarget;
             }
 
             if (const auto* uiButton = sourceRegistry.try_get<UIButtonComponent>(sourceEntity))
@@ -1727,12 +1809,18 @@ namespace Limitless
                 auto& destinationButton = destinationRegistry.emplace<UIButtonComponent>(destinationEntity, *uiButton);
                 destinationButton.IsHovered = false;
                 destinationButton.IsPressed = false;
+                destinationButton.RuntimeHoverEnteredThisFrame = false;
+                destinationButton.RuntimeHoverExitedThisFrame = false;
+                destinationButton.RuntimePressedThisFrame = false;
+                destinationButton.RuntimeClickedThisFrame = false;
             }
 
             if (const auto* uiSlider = sourceRegistry.try_get<UISliderComponent>(sourceEntity))
             {
                 auto& destinationSlider = destinationRegistry.emplace<UISliderComponent>(destinationEntity, *uiSlider);
                 destinationSlider.Value = std::clamp(destinationSlider.Value, destinationSlider.MinValue, destinationSlider.MaxValue);
+                destinationSlider.RuntimeDragging = false;
+                destinationSlider.RuntimeValueChangedThisFrame = false;
             }
 
             if (const auto* tilemap = sourceRegistry.try_get<TilemapComponent>(sourceEntity))
@@ -2097,16 +2185,6 @@ namespace Limitless
                 };
             }
 
-            if (const auto* text = m_Registry.try_get<TextComponent>(entity))
-            {
-                entry["Text"] = {
-                    { "Value", text->Text },
-                    { "FontFilePath", text->FontFilePath },
-                    { "FontSize", text->FontSize },
-                    { "Color", { text->Color.r, text->Color.g, text->Color.b, text->Color.a } }
-                };
-            }
-
             if (const auto* uiImage = m_Registry.try_get<UIImageComponent>(entity))
             {
                 entry["UIImage"] = {
@@ -2117,6 +2195,10 @@ namespace Limitless
             if (const auto* uiText = m_Registry.try_get<UITextComponent>(entity))
             {
                 entry["UIText"] = {
+                    { "Value", uiText->Text },
+                    { "FontFilePath", uiText->FontFilePath },
+                    { "FontSize", uiText->FontSize },
+                    { "Color", { uiText->Color.r, uiText->Color.g, uiText->Color.b, uiText->Color.a } },
                     { "RaycastTarget", uiText->RaycastTarget }
                 };
             }
@@ -2125,6 +2207,11 @@ namespace Limitless
             {
                 entry["UIButton"] = {
                     { "Interactable", uiButton->Interactable },
+                    { "UseStateColors", uiButton->UseStateColors },
+                    { "NormalColor", { uiButton->NormalColor.r, uiButton->NormalColor.g, uiButton->NormalColor.b, uiButton->NormalColor.a } },
+                    { "HoveredColor", { uiButton->HoveredColor.r, uiButton->HoveredColor.g, uiButton->HoveredColor.b, uiButton->HoveredColor.a } },
+                    { "PressedColor", { uiButton->PressedColor.r, uiButton->PressedColor.g, uiButton->PressedColor.b, uiButton->PressedColor.a } },
+                    { "DisabledColor", { uiButton->DisabledColor.r, uiButton->DisabledColor.g, uiButton->DisabledColor.b, uiButton->DisabledColor.a } },
                     { "OnClickEvent", uiButton->OnClickEvent },
                     { "OnHoverEnterEvent", uiButton->OnHoverEnterEvent },
                     { "OnHoverExitEvent", uiButton->OnHoverExitEvent },
@@ -2139,6 +2226,12 @@ namespace Limitless
                     { "MinValue", uiSlider->MinValue },
                     { "MaxValue", uiSlider->MaxValue },
                     { "Value", uiSlider->Value },
+                    { "BackgroundColor", { uiSlider->BackgroundColor.r, uiSlider->BackgroundColor.g, uiSlider->BackgroundColor.b, uiSlider->BackgroundColor.a } },
+                    { "FillColor", { uiSlider->FillColor.r, uiSlider->FillColor.g, uiSlider->FillColor.b, uiSlider->FillColor.a } },
+                    { "HandleColor", { uiSlider->HandleColor.r, uiSlider->HandleColor.g, uiSlider->HandleColor.b, uiSlider->HandleColor.a } },
+                    { "HandleWidth", uiSlider->HandleWidth },
+                    { "HandleHeightMultiplier", uiSlider->HandleHeightMultiplier },
+                    { "ShowHandle", uiSlider->ShowHandle },
                     { "OnValueChangedEvent", uiSlider->OnValueChangedEvent }
                 };
             }
@@ -2725,20 +2818,6 @@ namespace Limitless
                 shadowOccluder.RuntimeGeometryRevision = 0;
             }
 
-            if (entry.contains("Text") && entry["Text"].is_object())
-            {
-                const auto& textJson = entry["Text"];
-                auto& text = scene->GetRegistry().emplace<TextComponent>(entity);
-                text.Text = textJson.value("Value", std::string("Text"));
-                text.FontFilePath = textJson.value("FontFilePath", std::string{});
-                text.FontSize = textJson.value("FontSize", 32.0f);
-                auto color = textJson.value("Color", std::vector<float>{ 1.0f, 1.0f, 1.0f, 1.0f });
-                if (color.size() >= 4)
-                    text.Color = glm::vec4(color[0], color[1], color[2], color[3]);
-                text.CachedFont.reset();
-                text.FontLoadAttempted = false;
-            }
-
             if (entry.contains("UIImage") && entry["UIImage"].is_object())
             {
                 const auto& uiImageJson = entry["UIImage"];
@@ -2750,6 +2829,14 @@ namespace Limitless
             {
                 const auto& uiTextJson = entry["UIText"];
                 auto& uiText = scene->GetRegistry().emplace<UITextComponent>(entity);
+                uiText.Text = uiTextJson.value("Value", std::string("Text"));
+                uiText.FontFilePath = uiTextJson.value("FontFilePath", std::string{});
+                uiText.FontSize = uiTextJson.value("FontSize", 32.0f);
+                auto color = uiTextJson.value("Color", std::vector<float>{ 1.0f, 1.0f, 1.0f, 1.0f });
+                if (color.size() >= 4)
+                    uiText.Color = glm::vec4(color[0], color[1], color[2], color[3]);
+                uiText.CachedFont.reset();
+                uiText.FontLoadAttempted = false;
                 uiText.RaycastTarget = uiTextJson.value("RaycastTarget", false);
             }
 
@@ -2758,12 +2845,29 @@ namespace Limitless
                 const auto& uiButtonJson = entry["UIButton"];
                 auto& uiButton = scene->GetRegistry().emplace<UIButtonComponent>(entity);
                 uiButton.Interactable = uiButtonJson.value("Interactable", true);
+                uiButton.UseStateColors = uiButtonJson.value("UseStateColors", true);
+                const auto normalColor = uiButtonJson.value("NormalColor", std::vector<float>{ uiButton.NormalColor.r, uiButton.NormalColor.g, uiButton.NormalColor.b, uiButton.NormalColor.a });
+                if (normalColor.size() >= 4)
+                    uiButton.NormalColor = glm::vec4(normalColor[0], normalColor[1], normalColor[2], normalColor[3]);
+                const auto hoveredColor = uiButtonJson.value("HoveredColor", std::vector<float>{ uiButton.HoveredColor.r, uiButton.HoveredColor.g, uiButton.HoveredColor.b, uiButton.HoveredColor.a });
+                if (hoveredColor.size() >= 4)
+                    uiButton.HoveredColor = glm::vec4(hoveredColor[0], hoveredColor[1], hoveredColor[2], hoveredColor[3]);
+                const auto pressedColor = uiButtonJson.value("PressedColor", std::vector<float>{ uiButton.PressedColor.r, uiButton.PressedColor.g, uiButton.PressedColor.b, uiButton.PressedColor.a });
+                if (pressedColor.size() >= 4)
+                    uiButton.PressedColor = glm::vec4(pressedColor[0], pressedColor[1], pressedColor[2], pressedColor[3]);
+                const auto disabledColor = uiButtonJson.value("DisabledColor", std::vector<float>{ uiButton.DisabledColor.r, uiButton.DisabledColor.g, uiButton.DisabledColor.b, uiButton.DisabledColor.a });
+                if (disabledColor.size() >= 4)
+                    uiButton.DisabledColor = glm::vec4(disabledColor[0], disabledColor[1], disabledColor[2], disabledColor[3]);
                 uiButton.OnClickEvent = uiButtonJson.value("OnClickEvent", std::string{});
                 uiButton.OnHoverEnterEvent = uiButtonJson.value("OnHoverEnterEvent", std::string{});
                 uiButton.OnHoverExitEvent = uiButtonJson.value("OnHoverExitEvent", std::string{});
                 uiButton.OnPressedEvent = uiButtonJson.value("OnPressedEvent", std::string{});
                 uiButton.IsHovered = false;
                 uiButton.IsPressed = false;
+                uiButton.RuntimeHoverEnteredThisFrame = false;
+                uiButton.RuntimeHoverExitedThisFrame = false;
+                uiButton.RuntimePressedThisFrame = false;
+                uiButton.RuntimeClickedThisFrame = false;
             }
 
             if (entry.contains("UISlider") && entry["UISlider"].is_object())
@@ -2774,7 +2878,100 @@ namespace Limitless
                 uiSlider.MinValue = uiSliderJson.value("MinValue", 0.0f);
                 uiSlider.MaxValue = std::max(uiSlider.MinValue, uiSliderJson.value("MaxValue", 1.0f));
                 uiSlider.Value = std::clamp(uiSliderJson.value("Value", uiSlider.MinValue), uiSlider.MinValue, uiSlider.MaxValue);
+                const auto backgroundColor = uiSliderJson.value("BackgroundColor", std::vector<float>{ uiSlider.BackgroundColor.r, uiSlider.BackgroundColor.g, uiSlider.BackgroundColor.b, uiSlider.BackgroundColor.a });
+                if (backgroundColor.size() >= 4)
+                    uiSlider.BackgroundColor = glm::vec4(backgroundColor[0], backgroundColor[1], backgroundColor[2], backgroundColor[3]);
+                const auto fillColor = uiSliderJson.value("FillColor", std::vector<float>{ uiSlider.FillColor.r, uiSlider.FillColor.g, uiSlider.FillColor.b, uiSlider.FillColor.a });
+                if (fillColor.size() >= 4)
+                    uiSlider.FillColor = glm::vec4(fillColor[0], fillColor[1], fillColor[2], fillColor[3]);
+                const auto handleColor = uiSliderJson.value("HandleColor", std::vector<float>{ uiSlider.HandleColor.r, uiSlider.HandleColor.g, uiSlider.HandleColor.b, uiSlider.HandleColor.a });
+                if (handleColor.size() >= 4)
+                    uiSlider.HandleColor = glm::vec4(handleColor[0], handleColor[1], handleColor[2], handleColor[3]);
+                uiSlider.HandleWidth = std::max(1.0f, uiSliderJson.value("HandleWidth", uiSlider.HandleWidth));
+                uiSlider.HandleHeightMultiplier = std::max(0.1f, uiSliderJson.value("HandleHeightMultiplier", uiSlider.HandleHeightMultiplier));
+                uiSlider.ShowHandle = uiSliderJson.value("ShowHandle", uiSlider.ShowHandle);
                 uiSlider.OnValueChangedEvent = uiSliderJson.value("OnValueChangedEvent", std::string{});
+                uiSlider.RuntimeDragging = false;
+                uiSlider.RuntimeValueChangedThisFrame = false;
+            }
+
+            if (scene->GetRegistry().all_of<UISliderComponent>(entity))
+            {
+                auto& uiSlider = scene->GetRegistry().get<UISliderComponent>(entity);
+                const float sliderRange = std::max(0.0001f, uiSlider.MaxValue - uiSlider.MinValue);
+                const float sliderNormalized = std::clamp((uiSlider.Value - uiSlider.MinValue) / sliderRange, 0.0f, 1.0f);
+
+                auto ensureSliderVisualChild = [&](const char* childName,
+                                                   const glm::vec4& defaultColor,
+                                                   int32_t siblingOrder,
+                                                   auto&& initializeRectTransform) {
+                    entt::entity childEntity = FindDirectChildByTag(scene->GetRegistry(), entity, childName);
+                    bool created = false;
+                    if (childEntity == entt::null)
+                    {
+                        childEntity = scene->CreateEntity(childName);
+                        scene->SetParent(childEntity, entity);
+                        created = true;
+                    }
+
+                    if (auto* hierarchy = scene->GetRegistry().try_get<HierarchyComponent>(childEntity))
+                        hierarchy->SiblingOrder = siblingOrder;
+                    if (!scene->GetRegistry().all_of<RectTransformComponent>(childEntity))
+                        scene->GetRegistry().emplace<RectTransformComponent>(childEntity);
+                    if (!scene->GetRegistry().all_of<UIImageComponent>(childEntity))
+                        scene->GetRegistry().emplace<UIImageComponent>(childEntity);
+                    if (!scene->GetRegistry().all_of<SpriteComponent>(childEntity))
+                    {
+                        auto& childSprite = scene->GetRegistry().emplace<SpriteComponent>(childEntity);
+                        childSprite.Color = defaultColor;
+                    }
+
+                    if (created)
+                    {
+                        auto& rect = scene->GetRegistry().get<RectTransformComponent>(childEntity);
+                        initializeRectTransform(rect);
+                    }
+                };
+
+                ensureSliderVisualChild("Slider Background", uiSlider.BackgroundColor, 0, [](RectTransformComponent& rect) {
+                    rect.AnchorMin = glm::vec2(0.0f, 0.0f);
+                    rect.AnchorMax = glm::vec2(1.0f, 1.0f);
+                    rect.Pivot = glm::vec2(0.5f, 0.5f);
+                    rect.SizeDelta = glm::vec2(0.0f, 0.0f);
+                    rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
+                });
+                ensureSliderVisualChild("Slider Fill", uiSlider.FillColor, 10, [sliderNormalized](RectTransformComponent& rect) {
+                    rect.AnchorMin = glm::vec2(0.0f, 0.0f);
+                    rect.AnchorMax = glm::vec2(sliderNormalized, 1.0f);
+                    rect.Pivot = glm::vec2(0.5f, 0.5f);
+                    rect.SizeDelta = glm::vec2(0.0f, 0.0f);
+                    rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
+                });
+                ensureSliderVisualChild("Slider Handle", uiSlider.HandleColor, 20, [sliderNormalized](RectTransformComponent& rect) {
+                    rect.AnchorMin = glm::vec2(sliderNormalized, 0.5f);
+                    rect.AnchorMax = glm::vec2(sliderNormalized, 0.5f);
+                    rect.Pivot = glm::vec2(0.5f, 0.5f);
+                    rect.SizeDelta = glm::vec2(16.0f, 48.0f);
+                    rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
+                });
+            }
+
+            // UI compatibility migration: keep legacy scenes interactive by ensuring
+            // required render/layout components exist for button/slider entities.
+            if (scene->GetRegistry().all_of<UIButtonComponent>(entity))
+            {
+                if (!scene->GetRegistry().all_of<RectTransformComponent>(entity))
+                    scene->GetRegistry().emplace<RectTransformComponent>(entity);
+                if (!scene->GetRegistry().all_of<SpriteComponent>(entity))
+                    scene->GetRegistry().emplace<SpriteComponent>(entity);
+            }
+
+            if (scene->GetRegistry().all_of<UISliderComponent>(entity))
+            {
+                if (!scene->GetRegistry().all_of<RectTransformComponent>(entity))
+                    scene->GetRegistry().emplace<RectTransformComponent>(entity);
+                if (!scene->GetRegistry().all_of<SpriteComponent>(entity))
+                    scene->GetRegistry().emplace<SpriteComponent>(entity);
             }
 
             if (entry.contains("Tilemap") && entry["Tilemap"].is_object())
@@ -3467,61 +3664,6 @@ namespace Limitless
 
         renderTilemapLayers(true);
 
-        auto textView = registry.view<TransformComponent, TextComponent>();
-        std::vector<entt::entity> textRenderEntities;
-        textRenderEntities.reserve(textView.size_hint());
-        for (entt::entity entity : textView)
-            textRenderEntities.push_back(entity);
-
-        std::sort(textRenderEntities.begin(), textRenderEntities.end(), [&scene, &registry, interpolationAlpha](entt::entity left, entt::entity right) {
-            const glm::mat4 leftWorld = scene.GetWorldTransformMatrixForRendering(left, interpolationAlpha);
-            const glm::mat4 rightWorld = scene.GetWorldTransformMatrixForRendering(right, interpolationAlpha);
-            const float leftZ = leftWorld[3].z;
-            const float rightZ = rightWorld[3].z;
-            if (leftZ != rightZ)
-                return leftZ < rightZ;
-
-            const auto* leftHierarchy = registry.try_get<HierarchyComponent>(left);
-            const auto* rightHierarchy = registry.try_get<HierarchyComponent>(right);
-            const int32_t leftOrder = leftHierarchy ? leftHierarchy->SiblingOrder : 0;
-            const int32_t rightOrder = rightHierarchy ? rightHierarchy->SiblingOrder : 0;
-            if (leftOrder != rightOrder)
-                return leftOrder < rightOrder;
-
-            return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
-        });
-
-        for (entt::entity entity : textRenderEntities)
-        {
-            if (!scene.IsEntityEnabledInHierarchy(entity))
-                continue;
-            if (IsEntityInCanvasUiHierarchy(registry, entity))
-                continue;
-            auto& text = registry.get<TextComponent>(entity);
-            if (text.Text.empty() || text.FontFilePath.empty())
-            {
-                continue;
-            }
-
-            if (!text.CachedFont && !text.FontLoadAttempted)
-            {
-                text.CachedFont = Font::CreateFromFile(text.FontFilePath);
-                text.FontLoadAttempted = true;
-                if (!text.CachedFont)
-                {
-                    LT_CORE_WARN("SceneRenderer: failed to load text font '{}'", text.FontFilePath);
-                }
-            }
-
-            if (!text.CachedFont)
-            {
-                continue;
-            }
-
-            const glm::mat4 model = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
-            Renderer2D::DrawText(model, text.Text, text.CachedFont, text.FontSize, text.Color);
-        }
-
         Renderer2D::EndScene();
     }
 
@@ -3537,6 +3679,13 @@ namespace Limitless
     glm::vec4 SceneRenderer::GetViewportClearColor()
     {
         return g_ViewportClearColor;
+    }
+
+    void SceneRenderer::SetUiInputViewportRectPixels(float minX, float minY, float width, float height, bool enabled)
+    {
+        g_UiInputViewportRect.Enabled = enabled;
+        g_UiInputViewportRect.MinPixels = glm::vec2(minX, minY);
+        g_UiInputViewportRect.SizePixels = glm::vec2(std::max(0.0f, width), std::max(0.0f, height));
     }
 
     namespace
@@ -3647,6 +3796,263 @@ namespace Limitless
             return sprite.CachedTexture;
         }
 
+        glm::vec2 ConvertMousePixelsToCanvasSpace(const glm::vec2& mousePixels,
+                                                  const CanvasComponent& canvas,
+                                                  uint32_t windowWidth,
+                                                  uint32_t windowHeight)
+        {
+            const float safeWindowWidth = std::max(1.0f, static_cast<float>(windowWidth));
+            const float safeWindowHeight = std::max(1.0f, static_cast<float>(windowHeight));
+            const float canvasWidth = std::max(1.0f, canvas.ReferenceResolution.x);
+            const float canvasHeight = std::max(1.0f, canvas.ReferenceResolution.y);
+
+            const float normalizedX = mousePixels.x / safeWindowWidth;
+            const float normalizedY = mousePixels.y / safeWindowHeight;
+            return glm::vec2(
+                (normalizedX - 0.5f) * canvasWidth,
+                (0.5f - normalizedY) * canvasHeight);
+        }
+
+        bool IsPointInsideRect(const glm::vec2& point, const UiLayoutRect& rect)
+        {
+            return point.x >= rect.Min.x && point.x <= rect.Max.x &&
+                   point.y >= rect.Min.y && point.y <= rect.Max.y;
+        }
+
+        void ProcessUiInteractionSystem(Scene& scene, uint32_t windowWidth, uint32_t windowHeight)
+        {
+            auto& registry = scene.GetRegistry();
+
+            auto buttonView = registry.view<UIButtonComponent>();
+            for (entt::entity entity : buttonView)
+            {
+                auto& button = buttonView.get<UIButtonComponent>(entity);
+                button.RuntimeHoverEnteredThisFrame = false;
+                button.RuntimeHoverExitedThisFrame = false;
+                button.RuntimePressedThisFrame = false;
+                button.RuntimeClickedThisFrame = false;
+            }
+
+            auto sliderView = registry.view<UISliderComponent>();
+            for (entt::entity entity : sliderView)
+            {
+                auto& slider = sliderView.get<UISliderComponent>(entity);
+                slider.RuntimeValueChangedThisFrame = false;
+            }
+
+            uint32_t interactionViewportWidthPixels = windowWidth;
+            uint32_t interactionViewportHeightPixels = windowHeight;
+            glm::vec2 interactionMousePixels = glm::vec2(0.0f);
+
+            const InputSystem& input = GetInputSystem();
+            interactionMousePixels = input.GetMousePosition();
+
+            if (g_UiInputViewportRect.Enabled)
+            {
+                interactionViewportWidthPixels = static_cast<uint32_t>(std::max(0.0f, g_UiInputViewportRect.SizePixels.x));
+                interactionViewportHeightPixels = static_cast<uint32_t>(std::max(0.0f, g_UiInputViewportRect.SizePixels.y));
+                interactionMousePixels -= g_UiInputViewportRect.MinPixels;
+            }
+
+            if (interactionViewportWidthPixels == 0 || interactionViewportHeightPixels == 0)
+            {
+                for (entt::entity entity : buttonView)
+                {
+                    auto& button = buttonView.get<UIButtonComponent>(entity);
+                    button.IsHovered = false;
+                    button.IsPressed = false;
+                }
+                for (entt::entity entity : sliderView)
+                    sliderView.get<UISliderComponent>(entity).RuntimeDragging = false;
+                return;
+            }
+
+            auto canvasView = registry.view<CanvasComponent>();
+            std::vector<entt::entity> canvases;
+            for (entt::entity entity : canvasView)
+            {
+                if (scene.IsEntityEnabledInHierarchy(entity))
+                    canvases.push_back(entity);
+            }
+            std::sort(canvases.begin(), canvases.end(), [&registry](entt::entity left, entt::entity right) {
+                const auto& leftCanvas = registry.get<CanvasComponent>(left);
+                const auto& rightCanvas = registry.get<CanvasComponent>(right);
+                if (leftCanvas.SortOrder != rightCanvas.SortOrder)
+                    return leftCanvas.SortOrder < rightCanvas.SortOrder;
+                return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
+            });
+
+            struct UiInteractiveLayout
+            {
+                entt::entity CanvasEntity = entt::null;
+                UiLayoutRect Rect;
+                int32_t CanvasSortOrder = 0;
+                float Z = 0.0f;
+                int32_t SiblingOrder = 0;
+            };
+
+            std::unordered_map<entt::entity, UiInteractiveLayout> interactiveLayouts;
+            interactiveLayouts.reserve(128);
+            std::vector<entt::entity> hoveredCandidates;
+            hoveredCandidates.reserve(64);
+
+            auto rectView = registry.view<RectTransformComponent>();
+            for (entt::entity canvasEntity : canvases)
+            {
+                const auto& canvas = registry.get<CanvasComponent>(canvasEntity);
+                if (canvas.Mode != CanvasComponent::RenderMode::ScreenSpace)
+                    continue;
+
+                const glm::vec2 mouseInCanvasSpace = ConvertMousePixelsToCanvasSpace(
+                    interactionMousePixels,
+                    canvas,
+                    interactionViewportWidthPixels,
+                    interactionViewportHeightPixels);
+                const UiLayoutRect canvasRootRect = GetCanvasRootRect(canvas, interactionViewportWidthPixels, interactionViewportHeightPixels);
+                std::unordered_map<entt::entity, UiLayoutRect> layoutCache;
+
+                for (entt::entity entity : rectView)
+                {
+                    if (!scene.IsEntityEnabledInHierarchy(entity))
+                        continue;
+                    if (!registry.any_of<UIButtonComponent, UISliderComponent>(entity))
+                        continue;
+
+                    entt::entity owningCanvas = entt::null;
+                    if (!TryGetOwningCanvasEntity(registry, entity, owningCanvas) || owningCanvas != canvasEntity)
+                        continue;
+
+                    const UiLayoutRect rect = ResolveUiLayoutRect(registry, entity, canvasEntity, canvasRootRect, layoutCache);
+                    UiInteractiveLayout layout;
+                    layout.CanvasEntity = canvasEntity;
+                    layout.Rect = rect;
+                    layout.CanvasSortOrder = canvas.SortOrder;
+                    if (const auto* transform = registry.try_get<TransformComponent>(entity))
+                    {
+                        layout.Z = transform->Position.z;
+                        const glm::vec2 baseSize = rect.Max - rect.Min;
+                        const glm::vec2 scaledSize = glm::vec2(
+                            baseSize.x * std::max(0.001f, transform->Scale.x),
+                            baseSize.y * std::max(0.001f, transform->Scale.y));
+                        glm::vec2 center = (rect.Min + rect.Max) * 0.5f;
+                        center += glm::vec2(transform->Position.x, transform->Position.y);
+                        layout.Rect.Min = center - scaledSize * 0.5f;
+                        layout.Rect.Max = center + scaledSize * 0.5f;
+                    }
+                    if (const auto* hierarchy = registry.try_get<HierarchyComponent>(entity))
+                        layout.SiblingOrder = hierarchy->SiblingOrder;
+                    interactiveLayouts[entity] = layout;
+
+                    if (IsPointInsideRect(mouseInCanvasSpace, layout.Rect))
+                        hoveredCandidates.push_back(entity);
+                }
+            }
+
+            auto isEntityOnTop = [&interactiveLayouts](entt::entity left, entt::entity right) {
+                const auto leftIt = interactiveLayouts.find(left);
+                const auto rightIt = interactiveLayouts.find(right);
+                if (leftIt == interactiveLayouts.end() || rightIt == interactiveLayouts.end())
+                    return false;
+                const UiInteractiveLayout& leftLayout = leftIt->second;
+                const UiInteractiveLayout& rightLayout = rightIt->second;
+                if (leftLayout.CanvasSortOrder != rightLayout.CanvasSortOrder)
+                    return leftLayout.CanvasSortOrder > rightLayout.CanvasSortOrder;
+                if (leftLayout.Z != rightLayout.Z)
+                    return leftLayout.Z > rightLayout.Z;
+                if (leftLayout.SiblingOrder != rightLayout.SiblingOrder)
+                    return leftLayout.SiblingOrder > rightLayout.SiblingOrder;
+                return static_cast<uint32_t>(left) > static_cast<uint32_t>(right);
+            };
+
+            entt::entity topHoveredEntity = entt::null;
+            for (entt::entity entity : hoveredCandidates)
+            {
+                if (topHoveredEntity == entt::null || isEntityOnTop(entity, topHoveredEntity))
+                    topHoveredEntity = entity;
+            }
+
+            const bool mouseDown = input.IsMouseButtonDown(SDL_BUTTON_LEFT);
+            const bool mousePressedThisFrame = input.WasMouseButtonPressedThisFrame(SDL_BUTTON_LEFT);
+            const bool mouseReleasedThisFrame = input.WasMouseButtonReleasedThisFrame(SDL_BUTTON_LEFT);
+
+            for (entt::entity entity : buttonView)
+            {
+                auto& button = buttonView.get<UIButtonComponent>(entity);
+                const bool hovered = button.Interactable && entity == topHoveredEntity;
+                const bool wasHovered = button.IsHovered;
+                const bool wasPressed = button.IsPressed;
+
+                button.IsHovered = hovered;
+                button.RuntimeHoverEnteredThisFrame = hovered && !wasHovered;
+                button.RuntimeHoverExitedThisFrame = !hovered && wasHovered;
+
+                if (!button.Interactable)
+                {
+                    button.IsPressed = false;
+                    continue;
+                }
+
+                if (hovered && mousePressedThisFrame)
+                {
+                    button.IsPressed = true;
+                    button.RuntimePressedThisFrame = true;
+                }
+                if (!mouseDown)
+                    button.IsPressed = false;
+                if (wasPressed && mouseReleasedThisFrame && hovered)
+                    button.RuntimeClickedThisFrame = true;
+            }
+
+            for (entt::entity entity : sliderView)
+            {
+                auto& slider = sliderView.get<UISliderComponent>(entity);
+                const auto layoutIt = interactiveLayouts.find(entity);
+
+                if (layoutIt == interactiveLayouts.end())
+                {
+                    slider.RuntimeDragging = false;
+                    continue;
+                }
+
+                const bool hovered = slider.Interactable && entity == topHoveredEntity;
+                const UiInteractiveLayout& layout = layoutIt->second;
+                const auto* canvas = registry.try_get<CanvasComponent>(layout.CanvasEntity);
+                if (!canvas)
+                {
+                    slider.RuntimeDragging = false;
+                    continue;
+                }
+
+                if (slider.Interactable && hovered && mouseDown && (mousePressedThisFrame || !slider.RuntimeDragging))
+                    slider.RuntimeDragging = true;
+                if (!slider.Interactable)
+                    slider.RuntimeDragging = false;
+                if (mouseReleasedThisFrame || !mouseDown)
+                    slider.RuntimeDragging = false;
+
+                if (slider.Interactable && slider.RuntimeDragging)
+                {
+                    const glm::vec2 mouseInCanvasSpace = ConvertMousePixelsToCanvasSpace(
+                        interactionMousePixels,
+                        *canvas,
+                        interactionViewportWidthPixels,
+                        interactionViewportHeightPixels);
+                    const float width = std::max(1.0f, layout.Rect.Max.x - layout.Rect.Min.x);
+                    const float normalized = std::clamp((mouseInCanvasSpace.x - layout.Rect.Min.x) / width, 0.0f, 1.0f);
+                    const float minValue = slider.MinValue;
+                    const float maxValue = std::max(slider.MinValue, slider.MaxValue);
+                    const float updatedValue = minValue + (maxValue - minValue) * normalized;
+                    if (std::abs(updatedValue - slider.Value) > 0.0001f)
+                    {
+                        slider.Value = updatedValue;
+                        slider.RuntimeValueChangedThisFrame = true;
+                    }
+                }
+
+                SyncSliderVisualChildren(registry, entity, slider);
+            }
+        }
+
         void RenderCanvasUiPass(Scene& scene, const Camera& camera, uint32_t width, uint32_t height)
         {
             if (width == 0 || height == 0)
@@ -3695,7 +4101,7 @@ namespace Limitless
                 {
                     if (!scene.IsEntityEnabledInHierarchy(entity))
                         continue;
-                    if (!registry.any_of<SpriteComponent, TextComponent>(entity))
+                    if (!registry.any_of<SpriteComponent, UITextComponent>(entity))
                         continue;
 
                     entt::entity owningCanvas = entt::null;
@@ -3746,18 +4152,105 @@ namespace Limitless
                     if (canvas.Mode == CanvasComponent::RenderMode::WorldSpace)
                         model = canvasWorldTransform * model;
 
-                    if (auto* sprite = registry.try_get<SpriteComponent>(uiEntity))
+                    SpriteComponent* sprite = registry.try_get<SpriteComponent>(uiEntity);
+                    UIButtonComponent* button = registry.try_get<UIButtonComponent>(uiEntity);
+                    UISliderComponent* slider = registry.try_get<UISliderComponent>(uiEntity);
+                    const entt::entity sliderBackgroundVisualEntity = slider ? FindDirectChildByTag(registry, uiEntity, "Slider Background") : entt::null;
+                    const entt::entity sliderFillVisualEntity = slider ? FindDirectChildByTag(registry, uiEntity, "Slider Fill") : entt::null;
+                    const entt::entity sliderHandleVisualEntity = slider ? FindDirectChildByTag(registry, uiEntity, "Slider Handle") : entt::null;
+                    const bool sliderHasVisualChildren = slider &&
+                        (sliderBackgroundVisualEntity != entt::null ||
+                         sliderFillVisualEntity != entt::null ||
+                         sliderHandleVisualEntity != entt::null);
+
+                    if (slider && sliderHasVisualChildren)
+                        SyncSliderVisualChildren(registry, uiEntity, *slider);
+
+                    if (slider && !sliderHasVisualChildren)
                     {
+                        const float valueRange = std::max(0.0f, slider->MaxValue - slider->MinValue);
+                        const float normalizedValue = (valueRange > 0.0001f)
+                            ? std::clamp((slider->Value - slider->MinValue) / valueRange, 0.0f, 1.0f)
+                            : 0.0f;
+
+                        glm::vec4 backgroundColor = slider->BackgroundColor;
+                        glm::vec4 fillColor = slider->FillColor;
+                        glm::vec4 handleColor = slider->HandleColor;
+                        if (!slider->Interactable)
+                        {
+                            backgroundColor *= glm::vec4(0.65f, 0.65f, 0.65f, 1.0f);
+                            fillColor *= glm::vec4(0.65f, 0.65f, 0.65f, 1.0f);
+                            handleColor *= glm::vec4(0.65f, 0.65f, 0.65f, 1.0f);
+                        }
+
+                        if (sprite)
+                        {
+                            Assets::TextureAsset::Ptr textureAsset = ResolveUiSpriteTexture(*sprite);
+                            if (textureAsset)
+                                Renderer2D::DrawQuad(model, textureAsset, backgroundColor);
+                            else if (!sprite->TextureKey.empty())
+                                Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, backgroundColor.a));
+                            else
+                                Renderer2D::DrawQuad(model, backgroundColor);
+                        }
+                        else
+                        {
+                            Renderer2D::DrawQuad(model, backgroundColor);
+                        }
+
+                        if (normalizedValue > 0.0f)
+                        {
+                            glm::mat4 fillModel = glm::translate(model, glm::vec3((normalizedValue - 1.0f) * 0.5f, 0.0f, 0.0f));
+                            fillModel = glm::scale(fillModel, glm::vec3(normalizedValue, 1.0f, 1.0f));
+                            Renderer2D::DrawQuad(fillModel, fillColor);
+                        }
+
+                        if (slider->ShowHandle)
+                        {
+                            const float clampedHandleWidth = std::clamp(slider->HandleWidth, 1.0f, std::max(1.0f, scaledSize.x));
+                            const float handleWidthScale = clampedHandleWidth / std::max(1.0f, scaledSize.x);
+                            const float handleHeightScale = std::max(0.1f, slider->HandleHeightMultiplier);
+                            glm::mat4 handleModel = glm::translate(model, glm::vec3(normalizedValue - 0.5f, 0.0f, 0.0f));
+                            handleModel = glm::scale(handleModel, glm::vec3(handleWidthScale, handleHeightScale, 1.0f));
+                            Renderer2D::DrawQuad(handleModel, handleColor);
+                        }
+                    }
+                    else if (sprite && !sliderHasVisualChildren)
+                    {
+                        glm::vec4 resolvedColor = sprite->Color;
+                        if (button && button->UseStateColors)
+                        {
+                            if (!button->Interactable)
+                                resolvedColor = button->DisabledColor;
+                            else if (button->IsPressed)
+                                resolvedColor = button->PressedColor;
+                            else if (button->IsHovered)
+                                resolvedColor = button->HoveredColor;
+                            else
+                                resolvedColor = button->NormalColor;
+                        }
+
                         Assets::TextureAsset::Ptr textureAsset = ResolveUiSpriteTexture(*sprite);
                         if (textureAsset)
-                            Renderer2D::DrawQuad(model, textureAsset, sprite->Color);
+                            Renderer2D::DrawQuad(model, textureAsset, resolvedColor);
                         else if (!sprite->TextureKey.empty())
-                            Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, sprite->Color.a));
+                            Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, resolvedColor.a));
                         else
-                            Renderer2D::DrawQuad(model, sprite->Color);
+                            Renderer2D::DrawQuad(model, resolvedColor);
+                    }
+                    else if (!sliderHasVisualChildren && button && button->UseStateColors)
+                    {
+                        glm::vec4 resolvedColor = button->NormalColor;
+                        if (!button->Interactable)
+                            resolvedColor = button->DisabledColor;
+                        else if (button->IsPressed)
+                            resolvedColor = button->PressedColor;
+                        else if (button->IsHovered)
+                            resolvedColor = button->HoveredColor;
+                        Renderer2D::DrawQuad(model, resolvedColor);
                     }
 
-                    if (auto* text = registry.try_get<TextComponent>(uiEntity))
+                    if (auto* text = registry.try_get<UITextComponent>(uiEntity))
                     {
                         if (text->Text.empty() || text->FontFilePath.empty())
                             continue;
@@ -3773,11 +4266,7 @@ namespace Limitless
                         if (!text->CachedFont)
                             continue;
 
-                        float fontSize = text->FontSize;
-                        if (canvas.Mode == CanvasComponent::RenderMode::ScreenSpace)
-                            fontSize *= std::max(1.0f, text->CachedFont->GetEmSize());
-
-                        Renderer2D::DrawText(model, text->Text, text->CachedFont, fontSize, text->Color);
+                        Renderer2D::DrawText(model, text->Text, text->CachedFont, text->FontSize, text->Color);
                     }
                 }
 

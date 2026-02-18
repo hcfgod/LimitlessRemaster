@@ -281,6 +281,64 @@ namespace Limitless::EditorInspectorPanel
 
             if (rectTransformOpen)
             {
+                struct AnchorPreset
+                {
+                    const char* Name;
+                    glm::vec2 AnchorMin;
+                    glm::vec2 AnchorMax;
+                    glm::vec2 Pivot;
+                };
+                static const std::array<AnchorPreset, 9> anchorPresets = {{
+                    { "Top Left",     glm::vec2(0.0f, 1.0f), glm::vec2(0.0f, 1.0f), glm::vec2(0.0f, 1.0f) },
+                    { "Top Center",   glm::vec2(0.5f, 1.0f), glm::vec2(0.5f, 1.0f), glm::vec2(0.5f, 1.0f) },
+                    { "Top Right",    glm::vec2(1.0f, 1.0f), glm::vec2(1.0f, 1.0f), glm::vec2(1.0f, 1.0f) },
+                    { "Middle Left",  glm::vec2(0.0f, 0.5f), glm::vec2(0.0f, 0.5f), glm::vec2(0.0f, 0.5f) },
+                    { "Middle Center",glm::vec2(0.5f, 0.5f), glm::vec2(0.5f, 0.5f), glm::vec2(0.5f, 0.5f) },
+                    { "Middle Right", glm::vec2(1.0f, 0.5f), glm::vec2(1.0f, 0.5f), glm::vec2(1.0f, 0.5f) },
+                    { "Bottom Left",  glm::vec2(0.0f, 0.0f), glm::vec2(0.0f, 0.0f), glm::vec2(0.0f, 0.0f) },
+                    { "Bottom Center",glm::vec2(0.5f, 0.0f), glm::vec2(0.5f, 0.0f), glm::vec2(0.5f, 0.0f) },
+                    { "Bottom Right", glm::vec2(1.0f, 0.0f), glm::vec2(1.0f, 0.0f), glm::vec2(1.0f, 0.0f) }
+                }};
+
+                int selectedPresetIndex = -1;
+                for (int presetIndex = 0; presetIndex < static_cast<int>(anchorPresets.size()); ++presetIndex)
+                {
+                    const AnchorPreset& preset = anchorPresets[static_cast<size_t>(presetIndex)];
+                    const auto nearlyEqual = [](const glm::vec2& left, const glm::vec2& right) {
+                        return std::abs(left.x - right.x) < 0.0001f &&
+                               std::abs(left.y - right.y) < 0.0001f;
+                    };
+                    if (nearlyEqual(preset.AnchorMin, rectTransform->AnchorMin) &&
+                        nearlyEqual(preset.AnchorMax, rectTransform->AnchorMax) &&
+                        nearlyEqual(preset.Pivot, rectTransform->Pivot))
+                    {
+                        selectedPresetIndex = presetIndex;
+                        break;
+                    }
+                }
+
+                const char* selectedPresetName = selectedPresetIndex >= 0
+                    ? anchorPresets[static_cast<size_t>(selectedPresetIndex)].Name
+                    : "Custom";
+                if (ImGui::BeginCombo("Anchor Preset", selectedPresetName))
+                {
+                    for (int presetIndex = 0; presetIndex < static_cast<int>(anchorPresets.size()); ++presetIndex)
+                    {
+                        const bool isSelected = presetIndex == selectedPresetIndex;
+                        if (ImGui::Selectable(anchorPresets[static_cast<size_t>(presetIndex)].Name, isSelected))
+                        {
+                            const AnchorPreset& preset = anchorPresets[static_cast<size_t>(presetIndex)];
+                            rectTransform->AnchorMin = preset.AnchorMin;
+                            rectTransform->AnchorMax = preset.AnchorMax;
+                            rectTransform->Pivot = preset.Pivot;
+                        }
+                        if (isSelected)
+                            ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+                TrackInteractiveMutation(undoService, "Edit RectTransform Anchor Preset");
+
                 ImGui::DragFloat2("Anchor Min", &rectTransform->AnchorMin.x, 0.01f, 0.0f, 1.0f);
                 rectTransform->AnchorMin.x = std::clamp(rectTransform->AnchorMin.x, 0.0f, 1.0f);
                 rectTransform->AnchorMin.y = std::clamp(rectTransform->AnchorMin.y, 0.0f, 1.0f);
@@ -1877,106 +1935,6 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* text = registry.try_get<TextComponent>(selectedEntity))
-        {
-            const bool textOpen = ImGui::TreeNodeEx("Text", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("TextComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##TextComponentOptionsButton"))
-                ImGui::OpenPopup("TextComponentOptions");
-
-            if (ImGui::BeginPopup("TextComponentOptions"))
-            {
-                if (ImGui::MenuItem("Remove Component"))
-                    pendingRemovals.RemoveTextComponent = true;
-                ImGui::EndPopup();
-            }
-
-            if (textOpen)
-            {
-                static entt::entity textEditEntity = entt::null;
-                static std::array<char, 2048> textValueBuffer{};
-                static std::array<char, 512> fontPathBuffer{};
-                if (textEditEntity != selectedEntity)
-                {
-                    textEditEntity = selectedEntity;
-                    std::snprintf(textValueBuffer.data(), textValueBuffer.size(), "%s", text->Text.c_str());
-                    std::snprintf(fontPathBuffer.data(), fontPathBuffer.size(), "%s", text->FontFilePath.c_str());
-                }
-
-                ImGui::InputTextMultiline("Text Value", textValueBuffer.data(), textValueBuffer.size(), ImVec2(-1.0f, 84.0f));
-                if (ImGui::IsItemDeactivatedAfterEdit())
-                {
-                    text->Text = textValueBuffer.data();
-                    if (undoService)
-                        (void)undoService->CommitInteractiveSceneMutation("Edit Text Value");
-                }
-                else if (ImGui::IsItemActivated() && undoService)
-                {
-                    undoService->BeginInteractiveSceneMutation();
-                }
-
-                ImGui::InputText("Font File Path", fontPathBuffer.data(), fontPathBuffer.size());
-                if (ImGui::IsItemDeactivatedAfterEdit())
-                {
-                    text->FontFilePath = fontPathBuffer.data();
-                    text->CachedFont.reset();
-                    text->FontLoadAttempted = false;
-                    if (undoService)
-                        (void)undoService->CommitInteractiveSceneMutation("Edit Font File Path");
-                }
-                else if (ImGui::IsItemActivated() && undoService)
-                {
-                    undoService->BeginInteractiveSceneMutation();
-                }
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Example: Assets/Fonts/YourFont.ttf");
-
-                const std::string fontLabel = text->FontFilePath.empty()
-                    ? std::string("None")
-                    : EditorAssetNaming::GetAssetDisplayNameFromAssetKey(text->FontFilePath);
-                ImGui::Text("Font Asset");
-                ImGui::SameLine(80);
-                ImGui::Button((fontLabel + "##TextFontAsset").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 60.0f, 0.0f));
-                if (ImGui::BeginDragDropTarget())
-                {
-                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(fontPayloadId))
-                    {
-                        const char* key = static_cast<const char*>(payload->Data);
-                        if (key && key[0])
-                        {
-                            text->FontFilePath = key;
-                            std::snprintf(fontPathBuffer.data(), fontPathBuffer.size(), "%s", text->FontFilePath.c_str());
-                            text->CachedFont.reset();
-                            text->FontLoadAttempted = false;
-                        }
-                    }
-                    ImGui::EndDragDropTarget();
-                }
-                if (!text->FontFilePath.empty())
-                {
-                    ImGui::SameLine();
-                    if (ImGui::Button("Clear##TextFontAsset"))
-                    {
-                        text->FontFilePath.clear();
-                        fontPathBuffer[0] = '\0';
-                        text->CachedFont.reset();
-                        text->FontLoadAttempted = false;
-                    }
-                }
-
-                if (ImGui::DragFloat("Font Size", &text->FontSize, 1.0f, 4.0f, 512.0f))
-                    text->FontSize = std::max(4.0f, text->FontSize);
-                TrackInteractiveMutation(undoService, "Edit Font Size");
-                ImGui::TextDisabled("Render mode is driven by Canvas + RectTransform.");
-                ImGui::ColorEdit4("Color", &text->Color.r);
-                TrackInteractiveMutation(undoService, "Edit Text Color");
-
-                ImGui::TreePop();
-            }
-        }
-
         if (auto* uiImage = registry.try_get<UIImageComponent>(selectedEntity))
         {
             const bool uiImageOpen = ImGui::TreeNodeEx("UI Image", ImGuiTreeNodeFlags_DefaultOpen);
@@ -1995,6 +1953,55 @@ namespace Limitless::EditorInspectorPanel
 
             if (uiImageOpen)
             {
+                const auto assignUiImageTextureKey = [&](const std::string& key) {
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation(key.empty() ? "Clear UI Image Texture" : "Assign UI Image Texture", [&](Scene& mutableScene) {
+                            auto& mutableRegistry = mutableScene.GetRegistry();
+                            auto* mutableSprite = mutableRegistry.try_get<SpriteComponent>(selectedEntity);
+                            if (!mutableSprite)
+                                mutableSprite = &mutableRegistry.emplace<SpriteComponent>(selectedEntity);
+                            mutableSprite->TextureKey = key;
+                            mutableSprite->CachedTexture.reset();
+                            mutableSprite->TextureLoadAttempted = false;
+                            return true;
+                        });
+                    }
+                    else
+                    {
+                        auto* sprite = registry.try_get<SpriteComponent>(selectedEntity);
+                        if (!sprite)
+                            sprite = &registry.emplace<SpriteComponent>(selectedEntity);
+                        sprite->TextureKey = key;
+                        sprite->CachedTexture.reset();
+                        sprite->TextureLoadAttempted = false;
+                    }
+                };
+
+                auto* uiImageSprite = registry.try_get<SpriteComponent>(selectedEntity);
+                const std::string imageTextureLabel = (uiImageSprite && !uiImageSprite->TextureKey.empty())
+                    ? EditorAssetNaming::GetAssetDisplayNameFromAssetKey(uiImageSprite->TextureKey)
+                    : std::string("None (White Quad)");
+                ImGui::Text("Image");
+                ImGui::SameLine(80);
+                ImGui::Button((imageTextureLabel + "##UIImageTexture").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 60.0f, 0.0f));
+                if (ImGui::BeginDragDropTarget())
+                {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
+                    {
+                        const char* key = static_cast<const char*>(payload->Data);
+                        if (key && key[0])
+                            assignUiImageTextureKey(key);
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+                if (uiImageSprite && !uiImageSprite->TextureKey.empty())
+                {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Clear##UIImageTexture"))
+                        assignUiImageTextureKey({});
+                }
+
                 ImGui::Checkbox("Raycast Target", &uiImage->RaycastTarget);
                 TrackInteractiveMutation(undoService, "Edit UIImage Raycast Target");
                 ImGui::TreePop();
@@ -2019,6 +2026,84 @@ namespace Limitless::EditorInspectorPanel
 
             if (uiTextOpen)
             {
+                static entt::entity uiTextEditEntity = entt::null;
+                static std::array<char, 2048> uiTextValueBuffer{};
+                static std::array<char, 512> uiTextFontPathBuffer{};
+                if (uiTextEditEntity != selectedEntity)
+                {
+                    uiTextEditEntity = selectedEntity;
+                    std::snprintf(uiTextValueBuffer.data(), uiTextValueBuffer.size(), "%s", uiText->Text.c_str());
+                    std::snprintf(uiTextFontPathBuffer.data(), uiTextFontPathBuffer.size(), "%s", uiText->FontFilePath.c_str());
+                }
+
+                ImGui::InputTextMultiline("Text Value##UIText", uiTextValueBuffer.data(), uiTextValueBuffer.size(), ImVec2(-1.0f, 84.0f));
+                if (ImGui::IsItemDeactivatedAfterEdit())
+                {
+                    uiText->Text = uiTextValueBuffer.data();
+                    if (undoService)
+                        (void)undoService->CommitInteractiveSceneMutation("Edit UI Text Value");
+                }
+                else if (ImGui::IsItemActivated() && undoService)
+                {
+                    undoService->BeginInteractiveSceneMutation();
+                }
+
+                ImGui::InputText("Font File Path##UIText", uiTextFontPathBuffer.data(), uiTextFontPathBuffer.size());
+                if (ImGui::IsItemDeactivatedAfterEdit())
+                {
+                    uiText->FontFilePath = uiTextFontPathBuffer.data();
+                    uiText->CachedFont.reset();
+                    uiText->FontLoadAttempted = false;
+                    if (undoService)
+                        (void)undoService->CommitInteractiveSceneMutation("Edit UI Font File Path");
+                }
+                else if (ImGui::IsItemActivated() && undoService)
+                {
+                    undoService->BeginInteractiveSceneMutation();
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Example: Assets/Fonts/YourFont.ttf");
+
+                const std::string uiFontLabel = uiText->FontFilePath.empty()
+                    ? std::string("None")
+                    : EditorAssetNaming::GetAssetDisplayNameFromAssetKey(uiText->FontFilePath);
+                ImGui::Text("Font Asset");
+                ImGui::SameLine(80);
+                ImGui::Button((uiFontLabel + "##UITextFontAsset").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 60.0f, 0.0f));
+                if (ImGui::BeginDragDropTarget())
+                {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(fontPayloadId))
+                    {
+                        const char* key = static_cast<const char*>(payload->Data);
+                        if (key && key[0])
+                        {
+                            uiText->FontFilePath = key;
+                            std::snprintf(uiTextFontPathBuffer.data(), uiTextFontPathBuffer.size(), "%s", uiText->FontFilePath.c_str());
+                            uiText->CachedFont.reset();
+                            uiText->FontLoadAttempted = false;
+                        }
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+                if (!uiText->FontFilePath.empty())
+                {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Clear##UITextFontAsset"))
+                    {
+                        uiText->FontFilePath.clear();
+                        uiTextFontPathBuffer[0] = '\0';
+                        uiText->CachedFont.reset();
+                        uiText->FontLoadAttempted = false;
+                    }
+                }
+
+                if (ImGui::DragFloat("Font Size##UIText", &uiText->FontSize, 1.0f, 4.0f, 512.0f))
+                    uiText->FontSize = std::max(4.0f, uiText->FontSize);
+                TrackInteractiveMutation(undoService, "Edit UI Font Size");
+
+                ImGui::ColorEdit4("Color##UIText", &uiText->Color.r);
+                TrackInteractiveMutation(undoService, "Edit UI Text Color");
+
                 ImGui::Checkbox("Raycast Target", &uiText->RaycastTarget);
                 TrackInteractiveMutation(undoService, "Edit UIText Raycast Target");
                 ImGui::TreePop();
@@ -2045,6 +2130,19 @@ namespace Limitless::EditorInspectorPanel
             {
                 ImGui::Checkbox("Interactable", &uiButton->Interactable);
                 TrackInteractiveMutation(undoService, "Edit UIButton Interactable");
+                ImGui::Checkbox("Use State Colors", &uiButton->UseStateColors);
+                TrackInteractiveMutation(undoService, "Edit UIButton Use State Colors");
+                if (uiButton->UseStateColors)
+                {
+                    ImGui::ColorEdit4("Normal Color##UIButton", &uiButton->NormalColor.r);
+                    TrackInteractiveMutation(undoService, "Edit UIButton Normal Color");
+                    ImGui::ColorEdit4("Hovered Color##UIButton", &uiButton->HoveredColor.r);
+                    TrackInteractiveMutation(undoService, "Edit UIButton Hovered Color");
+                    ImGui::ColorEdit4("Pressed Color##UIButton", &uiButton->PressedColor.r);
+                    TrackInteractiveMutation(undoService, "Edit UIButton Pressed Color");
+                    ImGui::ColorEdit4("Disabled Color##UIButton", &uiButton->DisabledColor.r);
+                    TrackInteractiveMutation(undoService, "Edit UIButton Disabled Color");
+                }
                 std::array<char, 256> onClickEventBuffer{};
                 std::snprintf(onClickEventBuffer.data(), onClickEventBuffer.size(), "%s", uiButton->OnClickEvent.c_str());
                 if (ImGui::InputText("On Click Event", onClickEventBuffer.data(), onClickEventBuffer.size()))
@@ -2098,6 +2196,20 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::SliderFloat("Value", &uiSlider->Value, uiSlider->MinValue, uiSlider->MaxValue);
                 uiSlider->Value = std::clamp(uiSlider->Value, uiSlider->MinValue, uiSlider->MaxValue);
                 TrackInteractiveMutation(undoService, "Edit UISlider Value");
+                ImGui::ColorEdit4("Background Color##UISlider", &uiSlider->BackgroundColor.r);
+                TrackInteractiveMutation(undoService, "Edit UISlider Background Color");
+                ImGui::ColorEdit4("Fill Color##UISlider", &uiSlider->FillColor.r);
+                TrackInteractiveMutation(undoService, "Edit UISlider Fill Color");
+                ImGui::ColorEdit4("Handle Color##UISlider", &uiSlider->HandleColor.r);
+                TrackInteractiveMutation(undoService, "Edit UISlider Handle Color");
+                ImGui::DragFloat("Handle Width##UISlider", &uiSlider->HandleWidth, 0.5f, 1.0f, 4096.0f);
+                uiSlider->HandleWidth = std::max(1.0f, uiSlider->HandleWidth);
+                TrackInteractiveMutation(undoService, "Edit UISlider Handle Width");
+                ImGui::DragFloat("Handle Height Multiplier##UISlider", &uiSlider->HandleHeightMultiplier, 0.01f, 0.1f, 8.0f);
+                uiSlider->HandleHeightMultiplier = std::max(0.1f, uiSlider->HandleHeightMultiplier);
+                TrackInteractiveMutation(undoService, "Edit UISlider Handle Height Multiplier");
+                ImGui::Checkbox("Show Handle##UISlider", &uiSlider->ShowHandle);
+                TrackInteractiveMutation(undoService, "Edit UISlider Show Handle");
                 std::array<char, 256> onValueChangedEventBuffer{};
                 std::snprintf(onValueChangedEventBuffer.data(), onValueChangedEventBuffer.size(), "%s", uiSlider->OnValueChangedEvent.c_str());
                 if (ImGui::InputText("On Value Changed Event", onValueChangedEventBuffer.data(), onValueChangedEventBuffer.size()))

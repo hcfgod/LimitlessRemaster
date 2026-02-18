@@ -9,7 +9,7 @@ The engine now supports runtime 2D text rendering via vendored `msdf-atlas-gen` 
 - A runtime `Font` object that loads a `.ttf` or `.otf` file.
 - MSDF atlas generation on load using vendored `msdf-atlas-gen`.
 - A dedicated `Renderer2D` text pass that batches glyph quads and renders with an MSDF shader.
-- A scene `TextComponent` with serialization, clone support, and scene rendering integration.
+- A scene `UITextComponent` with serialization, clone support, and scene rendering integration.
 
 ## New Runtime APIs
 
@@ -18,7 +18,7 @@ The engine now supports runtime 2D text rendering via vendored `msdf-atlas-gen` 
 
 ## Scene Component
 
-`TextComponent` fields:
+`UITextComponent` fields:
 
 - `Text`: text content
 - `FontFilePath`: path to a font file
@@ -27,7 +27,7 @@ The engine now supports runtime 2D text rendering via vendored `msdf-atlas-gen` 
 
 ## Usage Example
 
-1. Add `TextComponent` to an entity.
+1. Add `UITextComponent` to an entity (typically under a Canvas with RectTransform).
 2. Set `FontFilePath` to a valid `.ttf` file.
 3. Set `Text` and `FontSize`.
 4. Run the scene; the renderer will build an MSDF atlas the first time the font is used.
@@ -35,5 +35,5 @@ The engine now supports runtime 2D text rendering via vendored `msdf-atlas-gen` 
 ## Current Scope
 
 - Default runtime charset is printable ASCII plus newline/tab.
-- Fonts are generated at runtime and cached per `TextComponent` instance.
+- Fonts are generated at runtime and cached per `UITextComponent` instance.
 - Text currently renders in the text pass after sprite rendering.

@@ -146,7 +146,7 @@ TEST_SUITE("Scene And Editor Flows")
         material.MaterialKey = "Assets/Materials/Ui/Button.material.json";
         material.MaterialLoadAttempted = true; // runtime-only behavior should reset in clone
 
-        auto& text = registry.emplace<Limitless::TextComponent>(child);
+        auto& text = registry.emplace<Limitless::UITextComponent>(child);
         text.Text = "Play";
         text.FontFilePath = "Assets/Fonts/Inter-Regular.ttf";
         text.FontSize = 42.0f;
@@ -242,7 +242,7 @@ TEST_SUITE("Scene And Editor Flows")
         REQUIRE(cloneRegistry.all_of<Limitless::TransformComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::SpriteComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::MaterialComponent>(clonedChild));
-        REQUIRE(cloneRegistry.all_of<Limitless::TextComponent>(clonedChild));
+        REQUIRE(cloneRegistry.all_of<Limitless::UITextComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::AudioSourceComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::NativeScriptComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::DirectionalLight2DComponent>(clonedChild));
@@ -264,7 +264,7 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(clonedMaterial.MaterialKey == material.MaterialKey);
         CHECK(clonedMaterial.MaterialLoadAttempted == false);
 
-        const auto& clonedText = cloneRegistry.get<Limitless::TextComponent>(clonedChild);
+        const auto& clonedText = cloneRegistry.get<Limitless::UITextComponent>(clonedChild);
         CHECK(clonedText.Text == text.Text);
         CHECK(clonedText.FontFilePath == text.FontFilePath);
         CHECK(clonedText.FontSize == doctest::Approx(text.FontSize));
@@ -363,7 +363,7 @@ TEST_SUITE("Scene And Editor Flows")
         auto& rootTransform = registry.get<Limitless::TransformComponent>(root);
         rootTransform.Position = { 11.0f, 12.0f, 13.0f };
 
-        auto& text = registry.emplace<Limitless::TextComponent>(hud);
+        auto& text = registry.emplace<Limitless::UITextComponent>(hud);
         text.Text = "Score: 999";
         text.FontFilePath = "Assets/Fonts/ScoreFont.ttf";
         text.FontSize = 24.0f;
@@ -483,7 +483,7 @@ TEST_SUITE("Scene And Editor Flows")
 
         CHECK(loadedScene.GetParent(loadedHud) == loadedRoot);
 
-        const auto& loadedText = loadedRegistry.get<Limitless::TextComponent>(loadedHud);
+        const auto& loadedText = loadedRegistry.get<Limitless::UITextComponent>(loadedHud);
         CHECK(loadedText.Text == "Score: 999");
         CHECK(loadedText.FontFilePath == "Assets/Fonts/ScoreFont.ttf");
 
@@ -601,7 +601,7 @@ TEST_SUITE("Scene And Editor Flows")
         auto& sprite = registry.emplace<Limitless::SpriteComponent>(player);
         sprite.TextureKey = "Assets/Textures/Characters/Player.png";
 
-        auto& text = registry.emplace<Limitless::TextComponent>(player);
+        auto& text = registry.emplace<Limitless::UITextComponent>(player);
         text.Text = "Player";
 
         const std::filesystem::path scenePath = MakeTempScenePath("EditorEntityFlow.scene.json");
@@ -616,7 +616,7 @@ TEST_SUITE("Scene And Editor Flows")
         const auto& loadedRegistry = loadedScene.GetRegistry();
         const entt::entity loadedPlayer = FindEntityByTag(loadedScene, "Player");
         REQUIRE_FALSE(IsNullEntity(loadedPlayer));
-        REQUIRE(loadedRegistry.all_of<Limitless::SpriteComponent, Limitless::TextComponent>(loadedPlayer));
+        REQUIRE(loadedRegistry.all_of<Limitless::SpriteComponent, Limitless::UITextComponent>(loadedPlayer));
 
         const auto& loadedTransform = loadedRegistry.get<Limitless::TransformComponent>(loadedPlayer);
         CHECK(loadedTransform.Position.x == doctest::Approx(1.0f));
@@ -626,7 +626,7 @@ TEST_SUITE("Scene And Editor Flows")
         const auto& loadedSprite = loadedRegistry.get<Limitless::SpriteComponent>(loadedPlayer);
         CHECK(loadedSprite.TextureKey == "Assets/Textures/Characters/Player.png");
 
-        const auto& loadedText = loadedRegistry.get<Limitless::TextComponent>(loadedPlayer);
+        const auto& loadedText = loadedRegistry.get<Limitless::UITextComponent>(loadedPlayer);
         CHECK(loadedText.Text == "Player");
 
         std::error_code errorCode;

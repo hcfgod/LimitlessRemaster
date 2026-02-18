@@ -1888,7 +1888,6 @@ namespace Limitless::EditorInspectorPanel
                 const bool hasCameraComponent = registry.all_of<CameraComponent>(selectedEntity);
                 const bool hasAudioListener2DComponent = registry.all_of<AudioListener2DComponent>(selectedEntity);
                 const bool hasAudioSourceComponent = registry.all_of<AudioSourceComponent>(selectedEntity);
-                const bool hasTextComponent = registry.all_of<TextComponent>(selectedEntity);
                 const bool hasNativeScriptComponent = registry.all_of<NativeScriptComponent>(selectedEntity);
                 const bool hasAnimatorComponent = registry.all_of<AnimatorComponent>(selectedEntity);
                 const bool hasAnimationEventReceiverComponent = registry.all_of<AnimationEventReceiverComponent>(selectedEntity);
@@ -1915,11 +1914,17 @@ namespace Limitless::EditorInspectorPanel
                 {
                     if (undoService)
                         (void)undoService->ExecuteSceneMutation("Add Canvas Component", [&](Scene& mutableScene) {
-                            mutableScene.GetRegistry().emplace<CanvasComponent>(selectedEntity);
+                            auto& mutableRegistry = mutableScene.GetRegistry();
+                            mutableRegistry.emplace<CanvasComponent>(selectedEntity);
+                            if (!mutableRegistry.all_of<RectTransformComponent>(selectedEntity))
+                                mutableRegistry.emplace<RectTransformComponent>(selectedEntity);
                             return true;
                         });
-                    else
+                    else {
                         registry.emplace<CanvasComponent>(selectedEntity);
+                        if (!registry.all_of<RectTransformComponent>(selectedEntity))
+                            registry.emplace<RectTransformComponent>(selectedEntity);
+                    }
                 }
 
                 if (hasCanvasComponent)
@@ -1949,11 +1954,21 @@ namespace Limitless::EditorInspectorPanel
                 {
                     if (undoService)
                         (void)undoService->ExecuteSceneMutation("Add UIImage Component", [&](Scene& mutableScene) {
-                            mutableScene.GetRegistry().emplace<UIImageComponent>(selectedEntity);
+                            auto& mutableRegistry = mutableScene.GetRegistry();
+                            mutableRegistry.emplace<UIImageComponent>(selectedEntity);
+                            if (!mutableRegistry.all_of<RectTransformComponent>(selectedEntity))
+                                mutableRegistry.emplace<RectTransformComponent>(selectedEntity);
+                            if (!mutableRegistry.all_of<SpriteComponent>(selectedEntity))
+                                mutableRegistry.emplace<SpriteComponent>(selectedEntity);
                             return true;
                         });
-                    else
+                    else {
                         registry.emplace<UIImageComponent>(selectedEntity);
+                        if (!registry.all_of<RectTransformComponent>(selectedEntity))
+                            registry.emplace<RectTransformComponent>(selectedEntity);
+                        if (!registry.all_of<SpriteComponent>(selectedEntity))
+                            registry.emplace<SpriteComponent>(selectedEntity);
+                    }
                 }
 
                 if (hasUIImageComponent)
@@ -1966,11 +1981,20 @@ namespace Limitless::EditorInspectorPanel
                 {
                     if (undoService)
                         (void)undoService->ExecuteSceneMutation("Add UIText Component", [&](Scene& mutableScene) {
-                            mutableScene.GetRegistry().emplace<UITextComponent>(selectedEntity);
+                            auto& mutableRegistry = mutableScene.GetRegistry();
+                            auto& uiText = mutableRegistry.emplace<UITextComponent>(selectedEntity);
+                            uiText.FontFilePath = "Assets/Fonts/Default.ttf";
+                            if (!mutableRegistry.all_of<RectTransformComponent>(selectedEntity))
+                                mutableRegistry.emplace<RectTransformComponent>(selectedEntity);
                             return true;
                         });
                     else
-                        registry.emplace<UITextComponent>(selectedEntity);
+                    {
+                        auto& uiText = registry.emplace<UITextComponent>(selectedEntity);
+                        uiText.FontFilePath = "Assets/Fonts/Default.ttf";
+                        if (!registry.all_of<RectTransformComponent>(selectedEntity))
+                            registry.emplace<RectTransformComponent>(selectedEntity);
+                    }
                 }
 
                 if (hasUITextComponent)
@@ -1983,11 +2007,45 @@ namespace Limitless::EditorInspectorPanel
                 {
                     if (undoService)
                         (void)undoService->ExecuteSceneMutation("Add UIButton Component", [&](Scene& mutableScene) {
-                            mutableScene.GetRegistry().emplace<UIButtonComponent>(selectedEntity);
+                            auto& mutableRegistry = mutableScene.GetRegistry();
+                            auto& button = mutableRegistry.emplace<UIButtonComponent>(selectedEntity);
+                            if (!mutableRegistry.all_of<UIImageComponent>(selectedEntity))
+                                mutableRegistry.emplace<UIImageComponent>(selectedEntity);
+                            if (!mutableRegistry.all_of<RectTransformComponent>(selectedEntity))
+                                mutableRegistry.emplace<RectTransformComponent>(selectedEntity);
+                            if (!mutableRegistry.all_of<SpriteComponent>(selectedEntity))
+                            {
+                                auto& sprite = mutableRegistry.emplace<SpriteComponent>(selectedEntity);
+                                sprite.Color = glm::vec4(0.82f, 0.82f, 0.82f, 1.0f);
+                            }
+                            if (auto* sprite = mutableRegistry.try_get<SpriteComponent>(selectedEntity))
+                            {
+                                button.NormalColor = sprite->Color;
+                                button.HoveredColor = glm::clamp(sprite->Color * glm::vec4(1.12f, 1.12f, 1.12f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
+                                button.PressedColor = glm::clamp(sprite->Color * glm::vec4(0.85f, 0.85f, 0.85f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
+                                button.DisabledColor = glm::clamp(sprite->Color * glm::vec4(0.55f, 0.55f, 0.55f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
+                            }
                             return true;
                         });
-                    else
-                        registry.emplace<UIButtonComponent>(selectedEntity);
+                    else {
+                        auto& button = registry.emplace<UIButtonComponent>(selectedEntity);
+                        if (!registry.all_of<UIImageComponent>(selectedEntity))
+                            registry.emplace<UIImageComponent>(selectedEntity);
+                        if (!registry.all_of<RectTransformComponent>(selectedEntity))
+                            registry.emplace<RectTransformComponent>(selectedEntity);
+                        if (!registry.all_of<SpriteComponent>(selectedEntity))
+                        {
+                            auto& sprite = registry.emplace<SpriteComponent>(selectedEntity);
+                            sprite.Color = glm::vec4(0.82f, 0.82f, 0.82f, 1.0f);
+                        }
+                        if (auto* sprite = registry.try_get<SpriteComponent>(selectedEntity))
+                        {
+                            button.NormalColor = sprite->Color;
+                            button.HoveredColor = glm::clamp(sprite->Color * glm::vec4(1.12f, 1.12f, 1.12f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
+                            button.PressedColor = glm::clamp(sprite->Color * glm::vec4(0.85f, 0.85f, 0.85f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
+                            button.DisabledColor = glm::clamp(sprite->Color * glm::vec4(0.55f, 0.55f, 0.55f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
+                        }
+                    }
                 }
 
                 if (hasUIButtonComponent)
@@ -2000,11 +2058,177 @@ namespace Limitless::EditorInspectorPanel
                 {
                     if (undoService)
                         (void)undoService->ExecuteSceneMutation("Add UISlider Component", [&](Scene& mutableScene) {
-                            mutableScene.GetRegistry().emplace<UISliderComponent>(selectedEntity);
+                            auto& mutableRegistry = mutableScene.GetRegistry();
+                            auto& slider = mutableRegistry.emplace<UISliderComponent>(selectedEntity);
+                            slider.Value = std::clamp(0.5f, slider.MinValue, std::max(slider.MinValue, slider.MaxValue));
+                            if (!mutableRegistry.all_of<UIImageComponent>(selectedEntity))
+                                mutableRegistry.emplace<UIImageComponent>(selectedEntity);
+                            if (!mutableRegistry.all_of<RectTransformComponent>(selectedEntity))
+                                mutableRegistry.emplace<RectTransformComponent>(selectedEntity);
+                            if (!mutableRegistry.all_of<SpriteComponent>(selectedEntity))
+                            {
+                                auto& sprite = mutableRegistry.emplace<SpriteComponent>(selectedEntity);
+                                sprite.Color = glm::vec4(0.22f, 0.22f, 0.22f, 1.0f);
+                            }
+                            if (auto* sprite = mutableRegistry.try_get<SpriteComponent>(selectedEntity))
+                                slider.BackgroundColor = sprite->Color;
+
+                            const float sliderRange = std::max(0.0001f, slider.MaxValue - slider.MinValue);
+                            const float sliderNormalized = std::clamp((slider.Value - slider.MinValue) / sliderRange, 0.0f, 1.0f);
+                            auto ensureSliderVisualChild = [&](const char* childName,
+                                                               const glm::vec4& defaultColor,
+                                                               int32_t siblingOrder,
+                                                               auto&& initializeRectTransform) {
+                                entt::entity childEntity = entt::null;
+                                auto childView = mutableRegistry.view<TagComponent, HierarchyComponent>();
+                                for (entt::entity candidate : childView)
+                                {
+                                    const auto& hierarchy = childView.get<HierarchyComponent>(candidate);
+                                    if (hierarchy.Parent != selectedEntity)
+                                        continue;
+                                    const auto& tag = childView.get<TagComponent>(candidate);
+                                    if (tag.Tag == childName)
+                                    {
+                                        childEntity = candidate;
+                                        break;
+                                    }
+                                }
+
+                                bool created = false;
+                                if (childEntity == entt::null)
+                                {
+                                    childEntity = mutableScene.CreateEntity(childName);
+                                    mutableScene.SetParent(childEntity, selectedEntity);
+                                    created = true;
+                                }
+
+                                if (auto* hierarchy = mutableRegistry.try_get<HierarchyComponent>(childEntity))
+                                    hierarchy->SiblingOrder = siblingOrder;
+                                if (!mutableRegistry.all_of<RectTransformComponent>(childEntity))
+                                    mutableRegistry.emplace<RectTransformComponent>(childEntity);
+                                if (!mutableRegistry.all_of<UIImageComponent>(childEntity))
+                                    mutableRegistry.emplace<UIImageComponent>(childEntity);
+                                if (!mutableRegistry.all_of<SpriteComponent>(childEntity))
+                                {
+                                    auto& childSprite = mutableRegistry.emplace<SpriteComponent>(childEntity);
+                                    childSprite.Color = defaultColor;
+                                }
+
+                                if (created)
+                                {
+                                    auto& rect = mutableRegistry.get<RectTransformComponent>(childEntity);
+                                    initializeRectTransform(rect);
+                                }
+                            };
+
+                            ensureSliderVisualChild("Slider Background", slider.BackgroundColor, 0, [](RectTransformComponent& rect) {
+                                rect.AnchorMin = glm::vec2(0.0f, 0.0f);
+                                rect.AnchorMax = glm::vec2(1.0f, 1.0f);
+                                rect.Pivot = glm::vec2(0.5f, 0.5f);
+                                rect.SizeDelta = glm::vec2(0.0f, 0.0f);
+                                rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
+                            });
+                            ensureSliderVisualChild("Slider Fill", slider.FillColor, 10, [sliderNormalized](RectTransformComponent& rect) {
+                                rect.AnchorMin = glm::vec2(0.0f, 0.0f);
+                                rect.AnchorMax = glm::vec2(sliderNormalized, 1.0f);
+                                rect.Pivot = glm::vec2(0.5f, 0.5f);
+                                rect.SizeDelta = glm::vec2(0.0f, 0.0f);
+                                rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
+                            });
+                            ensureSliderVisualChild("Slider Handle", slider.HandleColor, 20, [sliderNormalized](RectTransformComponent& rect) {
+                                rect.AnchorMin = glm::vec2(sliderNormalized, 0.5f);
+                                rect.AnchorMax = glm::vec2(sliderNormalized, 0.5f);
+                                rect.Pivot = glm::vec2(0.5f, 0.5f);
+                                rect.SizeDelta = glm::vec2(16.0f, 48.0f);
+                                rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
+                            });
                             return true;
                         });
-                    else
-                        registry.emplace<UISliderComponent>(selectedEntity);
+                    else {
+                        auto& slider = registry.emplace<UISliderComponent>(selectedEntity);
+                        slider.Value = std::clamp(0.5f, slider.MinValue, std::max(slider.MinValue, slider.MaxValue));
+                        if (!registry.all_of<UIImageComponent>(selectedEntity))
+                            registry.emplace<UIImageComponent>(selectedEntity);
+                        if (!registry.all_of<RectTransformComponent>(selectedEntity))
+                            registry.emplace<RectTransformComponent>(selectedEntity);
+                        if (!registry.all_of<SpriteComponent>(selectedEntity))
+                        {
+                            auto& sprite = registry.emplace<SpriteComponent>(selectedEntity);
+                            sprite.Color = glm::vec4(0.22f, 0.22f, 0.22f, 1.0f);
+                        }
+                        if (auto* sprite = registry.try_get<SpriteComponent>(selectedEntity))
+                            slider.BackgroundColor = sprite->Color;
+
+                        const float sliderRange = std::max(0.0001f, slider.MaxValue - slider.MinValue);
+                        const float sliderNormalized = std::clamp((slider.Value - slider.MinValue) / sliderRange, 0.0f, 1.0f);
+                        auto ensureSliderVisualChild = [&](const char* childName,
+                                                           const glm::vec4& defaultColor,
+                                                           int32_t siblingOrder,
+                                                           auto&& initializeRectTransform) {
+                            entt::entity childEntity = entt::null;
+                            auto childView = registry.view<TagComponent, HierarchyComponent>();
+                            for (entt::entity candidate : childView)
+                            {
+                                const auto& hierarchy = childView.get<HierarchyComponent>(candidate);
+                                if (hierarchy.Parent != selectedEntity)
+                                    continue;
+                                const auto& tag = childView.get<TagComponent>(candidate);
+                                if (tag.Tag == childName)
+                                {
+                                    childEntity = candidate;
+                                    break;
+                                }
+                            }
+
+                            bool created = false;
+                            if (childEntity == entt::null)
+                            {
+                                childEntity = scene->CreateEntity(childName);
+                                scene->SetParent(childEntity, selectedEntity);
+                                created = true;
+                            }
+
+                            if (auto* hierarchy = registry.try_get<HierarchyComponent>(childEntity))
+                                hierarchy->SiblingOrder = siblingOrder;
+                            if (!registry.all_of<RectTransformComponent>(childEntity))
+                                registry.emplace<RectTransformComponent>(childEntity);
+                            if (!registry.all_of<UIImageComponent>(childEntity))
+                                registry.emplace<UIImageComponent>(childEntity);
+                            if (!registry.all_of<SpriteComponent>(childEntity))
+                            {
+                                auto& childSprite = registry.emplace<SpriteComponent>(childEntity);
+                                childSprite.Color = defaultColor;
+                            }
+
+                            if (created)
+                            {
+                                auto& rect = registry.get<RectTransformComponent>(childEntity);
+                                initializeRectTransform(rect);
+                            }
+                        };
+
+                        ensureSliderVisualChild("Slider Background", slider.BackgroundColor, 0, [](RectTransformComponent& rect) {
+                            rect.AnchorMin = glm::vec2(0.0f, 0.0f);
+                            rect.AnchorMax = glm::vec2(1.0f, 1.0f);
+                            rect.Pivot = glm::vec2(0.5f, 0.5f);
+                            rect.SizeDelta = glm::vec2(0.0f, 0.0f);
+                            rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
+                        });
+                        ensureSliderVisualChild("Slider Fill", slider.FillColor, 10, [sliderNormalized](RectTransformComponent& rect) {
+                            rect.AnchorMin = glm::vec2(0.0f, 0.0f);
+                            rect.AnchorMax = glm::vec2(sliderNormalized, 1.0f);
+                            rect.Pivot = glm::vec2(0.5f, 0.5f);
+                            rect.SizeDelta = glm::vec2(0.0f, 0.0f);
+                            rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
+                        });
+                        ensureSliderVisualChild("Slider Handle", slider.HandleColor, 20, [sliderNormalized](RectTransformComponent& rect) {
+                            rect.AnchorMin = glm::vec2(sliderNormalized, 0.5f);
+                            rect.AnchorMax = glm::vec2(sliderNormalized, 0.5f);
+                            rect.Pivot = glm::vec2(0.5f, 0.5f);
+                            rect.SizeDelta = glm::vec2(16.0f, 48.0f);
+                            rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
+                        });
+                    }
                 }
 
                 if (hasUISliderComponent)
@@ -2085,27 +2309,6 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 if (hasAudioSourceComponent)
-                    ImGui::EndDisabled();
-
-                if (hasTextComponent)
-                    ImGui::BeginDisabled();
-
-                if (ImGui::MenuItem("Text Component"))
-                {
-                    if (undoService)
-                        (void)undoService->ExecuteSceneMutation("Add Text Component", [&](Scene& mutableScene) {
-                            auto& text = mutableScene.GetRegistry().emplace<TextComponent>(selectedEntity);
-                            text.FontFilePath = "Assets/Fonts/Default.ttf";
-                            return true;
-                        });
-                    else
-                    {
-                        auto& text = registry.emplace<TextComponent>(selectedEntity);
-                        text.FontFilePath = "Assets/Fonts/Default.ttf";
-                    }
-                }
-
-                if (hasTextComponent)
                     ImGui::EndDisabled();
 
                 if (hasNativeScriptComponent)
@@ -2500,21 +2703,6 @@ namespace Limitless::EditorInspectorPanel
                 else
                 {
                     registry.remove<AudioSourceComponent>(selectedEntity);
-                }
-            }
-
-            if (pendingRemovals.RemoveTextComponent)
-            {
-                if (undoService)
-                {
-                    (void)undoService->ExecuteSceneMutation("Remove Text Component", [&](Scene& mutableScene) {
-                        mutableScene.GetRegistry().remove<TextComponent>(selectedEntity);
-                        return true;
-                    });
-                }
-                else
-                {
-                    registry.remove<TextComponent>(selectedEntity);
                 }
             }
 

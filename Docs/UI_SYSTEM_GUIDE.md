@@ -17,11 +17,11 @@ Minimum UI component set currently available:
 - `UIButtonComponent`
 - `UISliderComponent`
 
-These components are authoring and scripting hooks and are intended to be composed with:
+These components are intended to be composed with:
 
 - `RectTransformComponent`
 - `SpriteComponent` (for images)
-- `TextComponent` (for text)
+- `UITextComponent` (for text payload and styling)
 
 ## Rendering Model
 
@@ -39,18 +39,40 @@ These components are authoring and scripting hooks and are intended to be compos
 
 ## Important Behavior Change
 
-`TextComponent` no longer owns screen/world render mode or screen-anchor settings.
-UI placement is now exclusively driven by `CanvasComponent` + `RectTransformComponent`.
+UI text is now authored through `UITextComponent` only.
+UI placement is exclusively driven by `CanvasComponent` + `RectTransformComponent`.
 
 ## Recommended Authoring Pattern
 
 1. Add `CanvasComponent` on a root entity.
 2. Add `RectTransformComponent` on each child UI entity.
 3. Add `SpriteComponent` + `UIImageComponent` for image elements.
-4. Add `TextComponent` + `UITextComponent` for text elements.
+4. Add `UITextComponent` for text elements.
 5. Add `UIButtonComponent` or `UISliderComponent` for interaction/state metadata.
+
+Button and slider visuals now follow Unity-style defaults:
+
+- `UIButtonComponent` exposes state color fields (`NormalColor`, `HoveredColor`, `PressedColor`, `DisabledColor`)
+  and `UseStateColors` to tint based on runtime interaction state.
+- `UISliderComponent` uses dedicated child entities by default:
+  - `Slider Background`
+  - `Slider Fill`
+  - `Slider Handle`
+
+Each child can have its own `SpriteComponent`/texture assignment for Unity-like customization.
+`Slider Fill` and `Slider Handle` are auto-driven from slider value at runtime.
+
+When adding UI components from the inspector (`Canvas`, `UI Image`, `UI Text`, `UI Button`, `UI Slider`),
+the editor automatically ensures a `RectTransformComponent` exists on the target entity.
 
 ## Current Scope
 
-This phase establishes the core data model, serialization, inspector integration, and rendering pass separation.
-Advanced layout groups, automatic event routing, and full runtime UI input dispatch are intended for future iterations.
+This phase establishes the core data model, serialization, inspector integration, rendering pass separation,
+and runtime pointer interaction for screen-space UI (`UIButtonComponent` hover/press/click and `UISliderComponent` drag/value updates).
+
+Interaction state is exposed on the components through runtime flags:
+
+- `UIButtonComponent`: `RuntimeHoverEnteredThisFrame`, `RuntimeHoverExitedThisFrame`, `RuntimePressedThisFrame`, `RuntimeClickedThisFrame`
+- `UISliderComponent`: `RuntimeDragging`, `RuntimeValueChangedThisFrame`
+
+These flags are transient gameplay state and are reset as part of runtime update/clone/load safety paths.

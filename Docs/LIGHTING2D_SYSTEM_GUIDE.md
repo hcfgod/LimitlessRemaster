@@ -13,8 +13,8 @@ It is fully integrated with ECS, scene save/load, scene clone, editor undo/redo,
 ## Supported Targets
 
 - World sprites (`SpriteComponent`) using lit materials
-- World-space text (`TextComponent` in world space)
-- Screen-space text remains a post pass and is not part of world lighting
+- World-space text is not currently supported in the UI-only text pipeline
+- Canvas UI text (`UITextComponent`) renders in the UI pass after world lighting
 
 ## Rendering Path
 
@@ -140,6 +140,6 @@ For cleaner contact edges and fewer leaks:
 - Add each lighting component and verify undo/redo in Inspector
 - Drag each lighting gizmo and verify undo/redo in viewport
 - Save, reload, and confirm light/occluder data round-trips
-- Verify world-space text receives world lighting
+- Verify UI text overlays render correctly over lit world content
 - Validate fallback path by disabling `Enabled` in project settings
 - Check diagnostics while scaling lights and occluder complexity

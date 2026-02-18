@@ -254,8 +254,14 @@ namespace Limitless
         }
     };
 
-    /// Renders runtime text using an MSDF atlas generated from the font file path.
-    struct TextComponent
+    /// Marks a SpriteComponent as a UI image for UI-specific tooling and scripts.
+    struct UIImageComponent
+    {
+        bool RaycastTarget = true;
+    };
+
+    /// Runtime UI text payload and interaction metadata for Canvas-based UI.
+    struct UITextComponent
     {
         std::string Text = "Text";
         std::string FontFilePath; ///< Relative or absolute font file path.
@@ -263,17 +269,6 @@ namespace Limitless
         bool FontLoadAttempted = false;
         float FontSize = 32.0f;
         glm::vec4 Color = glm::vec4(1.0f);
-    };
-
-    /// Marks a SpriteComponent as a UI image for UI-specific tooling and scripts.
-    struct UIImageComponent
-    {
-        bool RaycastTarget = true;
-    };
-
-    /// Marks a TextComponent as UI text for UI-specific tooling and scripts.
-    struct UITextComponent
-    {
         bool RaycastTarget = false;
     };
 
@@ -281,8 +276,17 @@ namespace Limitless
     struct UIButtonComponent
     {
         bool Interactable = true;
+        bool UseStateColors = true;
+        glm::vec4 NormalColor = glm::vec4(0.82f, 0.82f, 0.82f, 1.0f);
+        glm::vec4 HoveredColor = glm::vec4(0.92f, 0.92f, 0.92f, 1.0f);
+        glm::vec4 PressedColor = glm::vec4(0.72f, 0.72f, 0.72f, 1.0f);
+        glm::vec4 DisabledColor = glm::vec4(0.45f, 0.45f, 0.45f, 1.0f);
         bool IsHovered = false;
         bool IsPressed = false;
+        bool RuntimeHoverEnteredThisFrame = false;
+        bool RuntimeHoverExitedThisFrame = false;
+        bool RuntimePressedThisFrame = false;
+        bool RuntimeClickedThisFrame = false;
 
         // Event names are consumed by scripting bridges.
         std::string OnClickEvent;
@@ -298,6 +302,14 @@ namespace Limitless
         float MinValue = 0.0f;
         float MaxValue = 1.0f;
         float Value = 0.0f;
+        glm::vec4 BackgroundColor = glm::vec4(0.22f, 0.22f, 0.22f, 1.0f);
+        glm::vec4 FillColor = glm::vec4(0.22f, 0.72f, 1.0f, 0.95f);
+        glm::vec4 HandleColor = glm::vec4(0.92f, 0.92f, 0.92f, 1.0f);
+        float HandleWidth = 16.0f;
+        float HandleHeightMultiplier = 1.25f;
+        bool ShowHandle = true;
+        bool RuntimeDragging = false;
+        bool RuntimeValueChangedThisFrame = false;
         std::string OnValueChangedEvent;
     };
 
