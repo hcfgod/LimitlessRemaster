@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -180,16 +181,41 @@ namespace Limitless
         entt::entity FindDirectChildByTag(const entt::registry& registry, entt::entity parent, std::string_view childTag)
         {
             auto childView = registry.view<HierarchyComponent, TagComponent>();
+            entt::entity bestChild = entt::null;
+            int32_t bestScore = std::numeric_limits<int32_t>::min();
+            int32_t bestSiblingOrder = std::numeric_limits<int32_t>::min();
             for (entt::entity child : childView)
             {
                 const auto& hierarchy = childView.get<HierarchyComponent>(child);
                 if (hierarchy.Parent != parent)
                     continue;
                 const auto& tag = childView.get<TagComponent>(child);
-                if (tag.Tag == childTag)
-                    return child;
+                if (tag.Tag != childTag)
+                    continue;
+
+                // Prefer authored/customized children over generated defaults.
+                int32_t score = 0;
+                if (registry.all_of<RectTransformComponent>(child))
+                    score += 20;
+                if (registry.all_of<UIImageComponent>(child))
+                    score += 20;
+                if (const auto* sprite = registry.try_get<SpriteComponent>(child))
+                {
+                    score += 20;
+                    if (!sprite->TextureKey.empty())
+                        score += 100;
+                    if (sprite->Color != glm::vec4(1.0f))
+                        score += 10;
+                }
+
+                if (score > bestScore || (score == bestScore && hierarchy.SiblingOrder > bestSiblingOrder))
+                {
+                    bestChild = child;
+                    bestScore = score;
+                    bestSiblingOrder = hierarchy.SiblingOrder;
+                }
             }
-            return entt::null;
+            return bestChild;
         }
 
         void SyncSliderVisualChildren(entt::registry& registry, entt::entity sliderEntity, const UISliderComponent& slider)
@@ -2895,67 +2921,6 @@ namespace Limitless
                 uiSlider.RuntimeValueChangedThisFrame = false;
             }
 
-            if (scene->GetRegistry().all_of<UISliderComponent>(entity))
-            {
-                auto& uiSlider = scene->GetRegistry().get<UISliderComponent>(entity);
-                const float sliderRange = std::max(0.0001f, uiSlider.MaxValue - uiSlider.MinValue);
-                const float sliderNormalized = std::clamp((uiSlider.Value - uiSlider.MinValue) / sliderRange, 0.0f, 1.0f);
-
-                auto ensureSliderVisualChild = [&](const char* childName,
-                                                   const glm::vec4& defaultColor,
-                                                   int32_t siblingOrder,
-                                                   auto&& initializeRectTransform) {
-                    entt::entity childEntity = FindDirectChildByTag(scene->GetRegistry(), entity, childName);
-                    bool created = false;
-                    if (childEntity == entt::null)
-                    {
-                        childEntity = scene->CreateEntity(childName);
-                        scene->SetParent(childEntity, entity);
-                        created = true;
-                    }
-
-                    if (auto* hierarchy = scene->GetRegistry().try_get<HierarchyComponent>(childEntity))
-                        hierarchy->SiblingOrder = siblingOrder;
-                    if (!scene->GetRegistry().all_of<RectTransformComponent>(childEntity))
-                        scene->GetRegistry().emplace<RectTransformComponent>(childEntity);
-                    if (!scene->GetRegistry().all_of<UIImageComponent>(childEntity))
-                        scene->GetRegistry().emplace<UIImageComponent>(childEntity);
-                    if (!scene->GetRegistry().all_of<SpriteComponent>(childEntity))
-                    {
-                        auto& childSprite = scene->GetRegistry().emplace<SpriteComponent>(childEntity);
-                        childSprite.Color = defaultColor;
-                    }
-
-                    if (created)
-                    {
-                        auto& rect = scene->GetRegistry().get<RectTransformComponent>(childEntity);
-                        initializeRectTransform(rect);
-                    }
-                };
-
-                ensureSliderVisualChild("Slider Background", uiSlider.BackgroundColor, 0, [](RectTransformComponent& rect) {
-                    rect.AnchorMin = glm::vec2(0.0f, 0.0f);
-                    rect.AnchorMax = glm::vec2(1.0f, 1.0f);
-                    rect.Pivot = glm::vec2(0.5f, 0.5f);
-                    rect.SizeDelta = glm::vec2(0.0f, 0.0f);
-                    rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
-                });
-                ensureSliderVisualChild("Slider Fill", uiSlider.FillColor, 10, [sliderNormalized](RectTransformComponent& rect) {
-                    rect.AnchorMin = glm::vec2(0.0f, 0.0f);
-                    rect.AnchorMax = glm::vec2(sliderNormalized, 1.0f);
-                    rect.Pivot = glm::vec2(0.5f, 0.5f);
-                    rect.SizeDelta = glm::vec2(0.0f, 0.0f);
-                    rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
-                });
-                ensureSliderVisualChild("Slider Handle", uiSlider.HandleColor, 20, [sliderNormalized](RectTransformComponent& rect) {
-                    rect.AnchorMin = glm::vec2(sliderNormalized, 0.5f);
-                    rect.AnchorMax = glm::vec2(sliderNormalized, 0.5f);
-                    rect.Pivot = glm::vec2(0.5f, 0.5f);
-                    rect.SizeDelta = glm::vec2(16.0f, 48.0f);
-                    rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
-                });
-            }
-
             // UI compatibility migration: keep legacy scenes interactive by ensuring
             // required render/layout components exist for button/slider entities.
             if (scene->GetRegistry().all_of<UIButtonComponent>(entity))
@@ -2970,8 +2935,6 @@ namespace Limitless
             {
                 if (!scene->GetRegistry().all_of<RectTransformComponent>(entity))
                     scene->GetRegistry().emplace<RectTransformComponent>(entity);
-                if (!scene->GetRegistry().all_of<SpriteComponent>(entity))
-                    scene->GetRegistry().emplace<SpriteComponent>(entity);
             }
 
             if (entry.contains("Tilemap") && entry["Tilemap"].is_object())
@@ -3315,12 +3278,82 @@ namespace Limitless
             }
         }
 
+        // Post-load UI slider migration:
+        // Run after hierarchy restoration so direct-child lookups are stable and
+        // we do not create duplicate visual children while entities are still loading.
+        auto ensureSliderVisualChild = [&](entt::entity sliderEntity,
+                                           const char* childName,
+                                           const glm::vec4& defaultColor,
+                                           int32_t siblingOrder,
+                                           auto&& initializeRectTransform) {
+            entt::entity childEntity = FindDirectChildByTag(registry, sliderEntity, childName);
+            bool created = false;
+            if (childEntity == entt::null)
+            {
+                childEntity = scene->CreateEntity(childName);
+                scene->SetParent(childEntity, sliderEntity);
+                created = true;
+            }
+
+            if (created)
+            {
+                if (auto* hierarchy = registry.try_get<HierarchyComponent>(childEntity))
+                    hierarchy->SiblingOrder = siblingOrder;
+            }
+
+            if (!registry.all_of<RectTransformComponent>(childEntity))
+                registry.emplace<RectTransformComponent>(childEntity);
+            if (!registry.all_of<UIImageComponent>(childEntity))
+                registry.emplace<UIImageComponent>(childEntity);
+            if (!registry.all_of<SpriteComponent>(childEntity))
+            {
+                auto& childSprite = registry.emplace<SpriteComponent>(childEntity);
+                childSprite.Color = defaultColor;
+            }
+
+            if (created)
+            {
+                auto& rect = registry.get<RectTransformComponent>(childEntity);
+                initializeRectTransform(rect);
+            }
+        };
+
+        auto sliderView = registry.view<UISliderComponent>();
+        for (entt::entity sliderEntity : sliderView)
+        {
+            const auto& slider = sliderView.get<UISliderComponent>(sliderEntity);
+            const float sliderRange = std::max(0.0001f, slider.MaxValue - slider.MinValue);
+            const float sliderNormalized = std::clamp((slider.Value - slider.MinValue) / sliderRange, 0.0f, 1.0f);
+
+            ensureSliderVisualChild(sliderEntity, "Slider Background", slider.BackgroundColor, 0, [](RectTransformComponent& rect) {
+                rect.AnchorMin = glm::vec2(0.0f, 0.0f);
+                rect.AnchorMax = glm::vec2(1.0f, 1.0f);
+                rect.Pivot = glm::vec2(0.5f, 0.5f);
+                rect.SizeDelta = glm::vec2(0.0f, 0.0f);
+                rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
+            });
+            ensureSliderVisualChild(sliderEntity, "Slider Fill", slider.FillColor, 10, [sliderNormalized](RectTransformComponent& rect) {
+                rect.AnchorMin = glm::vec2(0.0f, 0.0f);
+                rect.AnchorMax = glm::vec2(sliderNormalized, 1.0f);
+                rect.Pivot = glm::vec2(0.5f, 0.5f);
+                rect.SizeDelta = glm::vec2(0.0f, 0.0f);
+                rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
+            });
+            ensureSliderVisualChild(sliderEntity, "Slider Handle", slider.HandleColor, 20, [sliderNormalized](RectTransformComponent& rect) {
+                rect.AnchorMin = glm::vec2(sliderNormalized, 0.5f);
+                rect.AnchorMax = glm::vec2(sliderNormalized, 0.5f);
+                rect.Pivot = glm::vec2(0.5f, 0.5f);
+                rect.SizeDelta = glm::vec2(16.0f, 48.0f);
+                rect.AnchoredPosition = glm::vec2(0.0f, 0.0f);
+            });
+        }
+
         return Result<std::unique_ptr<Scene>>(std::move(scene));
     }
 
     void SceneRenderer::Render(Scene& scene, const Camera& camera)
     {
-        Renderer2D::BeginScene(camera);
+        Renderer2D::BeginScene(camera.GetViewProjectionMatrix(), false);
         const float fixedDelta = Time::GetFixedDeltaTimeSeconds();
         const float interpolationAlpha = (fixedDelta > 0.0f)
             ? std::clamp(Time::GetFixedTimeAccumulatorSeconds() / fixedDelta, 0.0f, 1.0f)
@@ -3338,13 +3371,17 @@ namespace Limitless
             for (entt::entity entity : tilemapViewRender)
                 tilemapRenderEntities.push_back(entity);
 
-            std::sort(tilemapRenderEntities.begin(), tilemapRenderEntities.end(), [&scene, &registry, interpolationAlpha](entt::entity left, entt::entity right) {
+            const glm::mat4 cameraViewMatrix = camera.GetViewMatrix();
+            std::sort(tilemapRenderEntities.begin(), tilemapRenderEntities.end(), [&scene, &registry, interpolationAlpha, &cameraViewMatrix](entt::entity left, entt::entity right) {
                 const glm::mat4 leftWorld = scene.GetWorldTransformMatrixForRendering(left, interpolationAlpha);
                 const glm::mat4 rightWorld = scene.GetWorldTransformMatrixForRendering(right, interpolationAlpha);
-                const float leftZ = leftWorld[3].z;
-                const float rightZ = rightWorld[3].z;
-                if (leftZ != rightZ)
-                    return leftZ < rightZ;
+                const glm::vec4 leftViewPosition = cameraViewMatrix * glm::vec4(leftWorld[3][0], leftWorld[3][1], leftWorld[3][2], 1.0f);
+                const glm::vec4 rightViewPosition = cameraViewMatrix * glm::vec4(rightWorld[3][0], rightWorld[3][1], rightWorld[3][2], 1.0f);
+                const float leftViewDepth = leftViewPosition.z;
+                const float rightViewDepth = rightViewPosition.z;
+                constexpr float kDepthSortEpsilon = 0.005f;
+                if (std::abs(leftViewDepth - rightViewDepth) > kDepthSortEpsilon)
+                    return leftViewDepth < rightViewDepth;
 
                 const auto* leftHierarchy = registry.try_get<HierarchyComponent>(left);
                 const auto* rightHierarchy = registry.try_get<HierarchyComponent>(right);
@@ -3490,13 +3527,17 @@ namespace Limitless
         for (entt::entity entity : view)
             renderEntities.push_back(entity);
 
-        std::sort(renderEntities.begin(), renderEntities.end(), [&scene, &registry, interpolationAlpha](entt::entity left, entt::entity right) {
+        const glm::mat4 cameraViewMatrix = camera.GetViewMatrix();
+        std::sort(renderEntities.begin(), renderEntities.end(), [&scene, &registry, interpolationAlpha, &cameraViewMatrix](entt::entity left, entt::entity right) {
             const glm::mat4 leftWorld = scene.GetWorldTransformMatrixForRendering(left, interpolationAlpha);
             const glm::mat4 rightWorld = scene.GetWorldTransformMatrixForRendering(right, interpolationAlpha);
-            const float leftZ = leftWorld[3].z;
-            const float rightZ = rightWorld[3].z;
-            if (leftZ != rightZ)
-                return leftZ < rightZ; // Larger Z draws later (on top) in painter's algorithm.
+            const glm::vec4 leftViewPosition = cameraViewMatrix * glm::vec4(leftWorld[3][0], leftWorld[3][1], leftWorld[3][2], 1.0f);
+            const glm::vec4 rightViewPosition = cameraViewMatrix * glm::vec4(rightWorld[3][0], rightWorld[3][1], rightWorld[3][2], 1.0f);
+            const float leftViewDepth = leftViewPosition.z;
+            const float rightViewDepth = rightViewPosition.z;
+            constexpr float kDepthSortEpsilon = 0.005f;
+            if (std::abs(leftViewDepth - rightViewDepth) > kDepthSortEpsilon)
+                return leftViewDepth < rightViewDepth; // More negative view Z is farther; render far-to-near.
 
             const auto* leftHierarchy = registry.try_get<HierarchyComponent>(left);
             const auto* rightHierarchy = registry.try_get<HierarchyComponent>(right);
@@ -3819,6 +3860,38 @@ namespace Limitless
                    point.y >= rect.Min.y && point.y <= rect.Max.y;
         }
 
+        entt::entity FindInteractiveOwnerEntity(const entt::registry& registry, entt::entity entity)
+        {
+            entt::entity current = entity;
+            while (current != entt::null)
+            {
+                if (registry.any_of<UIButtonComponent, UISliderComponent>(current))
+                    return current;
+                const auto* hierarchy = registry.try_get<HierarchyComponent>(current);
+                if (!hierarchy)
+                    break;
+                current = hierarchy->Parent;
+            }
+            return entt::null;
+        }
+
+        UiLayoutRect ApplyTransformToUiRect(const entt::registry& registry, entt::entity entity, const UiLayoutRect& rect)
+        {
+            UiLayoutRect adjusted = rect;
+            if (const auto* transform = registry.try_get<TransformComponent>(entity))
+            {
+                const glm::vec2 baseSize = rect.Max - rect.Min;
+                const glm::vec2 scaledSize = glm::vec2(
+                    baseSize.x * std::max(0.001f, transform->Scale.x),
+                    baseSize.y * std::max(0.001f, transform->Scale.y));
+                glm::vec2 center = (rect.Min + rect.Max) * 0.5f;
+                center += glm::vec2(transform->Position.x, transform->Position.y);
+                adjusted.Min = center - scaledSize * 0.5f;
+                adjusted.Max = center + scaledSize * 0.5f;
+            }
+            return adjusted;
+        }
+
         void ProcessUiInteractionSystem(Scene& scene, uint32_t windowWidth, uint32_t windowHeight)
         {
             auto& registry = scene.GetRegistry();
@@ -3890,10 +3963,17 @@ namespace Limitless
                 float Z = 0.0f;
                 int32_t SiblingOrder = 0;
             };
+            struct UiHoveredCandidate
+            {
+                entt::entity OwnerEntity = entt::null;
+                int32_t CanvasSortOrder = 0;
+                float Z = 0.0f;
+                int32_t SiblingOrder = 0;
+            };
 
             std::unordered_map<entt::entity, UiInteractiveLayout> interactiveLayouts;
             interactiveLayouts.reserve(128);
-            std::vector<entt::entity> hoveredCandidates;
+            std::vector<UiHoveredCandidate> hoveredCandidates;
             hoveredCandidates.reserve(64);
 
             auto rectView = registry.view<RectTransformComponent>();
@@ -3915,60 +3995,70 @@ namespace Limitless
                 {
                     if (!scene.IsEntityEnabledInHierarchy(entity))
                         continue;
-                    if (!registry.any_of<UIButtonComponent, UISliderComponent>(entity))
-                        continue;
 
                     entt::entity owningCanvas = entt::null;
                     if (!TryGetOwningCanvasEntity(registry, entity, owningCanvas) || owningCanvas != canvasEntity)
                         continue;
 
-                    const UiLayoutRect rect = ResolveUiLayoutRect(registry, entity, canvasEntity, canvasRootRect, layoutCache);
-                    UiInteractiveLayout layout;
-                    layout.CanvasEntity = canvasEntity;
-                    layout.Rect = rect;
-                    layout.CanvasSortOrder = canvas.SortOrder;
-                    if (const auto* transform = registry.try_get<TransformComponent>(entity))
-                    {
-                        layout.Z = transform->Position.z;
-                        const glm::vec2 baseSize = rect.Max - rect.Min;
-                        const glm::vec2 scaledSize = glm::vec2(
-                            baseSize.x * std::max(0.001f, transform->Scale.x),
-                            baseSize.y * std::max(0.001f, transform->Scale.y));
-                        glm::vec2 center = (rect.Min + rect.Max) * 0.5f;
-                        center += glm::vec2(transform->Position.x, transform->Position.y);
-                        layout.Rect.Min = center - scaledSize * 0.5f;
-                        layout.Rect.Max = center + scaledSize * 0.5f;
-                    }
-                    if (const auto* hierarchy = registry.try_get<HierarchyComponent>(entity))
-                        layout.SiblingOrder = hierarchy->SiblingOrder;
-                    interactiveLayouts[entity] = layout;
+                    const entt::entity interactiveOwner = FindInteractiveOwnerEntity(registry, entity);
+                    if (interactiveOwner == entt::null || !registry.all_of<RectTransformComponent>(interactiveOwner))
+                        continue;
 
-                    if (IsPointInsideRect(mouseInCanvasSpace, layout.Rect))
-                        hoveredCandidates.push_back(entity);
+                    if (!interactiveLayouts.contains(interactiveOwner))
+                    {
+                        UiInteractiveLayout ownerLayout;
+                        ownerLayout.CanvasEntity = canvasEntity;
+                        ownerLayout.Rect = ApplyTransformToUiRect(
+                            registry,
+                            interactiveOwner,
+                            ResolveUiLayoutRect(registry, interactiveOwner, canvasEntity, canvasRootRect, layoutCache));
+                        ownerLayout.CanvasSortOrder = canvas.SortOrder;
+                        if (const auto* transform = registry.try_get<TransformComponent>(interactiveOwner))
+                            ownerLayout.Z = transform->Position.z;
+                        if (const auto* hierarchy = registry.try_get<HierarchyComponent>(interactiveOwner))
+                            ownerLayout.SiblingOrder = hierarchy->SiblingOrder;
+                        interactiveLayouts[interactiveOwner] = ownerLayout;
+                    }
+
+                    const UiLayoutRect hitRect = ApplyTransformToUiRect(
+                        registry,
+                        entity,
+                        ResolveUiLayoutRect(registry, entity, canvasEntity, canvasRootRect, layoutCache));
+                    if (IsPointInsideRect(mouseInCanvasSpace, hitRect))
+                    {
+                        UiHoveredCandidate candidate{};
+                        candidate.OwnerEntity = interactiveOwner;
+                        candidate.CanvasSortOrder = canvas.SortOrder;
+                        if (const auto* transform = registry.try_get<TransformComponent>(entity))
+                            candidate.Z = transform->Position.z;
+                        if (const auto* hierarchy = registry.try_get<HierarchyComponent>(entity))
+                            candidate.SiblingOrder = hierarchy->SiblingOrder;
+                        hoveredCandidates.push_back(candidate);
+                    }
                 }
             }
 
-            auto isEntityOnTop = [&interactiveLayouts](entt::entity left, entt::entity right) {
-                const auto leftIt = interactiveLayouts.find(left);
-                const auto rightIt = interactiveLayouts.find(right);
-                if (leftIt == interactiveLayouts.end() || rightIt == interactiveLayouts.end())
-                    return false;
-                const UiInteractiveLayout& leftLayout = leftIt->second;
-                const UiInteractiveLayout& rightLayout = rightIt->second;
-                if (leftLayout.CanvasSortOrder != rightLayout.CanvasSortOrder)
-                    return leftLayout.CanvasSortOrder > rightLayout.CanvasSortOrder;
-                if (leftLayout.Z != rightLayout.Z)
-                    return leftLayout.Z > rightLayout.Z;
-                if (leftLayout.SiblingOrder != rightLayout.SiblingOrder)
-                    return leftLayout.SiblingOrder > rightLayout.SiblingOrder;
-                return static_cast<uint32_t>(left) > static_cast<uint32_t>(right);
+            auto isCandidateOnTop = [](const UiHoveredCandidate& left, const UiHoveredCandidate& right) {
+                if (left.CanvasSortOrder != right.CanvasSortOrder)
+                    return left.CanvasSortOrder > right.CanvasSortOrder;
+                if (left.Z != right.Z)
+                    return left.Z > right.Z;
+                if (left.SiblingOrder != right.SiblingOrder)
+                    return left.SiblingOrder > right.SiblingOrder;
+                return static_cast<uint32_t>(left.OwnerEntity) > static_cast<uint32_t>(right.OwnerEntity);
             };
 
-            entt::entity topHoveredEntity = entt::null;
-            for (entt::entity entity : hoveredCandidates)
+            entt::entity topHoveredOwnerEntity = entt::null;
+            UiHoveredCandidate topHoveredCandidate{};
+            bool hasTopHoveredCandidate = false;
+            for (const UiHoveredCandidate& candidate : hoveredCandidates)
             {
-                if (topHoveredEntity == entt::null || isEntityOnTop(entity, topHoveredEntity))
-                    topHoveredEntity = entity;
+                if (!hasTopHoveredCandidate || isCandidateOnTop(candidate, topHoveredCandidate))
+                {
+                    topHoveredCandidate = candidate;
+                    topHoveredOwnerEntity = candidate.OwnerEntity;
+                    hasTopHoveredCandidate = true;
+                }
             }
 
             const bool mouseDown = input.IsMouseButtonDown(SDL_BUTTON_LEFT);
@@ -3978,7 +4068,7 @@ namespace Limitless
             for (entt::entity entity : buttonView)
             {
                 auto& button = buttonView.get<UIButtonComponent>(entity);
-                const bool hovered = button.Interactable && entity == topHoveredEntity;
+                const bool hovered = button.Interactable && entity == topHoveredOwnerEntity;
                 const bool wasHovered = button.IsHovered;
                 const bool wasPressed = button.IsPressed;
 
@@ -4014,7 +4104,7 @@ namespace Limitless
                     continue;
                 }
 
-                const bool hovered = slider.Interactable && entity == topHoveredEntity;
+                const bool hovered = slider.Interactable && entity == topHoveredOwnerEntity;
                 const UiInteractiveLayout& layout = layoutIt->second;
                 const auto* canvas = registry.try_get<CanvasComponent>(layout.CanvasEntity);
                 if (!canvas)

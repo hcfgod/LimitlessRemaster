@@ -88,6 +88,11 @@ namespace Limitless::Project
         int MaxShadowSegments = 128;
         float ShadowSoftnessScale = 1.0f;
         float DirectionalShadowBiasScale = 1.0f;
+        float ShadowAlphaCutoff = 0.5f;
+        float ShadowSegmentSnapPixels = 0.75f;
+        bool EnableHighAngularVelocityShadowFreeze = true;
+        float ShadowFreezeAngularVelocityDegreesPerSecond = 180.0f;
+        int ShadowFreezeFrameCount = 2;
         int MaxShadowSamplesPerLight = 12;
     };
 

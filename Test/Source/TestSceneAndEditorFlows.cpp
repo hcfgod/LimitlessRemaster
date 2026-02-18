@@ -657,6 +657,11 @@ TEST_SUITE("Scene And Editor Flows")
         authoredSettings.MaxShadowSegments = 196;
         authoredSettings.ShadowSoftnessScale = 1.35f;
         authoredSettings.DirectionalShadowBiasScale = 1.4f;
+        authoredSettings.ShadowAlphaCutoff = 0.62f;
+        authoredSettings.ShadowSegmentSnapPixels = 1.0f;
+        authoredSettings.EnableHighAngularVelocityShadowFreeze = true;
+        authoredSettings.ShadowFreezeAngularVelocityDegreesPerSecond = 240.0f;
+        authoredSettings.ShadowFreezeFrameCount = 3;
         authoredSettings.MaxShadowSamplesPerLight = 14;
 
         const auto saveResult = Project::SaveLighting2DSettings(projectRoot, authoredSettings);
@@ -678,6 +683,11 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(loadedSettings.MaxShadowSegments == 196);
         CHECK(loadedSettings.ShadowSoftnessScale == doctest::Approx(1.35f));
         CHECK(loadedSettings.DirectionalShadowBiasScale == doctest::Approx(1.4f));
+        CHECK(loadedSettings.ShadowAlphaCutoff == doctest::Approx(0.62f));
+        CHECK(loadedSettings.ShadowSegmentSnapPixels == doctest::Approx(1.0f));
+        CHECK(loadedSettings.EnableHighAngularVelocityShadowFreeze == true);
+        CHECK(loadedSettings.ShadowFreezeAngularVelocityDegreesPerSecond == doctest::Approx(240.0f));
+        CHECK(loadedSettings.ShadowFreezeFrameCount == 3);
         CHECK(loadedSettings.MaxShadowSamplesPerLight == 14);
 
         const std::filesystem::path lightingSettingsPath = Project::GetLighting2DSettingsPath(projectRoot);
@@ -695,6 +705,11 @@ TEST_SUITE("Scene And Editor Flows")
                 { "maxShadowSegments", 0 },
                 { "shadowSoftnessScale", -3.0f },
                 { "directionalShadowBiasScale", -4.0f },
+                { "shadowAlphaCutoff", 2.0f },
+                { "shadowSegmentSnapPixels", -2.0f },
+                { "enableHighAngularVelocityShadowFreeze", true },
+                { "shadowFreezeAngularVelocityDegreesPerSecond", -20.0f },
+                { "shadowFreezeFrameCount", 0 },
                 { "maxShadowSamplesPerLight", 0 }
             };
 
@@ -715,6 +730,11 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(clampedSettings.MaxShadowSegments == 1);
         CHECK(clampedSettings.ShadowSoftnessScale == doctest::Approx(0.0f));
         CHECK(clampedSettings.DirectionalShadowBiasScale == doctest::Approx(0.0f));
+        CHECK(clampedSettings.ShadowAlphaCutoff == doctest::Approx(1.0f));
+        CHECK(clampedSettings.ShadowSegmentSnapPixels == doctest::Approx(0.0f));
+        CHECK(clampedSettings.EnableHighAngularVelocityShadowFreeze == true);
+        CHECK(clampedSettings.ShadowFreezeAngularVelocityDegreesPerSecond == doctest::Approx(1.0f));
+        CHECK(clampedSettings.ShadowFreezeFrameCount == 1);
         CHECK(clampedSettings.MaxShadowSamplesPerLight == 1);
 
         std::filesystem::remove_all(projectRoot, errorCode);

@@ -40,11 +40,13 @@ uniform sampler2D u_NormalTexture;
 uniform vec4 u_Color;
 uniform float u_NormalStrength;
 uniform int u_ReceiveShadows;
+uniform float u_ShadowAlphaCutoff;
 
 void main()
 {
     vec4 albedo = texture(u_AlbedoTexture, v_UV) * u_Color;
-    if (albedo.a <= 0.001)
+    // Keep alpha edge rejection aligned with lighting passes for temporal stability.
+    if (albedo.a <= 0.01)
         discard;
 
     vec3 tangentNormal = texture(u_NormalTexture, v_UV).xyz * 2.0 - 1.0;
@@ -56,6 +58,16 @@ void main()
     vec3 encodedNormal = worldNormal * 0.5 + 0.5;
 
     // A channel carries whether this pixel should receive shadows.
-    FragColor = vec4(encodedNormal, u_ReceiveShadows != 0 ? 1.0 : 0.0);
+    // For alpha-cutout textures, ignore low-alpha fringe pixels to reduce
+    // temporal shimmer while rotating in perspective views.
+    float shadowAlphaCutoff = clamp(u_ShadowAlphaCutoff, 0.0, 1.0);
+    // Use a soft threshold band to avoid binary popping at alpha-cutout edges.
+    float shadowReceiver = 0.0;
+    if (u_ReceiveShadows != 0)
+    {
+        float edgeBand = 0.08;
+        shadowReceiver = smoothstep(shadowAlphaCutoff - edgeBand, shadowAlphaCutoff + edgeBand, albedo.a);
+    }
+    FragColor = vec4(encodedNormal, shadowReceiver);
 }
 

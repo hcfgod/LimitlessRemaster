@@ -46,6 +46,11 @@ Open **Project Settings -> Lighting 2D** and configure:
 - `MaxDirectionalLights`, `MaxPointLights`
 - `MaxShadowSegments`
 - `ShadowSoftnessScale`
+- `ShadowAlphaCutoff`
+- `ShadowSegmentSnapPixels`
+- `EnableHighAngularVelocityShadowFreeze`
+- `ShadowFreezeAngularVelocityDegreesPerSecond`
+- `ShadowFreezeFrameCount`
 - `MaxShadowSamplesPerLight`
 
 Settings are stored in the project settings file via `Project::SaveLighting2DSettings(...)`.
@@ -133,6 +138,9 @@ For cleaner contact edges and fewer leaks:
 
 - Increase occluder `Extrusion` slightly (`0.05` to `0.25`)
 - Increase point light `ShadowBias` only as needed
+- Raise `ShadowAlphaCutoff` (`0.55` to `0.70`) for foliage/cutout textures if fast camera rotation still shimmers
+- Raise `ShadowSegmentSnapPixels` (`0.75` to `1.25`) to stabilize shadows during combined strafe+rotate movement
+- Enable `HighAngularVelocityShadowFreeze` with threshold `180` to `300` deg/sec and `2` to `4` frames for worst-case camera spin
 - Keep polygon points convex and non-self-intersecting when possible
 
 ## Validation Checklist

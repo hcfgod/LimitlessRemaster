@@ -25,6 +25,11 @@ uniform sampler2D u_LightTexture;
 void main()
 {
     vec4 albedo = texture(u_AlbedoTexture, v_UV);
+    if (albedo.a <= 0.01)
+    {
+        FragColor = vec4(0.0);
+        return;
+    }
     vec3 lighting = texture(u_LightTexture, v_UV).rgb;
     FragColor = vec4(albedo.rgb * lighting, albedo.a);
 }

@@ -2065,13 +2065,6 @@ namespace Limitless::EditorInspectorPanel
                                 mutableRegistry.emplace<UIImageComponent>(selectedEntity);
                             if (!mutableRegistry.all_of<RectTransformComponent>(selectedEntity))
                                 mutableRegistry.emplace<RectTransformComponent>(selectedEntity);
-                            if (!mutableRegistry.all_of<SpriteComponent>(selectedEntity))
-                            {
-                                auto& sprite = mutableRegistry.emplace<SpriteComponent>(selectedEntity);
-                                sprite.Color = glm::vec4(0.22f, 0.22f, 0.22f, 1.0f);
-                            }
-                            if (auto* sprite = mutableRegistry.try_get<SpriteComponent>(selectedEntity))
-                                slider.BackgroundColor = sprite->Color;
 
                             const float sliderRange = std::max(0.0001f, slider.MaxValue - slider.MinValue);
                             const float sliderNormalized = std::clamp((slider.Value - slider.MinValue) / sliderRange, 0.0f, 1.0f);
@@ -2151,13 +2144,6 @@ namespace Limitless::EditorInspectorPanel
                             registry.emplace<UIImageComponent>(selectedEntity);
                         if (!registry.all_of<RectTransformComponent>(selectedEntity))
                             registry.emplace<RectTransformComponent>(selectedEntity);
-                        if (!registry.all_of<SpriteComponent>(selectedEntity))
-                        {
-                            auto& sprite = registry.emplace<SpriteComponent>(selectedEntity);
-                            sprite.Color = glm::vec4(0.22f, 0.22f, 0.22f, 1.0f);
-                        }
-                        if (auto* sprite = registry.try_get<SpriteComponent>(selectedEntity))
-                            slider.BackgroundColor = sprite->Color;
 
                         const float sliderRange = std::max(0.0001f, slider.MaxValue - slider.MinValue);
                         const float sliderNormalized = std::clamp((slider.Value - slider.MinValue) / sliderRange, 0.0f, 1.0f);

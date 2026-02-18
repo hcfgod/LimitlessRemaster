@@ -25,6 +25,7 @@
 #endif
 
 #include <glm/gtc/constants.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
 #include <array>
@@ -103,6 +104,12 @@ namespace Limitless
             Assets::ShaderAsset::Ptr DirectionalLightShaderAsset;
             Assets::ShaderAsset::Ptr PointLightShaderAsset;
             Assets::ShaderAsset::Ptr CompositeShaderAsset;
+
+            std::vector<glm::vec4> CachedShadowSegments;
+            uint32_t CachedShadowOccluderCount = 0;
+            bool HasPreviousCameraRotation = false;
+            glm::quat PreviousCameraRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            uint32_t ShadowFreezeFramesRemaining = 0;
         };
 
         Lighting2DRendererState g_State{};
@@ -157,6 +164,28 @@ namespace Limitless
             return std::min<uint32_t>(userMax, 8);
         }
 
+        glm::quat ExtractCameraRotationFromViewMatrix(const glm::mat4& viewMatrix)
+        {
+            const glm::mat4 cameraWorld = glm::inverse(viewMatrix);
+            glm::mat3 rotation = glm::mat3(cameraWorld);
+            rotation[0] = glm::normalize(rotation[0]);
+            rotation[1] = glm::normalize(rotation[1]);
+            rotation[2] = glm::normalize(rotation[2]);
+            return glm::normalize(glm::quat_cast(rotation));
+        }
+
+        float ComputeAngularVelocityDegreesPerSecond(const glm::quat& previousRotation,
+                                                     const glm::quat& currentRotation,
+                                                     float deltaTimeSeconds)
+        {
+            if (deltaTimeSeconds <= kEpsilon)
+                return 0.0f;
+
+            const float dotValue = std::clamp(std::abs(glm::dot(previousRotation, currentRotation)), 0.0f, 1.0f);
+            const float deltaAngleRadians = 2.0f * std::acos(dotValue);
+            return glm::degrees(deltaAngleRadians) / deltaTimeSeconds;
+        }
+
         bool ProjectWorldToScreen(const glm::mat4& viewProjection,
                                   const glm::vec3& worldPosition,
                                   uint32_t width,
@@ -164,10 +193,14 @@ namespace Limitless
                                   glm::vec2& outScreenPosition)
         {
             const glm::vec4 clip = viewProjection * glm::vec4(worldPosition, 1.0f);
-            if (std::abs(clip.w) < kEpsilon)
+            // Reject points behind (or too close to) the camera to avoid unstable
+            // projection in fast strafe+rotate motion.
+            if (clip.w <= kEpsilon)
                 return false;
 
             const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+            if (!std::isfinite(ndc.x) || !std::isfinite(ndc.y) || !std::isfinite(ndc.z))
+                return false;
             outScreenPosition.x = (ndc.x * 0.5f + 0.5f) * static_cast<float>(width);
             outScreenPosition.y = (ndc.y * 0.5f + 0.5f) * static_cast<float>(height);
             return true;
@@ -300,7 +333,7 @@ namespace Limitless
             return true;
         }
 
-        std::vector<entt::entity> BuildSortedSpriteRenderList(Scene& scene, float interpolationAlpha)
+        std::vector<entt::entity> BuildSortedSpriteRenderList(Scene& scene, float interpolationAlpha, const glm::mat4& cameraViewMatrix)
         {
             auto& registry = scene.GetRegistry();
             auto view = registry.view<TransformComponent, SpriteComponent>();
@@ -314,13 +347,16 @@ namespace Limitless
                 entities.push_back(entity);
             }
 
-            std::sort(entities.begin(), entities.end(), [&scene, &registry, interpolationAlpha](entt::entity left, entt::entity right) {
+            std::sort(entities.begin(), entities.end(), [&scene, &registry, interpolationAlpha, &cameraViewMatrix](entt::entity left, entt::entity right) {
                 const glm::mat4 leftWorld = scene.GetWorldTransformMatrixForRendering(left, interpolationAlpha);
                 const glm::mat4 rightWorld = scene.GetWorldTransformMatrixForRendering(right, interpolationAlpha);
-                const float leftZ = leftWorld[3].z;
-                const float rightZ = rightWorld[3].z;
-                if (leftZ != rightZ)
-                    return leftZ < rightZ;
+                const glm::vec4 leftViewPosition = cameraViewMatrix * glm::vec4(leftWorld[3][0], leftWorld[3][1], leftWorld[3][2], 1.0f);
+                const glm::vec4 rightViewPosition = cameraViewMatrix * glm::vec4(rightWorld[3][0], rightWorld[3][1], rightWorld[3][2], 1.0f);
+                const float leftViewDepth = leftViewPosition.z;
+                const float rightViewDepth = rightViewPosition.z;
+                constexpr float kDepthSortEpsilon = 0.005f;
+                if (std::abs(leftViewDepth - rightViewDepth) > kDepthSortEpsilon)
+                    return leftViewDepth < rightViewDepth;
 
                 const auto* leftHierarchy = registry.try_get<HierarchyComponent>(left);
                 const auto* rightHierarchy = registry.try_get<HierarchyComponent>(right);
@@ -368,10 +404,10 @@ namespace Limitless
             }
         }
 
-        std::vector<NormalPassSpriteDraw> BuildNormalPassDrawList(Scene& scene, float interpolationAlpha)
+        std::vector<NormalPassSpriteDraw> BuildNormalPassDrawList(Scene& scene, float interpolationAlpha, const glm::mat4& cameraViewMatrix)
         {
             std::vector<NormalPassSpriteDraw> drawList;
-            auto sortedEntities = BuildSortedSpriteRenderList(scene, interpolationAlpha);
+            auto sortedEntities = BuildSortedSpriteRenderList(scene, interpolationAlpha, cameraViewMatrix);
             drawList.reserve(sortedEntities.size());
 
             auto& registry = scene.GetRegistry();
@@ -462,6 +498,7 @@ namespace Limitless
             Renderer::GetInstance().SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
             Renderer::GetInstance().SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::Zero, false));
             SubmitSelectNormalAttachmentOnly();
+            const float shadowAlphaCutoff = std::clamp(g_State.Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
 
             for (const NormalPassSpriteDraw& draw : drawList)
             {
@@ -473,7 +510,7 @@ namespace Limitless
                 const glm::vec4 color = draw.Color;
                 const float normalStrength = draw.NormalStrength;
                 const int receiveShadows = draw.ReceiveShadows ? 1 : 0;
-                Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, viewProjection, model, color, normalStrength, receiveShadows](GraphicsContext*) {
+                Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, viewProjection, model, color, normalStrength, receiveShadows, shadowAlphaCutoff](GraphicsContext*) {
                     auto* glShader = dynamic_cast<OpenGLShader*>(shaderRef.get());
                     auto* glVertexArray = dynamic_cast<OpenGLVertexArray*>(vertexArrayRef.get());
                     auto* glAlbedoTexture = dynamic_cast<OpenGLTexture2D*>(albedoRef.get());
@@ -499,6 +536,8 @@ namespace Limitless
                         glUniform1f(location, normalStrength);
                     if (GLint location = glGetUniformLocation(shaderProgram, "u_ReceiveShadows"); location != -1)
                         glUniform1i(location, receiveShadows);
+                    if (GLint location = glGetUniformLocation(shaderProgram, "u_ShadowAlphaCutoff"); location != -1)
+                        glUniform1f(location, shadowAlphaCutoff);
                     if (GLint location = glGetUniformLocation(shaderProgram, "u_AlbedoTexture"); location != -1)
                         glUniform1i(location, 0);
                     if (GLint location = glGetUniformLocation(shaderProgram, "u_NormalTexture"); location != -1)
@@ -577,11 +616,13 @@ namespace Limitless
                                                    uint32_t width,
                                                    uint32_t height,
                                                    uint32_t maxSegments,
-                                                   uint32_t& outOccluderCount)
+                                                   uint32_t& outOccluderCount,
+                                                   float shadowSegmentSnapPixels)
         {
             std::vector<glm::vec4> segments;
             segments.reserve(maxSegments);
             outOccluderCount = 0;
+            const float snappedPixels = std::max(0.0f, shadowSegmentSnapPixels);
 
             auto& registry = scene.GetRegistry();
             std::unordered_set<entt::entity> explicitOccluderEntities;
@@ -595,14 +636,33 @@ namespace Limitless
 
                 std::vector<glm::vec2> screenPoints;
                 screenPoints.reserve(localPoints.size());
+                bool projectionFailed = false;
                 for (const glm::vec2& localPoint : localPoints)
                 {
                     const glm::vec4 worldPoint4 = worldTransform * glm::vec4(localPoint, 0.0f, 1.0f);
                     glm::vec2 screenPoint(0.0f);
                     if (!ProjectWorldToScreen(viewProjection, glm::vec3(worldPoint4), width, height, screenPoint))
-                        continue;
+                    {
+                        projectionFailed = true;
+                        break;
+                    }
+                    if (!std::isfinite(screenPoint.x) || !std::isfinite(screenPoint.y))
+                    {
+                        projectionFailed = true;
+                        break;
+                    }
+                    if (snappedPixels > kEpsilon)
+                    {
+                        screenPoint.x = std::round(screenPoint.x / snappedPixels) * snappedPixels;
+                        screenPoint.y = std::round(screenPoint.y / snappedPixels) * snappedPixels;
+                    }
                     screenPoints.push_back(screenPoint);
                 }
+
+                // Conservative stability guard: if any point fails projection, skip this occluder
+                // for the current frame instead of emitting malformed screen-space segments.
+                if (projectionFailed)
+                    return;
 
                 if (screenPoints.size() < 2)
                     return;
@@ -623,15 +683,25 @@ namespace Limitless
                 }
 
                 ++outOccluderCount;
+                const float maxSegmentLength = glm::max(16.0f, glm::length(glm::vec2(static_cast<float>(width), static_cast<float>(height))) * 2.0f);
                 for (size_t index = 0; index + 1 < screenPoints.size(); ++index)
                 {
                     if (segments.size() >= maxSegments)
                         break;
+                    const glm::vec2 edge = screenPoints[index + 1] - screenPoints[index];
+                    const float edgeLength = glm::length(edge);
+                    if (edgeLength <= kEpsilon || edgeLength > maxSegmentLength)
+                        continue;
                     segments.emplace_back(screenPoints[index].x, screenPoints[index].y, screenPoints[index + 1].x, screenPoints[index + 1].y);
                 }
 
                 if (closed && screenPoints.size() >= 3 && segments.size() < maxSegments)
-                    segments.emplace_back(screenPoints.back().x, screenPoints.back().y, screenPoints.front().x, screenPoints.front().y);
+                {
+                    const glm::vec2 closingEdge = screenPoints.front() - screenPoints.back();
+                    const float closingEdgeLength = glm::length(closingEdge);
+                    if (closingEdgeLength > kEpsilon && closingEdgeLength <= maxSegmentLength)
+                        segments.emplace_back(screenPoints.back().x, screenPoints.back().y, screenPoints.front().x, screenPoints.front().y);
+                }
             };
 
             auto occluderView = registry.view<ShadowOccluder2DComponent>();
@@ -854,7 +924,8 @@ namespace Limitless
                                         const std::vector<glm::vec4>& shadowSegments,
                                         const ScreenDirectionalLight& light,
                                         uint32_t width,
-                                        uint32_t height)
+                                        uint32_t height,
+                                        float shadowSegmentSnapPixels)
         {
             auto shader = ResolveShaderFromAsset(g_State.DirectionalLightShaderAsset, kDirectionalLightShaderKey);
             if (!shader || !g_State.UnitQuadVertexArray)
@@ -873,9 +944,11 @@ namespace Limitless
             const int shadowSamples = light.ShadowSamples;
             const float shadowDistance = light.ShadowDistancePixels;
             const float shadowBias = light.ShadowBiasPixels;
+            const float shadowAlphaCutoff = std::clamp(g_State.Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
+            const float shadowSegmentSnapPixelsClamped = std::max(0.0f, shadowSegmentSnapPixels);
             std::vector<glm::vec4> segments = FilterDirectionalShadowSegmentsByFacing(shadowSegments, lightDirection);
 
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, lightColor, intensity, lightDirection, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowDistance, shadowBias, width, height, segments = std::move(segments)](GraphicsContext*) {
+            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, lightColor, intensity, lightDirection, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowDistance, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segments = std::move(segments)](GraphicsContext*) {
                 auto* glShader = dynamic_cast<OpenGLShader*>(shaderRef.get());
                 auto* glVertexArray = dynamic_cast<OpenGLVertexArray*>(vertexArrayRef.get());
                 auto* glAlbedoTexture = dynamic_cast<OpenGLTexture2D*>(albedoRef.get());
@@ -916,6 +989,10 @@ namespace Limitless
                     glUniform1f(location, shadowDistance);
                 if (GLint location = glGetUniformLocation(program, "u_ShadowBias"); location != -1)
                     glUniform1f(location, shadowBias);
+                if (GLint location = glGetUniformLocation(program, "u_ShadowAlphaCutoff"); location != -1)
+                    glUniform1f(location, shadowAlphaCutoff);
+                if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentSnapPixels"); location != -1)
+                    glUniform1f(location, shadowSegmentSnapPixelsClamped);
 
                 const int segmentCount = static_cast<int>(std::min<size_t>(segments.size(), kShaderShadowSegmentCap));
                 if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentCount"); location != -1)
@@ -935,7 +1012,8 @@ namespace Limitless
                                   const std::vector<glm::vec4>& shadowSegments,
                                   const ScreenPointLight& light,
                                   uint32_t width,
-                                  uint32_t height)
+                                  uint32_t height,
+                                  float shadowSegmentSnapPixels)
         {
             auto shader = ResolveShaderFromAsset(g_State.PointLightShaderAsset, kPointLightShaderKey);
             if (!shader || !g_State.UnitQuadVertexArray)
@@ -955,9 +1033,11 @@ namespace Limitless
             const float shadowSoftness = light.ShadowSoftnessPixels;
             const int shadowSamples = light.ShadowSamples;
             const float shadowBias = light.ShadowBiasPixels;
+            const float shadowAlphaCutoff = std::clamp(g_State.Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
+            const float shadowSegmentSnapPixelsClamped = std::max(0.0f, shadowSegmentSnapPixels);
             std::vector<glm::vec4> segments = shadowSegments;
 
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, lightColor, intensity, lightPosition, lightRadius, lightFalloff, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowBias, width, height, segments = std::move(segments)](GraphicsContext*) {
+            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, lightColor, intensity, lightPosition, lightRadius, lightFalloff, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segments = std::move(segments)](GraphicsContext*) {
                 auto* glShader = dynamic_cast<OpenGLShader*>(shaderRef.get());
                 auto* glVertexArray = dynamic_cast<OpenGLVertexArray*>(vertexArrayRef.get());
                 auto* glAlbedoTexture = dynamic_cast<OpenGLTexture2D*>(albedoRef.get());
@@ -1000,6 +1080,10 @@ namespace Limitless
                     glUniform1i(location, shadowSamples);
                 if (GLint location = glGetUniformLocation(program, "u_ShadowBias"); location != -1)
                     glUniform1f(location, shadowBias);
+                if (GLint location = glGetUniformLocation(program, "u_ShadowAlphaCutoff"); location != -1)
+                    glUniform1f(location, shadowAlphaCutoff);
+                if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentSnapPixels"); location != -1)
+                    glUniform1f(location, shadowSegmentSnapPixelsClamped);
 
                 const int segmentCount = static_cast<int>(std::min<size_t>(segments.size(), kShaderShadowSegmentCap));
                 if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentCount"); location != -1)
@@ -1088,6 +1172,12 @@ namespace Limitless
             g_State.Settings.AmbientIntensity = std::max(0.0f, g_State.Settings.AmbientIntensity);
             g_State.Settings.ShadowSoftnessScale = std::max(0.0f, g_State.Settings.ShadowSoftnessScale);
             g_State.Settings.DirectionalShadowBiasScale = std::max(0.0f, g_State.Settings.DirectionalShadowBiasScale);
+            g_State.Settings.ShadowAlphaCutoff = std::clamp(g_State.Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
+            g_State.Settings.ShadowSegmentSnapPixels = std::max(0.0f, g_State.Settings.ShadowSegmentSnapPixels);
+            g_State.Settings.ShadowFreezeAngularVelocityDegreesPerSecond = std::max(1.0f, g_State.Settings.ShadowFreezeAngularVelocityDegreesPerSecond);
+            g_State.Settings.ShadowFreezeFrameCount = std::max(1, g_State.Settings.ShadowFreezeFrameCount);
+            if (!g_State.Settings.EnableHighAngularVelocityShadowFreeze)
+                g_State.ShadowFreezeFramesRemaining = 0;
         }
 
         const Lighting2DSettings& GetSettings()
@@ -1124,10 +1214,64 @@ namespace Limitless
             const glm::mat4 viewProjection = camera.GetViewProjectionMatrix();
             const float pixelsPerUnit = EstimatePixelsPerWorldUnit(viewProjection, width, height);
 
-            std::vector<NormalPassSpriteDraw> normalPassDraws = BuildNormalPassDrawList(scene, interpolationAlpha);
+            const glm::mat4 cameraViewMatrix = camera.GetViewMatrix();
+            std::vector<NormalPassSpriteDraw> normalPassDraws = BuildNormalPassDrawList(scene, interpolationAlpha, cameraViewMatrix);
             uint32_t occluderCount = 0;
             const uint32_t maxShadowSegments = ClampSegmentsByQuality(g_State.Settings);
-            std::vector<glm::vec4> shadowSegments = BuildShadowSegments(scene, interpolationAlpha, viewProjection, width, height, maxShadowSegments, occluderCount);
+            float effectiveShadowSegmentSnapPixels = std::max(0.0f, g_State.Settings.ShadowSegmentSnapPixels);
+            if (camera.GetUsage() == CameraUsage::Editor)
+            {
+                // Editor viewport prioritizes visual stability while orbiting over exact
+                // shadow edge fidelity, so apply stronger snapping in editor camera mode.
+                effectiveShadowSegmentSnapPixels = std::max(effectiveShadowSegmentSnapPixels, 1.5f);
+            }
+            const bool allowAngularVelocityShadowFreeze = g_State.Settings.EnableHighAngularVelocityShadowFreeze
+                && camera.GetUsage() == CameraUsage::Gameplay;
+            const glm::quat currentCameraRotation = ExtractCameraRotationFromViewMatrix(cameraViewMatrix);
+            float cameraAngularVelocityDegreesPerSecond = 0.0f;
+            if (allowAngularVelocityShadowFreeze && g_State.HasPreviousCameraRotation)
+            {
+                const float deltaTimeSeconds = std::max(Time::GetUnscaledDeltaTimeSeconds(), kEpsilon);
+                cameraAngularVelocityDegreesPerSecond = ComputeAngularVelocityDegreesPerSecond(
+                    g_State.PreviousCameraRotation,
+                    currentCameraRotation,
+                    deltaTimeSeconds);
+            }
+            if (allowAngularVelocityShadowFreeze)
+            {
+                g_State.HasPreviousCameraRotation = true;
+                g_State.PreviousCameraRotation = currentCameraRotation;
+            }
+            else
+            {
+                g_State.HasPreviousCameraRotation = false;
+                g_State.ShadowFreezeFramesRemaining = 0;
+            }
+
+            if (allowAngularVelocityShadowFreeze &&
+                cameraAngularVelocityDegreesPerSecond >= g_State.Settings.ShadowFreezeAngularVelocityDegreesPerSecond)
+            {
+                const uint32_t requestedFreezeFrames = static_cast<uint32_t>(std::max(1, g_State.Settings.ShadowFreezeFrameCount));
+                g_State.ShadowFreezeFramesRemaining = std::max(g_State.ShadowFreezeFramesRemaining, requestedFreezeFrames);
+            }
+
+            std::vector<glm::vec4> shadowSegments;
+            const bool useFrozenShadowSegments = allowAngularVelocityShadowFreeze &&
+                g_State.ShadowFreezeFramesRemaining > 0 &&
+                !g_State.CachedShadowSegments.empty();
+            if (useFrozenShadowSegments)
+            {
+                shadowSegments = g_State.CachedShadowSegments;
+                occluderCount = g_State.CachedShadowOccluderCount;
+            }
+            else
+            {
+                shadowSegments = BuildShadowSegments(scene, interpolationAlpha, viewProjection, width, height, maxShadowSegments, occluderCount, effectiveShadowSegmentSnapPixels);
+                g_State.CachedShadowSegments = shadowSegments;
+                g_State.CachedShadowOccluderCount = occluderCount;
+            }
+            if (allowAngularVelocityShadowFreeze && g_State.ShadowFreezeFramesRemaining > 0)
+                --g_State.ShadowFreezeFramesRemaining;
             std::vector<ScreenDirectionalLight> directionalLights = BuildDirectionalLights(scene, interpolationAlpha, camera, viewProjection, width, height, pixelsPerUnit);
             std::vector<ScreenPointLight> pointLights = BuildPointLights(scene, interpolationAlpha, viewProjection, width, height, pixelsPerUnit);
 
@@ -1176,11 +1320,11 @@ namespace Limitless
             const auto gBufferNormal = g_State.GBufferFramebuffer->GetColorAttachment(1);
             for (const ScreenDirectionalLight& directionalLight : directionalLights)
             {
-                SubmitDirectionalLightPass(gBufferAlbedo, gBufferNormal, shadowSegments, directionalLight, width, height);
+                SubmitDirectionalLightPass(gBufferAlbedo, gBufferNormal, shadowSegments, directionalLight, width, height, effectiveShadowSegmentSnapPixels);
             }
             for (const ScreenPointLight& pointLight : pointLights)
             {
-                SubmitPointLightPass(gBufferAlbedo, gBufferNormal, shadowSegments, pointLight, width, height);
+                SubmitPointLightPass(gBufferAlbedo, gBufferNormal, shadowSegments, pointLight, width, height, effectiveShadowSegmentSnapPixels);
             }
 
             renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::Zero, false));

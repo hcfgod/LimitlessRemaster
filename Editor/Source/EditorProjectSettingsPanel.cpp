@@ -604,6 +604,11 @@ namespace Limitless::EditorProjectSettingsPanel
                 ImGui::DragInt("Max Shadow Segments", &state.Lighting2D.MaxShadowSegments, 1.0f, 8, 512);
                 ImGui::DragFloat("Shadow Softness Scale", &state.Lighting2D.ShadowSoftnessScale, 0.01f, 0.0f, 16.0f, "%.2f");
                 ImGui::DragFloat("Directional Shadow Bias Scale", &state.Lighting2D.DirectionalShadowBiasScale, 0.01f, 0.0f, 8.0f, "%.2f");
+                ImGui::SliderFloat("Shadow Alpha Cutoff", &state.Lighting2D.ShadowAlphaCutoff, 0.0f, 1.0f, "%.2f");
+                ImGui::DragFloat("Shadow Segment Snap Pixels", &state.Lighting2D.ShadowSegmentSnapPixels, 0.05f, 0.0f, 4.0f, "%.2f");
+                ImGui::Checkbox("Enable High Angular Velocity Shadow Freeze", &state.Lighting2D.EnableHighAngularVelocityShadowFreeze);
+                ImGui::DragFloat("Shadow Freeze Angular Velocity (Deg/Sec)", &state.Lighting2D.ShadowFreezeAngularVelocityDegreesPerSecond, 1.0f, 1.0f, 1440.0f, "%.1f");
+                ImGui::DragInt("Shadow Freeze Frame Count", &state.Lighting2D.ShadowFreezeFrameCount, 1.0f, 1, 16);
                 ImGui::DragInt("Max Shadow Samples Per Light", &state.Lighting2D.MaxShadowSamplesPerLight, 1.0f, 1, 32);
 
                 state.Lighting2D.ShadowQualityLevel = std::clamp(state.Lighting2D.ShadowQualityLevel, 0, 2);
@@ -612,6 +617,10 @@ namespace Limitless::EditorProjectSettingsPanel
                 state.Lighting2D.MaxShadowSegments = std::max(1, state.Lighting2D.MaxShadowSegments);
                 state.Lighting2D.ShadowSoftnessScale = std::max(0.0f, state.Lighting2D.ShadowSoftnessScale);
                 state.Lighting2D.DirectionalShadowBiasScale = std::max(0.0f, state.Lighting2D.DirectionalShadowBiasScale);
+                state.Lighting2D.ShadowAlphaCutoff = std::clamp(state.Lighting2D.ShadowAlphaCutoff, 0.0f, 1.0f);
+                state.Lighting2D.ShadowSegmentSnapPixels = std::max(0.0f, state.Lighting2D.ShadowSegmentSnapPixels);
+                state.Lighting2D.ShadowFreezeAngularVelocityDegreesPerSecond = std::max(1.0f, state.Lighting2D.ShadowFreezeAngularVelocityDegreesPerSecond);
+                state.Lighting2D.ShadowFreezeFrameCount = std::max(1, state.Lighting2D.ShadowFreezeFrameCount);
                 state.Lighting2D.MaxShadowSamplesPerLight = std::max(1, state.Lighting2D.MaxShadowSamplesPerLight);
                 state.Lighting2D.AmbientIntensity = std::max(0.0f, state.Lighting2D.AmbientIntensity);
 

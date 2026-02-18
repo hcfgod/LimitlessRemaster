@@ -489,6 +489,11 @@ namespace Limitless
                     lightingSettings.MaxShadowSegments = std::max(1, lightingRoot.value("maxShadowSegments", 128));
                     lightingSettings.ShadowSoftnessScale = std::max(0.0f, lightingRoot.value("shadowSoftnessScale", 1.0f));
                     lightingSettings.DirectionalShadowBiasScale = std::max(0.0f, lightingRoot.value("directionalShadowBiasScale", 1.0f));
+                    lightingSettings.ShadowAlphaCutoff = std::clamp(lightingRoot.value("shadowAlphaCutoff", 0.5f), 0.0f, 1.0f);
+                    lightingSettings.ShadowSegmentSnapPixels = std::max(0.0f, lightingRoot.value("shadowSegmentSnapPixels", 0.75f));
+                    lightingSettings.EnableHighAngularVelocityShadowFreeze = lightingRoot.value("enableHighAngularVelocityShadowFreeze", true);
+                    lightingSettings.ShadowFreezeAngularVelocityDegreesPerSecond = std::max(1.0f, lightingRoot.value("shadowFreezeAngularVelocityDegreesPerSecond", 180.0f));
+                    lightingSettings.ShadowFreezeFrameCount = std::max(1, lightingRoot.value("shadowFreezeFrameCount", 2));
                     lightingSettings.MaxShadowSamplesPerLight = std::max(1, lightingRoot.value("maxShadowSamplesPerLight", 12));
                     if (lightingRoot.contains("ambientColor") && lightingRoot["ambientColor"].is_array())
                     {

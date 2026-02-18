@@ -2893,6 +2893,11 @@ namespace Limitless
         runtimeSettings.MaxShadowSegments = std::max(1, m_ProjectLighting2DSettings.MaxShadowSegments);
         runtimeSettings.ShadowSoftnessScale = std::max(0.0f, m_ProjectLighting2DSettings.ShadowSoftnessScale);
         runtimeSettings.DirectionalShadowBiasScale = std::max(0.0f, m_ProjectLighting2DSettings.DirectionalShadowBiasScale);
+        runtimeSettings.ShadowAlphaCutoff = std::clamp(m_ProjectLighting2DSettings.ShadowAlphaCutoff, 0.0f, 1.0f);
+        runtimeSettings.ShadowSegmentSnapPixels = std::max(0.0f, m_ProjectLighting2DSettings.ShadowSegmentSnapPixels);
+        runtimeSettings.EnableHighAngularVelocityShadowFreeze = m_ProjectLighting2DSettings.EnableHighAngularVelocityShadowFreeze;
+        runtimeSettings.ShadowFreezeAngularVelocityDegreesPerSecond = std::max(1.0f, m_ProjectLighting2DSettings.ShadowFreezeAngularVelocityDegreesPerSecond);
+        runtimeSettings.ShadowFreezeFrameCount = std::max(1, m_ProjectLighting2DSettings.ShadowFreezeFrameCount);
         runtimeSettings.MaxShadowSamplesPerLight = std::max(1, m_ProjectLighting2DSettings.MaxShadowSamplesPerLight);
         Lighting2DRenderer::SetSettings(runtimeSettings);
     }

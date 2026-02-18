@@ -486,6 +486,11 @@ namespace Limitless::Project
         root["maxShadowSegments"] = s.MaxShadowSegments;
         root["shadowSoftnessScale"] = s.ShadowSoftnessScale;
         root["directionalShadowBiasScale"] = s.DirectionalShadowBiasScale;
+        root["shadowAlphaCutoff"] = s.ShadowAlphaCutoff;
+        root["shadowSegmentSnapPixels"] = s.ShadowSegmentSnapPixels;
+        root["enableHighAngularVelocityShadowFreeze"] = s.EnableHighAngularVelocityShadowFreeze;
+        root["shadowFreezeAngularVelocityDegreesPerSecond"] = s.ShadowFreezeAngularVelocityDegreesPerSecond;
+        root["shadowFreezeFrameCount"] = s.ShadowFreezeFrameCount;
         root["maxShadowSamplesPerLight"] = s.MaxShadowSamplesPerLight;
         return root;
     }
@@ -516,6 +521,11 @@ namespace Limitless::Project
         s.MaxShadowSegments = std::max(1, root.value("maxShadowSegments", 128));
         s.ShadowSoftnessScale = std::max(0.0f, root.value("shadowSoftnessScale", 1.0f));
         s.DirectionalShadowBiasScale = std::max(0.0f, root.value("directionalShadowBiasScale", 1.0f));
+        s.ShadowAlphaCutoff = std::clamp(root.value("shadowAlphaCutoff", 0.5f), 0.0f, 1.0f);
+        s.ShadowSegmentSnapPixels = std::max(0.0f, root.value("shadowSegmentSnapPixels", 0.75f));
+        s.EnableHighAngularVelocityShadowFreeze = root.value("enableHighAngularVelocityShadowFreeze", true);
+        s.ShadowFreezeAngularVelocityDegreesPerSecond = std::max(1.0f, root.value("shadowFreezeAngularVelocityDegreesPerSecond", 180.0f));
+        s.ShadowFreezeFrameCount = std::max(1, root.value("shadowFreezeFrameCount", 2));
         s.MaxShadowSamplesPerLight = std::max(1, root.value("maxShadowSamplesPerLight", 12));
         return s;
     }

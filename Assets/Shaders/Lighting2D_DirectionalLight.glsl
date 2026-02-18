@@ -34,6 +34,8 @@ uniform float u_ShadowSoftness;
 uniform int u_ShadowSamples;
 uniform float u_ShadowDistance;
 uniform float u_ShadowBias;
+uniform float u_ShadowAlphaCutoff;
+uniform float u_ShadowSegmentSnapPixels;
 uniform int u_ShadowSegmentCount;
 
 const int MAX_SHADOW_SEGMENTS = 128;
@@ -63,6 +65,10 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition)
     if (u_UseShadows == 0 || u_ShadowSegmentCount <= 0 || u_ShadowStrength <= 0.001)
         return 1.0;
 
+    float snapPixels = max(u_ShadowSegmentSnapPixels, 0.0);
+    if (snapPixels > 0.0001)
+        fragmentScreenPosition = round(fragmentScreenPosition / snapPixels) * snapPixels;
+
     vec2 rayDirection = -normalize(u_LightDirection);
     vec2 perpendicular = vec2(-rayDirection.y, rayDirection.x);
     int samples = max(u_ShadowSamples, 1);
@@ -83,6 +89,11 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition)
         sampleWeight = max(sampleWeight, 0.01);
         vec2 sampleOrigin = fragmentScreenPosition + rayDirection * max(u_ShadowBias, 0.0) + perpendicular * sampleOffset;
         vec2 sampleEnd = sampleOrigin + rayDirection * effectiveShadowDistance;
+        if (snapPixels > 0.0001)
+        {
+            sampleOrigin = round(sampleOrigin / snapPixels) * snapPixels;
+            sampleEnd = round(sampleEnd / snapPixels) * snapPixels;
+        }
 
         bool occluded = false;
         int segmentCount = min(u_ShadowSegmentCount, MAX_SHADOW_SEGMENTS);
@@ -108,7 +119,8 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition)
 void main()
 {
     vec4 albedo = texture(u_AlbedoTexture, v_UV);
-    if (albedo.a <= 0.001 && max(max(albedo.r, albedo.g), albedo.b) <= 0.001)
+    // Ignore near-transparent texels to reduce alpha-edge shimmer on fast camera motion.
+    if (albedo.a <= 0.01)
     {
         FragColor = vec4(0.0);
         return;
@@ -122,7 +134,11 @@ void main()
     float ndotl = 1.0;
 
     vec2 fragmentScreenPosition = gl_FragCoord.xy;
-    float shadowFactor = normalSample.a > 0.5 ? ComputeShadowFactor(fragmentScreenPosition) : 1.0;
+    float shadowAlphaCutoff = clamp(u_ShadowAlphaCutoff, 0.0, 1.0);
+    float shadowReceiver = clamp(normalSample.a, 0.0, 1.0);
+    // Soft receiver weight from GBuffer prevents edge threshold popping.
+    float computedShadowFactor = (albedo.a >= max(0.01, shadowAlphaCutoff - 0.12)) ? ComputeShadowFactor(fragmentScreenPosition) : 1.0;
+    float shadowFactor = mix(1.0, computedShadowFactor, shadowReceiver);
 
     vec3 lighting = u_LightColor * (u_LightIntensity * ndotl * shadowFactor);
     FragColor = vec4(lighting, 1.0);

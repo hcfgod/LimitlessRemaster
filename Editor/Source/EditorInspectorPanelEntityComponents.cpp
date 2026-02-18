@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -141,6 +142,29 @@ namespace Limitless::EditorInspectorPanel
             if (length <= 0.0001f)
                 return fallback;
             return direction / length;
+        }
+
+        entt::entity FindDirectChildByTag(const entt::registry& registry, entt::entity parentEntity, std::string_view childTag)
+        {
+            auto childView = registry.view<HierarchyComponent, TagComponent>();
+            for (entt::entity child : childView)
+            {
+                const auto& hierarchy = childView.get<HierarchyComponent>(child);
+                if (hierarchy.Parent != parentEntity)
+                    continue;
+                const auto& tag = childView.get<TagComponent>(child);
+                if (tag.Tag == childTag)
+                    return child;
+            }
+
+            return entt::null;
+        }
+
+        bool SliderHasVisualChildren(const entt::registry& registry, entt::entity sliderEntity)
+        {
+            return FindDirectChildByTag(registry, sliderEntity, "Slider Background") != entt::null
+                || FindDirectChildByTag(registry, sliderEntity, "Slider Fill") != entt::null
+                || FindDirectChildByTag(registry, sliderEntity, "Slider Handle") != entt::null;
         }
     }
 
@@ -387,16 +411,28 @@ namespace Limitless::EditorInspectorPanel
 
             if (spriteOpen)
             {
-                ImGui::ColorEdit4("Color", &sprite->Color.r);
-                TrackInteractiveMutation(undoService, "Edit Sprite Color");
-                ImGui::DragFloat2("Tiling Factor", &sprite->TilingFactor.x, 0.05f, 0.001f, 100.0f, "%.3f");
-                sprite->TilingFactor.x = std::max(0.001f, sprite->TilingFactor.x);
-                sprite->TilingFactor.y = std::max(0.001f, sprite->TilingFactor.y);
-                TrackInteractiveMutation(undoService, "Edit Sprite Tiling Factor");
-                ImGui::Checkbox("Cast Shadows", &sprite->CastShadows);
-                TrackInteractiveMutation(undoService, "Edit Sprite Cast Shadows");
-                ImGui::Checkbox("Receive Shadows", &sprite->ReceiveShadows);
-                TrackInteractiveMutation(undoService, "Edit Sprite Receive Shadows");
+                const bool sliderRootUsesChildVisuals = registry.all_of<UISliderComponent>(selectedEntity)
+                    && SliderHasVisualChildren(registry, selectedEntity);
+                if (sliderRootUsesChildVisuals)
+                {
+                    ImGui::TextWrapped("This Sprite is not used when the slider has child visuals.");
+                    ImGui::TextWrapped("Edit colors on child entities: Slider Background, Slider Fill, and Slider Handle.");
+                    if (ImGui::Button("Remove Root Sprite Component##SliderRootSprite"))
+                        pendingRemovals.RemoveSpriteComponent = true;
+                    ImGui::TreePop();
+                }
+                else
+                {
+                    ImGui::ColorEdit4("Color", &sprite->Color.r);
+                    TrackInteractiveMutation(undoService, "Edit Sprite Color");
+                    ImGui::DragFloat2("Tiling Factor", &sprite->TilingFactor.x, 0.05f, 0.001f, 100.0f, "%.3f");
+                    sprite->TilingFactor.x = std::max(0.001f, sprite->TilingFactor.x);
+                    sprite->TilingFactor.y = std::max(0.001f, sprite->TilingFactor.y);
+                    TrackInteractiveMutation(undoService, "Edit Sprite Tiling Factor");
+                    ImGui::Checkbox("Cast Shadows", &sprite->CastShadows);
+                    TrackInteractiveMutation(undoService, "Edit Sprite Cast Shadows");
+                    ImGui::Checkbox("Receive Shadows", &sprite->ReceiveShadows);
+                    TrackInteractiveMutation(undoService, "Edit Sprite Receive Shadows");
 
                 // Material slot (Unity-style): dropping a material assigns it to the renderer.
                 auto* material = registry.try_get<MaterialComponent>(selectedEntity);
@@ -474,7 +510,8 @@ namespace Limitless::EditorInspectorPanel
                         assignMaterialKey({});
                 }
 
-                ImGui::TreePop();
+                    ImGui::TreePop();
+                }
             }
         }
 
@@ -2185,6 +2222,7 @@ namespace Limitless::EditorInspectorPanel
 
             if (uiSliderOpen)
             {
+                const bool sliderUsesVisualChildren = SliderHasVisualChildren(registry, selectedEntity);
                 ImGui::Checkbox("Interactable", &uiSlider->Interactable);
                 TrackInteractiveMutation(undoService, "Edit UISlider Interactable");
                 ImGui::DragFloat("Min Value", &uiSlider->MinValue, 0.1f);
@@ -2196,12 +2234,32 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::SliderFloat("Value", &uiSlider->Value, uiSlider->MinValue, uiSlider->MaxValue);
                 uiSlider->Value = std::clamp(uiSlider->Value, uiSlider->MinValue, uiSlider->MaxValue);
                 TrackInteractiveMutation(undoService, "Edit UISlider Value");
-                ImGui::ColorEdit4("Background Color##UISlider", &uiSlider->BackgroundColor.r);
-                TrackInteractiveMutation(undoService, "Edit UISlider Background Color");
-                ImGui::ColorEdit4("Fill Color##UISlider", &uiSlider->FillColor.r);
-                TrackInteractiveMutation(undoService, "Edit UISlider Fill Color");
-                ImGui::ColorEdit4("Handle Color##UISlider", &uiSlider->HandleColor.r);
-                TrackInteractiveMutation(undoService, "Edit UISlider Handle Color");
+                if (sliderUsesVisualChildren)
+                {
+                    ImGui::TextWrapped("Unity-style slider visuals are authored on child entities:");
+                    ImGui::BulletText("Slider Background");
+                    ImGui::BulletText("Slider Fill");
+                    ImGui::BulletText("Slider Handle");
+                    if (ImGui::TreeNodeEx("Fallback Colors (Used Only Without Visual Children)"))
+                    {
+                        ImGui::ColorEdit4("Background Color##UISlider", &uiSlider->BackgroundColor.r);
+                        TrackInteractiveMutation(undoService, "Edit UISlider Background Color");
+                        ImGui::ColorEdit4("Fill Color##UISlider", &uiSlider->FillColor.r);
+                        TrackInteractiveMutation(undoService, "Edit UISlider Fill Color");
+                        ImGui::ColorEdit4("Handle Color##UISlider", &uiSlider->HandleColor.r);
+                        TrackInteractiveMutation(undoService, "Edit UISlider Handle Color");
+                        ImGui::TreePop();
+                    }
+                }
+                else
+                {
+                    ImGui::ColorEdit4("Background Color##UISlider", &uiSlider->BackgroundColor.r);
+                    TrackInteractiveMutation(undoService, "Edit UISlider Background Color");
+                    ImGui::ColorEdit4("Fill Color##UISlider", &uiSlider->FillColor.r);
+                    TrackInteractiveMutation(undoService, "Edit UISlider Fill Color");
+                    ImGui::ColorEdit4("Handle Color##UISlider", &uiSlider->HandleColor.r);
+                    TrackInteractiveMutation(undoService, "Edit UISlider Handle Color");
+                }
                 ImGui::DragFloat("Handle Width##UISlider", &uiSlider->HandleWidth, 0.5f, 1.0f, 4096.0f);
                 uiSlider->HandleWidth = std::max(1.0f, uiSlider->HandleWidth);
                 TrackInteractiveMutation(undoService, "Edit UISlider Handle Width");
