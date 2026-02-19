@@ -25,6 +25,14 @@ project "Test"
         "../Editor/Source/Undo/**.cpp"
     }
 
+    filter "system:windows"
+        files
+        {
+            "../Resources/LimitlessExecutableIcon.rc",
+            "../Resources/LimitlessLogo.ico"
+        }
+    filter {}
+
     includedirs
     {
         "../Limitless/Source",

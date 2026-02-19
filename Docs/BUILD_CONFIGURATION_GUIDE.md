@@ -9,7 +9,8 @@ This guide covers the build system configuration, platform-specific settings, an
 3. [C++20 Coroutine Support](#c20-coroutine-support)
 4. [Build Configurations](#build-configurations)
 5. [Cross-Platform Building](#cross-platform-building)
-6. [Best Practices](#best-practices)
+6. [Application Icon Setup](#application-icon-setup)
+7. [Best Practices](#best-practices)
 
 ## Build System Overview
 
@@ -225,6 +226,15 @@ filter "configurations:Dist"
 - **Minimal Logging**: Only critical errors
 - **No Console Output**: Clean user experience
 - **Distribution Ready**: Production-ready build
+
+## Application Icon Setup
+
+The workspace uses a shared logo file at `Resources/LimitlessLogo.ico`.
+
+- **Windows executable icon metadata**: Embedded through `Resources/LimitlessExecutableIcon.rc` so the generated `.exe` files show the project icon in Explorer.
+- **Runtime window icon (Windows/macOS/Linux)**: `window.icon` in `Editor/config.json` and `Runtime/config.json` is set to `LimitlessLogo.ico`.
+- **Output layout**: Premake post-build copy rules place `LimitlessLogo.ico` next to each built executable so config-based icon loading works consistently.
+- **Packaged game builds**: `GameBuilder` now copies `LimitlessLogo.ico` into the output directory alongside `config.json` and the game executable.
 
 ## Cross-Platform Building
 

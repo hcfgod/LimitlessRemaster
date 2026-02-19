@@ -378,6 +378,13 @@ namespace Limitless::Project
             }
         }
 
+        // 2b. Copy runtime window icon so shipped config can resolve `window.icon`.
+        const auto sourceWindowIcon = runtimeDir / "LimitlessLogo.ico";
+        if (std::filesystem::exists(sourceWindowIcon))
+        {
+            CopySingleFile(sourceWindowIcon, request.OutputDirectory / "LimitlessLogo.ico", result);
+        }
+
         // 3. Copy ScriptCore DLL.
         const auto scriptCoreDir = GetScriptCoreBuildDirectory(request.EngineRoot, config);
         const auto scriptCorePath = scriptCoreDir / GetScriptCoreLibraryName();

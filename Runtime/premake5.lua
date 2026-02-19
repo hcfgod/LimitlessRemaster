@@ -23,6 +23,14 @@ project "Runtime"
         "Source/**.cpp"
     }
 
+    filter "system:windows"
+        files
+        {
+            "../Resources/LimitlessExecutableIcon.rc",
+            "../Resources/LimitlessLogo.ico"
+        }
+    filter {}
+
     includedirs
     {
         "../Limitless/Vendor",
@@ -59,7 +67,8 @@ project "Runtime"
         -- NOTE:
         -- Use the project location directly to avoid duplicated path segments
         -- segments on some generators after project renames.
-        "{COPY} \"%{prj.location}/config.json\" \"%{cfg.targetdir}\""
+        "{COPY} \"%{prj.location}/config.json\" \"%{cfg.targetdir}\"",
+        "{COPY} \"%{wks.location}/Resources/LimitlessLogo.ico\" \"%{cfg.targetdir}\""
     }
 
     filter "system:windows"

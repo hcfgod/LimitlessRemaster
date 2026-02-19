@@ -21,6 +21,14 @@ project "Editor"
         "Source/**.cpp"
     }
 
+    filter "system:windows"
+        files
+        {
+            "../Resources/LimitlessExecutableIcon.rc",
+            "../Resources/LimitlessLogo.ico"
+        }
+    filter {}
+
     removefiles
     {
         "Source/Scripting/UserScripts/**.h",
@@ -52,7 +60,8 @@ project "Editor"
 
     postbuildcommands
     {
-        "{COPY} \"%{wks.location}/Editor/config.json\" \"%{cfg.targetdir}\""
+        "{COPY} \"%{wks.location}/Editor/config.json\" \"%{cfg.targetdir}\"",
+        "{COPY} \"%{wks.location}/Resources/LimitlessLogo.ico\" \"%{cfg.targetdir}\""
     }
 
     filter "system:windows"

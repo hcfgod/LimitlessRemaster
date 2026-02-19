@@ -7,6 +7,145 @@
 #include "Graphics/Renderer.h"
 #include <SDL3/SDL.h>
 #include <spdlog/fmt/fmt.h>
+#include "stb/stb_image/stb_image.h"
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <vector>
+
+namespace
+{
+    constexpr std::uint8_t PngSignature[8] = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+
+    std::uint16_t ReadUint16LE(const std::uint8_t* data)
+    {
+        return static_cast<std::uint16_t>(data[0] | (static_cast<std::uint16_t>(data[1]) << 8));
+    }
+
+    std::uint32_t ReadUint32LE(const std::uint8_t* data)
+    {
+        return static_cast<std::uint32_t>(data[0])
+            | (static_cast<std::uint32_t>(data[1]) << 8)
+            | (static_cast<std::uint32_t>(data[2]) << 16)
+            | (static_cast<std::uint32_t>(data[3]) << 24);
+    }
+
+    SDL_Surface* CreateSurfaceFromRgba(const std::uint8_t* rgbaPixels, int width, int height)
+    {
+        if (!rgbaPixels || width <= 0 || height <= 0)
+            return nullptr;
+
+        SDL_Surface* surface = SDL_CreateSurface(width, height, SDL_PIXELFORMAT_RGBA32);
+        if (!surface)
+            return nullptr;
+
+        auto* destinationPixels = static_cast<std::uint8_t*>(surface->pixels);
+        const int sourcePitch = width * 4;
+        for (int y = 0; y < height; ++y)
+        {
+            std::memcpy(destinationPixels + (y * surface->pitch), rgbaPixels + (y * sourcePitch), static_cast<size_t>(sourcePitch));
+        }
+        return surface;
+    }
+
+    SDL_Surface* TryLoadSurfaceWithStb(const std::string& iconPath)
+    {
+        int width = 0;
+        int height = 0;
+        int channels = 0;
+        stbi_uc* rgbaPixels = stbi_load(iconPath.c_str(), &width, &height, &channels, 4);
+        if (!rgbaPixels)
+            return nullptr;
+
+        SDL_Surface* surface = CreateSurfaceFromRgba(rgbaPixels, width, height);
+        stbi_image_free(rgbaPixels);
+        return surface;
+    }
+
+    SDL_Surface* TryLoadIcoPngEntry(const std::vector<std::uint8_t>& icoBytes)
+    {
+        if (icoBytes.size() < 6)
+            return nullptr;
+
+        const std::uint16_t iconType = ReadUint16LE(icoBytes.data() + 2);
+        const std::uint16_t entryCount = ReadUint16LE(icoBytes.data() + 4);
+        if (iconType != 1 || entryCount == 0)
+            return nullptr;
+
+        const size_t directorySize = 6u + (static_cast<size_t>(entryCount) * 16u);
+        if (icoBytes.size() < directorySize)
+            return nullptr;
+
+        const std::uint8_t* bestData = nullptr;
+        std::uint32_t bestDataSize = 0;
+        int bestScore = -1;
+
+        for (std::uint16_t i = 0; i < entryCount; ++i)
+        {
+            const size_t entryOffset = 6u + (static_cast<size_t>(i) * 16u);
+            const std::uint8_t* entry = icoBytes.data() + entryOffset;
+            const int width = entry[0] == 0 ? 256 : entry[0];
+            const int height = entry[1] == 0 ? 256 : entry[1];
+            const std::uint16_t bitsPerPixel = ReadUint16LE(entry + 6);
+            const std::uint32_t bytesInResource = ReadUint32LE(entry + 8);
+            const std::uint32_t imageOffset = ReadUint32LE(entry + 12);
+
+            if (bytesInResource < 8)
+                continue;
+
+            const size_t dataStart = static_cast<size_t>(imageOffset);
+            const size_t dataEnd = dataStart + static_cast<size_t>(bytesInResource);
+            if (dataStart >= icoBytes.size() || dataEnd > icoBytes.size())
+                continue;
+
+            const std::uint8_t* imageBytes = icoBytes.data() + dataStart;
+            if (!std::equal(std::begin(PngSignature), std::end(PngSignature), imageBytes))
+                continue;
+
+            const int score = (width * height * 64) + bitsPerPixel;
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestData = imageBytes;
+                bestDataSize = bytesInResource;
+            }
+        }
+
+        if (!bestData || bestDataSize == 0)
+            return nullptr;
+
+        int width = 0;
+        int height = 0;
+        int channels = 0;
+        stbi_uc* rgbaPixels = stbi_load_from_memory(bestData, static_cast<int>(bestDataSize), &width, &height, &channels, 4);
+        if (!rgbaPixels)
+            return nullptr;
+
+        SDL_Surface* surface = CreateSurfaceFromRgba(rgbaPixels, width, height);
+        stbi_image_free(rgbaPixels);
+        return surface;
+    }
+
+    SDL_Surface* TryLoadSurfaceFromIco(const std::string& iconPath)
+    {
+        std::ifstream file(iconPath, std::ios::binary | std::ios::ate);
+        if (!file.is_open())
+            return nullptr;
+
+        const std::streamoff endPos = file.tellg();
+        if (endPos <= 0)
+            return nullptr;
+
+        file.seekg(0, std::ios::beg);
+        std::vector<std::uint8_t> icoBytes(static_cast<size_t>(endPos));
+        file.read(reinterpret_cast<char*>(icoBytes.data()), static_cast<std::streamsize>(icoBytes.size()));
+        if (!file)
+            return nullptr;
+
+        return TryLoadIcoPngEntry(icoBytes);
+    }
+}
 
 namespace Limitless
 {
@@ -461,6 +600,15 @@ namespace Limitless
         if (m_Window && !iconPath.empty())
         {
             SDL_Surface* surface = SDL_LoadBMP(iconPath.c_str());
+            if (!surface)
+            {
+                surface = TryLoadSurfaceWithStb(iconPath);
+            }
+            if (!surface)
+            {
+                surface = TryLoadSurfaceFromIco(iconPath);
+            }
+
             if (surface)
             {
                 SDL_SetWindowIcon(m_Window, surface);
@@ -469,15 +617,12 @@ namespace Limitless
             }
             else
             {
-                std::string errorMsg = fmt::format("SDL_LoadBMP failed: {}", SDL_GetError());
-                GraphicsError error(errorMsg, std::source_location::current());
-                error.SetFunctionName("SDLWindow::SetIcon");
-                error.SetClassName("SDLWindow");
-                error.SetModuleName("Platform/SDL");
-                error.AddContext("icon_path", iconPath);
-                LT_CORE_ERROR("{}", errorMsg);
-                Error::LogError(error);
-                LT_THROW_GRAPHICS_ERROR(errorMsg);
+                const std::string errorMsg = fmt::format(
+                    "Failed to load icon '{}' as BMP, standard image, or PNG-based ICO. SDL error: {}",
+                    iconPath,
+                    SDL_GetError()
+                );
+                LT_CORE_WARN("{}", errorMsg);
             }
         }
     }

@@ -17,6 +17,7 @@
     "window": {
         "fullscreen": false,
         "height": 720,
+        "icon": "LimitlessLogo.ico",
         "resizable": true,
         "title": "LimitLess Engine",
         "vsync": false,
