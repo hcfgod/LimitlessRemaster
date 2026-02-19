@@ -22,6 +22,7 @@ namespace Limitless::EditorScenePanel
         constexpr ImU32 kPrefabBadgeBorderColor = IM_COL32(120, 190, 255, 255);
         constexpr ImU32 kPrefabBadgeTextColor = IM_COL32(235, 245, 255, 255);
         constexpr float kPrefabBadgeSize = 12.0f;
+        constexpr ImVec4 kDisabledEntityTextColor = ImVec4(0.58f, 0.58f, 0.58f, 1.0f);
 
         void CopyTextToBuffer(std::array<char, 256>& destination, const char* source)
         {
@@ -122,6 +123,7 @@ namespace Limitless::EditorScenePanel
             auto& registry = scene->GetRegistry();
             const auto* tag = registry.try_get<TagComponent>(entity);
             const std::string label = (tag && !tag->Tag.empty()) ? tag->Tag : "Entity";
+            const bool isDisabledEntity = tag && !tag->Enabled;
             const auto* prefabInstanceForNode = registry.try_get<PrefabInstanceComponent>(entity);
             const bool isPrefabInstanceRoot = prefabInstanceForNode && !prefabInstanceForNode->PrefabAssetKey.empty();
             const bool isPrefabLinkedEntity = IsEntityInPrefabInstanceSubtree(*scene, entity);
@@ -134,10 +136,16 @@ namespace Limitless::EditorScenePanel
             if (selectedEntity == entity)
                 flags |= ImGuiTreeNodeFlags_Selected;
 
-            if (isPrefabLinkedEntity)
-                ImGui::PushStyleColor(ImGuiCol_Text, kPrefabHighlightTextColor);
+            const bool pushCustomTextColor = isDisabledEntity || isPrefabLinkedEntity;
+            if (pushCustomTextColor)
+            {
+                if (isDisabledEntity)
+                    ImGui::PushStyleColor(ImGuiCol_Text, kDisabledEntityTextColor);
+                else
+                    ImGui::PushStyleColor(ImGuiCol_Text, kPrefabHighlightTextColor);
+            }
             const bool opened = ImGui::TreeNodeEx(reinterpret_cast<void*>(static_cast<uintptr_t>(static_cast<uint32_t>(entity))), flags, "%s", nodeLabel.c_str());
-            if (isPrefabLinkedEntity)
+            if (pushCustomTextColor)
                 ImGui::PopStyleColor();
             if (isPrefabLinkedEntity)
                 DrawPrefabBadgeForLastItem();

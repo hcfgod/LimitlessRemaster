@@ -7,6 +7,9 @@
     #include "Scene/Scene.h"
 #endif
 
+#include <algorithm>
+#include <unordered_map>
+
 namespace Limitless
 {
     namespace
@@ -64,9 +67,44 @@ namespace Limitless
         return Entity{};
     }
 
-    Entity ScriptableEntity::Instantiate(const ScriptPrefabReference& prefabReference, entt::entity parentEntity)
+    Entity ScriptableEntity::Instantiate(const std::string& prefabAssetKey, const Entity& parentEntity)
+    {
+        const entt::entity parentHandle = (parentEntity && m_Registry && m_Registry->valid(parentEntity.GetHandle()))
+            ? parentEntity.GetHandle()
+            : entt::null;
+        return Instantiate(prefabAssetKey, parentHandle);
+    }
+
+    Entity ScriptableEntity::Instantiate(const Prefab& prefabReference, entt::entity parentEntity)
     {
         return Instantiate(prefabReference.AssetKey, parentEntity);
+    }
+
+    Entity ScriptableEntity::Instantiate(const Prefab& prefabReference, const Entity& parentEntity)
+    {
+        return Instantiate(prefabReference.AssetKey, parentEntity);
+    }
+
+    Entity ScriptableEntity::Instantiate(const Entity& prefabReference, entt::entity parentEntity)
+    {
+        if (prefabReference.IsPrefabReference())
+            return Instantiate(prefabReference.GetPrefabAssetKey(), parentEntity);
+
+        if (!prefabReference || !m_Registry || !m_Registry->valid(prefabReference.GetHandle()))
+            return Entity{};
+
+        if (const auto* prefabInstance = m_Registry->try_get<PrefabInstanceComponent>(prefabReference.GetHandle()))
+            return Instantiate(prefabInstance->PrefabAssetKey, parentEntity);
+
+        return Entity{};
+    }
+
+    Entity ScriptableEntity::Instantiate(const Entity& prefabReference, const Entity& parentEntity)
+    {
+        const entt::entity parentHandle = (parentEntity && m_Registry && m_Registry->valid(parentEntity.GetHandle()))
+            ? parentEntity.GetHandle()
+            : entt::null;
+        return Instantiate(prefabReference, parentHandle);
     }
 
     void ScriptableEntity::DestroyEntity(Entity entity)
@@ -121,6 +159,116 @@ namespace Limitless
         }
 
         return Entity{};
+    }
+
+    Entity ScriptableEntity::GetParent(const Entity& entity) const
+    {
+        return GetParent(entity.GetHandle());
+    }
+
+    Entity ScriptableEntity::GetParent(entt::entity entity) const
+    {
+        if (!IsEntityValid(entity))
+            return Entity{};
+
+        const auto* hierarchy = m_Registry->try_get<HierarchyComponent>(entity);
+        if (!hierarchy || hierarchy->Parent == entt::null || !m_Registry->valid(hierarchy->Parent))
+            return Entity{};
+
+        return Entity(m_Registry, hierarchy->Parent);
+    }
+
+    std::vector<Entity> ScriptableEntity::GetChildren(const Entity& parent) const
+    {
+        return GetChildren(parent.GetHandle());
+    }
+
+    std::vector<Entity> ScriptableEntity::GetChildren(entt::entity parent) const
+    {
+        std::vector<std::pair<int32_t, entt::entity>> orderedChildren;
+        if (m_Registry == nullptr)
+            return {};
+
+        auto hierarchyView = m_Registry->view<HierarchyComponent>();
+        for (entt::entity candidate : hierarchyView)
+        {
+            if (!m_Registry->valid(candidate))
+                continue;
+            const auto& hierarchy = hierarchyView.get<HierarchyComponent>(candidate);
+            if (hierarchy.Parent == parent)
+                orderedChildren.emplace_back(hierarchy.SiblingOrder, candidate);
+        }
+
+        std::sort(orderedChildren.begin(), orderedChildren.end(), [](const auto& left, const auto& right) {
+            if (left.first != right.first)
+                return left.first < right.first;
+            return static_cast<uint32_t>(left.second) < static_cast<uint32_t>(right.second);
+        });
+
+        std::vector<Entity> children;
+        children.reserve(orderedChildren.size());
+        for (const auto& [siblingOrder, child] : orderedChildren)
+        {
+            (void)siblingOrder;
+            children.emplace_back(m_Registry, child);
+        }
+        return children;
+    }
+
+    std::vector<Entity> ScriptableEntity::GetHierarchy(const Entity& root, bool includeRoot) const
+    {
+        return GetHierarchy(root.GetHandle(), includeRoot);
+    }
+
+    std::vector<Entity> ScriptableEntity::GetHierarchy(entt::entity root, bool includeRoot) const
+    {
+        if (!IsEntityValid(root))
+            return {};
+
+        std::unordered_multimap<entt::entity, std::pair<int32_t, entt::entity>> childrenByParent;
+        auto hierarchyView = m_Registry->view<HierarchyComponent>();
+        for (entt::entity candidate : hierarchyView)
+        {
+            if (!m_Registry->valid(candidate))
+                continue;
+            const auto& hierarchy = hierarchyView.get<HierarchyComponent>(candidate);
+            childrenByParent.emplace(hierarchy.Parent, std::make_pair(hierarchy.SiblingOrder, candidate));
+        }
+
+        std::vector<entt::entity> queue;
+        queue.push_back(root);
+
+        std::vector<Entity> result;
+        if (includeRoot)
+            result.emplace_back(m_Registry, root);
+
+        for (size_t index = 0; index < queue.size(); ++index)
+        {
+            const entt::entity parent = queue[index];
+            std::vector<std::pair<int32_t, entt::entity>> orderedChildren;
+            const auto [childBegin, childEnd] = childrenByParent.equal_range(parent);
+            for (auto iterator = childBegin; iterator != childEnd; ++iterator)
+            {
+                const auto& [siblingOrder, child] = iterator->second;
+                if (m_Registry->valid(child))
+                    orderedChildren.emplace_back(siblingOrder, child);
+            }
+
+            std::sort(orderedChildren.begin(), orderedChildren.end(), [](const auto& left, const auto& right) {
+                if (left.first != right.first)
+                    return left.first < right.first;
+                return static_cast<uint32_t>(left.second) < static_cast<uint32_t>(right.second);
+            });
+
+            for (const auto& [siblingOrder, child] : orderedChildren)
+            {
+                (void)siblingOrder;
+                queue.push_back(child);
+                result.emplace_back(m_Registry, child);
+            }
+        }
+
+        return result;
     }
 
     float ScriptableEntity::GetExposedFloat(const std::string& name, float fallbackValue) const
@@ -192,6 +340,8 @@ namespace Limitless
             return fallbackValue;
         if (const auto* value = std::get_if<ScriptEntityReference>(&found->second))
         {
+            if (!value->PrefabAssetKey.empty())
+                return Entity::FromPrefabAssetKey(value->PrefabAssetKey);
             if (!value->Tag.empty())
             {
                 const Entity resolved = FindEntityByTag(value->Tag);
@@ -203,15 +353,20 @@ namespace Limitless
         return fallbackValue;
     }
 
-    ScriptPrefabReference ScriptableEntity::GetExposedPrefab(const std::string& name, const ScriptPrefabReference& fallbackValue) const
+    Prefab ScriptableEntity::GetExposedPrefab(const std::string& name, const Prefab& fallbackValue) const
     {
         if (!m_ExposedProperties)
             return fallbackValue;
         const auto found = m_ExposedProperties->find(name);
         if (found == m_ExposedProperties->end())
             return fallbackValue;
-        if (const auto* value = std::get_if<ScriptPrefabReference>(&found->second))
+        if (const auto* value = std::get_if<Prefab>(&found->second))
             return *value;
+        if (const auto* entityValue = std::get_if<ScriptEntityReference>(&found->second))
+        {
+            if (!entityValue->PrefabAssetKey.empty())
+                return Prefab{ entityValue->PrefabAssetKey };
+        }
         return fallbackValue;
     }
 
@@ -251,7 +406,11 @@ namespace Limitless
             return;
 
         ScriptEntityReference entityReference{};
-        if (value && m_Registry && m_Registry->valid(value.GetHandle()))
+        if (value.IsPrefabReference())
+        {
+            entityReference.PrefabAssetKey = value.GetPrefabAssetKey();
+        }
+        else if (value && m_Registry && m_Registry->valid(value.GetHandle()))
         {
             if (const auto* tagComponent = m_Registry->try_get<TagComponent>(value.GetHandle()))
                 entityReference.Tag = tagComponent->Tag;
@@ -259,7 +418,7 @@ namespace Limitless
         (*m_ExposedProperties)[name] = std::move(entityReference);
     }
 
-    void ScriptableEntity::SetExposedPrefab(const std::string& name, const ScriptPrefabReference& value)
+    void ScriptableEntity::SetExposedPrefab(const std::string& name, const Prefab& value)
     {
         if (!m_ExposedProperties)
             return;

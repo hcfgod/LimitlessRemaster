@@ -2,6 +2,7 @@
 
 #include "EnTT/entt.hpp"
 
+#include <string>
 #include <stdexcept>
 #include <utility>
 
@@ -29,6 +30,15 @@ namespace Limitless
         {
         }
 
+        /// Construct an inspector/runtime prefab asset reference that can be
+        /// passed to ScriptableEntity::Instantiate.
+        static Entity FromPrefabAssetKey(const std::string& prefabAssetKey)
+        {
+            Entity entity;
+            entity.m_PrefabAssetKey = prefabAssetKey;
+            return entity;
+        }
+
         /// Returns true when the handle refers to a live entity in its registry.
         bool IsValid() const
         {
@@ -45,6 +55,12 @@ namespace Limitless
 
         /// Access the underlying registry (for advanced / editor use).
         entt::registry* GetRegistry() const { return m_Registry; }
+
+        /// Returns true when this value represents a prefab asset reference.
+        bool IsPrefabReference() const { return !m_PrefabAssetKey.empty(); }
+
+        /// Returns prefab asset key when IsPrefabReference() is true.
+        const std::string& GetPrefabAssetKey() const { return m_PrefabAssetKey; }
 
         // -----------------------------------------------------------------
         // Component access (mirrors Unity GetComponent / TryGetComponent)
@@ -119,5 +135,6 @@ namespace Limitless
     private:
         entt::registry* m_Registry = nullptr;
         entt::entity m_EntityHandle = entt::null;
+        std::string m_PrefabAssetKey;
     };
 }

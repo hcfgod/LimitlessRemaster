@@ -182,6 +182,13 @@ namespace Limitless
             s_ActiveScene->DestroyEntity(entity);
         }
 
+        entt::entity ForwardScriptInstantiatePrefabToHost(const char* prefabAssetKey, entt::entity parentEntity)
+        {
+            if (!s_ActiveScene || !prefabAssetKey || prefabAssetKey[0] == '\0')
+                return entt::null;
+            return s_ActiveScene->InstantiatePrefab(prefabAssetKey, parentEntity);
+        }
+
         void RegisterScriptFromModule(const char* className, NativeScriptCreateFunction createFunction)
         {
             if (className && createFunction)
@@ -369,6 +376,7 @@ namespace Limitless
                 const float authoredVolume = audioSource.Muted ? 0.0f : std::max(0.0f, audioSource.Volume);
                 const float runtimeVolume = authoredVolume * spatialMix.Gain;
                 const float runtimePan = spatialMix.Pan;
+                const float runtimePitch = std::max(0.01f, audioSource.Pitch);
 
                 const bool shouldPlayOnStart =
                     audioSource.PlayOnStart &&
@@ -384,7 +392,8 @@ namespace Limitless
                             runtimeVolume,
                             audioSource.Loop,
                             audioSource.MixerGroup,
-                            runtimePan);
+                            runtimePan,
+                            runtimePitch);
                         audioSource.RuntimePlaybackStarted = (audioSource.RuntimeVoiceId != 0);
                     }
                 }
@@ -394,7 +403,8 @@ namespace Limitless
                         audioSource.RuntimeVoiceId,
                         runtimeVolume,
                         runtimePan,
-                        audioSource.MixerGroup);
+                        audioSource.MixerGroup,
+                        runtimePitch);
                 }
                 else if (!shouldPlayOnStart && audioSource.RuntimeVoiceId != 0)
                 {
@@ -523,10 +533,49 @@ namespace Limitless
                 {
                     const nlohmann::json inputRoot = nlohmann::json::parse(inputSettingsText.GetValue());
                     const std::string projectInputActionsKey = inputRoot.value("projectInputActionsKey", std::string{});
+                    InputSystem& inputSystem = Application::GetInstance().GetInputSystem();
                     if (!projectInputActionsKey.empty())
+                        inputSystem.SetProjectActionAssetFromKey(projectInputActionsKey);
+                    else
+                        inputSystem.SetProjectActionAsset(nullptr);
+
+                    std::vector<std::string> additionalInputActionKeys;
+                    if (inputRoot.contains("additionalInputActionsAssets") && inputRoot["additionalInputActionsAssets"].is_array())
                     {
-                        Application::GetInstance().GetInputSystem().SetProjectActionAssetFromKey(projectInputActionsKey);
+                        for (const auto& value : inputRoot["additionalInputActionsAssets"])
+                        {
+                            if (value.is_object())
+                            {
+                                const std::string key = value.value("assetKey", std::string{});
+                                if (!key.empty())
+                                    additionalInputActionKeys.push_back(key);
+                            }
+                            else if (value.is_string())
+                            {
+                                const std::string key = value.get<std::string>();
+                                if (!key.empty())
+                                    additionalInputActionKeys.push_back(key);
+                            }
+                        }
                     }
+
+                    if (inputRoot.contains("additionalInputActionsKeys") && inputRoot["additionalInputActionsKeys"].is_array())
+                    {
+                        for (const auto& value : inputRoot["additionalInputActionsKeys"])
+                        {
+                            if (!value.is_string())
+                                continue;
+                            const std::string key = value.get<std::string>();
+                            if (!key.empty())
+                                additionalInputActionKeys.push_back(key);
+                        }
+                    }
+
+                    std::sort(additionalInputActionKeys.begin(), additionalInputActionKeys.end());
+                    additionalInputActionKeys.erase(
+                        std::unique(additionalInputActionKeys.begin(), additionalInputActionKeys.end()),
+                        additionalInputActionKeys.end());
+                    inputSystem.SetProjectAdditionalActionAssetsFromKeys(additionalInputActionKeys);
                 }
                 catch (const std::exception& e)
                 {
@@ -807,6 +856,7 @@ namespace Limitless
         connectBridge("LT_SetScriptLogBridge", &ForwardScriptLogToHost);
         connectBridge("LT_SetScriptCreateEntityBridge", &ForwardScriptCreateEntityToHost);
         connectBridge("LT_SetScriptDestroyEntityBridge", &ForwardScriptDestroyEntityToHost);
+        connectBridge("LT_SetScriptInstantiatePrefabBridge", &ForwardScriptInstantiatePrefabToHost);
 
         // Legacy bridge names (backward compat with older ScriptCore builds).
         connectBridge("LT_SetInputButtonDownBridge", &ForwardInputActionStartedToHost);
@@ -818,6 +868,7 @@ namespace Limitless
         // Wire up engine-side entity bridge callbacks.
         ScriptableEntity::SetCreateEntityBridgeCallback(&ForwardScriptCreateEntityToHost);
         ScriptableEntity::SetDestroyEntityBridgeCallback(&ForwardScriptDestroyEntityToHost);
+        ScriptableEntity::SetInstantiatePrefabBridgeCallback(&ForwardScriptInstantiatePrefabToHost);
 
         LT_INFO("GameLayer: ScriptCore loaded with {} script(s).",
                  NativeScriptRegistry::GetRegisteredScriptNames().size());

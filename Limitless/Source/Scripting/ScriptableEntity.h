@@ -10,6 +10,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace Limitless
 {
@@ -126,12 +127,22 @@ namespace Limitless
         Entity CreateEntity(const std::string& name = "Entity");
         entt::entity CreateEntityHandle(const std::string& name = "Entity");
         Entity Instantiate(const std::string& prefabAssetKey, entt::entity parentEntity = entt::null);
-        Entity Instantiate(const ScriptPrefabReference& prefabReference, entt::entity parentEntity = entt::null);
+        Entity Instantiate(const std::string& prefabAssetKey, const Entity& parentEntity);
+        Entity Instantiate(const Prefab& prefabReference, entt::entity parentEntity = entt::null);
+        Entity Instantiate(const Prefab& prefabReference, const Entity& parentEntity);
+        Entity Instantiate(const Entity& prefabReference, entt::entity parentEntity = entt::null);
+        Entity Instantiate(const Entity& prefabReference, const Entity& parentEntity);
         void DestroyEntity(Entity entity);
         void DestroyEntity(entt::entity entity);
         bool IsEntityValid(entt::entity entity) const;
         Entity GetEntity(entt::entity entity) const;
         Entity FindEntityByTag(const std::string& tag) const;
+        Entity GetParent(const Entity& entity) const;
+        Entity GetParent(entt::entity entity) const;
+        std::vector<Entity> GetChildren(const Entity& parent) const;
+        std::vector<Entity> GetChildren(entt::entity parent) const;
+        std::vector<Entity> GetHierarchy(const Entity& root, bool includeRoot = true) const;
+        std::vector<Entity> GetHierarchy(entt::entity root, bool includeRoot = true) const;
 
         static void SetCreateEntityBridgeCallback(ScriptCreateEntityBridgeCallback callback);
         static void SetDestroyEntityBridgeCallback(ScriptDestroyEntityBridgeCallback callback);
@@ -144,7 +155,7 @@ namespace Limitless
         glm::vec3 GetExposedVector3(const std::string& name, const glm::vec3& fallbackValue = glm::vec3(0.0f)) const;
         std::string GetExposedString(const std::string& name, const std::string& fallbackValue = {}) const;
         Entity GetExposedEntity(const std::string& name, const Entity& fallbackValue = Entity{}) const;
-        ScriptPrefabReference GetExposedPrefab(const std::string& name, const ScriptPrefabReference& fallbackValue = {}) const;
+        Prefab GetExposedPrefab(const std::string& name, const Prefab& fallbackValue = {}) const;
 
         void SetExposedFloat(const std::string& name, float value);
         void SetExposedInteger(const std::string& name, int32_t value);
@@ -152,7 +163,7 @@ namespace Limitless
         void SetExposedVector3(const std::string& name, const glm::vec3& value);
         void SetExposedString(const std::string& name, const std::string& value);
         void SetExposedEntity(const std::string& name, const Entity& value);
-        void SetExposedPrefab(const std::string& name, const ScriptPrefabReference& value);
+        void SetExposedPrefab(const std::string& name, const Prefab& value);
 
         void SyncExposedField(const std::string& name, float& value) { value = GetExposedFloat(name, value); }
         void SyncExposedField(const std::string& name, int32_t& value) { value = GetExposedInteger(name, value); }
@@ -160,7 +171,7 @@ namespace Limitless
         void SyncExposedField(const std::string& name, glm::vec3& value) { value = GetExposedVector3(name, value); }
         void SyncExposedField(const std::string& name, std::string& value) { value = GetExposedString(name, value); }
         void SyncExposedField(const std::string& name, Entity& value) { value = GetExposedEntity(name, value); }
-        void SyncExposedField(const std::string& name, ScriptPrefabReference& value) { value = GetExposedPrefab(name, value); }
+        void SyncExposedField(const std::string& name, Prefab& value) { value = GetExposedPrefab(name, value); }
 
         bool Raycast2D(const glm::vec2& origin,
                        const glm::vec2& direction,

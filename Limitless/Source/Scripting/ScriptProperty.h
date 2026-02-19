@@ -11,12 +11,16 @@ namespace Limitless
     struct ScriptEntityReference
     {
         std::string Tag;
+        std::string PrefabAssetKey;
     };
 
-    struct ScriptPrefabReference
+    struct Prefab
     {
         std::string AssetKey;
     };
+
+    // Backward compatibility alias for older scripts.
+    using ScriptPrefabReference = Prefab;
 
     enum class ScriptPropertyType : uint32_t
     {
@@ -29,5 +33,5 @@ namespace Limitless
         Prefab = 6
     };
 
-    using ScriptPropertyValue = std::variant<float, int32_t, bool, glm::vec3, std::string, ScriptEntityReference, ScriptPrefabReference>;
+    using ScriptPropertyValue = std::variant<float, int32_t, bool, glm::vec3, std::string, ScriptEntityReference, Prefab>;
 }

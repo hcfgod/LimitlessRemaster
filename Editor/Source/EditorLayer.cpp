@@ -710,6 +710,12 @@ namespace Limitless
 
     void EditorLayer::OnUpdate(float deltaTime)
     {
+        const ImGuiIO& io = ImGui::GetIO();
+        ScriptCoreModuleRuntime::SetGameplayInputRoutingState(
+            m_GameViewFocused,
+            m_GameViewHovered,
+            io.WantCaptureMouse,
+            io.WantCaptureKeyboard || io.WantTextInput);
         ScriptCoreModuleRuntime::Update(m_PlayModeState);
         ApplyProjectRenderSettings();
         UpdateSceneAudioSources(m_Scene.get(), m_PlayModeState);
@@ -748,7 +754,6 @@ namespace Limitless
             m_CachedGameplayCameraId,
             m_CreatedGameplayCameraFromScene);
 
-        const ImGuiIO& io = ImGui::GetIO();
         EditorRuntimeOperations::Update(
             m_PlayModeState,
             m_SceneViewHovered,
@@ -1280,6 +1285,7 @@ namespace Limitless
             m_GameViewFramebuffer,
             m_GameViewFocused,
             m_GameViewHovered,
+            m_FocusGameViewOnPlayEnter,
             m_EditorCameraController.get(),
             sceneViewCamera,
             gameViewCamera,
@@ -2106,6 +2112,7 @@ namespace Limitless
             m_SelectedEntity,
             m_SelectedTextureAssetKey,
             m_CachedTextureAsset);
+        m_FocusGameViewOnPlayEnter = true;
     }
 
     void EditorLayer::EnterSimulateMode()

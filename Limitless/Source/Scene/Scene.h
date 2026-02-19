@@ -101,6 +101,8 @@ namespace Limitless
         bool IsReady() const { return m_LoadState == LoadState::Ready; }
         bool IsSceneObjectsInitialized() const { return m_SceneObjectsInitialized; }
         bool IsPhysicsWorldInitializedForLoading() const { return m_PhysicsWorldInitializedForLoading; }
+        bool IsUiPointerOverInteractiveElement() const { return m_RuntimeUiPointerOverInteractiveElement; }
+        void SetUiPointerOverInteractiveElement(bool isOver) { m_RuntimeUiPointerOverInteractiveElement = isOver; }
 
         void SetPhysics2DSettings(const Physics2DWorldSettings& settings);
         const Physics2DWorldSettings& GetPhysics2DSettings() const { return m_Physics2DSettings; }
@@ -138,6 +140,7 @@ namespace Limitless
         LoadState m_LoadState = LoadState::Ready;
         bool m_SceneObjectsInitialized = true;
         bool m_PhysicsWorldInitializedForLoading = true;
+        bool m_RuntimeUiPointerOverInteractiveElement = false;
     };
 
     // -----------------------------------------------------------------------------

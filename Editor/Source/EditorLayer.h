@@ -130,6 +130,7 @@ namespace Limitless
         bool m_SceneViewHovered = false;
         bool m_GameViewFocused = false;
         bool m_GameViewHovered = false;
+        bool m_FocusGameViewOnPlayEnter = false;
 
         CameraManager m_CameraManager;
         CameraId m_EditorCameraId{};

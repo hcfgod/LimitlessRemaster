@@ -554,6 +554,37 @@ namespace Limitless
             rigidbody.RuntimeRenderCurrentPosition = rigidbody.RuntimePreviousPosition;
             rigidbody.RuntimeRenderCurrentAngleRadians = rigidbody.RuntimePreviousAngleRadians;
             rigidbody.RuntimeLinearVelocity = glm::vec2(0.0f);
+
+            // Preserve script-authored velocity writes made in the same frame as
+            // body creation (for example, freshly instantiated projectiles).
+            // Previously this was reset here, causing bullets to spawn and remain
+            // stationary until another script write occurred.
+            if (rigidbody.RuntimeBodyCreated)
+            {
+                b2Vec2 initialVelocity{ 0.0f, 0.0f };
+                if (rigidbody.RuntimeHasPendingLinearVelocity)
+                {
+                    initialVelocity.x = rigidbody.RuntimePendingLinearVelocity.x;
+                    initialVelocity.y = rigidbody.RuntimePendingLinearVelocity.y;
+                }
+                else
+                {
+                    if (rigidbody.RuntimeHasPendingLinearVelocityX)
+                        initialVelocity.x = rigidbody.RuntimePendingLinearVelocityX;
+                    if (rigidbody.RuntimeHasPendingLinearVelocityY)
+                        initialVelocity.y = rigidbody.RuntimePendingLinearVelocityY;
+                }
+
+                if (rigidbody.FreezePositionX)
+                    initialVelocity.x = 0.0f;
+                if (rigidbody.FreezePositionY)
+                    initialVelocity.y = 0.0f;
+
+                if (rigidbody.Type != Rigidbody2DComponent::BodyType::Static)
+                    b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, initialVelocity);
+                rigidbody.RuntimeLinearVelocity = glm::vec2(initialVelocity.x, initialVelocity.y);
+            }
+
             rigidbody.RuntimePendingLinearVelocity = glm::vec2(0.0f);
             rigidbody.RuntimeHasPendingLinearVelocity = false;
             rigidbody.RuntimePendingLinearVelocityX = 0.0f;

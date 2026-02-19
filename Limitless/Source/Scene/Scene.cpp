@@ -363,7 +363,8 @@ namespace Limitless
             {
                 root["Type"] = "Entity";
                 root["Value"] = {
-                    { "Tag", entityValue->Tag }
+                    { "Tag", entityValue->Tag },
+                    { "PrefabAssetKey", entityValue->PrefabAssetKey }
                 };
             }
             else if (const auto* prefabValue = std::get_if<ScriptPrefabReference>(&value))
@@ -418,7 +419,10 @@ namespace Limitless
                 {
                     const auto& value = root["Value"];
                     if (value.is_object())
+                    {
                         entityReference.Tag = value.value("Tag", std::string{});
+                        entityReference.PrefabAssetKey = value.value("PrefabAssetKey", std::string{});
+                    }
                     else if (value.is_string())
                         entityReference.Tag = value.get<std::string>();
                 }
@@ -427,16 +431,16 @@ namespace Limitless
             }
             if (typeName == "Prefab")
             {
-                ScriptPrefabReference prefabReference{};
+                ScriptEntityReference entityReference{};
                 if (root.contains("Value"))
                 {
                     const auto& value = root["Value"];
                     if (value.is_object())
-                        prefabReference.AssetKey = value.value("AssetKey", std::string{});
+                        entityReference.PrefabAssetKey = value.value("AssetKey", std::string{});
                     else if (value.is_string())
-                        prefabReference.AssetKey = value.get<std::string>();
+                        entityReference.PrefabAssetKey = value.get<std::string>();
                 }
-                outValue = std::move(prefabReference);
+                outValue = std::move(entityReference);
                 return true;
             }
 
@@ -4093,6 +4097,12 @@ namespace Limitless
             glm::vec2 Max = glm::vec2(0.0f);
         };
 
+        struct UiCanvasScreenSpaceMetrics
+        {
+            UiLayoutRect RootRect{};
+            UiLayoutRect ProjectionRect{};
+        };
+
         glm::vec2 Clamp01(const glm::vec2& value)
         {
             return glm::vec2(
@@ -4112,6 +4122,26 @@ namespace Limitless
                 glm::vec2(-halfWidth, -halfHeight),
                 glm::vec2(halfWidth, halfHeight)
             };
+        }
+
+        UiCanvasScreenSpaceMetrics BuildScreenSpaceCanvasMetrics(const CanvasComponent& canvas, uint32_t width, uint32_t height)
+        {
+            UiCanvasScreenSpaceMetrics metrics{};
+            metrics.RootRect = GetCanvasRootRect(canvas, width, height);
+
+            const glm::vec2 rootSize = metrics.RootRect.Max - metrics.RootRect.Min;
+            const float rootWidth = std::max(1.0f, rootSize.x);
+            const float rootHeight = std::max(1.0f, rootSize.y);
+            const float viewportWidth = std::max(1.0f, static_cast<float>(width));
+            const float viewportHeight = std::max(1.0f, static_cast<float>(height));
+
+            const float uniformScale = std::max(0.0001f, std::min(viewportWidth / rootWidth, viewportHeight / rootHeight));
+            const glm::vec2 projectionSize = glm::vec2(viewportWidth / uniformScale, viewportHeight / uniformScale);
+            const glm::vec2 projectionCenter = (metrics.RootRect.Min + metrics.RootRect.Max) * 0.5f;
+            const glm::vec2 projectionHalf = projectionSize * 0.5f;
+            metrics.ProjectionRect.Min = projectionCenter - projectionHalf;
+            metrics.ProjectionRect.Max = projectionCenter + projectionHalf;
+            return metrics;
         }
 
         UiLayoutRect ResolveUiLayoutRect(const entt::registry& registry,
@@ -4198,16 +4228,15 @@ namespace Limitless
                                                   uint32_t windowWidth,
                                                   uint32_t windowHeight)
         {
+            const UiCanvasScreenSpaceMetrics metrics = BuildScreenSpaceCanvasMetrics(canvas, windowWidth, windowHeight);
             const float safeWindowWidth = std::max(1.0f, static_cast<float>(windowWidth));
             const float safeWindowHeight = std::max(1.0f, static_cast<float>(windowHeight));
-            const float canvasWidth = std::max(1.0f, canvas.ReferenceResolution.x);
-            const float canvasHeight = std::max(1.0f, canvas.ReferenceResolution.y);
-
             const float normalizedX = mousePixels.x / safeWindowWidth;
             const float normalizedY = mousePixels.y / safeWindowHeight;
+            const glm::vec2 projectionSize = metrics.ProjectionRect.Max - metrics.ProjectionRect.Min;
             return glm::vec2(
-                (normalizedX - 0.5f) * canvasWidth,
-                (0.5f - normalizedY) * canvasHeight);
+                metrics.ProjectionRect.Min.x + normalizedX * projectionSize.x,
+                metrics.ProjectionRect.Max.y - normalizedY * projectionSize.y);
         }
 
         bool IsPointInsideRect(const glm::vec2& point, const UiLayoutRect& rect)
@@ -4216,12 +4245,25 @@ namespace Limitless
                    point.y >= rect.Min.y && point.y <= rect.Max.y;
         }
 
+        bool IsUiRaycastTargetEntity(const entt::registry& registry, entt::entity entity)
+        {
+            if (registry.any_of<UIButtonComponent, UISliderComponent>(entity))
+                return true;
+            if (const auto* uiImage = registry.try_get<UIImageComponent>(entity); uiImage && uiImage->RaycastTarget)
+                return true;
+            if (const auto* uiPanel = registry.try_get<UIPanelComponent>(entity); uiPanel && uiPanel->RaycastTarget)
+                return true;
+            if (const auto* uiText = registry.try_get<UITextComponent>(entity); uiText && uiText->RaycastTarget)
+                return true;
+            return false;
+        }
+
         entt::entity FindInteractiveOwnerEntity(const entt::registry& registry, entt::entity entity)
         {
             entt::entity current = entity;
             while (current != entt::null)
             {
-                if (registry.any_of<UIButtonComponent, UISliderComponent>(current))
+                if (IsUiRaycastTargetEntity(registry, current))
                     return current;
                 const auto* hierarchy = registry.try_get<HierarchyComponent>(current);
                 if (!hierarchy)
@@ -4251,6 +4293,7 @@ namespace Limitless
         void ProcessUiInteractionSystem(Scene& scene, uint32_t windowWidth, uint32_t windowHeight)
         {
             auto& registry = scene.GetRegistry();
+            scene.SetUiPointerOverInteractiveElement(false);
 
             auto buttonView = registry.view<UIButtonComponent>();
             for (entt::entity entity : buttonView)
@@ -4344,7 +4387,8 @@ namespace Limitless
                     canvas,
                     interactionViewportWidthPixels,
                     interactionViewportHeightPixels);
-                const UiLayoutRect canvasRootRect = GetCanvasRootRect(canvas, interactionViewportWidthPixels, interactionViewportHeightPixels);
+                const UiCanvasScreenSpaceMetrics canvasMetrics = BuildScreenSpaceCanvasMetrics(canvas, interactionViewportWidthPixels, interactionViewportHeightPixels);
+                const UiLayoutRect canvasRootRect = canvasMetrics.ProjectionRect;
                 std::unordered_map<entt::entity, UiLayoutRect> layoutCache;
 
                 for (entt::entity entity : rectView)
@@ -4416,6 +4460,7 @@ namespace Limitless
                     hasTopHoveredCandidate = true;
                 }
             }
+            scene.SetUiPointerOverInteractiveElement(topHoveredOwnerEntity != entt::null);
 
             const bool mouseDown = input.IsMouseButtonDown(SDL_BUTTON_LEFT);
             const bool mousePressedThisFrame = input.WasMouseButtonPressedThisFrame(SDL_BUTTON_LEFT);
@@ -4525,14 +4570,16 @@ namespace Limitless
             for (entt::entity canvasEntity : canvases)
             {
                 const auto& canvas = registry.get<CanvasComponent>(canvasEntity);
-                const UiLayoutRect canvasRect = GetCanvasRootRect(canvas, width, height);
+                UiLayoutRect canvasRect = GetCanvasRootRect(canvas, width, height);
                 std::unordered_map<entt::entity, UiLayoutRect> layoutCache;
 
                 if (canvas.Mode == CanvasComponent::RenderMode::ScreenSpace)
                 {
+                    const UiCanvasScreenSpaceMetrics metrics = BuildScreenSpaceCanvasMetrics(canvas, width, height);
+                    canvasRect = metrics.ProjectionRect;
                     const glm::mat4 screenProjection = glm::ortho(
-                        canvasRect.Min.x, canvasRect.Max.x,
-                        canvasRect.Min.y, canvasRect.Max.y,
+                        metrics.ProjectionRect.Min.x, metrics.ProjectionRect.Max.x,
+                        metrics.ProjectionRect.Min.y, metrics.ProjectionRect.Max.y,
                         -10000.0f, 10000.0f);
                     Renderer2D::BeginScene(screenProjection, false);
                 }

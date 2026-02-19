@@ -49,7 +49,43 @@ namespace Limitless::ScriptCoreModuleRuntime
             std::chrono::steady_clock::time_point LastPollTime{};
         };
 
+        struct GameplayInputRoutingState final
+        {
+            bool GameViewFocused = false;
+            bool GameViewHovered = false;
+            bool UiWantsMouseCapture = false;
+            bool UiWantsKeyboardCapture = false;
+        };
+
         RuntimeState s_RuntimeState;
+        GameplayInputRoutingState s_GameplayInputRoutingState;
+
+        bool ShouldSuppressGameplayInput()
+        {
+            const bool gameViewInputTargeted =
+                s_GameplayInputRoutingState.GameViewFocused ||
+                s_GameplayInputRoutingState.GameViewHovered;
+            if (!gameViewInputTargeted)
+                return true;
+
+            if (s_GameplayInputRoutingState.UiWantsMouseCapture &&
+                !s_GameplayInputRoutingState.GameViewHovered)
+            {
+                return true;
+            }
+
+            if (s_GameplayInputRoutingState.UiWantsKeyboardCapture &&
+                !s_GameplayInputRoutingState.GameViewFocused)
+            {
+                return true;
+            }
+
+            Scene* activeScene = Physics2DQueries::GetActiveSceneForScriptQueries();
+            if (activeScene && activeScene->IsUiPointerOverInteractiveElement())
+                return true;
+
+            return false;
+        }
 
         std::string GetScriptCoreLibraryFileName()
         {
@@ -201,6 +237,8 @@ namespace Limitless::ScriptCoreModuleRuntime
 
         float ForwardInputActionAxis1DToHost(const char* mapName, const char* actionName)
         {
+            if (ShouldSuppressGameplayInput())
+                return 0.0f;
             const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
             const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
             return InputSystem::GetInstance().ReadActionAxis1D(safeMapName, safeActionName);
@@ -208,6 +246,8 @@ namespace Limitless::ScriptCoreModuleRuntime
 
         glm::vec2 ForwardInputActionAxis2DToHost(const char* mapName, const char* actionName)
         {
+            if (ShouldSuppressGameplayInput())
+                return glm::vec2(0.0f);
             const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
             const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
             return InputSystem::GetInstance().ReadActionAxis2D(safeMapName, safeActionName);
@@ -215,6 +255,8 @@ namespace Limitless::ScriptCoreModuleRuntime
 
         bool ForwardInputActionPressedToHost(const char* mapName, const char* actionName, float deadzone)
         {
+            if (ShouldSuppressGameplayInput())
+                return false;
             const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
             const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
             return InputSystem::GetInstance().IsActionPressed(safeMapName, safeActionName, deadzone);
@@ -229,6 +271,8 @@ namespace Limitless::ScriptCoreModuleRuntime
 
         bool ForwardInputActionStartedToHost(const char* mapName, const char* actionName)
         {
+            if (ShouldSuppressGameplayInput())
+                return false;
             const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
             const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
             return InputSystem::GetInstance().WasActionStartedThisFrame(safeMapName, safeActionName);
@@ -236,6 +280,8 @@ namespace Limitless::ScriptCoreModuleRuntime
 
         bool ForwardInputActionPerformedToHost(const char* mapName, const char* actionName)
         {
+            if (ShouldSuppressGameplayInput())
+                return false;
             const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
             const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
             return InputSystem::GetInstance().WasActionPerformedThisFrame(safeMapName, safeActionName);
@@ -243,6 +289,8 @@ namespace Limitless::ScriptCoreModuleRuntime
 
         bool ForwardInputActionCanceledToHost(const char* mapName, const char* actionName)
         {
+            if (ShouldSuppressGameplayInput())
+                return false;
             const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
             const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
             return InputSystem::GetInstance().WasActionCanceledThisFrame(safeMapName, safeActionName);
@@ -250,6 +298,8 @@ namespace Limitless::ScriptCoreModuleRuntime
 
         bool ForwardInputActionButtonToHost(const char* mapName, const char* actionName)
         {
+            if (ShouldSuppressGameplayInput())
+                return false;
             const std::string_view safeMapName = mapName ? std::string_view(mapName) : std::string_view();
             const std::string_view safeActionName = actionName ? std::string_view(actionName) : std::string_view();
             return InputSystem::GetInstance().ReadActionButton(safeMapName, safeActionName);
@@ -506,6 +556,17 @@ namespace Limitless::ScriptCoreModuleRuntime
             LT_INFO("ScriptCore runtime: loaded scripts from '{}'.", libraryPath.string());
             return true;
         }
+    }
+
+    void SetGameplayInputRoutingState(bool gameViewFocused,
+                                      bool gameViewHovered,
+                                      bool uiWantsMouseCapture,
+                                      bool uiWantsKeyboardCapture)
+    {
+        s_GameplayInputRoutingState.GameViewFocused = gameViewFocused;
+        s_GameplayInputRoutingState.GameViewHovered = gameViewHovered;
+        s_GameplayInputRoutingState.UiWantsMouseCapture = uiWantsMouseCapture;
+        s_GameplayInputRoutingState.UiWantsKeyboardCapture = uiWantsKeyboardCapture;
     }
 
     void Initialize()

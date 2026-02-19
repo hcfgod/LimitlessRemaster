@@ -25,8 +25,14 @@ Derive from `ScriptableEntity` and override any of:
 
 - `Entity CreateEntity(const std::string& name = "Entity")`
 - `Entity Instantiate(const std::string& prefabAssetKey, entt::entity parentEntity = entt::null)`
-- `Entity Instantiate(const ScriptPrefabReference& prefabReference, entt::entity parentEntity = entt::null)`
+- `Entity Instantiate(const std::string& prefabAssetKey, const Entity& parentEntity)` (no raw `entt` needed)
+- `Entity Instantiate(const Entity& prefabReference, entt::entity parentEntity = entt::null)` (prefab asset assigned through `Entity` field)
+- `Entity Instantiate(const Entity& prefabReference, const Entity& parentEntity)` (no raw `entt` needed)
+- `Entity Instantiate(const Prefab& prefabReference, entt::entity parentEntity = entt::null)` (legacy-compatible)
 - `void DestroyEntity(Entity entity)` or `entity.Destroy()`
+- `Entity GetParent(const Entity& entity)`
+- `std::vector<Entity> GetChildren(const Entity& parent)`
+- `std::vector<Entity> GetHierarchy(const Entity& root, bool includeRoot = true)` (breadth-first)
 - `bool entity.HasComponent<T>()`
 - `T& entity.GetComponent<T>()` -- throws if component is missing
 - `T* entity.TryGetComponent<T>()` -- returns `nullptr` if missing (**recommended**)
@@ -61,7 +67,10 @@ if (auto* sprite = entity.TryGetComponent<Limitless::SpriteComponent>())
 
 ### Entity References in Scripts
 
-You can declare `Limitless::Entity` as a public field on your script class. The Inspector will show a dropdown / drag-drop slot to assign a scene entity. At runtime the entity is resolved by tag.
+You can declare `Limitless::Entity` as a public field on your script class. The Inspector slot supports both scene entities and prefab assets:
+
+- Scene entity assignment resolves by tag at runtime.
+- Prefab assignment is carried as a prefab asset reference and can be passed directly to `Instantiate(EntityReference)`.
 
 ```cpp
 class CameraFollowScript final : public Limitless::ScriptableEntity
@@ -184,7 +193,7 @@ You can expose prefab references directly in native scripts and spawn them at ru
 class EnemySpawnerScript final : public Limitless::ScriptableEntity
 {
 public:
-    Limitless::ScriptPrefabReference EnemyPrefab = "Assets/Prefabs/Enemy.prefab.json";
+    Limitless::Entity EnemyPrefab = "Assets/Prefabs/Enemy.prefab.json";
 
 protected:
     LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()
@@ -219,13 +228,15 @@ Each `Native Script` component automatically exposes supported `public` fields f
 
 - Declare fields in your script class (not in the inspector UI).
 - Inspector values are serialized with the scene.
-- Supported field types: `float`, `int`/`int32_t`, `bool`, `glm::vec3`, `std::string`, `Limitless::Entity`, `Limitless::ScriptPrefabReference`.
+- Supported field types: `float`, `int`/`int32_t`, `bool`, `glm::vec3`, `std::string`, `Limitless::Entity`, `Limitless::Prefab` (legacy alias `Limitless::ScriptPrefabReference` remains supported).
 - `Limitless::Entity` fields are Unity-style object slots in Inspector:
   - Choose from a dropdown of scene entities
+  - Choose prefab assets from the same slot (prefab entries are marked as prefab)
   - Drag an entity from the Scene panel directly into the slot
+  - Drag prefab assets from the Project panel directly into the same slot
   - Clear with `X`
   - Runtime resolution is tag-based, so tags should be unique.
-- `Limitless::ScriptPrefabReference` fields are prefab asset slots in Inspector:
+- `Limitless::Prefab` / `Limitless::ScriptPrefabReference` fields are prefab asset slots in Inspector:
   - Choose from a prefab dropdown
   - Drag prefab assets from the Project panel
   - Clear with `X`

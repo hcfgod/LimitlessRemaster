@@ -1306,6 +1306,7 @@ namespace Limitless::EditorViewportPanel
               std::shared_ptr<Framebuffer>& gameViewFramebuffer,
               bool& gameViewFocused,
               bool& gameViewHovered,
+              bool& focusGameViewRequested,
               EditorCameraController* editorCameraController,
               Camera* sceneViewCamera,
               Camera* gameViewCamera,
@@ -1712,6 +1713,11 @@ namespace Limitless::EditorViewportPanel
         ImGui::PopStyleVar();
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        if (focusGameViewRequested)
+        {
+            ImGui::SetNextWindowFocus();
+            focusGameViewRequested = false;
+        }
         ImGui::Begin("Game View");
         SceneRenderer::SetUiInputViewportRectPixels(0.0f, 0.0f, 0.0f, 0.0f, false);
 
