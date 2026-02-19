@@ -2143,6 +2143,7 @@ namespace Limitless::EditorInspectorPanel
                 const bool hasPointLight2DComponent = registry.all_of<PointLight2DComponent>(selectedEntity);
                 const bool hasShadowOccluder2DComponent = registry.all_of<ShadowOccluder2DComponent>(selectedEntity);
                 const bool hasTilemapComponent = registry.all_of<TilemapComponent>(selectedEntity);
+                const bool hasParticleEmitterComponent = registry.all_of<ParticleEmitterComponent>(selectedEntity);
                 const bool hasCanvasComponent = registry.all_of<CanvasComponent>(selectedEntity);
                 const bool hasRectTransformComponent = registry.all_of<RectTransformComponent>(selectedEntity);
                 const bool hasUIImageComponent = registry.all_of<UIImageComponent>(selectedEntity);
@@ -2786,6 +2787,23 @@ namespace Limitless::EditorInspectorPanel
                 if (hasTilemapComponent)
                     ImGui::EndDisabled();
 
+                if (hasParticleEmitterComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Particle Emitter"))
+                {
+                    if (undoService)
+                        (void)undoService->ExecuteSceneMutation("Add Particle Emitter Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<ParticleEmitterComponent>(selectedEntity);
+                            return true;
+                        });
+                    else
+                        registry.emplace<ParticleEmitterComponent>(selectedEntity);
+                }
+
+                if (hasParticleEmitterComponent)
+                    ImGui::EndDisabled();
+
                 ImGui::EndPopup();
             }
 
@@ -3179,6 +3197,21 @@ namespace Limitless::EditorInspectorPanel
                 else
                 {
                     registry.remove<TilemapCollider2DComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveParticleEmitterComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Particle Emitter Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<ParticleEmitterComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<ParticleEmitterComponent>(selectedEntity);
                 }
             }
         }

@@ -6,6 +6,7 @@
 #include "Assets/TilesetAsset.h"
 #include "Assets/AssetTypes.h"
 #include "Assets/AudioClipAsset.h"
+#include "Scene/ParticleEmitterSystem.h"
 #include "Undo/EditorUndoService.h"
 #include "imgui/imgui.h"
 
@@ -2356,6 +2357,245 @@ namespace Limitless::EditorInspectorPanel
                 if (ImGui::InputText("On Value Changed Event", onValueChangedEventBuffer.data(), onValueChangedEventBuffer.size()))
                     uiSlider->OnValueChangedEvent = onValueChangedEventBuffer.data();
                 TrackInteractiveMutation(undoService, "Edit UISlider OnValueChanged Event");
+                ImGui::TreePop();
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // Particle Emitter
+        // -----------------------------------------------------------------
+        if (auto* particleEmitter = registry.try_get<ParticleEmitterComponent>(selectedEntity))
+        {
+            const bool particleOpen = ImGui::TreeNodeEx("Particle Emitter", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("ParticleEmitterComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##ParticleEmitterComponentOptionsButton"))
+                ImGui::OpenPopup("ParticleEmitterComponentOptions");
+
+            if (ImGui::BeginPopup("ParticleEmitterComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveParticleEmitterComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (particleOpen)
+            {
+                // -- Playback controls (work in both edit and play mode) --
+                {
+                    const bool isPlaying = particleEmitter->Playing && !particleEmitter->Paused;
+                    const bool isPaused  = particleEmitter->Playing && particleEmitter->Paused;
+
+                    if (!particleEmitter->Playing)
+                    {
+                        if (ImGui::Button("Play##ParticleEmitter"))
+                            ParticleEmitterPlay(*particleEmitter);
+                    }
+                    else
+                    {
+                        if (ImGui::Button("Stop##ParticleEmitter"))
+                            ParticleEmitterStop(*particleEmitter, true);
+                    }
+
+                    ImGui::SameLine();
+                    if (!isPaused)
+                    {
+                        if (ImGui::Button("Pause##ParticleEmitter"))
+                            ParticleEmitterPause(*particleEmitter);
+                    }
+                    else
+                    {
+                        if (ImGui::Button("Resume##ParticleEmitter"))
+                            ParticleEmitterResume(*particleEmitter);
+                    }
+
+                    if (particleEmitter->RuntimeState)
+                    {
+                        ImGui::SameLine();
+                        ImGui::Text("Alive: %u", particleEmitter->RuntimeState->AliveCount);
+                    }
+                }
+
+                ImGui::Separator();
+
+                // -- Emission --
+                if (ImGui::TreeNodeEx("Emission##ParticleEmitter", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    ImGui::DragFloat("Spawn Rate", &particleEmitter->SpawnRate, 0.5f, 0.0f, 10000.0f);
+                    particleEmitter->SpawnRate = std::max(0.0f, particleEmitter->SpawnRate);
+                    TrackInteractiveMutation(undoService, "Edit Particle Spawn Rate");
+
+                    ImGui::DragFloat("Lifetime Min", &particleEmitter->LifetimeMin, 0.05f, 0.01f, 100.0f);
+                    particleEmitter->LifetimeMin = std::max(0.01f, particleEmitter->LifetimeMin);
+                    TrackInteractiveMutation(undoService, "Edit Particle Lifetime Min");
+
+                    ImGui::DragFloat("Lifetime Max", &particleEmitter->LifetimeMax, 0.05f, 0.01f, 100.0f);
+                    particleEmitter->LifetimeMax = std::max(particleEmitter->LifetimeMin, particleEmitter->LifetimeMax);
+                    TrackInteractiveMutation(undoService, "Edit Particle Lifetime Max");
+
+                    ImGui::Checkbox("Looping", &particleEmitter->Looping);
+                    TrackInteractiveMutation(undoService, "Edit Particle Looping");
+
+                    if (!particleEmitter->Looping)
+                    {
+                        ImGui::DragFloat("Duration", &particleEmitter->Duration, 0.1f, 0.1f, 600.0f);
+                        particleEmitter->Duration = std::max(0.1f, particleEmitter->Duration);
+                        TrackInteractiveMutation(undoService, "Edit Particle Duration");
+                    }
+
+                    ImGui::Checkbox("Play On Start", &particleEmitter->PlayOnStart);
+                    TrackInteractiveMutation(undoService, "Edit Particle Play On Start");
+
+                    ImGui::Checkbox("Burst Enabled", &particleEmitter->BurstEnabled);
+                    TrackInteractiveMutation(undoService, "Edit Particle Burst Enabled");
+
+                    if (particleEmitter->BurstEnabled)
+                    {
+                        int burstCount = static_cast<int>(particleEmitter->BurstCount);
+                        ImGui::DragInt("Burst Count", &burstCount, 1, 1, static_cast<int>(ParticleEmitterComponent::kMaxParticlesCap));
+                        particleEmitter->BurstCount = static_cast<uint32_t>(std::max(1, burstCount));
+                        TrackInteractiveMutation(undoService, "Edit Particle Burst Count");
+                    }
+
+                    ImGui::Checkbox("Radial Spawn Position", &particleEmitter->UseRadialSpawn);
+                    TrackInteractiveMutation(undoService, "Edit Particle Radial Spawn Position");
+
+                    if (particleEmitter->UseRadialSpawn)
+                    {
+                        ImGui::DragFloat("Spawn Radius Min", &particleEmitter->SpawnRadiusMin, 0.01f, 0.0f, 1000.0f);
+                        particleEmitter->SpawnRadiusMin = std::max(0.0f, particleEmitter->SpawnRadiusMin);
+                        TrackInteractiveMutation(undoService, "Edit Particle Spawn Radius Min");
+
+                        ImGui::DragFloat("Spawn Radius Max", &particleEmitter->SpawnRadiusMax, 0.01f, 0.0f, 1000.0f);
+                        particleEmitter->SpawnRadiusMax = std::max(particleEmitter->SpawnRadiusMin, particleEmitter->SpawnRadiusMax);
+                        TrackInteractiveMutation(undoService, "Edit Particle Spawn Radius Max");
+                    }
+                    else
+                    {
+                        ImGui::DragFloat2("Spawn Offset Min", &particleEmitter->SpawnOffsetMin.x, 0.01f, -1000.0f, 1000.0f, "%.3f");
+                        TrackInteractiveMutation(undoService, "Edit Particle Spawn Offset Min");
+
+                        ImGui::DragFloat2("Spawn Offset Max", &particleEmitter->SpawnOffsetMax.x, 0.01f, -1000.0f, 1000.0f, "%.3f");
+                        TrackInteractiveMutation(undoService, "Edit Particle Spawn Offset Max");
+                    }
+
+                    ImGui::TreePop();
+                }
+
+                // -- Velocity --
+                if (ImGui::TreeNodeEx("Velocity##ParticleEmitter", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    ImGui::DragFloat("Speed Min", &particleEmitter->SpeedMin, 0.5f, 0.0f, 10000.0f);
+                    particleEmitter->SpeedMin = std::max(0.0f, particleEmitter->SpeedMin);
+                    TrackInteractiveMutation(undoService, "Edit Particle Speed Min");
+
+                    ImGui::DragFloat("Speed Max", &particleEmitter->SpeedMax, 0.5f, 0.0f, 10000.0f);
+                    particleEmitter->SpeedMax = std::max(particleEmitter->SpeedMin, particleEmitter->SpeedMax);
+                    TrackInteractiveMutation(undoService, "Edit Particle Speed Max");
+
+                    ImGui::DragFloat("Angle Min", &particleEmitter->AngleMin, 1.0f, 0.0f, 360.0f);
+                    TrackInteractiveMutation(undoService, "Edit Particle Angle Min");
+
+                    ImGui::DragFloat("Angle Max", &particleEmitter->AngleMax, 1.0f, 0.0f, 360.0f);
+                    TrackInteractiveMutation(undoService, "Edit Particle Angle Max");
+
+                    ImGui::Checkbox("Radial Velocity", &particleEmitter->RadialVelocity);
+                    TrackInteractiveMutation(undoService, "Edit Particle Radial Velocity");
+
+                    ImGui::DragFloat("Gravity Modifier", &particleEmitter->GravityModifier, 0.05f, -100.0f, 100.0f);
+                    TrackInteractiveMutation(undoService, "Edit Particle Gravity Modifier");
+
+                    ImGui::TreePop();
+                }
+
+                // -- Appearance --
+                if (ImGui::TreeNodeEx("Appearance##ParticleEmitter", ImGuiTreeNodeFlags_DefaultOpen))
+                {
+                    ImGui::DragFloat("Start Size Min", &particleEmitter->StartSizeMin, 0.01f, 0.001f, 100.0f);
+                    particleEmitter->StartSizeMin = std::max(0.001f, particleEmitter->StartSizeMin);
+                    TrackInteractiveMutation(undoService, "Edit Particle Start Size Min");
+
+                    ImGui::DragFloat("Start Size Max", &particleEmitter->StartSizeMax, 0.01f, 0.001f, 100.0f);
+                    particleEmitter->StartSizeMax = std::max(particleEmitter->StartSizeMin, particleEmitter->StartSizeMax);
+                    TrackInteractiveMutation(undoService, "Edit Particle Start Size Max");
+
+                    ImGui::DragFloat("End Size", &particleEmitter->EndSize, 0.01f, 0.0f, 100.0f);
+                    particleEmitter->EndSize = std::max(0.0f, particleEmitter->EndSize);
+                    TrackInteractiveMutation(undoService, "Edit Particle End Size");
+
+                    ImGui::ColorEdit4("Start Color", &particleEmitter->StartColor.r);
+                    TrackInteractiveMutation(undoService, "Edit Particle Start Color");
+
+                    ImGui::ColorEdit4("End Color", &particleEmitter->EndColor.r);
+                    TrackInteractiveMutation(undoService, "Edit Particle End Color");
+
+                    ImGui::TreePop();
+                }
+
+                // -- Rotation --
+                if (ImGui::TreeNodeEx("Rotation##ParticleEmitter"))
+                {
+                    ImGui::DragFloat("Start Rotation Min", &particleEmitter->StartRotationMin, 1.0f, -360.0f, 360.0f);
+                    TrackInteractiveMutation(undoService, "Edit Particle Start Rotation Min");
+
+                    ImGui::DragFloat("Start Rotation Max", &particleEmitter->StartRotationMax, 1.0f, -360.0f, 360.0f);
+                    TrackInteractiveMutation(undoService, "Edit Particle Start Rotation Max");
+
+                    ImGui::DragFloat("Rotation Speed Min", &particleEmitter->RotationSpeedMin, 1.0f, -1000.0f, 1000.0f);
+                    TrackInteractiveMutation(undoService, "Edit Particle Rotation Speed Min");
+
+                    ImGui::DragFloat("Rotation Speed Max", &particleEmitter->RotationSpeedMax, 1.0f, -1000.0f, 1000.0f);
+                    TrackInteractiveMutation(undoService, "Edit Particle Rotation Speed Max");
+
+                    ImGui::TreePop();
+                }
+
+                // -- Texture --
+                if (ImGui::TreeNodeEx("Texture##ParticleEmitter"))
+                {
+                    const std::string textureLabel = !particleEmitter->TextureKey.empty()
+                        ? EditorAssetNaming::GetAssetDisplayNameFromAssetKey(particleEmitter->TextureKey)
+                        : std::string("None (White Quad)");
+                    ImGui::Text("Texture");
+                    ImGui::SameLine(80);
+                    ImGui::Button((textureLabel + "##ParticleEmitterTexture").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 90, 0));
+
+                    if (ImGui::BeginDragDropTarget())
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
+                        {
+                            const char* key = static_cast<const char*>(payload->Data);
+                            if (key && key[0])
+                            {
+                                particleEmitter->TextureKey = key;
+                                particleEmitter->CachedTexture.reset();
+                                particleEmitter->TextureLoadAttempted = false;
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+
+                    ImGui::SameLine();
+                    if (ImGui::Button("Clear##ParticleEmitterTexture"))
+                    {
+                        particleEmitter->TextureKey.clear();
+                        particleEmitter->CachedTexture.reset();
+                        particleEmitter->TextureLoadAttempted = false;
+                    }
+                    TrackInteractiveMutation(undoService, "Edit Particle Emitter Texture");
+
+                    ImGui::TreePop();
+                }
+
+                // -- Limits --
+                {
+                    int maxParticles = static_cast<int>(particleEmitter->MaxParticles);
+                    ImGui::DragInt("Max Particles", &maxParticles, 16, 1, static_cast<int>(ParticleEmitterComponent::kMaxParticlesCap));
+                    particleEmitter->MaxParticles = static_cast<uint32_t>(std::clamp(maxParticles, 1, static_cast<int>(ParticleEmitterComponent::kMaxParticlesCap)));
+                    TrackInteractiveMutation(undoService, "Edit Particle Max Particles");
+                }
+
                 ImGui::TreePop();
             }
         }

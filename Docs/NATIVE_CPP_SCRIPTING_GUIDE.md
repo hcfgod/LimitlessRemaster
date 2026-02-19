@@ -185,6 +185,84 @@ if (jumpPressed && !grounded)
 }
 ```
 
+## Coroutine API (Unity-Style)
+
+Native scripts can run coroutine routines without putting coroutine methods on `ScriptableEntity`.
+
+- `Limitless::Coroutine::Start(*this, MyRoutine())`
+- `Limitless::Coroutine::Stop(*this, handle)`
+- `Limitless::Coroutine::StopAll(*this)`
+- `Limitless::Coroutine::IsRunning(*this, handle)`
+- Convenience wrappers:
+  - `Limitless::StartCoroutine(*this, MyRoutine())`
+  - `Limitless::StopCoroutine(*this, handle)`
+  - `Limitless::StopAllCoroutines(*this)`
+  - `Limitless::IsCoroutineRunning(*this, handle)`
+
+Yield instructions:
+
+- `co_yield Limitless::WaitForSeconds(seconds)`
+- `co_yield Limitless::WaitForFrames(frameCount)`
+- `co_yield nullptr` (wait one frame)
+
+Example:
+
+```cpp
+#include "Limitless.h"
+
+class BlinkScript final : public Limitless::ScriptableEntity
+{
+public:
+    float BlinkIntervalSeconds = 0.25f;
+    Limitless::CoroutineHandle BlinkCoroutine{};
+
+protected:
+    LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()
+        LT_AUTO_EXPOSED_FIELD(BlinkIntervalSeconds)
+    LT_END_AUTO_EXPOSED_FIELD_SYNC()
+
+    void OnCreate() override
+    {
+        BlinkCoroutine = Limitless::StartCoroutine(*this, BlinkRoutine());
+    }
+
+    void OnDestroy() override
+    {
+        Limitless::StopAllCoroutines(*this);
+    }
+
+private:
+    Limitless::CoroutineRoutine BlinkRoutine()
+    {
+        bool visible = true;
+        while (true)
+        {
+            if (auto* sprite = GetEntity().TryGetComponent<Limitless::SpriteComponent>())
+                sprite->Color.a = visible ? 1.0f : 0.2f;
+
+            visible = !visible;
+            co_yield Limitless::WaitForSeconds(BlinkIntervalSeconds);
+        }
+    }
+};
+```
+
+## Random API (Unity-Style)
+
+Use the static `Limitless::Random` utility:
+
+- `Limitless::Random::Range(int minInclusive, int maxExclusive)` (**max is exclusive**)
+- `Limitless::Random::Range(float minInclusive, float maxInclusive)` (**max is inclusive**)
+- `Limitless::Random::Value()` (`0.0f` to `1.0f`)
+- `Limitless::Random::SetSeed(seed)` for deterministic runs
+
+Example:
+
+```cpp
+const int enemyIndex = Limitless::Random::Range(0, 4);       // 0,1,2,3
+const float spread = Limitless::Random::Range(-0.5f, 0.5f);  // inclusive range
+```
+
 ### Prefab References and Instantiate
 
 You can expose prefab references directly in native scripts and spawn them at runtime:

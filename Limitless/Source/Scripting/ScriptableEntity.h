@@ -3,6 +3,7 @@
 #include "Core/Error.h"
 #include "EnTT/entt.hpp"
 #include "Scene/Entity.h"
+#include "Scripting/CoroutineTypes.h"
 #include "Scripting/ScriptProperty.h"
 
 #include <glm/glm.hpp>
@@ -15,6 +16,7 @@
 namespace Limitless
 {
     class Scene;
+    class Coroutine;
     class ScriptableEntity;
     struct AnimatorComponent;
     using ScriptCreateEntityBridgeCallback = entt::entity (*)(const char* name);
@@ -26,6 +28,7 @@ namespace Limitless
     class ScriptableEntity
     {
         friend class Scene;
+        friend class Coroutine;
 
     public:
         virtual ~ScriptableEntity() = default;
@@ -200,6 +203,17 @@ namespace Limitless
         std::string GetAnimatorCurrentStateName() const;
         float GetAnimatorStateTimeSeconds() const;
 
+        // Particle emitter controls.
+        void PlayParticles();
+        void StopParticles(bool clearParticles = true);
+        void PauseParticles();
+        void ResumeParticles();
+        void EmitParticles(uint32_t count);
+        void SetSpawnRate(float rate);
+        void SetParticleColor(const glm::vec4& startColor, const glm::vec4& endColor);
+        bool IsEmitterPlaying() const;
+        uint32_t GetAliveParticleCount() const;
+
         virtual void OnSynchronizeExposedFields() {}
 
         virtual void OnCreate() {}
@@ -208,10 +222,26 @@ namespace Limitless
         virtual void OnDestroy() {}
 
     private:
+        struct CoroutineState final
+        {
+            CoroutineHandle Handle{};
+            CoroutineRoutine Routine{};
+            bool WaitingForSeconds = false;
+            bool WaitingForFrames = false;
+            float RemainingWaitSeconds = 0.0f;
+            uint32_t RemainingWaitFrames = 0;
+            bool SkipWaitTickThisFrame = false;
+        };
+
         Scene* m_Scene = nullptr;
         entt::registry* m_Registry = nullptr;
         entt::entity m_EntityHandle = entt::null;
         std::unordered_map<std::string, ScriptPropertyValue>* m_ExposedProperties = nullptr;
+        std::vector<CoroutineState> m_ActiveCoroutines;
+        std::vector<CoroutineState> m_PendingCoroutineStarts;
+        std::vector<CoroutineHandle> m_PendingCoroutineStops;
+        uint64_t m_NextCoroutineIdentifier = 1;
+        bool m_IsAdvancingCoroutines = false;
     };
 }
 

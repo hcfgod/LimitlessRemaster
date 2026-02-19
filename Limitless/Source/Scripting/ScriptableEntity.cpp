@@ -1,6 +1,7 @@
 #include "Scripting/ScriptableEntity.h"
 
 #include "Scene/Components.h"
+#include "Scene/ParticleEmitterSystem.h"
 
 #ifndef SCRIPTCORE_EXPORTS
     #include "Physics/Physics2DQueries.h"
@@ -637,6 +638,105 @@ namespace Limitless
             return 0.0f;
         const auto& animator = m_Registry->get<AnimatorComponent>(m_EntityHandle);
         return animator.RuntimeStateTimeSeconds;
+    }
+
+    // -------------------------------------------------------------------------
+    // Particle emitter controls
+    // -------------------------------------------------------------------------
+
+    void ScriptableEntity::PlayParticles()
+    {
+        if (!m_Registry || !m_Registry->valid(m_EntityHandle))
+            return;
+        auto* emitter = m_Registry->try_get<ParticleEmitterComponent>(m_EntityHandle);
+        if (!emitter)
+            return;
+
+        ParticleEmitterPlay(*emitter);
+    }
+
+    void ScriptableEntity::StopParticles(bool clearParticles)
+    {
+        if (!m_Registry || !m_Registry->valid(m_EntityHandle))
+            return;
+        auto* emitter = m_Registry->try_get<ParticleEmitterComponent>(m_EntityHandle);
+        if (!emitter)
+            return;
+
+        ParticleEmitterStop(*emitter, clearParticles);
+    }
+
+    void ScriptableEntity::PauseParticles()
+    {
+        if (!m_Registry || !m_Registry->valid(m_EntityHandle))
+            return;
+        auto* emitter = m_Registry->try_get<ParticleEmitterComponent>(m_EntityHandle);
+        if (!emitter)
+            return;
+
+        ParticleEmitterPause(*emitter);
+    }
+
+    void ScriptableEntity::ResumeParticles()
+    {
+        if (!m_Registry || !m_Registry->valid(m_EntityHandle))
+            return;
+        auto* emitter = m_Registry->try_get<ParticleEmitterComponent>(m_EntityHandle);
+        if (!emitter)
+            return;
+
+        ParticleEmitterResume(*emitter);
+    }
+
+    void ScriptableEntity::EmitParticles(uint32_t count)
+    {
+        if (!m_Registry || !m_Registry->valid(m_EntityHandle))
+            return;
+        auto* emitter = m_Registry->try_get<ParticleEmitterComponent>(m_EntityHandle);
+        if (!emitter)
+            return;
+
+        auto* transform = m_Registry->try_get<TransformComponent>(m_EntityHandle);
+        const glm::vec2 worldPos = transform
+            ? glm::vec2(transform->Position.x, transform->Position.y)
+            : glm::vec2(0.0f);
+
+        ParticleEmitterEmit(*emitter, count, worldPos);
+    }
+
+    void ScriptableEntity::SetSpawnRate(float rate)
+    {
+        if (!m_Registry || !m_Registry->valid(m_EntityHandle))
+            return;
+        auto* emitter = m_Registry->try_get<ParticleEmitterComponent>(m_EntityHandle);
+        if (emitter) emitter->SpawnRate = std::max(0.0f, rate);
+    }
+
+    void ScriptableEntity::SetParticleColor(const glm::vec4& startColor, const glm::vec4& endColor)
+    {
+        if (!m_Registry || !m_Registry->valid(m_EntityHandle))
+            return;
+        auto* emitter = m_Registry->try_get<ParticleEmitterComponent>(m_EntityHandle);
+        if (!emitter) return;
+        emitter->StartColor = startColor;
+        emitter->EndColor   = endColor;
+    }
+
+    bool ScriptableEntity::IsEmitterPlaying() const
+    {
+        if (!m_Registry || !m_Registry->valid(m_EntityHandle))
+            return false;
+        const auto* emitter = m_Registry->try_get<ParticleEmitterComponent>(m_EntityHandle);
+        return emitter && emitter->Playing;
+    }
+
+    uint32_t ScriptableEntity::GetAliveParticleCount() const
+    {
+        if (!m_Registry || !m_Registry->valid(m_EntityHandle))
+            return 0;
+        const auto* emitter = m_Registry->try_get<ParticleEmitterComponent>(m_EntityHandle);
+        if (!emitter || !emitter->RuntimeState) return 0;
+        return emitter->RuntimeState->AliveCount;
     }
 
 }

@@ -50,6 +50,8 @@
 #include "Scripting/InputActions.h"
 #include "Scripting/Physics2D.h"
 #include "Scripting/Debug.h"
+#include "Scripting/Coroutine.h"
+#include "Scripting/Random.h"
 
 // Project System (Editor/tooling)
 #include "Project/ProjectDefinition.h"

@@ -26,6 +26,8 @@
 #include "Platform/Window.h"
 #include "Physics/Physics2DQueries.h"
 #include "Physics/Physics2DWorld.h"
+#include "Scene/ParticleEmitterSystem.h"
+#include "Scripting/Coroutine.h"
 #include "Scripting/NativeScriptRegistry.h"
 
 #include <nlohmann/json.hpp>
@@ -1130,11 +1132,22 @@ namespace Limitless
                 eventReceiver->RuntimeDispatchFrame = 0;
             }
 
+            if (auto* particleEmitter = registry.try_get<ParticleEmitterComponent>(entity))
+            {
+                particleEmitter->CachedTexture.reset();
+                particleEmitter->TextureLoadAttempted = false;
+                particleEmitter->RuntimeState.reset();
+                particleEmitter->Playing = false;
+                particleEmitter->Paused = false;
+            }
+
             if (auto* nativeScript = registry.try_get<NativeScriptComponent>(entity))
             {
                 for (auto& scriptEntry : nativeScript->Scripts)
                 {
                     scriptEntry.RuntimeInitialized = false;
+                    if (scriptEntry.RuntimeInstance)
+                        Coroutine::StopAll(*scriptEntry.RuntimeInstance);
                     scriptEntry.RuntimeInstance.reset();
                     scriptEntry.RuntimeUpdateCount = 0;
                     scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
@@ -1313,6 +1326,9 @@ namespace Limitless
                     }
                 }
 
+                if (const auto* sourceParticleEmitter = sourceRegistry.try_get<ParticleEmitterComponent>(sourceEntity))
+                    destinationRegistry.emplace<ParticleEmitterComponent>(destinationEntity, *sourceParticleEmitter);
+
                 if (const auto* sourcePrefabInstance = sourceRegistry.try_get<PrefabInstanceComponent>(sourceEntity))
                     destinationRegistry.emplace<PrefabInstanceComponent>(destinationEntity, *sourcePrefabInstance);
 
@@ -1423,9 +1439,13 @@ namespace Limitless
             auto& nativeScript = view.get<NativeScriptComponent>(entity);
             for (auto& scriptEntry : nativeScript.Scripts)
             {
-                if (scriptEntry.RuntimeInstance && scriptEntry.RuntimeInitialized)
-                    scriptEntry.RuntimeInstance->OnDestroy();
-                scriptEntry.RuntimeInstance.reset();
+                if (scriptEntry.RuntimeInstance)
+                {
+                    if (scriptEntry.RuntimeInitialized)
+                        scriptEntry.RuntimeInstance->OnDestroy();
+                    Coroutine::StopAll(*scriptEntry.RuntimeInstance);
+                    scriptEntry.RuntimeInstance.reset();
+                }
                 scriptEntry.RuntimeInitialized = false;
                 scriptEntry.RuntimeUpdateCount = 0;
                 scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
@@ -1513,9 +1533,13 @@ namespace Limitless
         {
             for (auto& scriptEntry : nativeScript->Scripts)
             {
-                if (scriptEntry.RuntimeInstance && scriptEntry.RuntimeInitialized)
-                    scriptEntry.RuntimeInstance->OnDestroy();
-                scriptEntry.RuntimeInstance.reset();
+                if (scriptEntry.RuntimeInstance)
+                {
+                    if (scriptEntry.RuntimeInitialized)
+                        scriptEntry.RuntimeInstance->OnDestroy();
+                    Coroutine::StopAll(*scriptEntry.RuntimeInstance);
+                    scriptEntry.RuntimeInstance.reset();
+                }
                 scriptEntry.RuntimeInitialized = false;
                 scriptEntry.RuntimeUpdateCount = 0;
                 scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
@@ -1798,9 +1822,13 @@ namespace Limitless
             {
                 if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty() || !IsEntityEnabledInHierarchy(entity))
                 {
-                    if (scriptEntry.RuntimeInstance && scriptEntry.RuntimeInitialized)
-                        scriptEntry.RuntimeInstance->OnDestroy();
-                    scriptEntry.RuntimeInstance.reset();
+                    if (scriptEntry.RuntimeInstance)
+                    {
+                        if (scriptEntry.RuntimeInitialized)
+                            scriptEntry.RuntimeInstance->OnDestroy();
+                        Coroutine::StopAll(*scriptEntry.RuntimeInstance);
+                        scriptEntry.RuntimeInstance.reset();
+                    }
                     scriptEntry.RuntimeInitialized = false;
                     scriptEntry.RuntimeUpdateCount = 0;
                     scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
@@ -1876,6 +1904,7 @@ namespace Limitless
 
                 scriptEntry.RuntimeInstance->OnSynchronizeExposedFields();
                 scriptEntry.RuntimeInstance->OnUpdate(deltaTime);
+                Coroutine::TickOwner(*scriptEntry.RuntimeInstance, deltaTime);
                 ++scriptEntry.RuntimeUpdateCount;
 
                 if (trackTransformMutation && !scriptEntry.RuntimeWarnedOnUpdateTransformMutation)
@@ -1901,6 +1930,8 @@ namespace Limitless
         }
 
         UpdateAnimation2DSystem(*this, deltaTime, ++s_AnimationDispatchFrameCounter);
+
+        UpdateParticleEmitterSystem(m_Registry, deltaTime);
     }
 
     void Scene::FixedUpdate(float fixedDeltaTime)
@@ -1914,9 +1945,13 @@ namespace Limitless
             {
                 if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty() || !IsEntityEnabledInHierarchy(entity))
                 {
-                    if (scriptEntry.RuntimeInstance && scriptEntry.RuntimeInitialized)
-                        scriptEntry.RuntimeInstance->OnDestroy();
-                    scriptEntry.RuntimeInstance.reset();
+                    if (scriptEntry.RuntimeInstance)
+                    {
+                        if (scriptEntry.RuntimeInitialized)
+                            scriptEntry.RuntimeInstance->OnDestroy();
+                        Coroutine::StopAll(*scriptEntry.RuntimeInstance);
+                        scriptEntry.RuntimeInstance.reset();
+                    }
                     scriptEntry.RuntimeInitialized = false;
                     scriptEntry.RuntimeUpdateCount = 0;
                     scriptEntry.RuntimeWarnedMissingCompiledScript = false;
@@ -2288,6 +2323,12 @@ namespace Limitless
                     destinationScriptEntry.RuntimeInstance.reset();
                     destinationScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
                 }
+            }
+
+            if (const auto* particleEmitter = sourceRegistry.try_get<ParticleEmitterComponent>(sourceEntity))
+            {
+                // Copy constructor copies authoring fields and resets runtime state
+                destinationRegistry.emplace<ParticleEmitterComponent>(destinationEntity, *particleEmitter);
             }
 
             if (const auto* prefabInstance = sourceRegistry.try_get<PrefabInstanceComponent>(sourceEntity))
@@ -2804,6 +2845,42 @@ namespace Limitless
                     });
                 }
                 entry["NativeScripts"] = std::move(scriptEntries);
+            }
+
+            if (const auto* particleEmitter = m_Registry.try_get<ParticleEmitterComponent>(entity))
+            {
+                entry["ParticleEmitter"] = {
+                    { "SpawnRate", particleEmitter->SpawnRate },
+                    { "LifetimeMin", particleEmitter->LifetimeMin },
+                    { "LifetimeMax", particleEmitter->LifetimeMax },
+                    { "Looping", particleEmitter->Looping },
+                    { "Duration", particleEmitter->Duration },
+                    { "PlayOnStart", particleEmitter->PlayOnStart },
+                    { "BurstEnabled", particleEmitter->BurstEnabled },
+                    { "BurstCount", particleEmitter->BurstCount },
+                    { "SpawnOffsetMin", { particleEmitter->SpawnOffsetMin.x, particleEmitter->SpawnOffsetMin.y } },
+                    { "SpawnOffsetMax", { particleEmitter->SpawnOffsetMax.x, particleEmitter->SpawnOffsetMax.y } },
+                    { "UseRadialSpawn", particleEmitter->UseRadialSpawn },
+                    { "SpawnRadiusMin", particleEmitter->SpawnRadiusMin },
+                    { "SpawnRadiusMax", particleEmitter->SpawnRadiusMax },
+                    { "SpeedMin", particleEmitter->SpeedMin },
+                    { "SpeedMax", particleEmitter->SpeedMax },
+                    { "AngleMin", particleEmitter->AngleMin },
+                    { "AngleMax", particleEmitter->AngleMax },
+                    { "RadialVelocity", particleEmitter->RadialVelocity },
+                    { "GravityModifier", particleEmitter->GravityModifier },
+                    { "StartSizeMin", particleEmitter->StartSizeMin },
+                    { "StartSizeMax", particleEmitter->StartSizeMax },
+                    { "EndSize", particleEmitter->EndSize },
+                    { "StartColor", { particleEmitter->StartColor.r, particleEmitter->StartColor.g, particleEmitter->StartColor.b, particleEmitter->StartColor.a } },
+                    { "EndColor", { particleEmitter->EndColor.r, particleEmitter->EndColor.g, particleEmitter->EndColor.b, particleEmitter->EndColor.a } },
+                    { "StartRotationMin", particleEmitter->StartRotationMin },
+                    { "StartRotationMax", particleEmitter->StartRotationMax },
+                    { "RotationSpeedMin", particleEmitter->RotationSpeedMin },
+                    { "RotationSpeedMax", particleEmitter->RotationSpeedMax },
+                    { "Texture", MakeAssetReferenceJson(particleEmitter->TextureKey, Assets::AssetType::Texture2D) },
+                    { "MaxParticles", particleEmitter->MaxParticles }
+                };
             }
 
             if (const auto* prefabInstance = m_Registry.try_get<PrefabInstanceComponent>(entity))
@@ -3590,6 +3667,63 @@ namespace Limitless
                 loadNativeScriptEntry(entry["NativeScript"], loadedScriptEntry);
             }
 
+            if (entry.contains("ParticleEmitter") && entry["ParticleEmitter"].is_object())
+            {
+                const auto& peJson = entry["ParticleEmitter"];
+                auto& pe = scene->GetRegistry().emplace<ParticleEmitterComponent>(entity);
+
+                pe.SpawnRate       = peJson.value("SpawnRate", 10.0f);
+                pe.LifetimeMin     = peJson.value("LifetimeMin", 1.0f);
+                pe.LifetimeMax     = peJson.value("LifetimeMax", 2.0f);
+                pe.Looping         = peJson.value("Looping", true);
+                pe.Duration        = peJson.value("Duration", 5.0f);
+                pe.PlayOnStart     = peJson.value("PlayOnStart", true);
+                pe.BurstEnabled    = peJson.value("BurstEnabled", false);
+                pe.BurstCount      = peJson.value("BurstCount", 10u);
+                auto spawnOffsetMin = peJson.value("SpawnOffsetMin", std::vector<float>{ 0.0f, 0.0f });
+                if (spawnOffsetMin.size() >= 2)
+                    pe.SpawnOffsetMin = glm::vec2(spawnOffsetMin[0], spawnOffsetMin[1]);
+                auto spawnOffsetMax = peJson.value("SpawnOffsetMax", std::vector<float>{ 0.0f, 0.0f });
+                if (spawnOffsetMax.size() >= 2)
+                    pe.SpawnOffsetMax = glm::vec2(spawnOffsetMax[0], spawnOffsetMax[1]);
+                pe.UseRadialSpawn = peJson.value("UseRadialSpawn", false);
+                pe.SpawnRadiusMin = peJson.value("SpawnRadiusMin", 0.0f);
+                pe.SpawnRadiusMax = peJson.value("SpawnRadiusMax", 0.0f);
+                pe.SpeedMin        = peJson.value("SpeedMin", 50.0f);
+                pe.SpeedMax        = peJson.value("SpeedMax", 100.0f);
+                pe.AngleMin        = peJson.value("AngleMin", 0.0f);
+                pe.AngleMax        = peJson.value("AngleMax", 360.0f);
+                pe.RadialVelocity  = peJson.value("RadialVelocity", false);
+                pe.GravityModifier = peJson.value("GravityModifier", 0.0f);
+                pe.StartSizeMin    = peJson.value("StartSizeMin", 1.0f);
+                pe.StartSizeMax    = peJson.value("StartSizeMax", 1.0f);
+                pe.EndSize         = peJson.value("EndSize", 0.0f);
+
+                auto startColor = peJson.value("StartColor", std::vector<float>{ 1.0f, 1.0f, 1.0f, 1.0f });
+                if (startColor.size() >= 4)
+                    pe.StartColor = glm::vec4(startColor[0], startColor[1], startColor[2], startColor[3]);
+                auto endColor = peJson.value("EndColor", std::vector<float>{ 1.0f, 1.0f, 1.0f, 0.0f });
+                if (endColor.size() >= 4)
+                    pe.EndColor = glm::vec4(endColor[0], endColor[1], endColor[2], endColor[3]);
+
+                pe.StartRotationMin = peJson.value("StartRotationMin", 0.0f);
+                pe.StartRotationMax = peJson.value("StartRotationMax", 0.0f);
+                pe.RotationSpeedMin = peJson.value("RotationSpeedMin", 0.0f);
+                pe.RotationSpeedMax = peJson.value("RotationSpeedMax", 0.0f);
+
+                if (peJson.contains("Texture"))
+                    pe.TextureKey = ResolveAssetKeyFromSceneJson(peJson["Texture"]);
+
+                pe.MaxParticles = std::min(peJson.value("MaxParticles", 1024u),
+                                           ParticleEmitterComponent::kMaxParticlesCap);
+
+                pe.CachedTexture = nullptr;
+                pe.TextureLoadAttempted = false;
+                pe.RuntimeState.reset();
+                pe.Playing = false;
+                pe.Paused = false;
+            }
+
             if (entry.contains("PrefabInstance") && entry["PrefabInstance"].is_object())
             {
                 const auto& prefabJson = entry["PrefabInstance"];
@@ -4060,6 +4194,69 @@ namespace Limitless
             else
             {
                 Renderer2D::DrawQuad(model, sprite.Color);
+            }
+        }
+
+        // --- Particle emitters ---
+        {
+            auto particleView = registry.view<ParticleEmitterComponent, TransformComponent>();
+            for (entt::entity entity : particleView)
+            {
+                if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
+
+                auto& emitter = particleView.get<ParticleEmitterComponent>(entity);
+                if (!emitter.RuntimeState || emitter.RuntimeState->AliveCount == 0)
+                    continue;
+
+                // Resolve texture once per emitter (same lazy-load pattern as SpriteComponent)
+                if (!emitter.TextureKey.empty() && !emitter.CachedTexture && !emitter.TextureLoadAttempted)
+                {
+                    emitter.CachedTexture = std::dynamic_pointer_cast<Assets::TextureAsset>(
+                        Assets::AssetManager::GetCachedByKey(emitter.TextureKey));
+                    if (!emitter.CachedTexture)
+                    {
+                        if (!g_PendingTextureLoads.contains(emitter.TextureKey))
+                            g_PendingTextureLoads.emplace(emitter.TextureKey, Assets::TextureAsset::LoadAsync(emitter.TextureKey));
+                    }
+                    emitter.TextureLoadAttempted = true;
+                }
+                else if (!emitter.CachedTexture && emitter.TextureLoadAttempted && !emitter.TextureKey.empty())
+                {
+                    emitter.CachedTexture = std::dynamic_pointer_cast<Assets::TextureAsset>(
+                        Assets::AssetManager::GetCachedByKey(emitter.TextureKey));
+                    if (!emitter.CachedTexture)
+                    {
+                        const auto pendingIt = g_PendingTextureLoads.find(emitter.TextureKey);
+                        if (pendingIt != g_PendingTextureLoads.end() && pendingIt->second.IsDone())
+                        {
+                            emitter.CachedTexture = pendingIt->second.Get();
+                            g_PendingTextureLoads.erase(pendingIt);
+                        }
+                    }
+                }
+
+                const auto& runtime = *emitter.RuntimeState;
+                const auto& emitterTransform = particleView.get<TransformComponent>(entity);
+                const float emitterZ = emitterTransform.Position.z;
+
+                for (uint32_t i = 0; i < runtime.AliveCount; ++i)
+                {
+                    const float t = 1.0f - (runtime.Lifetimes[i] / runtime.MaxLifetimes[i]);
+                    const float size = glm::mix(runtime.StartSizes[i], runtime.EndSizes[i], t);
+                    const glm::vec4 color = glm::mix(runtime.StartColors[i], runtime.EndColors[i], t);
+
+                    glm::mat4 particleTransform(1.0f);
+                    particleTransform = glm::translate(particleTransform, glm::vec3(runtime.Positions[i], emitterZ));
+                    if (runtime.Rotations[i] != 0.0f)
+                        particleTransform = glm::rotate(particleTransform, glm::radians(runtime.Rotations[i]), glm::vec3(0.0f, 0.0f, 1.0f));
+                    particleTransform = glm::scale(particleTransform, glm::vec3(size, size, 1.0f));
+
+                    if (emitter.CachedTexture)
+                        Renderer2D::DrawQuad(particleTransform, emitter.CachedTexture, color);
+                    else
+                        Renderer2D::DrawQuad(particleTransform, color);
+                }
             }
         }
 

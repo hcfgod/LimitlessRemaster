@@ -21,6 +21,7 @@
 #include "EditorRuntimeOperations.h"
 #include "EditorScenePanel.h"
 #include "EditorViewportPanel.h"
+#include "Scene/ParticleEmitterSystem.h"
 #include "Scripting/ScriptCoreModuleRuntime.h"
 #include "Core/Input/InputSystem.h"
 #include "Graphics/Camera/Camera.h"
@@ -742,6 +743,11 @@ namespace Limitless
 
         if (m_PlayModeState == EditorPlayModeState::Play && m_Scene && m_Scene->IsReady())
             m_Scene->Update(deltaTime);
+
+        // Tick particle emitters in edit mode so the inspector preview works.
+        // Pass editModePreview=true to prevent PlayOnStart from auto-triggering.
+        if (m_PlayModeState != EditorPlayModeState::Play && m_Scene && m_Scene->IsReady())
+            UpdateParticleEmitterSystem(m_Scene->GetRegistry(), deltaTime, true);
 
         ProcessPendingSceneTransitions();
         PumpSceneAssetPrewarm();

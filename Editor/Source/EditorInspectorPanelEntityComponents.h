@@ -36,6 +36,7 @@ namespace Limitless::EditorInspectorPanel
         bool RemoveTilemapCollider2DComponent = false;
         bool RemoveAnimatorComponent = false;
         bool RemoveAnimationEventReceiverComponent = false;
+        bool RemoveParticleEmitterComponent = false;
     };
 
     void DrawStandardEntityComponentSections(Scene* scene,

@@ -779,4 +779,171 @@ namespace Limitless
         const int32_t width = std::max(1, tilemap.GridSize.x);
         return static_cast<size_t>(cellY * width + cellX);
     }
+
+    // -------------------------------------------------------------------------
+    // 2D Particle System
+    //
+    // Unity-style particle emitter component. Authoring fields are serialized;
+    // runtime state (the particle pool) is transient and rebuilt on play.
+    // -------------------------------------------------------------------------
+
+    /// Internal particle pool using a Struct-of-Arrays layout for cache-friendly
+    /// iteration. Allocated once when the emitter starts playing; never grows.
+    struct ParticleEmitterRuntime
+    {
+        std::vector<glm::vec2> Positions;
+        std::vector<glm::vec2> Velocities;
+        std::vector<float>     Lifetimes;
+        std::vector<float>     MaxLifetimes;
+        std::vector<float>     StartSizes;
+        std::vector<float>     EndSizes;
+        std::vector<glm::vec4> StartColors;
+        std::vector<glm::vec4> EndColors;
+        std::vector<float>     Rotations;
+        std::vector<float>     RotationSpeeds;
+
+        uint32_t AliveCount      = 0;
+        float    SpawnAccumulator = 0.0f;
+        float    ElapsedTime     = 0.0f;
+        bool     BurstFired      = false;
+
+        /// Pre-allocate all SoA arrays to the given capacity. Called once.
+        void Allocate(uint32_t maxParticles)
+        {
+            Positions.resize(maxParticles);
+            Velocities.resize(maxParticles);
+            Lifetimes.resize(maxParticles);
+            MaxLifetimes.resize(maxParticles);
+            StartSizes.resize(maxParticles);
+            EndSizes.resize(maxParticles);
+            StartColors.resize(maxParticles, glm::vec4(1.0f));
+            EndColors.resize(maxParticles, glm::vec4(1.0f));
+            Rotations.resize(maxParticles, 0.0f);
+            RotationSpeeds.resize(maxParticles, 0.0f);
+            AliveCount = 0;
+            SpawnAccumulator = 0.0f;
+            ElapsedTime = 0.0f;
+            BurstFired = false;
+        }
+
+        void Reset()
+        {
+            AliveCount = 0;
+            SpawnAccumulator = 0.0f;
+            ElapsedTime = 0.0f;
+            BurstFired = false;
+        }
+    };
+
+    /// 2D particle emitter component. Attach to any entity with a TransformComponent.
+    struct ParticleEmitterComponent
+    {
+        static constexpr uint32_t kMaxParticlesCap = 32768;
+
+        // --- Emission ---
+        float    SpawnRate   = 10.0f;   ///< Particles emitted per second (continuous mode).
+        float    LifetimeMin = 1.0f;    ///< Minimum particle lifetime in seconds.
+        float    LifetimeMax = 2.0f;    ///< Maximum particle lifetime in seconds.
+        bool     Looping     = true;
+        float    Duration    = 5.0f;    ///< Emitter duration before stopping (if not looping).
+        bool     PlayOnStart = true;    ///< Automatically begin emitting when the scene starts.
+
+        // Burst emission (fires once at start of each cycle).
+        bool     BurstEnabled = false;
+        uint32_t BurstCount   = 10;
+
+        // Spawn position relative to emitter origin.
+        // Box mode: random offset in [SpawnOffsetMin, SpawnOffsetMax].
+        // Radial mode: random offset from radius range around emitter origin.
+        glm::vec2 SpawnOffsetMin = glm::vec2(0.0f);
+        glm::vec2 SpawnOffsetMax = glm::vec2(0.0f);
+        bool UseRadialSpawn = false;
+        float SpawnRadiusMin = 0.0f;
+        float SpawnRadiusMax = 0.0f;
+
+        // --- Velocity ---
+        float SpeedMin = 50.0f;   ///< Minimum initial particle speed (world units/sec).
+        float SpeedMax = 100.0f;
+        float AngleMin = 0.0f;    ///< Minimum emission angle in degrees (0 = right, 90 = up).
+        float AngleMax = 360.0f;
+        bool RadialVelocity = false; ///< When true, initial velocity points away from emitter center.
+
+        // --- Physics ---
+        float GravityModifier = 0.0f;  ///< Multiplied by 9.81 and applied to Y velocity each frame.
+
+        // --- Appearance ---
+        float    StartSizeMin = 1.0f;
+        float    StartSizeMax = 1.0f;
+        float    EndSize      = 0.0f;
+        glm::vec4 StartColor  = glm::vec4(1.0f);
+        glm::vec4 EndColor    = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
+
+        // --- Rotation ---
+        float StartRotationMin = 0.0f;   ///< Degrees.
+        float StartRotationMax = 0.0f;
+        float RotationSpeedMin = 0.0f;   ///< Degrees per second.
+        float RotationSpeedMax = 0.0f;
+
+        // --- Texture ---
+        std::string TextureKey;
+        Assets::TextureAsset::Ptr CachedTexture;
+        bool TextureLoadAttempted = false;
+
+        // --- Limits ---
+        uint32_t MaxParticles = 1024;
+
+        // --- Runtime (not serialized, transient) ---
+        std::unique_ptr<ParticleEmitterRuntime> RuntimeState;
+        bool Playing = false;
+        bool Paused  = false;
+
+        // -- Copy semantics: copy authoring data, reset runtime --
+
+        ParticleEmitterComponent() = default;
+
+        ParticleEmitterComponent(const ParticleEmitterComponent& other)
+            : SpawnRate(other.SpawnRate), LifetimeMin(other.LifetimeMin), LifetimeMax(other.LifetimeMax),
+              Looping(other.Looping), Duration(other.Duration), PlayOnStart(other.PlayOnStart),
+              BurstEnabled(other.BurstEnabled), BurstCount(other.BurstCount),
+              SpawnOffsetMin(other.SpawnOffsetMin), SpawnOffsetMax(other.SpawnOffsetMax),
+              UseRadialSpawn(other.UseRadialSpawn), SpawnRadiusMin(other.SpawnRadiusMin), SpawnRadiusMax(other.SpawnRadiusMax),
+              SpeedMin(other.SpeedMin), SpeedMax(other.SpeedMax),
+              AngleMin(other.AngleMin), AngleMax(other.AngleMax), RadialVelocity(other.RadialVelocity),
+              GravityModifier(other.GravityModifier),
+              StartSizeMin(other.StartSizeMin), StartSizeMax(other.StartSizeMax), EndSize(other.EndSize),
+              StartColor(other.StartColor), EndColor(other.EndColor),
+              StartRotationMin(other.StartRotationMin), StartRotationMax(other.StartRotationMax),
+              RotationSpeedMin(other.RotationSpeedMin), RotationSpeedMax(other.RotationSpeedMax),
+              TextureKey(other.TextureKey),
+              CachedTexture(nullptr), TextureLoadAttempted(false),
+              MaxParticles(other.MaxParticles),
+              RuntimeState(nullptr), Playing(false), Paused(false)
+        {
+        }
+
+        ParticleEmitterComponent& operator=(const ParticleEmitterComponent& other)
+        {
+            if (this == &other) return *this;
+            SpawnRate = other.SpawnRate; LifetimeMin = other.LifetimeMin; LifetimeMax = other.LifetimeMax;
+            Looping = other.Looping; Duration = other.Duration; PlayOnStart = other.PlayOnStart;
+            BurstEnabled = other.BurstEnabled; BurstCount = other.BurstCount;
+            SpawnOffsetMin = other.SpawnOffsetMin; SpawnOffsetMax = other.SpawnOffsetMax;
+            UseRadialSpawn = other.UseRadialSpawn; SpawnRadiusMin = other.SpawnRadiusMin; SpawnRadiusMax = other.SpawnRadiusMax;
+            SpeedMin = other.SpeedMin; SpeedMax = other.SpeedMax;
+            AngleMin = other.AngleMin; AngleMax = other.AngleMax; RadialVelocity = other.RadialVelocity;
+            GravityModifier = other.GravityModifier;
+            StartSizeMin = other.StartSizeMin; StartSizeMax = other.StartSizeMax; EndSize = other.EndSize;
+            StartColor = other.StartColor; EndColor = other.EndColor;
+            StartRotationMin = other.StartRotationMin; StartRotationMax = other.StartRotationMax;
+            RotationSpeedMin = other.RotationSpeedMin; RotationSpeedMax = other.RotationSpeedMax;
+            TextureKey = other.TextureKey;
+            CachedTexture = nullptr; TextureLoadAttempted = false;
+            MaxParticles = other.MaxParticles;
+            RuntimeState.reset(); Playing = false; Paused = false;
+            return *this;
+        }
+
+        ParticleEmitterComponent(ParticleEmitterComponent&&) noexcept = default;
+        ParticleEmitterComponent& operator=(ParticleEmitterComponent&&) noexcept = default;
+    };
 }

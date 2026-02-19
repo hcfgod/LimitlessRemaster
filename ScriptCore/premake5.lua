@@ -20,7 +20,10 @@ project "ScriptCore"
         "../Limitless/Source/Scripting/InputActions.cpp",
         "../Limitless/Source/Scripting/Physics2D.cpp",
         "../Limitless/Source/Scripting/Debug.cpp",
+        "../Limitless/Source/Scripting/Coroutine.cpp",
+        "../Limitless/Source/Scripting/Random.cpp",
         "../Limitless/Source/Scripting/ScriptableEntity.cpp",
+        "../Limitless/Source/Scene/ParticleEmitterSystem.cpp",
         generatedScriptCoreDirectory .. "/**.h",
         generatedScriptCoreDirectory .. "/**.cpp"
     }
