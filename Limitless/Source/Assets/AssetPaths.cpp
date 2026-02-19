@@ -36,7 +36,16 @@ namespace Limitless::Assets
                 const bool hasAssets = std::filesystem::exists(probe / "Assets", ec) && std::filesystem::is_directory(probe / "Assets", ec);
                 const bool hasEngine = std::filesystem::exists(probe / "Limitless", ec) && std::filesystem::is_directory(probe / "Limitless", ec);
                 const bool hasScripts = std::filesystem::exists(probe / "Scripts", ec) && std::filesystem::is_directory(probe / "Scripts", ec);
-                if (hasAssets && (hasEngine || hasScripts))
+                // Shipped editor layouts usually only include Assets/ + binaries (no source folders).
+                // Accept those directories as shared-asset roots when known built-in assets exist.
+                const bool hasSharedMaterials =
+                    std::filesystem::exists(probe / "Assets" / "Materials" / "Renderer2D_TexturedQuad.material.json", ec) ||
+                    std::filesystem::exists(probe / "Assets" / "Materials" / "Renderer2D_MSDFText.material.json", ec);
+                const bool hasSharedShaders =
+                    std::filesystem::exists(probe / "Assets" / "Shaders" / "Renderer2D_TexturedQuad.glsl", ec) ||
+                    std::filesystem::exists(probe / "Assets" / "Shaders" / "Lighting2D_Composite.glsl", ec);
+
+                if (hasAssets && (hasEngine || hasScripts || hasSharedMaterials || hasSharedShaders))
                     return std::filesystem::weakly_canonical(probe);
 
                 if (!probe.has_parent_path())

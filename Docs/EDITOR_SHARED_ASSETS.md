@@ -15,6 +15,8 @@ This ensures project content is never overridden by shared defaults.
 ## Shared Assets Root
 
 - Default: discovered by walking upward from the editor executable path
+  - Development layout: directory contains `Assets/` plus source markers such as `Limitless/` or `Scripts/`
+  - Shipped layout: directory contains `Assets/` plus known built-in shared assets (for example renderer materials/shaders)
 - Optional override: `LIMITLESS_SHARED_ASSET_ROOT`
   - Value must be a directory that contains `Assets/`
 
