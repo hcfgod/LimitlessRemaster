@@ -1,15 +1,38 @@
 #include "EditorRuntimeOperations.h"
 
+#include "Core/Application.h"
 #include "Core/Debug/Log.h"
 #include "Editor/EditorCameraController.h"
 #include "Graphics/Framebuffer.h"
 #include "Graphics/Renderer2D.h"
 #include "Scene/Scene.h"
+#include "imgui/imgui.h"
 
 #include <glm/glm.hpp>
 
 namespace Limitless::EditorRuntimeOperations
 {
+    namespace
+    {
+        enum class ViewportCaptureOwner : uint8_t
+        {
+            None = 0,
+            Scene,
+            Game
+        };
+
+        bool IsPointInsideRect(const ImVec2& point, const glm::vec2& rectMin, const glm::vec2& rectMax)
+        {
+            return point.x >= rectMin.x && point.x <= rectMax.x &&
+                   point.y >= rectMin.y && point.y <= rectMax.y;
+        }
+
+        glm::vec2 ComputeRectCenter(const glm::vec2& rectMin, const glm::vec2& rectMax)
+        {
+            return glm::vec2((rectMin.x + rectMax.x) * 0.5f, (rectMin.y + rectMax.y) * 0.5f);
+        }
+    }
+
     void Attach(uint32_t viewportWidthPixels,
                 uint32_t viewportHeightPixels,
                 std::unique_ptr<Scene>& scene,
@@ -77,7 +100,13 @@ namespace Limitless::EditorRuntimeOperations
     }
 
     void Update(EditorPlayModeState playModeState,
-                bool viewportHovered,
+                bool sceneViewHovered,
+                bool sceneViewRectValid,
+                const glm::vec2& sceneViewRectMinPixels,
+                const glm::vec2& sceneViewRectMaxPixels,
+                bool gameViewRectValid,
+                const glm::vec2& gameViewRectMinPixels,
+                const glm::vec2& gameViewRectMaxPixels,
                 bool textInputWanted,
                 float deltaTime,
                 EditorCameraController* editorCameraController)
@@ -85,13 +114,64 @@ namespace Limitless::EditorRuntimeOperations
         if (!editorCameraController)
             return;
 
+        static ViewportCaptureOwner s_CaptureOwner = ViewportCaptureOwner::None;
+        static bool s_RightMouseWasDown = false;
+
         (void)playModeState;
-        // Unity-style behavior: Scene View camera remains controllable in all play states.
-        // Input is still gated by Scene View hover and text input focus.
-        const bool allowCameraInput = viewportHovered && !textInputWanted;
+        const bool rightMouseDown = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+        const bool rightMousePressedThisFrame = rightMouseDown && !s_RightMouseWasDown;
+        const ImVec2 mousePosition = ImGui::GetMousePos();
+        const bool mouseInSceneView = sceneViewRectValid && IsPointInsideRect(mousePosition, sceneViewRectMinPixels, sceneViewRectMaxPixels);
+        const bool mouseInGameView = gameViewRectValid && IsPointInsideRect(mousePosition, gameViewRectMinPixels, gameViewRectMaxPixels);
+
+        if (textInputWanted)
+        {
+            s_CaptureOwner = ViewportCaptureOwner::None;
+        }
+        else
+        {
+            if (rightMousePressedThisFrame)
+            {
+                if (mouseInSceneView)
+                    s_CaptureOwner = ViewportCaptureOwner::Scene;
+                else if (mouseInGameView)
+                    s_CaptureOwner = ViewportCaptureOwner::Game;
+                else
+                    s_CaptureOwner = ViewportCaptureOwner::None;
+            }
+            else if (!rightMouseDown)
+            {
+                s_CaptureOwner = ViewportCaptureOwner::None;
+            }
+        }
+
+        const bool sceneLookCaptureActive = !textInputWanted && rightMouseDown && s_CaptureOwner == ViewportCaptureOwner::Scene;
+        const bool gameLookCaptureActive = !textInputWanted && rightMouseDown && s_CaptureOwner == ViewportCaptureOwner::Game;
+        const bool allowCameraInput = sceneLookCaptureActive || (!textInputWanted && sceneViewHovered && !rightMouseDown);
 
         editorCameraController->SetInputEnabled(allowCameraInput);
         editorCameraController->Update(deltaTime);
+
+        if (Application::HasInstance())
+        {
+            auto& window = Application::GetInstance().GetWindow();
+            const bool shouldLockCursor = sceneLookCaptureActive || gameLookCaptureActive;
+
+            if (window.IsCursorLocked() != shouldLockCursor)
+                window.SetCursorLocked(shouldLockCursor);
+            window.SetCursorVisible(!shouldLockCursor);
+
+            if (shouldLockCursor)
+            {
+                const bool useSceneCenter = (s_CaptureOwner == ViewportCaptureOwner::Scene);
+                const glm::vec2 center = useSceneCenter
+                    ? ComputeRectCenter(sceneViewRectMinPixels, sceneViewRectMaxPixels)
+                    : ComputeRectCenter(gameViewRectMinPixels, gameViewRectMaxPixels);
+                window.SetCursorPosition(static_cast<int>(center.x), static_cast<int>(center.y));
+            }
+        }
+
+        s_RightMouseWasDown = rightMouseDown;
     }
 
     void HandleWindowResize(uint32_t width,

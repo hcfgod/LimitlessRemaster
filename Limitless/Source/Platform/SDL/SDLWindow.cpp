@@ -1396,6 +1396,13 @@ namespace Limitless
     {
         LT_VERIFY(m_Window, "Window not initialized");
 
+        const bool currentLocked = SDL_GetWindowRelativeMouseMode(m_Window);
+        if (currentLocked == locked)
+        {
+            m_CursorLocked = currentLocked;
+            return;
+        }
+
         // SDL relative mouse mode constrains the cursor and reports relative movement.
         // SDL also hides the cursor in this mode (see SDL docs).
         const bool ok = SDL_SetWindowRelativeMouseMode(m_Window, locked);
@@ -1409,11 +1416,6 @@ namespace Limitless
 
         if (m_CursorLocked)
         {
-            // Warp to center as a convenience so the transition feels immediate.
-            const int centerX = static_cast<int>(m_Data.Width / 2);
-            const int centerY = static_cast<int>(m_Data.Height / 2);
-            SDL_WarpMouseInWindow(m_Window, static_cast<float>(centerX), static_cast<float>(centerY));
-
             SDL_HideCursor();
         }
         else

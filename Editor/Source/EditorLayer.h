@@ -133,8 +133,14 @@ namespace Limitless
         std::shared_ptr<Framebuffer> m_GameViewFramebuffer;
         bool m_SceneViewFocused = false;
         bool m_SceneViewHovered = false;
+        bool m_SceneViewRectValid = false;
+        glm::vec2 m_SceneViewRectMinPixels = glm::vec2(0.0f);
+        glm::vec2 m_SceneViewRectMaxPixels = glm::vec2(0.0f);
         bool m_GameViewFocused = false;
         bool m_GameViewHovered = false;
+        bool m_GameViewRectValid = false;
+        glm::vec2 m_GameViewRectMinPixels = glm::vec2(0.0f);
+        glm::vec2 m_GameViewRectMaxPixels = glm::vec2(0.0f);
         bool m_FocusGameViewOnPlayEnter = false;
         bool m_FocusSceneViewOnPlayExit = false;
 

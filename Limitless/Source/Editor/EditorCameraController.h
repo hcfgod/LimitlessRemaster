@@ -86,6 +86,7 @@ namespace Limitless
         CameraManager* m_CameraManager = nullptr;
         CameraId m_CameraId{};
         bool m_InputEnabled = true;  ///< When false, Update ignores input and cursor is restored.
+        bool m_WasLookActive = false;
     };
 }
 

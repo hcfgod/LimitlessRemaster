@@ -3,6 +3,7 @@
 #include "EditorPlayMode.h"
 
 #include <cstdint>
+#include <glm/glm.hpp>
 #include <memory>
 
 namespace Limitless
@@ -32,7 +33,13 @@ namespace Limitless::EditorRuntimeOperations
 
     /// Updates editor runtime per-frame input and camera behavior.
     void Update(EditorPlayModeState playModeState,
-                bool viewportHovered,
+                bool sceneViewHovered,
+                bool sceneViewRectValid,
+                const glm::vec2& sceneViewRectMinPixels,
+                const glm::vec2& sceneViewRectMaxPixels,
+                bool gameViewRectValid,
+                const glm::vec2& gameViewRectMinPixels,
+                const glm::vec2& gameViewRectMaxPixels,
                 bool textInputWanted,
                 float deltaTime,
                 EditorCameraController* editorCameraController);

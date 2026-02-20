@@ -2,6 +2,7 @@
 
 #include "Assets/AssetManager.h"
 #include "Assets/InputActionsAssetImporter.h"
+#include "imgui/imgui.h"
 
 namespace Limitless
 {
@@ -43,6 +44,7 @@ namespace Limitless
         m_InputAsset.reset();
         m_InputAssetResource.reset();
         m_InputAssetRevision = 0;
+        m_WasLookActive = false;
         m_Settings = Settings{};
     }
 
@@ -65,6 +67,7 @@ namespace Limitless
                 window.SetCursorLocked(false);
                 window.SetCursorVisible(true);
             }
+            m_WasLookActive = false;
         }
         else
         {
@@ -90,18 +93,16 @@ namespace Limitless
             return;
         }
 
-        const bool wantLook = (m_ActionLookEnable != nullptr) ? m_ActionLookEnable->ReadButton() : true;
-
-        // Unity/editor style: lock+hide cursor while RMB is held.
-        if (Application::HasInstance())
-        {
-            auto& window = Application::GetInstance().GetWindow();
-            window.SetCursorLocked(wantLook);
-            window.SetCursorVisible(!wantLook);
-        }
+        // Docked split views can cause action-based RMB state to flicker while cursor
+        // lock engages. Prefer raw RMB state, with action as fallback for non-mouse bindings.
+        const bool mouseLookEnable = ImGui::GetIO().MouseDown[ImGuiMouseButton_Right];
+        const bool actionLookEnable = (m_ActionLookEnable != nullptr) ? m_ActionLookEnable->ReadButton() : true;
+        const bool wantLook = mouseLookEnable || actionLookEnable;
+        const bool startedLookThisFrame = wantLook && !m_WasLookActive;
+        m_WasLookActive = wantLook;
 
         const glm::vec2 move = m_ActionMove->ReadAxis2D();
-        const glm::vec2 look = wantLook ? m_ActionLook->ReadAxis2D() : glm::vec2(0.0f);
+        const glm::vec2 look = (wantLook && !startedLookThisFrame) ? m_ActionLook->ReadAxis2D() : glm::vec2(0.0f);
 
         // Mouse delta -> yaw/pitch (scaled; camera stores degrees).
         const float yaw = camera->GetYawDegrees() + (look.x * (LookSensitivity * 180.0f / 3.14159265f));

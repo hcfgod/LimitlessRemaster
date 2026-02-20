@@ -31,6 +31,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -103,6 +104,15 @@ namespace Limitless
             std::shared_ptr<Framebuffer> LightFramebuffer;
             uint32_t FramebufferWidth = 0;
             uint32_t FramebufferHeight = 0;
+            uint64_t FramebufferUseTick = 0;
+
+            struct FramebufferSet
+            {
+                std::shared_ptr<Framebuffer> GBuffer;
+                std::shared_ptr<Framebuffer> Light;
+                uint64_t LastUsedTick = 0;
+            };
+            std::unordered_map<uint64_t, FramebufferSet> FramebufferSets;
 
             std::shared_ptr<VertexArray> UnitQuadVertexArray;
             std::shared_ptr<VertexBuffer> UnitQuadVertexBuffer;
@@ -123,6 +133,11 @@ namespace Limitless
         };
 
         Lighting2DRendererState g_State{};
+
+        uint64_t MakeFramebufferSetKey(uint32_t width, uint32_t height)
+        {
+            return (static_cast<uint64_t>(width) << 32) | static_cast<uint64_t>(height);
+        }
 
         int ClampShadowSamplesByQuality(const Lighting2DSettings& settings, int requestedSamples)
         {
@@ -411,8 +426,7 @@ namespace Limitless
             if (width == 0 || height == 0)
                 return false;
 
-            if (!g_State.GBufferFramebuffer)
-            {
+            const auto createGBufferFramebuffer = [width, height]() -> std::shared_ptr<Framebuffer> {
                 FramebufferSpecification gBufferSpec{};
                 gBufferSpec.Width = width;
                 gBufferSpec.Height = height;
@@ -421,11 +435,10 @@ namespace Limitless
                 gBufferSpec.DepthAttachment = true;
                 gBufferSpec.StencilAttachment = false;
                 gBufferSpec.SwapChainTarget = false;
-                g_State.GBufferFramebuffer = Framebuffer::Create(gBufferSpec);
-            }
+                return Framebuffer::Create(gBufferSpec);
+            };
 
-            if (!g_State.LightFramebuffer)
-            {
+            const auto createLightFramebuffer = [width, height]() -> std::shared_ptr<Framebuffer> {
                 FramebufferSpecification lightSpec{};
                 lightSpec.Width = width;
                 lightSpec.Height = height;
@@ -434,16 +447,46 @@ namespace Limitless
                 lightSpec.DepthAttachment = false;
                 lightSpec.StencilAttachment = false;
                 lightSpec.SwapChainTarget = false;
-                g_State.LightFramebuffer = Framebuffer::Create(lightSpec);
-            }
+                return Framebuffer::Create(lightSpec);
+            };
 
-            if (!g_State.GBufferFramebuffer || !g_State.LightFramebuffer)
+            const uint64_t setKey = MakeFramebufferSetKey(width, height);
+            auto& framebufferSet = g_State.FramebufferSets[setKey];
+            if (!framebufferSet.GBuffer)
+                framebufferSet.GBuffer = createGBufferFramebuffer();
+            if (!framebufferSet.Light)
+                framebufferSet.Light = createLightFramebuffer();
+
+            if (!framebufferSet.GBuffer || !framebufferSet.Light)
                 return false;
 
-            if (g_State.GBufferFramebuffer->GetWidth() != width || g_State.GBufferFramebuffer->GetHeight() != height)
-                g_State.GBufferFramebuffer->Resize(width, height);
-            if (g_State.LightFramebuffer->GetWidth() != width || g_State.LightFramebuffer->GetHeight() != height)
-                g_State.LightFramebuffer->Resize(width, height);
+            // Safety check for stale entries (should be rare unless external resize occurred).
+            if (framebufferSet.GBuffer->GetWidth() != width || framebufferSet.GBuffer->GetHeight() != height)
+                framebufferSet.GBuffer = createGBufferFramebuffer();
+            if (framebufferSet.Light->GetWidth() != width || framebufferSet.Light->GetHeight() != height)
+                framebufferSet.Light = createLightFramebuffer();
+            if (!framebufferSet.GBuffer || !framebufferSet.Light)
+                return false;
+
+            framebufferSet.LastUsedTick = ++g_State.FramebufferUseTick;
+
+            constexpr size_t kMaxFramebufferSetCache = 4;
+            if (g_State.FramebufferSets.size() > kMaxFramebufferSetCache)
+            {
+                auto evictIt = g_State.FramebufferSets.end();
+                for (auto it = g_State.FramebufferSets.begin(); it != g_State.FramebufferSets.end(); ++it)
+                {
+                    if (it->first == setKey)
+                        continue;
+                    if (evictIt == g_State.FramebufferSets.end() || it->second.LastUsedTick < evictIt->second.LastUsedTick)
+                        evictIt = it;
+                }
+                if (evictIt != g_State.FramebufferSets.end())
+                    g_State.FramebufferSets.erase(evictIt);
+            }
+
+            g_State.GBufferFramebuffer = framebufferSet.GBuffer;
+            g_State.LightFramebuffer = framebufferSet.Light;
 
             g_State.FramebufferWidth = width;
             g_State.FramebufferHeight = height;

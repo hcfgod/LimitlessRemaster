@@ -1298,11 +1298,17 @@ namespace Limitless::EditorViewportPanel
               std::shared_ptr<Framebuffer>& sceneViewFramebuffer,
               bool& sceneViewFocused,
               bool& sceneViewHovered,
+              bool& sceneViewRectValid,
+              glm::vec2& sceneViewRectMinPixels,
+              glm::vec2& sceneViewRectMaxPixels,
               uint32_t& gameViewWidthPixels,
               uint32_t& gameViewHeightPixels,
               std::shared_ptr<Framebuffer>& gameViewFramebuffer,
               bool& gameViewFocused,
               bool& gameViewHovered,
+              bool& gameViewRectValid,
+              glm::vec2& gameViewRectMinPixels,
+              glm::vec2& gameViewRectMaxPixels,
               bool& focusSceneViewRequested,
               bool& focusGameViewRequested,
               EditorCameraController* editorCameraController,
@@ -1329,6 +1335,12 @@ namespace Limitless::EditorViewportPanel
               bool showMissingGameplayCameraOverlay)
     {
         (void)editorCameraController;
+        sceneViewRectValid = false;
+        sceneViewRectMinPixels = glm::vec2(0.0f);
+        sceneViewRectMaxPixels = glm::vec2(0.0f);
+        gameViewRectValid = false;
+        gameViewRectMinPixels = glm::vec2(0.0f);
+        gameViewRectMaxPixels = glm::vec2(0.0f);
 
         auto sanitizeViewportDimension = [](float value) -> uint32_t {
             if (!std::isfinite(value) || value <= 1.0f)
@@ -1468,11 +1480,16 @@ namespace Limitless::EditorViewportPanel
                     ImVec2(static_cast<float>(sceneWidth), static_cast<float>(sceneHeight)),
                     ImVec2(0, 1),
                     ImVec2(1, 0));
+                const ImVec2 sceneRectMin = ImGui::GetItemRectMin();
+                const ImVec2 sceneRectMax = ImGui::GetItemRectMax();
+                sceneViewRectValid = true;
+                sceneViewRectMinPixels = glm::vec2(sceneRectMin.x, sceneRectMin.y);
+                sceneViewRectMaxPixels = glm::vec2(sceneRectMax.x, sceneRectMax.y);
 
                 if (scene && sceneViewCamera && !isSceneLoading)
                 {
-                    const ImVec2 viewportMin = ImGui::GetItemRectMin();
-                    const ImVec2 viewportMax = ImGui::GetItemRectMax();
+                    const ImVec2 viewportMin = sceneRectMin;
+                    const ImVec2 viewportMax = sceneRectMax;
                     ImDrawList* drawList = ImGui::GetWindowDrawList();
                     DrawSelectedPhysicsOverlays(drawList,
                                                 *scene,
@@ -1789,9 +1806,14 @@ namespace Limitless::EditorViewportPanel
                     ImVec2(static_cast<float>(gameWidth), static_cast<float>(gameHeight)),
                     ImVec2(0, 1),
                     ImVec2(1, 0));
+                const ImVec2 gameRectMin = ImGui::GetItemRectMin();
+                const ImVec2 gameRectMax = ImGui::GetItemRectMax();
+                gameViewRectValid = true;
+                gameViewRectMinPixels = glm::vec2(gameRectMin.x, gameRectMin.y);
+                gameViewRectMaxPixels = glm::vec2(gameRectMax.x, gameRectMax.y);
 
-                const ImVec2 minPos = ImGui::GetItemRectMin();
-                const ImVec2 maxPos = ImGui::GetItemRectMax();
+                const ImVec2 minPos = gameRectMin;
+                const ImVec2 maxPos = gameRectMax;
                 SceneRenderer::SetUiInputViewportRectPixels(
                     minPos.x,
                     minPos.y,
