@@ -131,13 +131,18 @@ public:
     static std::vector<LogMessageEntry> GetRecentMessages();
     static void ClearRecentMessages();
 
+    static void SetCoreLogLevel(spdlog::level::level_enum level, bool persistToConfig = true);
+    static void SetClientLogLevel(spdlog::level::level_enum level, bool persistToConfig = true);
+    static spdlog::level::level_enum GetCoreLogLevel();
+    static spdlog::level::level_enum GetClientLogLevel();
+    static std::string LogLevelToString(spdlog::level::level_enum level);
+    static spdlog::level::level_enum StringToLogLevel(const std::string& level);
+
 private:
     static std::shared_ptr<spdlog::logger> s_CoreLogger;
     static std::shared_ptr<spdlog::logger> s_ClientLogger;
     static bool s_IsShuttingDown;
     
-    // Helper method to convert string log level to spdlog level
-    static spdlog::level::level_enum StringToLogLevel(const std::string& level);
 };
 } // namespace Limitless
 

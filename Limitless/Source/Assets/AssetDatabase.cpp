@@ -3,6 +3,7 @@
 #include "Assets/AssetBundle.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetUtils.h"
+#include "Project/ProjectManager.h"
 
 #include "Core/Debug/Log.h"
 #include "Core/Hash/XxHash64.h"
@@ -33,6 +34,39 @@ namespace Limitless::Assets
         // file_time_type::duration::rep is implementation-defined; we store the raw tick count and only
         // compare values from the same platform/toolchain family (incremental reimport correctness is best-effort).
         return static_cast<int64_t>(t.time_since_epoch().count());
+    }
+
+    static bool IsPathUnderRoot(const std::filesystem::path& candidatePath,
+                                const std::filesystem::path& rootPath)
+    {
+        std::error_code ec;
+        const std::filesystem::path candidate = std::filesystem::weakly_canonical(candidatePath, ec);
+        if (ec)
+        {
+            return false;
+        }
+
+        ec.clear();
+        const std::filesystem::path root = std::filesystem::weakly_canonical(rootPath, ec);
+        if (ec)
+        {
+            return false;
+        }
+
+        ec.clear();
+        const std::filesystem::path rel = std::filesystem::relative(candidate, root, ec);
+        if (ec)
+        {
+            return false;
+        }
+
+        if (rel.empty())
+        {
+            return true;
+        }
+
+        const std::string relText = rel.generic_string();
+        return !(relText == ".." || relText.rfind("../", 0) == 0);
     }
 
     AssetDatabase& AssetDatabase::GetInstance()
@@ -69,6 +103,16 @@ namespace Limitless::Assets
         }
 
         m_Loaded = true;
+    }
+
+    void AssetDatabase::Reset()
+    {
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        m_ByGuid.clear();
+        m_GuidByKey.clear();
+        m_DependentsByGuid.clear();
+        m_Loaded = false;
+        ++m_Revision;
     }
 
     Result<AssetDatabase::Record> AssetDatabase::FindByGuid(const std::string& guid)
@@ -124,6 +168,32 @@ namespace Limitless::Assets
         if (!std::filesystem::exists(resolvedPath))
         {
             return Result<Record>(ErrorCode::FileNotFound, "Asset file not found: " + resolvedPath.string());
+        }
+
+        // Database records are project-local; do not allow keys resolved outside
+        // the active project's Assets/ tree.
+        std::filesystem::path projectRootForValidation;
+        const auto& projectManager = Project::ProjectManager::GetInstance();
+        if (projectManager.HasOpenProject())
+        {
+            projectRootForValidation = projectManager.GetProjectRoot();
+        }
+        else
+        {
+            const auto rootResult = FindProjectRootFromWorkingDirectory();
+            if (rootResult.IsSuccess())
+                projectRootForValidation = rootResult.GetValue();
+        }
+
+        if (!projectRootForValidation.empty())
+        {
+            const std::filesystem::path projectAssetsRoot = projectRootForValidation / "Assets";
+            if (!IsPathUnderRoot(resolvedPath, projectAssetsRoot))
+            {
+                return Result<Record>(
+                    ErrorCode::InvalidState,
+                    "AssetDatabase::ImportOrUpdate: resolved path is outside active project Assets/: " + resolvedPath.string());
+            }
         }
 
         std::error_code sizeEc;
@@ -213,6 +283,7 @@ namespace Limitless::Assets
 
             m_ByGuid[record.Guid] = record;
             m_GuidByKey[record.Key] = record.Guid;
+            ++m_Revision;
 
             if (rebuildDependentsIndex)
             {
@@ -281,6 +352,7 @@ namespace Limitless::Assets
             {
                 LT_CORE_WARN("AssetDatabase: failed to save database: {}", saveResult.GetError().GetErrorMessage());
             }
+            ++m_Revision;
         }
 
         // Write deps into .meta next to the real asset.
@@ -355,6 +427,7 @@ namespace Limitless::Assets
         }
 
         RebuildDependentsIndexLocked();
+        ++m_Revision;
 
         const auto saveResult = SaveToDiskLocked();
         if (saveResult.IsFailure())
@@ -389,6 +462,7 @@ namespace Limitless::Assets
         }
 
         RebuildDependentsIndexLocked();
+        ++m_Revision;
 
         const auto saveResult = SaveToDiskLocked();
         if (saveResult.IsFailure())
@@ -405,8 +479,23 @@ namespace Limitless::Assets
         return m_ByGuid.size();
     }
 
+    uint64_t AssetDatabase::GetRevision() const
+    {
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        return m_Revision;
+    }
+
     Result<std::filesystem::path> AssetDatabase::GetDatabaseFilePathLocked()
     {
+        // Prefer the explicitly opened project root when available; this avoids
+        // any ambiguity from working-directory heuristics during project switches.
+        const auto& projectManager = Project::ProjectManager::GetInstance();
+        if (projectManager.HasOpenProject())
+        {
+            const std::filesystem::path root = projectManager.GetProjectRoot();
+            return root / "Build" / "AssetDatabase.json";
+        }
+
         const auto rootResult = FindProjectRootFromWorkingDirectory();
         if (rootResult.IsFailure())
         {
@@ -426,6 +515,8 @@ namespace Limitless::Assets
             return Result<void>(pathResult.GetError());
         }
         const std::filesystem::path dbPath = pathResult.GetValue();
+        const std::filesystem::path projectRoot = dbPath.parent_path().parent_path();
+        const std::filesystem::path projectAssetsRoot = projectRoot / "Assets";
 
         if (!std::filesystem::exists(dbPath))
         {
@@ -467,10 +558,18 @@ namespace Limitless::Assets
                     continue;
                 }
 
+                // Keep database scoped to the currently opened project even if
+                // stale/mixed records are present in the loaded file.
+                if (r.ResolvedPath.empty() || !IsPathUnderRoot(std::filesystem::path(r.ResolvedPath), projectAssetsRoot))
+                {
+                    continue;
+                }
+
                 m_GuidByKey[r.Key] = r.Guid;
                 m_ByGuid[r.Guid] = std::move(r);
             }
             RebuildDependentsIndexLocked();
+            ++m_Revision;
         }
         catch (const std::exception& e)
         {

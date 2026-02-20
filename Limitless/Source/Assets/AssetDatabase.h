@@ -52,6 +52,8 @@ namespace Limitless::Assets
 
         // Ensure the database has been loaded from disk (lazy).
         void EnsureLoaded();
+        // Reset in-memory state so the next query reloads from current project root.
+        void Reset();
 
         // Find a record by GUID/key.
         Result<Record> FindByGuid(const std::string& guid);
@@ -80,6 +82,8 @@ namespace Limitless::Assets
 
         // For debugging/telemetry.
         size_t GetRecordCount() const;
+        // Monotonic counter that changes whenever database contents are reloaded/mutated.
+        uint64_t GetRevision() const;
 
     private:
         AssetDatabase() = default;
@@ -96,6 +100,7 @@ namespace Limitless::Assets
     private:
         mutable std::mutex m_Mutex;
         bool m_Loaded = false;
+        uint64_t m_Revision = 1;
 
         // GUID -> Record
         std::unordered_map<std::string, Record> m_ByGuid;

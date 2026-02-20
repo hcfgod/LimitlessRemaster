@@ -847,6 +847,11 @@ namespace Limitless
             m_ProjectSettingsPanelState.StatusMessage.clear();
             m_ProjectSettingsPanelState.StatusIsError = false;
 
+            // Reset tile palette selection/caches so stale keys from the previous project never linger.
+            m_TilePaletteState.ActivePaletteKey.clear();
+            m_TilePaletteState.InvalidateCache();
+            EditorTilePalettePanel::InvalidatePaletteKeyCache();
+
             // Apply project-level input settings at project open so runtime input defaults are active immediately.
             const auto inputSettingsResult = Project::LoadInputSettings(projectRoot);
             if (inputSettingsResult.IsSuccess())
@@ -1205,7 +1210,11 @@ namespace Limitless
         }
 
         if (ImGui::Button("Clear"))
+        {
             Log::ClearRecentMessages();
+            m_ConsoleSelectedEntryText.clear();
+            m_ConsoleSelectedMessageText.clear();
+        }
         ImGui::SameLine();
         ImGui::Checkbox("Auto-scroll", &m_ConsoleAutoScroll);
         ImGui::SameLine();
@@ -1225,6 +1234,46 @@ namespace Limitless
         ImGui::InputTextWithHint("##ConsoleSearch", "Search logs...", m_ConsoleSearchBuffer.data(), m_ConsoleSearchBuffer.size());
         ImGui::SameLine();
         bool copyVisibleRequested = ImGui::Button("Copy Visible");
+        {
+            static constexpr int kLogLevelCount = 7;
+            static constexpr const char* kLogLevelLabels[] = { "Trace", "Debug", "Info", "Warn", "Error", "Critical", "Off" };
+            static constexpr spdlog::level::level_enum kLogLevelValues[] = {
+                spdlog::level::trace,
+                spdlog::level::debug,
+                spdlog::level::info,
+                spdlog::level::warn,
+                spdlog::level::err,
+                spdlog::level::critical,
+                spdlog::level::off
+            };
+
+            auto levelToIndex = [](spdlog::level::level_enum level) -> int
+            {
+                for (int index = 0; index < kLogLevelCount; ++index)
+                {
+                    if (kLogLevelValues[index] == level)
+                        return index;
+                }
+                return 2; // Info
+            };
+
+            int coreLevelIndex = levelToIndex(Log::GetCoreLogLevel());
+            int appLevelIndex = levelToIndex(Log::GetClientLogLevel());
+            const bool hasCoreLogger = static_cast<bool>(Log::GetCoreLogger());
+
+            ImGui::SetNextItemWidth(120.0f);
+            ImGui::BeginDisabled(!hasCoreLogger);
+            if (ImGui::Combo("Core Level", &coreLevelIndex, kLogLevelLabels, kLogLevelCount))
+                Log::SetCoreLogLevel(kLogLevelValues[coreLevelIndex], true);
+            ImGui::EndDisabled();
+            if (!hasCoreLogger && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                ImGui::SetTooltip("Core logger is disabled in this build configuration.");
+
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(120.0f);
+            if (ImGui::Combo("App Level", &appLevelIndex, kLogLevelLabels, kLogLevelCount))
+                Log::SetClientLogLevel(kLogLevelValues[appLevelIndex], true);
+        }
 
         const std::string searchText = m_ConsoleSearchBuffer.data();
         const auto shouldDisplayEntry = [&](const LogMessageEntry& entry) -> bool
@@ -1287,21 +1336,48 @@ namespace Limitless
         if (ImGui::BeginChild("ConsoleEntries"))
         {
             const bool shouldScrollToBottom = m_ConsoleAutoScroll && (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 8.0f);
-            for (const LogMessageEntry* entry : visibleEntries)
+            for (size_t entryIndex = 0; entryIndex < visibleEntries.size(); ++entryIndex)
             {
+                const LogMessageEntry* entry = visibleEntries[entryIndex];
                 if (!entry)
                     continue;
 
                 const bool isWarning = entry->Level == spdlog::level::warn;
                 const bool isError = entry->Level >= spdlog::level::err;
+                const std::string lineText = "[" + entry->LoggerName + "] " + entry->Message;
+                const bool isSelected = (lineText == m_ConsoleSelectedEntryText);
 
                 const ImVec4 textColor = isError
                     ? ImVec4(1.0f, 0.38f, 0.38f, 1.0f)
                     : (isWarning ? ImVec4(1.0f, 0.85f, 0.35f, 1.0f) : ImGui::GetStyleColorVec4(ImGuiCol_Text));
 
                 ImGui::PushStyleColor(ImGuiCol_Text, textColor);
-                ImGui::TextWrapped("[%s] %s", entry->LoggerName.c_str(), entry->Message.c_str());
+                const std::string selectableLabel = lineText + "##ConsoleEntry_" + std::to_string(entryIndex);
+                if (ImGui::Selectable(selectableLabel.c_str(), isSelected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
+                {
+                    m_ConsoleSelectedEntryText = lineText;
+                    m_ConsoleSelectedMessageText = entry->Message;
+                    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                        ImGui::SetClipboardText(entry->Message.c_str());
+                }
+                if (ImGui::BeginPopupContextItem())
+                {
+                    if (ImGui::MenuItem("Copy"))
+                        ImGui::SetClipboardText(lineText.c_str());
+                    if (ImGui::MenuItem("Copy Message"))
+                        ImGui::SetClipboardText(entry->Message.c_str());
+                    ImGui::EndPopup();
+                }
                 ImGui::PopStyleColor();
+            }
+
+            const ImGuiIO& io = ImGui::GetIO();
+            if (!ImGui::IsAnyItemActive() &&
+                !m_ConsoleSelectedMessageText.empty() &&
+                (io.KeyCtrl || io.KeySuper) &&
+                ImGui::IsKeyPressed(ImGuiKey_C, false))
+            {
+                ImGui::SetClipboardText(m_ConsoleSelectedMessageText.c_str());
             }
 
             if (shouldScrollToBottom)

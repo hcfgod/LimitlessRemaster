@@ -4,6 +4,8 @@
 #include <iostream>
 #include <deque>
 #include <mutex>
+#include <algorithm>
+#include <cctype>
 #include <spdlog/async.h>
 #include <spdlog/async_logger.h>
 #include <spdlog/sinks/basic_file_sink.h>
@@ -49,16 +51,35 @@ namespace Limitless
     bool Log::s_IsShuttingDown = false;
 
     spdlog::level::level_enum Log::StringToLogLevel(const std::string& level) {
-        if (level == "trace") return spdlog::level::trace;
-        if (level == "debug") return spdlog::level::debug;
-        if (level == "info") return spdlog::level::info;
-        if (level == "warn") return spdlog::level::warn;
-        if (level == "error") return spdlog::level::err;
-        if (level == "critical") return spdlog::level::critical;
-        if (level == "off") return spdlog::level::off;
-    
-        // Default to info if unknown
+        std::string normalized = level;
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+
+        if (normalized == "trace") return spdlog::level::trace;
+        if (normalized == "debug") return spdlog::level::debug;
+        if (normalized == "info") return spdlog::level::info;
+        if (normalized == "warn" || normalized == "warning") return spdlog::level::warn;
+        if (normalized == "error" || normalized == "err") return spdlog::level::err;
+        if (normalized == "critical") return spdlog::level::critical;
+        if (normalized == "off") return spdlog::level::off;
+
         return spdlog::level::info;
+    }
+
+    std::string Log::LogLevelToString(spdlog::level::level_enum level)
+    {
+        switch (level)
+        {
+        case spdlog::level::trace: return "trace";
+        case spdlog::level::debug: return "debug";
+        case spdlog::level::info: return "info";
+        case spdlog::level::warn: return "warn";
+        case spdlog::level::err: return "error";
+        case spdlog::level::critical: return "critical";
+        case spdlog::level::off: return "off";
+        default: return "info";
+        }
     }
 
     void Log::Init() {
@@ -71,6 +92,8 @@ namespace Limitless
         auto& config = GetConfigManager();
         
         std::string logLevel = config.GetValue<std::string>(Config::Logging::LEVEL, "info");
+        std::string coreLevel = config.GetValue<std::string>(Config::Logging::CORE_LEVEL, logLevel);
+        std::string appLevel = config.GetValue<std::string>(Config::Logging::APP_LEVEL, logLevel);
         bool fileEnabled = config.GetValue<bool>(Config::Logging::FILE_ENABLED, true);
         bool consoleEnabled = config.GetValue<bool>(Config::Logging::CONSOLE_ENABLED, true);
         std::string pattern = config.GetValue<std::string>(Config::Logging::PATTERN, "[%T] [%l] %n: %v");
@@ -91,6 +114,10 @@ namespace Limitless
         #endif
         
         Init(logLevel, fileEnabled, consoleEnabled, pattern, directory, maxFileSize, maxFiles);
+
+        // Apply per-logger runtime levels (fall back to logging.level if not configured).
+        SetCoreLogLevel(StringToLogLevel(coreLevel), false);
+        SetClientLogLevel(StringToLogLevel(appLevel), false);
     }
 
     void Log::Init(const std::string& logLevel, 
@@ -223,5 +250,43 @@ namespace Limitless
     {
         std::scoped_lock<std::mutex> lock(s_BufferedMessagesMutex);
         s_BufferedMessages.clear();
+    }
+
+    void Log::SetCoreLogLevel(spdlog::level::level_enum level, bool persistToConfig)
+    {
+        if (s_CoreLogger)
+        {
+            s_CoreLogger->set_level(level);
+            s_CoreLogger->flush_on(level);
+        }
+
+        if (persistToConfig)
+            GetConfigManager().SetValue<std::string>(Config::Logging::CORE_LEVEL, LogLevelToString(level));
+    }
+
+    void Log::SetClientLogLevel(spdlog::level::level_enum level, bool persistToConfig)
+    {
+        if (s_ClientLogger)
+        {
+            s_ClientLogger->set_level(level);
+            s_ClientLogger->flush_on(level);
+        }
+
+        if (persistToConfig)
+            GetConfigManager().SetValue<std::string>(Config::Logging::APP_LEVEL, LogLevelToString(level));
+    }
+
+    spdlog::level::level_enum Log::GetCoreLogLevel()
+    {
+        if (s_CoreLogger)
+            return s_CoreLogger->level();
+        return spdlog::level::off;
+    }
+
+    spdlog::level::level_enum Log::GetClientLogLevel()
+    {
+        if (s_ClientLogger)
+            return s_ClientLogger->level();
+        return spdlog::level::off;
     }
 } // namespace Limitless

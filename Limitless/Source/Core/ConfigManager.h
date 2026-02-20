@@ -68,6 +68,8 @@ namespace Limitless
         namespace Logging
         {
             constexpr const char* LEVEL = "logging.level";
+            constexpr const char* CORE_LEVEL = "logging.core_level";
+            constexpr const char* APP_LEVEL = "logging.app_level";
             constexpr const char* FILE_ENABLED = "logging.file_enabled";
             constexpr const char* CONSOLE_ENABLED = "logging.console_enabled";
             constexpr const char* PATTERN = "logging.pattern";

@@ -717,6 +717,8 @@ namespace Limitless
 
         // Logging defaults
         m_Config[Config::Logging::LEVEL] = std::string("info");
+        m_Config[Config::Logging::CORE_LEVEL] = std::string("info");
+        m_Config[Config::Logging::APP_LEVEL] = std::string("info");
         m_Config[Config::Logging::FILE_ENABLED] = true;
         m_Config[Config::Logging::CONSOLE_ENABLED] = true;
         m_Config[Config::Logging::PATTERN] = std::string("[%T] [%l] %n: %v");

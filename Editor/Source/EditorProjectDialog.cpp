@@ -110,6 +110,7 @@ namespace Limitless::EditorProjectDialog
     static bool TryOpenRecentProject(EditorProjectDialogState& state, const Editor::RecentProjectEntry& entry)
     {
         const std::filesystem::path root(entry.ProjectRoot);
+        Project::ProjectManager::GetInstance().CloseProject();
         const auto result = Project::ProjectManager::GetInstance().OpenProjectRoot(root);
         if (result.IsFailure())
         {
@@ -226,6 +227,7 @@ namespace Limitless::EditorProjectDialog
                     if (ImGui::Button("Open", ImVec2(120, 0)))
                     {
                         const auto root = ToPath(state.ProjectRootPathBuffer);
+                        Project::ProjectManager::GetInstance().CloseProject();
                         const auto result = Project::ProjectManager::GetInstance().OpenProjectRoot(root);
                         if (result.IsFailure())
                         {
@@ -276,6 +278,7 @@ namespace Limitless::EditorProjectDialog
                                 ? selectedFolder
                                 : (selectedFolder / name);
 
+                        Project::ProjectManager::GetInstance().CloseProject();
                         const auto result = Project::ProjectManager::GetInstance().CreateProjectRoot(projectRoot, name);
                         if (result.IsFailure())
                         {

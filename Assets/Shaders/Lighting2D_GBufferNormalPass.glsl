@@ -30,6 +30,7 @@ void main()
 #version 330 core
 
 layout(location = 0) out vec4 FragColor;
+layout(location = 1) out vec4 FragEntityId;
 
 in vec2 v_UV;
 in vec2 v_BasisX;
@@ -40,6 +41,7 @@ uniform sampler2D u_NormalTexture;
 uniform vec4 u_Color;
 uniform float u_NormalStrength;
 uniform int u_ReceiveShadows;
+uniform vec2 u_CasterEntityId;
 uniform float u_ShadowAlphaCutoff;
 
 void main()
@@ -69,5 +71,6 @@ void main()
         shadowReceiver = smoothstep(shadowAlphaCutoff - edgeBand, shadowAlphaCutoff + edgeBand, albedo.a);
     }
     FragColor = vec4(encodedNormal, shadowReceiver);
+    FragEntityId = vec4(u_CasterEntityId, 0.0, 1.0);
 }
 

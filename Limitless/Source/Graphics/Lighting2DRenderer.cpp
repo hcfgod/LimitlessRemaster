@@ -53,8 +53,15 @@ namespace Limitless
             glm::vec4 Color = glm::vec4(1.0f);
             float NormalStrength = 1.0f;
             bool ReceiveShadows = true;
+            glm::vec2 CasterEntityId = glm::vec2(0.0f);
             std::shared_ptr<Texture2D> AlbedoTexture;
             std::shared_ptr<Texture2D> NormalTexture;
+        };
+
+        struct ShadowSegment
+        {
+            glm::vec4 Endpoints = glm::vec4(0.0f);
+            glm::vec2 CasterEntityId = glm::vec2(0.0f);
         };
 
         struct ScreenDirectionalLight
@@ -108,7 +115,7 @@ namespace Limitless
             Assets::ShaderAsset::Ptr PointLightShaderAsset;
             Assets::ShaderAsset::Ptr CompositeShaderAsset;
 
-            std::vector<glm::vec4> CachedShadowSegments;
+            std::vector<ShadowSegment> CachedShadowSegments;
             uint32_t CachedShadowOccluderCount = 0;
             bool HasPreviousCameraRotation = false;
             glm::quat PreviousCameraRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
@@ -167,6 +174,20 @@ namespace Limitless
             return std::min<uint32_t>(userMax, 8);
         }
 
+        glm::vec2 EncodeEntityIdToUnitVec2(entt::entity entity)
+        {
+            if (entity == entt::null)
+                return glm::vec2(0.0f);
+
+            // 16-bit encoded entity id in two 8-bit channels (R,G).
+            // This is robust on standard RGBA8 framebuffer attachments.
+            const uint32_t raw = static_cast<uint32_t>(entt::to_integral(entity));
+            const uint32_t id16 = (raw & 0xFFFFu);
+            const float r = static_cast<float>(id16 & 0xFFu) / 255.0f;
+            const float g = static_cast<float>((id16 >> 8) & 0xFFu) / 255.0f;
+            return glm::vec2(r, g);
+        }
+
         glm::quat ExtractCameraRotationFromViewMatrix(const glm::mat4& viewMatrix)
         {
             const glm::mat4 cameraWorld = glm::inverse(viewMatrix);
@@ -187,6 +208,43 @@ namespace Limitless
             const float dotValue = std::clamp(std::abs(glm::dot(previousRotation, currentRotation)), 0.0f, 1.0f);
             const float deltaAngleRadians = 2.0f * std::acos(dotValue);
             return glm::degrees(deltaAngleRadians) / deltaTimeSeconds;
+        }
+
+        bool IsEntityInCanvasUiHierarchy(const entt::registry& registry, entt::entity entity)
+        {
+            if (!registry.all_of<RectTransformComponent>(entity))
+                return false;
+
+            entt::entity current = entity;
+            while (current != entt::null)
+            {
+                if (registry.all_of<CanvasComponent>(current))
+                    return true;
+
+                const auto* hierarchy = registry.try_get<HierarchyComponent>(current);
+                if (!hierarchy || hierarchy->Parent == entt::null)
+                    break;
+                current = hierarchy->Parent;
+            }
+
+            return false;
+        }
+
+        bool IsEntityInLightHierarchy(const entt::registry& registry, entt::entity entity)
+        {
+            entt::entity current = entity;
+            while (current != entt::null)
+            {
+                if (registry.any_of<DirectionalLight2DComponent, PointLight2DComponent>(current))
+                    return true;
+
+                const auto* hierarchy = registry.try_get<HierarchyComponent>(current);
+                if (!hierarchy || hierarchy->Parent == entt::null)
+                    break;
+                current = hierarchy->Parent;
+            }
+
+            return false;
         }
 
         bool ProjectWorldToScreen(const glm::mat4& viewProjection,
@@ -239,30 +297,38 @@ namespace Limitless
             return { sx, sy };
         }
 
-        float EstimatePixelsPerWorldUnit(const glm::mat4& viewProjection, uint32_t width, uint32_t height)
+        float EstimatePixelsPerWorldUnit(const glm::mat4& viewMatrix,
+                                         const glm::mat4& viewProjection,
+                                         uint32_t width,
+                                         uint32_t height)
         {
-            // Analytically derive the screen-space scale at the viewport
-            // center for a unit step along the world X-axis.  Using only
-            // matrix coefficients avoids the discontinuity that projection-
-            // based estimation caused: when test points crossed the near
-            // plane during camera rotation, pixelsPerUnit jumped between the
-            // projected value and the analytical fallback, making shadow
-            // bias/distance/softness flash between frames.
-            //
-            // For a perspective VP matrix at the Z=0 scene plane, the world
-            // X-axis (1,0,0,0) maps to VP column 0 in clip space.  The
-            // screen-space length of that vector is:
-            //   sqrt(VP[0][0]^2 + VP[0][1]^2) / |VP[3][3]| * halfWidth
-            // Using both clip X and Y handles camera rotations that project
-            // the world X-axis partially into the screen Y direction.
-            const float vpW = std::abs(viewProjection[3][3]);
-            if (vpW > kEpsilon)
+            // Estimate world->screen scale at the camera's intersection with
+            // the Z=0 scene plane. This keeps directional shadow distance
+            // stable in top-down perspective cameras where a global VP-only
+            // estimate can wildly over-scale shadow length.
+            glm::vec3 referencePoint = glm::vec3(0.0f);
             {
-                const float clipLenXY = std::sqrt(
-                    viewProjection[0][0] * viewProjection[0][0] +
-                    viewProjection[0][1] * viewProjection[0][1]);
-                const float estimate = (clipLenXY / vpW) * static_cast<float>(width) * 0.5f;
-                const float maxReasonable = static_cast<float>(std::max(width, height)) * 2.0f;
+                const glm::mat4 cameraWorld = glm::inverse(viewMatrix);
+                const glm::vec3 cameraPosition = glm::vec3(cameraWorld[3]);
+                const glm::vec3 cameraForward = glm::normalize(-glm::vec3(cameraWorld[2]));
+                if (std::abs(cameraForward.z) > kEpsilon)
+                {
+                    const float t = (0.0f - cameraPosition.z) / cameraForward.z;
+                    if (t > 0.0f && std::isfinite(t))
+                        referencePoint = cameraPosition + cameraForward * t;
+                }
+            }
+
+            const glm::vec2 screenOrigin = ProjectWorldToScreenClamped(viewProjection, referencePoint, width, height);
+            const glm::vec2 screenStepX = ProjectWorldToScreenClamped(viewProjection, referencePoint + glm::vec3(1.0f, 0.0f, 0.0f), width, height);
+            const glm::vec2 screenStepY = ProjectWorldToScreenClamped(viewProjection, referencePoint + glm::vec3(0.0f, 1.0f, 0.0f), width, height);
+
+            const float pixelsPerUnitX = glm::length(screenStepX - screenOrigin);
+            const float pixelsPerUnitY = glm::length(screenStepY - screenOrigin);
+            const float estimate = std::max(pixelsPerUnitX, pixelsPerUnitY);
+            if (std::isfinite(estimate) && estimate > kEpsilon)
+            {
+                const float maxReasonable = static_cast<float>(std::max(width, height));
                 return std::clamp(estimate, 1.0f, maxReasonable);
             }
 
@@ -351,7 +417,7 @@ namespace Limitless
                 gBufferSpec.Width = width;
                 gBufferSpec.Height = height;
                 gBufferSpec.Samples = 1;
-                gBufferSpec.ColorAttachmentCount = 2;
+                gBufferSpec.ColorAttachmentCount = 3;
                 gBufferSpec.DepthAttachment = true;
                 gBufferSpec.StencilAttachment = false;
                 gBufferSpec.SwapChainTarget = false;
@@ -478,6 +544,7 @@ namespace Limitless
                 draw.NormalTexture = g_State.FlatNormalTexture;
                 draw.NormalStrength = 1.0f;
                 draw.ReceiveShadows = sprite.ReceiveShadows;
+                draw.CasterEntityId = EncodeEntityIdToUnitVec2(entity);
 
                 bool hasMaterialButFailed = false;
                 if (auto* material = registry.try_get<MaterialComponent>(entity))
@@ -520,8 +587,8 @@ namespace Limitless
         void SubmitSelectGBufferDrawBuffers()
         {
             Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([](GraphicsContext*) {
-                const GLenum drawBuffers[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
-                glDrawBuffers(2, drawBuffers);
+                const GLenum drawBuffers[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
+                glDrawBuffers(3, drawBuffers);
             }, "Lighting2D/SetGBufferDrawBuffers"));
         }
 
@@ -532,11 +599,12 @@ namespace Limitless
             }, "Lighting2D/SetAlbedoAttachmentOnly"));
         }
 
-        void SubmitSelectNormalAttachmentOnly()
+        void SubmitSelectNormalAndEntityAttachments()
         {
             Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([](GraphicsContext*) {
-                glDrawBuffer(GL_COLOR_ATTACHMENT1);
-            }, "Lighting2D/SetNormalAttachmentOnly"));
+                const GLenum drawBuffers[] = { GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
+                glDrawBuffers(2, drawBuffers);
+            }, "Lighting2D/SetNormalAndEntityAttachments"));
         }
 
         void SubmitClearNormalAttachment()
@@ -547,6 +615,14 @@ namespace Limitless
                 const GLfloat flatNormal[4] = { 0.5f, 0.5f, 1.0f, 1.0f };
                 glClearBufferfv(GL_COLOR, 1, flatNormal);
             }, "Lighting2D/ClearNormalAttachment"));
+        }
+
+        void SubmitClearEntityIdAttachment()
+        {
+            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([](GraphicsContext*) {
+                const GLfloat emptyEntityId[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+                glClearBufferfv(GL_COLOR, 2, emptyEntityId);
+            }, "Lighting2D/ClearEntityIdAttachment"));
         }
 
         void SubmitNormalPassDraws(const std::vector<NormalPassSpriteDraw>& drawList, const glm::mat4& viewProjection)
@@ -560,7 +636,7 @@ namespace Limitless
 
             Renderer::GetInstance().SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
             Renderer::GetInstance().SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::Zero, false));
-            SubmitSelectNormalAttachmentOnly();
+            SubmitSelectNormalAndEntityAttachments();
             const float shadowAlphaCutoff = std::clamp(g_State.Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
 
             for (const NormalPassSpriteDraw& draw : drawList)
@@ -573,7 +649,8 @@ namespace Limitless
                 const glm::vec4 color = draw.Color;
                 const float normalStrength = draw.NormalStrength;
                 const int receiveShadows = draw.ReceiveShadows ? 1 : 0;
-                Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, viewProjection, model, color, normalStrength, receiveShadows, shadowAlphaCutoff](GraphicsContext*) {
+                const glm::vec2 casterEntityId = draw.CasterEntityId;
+                Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, viewProjection, model, color, normalStrength, receiveShadows, casterEntityId, shadowAlphaCutoff](GraphicsContext*) {
                     auto* glShader = dynamic_cast<OpenGLShader*>(shaderRef.get());
                     auto* glVertexArray = dynamic_cast<OpenGLVertexArray*>(vertexArrayRef.get());
                     auto* glAlbedoTexture = dynamic_cast<OpenGLTexture2D*>(albedoRef.get());
@@ -599,6 +676,8 @@ namespace Limitless
                         glUniform1f(location, normalStrength);
                     if (GLint location = glGetUniformLocation(shaderProgram, "u_ReceiveShadows"); location != -1)
                         glUniform1i(location, receiveShadows);
+                    if (GLint location = glGetUniformLocation(shaderProgram, "u_CasterEntityId"); location != -1)
+                        glUniform2f(location, casterEntityId.x, casterEntityId.y);
                     if (GLint location = glGetUniformLocation(shaderProgram, "u_ShadowAlphaCutoff"); location != -1)
                         glUniform1f(location, shadowAlphaCutoff);
                     if (GLint location = glGetUniformLocation(shaderProgram, "u_AlbedoTexture"); location != -1)
@@ -673,16 +752,16 @@ namespace Limitless
             return points;
         }
 
-        std::vector<glm::vec4> BuildShadowSegments(Scene& scene,
-                                                   float interpolationAlpha,
-                                                   const glm::mat4& viewProjection,
-                                                   uint32_t width,
-                                                   uint32_t height,
-                                                   uint32_t maxSegments,
-                                                   uint32_t& outOccluderCount,
-                                                   float shadowSegmentSnapPixels)
+        std::vector<ShadowSegment> BuildShadowSegments(Scene& scene,
+                                                       float interpolationAlpha,
+                                                       const glm::mat4& viewProjection,
+                                                       uint32_t width,
+                                                       uint32_t height,
+                                                       uint32_t maxSegments,
+                                                       uint32_t& outOccluderCount,
+                                                       float shadowSegmentSnapPixels)
         {
-            std::vector<glm::vec4> segments;
+            std::vector<ShadowSegment> segments;
             segments.reserve(maxSegments);
             outOccluderCount = 0;
             const float snappedPixels = std::max(0.0f, shadowSegmentSnapPixels);
@@ -696,6 +775,7 @@ namespace Limitless
                     return;
 
                 const glm::mat4 worldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
+                const glm::vec2 casterEntityId = EncodeEntityIdToUnitVec2(entity);
 
                 // Work in clip space so we can clip edges at the near plane
                 // instead of clamping vertices to extreme off-screen positions.
@@ -789,7 +869,7 @@ namespace Limitless
                     if (edgeLength <= kEpsilon)
                         return;
 
-                    segments.emplace_back(screenA.x, screenA.y, screenB.x, screenB.y);
+                    segments.push_back(ShadowSegment{ glm::vec4(screenA.x, screenA.y, screenB.x, screenB.y), casterEntityId });
                 };
 
                 for (size_t index = 0; index + 1 < clipPoints.size(); ++index)
@@ -797,6 +877,58 @@ namespace Limitless
 
                 if (closed && clipPoints.size() >= 3 && segments.size() < maxSegments)
                     addClippedEdge(clipPoints.back(), clipPoints.front());
+            };
+
+            auto appendWorldEdge = [&](const glm::vec3& worldStart, const glm::vec3& worldEnd, const glm::vec2& casterEntityId) {
+                if (segments.size() >= maxSegments)
+                    return;
+
+                constexpr float kNearW = 0.01f;
+                const glm::vec4 clipA = viewProjection * glm::vec4(worldStart, 1.0f);
+                const glm::vec4 clipB = viewProjection * glm::vec4(worldEnd, 1.0f);
+
+                const bool behindA = clipA.w < kNearW;
+                const bool behindB = clipB.w < kNearW;
+                if (behindA && behindB)
+                    return;
+
+                glm::vec4 ca = clipA;
+                glm::vec4 cb = clipB;
+                if (behindA)
+                {
+                    const float t = (kNearW - ca.w) / (cb.w - ca.w);
+                    ca = glm::mix(ca, cb, t);
+                }
+                else if (behindB)
+                {
+                    const float t = (kNearW - cb.w) / (ca.w - cb.w);
+                    cb = glm::mix(cb, ca, t);
+                }
+
+                const float fWidth = static_cast<float>(width);
+                const float fHeight = static_cast<float>(height);
+                const float coordLimit = std::max(fWidth, fHeight) * 4.0f;
+                auto projectToScreen = [fWidth, fHeight, snappedPixels, coordLimit](const glm::vec4& clip) -> glm::vec2 {
+                    const float ndcX = clip.x / clip.w;
+                    const float ndcY = clip.y / clip.w;
+                    float sx = (ndcX * 0.5f + 0.5f) * fWidth;
+                    float sy = (ndcY * 0.5f + 0.5f) * fHeight;
+                    sx = std::clamp(sx, -coordLimit, coordLimit);
+                    sy = std::clamp(sy, -coordLimit, coordLimit);
+                    if (snappedPixels > kEpsilon)
+                    {
+                        sx = std::round(sx / snappedPixels) * snappedPixels;
+                        sy = std::round(sy / snappedPixels) * snappedPixels;
+                    }
+                    return { sx, sy };
+                };
+
+                const glm::vec2 screenA = projectToScreen(ca);
+                const glm::vec2 screenB = projectToScreen(cb);
+                if (glm::length(screenB - screenA) <= kEpsilon)
+                    return;
+
+                segments.push_back(ShadowSegment{ glm::vec4(screenA.x, screenA.y, screenB.x, screenB.y), casterEntityId });
             };
 
             auto occluderView = registry.view<ShadowOccluder2DComponent>();
@@ -818,6 +950,12 @@ namespace Limitless
                 appendOccluderSegments(entity, localPoints, occluder.Closed);
             }
 
+            auto shouldAutoCastFromSprite = [&](const SpriteComponent& sprite) -> bool {
+                if (!sprite.CastShadows || sprite.Color.a <= 0.01f)
+                    return false;
+                return true;
+            };
+
             // Hybrid fallback: collider-backed occluders for entities without an explicit ShadowOccluder2D.
             // This keeps scene authoring fast while preserving explicit component control when present.
             auto boxColliderView = registry.view<BoxCollider2DComponent>();
@@ -827,9 +965,14 @@ namespace Limitless
                     break;
                 if (explicitOccluderEntities.contains(entity))
                     continue;
+                if (IsEntityInLightHierarchy(registry, entity))
+                    continue;
                 if (!scene.IsEntityEnabledInHierarchy(entity))
                     continue;
-                if (const auto* sprite = registry.try_get<SpriteComponent>(entity); sprite && !sprite->CastShadows)
+                const auto* sprite = registry.try_get<SpriteComponent>(entity);
+                if (!sprite)
+                    continue;
+                if (!shouldAutoCastFromSprite(*sprite))
                     continue;
 
                 std::vector<glm::vec2> localPoints;
@@ -844,14 +987,158 @@ namespace Limitless
                     break;
                 if (explicitOccluderEntities.contains(entity) || registry.all_of<BoxCollider2DComponent>(entity))
                     continue;
+                if (IsEntityInLightHierarchy(registry, entity))
+                    continue;
                 if (!scene.IsEntityEnabledInHierarchy(entity))
                     continue;
-                if (const auto* sprite = registry.try_get<SpriteComponent>(entity); sprite && !sprite->CastShadows)
+                const auto* sprite = registry.try_get<SpriteComponent>(entity);
+                if (!sprite)
+                    continue;
+                if (!shouldAutoCastFromSprite(*sprite))
                     continue;
 
                 std::vector<glm::vec2> localPoints;
                 BuildPhysicsOccluderPolygon(registry, entity, localPoints);
                 appendOccluderSegments(entity, localPoints, true);
+            }
+
+            // Sprite fallback: allow regular sprite entities to cast shadows even
+            // without explicit ShadowOccluder2D/physics collider components.
+            // The shadow shape is a unit quad scaled by the entity transform, so
+            // its size matches the rendered sprite.  Shadow *length* is governed
+            // by the per-light ShadowDistance setting -- keep that value reasonable
+            // (e.g. 2-10 world units) for top-down games.
+            auto spriteView = registry.view<TransformComponent, SpriteComponent>();
+            for (entt::entity entity : spriteView)
+            {
+                if (segments.size() >= maxSegments)
+                    break;
+                if (explicitOccluderEntities.contains(entity))
+                    continue;
+                if (IsEntityInLightHierarchy(registry, entity))
+                    continue;
+                if (registry.any_of<BoxCollider2DComponent, CircleCollider2DComponent>(entity))
+                    continue;
+                if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
+                if (IsEntityInCanvasUiHierarchy(registry, entity))
+                    continue;
+
+                const auto& sprite = spriteView.get<SpriteComponent>(entity);
+                if (!shouldAutoCastFromSprite(sprite))
+                    continue;
+
+                // Automatic sprite fallback should not produce map-sized caster
+                // quads when users scale sprites up for visual reasons (common
+                // with pixel-art imports). Clamp fallback caster extents in
+                // world space; explicit colliders/occluders remain exact.
+                const glm::mat4 worldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
+                const float worldScaleX = std::max(glm::length(glm::vec2(worldTransform[0].x, worldTransform[0].y)), kEpsilon);
+                const float worldScaleY = std::max(glm::length(glm::vec2(worldTransform[1].x, worldTransform[1].y)), kEpsilon);
+
+                constexpr float kAutoSpriteCasterMaxWorldExtent = 1.5f;
+                const float clampedWorldWidth = std::min(worldScaleX, kAutoSpriteCasterMaxWorldExtent);
+                const float clampedWorldHeight = std::min(worldScaleY, kAutoSpriteCasterMaxWorldExtent);
+
+                const glm::vec2 localHalfExtents(
+                    0.5f * clampedWorldWidth / worldScaleX,
+                    0.5f * clampedWorldHeight / worldScaleY);
+                const std::vector<glm::vec2> localQuad = {
+                    glm::vec2(-localHalfExtents.x, -localHalfExtents.y),
+                    glm::vec2( localHalfExtents.x, -localHalfExtents.y),
+                    glm::vec2( localHalfExtents.x,  localHalfExtents.y),
+                    glm::vec2(-localHalfExtents.x,  localHalfExtents.y)
+                };
+                appendOccluderSegments(entity, localQuad, true);
+            }
+
+            // Tilemap fallback: emit edge segments for occupied cells in Grid2D
+            // layers so tilemaps can cast directional/point shadows without
+            // requiring explicit collider/occluder authoring.
+            auto gridView = registry.view<TransformComponent, Grid2DComponent>();
+            for (entt::entity gridEntity : gridView)
+            {
+                if (segments.size() >= maxSegments)
+                    break;
+                if (!scene.IsEntityEnabledInHierarchy(gridEntity))
+                    continue;
+
+                const auto& grid = gridView.get<Grid2DComponent>(gridEntity);
+                const glm::vec2 cellSize(
+                    std::max(0.001f, grid.CellSize.x),
+                    std::max(0.001f, grid.CellSize.y));
+                const glm::mat4 gridWorldTransform = scene.GetWorldTransformMatrixForRendering(gridEntity, interpolationAlpha);
+
+                const auto children = scene.GetChildren(gridEntity);
+                for (entt::entity layerEntity : children)
+                {
+                    if (segments.size() >= maxSegments)
+                        break;
+                    if (!registry.all_of<TilemapLayerComponent>(layerEntity) ||
+                        !scene.IsEntityEnabledInHierarchy(layerEntity))
+                    {
+                        continue;
+                    }
+
+                    const auto& layer = registry.get<TilemapLayerComponent>(layerEntity);
+                    // Tilemap layers must opt in to shadow casting. Keeping
+                    // this separate from collision avoids giant map-perimeter
+                    // shadows when a gameplay collision layer is broadly filled.
+                    if (!layer.CollisionEnabled || !layer.CastShadows)
+                        continue;
+                    const int32_t widthCells = std::max(1, layer.GridSize.x);
+                    const int32_t heightCells = std::max(1, layer.GridSize.y);
+                    const glm::vec2 mapCenterOffset =
+                        -0.5f * glm::vec2(widthCells - 1, heightCells - 1) * cellSize;
+
+                    const auto hasTileAt = [&](int32_t cellX, int32_t cellY) -> bool {
+                        if (cellX < 0 || cellY < 0 || cellX >= widthCells || cellY >= heightCells)
+                            return false;
+                        const size_t index = static_cast<size_t>(cellY * widthCells + cellX);
+                        if (index >= layer.Tiles.size())
+                            return false;
+                        return layer.Tiles[index] != 0u;
+                    };
+
+                    bool emittedAnySegment = false;
+                    auto emitLocalEdge = [&](const glm::vec2& localA, const glm::vec2& localB) {
+                        const glm::vec4 worldAH = gridWorldTransform * glm::vec4(localA, 0.0f, 1.0f);
+                        const glm::vec4 worldBH = gridWorldTransform * glm::vec4(localB, 0.0f, 1.0f);
+                        const size_t beforeCount = segments.size();
+                        appendWorldEdge(glm::vec3(worldAH), glm::vec3(worldBH), EncodeEntityIdToUnitVec2(layerEntity));
+                        if (segments.size() > beforeCount)
+                            emittedAnySegment = true;
+                    };
+
+                    for (int32_t cellY = 0; cellY < heightCells && segments.size() < maxSegments; ++cellY)
+                    {
+                        for (int32_t cellX = 0; cellX < widthCells && segments.size() < maxSegments; ++cellX)
+                        {
+                            if (!hasTileAt(cellX, cellY))
+                                continue;
+
+                            const glm::vec2 localCenter = mapCenterOffset + glm::vec2(
+                                static_cast<float>(cellX) * cellSize.x,
+                                static_cast<float>(cellY) * cellSize.y);
+                            const glm::vec2 localMin = localCenter - cellSize * 0.5f;
+                            const glm::vec2 localMax = localCenter + cellSize * 0.5f;
+
+                            // Maintain consistent counter-clockwise edge winding for
+                            // stable outward normals in shader-side facing tests.
+                            if (!hasTileAt(cellX, cellY - 1))
+                                emitLocalEdge(glm::vec2(localMin.x, localMin.y), glm::vec2(localMax.x, localMin.y));
+                            if (!hasTileAt(cellX + 1, cellY))
+                                emitLocalEdge(glm::vec2(localMax.x, localMin.y), glm::vec2(localMax.x, localMax.y));
+                            if (!hasTileAt(cellX, cellY + 1))
+                                emitLocalEdge(glm::vec2(localMax.x, localMax.y), glm::vec2(localMin.x, localMax.y));
+                            if (!hasTileAt(cellX - 1, cellY))
+                                emitLocalEdge(glm::vec2(localMin.x, localMax.y), glm::vec2(localMin.x, localMin.y));
+                        }
+                    }
+
+                    if (emittedAnySegment)
+                        ++outOccluderCount;
+                }
             }
 
             return segments;
@@ -1017,7 +1304,8 @@ namespace Limitless
 
         void SubmitDirectionalLightPass(const std::shared_ptr<Texture2D>& albedoTexture,
                                         const std::shared_ptr<Texture2D>& normalTexture,
-                                        const std::vector<glm::vec4>& shadowSegments,
+                                        const std::shared_ptr<Texture2D>& entityIdTexture,
+                                        const std::vector<ShadowSegment>& shadowSegments,
                                         const ScreenDirectionalLight& light,
                                         uint32_t width,
                                         uint32_t height,
@@ -1031,6 +1319,7 @@ namespace Limitless
             auto vertexArrayRef = g_State.UnitQuadVertexArray;
             auto albedoRef = albedoTexture;
             auto normalRef = normalTexture;
+            auto entityIdRef = entityIdTexture;
             const glm::vec3 lightColor = light.Color;
             const float intensity = light.Intensity;
             const glm::vec2 shadowDirection = light.ShadowDirection;
@@ -1049,14 +1338,24 @@ namespace Limitless
             // a performance optimization.  Under perspective camera rotation
             // the screen-space edge normals shift rapidly, causing the filter
             // to pop edges in/out and produce shadow flicker.
-            const std::vector<glm::vec4>& segments = shadowSegments;
+            const size_t segmentCountClamped = std::min<size_t>(shadowSegments.size(), kShaderShadowSegmentCap);
+            std::vector<glm::vec4> segmentEndpoints;
+            std::vector<glm::vec2> segmentCasterIds;
+            segmentEndpoints.reserve(segmentCountClamped);
+            segmentCasterIds.reserve(segmentCountClamped);
+            for (size_t i = 0; i < segmentCountClamped; ++i)
+            {
+                segmentEndpoints.push_back(shadowSegments[i].Endpoints);
+                segmentCasterIds.push_back(shadowSegments[i].CasterEntityId);
+            }
 
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, lightColor, intensity, shadowDirection, shadingDirection, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowDistance, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segments = std::move(segments)](GraphicsContext*) {
+            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, entityIdRef, lightColor, intensity, shadowDirection, shadingDirection, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowDistance, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segmentEndpoints = std::move(segmentEndpoints), segmentCasterIds = std::move(segmentCasterIds)](GraphicsContext*) {
                 auto* glShader = dynamic_cast<OpenGLShader*>(shaderRef.get());
                 auto* glVertexArray = dynamic_cast<OpenGLVertexArray*>(vertexArrayRef.get());
                 auto* glAlbedoTexture = dynamic_cast<OpenGLTexture2D*>(albedoRef.get());
                 auto* glNormalTexture = dynamic_cast<OpenGLTexture2D*>(normalRef.get());
-                if (!glShader || !glVertexArray || !glAlbedoTexture || !glNormalTexture)
+                auto* glEntityIdTexture = dynamic_cast<OpenGLTexture2D*>(entityIdRef.get());
+                if (!glShader || !glVertexArray || !glAlbedoTexture || !glNormalTexture || !glEntityIdTexture)
                     return;
 
                 const GLuint program = glShader->GetRendererID();
@@ -1067,11 +1366,15 @@ namespace Limitless
                 glBindTexture(GL_TEXTURE_2D, glAlbedoTexture->GetRendererID());
                 glActiveTexture(GL_TEXTURE1);
                 glBindTexture(GL_TEXTURE_2D, glNormalTexture->GetRendererID());
+                glActiveTexture(GL_TEXTURE2);
+                glBindTexture(GL_TEXTURE_2D, glEntityIdTexture->GetRendererID());
 
                 if (GLint location = glGetUniformLocation(program, "u_AlbedoTexture"); location != -1)
                     glUniform1i(location, 0);
                 if (GLint location = glGetUniformLocation(program, "u_NormalTexture"); location != -1)
                     glUniform1i(location, 1);
+                if (GLint location = glGetUniformLocation(program, "u_EntityIdTexture"); location != -1)
+                    glUniform1i(location, 2);
                 if (GLint location = glGetUniformLocation(program, "u_ViewportSize"); location != -1)
                     glUniform2f(location, static_cast<float>(width), static_cast<float>(height));
                 if (GLint location = glGetUniformLocation(program, "u_LightColor"); location != -1)
@@ -1099,13 +1402,15 @@ namespace Limitless
                 if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentSnapPixels"); location != -1)
                     glUniform1f(location, shadowSegmentSnapPixelsClamped);
 
-                const int segmentCount = static_cast<int>(std::min<size_t>(segments.size(), kShaderShadowSegmentCap));
+                const int segmentCount = static_cast<int>(segmentEndpoints.size());
                 if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentCount"); location != -1)
                     glUniform1i(location, segmentCount);
                 if (segmentCount > 0)
                 {
                     if (GLint location = glGetUniformLocation(program, "u_ShadowSegments"); location != -1)
-                        glUniform4fv(location, segmentCount, &segments[0][0]);
+                        glUniform4fv(location, segmentCount, &segmentEndpoints[0][0]);
+                    if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentCasterIds"); location != -1)
+                        glUniform2fv(location, segmentCount, &segmentCasterIds[0][0]);
                 }
 
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -1114,7 +1419,8 @@ namespace Limitless
 
         void SubmitPointLightPass(const std::shared_ptr<Texture2D>& albedoTexture,
                                   const std::shared_ptr<Texture2D>& normalTexture,
-                                  const std::vector<glm::vec4>& shadowSegments,
+                                  const std::shared_ptr<Texture2D>& entityIdTexture,
+                                  const std::vector<ShadowSegment>& shadowSegments,
                                   const ScreenPointLight& light,
                                   uint32_t width,
                                   uint32_t height,
@@ -1128,6 +1434,7 @@ namespace Limitless
             auto vertexArrayRef = g_State.UnitQuadVertexArray;
             auto albedoRef = albedoTexture;
             auto normalRef = normalTexture;
+            auto entityIdRef = entityIdTexture;
             const glm::vec3 lightColor = light.Color;
             const float intensity = light.Intensity;
             const glm::vec2 lightPosition = light.Position;
@@ -1140,14 +1447,24 @@ namespace Limitless
             const float shadowBias = light.ShadowBiasPixels;
             const float shadowAlphaCutoff = std::clamp(g_State.Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
             const float shadowSegmentSnapPixelsClamped = std::max(0.0f, shadowSegmentSnapPixels);
-            std::vector<glm::vec4> segments = shadowSegments;
+            const size_t segmentCountClamped = std::min<size_t>(shadowSegments.size(), kShaderShadowSegmentCap);
+            std::vector<glm::vec4> segmentEndpoints;
+            std::vector<glm::vec2> segmentCasterIds;
+            segmentEndpoints.reserve(segmentCountClamped);
+            segmentCasterIds.reserve(segmentCountClamped);
+            for (size_t i = 0; i < segmentCountClamped; ++i)
+            {
+                segmentEndpoints.push_back(shadowSegments[i].Endpoints);
+                segmentCasterIds.push_back(shadowSegments[i].CasterEntityId);
+            }
 
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, lightColor, intensity, lightPosition, lightRadius, lightFalloff, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segments = std::move(segments)](GraphicsContext*) {
+            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, entityIdRef, lightColor, intensity, lightPosition, lightRadius, lightFalloff, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segmentEndpoints = std::move(segmentEndpoints), segmentCasterIds = std::move(segmentCasterIds)](GraphicsContext*) {
                 auto* glShader = dynamic_cast<OpenGLShader*>(shaderRef.get());
                 auto* glVertexArray = dynamic_cast<OpenGLVertexArray*>(vertexArrayRef.get());
                 auto* glAlbedoTexture = dynamic_cast<OpenGLTexture2D*>(albedoRef.get());
                 auto* glNormalTexture = dynamic_cast<OpenGLTexture2D*>(normalRef.get());
-                if (!glShader || !glVertexArray || !glAlbedoTexture || !glNormalTexture)
+                auto* glEntityIdTexture = dynamic_cast<OpenGLTexture2D*>(entityIdRef.get());
+                if (!glShader || !glVertexArray || !glAlbedoTexture || !glNormalTexture || !glEntityIdTexture)
                     return;
 
                 const GLuint program = glShader->GetRendererID();
@@ -1158,11 +1475,15 @@ namespace Limitless
                 glBindTexture(GL_TEXTURE_2D, glAlbedoTexture->GetRendererID());
                 glActiveTexture(GL_TEXTURE1);
                 glBindTexture(GL_TEXTURE_2D, glNormalTexture->GetRendererID());
+                glActiveTexture(GL_TEXTURE2);
+                glBindTexture(GL_TEXTURE_2D, glEntityIdTexture->GetRendererID());
 
                 if (GLint location = glGetUniformLocation(program, "u_AlbedoTexture"); location != -1)
                     glUniform1i(location, 0);
                 if (GLint location = glGetUniformLocation(program, "u_NormalTexture"); location != -1)
                     glUniform1i(location, 1);
+                if (GLint location = glGetUniformLocation(program, "u_EntityIdTexture"); location != -1)
+                    glUniform1i(location, 2);
                 if (GLint location = glGetUniformLocation(program, "u_ViewportSize"); location != -1)
                     glUniform2f(location, static_cast<float>(width), static_cast<float>(height));
                 if (GLint location = glGetUniformLocation(program, "u_LightColor"); location != -1)
@@ -1190,13 +1511,15 @@ namespace Limitless
                 if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentSnapPixels"); location != -1)
                     glUniform1f(location, shadowSegmentSnapPixelsClamped);
 
-                const int segmentCount = static_cast<int>(std::min<size_t>(segments.size(), kShaderShadowSegmentCap));
+                const int segmentCount = static_cast<int>(segmentEndpoints.size());
                 if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentCount"); location != -1)
                     glUniform1i(location, segmentCount);
                 if (segmentCount > 0)
                 {
                     if (GLint location = glGetUniformLocation(program, "u_ShadowSegments"); location != -1)
-                        glUniform4fv(location, segmentCount, &segments[0][0]);
+                        glUniform4fv(location, segmentCount, &segmentEndpoints[0][0]);
+                    if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentCasterIds"); location != -1)
+                        glUniform2fv(location, segmentCount, &segmentCasterIds[0][0]);
                 }
 
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -1317,7 +1640,7 @@ namespace Limitless
 
             const float interpolationAlpha = ComputeInterpolationAlpha();
             const glm::mat4 viewProjection = camera.GetViewProjectionMatrix();
-            const float pixelsPerUnit = EstimatePixelsPerWorldUnit(viewProjection, width, height);
+            const float pixelsPerUnit = EstimatePixelsPerWorldUnit(camera.GetViewMatrix(), viewProjection, width, height);
 
             const glm::mat4 cameraViewMatrix = camera.GetViewMatrix();
             std::vector<NormalPassSpriteDraw> normalPassDraws = BuildNormalPassDrawList(scene, interpolationAlpha);
@@ -1376,7 +1699,7 @@ namespace Limitless
                 g_State.ShadowFreezeFramesRemaining = std::max(g_State.ShadowFreezeFramesRemaining, requestedFreezeFrames);
             }
 
-            std::vector<glm::vec4> shadowSegments;
+            std::vector<ShadowSegment> shadowSegments;
             const bool useFrozenShadowSegments = allowAngularVelocityShadowFreeze &&
                 g_State.ShadowFreezeFramesRemaining > 0 &&
                 !g_State.CachedShadowSegments.empty();
@@ -1416,6 +1739,7 @@ namespace Limitless
             gBufferClearFlags.stencil = false;
             renderer.SubmitCommand(std::make_unique<ClearCommand>(gBufferClearFlags, 0.0f, 0.0f, 0.0f, 0.0f));
             SubmitClearNormalAttachment();
+            SubmitClearEntityIdAttachment();
 
             // Restrict the albedo pass to attachment 0 only.  The Renderer2D
             // shader has a single output at location 0; leaving attachment 1
@@ -1446,13 +1770,14 @@ namespace Limitless
 
             const auto gBufferAlbedo = g_State.GBufferFramebuffer->GetColorAttachment(0);
             const auto gBufferNormal = g_State.GBufferFramebuffer->GetColorAttachment(1);
+            const auto gBufferEntityId = g_State.GBufferFramebuffer->GetColorAttachment(2);
             for (const ScreenDirectionalLight& directionalLight : directionalLights)
             {
-                SubmitDirectionalLightPass(gBufferAlbedo, gBufferNormal, shadowSegments, directionalLight, width, height, effectiveShadowSegmentSnapPixels);
+                SubmitDirectionalLightPass(gBufferAlbedo, gBufferNormal, gBufferEntityId, shadowSegments, directionalLight, width, height, effectiveShadowSegmentSnapPixels);
             }
             for (const ScreenPointLight& pointLight : pointLights)
             {
-                SubmitPointLightPass(gBufferAlbedo, gBufferNormal, shadowSegments, pointLight, width, height, effectiveShadowSegmentSnapPixels);
+                SubmitPointLightPass(gBufferAlbedo, gBufferNormal, gBufferEntityId, shadowSegments, pointLight, width, height, effectiveShadowSegmentSnapPixels);
             }
 
             renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::Zero, false));

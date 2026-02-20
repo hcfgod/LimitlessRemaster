@@ -3,6 +3,7 @@
 #include "Assets/AssetManager.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetTypes.h"
+#include "Project/ProjectManager.h"
 
 #include "Core/Debug/Log.h"
 
@@ -18,6 +19,25 @@ namespace Limitless::Assets::AssetImportPipeline
 {
     namespace
     {
+        bool IsImportRootStillActiveProject(const std::filesystem::path& importRoot)
+        {
+            const auto& projectManager = Project::ProjectManager::GetInstance();
+            if (!projectManager.HasOpenProject())
+                return false;
+
+            std::error_code ec;
+            const std::filesystem::path currentRoot = std::filesystem::weakly_canonical(projectManager.GetProjectRoot(), ec);
+            if (ec)
+                return false;
+
+            ec.clear();
+            const std::filesystem::path expectedRoot = std::filesystem::weakly_canonical(importRoot, ec);
+            if (ec)
+                return false;
+
+            return currentRoot == expectedRoot;
+        }
+
         bool EndsWith(const std::string& s, const std::string& suffix)
         {
             if (s.size() < suffix.size()) return false;
@@ -170,6 +190,12 @@ namespace Limitless::Assets::AssetImportPipeline
 
             for (const auto& job : jobs)
             {
+                if (!IsImportRootStillActiveProject(projectRoot))
+                {
+                    LT_CORE_INFO("AssetImportPipeline: stopping reimport because active project root changed.");
+                    break;
+                }
+
                 if (job.Key.empty())
                 {
                     continue;
@@ -254,6 +280,41 @@ namespace Limitless::Assets::AssetImportPipeline
 
             return stats;
         }
+
+        size_t PruneMissingRecords()
+        {
+            size_t removedCount = 0;
+            const auto records = AssetDatabase::GetInstance().GetAllRecords();
+            for (const auto& record : records)
+            {
+                std::filesystem::path resolvedPath;
+                if (!record.ResolvedPath.empty())
+                {
+                    resolvedPath = std::filesystem::path(record.ResolvedPath);
+                }
+                else if (!record.Key.empty())
+                {
+                    const auto resolvedResult = ResolveAssetKeyToPath(record.Key);
+                    if (resolvedResult.IsSuccess())
+                        resolvedPath = resolvedResult.GetValue();
+                }
+
+                std::error_code ec;
+                const bool missingOnDisk = resolvedPath.empty() || !std::filesystem::exists(resolvedPath, ec);
+                if (!missingOnDisk)
+                    continue;
+
+                Result<void> removeResult(ErrorCode::InvalidState, "missing record identity");
+                if (!record.Guid.empty())
+                    removeResult = AssetDatabase::GetInstance().RemoveByGuid(record.Guid);
+                else if (!record.Key.empty())
+                    removeResult = AssetDatabase::GetInstance().RemoveByKey(record.Key);
+
+                if (removeResult.IsSuccess())
+                    ++removedCount;
+            }
+            return removedCount;
+        }
     }
 
     Result<AssetImportStatistics> ReimportAll(bool includeDependents)
@@ -271,7 +332,15 @@ namespace Limitless::Assets::AssetImportPipeline
             return Result<AssetImportStatistics>(jobsResult.GetError());
         }
 
-        return ImportJobs(projectRoot, jobsResult.GetValue(), /*changedOnly=*/false, includeDependents);
+        auto importResult = ImportJobs(projectRoot, jobsResult.GetValue(), /*changedOnly=*/false, includeDependents);
+        if (importResult.IsFailure())
+            return importResult;
+
+        const size_t removed = PruneMissingRecords();
+        if (removed > 0)
+            LT_CORE_INFO("AssetImportPipeline: pruned {} missing AssetDatabase record(s)", removed);
+
+        return importResult;
     }
 
     Result<AssetImportStatistics> ReimportChanged(bool includeDependents)
@@ -289,7 +358,15 @@ namespace Limitless::Assets::AssetImportPipeline
             return Result<AssetImportStatistics>(jobsResult.GetError());
         }
 
-        return ImportJobs(projectRoot, jobsResult.GetValue(), /*changedOnly=*/true, includeDependents);
+        auto importResult = ImportJobs(projectRoot, jobsResult.GetValue(), /*changedOnly=*/true, includeDependents);
+        if (importResult.IsFailure())
+            return importResult;
+
+        const size_t removed = PruneMissingRecords();
+        if (removed > 0)
+            LT_CORE_INFO("AssetImportPipeline: pruned {} missing AssetDatabase record(s)", removed);
+
+        return importResult;
     }
 
     Result<std::vector<AssetDatabaseValidationIssue>> ValidateAssetDatabase()

@@ -65,6 +65,7 @@ namespace Limitless::Project
         // Make AssetPaths deterministic for the entire runtime/editor session.
         // Root directory should be the directory that contains `Assets/`.
         Assets::SetAssetRootDirectory(root);
+        Assets::AssetDatabase::GetInstance().Reset();
 
         LT_CORE_INFO("Project opened: root='{}' name='{}' guid='{}'",
                      root.string(),
@@ -122,6 +123,7 @@ namespace Limitless::Project
     void ProjectManager::CloseProject()
     {
         Assets::AssetManager::ClearCaches();
+        Assets::AssetDatabase::GetInstance().Reset();
         Assets::SetAssetRootDirectory({});
 
         std::lock_guard<std::mutex> lock(m_Mutex);

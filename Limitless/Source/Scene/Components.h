@@ -691,6 +691,7 @@ namespace Limitless
         glm::ivec2 GridSize = glm::ivec2(64, 64);
         int32_t RenderOrder = 0;
         bool CollisionEnabled = false;
+        bool CastShadows = false;
 
         /// Maps compact tile IDs to TileAsset keys. Index 0 is reserved (empty).
         std::vector<std::string> TileTable;

@@ -21,6 +21,7 @@ in vec2 v_UV;
 
 uniform sampler2D u_AlbedoTexture;
 uniform sampler2D u_NormalTexture;
+uniform sampler2D u_EntityIdTexture;
 
 uniform vec2 u_ViewportSize;
 
@@ -41,6 +42,7 @@ uniform int u_ShadowSegmentCount;
 
 const int MAX_SHADOW_SEGMENTS = 128;
 uniform vec4 u_ShadowSegments[MAX_SHADOW_SEGMENTS];
+uniform vec2 u_ShadowSegmentCasterIds[MAX_SHADOW_SEGMENTS];
 
 float Cross2D(vec2 a, vec2 b)
 {
@@ -61,7 +63,7 @@ bool IntersectSegment(vec2 p0, vec2 p1, vec2 q0, vec2 q1)
     return (t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0);
 }
 
-float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 rayDirection)
+float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 rayDirection, vec2 fragmentCasterId)
 {
     if (u_UseShadows == 0 || u_ShadowSegmentCount <= 0 || u_ShadowStrength <= 0.001)
         return 1.0;
@@ -76,8 +78,7 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 rayDirection)
     float totalWeight = 0.0;
     float softness = max(u_ShadowSoftness, 0.0);
     float halfSoftness = max(softness * 0.5, 0.0001);
-    float viewportDiagonal = length(u_ViewportSize);
-    float effectiveShadowDistance = max(max(u_ShadowDistance, 1.0), viewportDiagonal * 1.5);
+    float effectiveShadowDistance = max(u_ShadowDistance, 1.0);
 
     for (int sampleIndex = 0; sampleIndex < samples; ++sampleIndex)
     {
@@ -97,7 +98,21 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 rayDirection)
         int segmentCount = min(u_ShadowSegmentCount, MAX_SHADOW_SEGMENTS);
         for (int segmentIndex = 0; segmentIndex < segmentCount; ++segmentIndex)
         {
+            if (fragmentCasterId.x > 0.0001 &&
+                length(u_ShadowSegmentCasterIds[segmentIndex] - fragmentCasterId) < 0.001)
+            {
+                continue;
+            }
             vec4 segment = u_ShadowSegments[segmentIndex];
+            vec2 edge = segment.zw - segment.xy;
+            float edgeLength = length(edge);
+            if (edgeLength <= 0.0001)
+                continue;
+            vec2 outwardNormal = vec2(edge.y, -edge.x) / edgeLength;
+            // Ignore back-facing/exit intersections. This greatly reduces
+            // self-shadowing artifacts for convex sprite/collider occluders.
+            if (dot(outwardNormal, rayDirection) >= 0.0)
+                continue;
             if (IntersectSegment(sampleOrigin, sampleEnd, segment.xy, segment.zw))
             {
                 occluded = true;
@@ -124,6 +139,7 @@ void main()
     }
 
     vec4 normalSample = texture(u_NormalTexture, v_UV);
+    vec2 fragmentCasterId = texture(u_EntityIdTexture, v_UV).rg;
 
     vec3 normal = normalize(normalSample.xyz * 2.0 - 1.0);
     vec2 shadingDirection = u_ShadingLightDirection;
@@ -145,11 +161,16 @@ void main()
     ndotl = mix(ndotl, azimuthTerm, flatness * 0.35);
 
     vec2 fragmentScreenPosition = gl_FragCoord.xy;
-    vec2 shadowRayDir = -normalize(u_LightDirection);
+    vec2 shadowRayDir = -u_LightDirection;
+    float shadowRayLength = length(shadowRayDir);
+    if (shadowRayLength < 0.0001)
+        shadowRayDir = vec2(0.0, 1.0);
+    else
+        shadowRayDir /= shadowRayLength;
 
     float shadowAlphaCutoff = clamp(u_ShadowAlphaCutoff, 0.0, 1.0);
     float shadowReceiver = clamp(normalSample.a, 0.0, 1.0);
-    float computedShadowFactor = (albedo.a >= max(0.01, shadowAlphaCutoff - 0.12)) ? ComputeShadowFactor(fragmentScreenPosition, shadowRayDir) : 1.0;
+    float computedShadowFactor = (albedo.a >= max(0.01, shadowAlphaCutoff - 0.12)) ? ComputeShadowFactor(fragmentScreenPosition, shadowRayDir, fragmentCasterId) : 1.0;
     float shadowFactor = mix(1.0, computedShadowFactor, shadowReceiver);
 
     vec3 lighting = u_LightColor * (u_LightIntensity * ndotl * shadowFactor);

@@ -8,12 +8,14 @@
 #include "Assets/TextureAsset.h"
 #include "Assets/TextureAssetImporter.h"
 #include "Core/Debug/Log.h"
+#include "Project/ProjectManager.h"
 #include "Scene/Scene.h"
 #include "Scene/Components.h"
 #include "Undo/EditorUndoService.h"
 #include "imgui/imgui.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 
 namespace Limitless::EditorTilePalettePanel
@@ -28,19 +30,62 @@ namespace Limitless::EditorTilePalettePanel
     /// Cached palette asset key list so we don't scan the database every frame.
     static std::vector<std::string> s_CachedPaletteKeys;
     static bool s_PaletteKeysDirty = true;
+    static uint64_t s_CachedPaletteKeysRevision = 0;
+
+    static bool IsAssetKeyUnderOpenProjectAssets(const std::string& assetKey)
+    {
+        if (assetKey.empty())
+            return false;
+
+        const auto& projectManager = Project::ProjectManager::GetInstance();
+        if (!projectManager.HasOpenProject())
+            return true;
+
+        const auto resolvedResult = Assets::ResolveAssetKeyToPath(assetKey);
+        if (resolvedResult.IsFailure())
+            return false;
+
+        std::error_code ec;
+        const std::filesystem::path resolvedPath = std::filesystem::weakly_canonical(resolvedResult.GetValue(), ec);
+        if (ec)
+            return false;
+
+        ec.clear();
+        if (!std::filesystem::exists(resolvedPath, ec))
+            return false;
+
+        ec.clear();
+        const std::filesystem::path assetsRoot = std::filesystem::weakly_canonical(projectManager.GetProjectRoot() / "Assets", ec);
+        if (ec)
+            return false;
+
+        ec.clear();
+        const std::filesystem::path rel = std::filesystem::relative(resolvedPath, assetsRoot, ec);
+        if (ec)
+            return false;
+        if (rel.empty())
+            return true;
+
+        const std::string relText = rel.generic_string();
+        return !(relText == ".." || relText.rfind("../", 0) == 0);
+    }
 
     static const std::vector<std::string>& GetCachedPaletteAssetKeys()
     {
-        if (s_PaletteKeysDirty)
+        const uint64_t currentDatabaseRevision = Assets::AssetDatabase::GetInstance().GetRevision();
+        if (s_PaletteKeysDirty || currentDatabaseRevision != s_CachedPaletteKeysRevision)
         {
             s_CachedPaletteKeys.clear();
             const auto records = Assets::AssetDatabase::GetInstance().GetAllRecords();
             for (const auto& record : records)
             {
-                if (record.Type == Assets::AssetType::TilePalette)
+                if (record.Type != Assets::AssetType::TilePalette)
+                    continue;
+                if (IsAssetKeyUnderOpenProjectAssets(record.Key))
                     s_CachedPaletteKeys.push_back(record.Key);
             }
             std::sort(s_CachedPaletteKeys.begin(), s_CachedPaletteKeys.end());
+            s_CachedPaletteKeysRevision = currentDatabaseRevision;
             s_PaletteKeysDirty = false;
         }
         return s_CachedPaletteKeys;
@@ -745,5 +790,6 @@ namespace Limitless::EditorTilePalettePanel
     void InvalidatePaletteKeyCache()
     {
         s_PaletteKeysDirty = true;
+        s_CachedPaletteKeysRevision = 0;
     }
 }

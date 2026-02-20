@@ -137,6 +137,43 @@ namespace Limitless::EditorInspectorPanel
 
         std::vector<std::string> BuildPrefabReferencePickerKeys()
         {
+            auto isAssetKeyUnderOpenProjectAssets = [](const std::string& assetKey) -> bool {
+                if (assetKey.empty())
+                    return false;
+
+                const auto& projectManager = Project::ProjectManager::GetInstance();
+                if (!projectManager.HasOpenProject())
+                    return true;
+
+                const auto resolvedResult = Assets::ResolveAssetKeyToPath(assetKey);
+                if (resolvedResult.IsFailure())
+                    return false;
+
+                std::error_code ec;
+                const std::filesystem::path resolvedPath = std::filesystem::weakly_canonical(resolvedResult.GetValue(), ec);
+                if (ec)
+                    return false;
+
+                ec.clear();
+                if (!std::filesystem::exists(resolvedPath, ec))
+                    return false;
+
+                ec.clear();
+                const std::filesystem::path assetsRoot = std::filesystem::weakly_canonical(projectManager.GetProjectRoot() / "Assets", ec);
+                if (ec)
+                    return false;
+
+                ec.clear();
+                const std::filesystem::path rel = std::filesystem::relative(resolvedPath, assetsRoot, ec);
+                if (ec)
+                    return false;
+                if (rel.empty())
+                    return true;
+
+                const std::string relText = rel.generic_string();
+                return !(relText == ".." || relText.rfind("../", 0) == 0);
+            };
+
             std::vector<std::string> keys;
             std::unordered_set<std::string> seen;
 
@@ -144,6 +181,8 @@ namespace Limitless::EditorInspectorPanel
             for (const auto& record : records)
             {
                 if (record.Type != Assets::AssetType::Prefab || record.Key.empty())
+                    continue;
+                if (!isAssetKeyUnderOpenProjectAssets(record.Key))
                     continue;
                 if (seen.insert(record.Key).second)
                     keys.push_back(record.Key);

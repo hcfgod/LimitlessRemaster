@@ -212,11 +212,13 @@ namespace Limitless
         bool m_ShowBuildSettingsWindow = false;
         bool m_ConsoleAutoScroll = true;
         bool m_ConsoleShowScriptLogs = true;
-        bool m_ConsoleShowEngineLogs = false;
+        bool m_ConsoleShowEngineLogs = true;
         bool m_ConsoleShowInfo = true;
         bool m_ConsoleShowWarnings = true;
         bool m_ConsoleShowErrors = true;
         std::array<char, 256> m_ConsoleSearchBuffer{};
+        std::string m_ConsoleSelectedEntryText;
+        std::string m_ConsoleSelectedMessageText;
         int m_PhysicsDiagnosticsRecentPeakContactPairs = 0;
         int m_PhysicsDiagnosticsRecentPeakPenetratingPoints = 0;
         float m_PhysicsDiagnosticsRecentPeakMaxPenetrationDepth = 0.0f;

@@ -6,6 +6,7 @@
 #include "Assets/SpriteImportSettings.h"
 #include "Assets/AssetTypes.h"
 #include "Assets/AudioClipAsset.h"
+#include "Project/ProjectManager.h"
 #include "Scene/ParticleEmitterSystem.h"
 #include "Undo/EditorUndoService.h"
 #include "imgui/imgui.h"
@@ -46,6 +47,44 @@ namespace Limitless::EditorInspectorPanel
                 (void)undoService->CommitInteractiveSceneMutation(label);
         }
 
+        bool IsAssetKeyUnderOpenProjectAssets(const std::string& assetKey)
+        {
+            if (assetKey.empty())
+                return false;
+
+            const auto& projectManager = Project::ProjectManager::GetInstance();
+            if (!projectManager.HasOpenProject())
+                return true;
+
+            const auto resolvedResult = Assets::ResolveAssetKeyToPath(assetKey);
+            if (resolvedResult.IsFailure())
+                return false;
+
+            std::error_code ec;
+            const std::filesystem::path resolvedPath = std::filesystem::weakly_canonical(resolvedResult.GetValue(), ec);
+            if (ec)
+                return false;
+
+            ec.clear();
+            if (!std::filesystem::exists(resolvedPath, ec))
+                return false;
+
+            ec.clear();
+            const std::filesystem::path assetsRoot = std::filesystem::weakly_canonical(projectManager.GetProjectRoot() / "Assets", ec);
+            if (ec)
+                return false;
+
+            ec.clear();
+            const std::filesystem::path rel = std::filesystem::relative(resolvedPath, assetsRoot, ec);
+            if (ec)
+                return false;
+            if (rel.empty())
+                return true;
+
+            const std::string relText = rel.generic_string();
+            return !(relText == ".." || relText.rfind("../", 0) == 0);
+        }
+
         std::vector<std::string> BuildMaterialPickerKeys()
         {
             std::vector<std::string> keys;
@@ -55,6 +94,8 @@ namespace Limitless::EditorInspectorPanel
             for (const auto& record : records)
             {
                 if (record.Type != Assets::AssetType::Material || record.Key.empty())
+                    continue;
+                if (!IsAssetKeyUnderOpenProjectAssets(record.Key))
                     continue;
                 if (seen.insert(record.Key).second)
                     keys.push_back(record.Key);
@@ -93,6 +134,8 @@ namespace Limitless::EditorInspectorPanel
             {
                 if (record.Type != Assets::AssetType::AudioClip || record.Key.empty())
                     continue;
+                if (!IsAssetKeyUnderOpenProjectAssets(record.Key))
+                    continue;
                 if (seen.insert(record.Key).second)
                     keys.push_back(record.Key);
             }
@@ -111,6 +154,8 @@ namespace Limitless::EditorInspectorPanel
             {
                 if (record.Type != Assets::AssetType::AnimationClip || record.Key.empty())
                     continue;
+                if (!IsAssetKeyUnderOpenProjectAssets(record.Key))
+                    continue;
                 if (seen.insert(record.Key).second)
                     keys.push_back(record.Key);
             }
@@ -128,6 +173,8 @@ namespace Limitless::EditorInspectorPanel
             for (const auto& record : records)
             {
                 if (record.Type != Assets::AssetType::AnimatorController || record.Key.empty())
+                    continue;
+                if (!IsAssetKeyUnderOpenProjectAssets(record.Key))
                     continue;
                 if (seen.insert(record.Key).second)
                     keys.push_back(record.Key);
@@ -1200,6 +1247,9 @@ namespace Limitless::EditorInspectorPanel
 
                 ImGui::Checkbox("Collision Enabled", &tilemapLayer->CollisionEnabled);
                 TrackInteractiveMutation(undoService, "Edit TilemapLayer Collision");
+
+                ImGui::Checkbox("Cast Shadows", &tilemapLayer->CastShadows);
+                TrackInteractiveMutation(undoService, "Edit TilemapLayer Cast Shadows");
 
                 const int32_t tileCount = tilemapLayer->GetCellCount();
                 int32_t nonEmptyCount = 0;

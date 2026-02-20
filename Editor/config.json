@@ -1,6 +1,8 @@
 {
     "logging": {
+        "app_level": "debug",
         "console_enabled": true,
+        "core_level": "info",
         "directory": "logs",
         "file_enabled": true,
         "level": "info",

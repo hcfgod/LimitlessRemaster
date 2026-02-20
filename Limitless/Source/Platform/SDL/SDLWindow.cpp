@@ -5,13 +5,18 @@
 #include "Core/Error.h"
 #include "Graphics/RenderCommand.h"
 #include "Graphics/Renderer.h"
+#include "Platform/Platform.h"
 #include <SDL3/SDL.h>
 #include <spdlog/fmt/fmt.h>
 #include "stb/stb_image/stb_image.h"
 #include <algorithm>
+#include <cstdlib>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
+#include <optional>
+#include <unordered_set>
 #include <vector>
 
 namespace
@@ -127,6 +132,154 @@ namespace
         return surface;
     }
 
+    SDL_Surface* TryLoadIcoBmpEntry(const std::vector<std::uint8_t>& icoBytes)
+    {
+        if (icoBytes.size() < 6)
+            return nullptr;
+
+        const std::uint16_t iconType = ReadUint16LE(icoBytes.data() + 2);
+        const std::uint16_t entryCount = ReadUint16LE(icoBytes.data() + 4);
+        if (iconType != 1 || entryCount == 0)
+            return nullptr;
+
+        const size_t directorySize = 6u + (static_cast<size_t>(entryCount) * 16u);
+        if (icoBytes.size() < directorySize)
+            return nullptr;
+
+        const std::uint8_t* bestData = nullptr;
+        std::uint32_t bestDataSize = 0;
+        int bestScore = -1;
+
+        for (std::uint16_t i = 0; i < entryCount; ++i)
+        {
+            const size_t entryOffset = 6u + (static_cast<size_t>(i) * 16u);
+            const std::uint8_t* entry = icoBytes.data() + entryOffset;
+            const int width = entry[0] == 0 ? 256 : entry[0];
+            const int height = entry[1] == 0 ? 256 : entry[1];
+            const std::uint16_t bitsPerPixel = ReadUint16LE(entry + 6);
+            const std::uint32_t bytesInResource = ReadUint32LE(entry + 8);
+            const std::uint32_t imageOffset = ReadUint32LE(entry + 12);
+
+            if (bytesInResource < 40)
+                continue;
+
+            const size_t dataStart = static_cast<size_t>(imageOffset);
+            const size_t dataEnd = dataStart + static_cast<size_t>(bytesInResource);
+            if (dataStart >= icoBytes.size() || dataEnd > icoBytes.size())
+                continue;
+
+            const std::uint8_t* imageBytes = icoBytes.data() + dataStart;
+            const bool isPng = std::equal(std::begin(PngSignature), std::end(PngSignature), imageBytes);
+            if (isPng)
+                continue;
+
+            const std::uint32_t dibHeaderSize = ReadUint32LE(imageBytes);
+            if (dibHeaderSize < 40 || dibHeaderSize > bytesInResource)
+                continue;
+
+            const int score = (width * height * 64) + bitsPerPixel;
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestData = imageBytes;
+                bestDataSize = bytesInResource;
+            }
+        }
+
+        if (!bestData || bestDataSize < 40)
+            return nullptr;
+
+        const std::uint32_t dibHeaderSize = ReadUint32LE(bestData + 0);
+        const std::int32_t dibWidth = static_cast<std::int32_t>(ReadUint32LE(bestData + 4));
+        const std::int32_t dibHeight = static_cast<std::int32_t>(ReadUint32LE(bestData + 8));
+        const std::uint16_t dibBitCount = ReadUint16LE(bestData + 14);
+        const std::uint32_t dibCompression = ReadUint32LE(bestData + 16);
+
+        if (dibWidth <= 0 || dibHeight == 0)
+            return nullptr;
+        if (dibCompression != 0)
+            return nullptr; // BI_RGB only
+        if (dibBitCount != 24 && dibBitCount != 32)
+            return nullptr;
+
+        const int iconWidth = dibWidth;
+        const int iconHeight = static_cast<int>(std::abs(dibHeight) / 2);
+        if (iconHeight <= 0)
+            return nullptr;
+
+        const size_t xorStride = static_cast<size_t>(((iconWidth * dibBitCount + 31) / 32) * 4);
+        const size_t andStride = static_cast<size_t>(((iconWidth + 31) / 32) * 4);
+        const size_t xorDataOffset = dibHeaderSize;
+        const size_t xorDataSize = xorStride * static_cast<size_t>(iconHeight);
+        const size_t andDataOffset = xorDataOffset + xorDataSize;
+        const size_t andDataSize = andStride * static_cast<size_t>(iconHeight);
+        if (andDataOffset + andDataSize > bestDataSize)
+            return nullptr;
+
+        SDL_Surface* surface = SDL_CreateSurface(iconWidth, iconHeight, SDL_PIXELFORMAT_RGBA32);
+        if (!surface)
+            return nullptr;
+
+        auto* destinationPixels = static_cast<std::uint8_t*>(surface->pixels);
+        bool hasNonZeroAlpha = false;
+        const bool bottomUp = (dibHeight > 0);
+        for (int y = 0; y < iconHeight; ++y)
+        {
+            const int sourceY = bottomUp ? (iconHeight - 1 - y) : y;
+            const std::uint8_t* srcRow = bestData + xorDataOffset + (xorStride * static_cast<size_t>(sourceY));
+            std::uint8_t* dstRow = destinationPixels + (static_cast<size_t>(y) * static_cast<size_t>(surface->pitch));
+
+            for (int x = 0; x < iconWidth; ++x)
+            {
+                if (dibBitCount == 32)
+                {
+                    const std::uint8_t b = srcRow[x * 4 + 0];
+                    const std::uint8_t g = srcRow[x * 4 + 1];
+                    const std::uint8_t r = srcRow[x * 4 + 2];
+                    const std::uint8_t a = srcRow[x * 4 + 3];
+                    dstRow[x * 4 + 0] = r;
+                    dstRow[x * 4 + 1] = g;
+                    dstRow[x * 4 + 2] = b;
+                    dstRow[x * 4 + 3] = a;
+                    if (a != 0)
+                        hasNonZeroAlpha = true;
+                }
+                else
+                {
+                    const std::uint8_t b = srcRow[x * 3 + 0];
+                    const std::uint8_t g = srcRow[x * 3 + 1];
+                    const std::uint8_t r = srcRow[x * 3 + 2];
+                    dstRow[x * 4 + 0] = r;
+                    dstRow[x * 4 + 1] = g;
+                    dstRow[x * 4 + 2] = b;
+                    dstRow[x * 4 + 3] = 255;
+                }
+            }
+        }
+
+        if (!hasNonZeroAlpha || dibBitCount == 24)
+        {
+            for (int y = 0; y < iconHeight; ++y)
+            {
+                const int sourceY = bottomUp ? (iconHeight - 1 - y) : y;
+                const std::uint8_t* maskRow = bestData + andDataOffset + (andStride * static_cast<size_t>(sourceY));
+                std::uint8_t* dstRow = destinationPixels + (static_cast<size_t>(y) * static_cast<size_t>(surface->pitch));
+
+                for (int x = 0; x < iconWidth; ++x)
+                {
+                    const std::uint8_t maskByte = maskRow[x / 8];
+                    const std::uint8_t maskBit = static_cast<std::uint8_t>((maskByte >> (7 - (x % 8))) & 0x1u);
+                    if (maskBit)
+                        dstRow[x * 4 + 3] = 0;
+                    else if (dibBitCount == 24)
+                        dstRow[x * 4 + 3] = 255;
+                }
+            }
+        }
+
+        return surface;
+    }
+
     SDL_Surface* TryLoadSurfaceFromIco(const std::string& iconPath)
     {
         std::ifstream file(iconPath, std::ios::binary | std::ios::ate);
@@ -143,7 +296,81 @@ namespace
         if (!file)
             return nullptr;
 
-        return TryLoadIcoPngEntry(icoBytes);
+        if (SDL_Surface* pngSurface = TryLoadIcoPngEntry(icoBytes))
+            return pngSurface;
+
+        return TryLoadIcoBmpEntry(icoBytes);
+    }
+
+    std::optional<std::filesystem::path> ResolveIconPath(const std::string& iconPath)
+    {
+        if (iconPath.empty())
+            return std::nullopt;
+
+        std::vector<std::filesystem::path> candidates;
+        candidates.reserve(24);
+
+        const std::filesystem::path inputPath(iconPath);
+        candidates.push_back(inputPath);
+
+        std::error_code ec;
+        const std::filesystem::path cwd = std::filesystem::current_path(ec);
+        if (!ec)
+        {
+            candidates.push_back(cwd / inputPath);
+            candidates.push_back(cwd / "Resources" / inputPath.filename());
+        }
+
+        std::filesystem::path exeDir;
+        const std::string executablePath = Limitless::PlatformDetection::GetExecutablePath();
+        if (!executablePath.empty())
+        {
+            exeDir = std::filesystem::path(executablePath).parent_path();
+            if (!exeDir.empty())
+            {
+                candidates.push_back(exeDir / inputPath);
+                candidates.push_back(exeDir / "Resources" / inputPath.filename());
+            }
+        }
+
+        auto appendParentResources = [&](std::filesystem::path probeRoot) {
+            if (probeRoot.empty())
+                return;
+            for (int depth = 0; depth < 8; ++depth)
+            {
+                candidates.push_back(probeRoot / "Resources" / inputPath.filename());
+                if (!probeRoot.has_parent_path())
+                    break;
+                const std::filesystem::path parent = probeRoot.parent_path();
+                if (parent == probeRoot)
+                    break;
+                probeRoot = parent;
+            }
+        };
+        appendParentResources(cwd);
+        appendParentResources(exeDir);
+
+        std::unordered_set<std::string> seen;
+        for (const auto& candidate : candidates)
+        {
+            if (candidate.empty())
+                continue;
+            const std::string candidateText = candidate.lexically_normal().generic_string();
+            if (!seen.insert(candidateText).second)
+                continue;
+
+            ec.clear();
+            if (std::filesystem::exists(candidate, ec) && std::filesystem::is_regular_file(candidate, ec))
+            {
+                ec.clear();
+                const std::filesystem::path canonicalCandidate = std::filesystem::weakly_canonical(candidate, ec);
+                if (!ec)
+                    return canonicalCandidate;
+                return candidate;
+            }
+        }
+
+        return std::nullopt;
     }
 }
 
@@ -599,14 +826,23 @@ namespace Limitless
         
         if (m_Window && !iconPath.empty())
         {
-            SDL_Surface* surface = SDL_LoadBMP(iconPath.c_str());
+            const auto resolvedIconPath = ResolveIconPath(iconPath);
+            if (!resolvedIconPath.has_value())
+            {
+                LT_CORE_WARN("Failed to resolve icon path '{}'. Expected either a path relative to CWD/executable or under a nearby Resources/ folder.", iconPath);
+                return;
+            }
+
+            const std::string resolvedPathString = resolvedIconPath->string();
+
+            SDL_Surface* surface = SDL_LoadBMP(resolvedPathString.c_str());
             if (!surface)
             {
-                surface = TryLoadSurfaceWithStb(iconPath);
+                surface = TryLoadSurfaceWithStb(resolvedPathString);
             }
             if (!surface)
             {
-                surface = TryLoadSurfaceFromIco(iconPath);
+                surface = TryLoadSurfaceFromIco(resolvedPathString);
             }
 
             if (surface)
@@ -618,7 +854,8 @@ namespace Limitless
             else
             {
                 const std::string errorMsg = fmt::format(
-                    "Failed to load icon '{}' as BMP, standard image, or PNG-based ICO. SDL error: {}",
+                    "Failed to load resolved icon '{}' (requested '{}') as BMP, standard image, or PNG-based ICO. SDL error: {}",
+                    resolvedPathString,
                     iconPath,
                     SDL_GetError()
                 );

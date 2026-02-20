@@ -53,7 +53,7 @@ workspace "LimitlessRemaster"
             "LT_LOG_LEVEL_CRITICAL_ENABLED",
             "LT_LOG_CONSOLE_ENABLED",
             "LT_LOG_FILE_ENABLED",
-            "LT_LOG_CORE_DISABLED"
+            "LT_LOG_CORE_ENABLED"
         }
         runtime "Release"
         optimize "speed"

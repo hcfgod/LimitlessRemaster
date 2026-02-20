@@ -2574,6 +2574,7 @@ namespace Limitless
                     { "GridSize",         { tilemapLayer->GridSize.x, tilemapLayer->GridSize.y } },
                     { "RenderOrder",      tilemapLayer->RenderOrder },
                     { "CollisionEnabled", tilemapLayer->CollisionEnabled },
+                    { "CastShadows",      tilemapLayer->CastShadows },
                     { "TileTable",        std::move(tileTableJson) }
                 };
                 if (hasPaintedTiles)
@@ -3302,6 +3303,7 @@ namespace Limitless
 
                 layer.RenderOrder = layerJson.value("RenderOrder", 0);
                 layer.CollisionEnabled = layerJson.value("CollisionEnabled", false);
+                layer.CastShadows = layerJson.value("CastShadows", false);
 
                 layer.TileTable.clear();
                 if (layerJson.contains("TileTable") && layerJson["TileTable"].is_array())

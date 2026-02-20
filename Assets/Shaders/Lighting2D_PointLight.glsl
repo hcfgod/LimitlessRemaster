@@ -21,6 +21,7 @@ in vec2 v_UV;
 
 uniform sampler2D u_AlbedoTexture;
 uniform sampler2D u_NormalTexture;
+uniform sampler2D u_EntityIdTexture;
 
 uniform vec2 u_ViewportSize;
 
@@ -41,6 +42,7 @@ uniform int u_ShadowSegmentCount;
 
 const int MAX_SHADOW_SEGMENTS = 128;
 uniform vec4 u_ShadowSegments[MAX_SHADOW_SEGMENTS];
+uniform vec2 u_ShadowSegmentCasterIds[MAX_SHADOW_SEGMENTS];
 
 float Cross2D(vec2 a, vec2 b)
 {
@@ -61,7 +63,7 @@ bool IntersectSegment(vec2 p0, vec2 p1, vec2 q0, vec2 q1)
     return (t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0);
 }
 
-float ComputeShadowFactor(vec2 fragmentScreenPosition)
+float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 fragmentCasterId)
 {
     if (u_UseShadows == 0 || u_ShadowSegmentCount <= 0 || u_ShadowStrength <= 0.001)
         return 1.0;
@@ -105,7 +107,20 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition)
         int segmentCount = min(u_ShadowSegmentCount, MAX_SHADOW_SEGMENTS);
         for (int segmentIndex = 0; segmentIndex < segmentCount; ++segmentIndex)
         {
+            if (fragmentCasterId.x > 0.0001 &&
+                length(u_ShadowSegmentCasterIds[segmentIndex] - fragmentCasterId) < 0.001)
+            {
+                continue;
+            }
             vec4 segment = u_ShadowSegments[segmentIndex];
+            vec2 edge = segment.zw - segment.xy;
+            float edgeLength = length(edge);
+            if (edgeLength <= 0.0001)
+                continue;
+            vec2 outwardNormal = vec2(edge.y, -edge.x) / edgeLength;
+            vec2 rayDirection = normalize(sampleRayEnd - sampleLightPosition);
+            if (dot(outwardNormal, rayDirection) >= 0.0)
+                continue;
             if (IntersectSegment(sampleLightPosition, sampleRayEnd, segment.xy, segment.zw))
             {
                 occluded = true;
@@ -142,6 +157,7 @@ void main()
     }
 
     vec4 normalSample = texture(u_NormalTexture, v_UV);
+    vec2 fragmentCasterId = texture(u_EntityIdTexture, v_UV).rg;
 
     // Read GBuffer normal for future normal-mapped bump lighting support.
     // For 2D sprites, N dot L is disabled by default: point lights radiate
@@ -155,7 +171,7 @@ void main()
     float shadowAlphaCutoff = clamp(u_ShadowAlphaCutoff, 0.0, 1.0);
     float shadowReceiver = clamp(normalSample.a, 0.0, 1.0);
     // Soft receiver weight from GBuffer prevents edge threshold popping.
-    float computedShadowFactor = (albedo.a >= max(0.01, shadowAlphaCutoff - 0.12)) ? ComputeShadowFactor(fragmentScreenPosition) : 1.0;
+    float computedShadowFactor = (albedo.a >= max(0.01, shadowAlphaCutoff - 0.12)) ? ComputeShadowFactor(fragmentScreenPosition, fragmentCasterId) : 1.0;
     float shadowFactor = mix(1.0, computedShadowFactor, shadowReceiver);
 
     vec3 lighting = u_LightColor * (u_LightIntensity * ndotl * attenuation * shadowFactor);
