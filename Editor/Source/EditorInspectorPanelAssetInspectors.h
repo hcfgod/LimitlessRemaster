@@ -27,5 +27,10 @@ namespace Limitless
         void DrawAudioMixerAssetInspector(std::string& selectedAudioMixerAssetKey);
         void DrawAnimationClipAssetInspector(std::string& selectedAnimationClipAssetKey);
         void DrawAnimatorControllerAssetInspector(std::string& selectedAnimatorControllerAssetKey);
+
+        /// Returns the texture asset key that the user requested to open in the Sprite Editor.
+        /// Empty string means no request pending. Consuming code should call ClearPendingSpriteEditorRequest().
+        const std::string& GetPendingSpriteEditorRequest();
+        void ClearPendingSpriteEditorRequest();
     }
 }

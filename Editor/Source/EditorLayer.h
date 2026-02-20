@@ -12,6 +12,8 @@
 #include "EditorAssetDiagnosticsPanel.h"
 #include "EditorBuildSettingsPanel.h"
 #include "EditorScenePanel.h"
+#include "EditorSpriteEditor.h"
+#include "EditorTilePalettePanel.h"
 #include "EditorViewportPanel.h"
 #include "Core/Concurrency/AsyncIO.h"
 #include "Undo/EditorUndoService.h"
@@ -65,6 +67,8 @@ namespace Limitless
         void DrawPhysicsDiagnosticsPanel();
         void DrawConsolePanel();
         void DrawTilemapPanel();
+        void DrawTilePalettePanelFrame();
+        void DrawSpriteEditorPanel();
 
         void EnsureSceneViewFramebuffer(uint32_t width, uint32_t height);
         void EnsureGameViewFramebuffer(uint32_t width, uint32_t height);
@@ -242,6 +246,8 @@ namespace Limitless
         std::unordered_set<std::string> m_ActiveSceneMaterialPrewarmKeys;
         EditorBuildSettingsPanel::EditorBuildSettingsPanelState m_BuildSettingsPanelState;
         EditorViewportPanel::TilemapEditorState m_TilemapEditorState{};
+        EditorSpriteEditor::SpriteEditorState m_SpriteEditorState{};
+        EditorTilePalettePanel::TilePaletteState m_TilePaletteState{};
     };
 
 }  // namespace Limitless

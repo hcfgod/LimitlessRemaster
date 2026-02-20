@@ -8,11 +8,13 @@
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetImportPipeline.h"
 #include "Assets/AssetTypes.h"
+#include "Assets/SpriteImportSettings.h"
 #include "Assets/TextureAsset.h"
 #include "Core/Application.h"
 #include "Core/Debug/Log.h"
 #include "Editor/EditorCameraController.h"
 #include "EditorInspectorPanel.h"
+#include "EditorInspectorPanelAssetInspectors.h"
 #include "EditorMenuBar.h"
 #include "EditorPrefabSystem.h"
 #include "EditorPlayMode.h"
@@ -827,8 +829,9 @@ namespace Limitless
             const std::filesystem::path projectRoot = pm.GetProjectRoot();
 
             // Keep AssetDatabase key mappings canonical before any scene is loaded.
-            // This repairs stale key mappings after file rename/move operations.
-            const auto reimportResult = Assets::AssetImportPipeline::ReimportAll(true);
+            // Use changed-only import on project open to avoid re-importing every
+            // generated tile asset on each startup.
+            const auto reimportResult = Assets::AssetImportPipeline::ReimportChanged(true);
             if (reimportResult.IsFailure())
             {
                 LT_WARN("Asset reimport on project open failed: {}", reimportResult.GetError().GetErrorMessage());
@@ -927,6 +930,8 @@ namespace Limitless
         DrawScenePanel();
         DrawInspectorPanel();
         DrawTilemapPanel();
+        DrawTilePalettePanelFrame();
+        DrawSpriteEditorPanel();
         DrawProjectPanel();
         DrawAnimationTimelinePanel();
         DrawAnimatorGraphPanel();
@@ -965,6 +970,7 @@ namespace Limitless
             m_ShowEditorFpsOverlay,
             m_ShowAnimationTimelinePanel,
             m_ShowAnimatorGraphPanel,
+            m_TilePaletteState.PanelOpen,
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Open); },
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Create); },
             [this]() { m_ShowProjectSettingsWindow = true; },
@@ -1694,6 +1700,22 @@ namespace Limitless
         EditorAnimatorGraphPanel::Draw(m_ShowAnimatorGraphPanel, m_SelectedAnimatorControllerAssetKey, &m_EditorUndoService);
     }
 
+    void EditorLayer::DrawSpriteEditorPanel()
+    {
+        // Poll the inspector for a pending "Open Sprite Editor" request.
+        const std::string& pendingKey = EditorInspectorPanel::GetPendingSpriteEditorRequest();
+        if (!pendingKey.empty())
+        {
+            EditorSpriteEditor::Open(m_SpriteEditorState, pendingKey);
+            EditorInspectorPanel::ClearPendingSpriteEditorRequest();
+        }
+
+        EditorSpriteEditor::Draw(m_SpriteEditorState);
+    }
+
+    // DEPRECATED: The old Tilemap panel is kept for backward compatibility with
+    // scenes using TilemapComponent. New scenes should use the Tile Palette panel
+    // with Grid2DComponent + TilemapLayerComponent instead.
     void EditorLayer::DrawTilemapPanel()
     {
         if (!m_ShowTilemapPanel)
@@ -1804,39 +1826,154 @@ namespace Limitless
         const uint32_t textureHeight = tilemap->CachedTilesetTexture->GetTexture()->GetHeight();
         const int32_t tileWidth = std::max(1, tilemap->TilesetTileSizePixels.x);
         const int32_t tileHeight = std::max(1, tilemap->TilesetTileSizePixels.y);
-        const int32_t columns = static_cast<int32_t>(textureWidth) / tileWidth;
-        const int32_t rows = static_cast<int32_t>(textureHeight) / tileHeight;
-        if (columns <= 0 || rows <= 0)
+        const int32_t marginWidth = std::max(0, tilemap->TilesetMarginPixels.x);
+        const int32_t marginHeight = std::max(0, tilemap->TilesetMarginPixels.y);
+        const int32_t spacingWidth = std::max(0, tilemap->TilesetSpacingPixels.x);
+        const int32_t spacingHeight = std::max(0, tilemap->TilesetSpacingPixels.y);
+        const int32_t usableWidth = static_cast<int32_t>(textureWidth) - marginWidth * 2;
+        const int32_t usableHeight = static_cast<int32_t>(textureHeight) - marginHeight * 2;
+        const int32_t columnStride = tileWidth + spacingWidth;
+        const int32_t rowStride = tileHeight + spacingHeight;
+        const int32_t columns = (usableWidth >= tileWidth && columnStride > 0)
+            ? ((usableWidth + spacingWidth) / columnStride)
+            : 0;
+        const int32_t rows = (usableHeight >= tileHeight && rowStride > 0)
+            ? ((usableHeight + spacingHeight) / rowStride)
+            : 0;
+        if (tilemap->TilesetExplicitTileRectsPixels.empty() && (columns <= 0 || rows <= 0))
         {
-            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Tileset tile size is larger than texture dimensions.");
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Tileset slicing is invalid. Verify tile size, margin, and spacing.");
             ImGui::End();
             return;
         }
 
-        const int32_t maxTileCount = columns * rows;
-        const int32_t paletteColumnCount = std::max(1, std::min(columns, 12));
+        const bool useExplicitRects = !tilemap->TilesetExplicitTileRectsPixels.empty();
+        const int32_t maxTileCount = useExplicitRects
+            ? static_cast<int32_t>(tilemap->TilesetExplicitTileRectsPixels.size())
+            : (columns * rows);
+        const int32_t paletteColumnCount = useExplicitRects
+            ? 12
+            : std::max(1, std::min(columns, 12));
         const ImTextureID textureId = (ImTextureID)(void*)(uintptr_t)tilemap->CachedTilesetTexture->GetTexture()->GetRendererID();
         constexpr float tileButtonSize = 30.0f;
 
+        // Accept sub-sprite drag-drop to auto-configure the tilemap from a sprite sheet.
         ImGui::Separator();
-        ImGui::TextDisabled("Tile Palette");
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SUB_SPRITE_KEY"))
+            {
+                const std::string subSpriteKey(static_cast<const char*>(payload->Data));
+                // Parse parent texture key from "Assets/Texture.png#index".
+                const size_t hashPos = subSpriteKey.rfind('#');
+                if (hashPos != std::string::npos)
+                {
+                    const std::string parentTextureKey = subSpriteKey.substr(0, hashPos);
+                    const auto spriteSettings = Assets::LoadSpriteImportSettings(parentTextureKey);
+                    if (spriteSettings.Mode == Assets::SpriteImportSettings::SpriteMode::Multiple &&
+                        !spriteSettings.SubSprites.empty())
+                    {
+                        // Populate tilemap from sprite sheet sub-rects.
+                        tilemap->TilesetTextureKey = parentTextureKey;
+                        tilemap->CachedTilesetTexture.reset();
+                        tilemap->TilesetTextureLoadAttempted = false;
+
+                        // Convert sub-sprites to explicit tile rects.
+                        tilemap->TilesetExplicitTileRectsPixels.clear();
+                        for (const auto& sub : spriteSettings.SubSprites)
+                            tilemap->TilesetExplicitTileRectsPixels.push_back(sub.RectPixels);
+
+                        if (!spriteSettings.SubSprites.empty())
+                        {
+                            tilemap->TilesetTileSizePixels = glm::ivec2(
+                                spriteSettings.SubSprites[0].RectPixels.z,
+                                spriteSettings.SubSprites[0].RectPixels.w);
+                        }
+                        tilemap->TilesetMarginPixels = glm::ivec2(0);
+                        tilemap->TilesetSpacingPixels = glm::ivec2(0);
+
+                        LT_CORE_INFO("Tilemap: populated palette from sprite sheet '{}' ({} tiles)",
+                                     parentTextureKey, spriteSettings.SubSprites.size());
+                    }
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+
+        ImGui::TextDisabled("Tile Palette  (drag sub-sprites here)");
+
+        // Determine stamp selection range in palette grid coordinates.
+        auto paletteGridCoordFromTileIndex = [&](int32_t tileIndex) -> glm::ivec2 {
+            return glm::ivec2(tileIndex % paletteColumnCount, tileIndex / paletteColumnCount);
+        };
+
+        const bool hasStampSelection =
+            m_TilemapEditorState.PaletteSelectionStart.x >= 0 &&
+            m_TilemapEditorState.PaletteSelectionEnd.x >= 0;
+
+        const glm::ivec2 stampSelMin = hasStampSelection
+            ? glm::min(m_TilemapEditorState.PaletteSelectionStart, m_TilemapEditorState.PaletteSelectionEnd)
+            : glm::ivec2(-1);
+        const glm::ivec2 stampSelMax = hasStampSelection
+            ? glm::max(m_TilemapEditorState.PaletteSelectionStart, m_TilemapEditorState.PaletteSelectionEnd)
+            : glm::ivec2(-1);
+
         for (int32_t tileIndex = 0; tileIndex < maxTileCount; ++tileIndex)
         {
             const int32_t tileId = tileIndex + 1;
-            const bool isTileCurrentlySelected = (tileId == static_cast<int32_t>(m_TilemapEditorState.ActiveTileId));
-            const int32_t tileX = tileIndex % columns;
-            const int32_t tileY = tileIndex / columns;
-            const float u0 = static_cast<float>(tileX * tileWidth) / static_cast<float>(textureWidth);
-            const float v0 = static_cast<float>(tileY * tileHeight) / static_cast<float>(textureHeight);
-            const float u1 = static_cast<float>((tileX + 1) * tileWidth) / static_cast<float>(textureWidth);
-            const float v1 = static_cast<float>((tileY + 1) * tileHeight) / static_cast<float>(textureHeight);
+            const glm::ivec2 paletteCoord = paletteGridCoordFromTileIndex(tileIndex);
+
+            const bool isSingleSelected = !hasStampSelection &&
+                (tileId == static_cast<int32_t>(m_TilemapEditorState.ActiveTileId));
+            const bool isInStampSelection = hasStampSelection &&
+                paletteCoord.x >= stampSelMin.x && paletteCoord.x <= stampSelMax.x &&
+                paletteCoord.y >= stampSelMin.y && paletteCoord.y <= stampSelMax.y;
+            const bool isHighlighted = isSingleSelected || isInStampSelection;
+
+            float u0 = 0.0f;
+            float v0 = 0.0f;
+            float u1 = 1.0f;
+            float v1 = 1.0f;
+            if (useExplicitRects)
+            {
+                const glm::ivec4 rect = tilemap->TilesetExplicitTileRectsPixels[static_cast<size_t>(tileIndex)];
+                u0 = static_cast<float>(rect.x) / static_cast<float>(textureWidth);
+                v0 = static_cast<float>(rect.y) / static_cast<float>(textureHeight);
+                u1 = static_cast<float>(rect.x + rect.z) / static_cast<float>(textureWidth);
+                v1 = static_cast<float>(rect.y + rect.w) / static_cast<float>(textureHeight);
+            }
+            else
+            {
+                const int32_t tileX = tileIndex % columns;
+                const int32_t tileY = tileIndex / columns;
+                const int32_t tileLeft = marginWidth + (tileX * columnStride);
+                const int32_t tileBottom = marginHeight + (tileY * rowStride);
+                u0 = static_cast<float>(tileLeft) / static_cast<float>(textureWidth);
+                v0 = static_cast<float>(tileBottom) / static_cast<float>(textureHeight);
+                u1 = static_cast<float>(tileLeft + tileWidth) / static_cast<float>(textureWidth);
+                v1 = static_cast<float>(tileBottom + tileHeight) / static_cast<float>(textureHeight);
+            }
 
             ImGui::PushID(tileId);
-            if (isTileCurrentlySelected)
+            if (isHighlighted)
                 ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(85, 200, 255, 255));
+
             if (ImGui::ImageButton("##TilePaletteButton", textureId, ImVec2(tileButtonSize, tileButtonSize), ImVec2(u0, v0), ImVec2(u1, v1)))
-                m_TilemapEditorState.ActiveTileId = static_cast<uint32_t>(tileId);
-            if (isTileCurrentlySelected)
+            {
+                // Single click = select single tile.
+                m_TilemapEditorState.SetSingleTile(static_cast<uint32_t>(tileId));
+                m_TilemapEditorState.PaletteSelectionStart = paletteCoord;
+                m_TilemapEditorState.PaletteSelectionEnd = paletteCoord;
+                m_TilemapEditorState.PaletteSelecting = true;
+            }
+
+            // Multi-tile drag selection in palette.
+            if (m_TilemapEditorState.PaletteSelecting && ImGui::IsItemHovered() && ImGui::IsMouseDown(0))
+            {
+                m_TilemapEditorState.PaletteSelectionEnd = paletteCoord;
+            }
+
+            if (isHighlighted)
                 ImGui::PopStyleColor();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
                 ImGui::SetTooltip("Tile %d", tileId);
@@ -1846,7 +1983,61 @@ namespace Limitless
                 ImGui::SameLine();
         }
 
+        // Finalize multi-tile stamp selection on mouse release.
+        if (m_TilemapEditorState.PaletteSelecting && ImGui::IsMouseReleased(0))
+        {
+            m_TilemapEditorState.PaletteSelecting = false;
+
+            if (m_TilemapEditorState.PaletteSelectionStart.x >= 0 &&
+                m_TilemapEditorState.PaletteSelectionEnd.x >= 0)
+            {
+                const glm::ivec2 selMin = glm::min(m_TilemapEditorState.PaletteSelectionStart,
+                                                     m_TilemapEditorState.PaletteSelectionEnd);
+                const glm::ivec2 selMax = glm::max(m_TilemapEditorState.PaletteSelectionStart,
+                                                     m_TilemapEditorState.PaletteSelectionEnd);
+                const int32_t stampW = selMax.x - selMin.x + 1;
+                const int32_t stampH = selMax.y - selMin.y + 1;
+
+                m_TilemapEditorState.StampSize = glm::ivec2(stampW, stampH);
+                m_TilemapEditorState.StampTileIds.clear();
+                m_TilemapEditorState.StampTileIds.reserve(static_cast<size_t>(stampW * stampH));
+
+                for (int32_t sy = selMin.y; sy <= selMax.y; ++sy)
+                {
+                    for (int32_t sx = selMin.x; sx <= selMax.x; ++sx)
+                    {
+                        const int32_t paletteTileIndex = sy * paletteColumnCount + sx;
+                        if (paletteTileIndex < maxTileCount)
+                            m_TilemapEditorState.StampTileIds.push_back(static_cast<uint32_t>(paletteTileIndex + 1));
+                        else
+                            m_TilemapEditorState.StampTileIds.push_back(0);
+                    }
+                }
+
+                // For single-tile selections, also update ActiveTileId for backwards compatibility.
+                if (stampW == 1 && stampH == 1 && !m_TilemapEditorState.StampTileIds.empty())
+                    m_TilemapEditorState.ActiveTileId = m_TilemapEditorState.StampTileIds[0];
+            }
+        }
+
+        // Show stamp info.
+        if (m_TilemapEditorState.HasStamp() &&
+            (m_TilemapEditorState.StampSize.x > 1 || m_TilemapEditorState.StampSize.y > 1))
+        {
+            ImGui::TextDisabled("Stamp: %d x %d tiles", m_TilemapEditorState.StampSize.x, m_TilemapEditorState.StampSize.y);
+        }
+
         ImGui::End();
+    }
+
+    void EditorLayer::DrawTilePalettePanelFrame()
+    {
+        EditorTilePalettePanel::DrawTilePalettePanel(
+            m_TilePaletteState,
+            m_Scene.get(),
+            m_SelectedEntity,
+            m_TilemapEditorState,
+            &m_EditorUndoService);
     }
 
     void EditorLayer::EnsureSceneViewFramebuffer(uint32_t width, uint32_t height)

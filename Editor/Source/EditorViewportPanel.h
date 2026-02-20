@@ -10,6 +10,7 @@
 #include <glm/glm.hpp>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace Limitless
 {
@@ -43,6 +44,52 @@ namespace Limitless::EditorViewportPanel
         uint32_t ActiveCustomData = 0;
         bool HasHoveredCell = false;
         glm::ivec2 HoveredCell = glm::ivec2(0, 0);
+
+        // Preferred Grid2D/layer paint targets pushed by the Tile Palette panel.
+        // When valid, viewport painting uses these instead of relying solely on
+        // scene selection heuristics.
+        entt::entity ActiveGridEntity = entt::null;
+        entt::entity ActiveLayerEntity = entt::null;
+
+        // Multi-tile stamp brush: a rectangular group of tile IDs painted as one.
+        glm::ivec2 StampSize = glm::ivec2(1, 1);
+        std::vector<uint32_t> StampTileIds; // Row-major, size = StampSize.x * StampSize.y.
+
+        // Tile asset keys corresponding to each StampTileId / ActiveTileId.
+        // Used to register tiles in the layer's TileTable when painting.
+        std::string ActiveTileAssetKey;
+        std::vector<std::string> StampTileAssetKeys; // Parallel to StampTileIds.
+
+        // Palette selection state for multi-tile drag.
+        glm::ivec2 PaletteSelectionStart = glm::ivec2(-1, -1);
+        glm::ivec2 PaletteSelectionEnd = glm::ivec2(-1, -1);
+        bool PaletteSelecting = false;
+
+        bool HasStamp() const
+        {
+            return StampSize.x > 0 && StampSize.y > 0 &&
+                   static_cast<int>(StampTileIds.size()) == StampSize.x * StampSize.y;
+        }
+
+        void ClearStamp()
+        {
+            StampSize = glm::ivec2(1, 1);
+            StampTileIds.clear();
+            StampTileIds.push_back(ActiveTileId);
+            StampTileAssetKeys.clear();
+            StampTileAssetKeys.push_back(ActiveTileAssetKey);
+        }
+
+        void SetSingleTile(uint32_t tileId, const std::string& tileAssetKey = {})
+        {
+            ActiveTileId = tileId;
+            ActiveTileAssetKey = tileAssetKey;
+            StampSize = glm::ivec2(1, 1);
+            StampTileIds.clear();
+            StampTileIds.push_back(tileId);
+            StampTileAssetKeys.clear();
+            StampTileAssetKeys.push_back(tileAssetKey);
+        }
     };
 
     void Draw(uint32_t& sceneViewWidthPixels,

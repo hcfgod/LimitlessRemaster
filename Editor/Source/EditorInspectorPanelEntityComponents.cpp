@@ -3,6 +3,7 @@
 #include "EditorAssetNaming.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetPaths.h"
+#include "Assets/SpriteImportSettings.h"
 #include "Assets/TilesetAsset.h"
 #include "Assets/AssetTypes.h"
 #include "Assets/AudioClipAsset.h"
@@ -166,6 +167,25 @@ namespace Limitless::EditorInspectorPanel
             return FindDirectChildByTag(registry, sliderEntity, "Slider Background") != entt::null
                 || FindDirectChildByTag(registry, sliderEntity, "Slider Fill") != entt::null
                 || FindDirectChildByTag(registry, sliderEntity, "Slider Handle") != entt::null;
+        }
+
+        void ApplyTilesetDefinitionToTilemap(TilemapComponent& tilemap, const Assets::TilesetAssetDefinition& definition)
+        {
+            if (!definition.TextureKey.empty())
+                tilemap.TilesetTextureKey = definition.TextureKey;
+            tilemap.TilesetTileSizePixels = glm::ivec2(
+                std::max(1, definition.TileSizePixels.x),
+                std::max(1, definition.TileSizePixels.y));
+            tilemap.TilesetMarginPixels = glm::ivec2(
+                std::max(0, definition.MarginPixels.x),
+                std::max(0, definition.MarginPixels.y));
+            tilemap.TilesetSpacingPixels = glm::ivec2(
+                std::max(0, definition.SpacingPixels.x),
+                std::max(0, definition.SpacingPixels.y));
+            tilemap.TilesetExplicitTileRectsPixels = definition.ExplicitTileRectsPixels;
+            tilemap.CachedTilesetTexture.reset();
+            tilemap.TilesetTextureLoadAttempted = false;
+            tilemap.TilesetAssetLoadAttempted = true;
         }
     }
 
@@ -509,6 +529,64 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::SameLine();
                     if (ImGui::Button("Clear##Material"))
                         assignMaterialKey({});
+                }
+
+                // Sub-sprite region (when the assigned texture has a sprite sheet).
+                if (!sprite->TextureKey.empty())
+                {
+                    ImGui::Spacing();
+                    ImGui::Separator();
+                    ImGui::TextDisabled("Sub-Sprite");
+
+                    const auto spriteSettings = Assets::LoadSpriteImportSettings(sprite->TextureKey);
+                    if (spriteSettings.Mode == Assets::SpriteImportSettings::SpriteMode::Multiple &&
+                        !spriteSettings.SubSprites.empty())
+                    {
+                        int subIndex = sprite->SubSpriteIndex;
+                        const int maxIndex = static_cast<int>(spriteSettings.SubSprites.size()) - 1;
+                        const std::string previewName = (subIndex >= 0 && subIndex <= maxIndex)
+                            ? spriteSettings.SubSprites[subIndex].Name
+                            : std::string("Full Texture");
+
+                        if (ImGui::BeginCombo("Sub-Sprite##Picker", previewName.c_str()))
+                        {
+                            if (ImGui::Selectable("Full Texture", subIndex < 0))
+                            {
+                                sprite->SubSpriteIndex = -1;
+                                sprite->UvMin = glm::vec2(0.0f);
+                                sprite->UvMax = glm::vec2(1.0f);
+                            }
+
+                            for (int i = 0; i <= maxIndex; ++i)
+                            {
+                                const bool selected = (subIndex == i);
+                                const auto& sub = spriteSettings.SubSprites[i];
+                                if (ImGui::Selectable((sub.Name + "##" + std::to_string(i)).c_str(), selected))
+                                {
+                                    sprite->SubSpriteIndex = i;
+
+                                    // Compute UVs from the sub-sprite rect.
+                                    if (sprite->CachedTexture && sprite->CachedTexture->GetTexture())
+                                    {
+                                        const auto uvs = Assets::ComputeSubSpriteUvs(
+                                            sub.RectPixels,
+                                            sprite->CachedTexture->GetTexture()->GetWidth(),
+                                            sprite->CachedTexture->GetTexture()->GetHeight());
+                                        sprite->UvMin = glm::vec2(uvs.x, uvs.y);
+                                        sprite->UvMax = glm::vec2(uvs.z, uvs.w);
+                                    }
+                                }
+                                if (selected)
+                                    ImGui::SetItemDefaultFocus();
+                            }
+
+                            ImGui::EndCombo();
+                        }
+                    }
+                    else
+                    {
+                        ImGui::TextDisabled("Set Sprite Mode to Multiple and slice to use sub-sprites.");
+                    }
                 }
 
                     ImGui::TreePop();
@@ -1045,27 +1123,92 @@ namespace Limitless::EditorInspectorPanel
             if (tilemapOpen)
             {
                 const auto assignTilesetTextureKey = [&](const std::string& key) {
+                    std::string ensuredTilesetAssetKey;
+                    Assets::TilesetAssetDefinition ensuredDefinition{};
+                    bool hasEnsuredTileset = false;
+                    if (!key.empty())
+                    {
+                        const glm::ivec2 preferredTileSize = glm::ivec2(
+                            std::max(1, tilemap->TilesetTileSizePixels.x),
+                            std::max(1, tilemap->TilesetTileSizePixels.y));
+                        hasEnsuredTileset = Assets::TryEnsureTilesetAssetForTextureKey(
+                            key,
+                            preferredTileSize,
+                            ensuredTilesetAssetKey);
+                        if (hasEnsuredTileset)
+                        {
+                            if (!Assets::TryLoadTilesetAssetDefinition(ensuredTilesetAssetKey, ensuredDefinition))
+                            {
+                                ensuredDefinition = Assets::TilesetAssetDefinition{};
+                                ensuredDefinition.TextureKey = key;
+                                ensuredDefinition.TileSizePixels = preferredTileSize;
+                            }
+                            else if (ensuredDefinition.TextureKey.empty())
+                            {
+                                ensuredDefinition.TextureKey = key;
+                            }
+                        }
+                    }
+
                     if (undoService)
                     {
                         (void)undoService->ExecuteSceneMutation(key.empty() ? "Clear Tilemap Tileset Texture" : "Assign Tilemap Tileset Texture", [&](Scene& mutableScene) {
                             auto* mutableTilemap = mutableScene.GetRegistry().try_get<TilemapComponent>(selectedEntity);
                             if (!mutableTilemap)
                                 return false;
-                            mutableTilemap->TilesetTextureKey = key;
-                            mutableTilemap->TilesetAssetKey.clear();
-                            mutableTilemap->CachedTilesetTexture.reset();
-                            mutableTilemap->TilesetTextureLoadAttempted = false;
-                            mutableTilemap->TilesetAssetLoadAttempted = true;
+                            if (key.empty())
+                            {
+                                mutableTilemap->TilesetTextureKey.clear();
+                                mutableTilemap->TilesetAssetKey.clear();
+                                mutableTilemap->TilesetExplicitTileRectsPixels.clear();
+                                mutableTilemap->CachedTilesetTexture.reset();
+                                mutableTilemap->TilesetTextureLoadAttempted = false;
+                                mutableTilemap->TilesetAssetLoadAttempted = true;
+                                return true;
+                            }
+
+                            if (hasEnsuredTileset && !ensuredTilesetAssetKey.empty())
+                            {
+                                mutableTilemap->TilesetAssetKey = ensuredTilesetAssetKey;
+                                ApplyTilesetDefinitionToTilemap(*mutableTilemap, ensuredDefinition);
+                            }
+                            else
+                            {
+                                mutableTilemap->TilesetTextureKey = key;
+                                mutableTilemap->TilesetAssetKey.clear();
+                                mutableTilemap->TilesetExplicitTileRectsPixels.clear();
+                                mutableTilemap->CachedTilesetTexture.reset();
+                                mutableTilemap->TilesetTextureLoadAttempted = false;
+                                mutableTilemap->TilesetAssetLoadAttempted = true;
+                            }
                             return true;
                         });
                     }
                     else
                     {
-                        tilemap->TilesetTextureKey = key;
-                        tilemap->TilesetAssetKey.clear();
-                        tilemap->CachedTilesetTexture.reset();
-                        tilemap->TilesetTextureLoadAttempted = false;
-                        tilemap->TilesetAssetLoadAttempted = true;
+                        if (key.empty())
+                        {
+                            tilemap->TilesetTextureKey.clear();
+                            tilemap->TilesetAssetKey.clear();
+                            tilemap->TilesetExplicitTileRectsPixels.clear();
+                            tilemap->CachedTilesetTexture.reset();
+                            tilemap->TilesetTextureLoadAttempted = false;
+                            tilemap->TilesetAssetLoadAttempted = true;
+                        }
+                        else if (hasEnsuredTileset && !ensuredTilesetAssetKey.empty())
+                        {
+                            tilemap->TilesetAssetKey = ensuredTilesetAssetKey;
+                            ApplyTilesetDefinitionToTilemap(*tilemap, ensuredDefinition);
+                        }
+                        else
+                        {
+                            tilemap->TilesetTextureKey = key;
+                            tilemap->TilesetAssetKey.clear();
+                            tilemap->TilesetExplicitTileRectsPixels.clear();
+                            tilemap->CachedTilesetTexture.reset();
+                            tilemap->TilesetTextureLoadAttempted = false;
+                            tilemap->TilesetAssetLoadAttempted = true;
+                        }
                     }
                 };
 
@@ -1075,14 +1218,12 @@ namespace Limitless::EditorInspectorPanel
                         mutableTilemap.TilesetAssetLoadAttempted = false;
                         mutableTilemap.CachedTilesetTexture.reset();
                         mutableTilemap.TilesetTextureLoadAttempted = false;
+                        mutableTilemap.TilesetExplicitTileRectsPixels.clear();
 
                         Assets::TilesetAssetDefinition definition{};
                         if (!key.empty() && Assets::TryLoadTilesetAssetDefinition(key, definition))
                         {
-                            mutableTilemap.TilesetTextureKey = definition.TextureKey;
-                            mutableTilemap.TilesetTileSizePixels = glm::ivec2(
-                                std::max(1, definition.TileSizePixels.x),
-                                std::max(1, definition.TileSizePixels.y));
+                            ApplyTilesetDefinitionToTilemap(mutableTilemap, definition);
                         }
                     };
 
@@ -1178,6 +1319,21 @@ namespace Limitless::EditorInspectorPanel
                 tilemap->TilesetTileSizePixels.x = std::max(1, tilemap->TilesetTileSizePixels.x);
                 tilemap->TilesetTileSizePixels.y = std::max(1, tilemap->TilesetTileSizePixels.y);
                 TrackInteractiveMutation(undoService, "Edit Tilemap Tile Size Pixels");
+
+                ImGui::DragInt2("Tile Margin Pixels", &tilemap->TilesetMarginPixels.x, 1.0f, 0, 4096);
+                tilemap->TilesetMarginPixels.x = std::max(0, tilemap->TilesetMarginPixels.x);
+                tilemap->TilesetMarginPixels.y = std::max(0, tilemap->TilesetMarginPixels.y);
+                TrackInteractiveMutation(undoService, "Edit Tilemap Margin Pixels");
+
+                ImGui::DragInt2("Tile Spacing Pixels", &tilemap->TilesetSpacingPixels.x, 1.0f, 0, 4096);
+                tilemap->TilesetSpacingPixels.x = std::max(0, tilemap->TilesetSpacingPixels.x);
+                tilemap->TilesetSpacingPixels.y = std::max(0, tilemap->TilesetSpacingPixels.y);
+                TrackInteractiveMutation(undoService, "Edit Tilemap Spacing Pixels");
+
+                if (!tilemap->TilesetExplicitTileRectsPixels.empty())
+                {
+                    ImGui::TextDisabled("Explicit Tile Rects: %d", static_cast<int>(tilemap->TilesetExplicitTileRectsPixels.size()));
+                }
 
                 ImGui::Checkbox("Auto Tile Enabled", &tilemap->AutoTileEnabled);
                 TrackInteractiveMutation(undoService, "Edit Tilemap Auto Tile");
@@ -1347,6 +1503,136 @@ namespace Limitless::EditorInspectorPanel
                 TrackInteractiveMutation(undoService, "Edit TilemapCollider2D Layer Bits");
                 ImGui::InputScalar("Mask Bits", ImGuiDataType_U64, &tilemapCollider2D->CollisionMask);
                 TrackInteractiveMutation(undoService, "Edit TilemapCollider2D Mask Bits");
+
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* grid2D = registry.try_get<Grid2DComponent>(selectedEntity))
+        {
+            const bool grid2DOpen = ImGui::TreeNodeEx("Grid 2D", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("Grid2DComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##Grid2DComponentOptionsButton"))
+                ImGui::OpenPopup("Grid2DComponentOptions");
+
+            if (ImGui::BeginPopup("Grid2DComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveGrid2DComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (grid2DOpen)
+            {
+                ImGui::DragFloat2("Cell Size", &grid2D->CellSize.x, 0.05f, 0.001f, 100.0f);
+                TrackInteractiveMutation(undoService, "Edit Grid2D Cell Size");
+                ImGui::DragFloat2("Cell Gap", &grid2D->CellGap.x, 0.01f, 0.0f, 10.0f);
+                TrackInteractiveMutation(undoService, "Edit Grid2D Cell Gap");
+
+                ImGui::Separator();
+                if (ImGui::Button("Add Layer"))
+                {
+                    if (scene && undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation("Add Tilemap Layer", [&](Scene& mutableScene) {
+                            const auto children = mutableScene.GetChildren(selectedEntity);
+                            const int32_t layerNumber = static_cast<int32_t>(children.size()) + 1;
+                            const std::string layerName = "Layer " + std::to_string(layerNumber);
+                            const int32_t renderOrder = static_cast<int32_t>(children.size()) * 10;
+
+                            entt::entity layerEntity = mutableScene.CreateEntity(layerName);
+                            mutableScene.SetParent(layerEntity, selectedEntity);
+
+                            auto& layer = mutableScene.GetRegistry().emplace<TilemapLayerComponent>(layerEntity);
+                            layer.RenderOrder = renderOrder;
+                            layer.EnsureStorage();
+                            return true;
+                        });
+                    }
+                    else if (scene)
+                    {
+                        const auto children = scene->GetChildren(selectedEntity);
+                        const int32_t layerNumber = static_cast<int32_t>(children.size()) + 1;
+                        const std::string layerName = "Layer " + std::to_string(layerNumber);
+                        const int32_t renderOrder = static_cast<int32_t>(children.size()) * 10;
+
+                        entt::entity layerEntity = scene->CreateEntity(layerName);
+                        scene->SetParent(layerEntity, selectedEntity);
+
+                        auto& layer = registry.emplace<TilemapLayerComponent>(layerEntity);
+                        layer.RenderOrder = renderOrder;
+                        layer.EnsureStorage();
+                    }
+                }
+
+                if (scene)
+                {
+                    const auto children = scene->GetChildren(selectedEntity);
+                    if (!children.empty())
+                    {
+                        ImGui::TextDisabled("Layers: %d", static_cast<int>(children.size()));
+                        for (entt::entity child : children)
+                        {
+                            if (!registry.all_of<TilemapLayerComponent>(child))
+                                continue;
+                            const auto* tag = registry.try_get<TagComponent>(child);
+                            const auto* childLayer = registry.try_get<TilemapLayerComponent>(child);
+                            if (tag && childLayer)
+                                ImGui::BulletText("%s (order %d)", tag->Tag.c_str(), childLayer->RenderOrder);
+                        }
+                    }
+                }
+
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* tilemapLayer = registry.try_get<TilemapLayerComponent>(selectedEntity))
+        {
+            tilemapLayer->EnsureStorage();
+            const bool layerOpen = ImGui::TreeNodeEx("Tilemap Layer", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("TilemapLayerComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##TilemapLayerComponentOptionsButton"))
+                ImGui::OpenPopup("TilemapLayerComponentOptions");
+
+            if (ImGui::BeginPopup("TilemapLayerComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveTilemapLayerComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (layerOpen)
+            {
+                glm::ivec2 gridSize = tilemapLayer->GridSize;
+                if (ImGui::DragInt2("Grid Size", &gridSize.x, 1.0f, 1, 4096))
+                {
+                    gridSize = glm::ivec2(std::max(1, gridSize.x), std::max(1, gridSize.y));
+                    if (gridSize != tilemapLayer->GridSize)
+                        tilemapLayer->ResizeGrid(gridSize);
+                }
+                TrackInteractiveMutation(undoService, "Edit TilemapLayer Grid Size");
+
+                ImGui::DragInt("Render Order", &tilemapLayer->RenderOrder);
+                TrackInteractiveMutation(undoService, "Edit TilemapLayer Render Order");
+
+                ImGui::Checkbox("Collision Enabled", &tilemapLayer->CollisionEnabled);
+                TrackInteractiveMutation(undoService, "Edit TilemapLayer Collision");
+
+                const int32_t tileCount = tilemapLayer->GetCellCount();
+                int32_t nonEmptyCount = 0;
+                for (uint32_t t : tilemapLayer->Tiles)
+                {
+                    if (t != 0)
+                        ++nonEmptyCount;
+                }
+                ImGui::TextDisabled("Cells: %d  |  Painted: %d  |  Tile types: %d",
+                                    tileCount, nonEmptyCount,
+                                    static_cast<int>(tilemapLayer->TileTable.size()));
 
                 ImGui::TreePop();
             }

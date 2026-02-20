@@ -13,6 +13,7 @@ namespace Limitless::EditorMenuBar
               bool& showEditorFpsOverlay,
               bool& showAnimationTimelinePanel,
               bool& showAnimatorGraphPanel,
+              bool& showTilePalettePanel,
               const std::function<void()>& onOpenProject,
               const std::function<void()>& onCreateProject,
               const std::function<void()>& onProjectSettings,
@@ -117,6 +118,7 @@ namespace Limitless::EditorMenuBar
             ImGui::MenuItem("FPS Overlay", nullptr, &showEditorFpsOverlay);
             ImGui::MenuItem("Animation Timeline", nullptr, &showAnimationTimelinePanel);
             ImGui::MenuItem("Animator Graph", nullptr, &showAnimatorGraphPanel);
+            ImGui::MenuItem("Tile Palette", nullptr, &showTilePalettePanel);
             ImGui::EndMenu();
         }
 

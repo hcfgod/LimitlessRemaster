@@ -76,6 +76,12 @@ namespace Limitless
         std::filesystem::path CreateAnimatorControllerParentRelativePath;
         std::array<char, 256> CreateAnimatorControllerNameBuffer{};
 
+        // Tile palette asset creation popup state.
+        bool CreateTilePalettePopupPending = false;
+        bool CreateTilePalettePopupOpen = false;
+        std::filesystem::path CreateTilePaletteParentRelativePath;
+        std::array<char, 256> CreateTilePaletteNameBuffer{};
+
         // Multi-select state for Project assets (Ctrl/Shift click + multi-drag).
         std::vector<std::string> MultiSelectedAssetKeys;
         std::string SelectionAnchorAssetKey;

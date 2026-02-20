@@ -146,6 +146,7 @@ namespace Limitless::Editor
         }
         catch (const std::exception& e)
         {
+            (void)e;
             LT_CORE_WARN("EditorRecentProjects: failed to load: {}", e.what());
         }
     }

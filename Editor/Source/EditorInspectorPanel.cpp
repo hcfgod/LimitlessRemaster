@@ -2143,6 +2143,8 @@ namespace Limitless::EditorInspectorPanel
                 const bool hasPointLight2DComponent = registry.all_of<PointLight2DComponent>(selectedEntity);
                 const bool hasShadowOccluder2DComponent = registry.all_of<ShadowOccluder2DComponent>(selectedEntity);
                 const bool hasTilemapComponent = registry.all_of<TilemapComponent>(selectedEntity);
+                const bool hasGrid2DComponent = registry.all_of<Grid2DComponent>(selectedEntity);
+                const bool hasTilemapLayerComponent = registry.all_of<TilemapLayerComponent>(selectedEntity);
                 const bool hasParticleEmitterComponent = registry.all_of<ParticleEmitterComponent>(selectedEntity);
                 const bool hasCanvasComponent = registry.all_of<CanvasComponent>(selectedEntity);
                 const bool hasRectTransformComponent = registry.all_of<RectTransformComponent>(selectedEntity);
@@ -2787,6 +2789,50 @@ namespace Limitless::EditorInspectorPanel
                 if (hasTilemapComponent)
                     ImGui::EndDisabled();
 
+                if (hasGrid2DComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Grid 2D"))
+                {
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation("Add Grid2D Component", [&](Scene& mutableScene) {
+                            mutableScene.GetRegistry().emplace<Grid2DComponent>(selectedEntity);
+                            return true;
+                        });
+                    }
+                    else
+                    {
+                        registry.emplace<Grid2DComponent>(selectedEntity);
+                    }
+                }
+
+                if (hasGrid2DComponent)
+                    ImGui::EndDisabled();
+
+                if (hasTilemapLayerComponent)
+                    ImGui::BeginDisabled();
+
+                if (ImGui::MenuItem("Tilemap Layer"))
+                {
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation("Add TilemapLayer Component", [&](Scene& mutableScene) {
+                            auto& layer = mutableScene.GetRegistry().emplace<TilemapLayerComponent>(selectedEntity);
+                            layer.EnsureStorage();
+                            return true;
+                        });
+                    }
+                    else
+                    {
+                        auto& layer = registry.emplace<TilemapLayerComponent>(selectedEntity);
+                        layer.EnsureStorage();
+                    }
+                }
+
+                if (hasTilemapLayerComponent)
+                    ImGui::EndDisabled();
+
                 if (hasParticleEmitterComponent)
                     ImGui::BeginDisabled();
 
@@ -3212,6 +3258,36 @@ namespace Limitless::EditorInspectorPanel
                 else
                 {
                     registry.remove<ParticleEmitterComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveGrid2DComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove Grid2D Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<Grid2DComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<Grid2DComponent>(selectedEntity);
+                }
+            }
+
+            if (pendingRemovals.RemoveTilemapLayerComponent)
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Remove TilemapLayer Component", [&](Scene& mutableScene) {
+                        mutableScene.GetRegistry().remove<TilemapLayerComponent>(selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    registry.remove<TilemapLayerComponent>(selectedEntity);
                 }
             }
         }

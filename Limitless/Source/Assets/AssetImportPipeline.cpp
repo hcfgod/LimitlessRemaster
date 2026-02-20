@@ -33,6 +33,8 @@ namespace Limitless::Assets::AssetImportPipeline
             if (EndsWith(name, ".prefab.json")) return AssetType::Prefab;
             if (EndsWith(name, ".tilemap.json")) return AssetType::Tilemap;
             if (EndsWith(name, ".tileset.json")) return AssetType::Tileset;
+            if (EndsWith(name, ".tile.json")) return AssetType::Tile;
+            if (EndsWith(name, ".tilepalette.json")) return AssetType::TilePalette;
             if (EndsWith(name, ".animationclip.json") || EndsWith(name, ".animation.json") || EndsWith(name, ".anim.json"))
                 return AssetType::AnimationClip;
             if (EndsWith(name, ".animcontroller.json") || EndsWith(name, ".animatorcontroller.json"))

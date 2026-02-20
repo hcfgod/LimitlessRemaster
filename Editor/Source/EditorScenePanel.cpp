@@ -493,6 +493,59 @@ namespace Limitless::EditorScenePanel
                 selectedAudioMixerAssetKey.clear();
                 selectedInputActionsAssetKey.clear();
             }
+            if (ImGui::MenuItem("Create Grid (Tilemap)"))
+            {
+                entt::entity gridEntity = entt::null;
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Create Grid (Tilemap)", [&](Scene& mutableScene) {
+                        gridEntity = mutableScene.CreateEntity("Grid");
+                        auto& reg = mutableScene.GetRegistry();
+                        reg.emplace<Grid2DComponent>(gridEntity);
+
+                        auto createLayer = [&](const char* name, int32_t order, bool collision) {
+                            entt::entity layerEntity = mutableScene.CreateEntity(name);
+                            mutableScene.SetParent(layerEntity, gridEntity);
+                            auto& layer = reg.emplace<TilemapLayerComponent>(layerEntity);
+                            layer.RenderOrder = order;
+                            layer.CollisionEnabled = collision;
+                            layer.EnsureStorage();
+                        };
+                        createLayer("Background", -20, false);
+                        createLayer("Collision",    0, true);
+                        createLayer("Foreground",  20, false);
+                        return true;
+                    });
+                }
+                else
+                {
+                    gridEntity = scene->CreateEntity("Grid");
+                    auto& reg = scene->GetRegistry();
+                    reg.emplace<Grid2DComponent>(gridEntity);
+
+                    auto createLayer = [&](const char* name, int32_t order, bool collision) {
+                        entt::entity layerEntity = scene->CreateEntity(name);
+                        scene->SetParent(layerEntity, gridEntity);
+                        auto& layer = reg.emplace<TilemapLayerComponent>(layerEntity);
+                        layer.RenderOrder = order;
+                        layer.CollisionEnabled = collision;
+                        layer.EnsureStorage();
+                    };
+                    createLayer("Background", -20, false);
+                    createLayer("Collision",    0, true);
+                    createLayer("Foreground",  20, false);
+                }
+                selectedEntity = gridEntity;
+                selectedTextureAssetKey.clear();
+                cachedTextureAsset.reset();
+                selectedMaterialAssetKey.clear();
+                cachedMaterialAsset.reset();
+                selectedNativeScriptAssetKey.clear();
+                selectedPrefabAssetKey.clear();
+                selectedTilesetAssetKey.clear();
+                selectedAudioMixerAssetKey.clear();
+                selectedInputActionsAssetKey.clear();
+            }
             ImGui::EndPopup();
         }
 

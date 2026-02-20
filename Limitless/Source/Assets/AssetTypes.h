@@ -24,7 +24,9 @@ namespace Limitless::Assets
         AnimationClip = 10,
         Tileset = 11,
         AudioMixer = 12,
-        AnimatorController = 13
+        AnimatorController = 13,
+        Tile = 14,
+        TilePalette = 15
     };
 
     [[nodiscard]] const char* ToString(AssetType type);

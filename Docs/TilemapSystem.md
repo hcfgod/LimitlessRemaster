@@ -18,6 +18,9 @@ The tilemap feature adds a grid-based world authoring workflow with runtime rend
 - `TilesetAssetKey`: optional `.tileset.json` asset reference
 - `TilesetTextureKey`: texture asset key used as tile atlas
 - `TilesetTileSizePixels`: tile dimensions in the atlas texture
+- `TilesetMarginPixels`: optional atlas border margin before first tile
+- `TilesetSpacingPixels`: optional spacing between atlas cells
+- `TilesetExplicitTileRectsPixels`: optional explicit per-tile pixel rectangles for packed atlases
 - `AutoTileEnabled`: optional bitmask autotile remapping
 - `Layers`: ordered tile layers (`Background`, `Collision`, `Foreground` by default)
 
@@ -36,8 +39,11 @@ Tilemaps render in `SceneRenderer::Render` using the existing `Renderer2D` pipel
 
 - Negative `RenderOrder` tilemap layers draw before sprites.
 - Zero or positive `RenderOrder` tilemap layers draw after sprites.
-- Tilemap cells use UVs derived from `TilesetTileSizePixels`.
+- Tilemap cells use UVs derived from tileset metadata:
+  - explicit tile rects when present, otherwise
+  - grid slicing from tile size + margin + spacing.
 - Autotile mode (optional) applies a 4-neighbor bitmask offset (`+0..+15`) per painted base tile.
+  - Note: explicit tile-rect palettes intentionally skip auto-tile remapping (IDs are compacted, not contiguous atlas grid IDs).
 
 ## Scene Serialization
 
@@ -59,8 +65,11 @@ Scene format version was incremented to `9` for this addition.
 When a selected entity has `TilemapComponent`, Inspector exposes:
 
 - Tileset texture assignment (drag/drop from Project panel)
-- Tileset asset assignment (`.tileset.json`) with texture and tile-size defaults
-- Grid size / cell size / tile pixel size
+  - automatically creates/uses a sidecar `.tileset.json` file for importer metadata.
+  - on first sidecar creation, tile size is auto-detected from the texture (with deterministic fallback).
+  - sparse atlases auto-generate compact explicit tile rects so the tile palette avoids large empty slot ranges.
+- Tileset asset assignment (`.tileset.json`) with texture, tile size, margin, spacing, and optional explicit tile rectangles
+- Grid size / cell size / tile pixel size / margin / spacing
 - Auto tile toggle
 - Layer list (name, visibility, collision flag, render order, add/remove)
 

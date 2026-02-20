@@ -1,8 +1,12 @@
 #include "EditorProjectPanel.h"
 
 #include "EditorAssetNaming.h"
+#include "Assets/AssetDatabase.h"
 #include "Assets/AssetImportPipeline.h"
 #include "Assets/AssetPaths.h"
+#include "Assets/SpriteImportSettings.h"
+#include "Assets/TilePaletteAsset.h"
+#include "EditorTilePalettePanel.h"
 #include "Core/Debug/Log.h"
 #include "ProjectAssetOperations.h"
 #include "imgui/imgui.h"
@@ -25,6 +29,7 @@ namespace Limitless::EditorProjectPanel
     {
         constexpr const char* kSceneEntityPayload = "SCENE_ENTITY";
         constexpr const char* kAssetMultiSelectionPayload = "ASSET_MULTI_KEYS";
+        constexpr const char* kSubSpritePayloadId = "SUB_SPRITE_KEY";
 
         std::vector<std::string> ParseAssetKeyListPayload(const void* payloadData, int payloadSize)
         {
@@ -89,6 +94,33 @@ namespace Limitless::EditorProjectPanel
         };
 
         std::unordered_map<std::string, ProjectAssetDirectoryCacheEntry> gProjectAssetDirectoryCache;
+
+        // Cache for sprite import settings to avoid reading meta files every frame.
+        struct SpriteSettingsCacheEntry
+        {
+            Assets::SpriteImportSettings Settings;
+            std::chrono::steady_clock::time_point LoadTime = {};
+        };
+        std::unordered_map<std::string, SpriteSettingsCacheEntry> gSpriteSettingsCache;
+        constexpr std::chrono::milliseconds kSpriteSettingsCacheLifetime(2000);
+
+        const Assets::SpriteImportSettings& GetCachedSpriteImportSettings(const std::string& textureAssetKey)
+        {
+            auto it = gSpriteSettingsCache.find(textureAssetKey);
+            const auto now = std::chrono::steady_clock::now();
+
+            if (it != gSpriteSettingsCache.end() &&
+                (now - it->second.LoadTime) < kSpriteSettingsCacheLifetime)
+            {
+                return it->second.Settings;
+            }
+
+            SpriteSettingsCacheEntry entry;
+            entry.Settings = Assets::LoadSpriteImportSettings(textureAssetKey);
+            entry.LoadTime = now;
+            auto [insertedIt, _] = gSpriteSettingsCache.insert_or_assign(textureAssetKey, std::move(entry));
+            return insertedIt->second.Settings;
+        }
 
         std::string ToLowerAscii(std::string value)
         {
@@ -676,6 +708,12 @@ namespace Limitless::EditorProjectPanel
                             CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
                             state.CreateTilesetPopupPending = true;
                         }
+                        if (ImGui::MenuItem("Create Tile Palette"))
+                        {
+                            state.CreateTilePaletteParentRelativePath = entryRelativePath;
+                            CopyTextToBuffer(state.CreateTilePaletteNameBuffer, "New Tile Palette");
+                            state.CreateTilePalettePopupPending = true;
+                        }
                         if (ImGui::MenuItem("Create Audio Mixer"))
                         {
                             state.CreateAudioMixerParentRelativePath = entryRelativePath;
@@ -969,7 +1007,17 @@ namespace Limitless::EditorProjectPanel
                         ? BuildScriptAssetDisplayName(entry.AbsolutePath)
                         : GetAssetDisplayName(entry.AbsolutePath);
                     const std::string treeLabel = displayName + "###" + fileName;
-                    const ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
+
+                    // Check if this texture has sub-sprites so we can render it as an expandable parent.
+                    const bool hasSubSprites = isTexture && [&]() {
+                        const auto& spriteSets = GetCachedSpriteImportSettings(assetKey);
+                        return spriteSets.Mode == Assets::SpriteImportSettings::SpriteMode::Multiple &&
+                               !spriteSets.SubSprites.empty();
+                    }();
+
+                    const ImGuiTreeNodeFlags leafFlags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
+                    const ImGuiTreeNodeFlags expandableFlags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
+                    const ImGuiTreeNodeFlags flags = hasSubSprites ? expandableFlags : leafFlags;
                     const bool isPrimarySelected =
                         (isTexture && (selectedTextureAssetKey == assetKey)) ||
                         (isMaterial && (selectedMaterialAssetKey == assetKey)) ||
@@ -981,7 +1029,7 @@ namespace Limitless::EditorProjectPanel
                         (isNativeScriptFile && (selectedNativeScriptAssetKey == assetKey)) ||
                         (isPrefab && (selectedPrefabAssetKey == assetKey));
                     const bool isMultiSelected = std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), assetKey) != state.MultiSelectedAssetKeys.end();
-                    ImGui::TreeNodeEx(treeLabel.c_str(), (isPrimarySelected || isMultiSelected) ? (flags | ImGuiTreeNodeFlags_Selected) : flags);
+                    const bool treeNodeOpen = ImGui::TreeNodeEx(treeLabel.c_str(), (isPrimarySelected || isMultiSelected) ? (flags | ImGuiTreeNodeFlags_Selected) : flags);
 
                     const bool releasedOnItemWithoutDrag =
                         ImGui::IsItemHovered() &&
@@ -1272,6 +1320,44 @@ namespace Limitless::EditorProjectPanel
                         }
                         ImGui::EndDragDropSource();
                     }
+
+                    // Render sub-sprite children when the texture node is expanded.
+                    if (hasSubSprites && treeNodeOpen)
+                    {
+                        const auto& spriteSettings = GetCachedSpriteImportSettings(assetKey);
+                        for (size_t subIdx = 0; subIdx < spriteSettings.SubSprites.size(); ++subIdx)
+                        {
+                            const auto& sub = spriteSettings.SubSprites[subIdx];
+                            const std::string subLabel = sub.Name + "###sub_" + std::to_string(subIdx);
+                            const std::string subSpriteKey = assetKey + "#" + std::to_string(subIdx);
+                            const ImGuiTreeNodeFlags subFlags =
+                                ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen |
+                                ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Bullet;
+
+                            ImGui::TreeNodeEx(subLabel.c_str(), subFlags);
+
+                            // Drag-drop source: sub-sprite virtual key.
+                            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                            {
+                                ImGui::SetDragDropPayload(
+                                    kSubSpritePayloadId,
+                                    subSpriteKey.c_str(),
+                                    static_cast<uint32_t>(subSpriteKey.size() + 1),
+                                    ImGuiCond_Once);
+                                ImGui::Text("%s", sub.Name.c_str());
+                                ImGui::EndDragDropSource();
+                            }
+
+                            if (ImGui::IsItemHovered())
+                            {
+                                ImGui::SetTooltip("%s\n%d x %d at (%d, %d)",
+                                    sub.Name.c_str(),
+                                    sub.RectPixels.z, sub.RectPixels.w,
+                                    sub.RectPixels.x, sub.RectPixels.y);
+                            }
+                        }
+                        ImGui::TreePop();
+                    }
                 }
             }
         }
@@ -1390,6 +1476,14 @@ namespace Limitless::EditorProjectPanel
                 ImGui::SetNextWindowFocus();
                 state.CreateTilesetPopupPending = false;
                 state.CreateTilesetPopupOpen = true;
+            }
+
+            if (state.CreateTilePalettePopupPending)
+            {
+                ImGui::OpenPopup("CreateTilePaletteAsset");
+                ImGui::SetNextWindowFocus();
+                state.CreateTilePalettePopupPending = false;
+                state.CreateTilePalettePopupOpen = true;
             }
 
             if (state.CreateAudioMixerPopupPending)
@@ -1579,6 +1673,58 @@ namespace Limitless::EditorProjectPanel
                 ImGui::EndPopup();
             }
 
+            if (ImGui::BeginPopupModal("CreateTilePaletteAsset", &state.CreateTilePalettePopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::Text("Create Tile Palette");
+                ImGui::Separator();
+                if (ImGui::IsWindowAppearing())
+                    ImGui::SetKeyboardFocusHere();
+
+                const bool create = ImGui::InputText("Name",
+                                                     state.CreateTilePaletteNameBuffer.data(),
+                                                     state.CreateTilePaletteNameBuffer.size(),
+                                                     ImGuiInputTextFlags_EnterReturnsTrue);
+                if (ImGui::Button("Create", ImVec2(120, 0)) || create)
+                {
+                    const std::string requestedName = state.CreateTilePaletteNameBuffer.data();
+                    if (!requestedName.empty())
+                    {
+                        // Create tile palette inline (no callback needed).
+                        const auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
+                        if (rootResult.IsSuccess())
+                        {
+                            const std::filesystem::path targetDir = rootResult.GetValue() / "Assets" / state.CreateTilePaletteParentRelativePath;
+                            std::filesystem::create_directories(targetDir);
+
+                            std::string filename = requestedName + ".tilepalette.json";
+                            std::filesystem::path filePath = targetDir / filename;
+                            int suffix = 1;
+                            while (std::filesystem::exists(filePath))
+                            {
+                                filename = requestedName + " " + std::to_string(suffix++) + ".tilepalette.json";
+                                filePath = targetDir / filename;
+                            }
+
+                            Assets::TilePaletteData emptyPalette;
+                            const auto writeResult = Assets::WriteTilePaletteFile(filePath, emptyPalette);
+                            if (writeResult.IsSuccess())
+                            {
+                                const std::filesystem::path relPath = std::filesystem::relative(filePath, rootResult.GetValue());
+                                const std::string assetKey = relPath.generic_string();
+                                Assets::AssetDatabase::GetInstance().ImportOrUpdate(assetKey, Assets::AssetType::TilePalette);
+                                EditorTilePalettePanel::InvalidatePaletteKeyCache();
+                            }
+                        }
+                        state.CreateTilePalettePopupOpen = false;
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                    state.CreateTilePalettePopupOpen = false;
+
+                ImGui::EndPopup();
+            }
+
             if (ImGui::BeginPopupModal("CreateAudioMixerAsset", &state.CreateAudioMixerPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
             {
                 ImGui::Text("Create Audio Mixer");
@@ -1739,6 +1885,12 @@ namespace Limitless::EditorProjectPanel
                 CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
                 state.CreateTilesetPopupPending = true;
             }
+            if (ImGui::MenuItem("Create Tile Palette"))
+            {
+                state.CreateTilePaletteParentRelativePath = "";
+                CopyTextToBuffer(state.CreateTilePaletteNameBuffer, "New Tile Palette");
+                state.CreateTilePalettePopupPending = true;
+            }
             if (ImGui::MenuItem("Create Audio Mixer"))
             {
                 state.CreateAudioMixerParentRelativePath = "";
@@ -1794,6 +1946,12 @@ namespace Limitless::EditorProjectPanel
                     state.CreateTilesetParentRelativePath = "";
                     CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
                     state.CreateTilesetPopupPending = true;
+                }
+                if (ImGui::MenuItem("Create Tile Palette"))
+                {
+                    state.CreateTilePaletteParentRelativePath = "";
+                    CopyTextToBuffer(state.CreateTilePaletteNameBuffer, "New Tile Palette");
+                    state.CreateTilePalettePopupPending = true;
                 }
                 if (ImGui::MenuItem("Create Audio Mixer"))
                 {

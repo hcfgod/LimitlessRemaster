@@ -14,6 +14,7 @@
 #include "Assets/InputActionsAssetResource.h"
 #include "Assets/MaterialAssetImporter.h"
 #include "Assets/ShaderAsset.h"
+#include "Assets/SpriteImportSettings.h"
 #include "Assets/TextureAssetImporter.h"
 #include "Graphics/Renderer.h"
 #include "Scene/Scene.h"
@@ -776,6 +777,19 @@ namespace Limitless::EditorInspectorPanel
         }
     }
 
+    // Sprite Editor open request — set by the inspector, polled by EditorLayer.
+    static std::string s_PendingSpriteEditorTextureKey;
+
+    const std::string& GetPendingSpriteEditorRequest()
+    {
+        return s_PendingSpriteEditorTextureKey;
+    }
+
+    void ClearPendingSpriteEditorRequest()
+    {
+        s_PendingSpriteEditorTextureKey.clear();
+    }
+
     void DrawTextureInspector(Scene* scene,
                               std::string& selectedTextureAssetKey,
                               Assets::TextureAsset::Ptr& cachedTextureAsset)
@@ -824,6 +838,67 @@ namespace Limitless::EditorInspectorPanel
         ImGui::Separator();
         ImGui::Spacing();
 
+        // --- Sprite Import Settings ---
+        // Cache the sprite settings per-texture to avoid reading .meta every frame.
+        struct SpriteSettingsCache
+        {
+            std::string TextureKey;
+            Assets::SpriteImportSettings Settings;
+            bool Loaded = false;
+        };
+        static SpriteSettingsCache s_SpriteCache;
+
+        if (!s_SpriteCache.Loaded || s_SpriteCache.TextureKey != selectedTextureAssetKey)
+        {
+            s_SpriteCache.TextureKey = selectedTextureAssetKey;
+            s_SpriteCache.Settings = Assets::LoadSpriteImportSettings(selectedTextureAssetKey);
+            s_SpriteCache.Loaded = true;
+        }
+
+        auto& spriteSettings = s_SpriteCache.Settings;
+
+        const char* spriteModeNames[] = { "Single", "Multiple" };
+        int spriteModeIndex = static_cast<int>(spriteSettings.Mode);
+        if (ImGui::Combo("Sprite Mode", &spriteModeIndex, spriteModeNames, 2))
+        {
+            spriteSettings.Mode = static_cast<Assets::SpriteImportSettings::SpriteMode>(spriteModeIndex);
+            const auto saveResult = Assets::SaveSpriteImportSettings(selectedTextureAssetKey, spriteSettings);
+            if (!saveResult.IsSuccess())
+                LT_CORE_WARN("Failed to save sprite import settings for '{}': {}", selectedTextureAssetKey, saveResult.GetError().GetErrorMessage());
+        }
+
+        float ppu = spriteSettings.PixelsPerUnit;
+        if (ImGui::DragFloat("Pixels Per Unit", &ppu, 0.5f, 0.01f, 4096.0f, "%.1f"))
+        {
+            spriteSettings.PixelsPerUnit = std::max(0.01f, ppu);
+            const auto saveResult = Assets::SaveSpriteImportSettings(selectedTextureAssetKey, spriteSettings);
+            if (!saveResult.IsSuccess())
+                LT_CORE_WARN("Failed to save sprite import settings for '{}': {}", selectedTextureAssetKey, saveResult.GetError().GetErrorMessage());
+        }
+
+        if (spriteSettings.Mode == Assets::SpriteImportSettings::SpriteMode::Multiple)
+        {
+            ImGui::Spacing();
+            if (ImGui::Button("Open Sprite Editor", ImVec2(-1, 0)))
+            {
+                s_PendingSpriteEditorTextureKey = selectedTextureAssetKey;
+            }
+
+            if (!spriteSettings.SubSprites.empty())
+            {
+                ImGui::TextDisabled("%zu sub-sprites defined", spriteSettings.SubSprites.size());
+            }
+            else
+            {
+                ImGui::TextDisabled("No sub-sprites. Open Sprite Editor to slice.");
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // --- Texture Specification ---
         TextureSpecification specification = textureAsset->GetSpecification();
 
         const char* filterNames[] = { "Nearest", "Linear" };
