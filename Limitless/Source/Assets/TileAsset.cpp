@@ -6,9 +6,15 @@
 
 #include <filesystem>
 #include <fstream>
+#include <mutex>
+#include <unordered_map>
 
 namespace Limitless::Assets
 {
+    // In-memory cache keyed by asset key. Avoids repeated disk reads for
+    // tile data that rarely changes at runtime.
+    static std::mutex s_TileCacheMutex;
+    static std::unordered_map<std::string, TileAssetData> s_TileDataCache;
     // -------------------------------------------------------------------------
     // Collider type serialization helpers
     // -------------------------------------------------------------------------
@@ -77,6 +83,13 @@ namespace Limitless::Assets
         if (tileAssetKey.empty())
             return Result<TileAssetData>(ErrorCode::InvalidArgument, "Tile asset key is empty.");
 
+        {
+            std::lock_guard<std::mutex> lock(s_TileCacheMutex);
+            auto it = s_TileDataCache.find(tileAssetKey);
+            if (it != s_TileDataCache.end())
+                return Result<TileAssetData>(it->second);
+        }
+
         const auto pathResult = ResolveAssetKeyToPath(tileAssetKey);
         if (pathResult.IsFailure())
             return Result<TileAssetData>(pathResult.GetError());
@@ -89,7 +102,14 @@ namespace Limitless::Assets
         {
             nlohmann::json j;
             input >> j;
-            return Result<TileAssetData>(TileAssetDataFromJson(j));
+            TileAssetData data = TileAssetDataFromJson(j);
+
+            {
+                std::lock_guard<std::mutex> lock(s_TileCacheMutex);
+                s_TileDataCache[tileAssetKey] = data;
+            }
+
+            return Result<TileAssetData>(std::move(data));
         }
         catch (const std::exception& e)
         {
@@ -106,7 +126,13 @@ namespace Limitless::Assets
         if (pathResult.IsFailure())
             return Result<void>(pathResult.GetError());
 
-        return WriteTileAssetFile(pathResult.GetValue(), data);
+        auto result = WriteTileAssetFile(pathResult.GetValue(), data);
+        if (result.IsSuccess())
+        {
+            std::lock_guard<std::mutex> lock(s_TileCacheMutex);
+            s_TileDataCache[tileAssetKey] = data;
+        }
+        return result;
     }
 
     Result<void> WriteTileAssetFile(const std::filesystem::path& absolutePath, const TileAssetData& data)
@@ -129,5 +155,17 @@ namespace Limitless::Assets
         }
 
         return Result<void>();
+    }
+
+    void InvalidateTileAssetCache()
+    {
+        std::lock_guard<std::mutex> lock(s_TileCacheMutex);
+        s_TileDataCache.clear();
+    }
+
+    void InvalidateTileAssetCacheEntry(const std::string& tileAssetKey)
+    {
+        std::lock_guard<std::mutex> lock(s_TileCacheMutex);
+        s_TileDataCache.erase(tileAssetKey);
     }
 }

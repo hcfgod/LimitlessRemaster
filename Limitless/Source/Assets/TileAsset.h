@@ -35,10 +35,13 @@ namespace Limitless::Assets
         ColliderType Collider = ColliderType::Grid;
     };
 
-    /// Load a `.tile.json` asset from disk by its asset key.
+    /// Load a `.tile.json` asset, returning a cached copy when available.
+    /// Tile data is cached in memory after the first disk read. Call
+    /// InvalidateTileAssetCache() or InvalidateTileAssetCacheEntry() when
+    /// a tile file is modified on disk.
     [[nodiscard]] Result<TileAssetData> LoadTileAssetData(const std::string& tileAssetKey);
 
-    /// Save a `.tile.json` asset to disk at the location resolved from the asset key.
+    /// Save a `.tile.json` asset to disk and update the in-memory cache.
     [[nodiscard]] Result<void> SaveTileAssetData(const std::string& tileAssetKey,
                                                   const TileAssetData& data);
 
@@ -46,4 +49,11 @@ namespace Limitless::Assets
     /// The caller is responsible for registering the asset with AssetDatabase afterward.
     [[nodiscard]] Result<void> WriteTileAssetFile(const std::filesystem::path& absolutePath,
                                                   const TileAssetData& data);
+
+    /// Drop all entries from the in-memory tile data cache, forcing the next
+    /// LoadTileAssetData call for each key to re-read from disk.
+    void InvalidateTileAssetCache();
+
+    /// Drop a single entry from the in-memory tile data cache.
+    void InvalidateTileAssetCacheEntry(const std::string& tileAssetKey);
 }

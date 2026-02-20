@@ -6,9 +6,13 @@
 
 #include <filesystem>
 #include <fstream>
+#include <mutex>
+#include <unordered_map>
 
 namespace Limitless::Assets
 {
+    static std::mutex s_SpriteSettingsCacheMutex;
+    static std::unordered_map<std::string, SpriteImportSettings> s_SpriteSettingsCache;
     // -------------------------------------------------------------------------
     // JSON helpers
     // -------------------------------------------------------------------------
@@ -92,6 +96,16 @@ namespace Limitless::Assets
 
     SpriteImportSettings LoadSpriteImportSettings(const std::string& textureAssetKey)
     {
+        if (textureAssetKey.empty())
+            return SpriteImportSettings{};
+
+        {
+            std::lock_guard<std::mutex> lock(s_SpriteSettingsCacheMutex);
+            auto it = s_SpriteSettingsCache.find(textureAssetKey);
+            if (it != s_SpriteSettingsCache.end())
+                return it->second;
+        }
+
         SpriteImportSettings settings;
 
         const std::string metaPath = GetMetaPathForAssetKey(textureAssetKey);
@@ -130,6 +144,11 @@ namespace Limitless::Assets
             }
         }
 
+        {
+            std::lock_guard<std::mutex> lock(s_SpriteSettingsCacheMutex);
+            s_SpriteSettingsCache[textureAssetKey] = settings;
+        }
+
         return settings;
     }
 
@@ -140,7 +159,6 @@ namespace Limitless::Assets
         if (metaPath.empty())
             return Result<void>(ErrorCode::InvalidArgument, "Could not resolve meta path for: " + textureAssetKey);
 
-        // Read existing meta to preserve guid, deps, etc.
         nlohmann::json j = ReadMetaJson(metaPath);
 
         j["spriteMode"] = SpriteModeToString(settings.Mode);
@@ -156,7 +174,25 @@ namespace Limitless::Assets
         }
         j["subSprites"] = std::move(subArray);
 
-        return WriteMetaJson(metaPath, j);
+        auto result = WriteMetaJson(metaPath, j);
+        if (result.IsSuccess())
+        {
+            std::lock_guard<std::mutex> lock(s_SpriteSettingsCacheMutex);
+            s_SpriteSettingsCache[textureAssetKey] = settings;
+        }
+        return result;
+    }
+
+    void InvalidateSpriteImportSettingsCache()
+    {
+        std::lock_guard<std::mutex> lock(s_SpriteSettingsCacheMutex);
+        s_SpriteSettingsCache.clear();
+    }
+
+    void InvalidateSpriteImportSettingsCacheEntry(const std::string& textureAssetKey)
+    {
+        std::lock_guard<std::mutex> lock(s_SpriteSettingsCacheMutex);
+        s_SpriteSettingsCache.erase(textureAssetKey);
     }
 
     glm::vec4 ComputeSubSpriteUvs(const glm::ivec4& rectPixels,

@@ -10,6 +10,7 @@
 #include "Assets/AssetTypes.h"
 #include "Assets/SpriteImportSettings.h"
 #include "Assets/TextureAsset.h"
+#include "Assets/TileAsset.h"
 #include "Core/Application.h"
 #include "Core/Debug/Log.h"
 #include "Editor/EditorCameraController.h"
@@ -2804,6 +2805,32 @@ namespace Limitless
                 continue;
 
             m_PendingMaterialPrewarmTasks.emplace(material.MaterialKey, Assets::MaterialAsset::LoadAsync(material.MaterialKey));
+        }
+
+        // Prewarm tile textures so the render cache doesn't stall on first frame.
+        auto tilemapView = registry.view<TilemapLayerComponent>();
+        for (entt::entity entity : tilemapView)
+        {
+            const auto& layer = tilemapView.get<TilemapLayerComponent>(entity);
+            for (const std::string& tileKey : layer.TileTable)
+            {
+                if (tileKey.empty())
+                    continue;
+
+                auto tileResult = Assets::LoadTileAssetData(tileKey);
+                if (tileResult.IsFailure())
+                    continue;
+
+                const std::string& textureKey = tileResult.GetValue().SpriteTextureKey;
+                if (textureKey.empty())
+                    continue;
+
+                m_ActiveSceneTexturePrewarmKeys.insert(textureKey);
+                if (m_PrewarmedTextureAssets.contains(textureKey) || m_PendingTexturePrewarmTasks.contains(textureKey))
+                    continue;
+
+                m_PendingTexturePrewarmTasks.emplace(textureKey, Assets::TextureAsset::LoadAsync(textureKey));
+            }
         }
     }
 

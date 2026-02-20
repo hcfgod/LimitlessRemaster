@@ -32,13 +32,21 @@ namespace Limitless::Assets
     };
 
     /// Load sprite import settings from the `.meta` file of the given texture asset key.
-    /// Returns default settings if the meta file doesn't contain sprite fields.
+    /// Results are cached in memory; call InvalidateSpriteImportSettingsCache() after
+    /// modifying `.meta` files externally. SaveSpriteImportSettings updates the cache
+    /// automatically.
     [[nodiscard]] SpriteImportSettings LoadSpriteImportSettings(const std::string& textureAssetKey);
 
     /// Persist sprite import settings into the `.meta` file of the given texture asset key.
-    /// Preserves all existing meta fields (guid, deps, etc.).
+    /// Preserves all existing meta fields (guid, deps, etc.). Updates the in-memory cache.
     [[nodiscard]] Result<void> SaveSpriteImportSettings(const std::string& textureAssetKey,
                                                         const SpriteImportSettings& settings);
+
+    /// Drop all entries from the sprite import settings cache.
+    void InvalidateSpriteImportSettingsCache();
+
+    /// Drop a single entry from the sprite import settings cache.
+    void InvalidateSpriteImportSettingsCacheEntry(const std::string& textureAssetKey);
 
     /// Compute normalized UV coordinates for a sub-sprite rect within a texture of the given dimensions.
     /// Returns { uvMinX, uvMinY, uvMaxX, uvMaxY }.
