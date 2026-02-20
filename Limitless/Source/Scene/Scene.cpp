@@ -42,6 +42,7 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -1116,6 +1117,7 @@ namespace Limitless
                     destinationSprite.TextureLoadAttempted = false;
                     destinationSprite.Color = sourceSprite->Color;
                     destinationSprite.TilingFactor = sourceSprite->TilingFactor;
+                    destinationSprite.RenderOrder = sourceSprite->RenderOrder;
                     destinationSprite.CastShadows = sourceSprite->CastShadows;
                     destinationSprite.ReceiveShadows = sourceSprite->ReceiveShadows;
                 }
@@ -2027,6 +2029,7 @@ namespace Limitless
                 destinationSprite.TextureLoadAttempted = false;
                 destinationSprite.Color = sprite->Color;
                 destinationSprite.TilingFactor = sprite->TilingFactor;
+                destinationSprite.RenderOrder = sprite->RenderOrder;
                 destinationSprite.CastShadows = sprite->CastShadows;
                 destinationSprite.ReceiveShadows = sprite->ReceiveShadows;
             }
@@ -2373,6 +2376,7 @@ namespace Limitless
                     { "Texture", MakeAssetReferenceJson(sprite->TextureKey, Assets::AssetType::Texture2D) },
                     { "Color", { sprite->Color.r, sprite->Color.g, sprite->Color.b, sprite->Color.a } },
                     { "TilingFactor", { sprite->TilingFactor.x, sprite->TilingFactor.y } },
+                    { "RenderOrder", sprite->RenderOrder },
                     { "CastShadows", sprite->CastShadows },
                     { "ReceiveShadows", sprite->ReceiveShadows }
                 };
@@ -2987,6 +2991,7 @@ namespace Limitless
                         sprite.TilingFactor = glm::vec2(tilingX, tilingY);
                     }
                 }
+                sprite.RenderOrder = spriteJson.value("RenderOrder", 0);
                 sprite.CastShadows = spriteJson.value("CastShadows", true);
                 sprite.ReceiveShadows = spriteJson.value("ReceiveShadows", true);
 
@@ -3714,7 +3719,7 @@ namespace Limitless
         // Renders entities using the new Grid2DComponent + child TilemapLayerComponent
         // architecture. Each Grid2D entity defines the cell layout; its children
         // with TilemapLayerComponent store per-cell tile references.
-        auto renderGrid2DLayers = [&](bool renderForegroundLayers) {
+        auto renderGrid2DLayersAtOrder = [&](int32_t targetRenderOrder) {
             auto gridView = registry.view<TransformComponent, Grid2DComponent>();
             for (entt::entity gridEntity : gridView)
             {
@@ -3751,13 +3756,23 @@ namespace Limitless
                 {
                     auto& layer = registry.get<TilemapLayerComponent>(layerEntity);
 
-                    // Filter by foreground/background.
-                    if (renderForegroundLayers && layer.RenderOrder < 0)
-                        continue;
-                    if (!renderForegroundLayers && layer.RenderOrder >= 0)
+                    // Filter by exact render order so tile layers can interleave
+                    // with regular sprites using the same order channel.
+                    if (layer.RenderOrder != targetRenderOrder)
                         continue;
 
                     layer.EnsureStorage();
+                    // Track which TileTable entries are actually referenced by
+                    // cells in this layer. Large palettes may populate a huge
+                    // TileTable, but only a subset is typically painted.
+                    std::vector<bool> usedTileTableEntries(layer.TileTable.size(), false);
+                    for (uint32_t tileId : layer.Tiles)
+                    {
+                        if (tileId == 0u)
+                            continue;
+                        if (static_cast<size_t>(tileId) < usedTileTableEntries.size())
+                            usedTileTableEntries[tileId] = true;
+                    }
 
                     // Rebuild render cache if dirty.
                     if (layer.RenderCacheDirty)
@@ -3774,6 +3789,9 @@ namespace Limitless
 
                         for (size_t ti = 0; ti < layer.TileTable.size(); ++ti)
                         {
+                            if (ti >= usedTileTableEntries.size() || !usedTileTableEntries[ti])
+                                continue;
+
                             const std::string& tileKey = layer.TileTable[ti];
                             if (tileKey.empty())
                                 continue;
@@ -3843,7 +3861,11 @@ namespace Limitless
                         for (size_t ti = 0; ti < layer.CachedTileRender.size(); ++ti)
                         {
                             auto& cached = layer.CachedTileRender[ti];
-                            if (!cached.Texture && ti < layer.TileTable.size() && !layer.TileTable[ti].empty())
+                            if (!cached.Texture &&
+                                ti < layer.TileTable.size() &&
+                                ti < usedTileTableEntries.size() &&
+                                usedTileTableEntries[ti] &&
+                                !layer.TileTable[ti].empty())
                             {
                                 // Re-check pending texture loads without re-reading tile JSON.
                                 // Mark dirty so the full rebuild runs once textures become available.
@@ -3911,41 +3933,12 @@ namespace Limitless
             }
         };
 
-        renderGrid2DLayers(false);
-
-        auto view = registry.view<TransformComponent, SpriteComponent>();
-        std::vector<entt::entity> renderEntities;
-        renderEntities.reserve(view.size_hint());
-        for (entt::entity entity : view)
-            renderEntities.push_back(entity);
-
-        std::sort(renderEntities.begin(), renderEntities.end(), [&scene, &registry, interpolationAlpha](entt::entity left, entt::entity right) {
-            const glm::mat4 leftWorld = scene.GetWorldTransformMatrixForRendering(left, interpolationAlpha);
-            const glm::mat4 rightWorld = scene.GetWorldTransformMatrixForRendering(right, interpolationAlpha);
-            // Sort by world-space Z rather than view-space Z so the order stays
-            // stable regardless of the editor camera orientation.
-            const float leftWorldZ = leftWorld[3][2];
-            const float rightWorldZ = rightWorld[3][2];
-            constexpr float kDepthSortEpsilon = 0.005f;
-            if (std::abs(leftWorldZ - rightWorldZ) > kDepthSortEpsilon)
-                return leftWorldZ < rightWorldZ;
-
-            const auto* leftHierarchy = registry.try_get<HierarchyComponent>(left);
-            const auto* rightHierarchy = registry.try_get<HierarchyComponent>(right);
-            const int32_t leftOrder = leftHierarchy ? leftHierarchy->SiblingOrder : 0;
-            const int32_t rightOrder = rightHierarchy ? rightHierarchy->SiblingOrder : 0;
-            if (leftOrder != rightOrder)
-                return leftOrder < rightOrder;
-
-            return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
-        });
-
-        for (entt::entity entity : renderEntities)
-        {
+        auto drawSpriteEntity = [&](entt::entity entity) {
             if (!scene.IsEntityEnabledInHierarchy(entity))
-                continue;
+                return;
             if (IsEntityInCanvasUiHierarchy(registry, entity))
-                continue;
+                return;
+
             auto& sprite = registry.get<SpriteComponent>(entity);
             auto* animator = registry.try_get<AnimatorComponent>(entity);
 
@@ -4100,10 +4093,9 @@ namespace Limitless
             {
                 Renderer2D::DrawQuad(model, sprite.Color);
             }
-        }
+        };
 
-        // --- Particle emitters ---
-        {
+        auto drawParticleEmitters = [&]() {
             auto particleView = registry.view<ParticleEmitterComponent, TransformComponent>();
             for (entt::entity entity : particleView)
             {
@@ -4163,9 +4155,84 @@ namespace Limitless
                         Renderer2D::DrawQuad(particleTransform, color);
                 }
             }
+        };
+
+        auto view = registry.view<TransformComponent, SpriteComponent>();
+        std::vector<entt::entity> renderEntities;
+        renderEntities.reserve(view.size_hint());
+        std::set<int32_t> renderOrders;
+        for (entt::entity entity : view)
+        {
+            renderEntities.push_back(entity);
+            const auto& sprite = view.get<SpriteComponent>(entity);
+            renderOrders.insert(sprite.RenderOrder);
         }
 
-        renderGrid2DLayers(true);
+        auto gridView = registry.view<TransformComponent, Grid2DComponent>();
+        for (entt::entity gridEntity : gridView)
+        {
+            if (!scene.IsEntityEnabledInHierarchy(gridEntity))
+                continue;
+            const auto children = scene.GetChildren(gridEntity);
+            for (entt::entity child : children)
+            {
+                if (!registry.all_of<TilemapLayerComponent>(child) || !scene.IsEntityEnabledInHierarchy(child))
+                    continue;
+                renderOrders.insert(registry.get<TilemapLayerComponent>(child).RenderOrder);
+            }
+        }
+
+        std::sort(renderEntities.begin(), renderEntities.end(), [&scene, &registry, interpolationAlpha](entt::entity left, entt::entity right) {
+            const auto& leftSprite = registry.get<SpriteComponent>(left);
+            const auto& rightSprite = registry.get<SpriteComponent>(right);
+            if (leftSprite.RenderOrder != rightSprite.RenderOrder)
+                return leftSprite.RenderOrder < rightSprite.RenderOrder;
+
+            const glm::mat4 leftWorld = scene.GetWorldTransformMatrixForRendering(left, interpolationAlpha);
+            const glm::mat4 rightWorld = scene.GetWorldTransformMatrixForRendering(right, interpolationAlpha);
+            // Sort by world-space Z rather than view-space Z so the order stays
+            // stable regardless of the editor camera orientation.
+            const float leftWorldZ = leftWorld[3][2];
+            const float rightWorldZ = rightWorld[3][2];
+            constexpr float kDepthSortEpsilon = 0.005f;
+            if (std::abs(leftWorldZ - rightWorldZ) > kDepthSortEpsilon)
+                return leftWorldZ < rightWorldZ;
+
+            const auto* leftHierarchy = registry.try_get<HierarchyComponent>(left);
+            const auto* rightHierarchy = registry.try_get<HierarchyComponent>(right);
+            const int32_t leftOrder = leftHierarchy ? leftHierarchy->SiblingOrder : 0;
+            const int32_t rightOrder = rightHierarchy ? rightHierarchy->SiblingOrder : 0;
+            if (leftOrder != rightOrder)
+                return leftOrder < rightOrder;
+
+            return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
+        });
+
+        size_t spriteCursor = 0;
+        bool particlesRendered = false;
+        for (int32_t renderOrder : renderOrders)
+        {
+            if (!particlesRendered && renderOrder > 0)
+            {
+                drawParticleEmitters();
+                particlesRendered = true;
+            }
+
+            renderGrid2DLayersAtOrder(renderOrder);
+
+            while (spriteCursor < renderEntities.size())
+            {
+                const entt::entity entity = renderEntities[spriteCursor];
+                const auto& sprite = registry.get<SpriteComponent>(entity);
+                if (sprite.RenderOrder != renderOrder)
+                    break;
+                ++spriteCursor;
+                drawSpriteEntity(entity);
+            }
+        }
+
+        if (!particlesRendered)
+            drawParticleEmitters();
 
         Renderer2D::EndScene();
     }

@@ -431,6 +431,8 @@ namespace Limitless::EditorInspectorPanel
                     sprite->TilingFactor.x = std::max(0.001f, sprite->TilingFactor.x);
                     sprite->TilingFactor.y = std::max(0.001f, sprite->TilingFactor.y);
                     TrackInteractiveMutation(undoService, "Edit Sprite Tiling Factor");
+                    ImGui::DragInt("Render Order", &sprite->RenderOrder, 1.0f);
+                    TrackInteractiveMutation(undoService, "Edit Sprite Render Order");
                     ImGui::Checkbox("Cast Shadows", &sprite->CastShadows);
                     TrackInteractiveMutation(undoService, "Edit Sprite Cast Shadows");
                     ImGui::Checkbox("Receive Shadows", &sprite->ReceiveShadows);

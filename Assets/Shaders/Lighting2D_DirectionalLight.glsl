@@ -27,6 +27,7 @@ uniform vec2 u_ViewportSize;
 uniform vec3 u_LightColor;
 uniform float u_LightIntensity;
 uniform vec2 u_LightDirection;
+uniform vec2 u_ShadingLightDirection;
 
 uniform int u_UseShadows;
 uniform float u_ShadowStrength;
@@ -123,7 +124,25 @@ void main()
     }
 
     vec4 normalSample = texture(u_NormalTexture, v_UV);
-    float ndotl = 1.0;
+
+    vec3 normal = normalize(normalSample.xyz * 2.0 - 1.0);
+    vec2 shadingDirection = u_ShadingLightDirection;
+    if (length(shadingDirection) < 0.0001)
+        shadingDirection = vec2(0.0, -1.0);
+    else
+        shadingDirection = normalize(shadingDirection);
+
+    // Use world-space XY light azimuth and a small positive Z lift so
+    // flat sprites keep readable lighting while still reacting to rotation.
+    vec3 lightVector = normalize(vec3(-shadingDirection, 0.45));
+    float ndotl = max(dot(normal, lightVector), 0.0);
+
+    // Flat/default normals have near-zero XY and otherwise produce an almost
+    // constant result. Provide a gentle fallback so directional rotation is
+    // still visible without authored normal maps.
+    float flatness = 1.0 - clamp(length(normal.xy), 0.0, 1.0);
+    float azimuthTerm = 0.35 + 0.65 * max(dot(-shadingDirection, vec2(0.0, -1.0)), 0.0);
+    ndotl = mix(ndotl, azimuthTerm, flatness * 0.35);
 
     vec2 fragmentScreenPosition = gl_FragCoord.xy;
     vec2 shadowRayDir = -normalize(u_LightDirection);

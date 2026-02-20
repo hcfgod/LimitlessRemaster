@@ -93,6 +93,7 @@ namespace Limitless::EditorViewportPanel
               std::shared_ptr<Framebuffer>& gameViewFramebuffer,
               bool& gameViewFocused,
               bool& gameViewHovered,
+              bool& focusSceneViewRequested,
               bool& focusGameViewRequested,
               EditorCameraController* editorCameraController,
               Camera* sceneViewCamera,

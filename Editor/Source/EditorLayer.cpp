@@ -48,6 +48,7 @@
 #include <functional>
 #include <limits>
 #include <nlohmann/json.hpp>
+#include <sstream>
 #include <vector>
 
 namespace Limitless
@@ -753,6 +754,12 @@ namespace Limitless
             UpdateParticleEmitterSystem(m_Scene->GetRegistry(), deltaTime, true);
 
         ProcessPendingSceneTransitions();
+        if (m_StartupAssetImportPending && (!m_Scene || m_Scene->IsReady()))
+        {
+            LaunchStartupAssetImport();
+            m_StartupAssetImportPending = false;
+        }
+        PumpStartupAssetImport();
         PumpSceneAssetPrewarm();
         UpdateSceneLoadingState();
 
@@ -829,14 +836,11 @@ namespace Limitless
             const auto& pm = Project::ProjectManager::GetInstance();
             const std::filesystem::path projectRoot = pm.GetProjectRoot();
 
-            // Keep AssetDatabase key mappings canonical before any scene is loaded.
-            // Use changed-only import on project open to avoid re-importing every
-            // generated tile asset on each startup.
-            const auto reimportResult = Assets::AssetImportPipeline::ReimportChanged(true);
-            if (reimportResult.IsFailure())
-            {
-                LT_WARN("Asset reimport on project open failed: {}", reimportResult.GetError().GetErrorMessage());
-            }
+            // Defer startup reimport to a background task once the initial scene is
+            // visible, so project open remains responsive for tile-heavy projects.
+            m_StartupAssetImportPending = true;
+            m_StartupAssetImportInProgress = false;
+            m_StartupAssetImportTask = Async::Task<std::string>();
 
             // Reset per-project panel cache so settings always match the newly opened project.
             m_ProjectSettingsPanelState.Loaded = false;
@@ -923,6 +927,34 @@ namespace Limitless
         }
 
         DrawMenuBar();
+        if (m_StartupAssetImportPending || m_StartupAssetImportInProgress)
+        {
+            const char* phaseText = m_StartupAssetImportPending ? "Queued" : "Running";
+            const int dotCount = 1 + static_cast<int>(std::fmod(ImGui::GetTime() * 2.0, 3.0));
+            const std::string animatedDots(static_cast<size_t>(dotCount), '.');
+            const std::string statusText = std::string("Background Asset Sync: ") + phaseText + animatedDots;
+
+            ImGuiViewport* viewport = ImGui::GetMainViewport();
+            if (viewport)
+            {
+                const ImVec2 windowPos(
+                    viewport->Pos.x + viewport->Size.x - 12.0f,
+                    viewport->Pos.y + 28.0f);
+                ImGui::SetNextWindowPos(windowPos, ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+            }
+            ImGui::SetNextWindowBgAlpha(0.80f);
+            constexpr ImGuiWindowFlags statusFlags =
+                ImGuiWindowFlags_NoDecoration |
+                ImGuiWindowFlags_AlwaysAutoResize |
+                ImGuiWindowFlags_NoSavedSettings |
+                ImGuiWindowFlags_NoFocusOnAppearing |
+                ImGuiWindowFlags_NoNav;
+            if (ImGui::Begin("##BackgroundAssetSyncStatus", nullptr, statusFlags))
+            {
+                ImGui::TextUnformatted(statusText.c_str());
+            }
+            ImGui::End();
+        }
         EditorProjectSettingsPanel::Draw(m_ShowProjectSettingsWindow, m_ProjectSettingsPanelState);
         EditorBuildSettingsPanel::Draw(m_ShowBuildSettingsWindow, m_BuildSettingsPanelState,
                                        m_CurrentSceneAssetKey, m_Scene.get());
@@ -1297,6 +1329,7 @@ namespace Limitless
             m_GameViewFramebuffer,
             m_GameViewFocused,
             m_GameViewHovered,
+            m_FocusSceneViewOnPlayExit,
             m_FocusGameViewOnPlayEnter,
             m_EditorCameraController.get(),
             sceneViewCamera,
@@ -1969,6 +2002,7 @@ namespace Limitless
             m_SelectedEntity,
             m_SelectedTextureAssetKey,
             m_CachedTextureAsset);
+        m_FocusSceneViewOnPlayExit = false;
         m_FocusGameViewOnPlayEnter = true;
     }
 
@@ -2008,6 +2042,7 @@ namespace Limitless
             m_SelectedEntity,
             m_SelectedTextureAssetKey,
             m_CachedTextureAsset);
+        m_FocusSceneViewOnPlayExit = false;
     }
 
     void EditorLayer::ExitPlayMode()
@@ -2031,6 +2066,8 @@ namespace Limitless
         // Restore the edit scene identity after Play Mode runtime scene changes.
         m_CurrentSceneAssetKey = m_EditSceneStoredAssetKey;
         m_EditSceneStoredAssetKey.clear();
+        m_FocusGameViewOnPlayEnter = false;
+        m_FocusSceneViewOnPlayExit = true;
         DestroyGameViewPreviewCamera();
     }
 
@@ -2769,6 +2806,71 @@ namespace Limitless
         Lighting2DRenderer::SetSettings(runtimeSettings);
     }
 
+    void EditorLayer::LaunchStartupAssetImport()
+    {
+        if (m_StartupAssetImportInProgress)
+            return;
+
+        const auto existingRecords = Assets::AssetDatabase::GetInstance().GetAllRecords();
+        size_t tileRecordCount = 0;
+        for (const auto& record : existingRecords)
+        {
+            if (record.Type == Assets::AssetType::Tile)
+                ++tileRecordCount;
+        }
+
+        // Use a lighter changed-only pass for established projects to avoid an
+        // expensive dependent cascade while the editor is becoming interactive.
+        const bool includeDependents = existingRecords.empty();
+        m_StartupAssetImportInProgress = true;
+        m_StartupAssetImportTask = Async::GetAsyncIO().RunAsync([includeDependents]() -> std::string {
+            const auto result = Assets::AssetImportPipeline::ReimportChanged(includeDependents);
+            if (result.IsFailure())
+                return std::string("error: ") + result.GetError().GetErrorMessage();
+
+            const auto& stats = result.GetValue();
+            std::ostringstream stream;
+            stream << "discovered=" << stats.DiscoveredFiles
+                   << " imported=" << stats.Imported
+                   << " skipped=" << stats.SkippedUpToDate
+                   << " missing=" << stats.MissingOnDisk
+                   << " errors=" << stats.Errors;
+            return stream.str();
+        });
+
+        LT_INFO(
+            "Scheduled background startup reimport (records={}, tileRecords={}, includeDependents={}).",
+            existingRecords.size(),
+            tileRecordCount,
+            includeDependents ? "true" : "false");
+    }
+
+    void EditorLayer::PumpStartupAssetImport()
+    {
+        if (!m_StartupAssetImportInProgress || !m_StartupAssetImportTask.IsValid() || !m_StartupAssetImportTask.IsDone())
+            return;
+
+        try
+        {
+            const std::string result = m_StartupAssetImportTask.Get();
+            if (result.rfind("error:", 0) == 0)
+                LT_WARN("Background startup reimport failed: {}", result);
+            else
+                LT_INFO("Background startup reimport completed: {}", result);
+        }
+        catch (const std::exception& exception)
+        {
+            LT_WARN("Background startup reimport failed with exception: {}", exception.what());
+        }
+        catch (...)
+        {
+            LT_WARN("Background startup reimport failed with unknown exception.");
+        }
+
+        m_StartupAssetImportTask = Async::Task<std::string>();
+        m_StartupAssetImportInProgress = false;
+    }
+
     void EditorLayer::QueueSceneAssetPrewarm()
     {
         m_ActiveSceneTexturePrewarmKeys.clear();
@@ -2812,8 +2914,21 @@ namespace Limitless
         for (entt::entity entity : tilemapView)
         {
             const auto& layer = tilemapView.get<TilemapLayerComponent>(entity);
-            for (const std::string& tileKey : layer.TileTable)
+            std::vector<bool> usedTileTableEntries(layer.TileTable.size(), false);
+            for (uint32_t tileId : layer.Tiles)
             {
+                if (tileId == 0u)
+                    continue;
+                if (static_cast<size_t>(tileId) < usedTileTableEntries.size())
+                    usedTileTableEntries[tileId] = true;
+            }
+
+            for (size_t tableIndex = 0; tableIndex < layer.TileTable.size(); ++tableIndex)
+            {
+                if (tableIndex >= usedTileTableEntries.size() || !usedTileTableEntries[tableIndex])
+                    continue;
+
+                const std::string& tileKey = layer.TileTable[tableIndex];
                 if (tileKey.empty())
                     continue;
 

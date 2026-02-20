@@ -90,6 +90,8 @@ namespace Limitless
         bool OpenPrefabAssetForEditing(const std::string& prefabAssetKey);
         bool ReturnFromPrefabMode(bool forceWithoutConfirmation);
         bool ApplyPrefabStageChangesToInstances();
+        void LaunchStartupAssetImport();
+        void PumpStartupAssetImport();
         void QueueSceneAssetPrewarm();
         void PumpSceneAssetPrewarm();
         void UpdateSceneLoadingState();
@@ -134,6 +136,7 @@ namespace Limitless
         bool m_GameViewFocused = false;
         bool m_GameViewHovered = false;
         bool m_FocusGameViewOnPlayEnter = false;
+        bool m_FocusSceneViewOnPlayExit = false;
 
         CameraManager m_CameraManager;
         CameraId m_EditorCameraId{};
@@ -238,6 +241,9 @@ namespace Limitless
 
         std::unordered_map<std::string, Async::Task<Assets::TextureAsset::Ptr>> m_PendingTexturePrewarmTasks;
         std::unordered_map<std::string, Async::Task<Assets::MaterialAsset::Ptr>> m_PendingMaterialPrewarmTasks;
+        Async::Task<std::string> m_StartupAssetImportTask;
+        bool m_StartupAssetImportPending = false;
+        bool m_StartupAssetImportInProgress = false;
         std::unordered_map<std::string, Assets::TextureAsset::Ptr> m_PrewarmedTextureAssets;
         std::unordered_map<std::string, Assets::MaterialAsset::Ptr> m_PrewarmedMaterialAssets;
         std::unordered_set<std::string> m_ActiveSceneTexturePrewarmKeys;

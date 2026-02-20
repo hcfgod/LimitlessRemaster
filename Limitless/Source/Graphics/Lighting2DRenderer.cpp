@@ -61,7 +61,10 @@ namespace Limitless
         {
             glm::vec3 Color = glm::vec3(1.0f);
             float Intensity = 1.0f;
-            glm::vec2 Direction = glm::vec2(0.0f, -1.0f);
+            // Screen-space direction for shadow ray marching.
+            glm::vec2 ShadowDirection = glm::vec2(0.0f, -1.0f);
+            // World-space XY direction for diffuse shading.
+            glm::vec2 ShadingDirection = glm::vec2(0.0f, -1.0f);
             bool CastShadows = true;
             float ShadowStrength = 1.0f;
             float ShadowSoftnessPixels = 0.0f;
@@ -396,6 +399,11 @@ namespace Limitless
             }
 
             std::sort(entities.begin(), entities.end(), [&scene, &registry, interpolationAlpha](entt::entity left, entt::entity right) {
+                const auto& leftSprite = registry.get<SpriteComponent>(left);
+                const auto& rightSprite = registry.get<SpriteComponent>(right);
+                if (leftSprite.RenderOrder != rightSprite.RenderOrder)
+                    return leftSprite.RenderOrder < rightSprite.RenderOrder;
+
                 const glm::mat4 leftWorld = scene.GetWorldTransformMatrixForRendering(left, interpolationAlpha);
                 const glm::mat4 rightWorld = scene.GetWorldTransformMatrixForRendering(right, interpolationAlpha);
                 // Sort by world-space Z rather than view-space Z so the order stays
@@ -931,7 +939,8 @@ namespace Limitless
                 ScreenDirectionalLight screenLight{};
                 screenLight.Color = glm::max(directional.Color, glm::vec3(0.0f));
                 screenLight.Intensity = directional.Intensity;
-                screenLight.Direction = screenDirection;
+                screenLight.ShadowDirection = screenDirection;
+                screenLight.ShadingDirection = worldDirection;
                 screenLight.CastShadows = g_State.Settings.EnableShadows && directional.CastShadows;
                 screenLight.ShadowStrength = std::clamp(directional.ShadowStrength, 0.0f, 1.0f);
                 screenLight.ShadowSoftnessPixels = std::max(0.0f, directional.ShadowSoftness * g_State.Settings.ShadowSoftnessScale * pixelsPerUnit);
@@ -1024,7 +1033,8 @@ namespace Limitless
             auto normalRef = normalTexture;
             const glm::vec3 lightColor = light.Color;
             const float intensity = light.Intensity;
-            const glm::vec2 lightDirection = light.Direction;
+            const glm::vec2 shadowDirection = light.ShadowDirection;
+            const glm::vec2 shadingDirection = light.ShadingDirection;
             const int useShadows = light.CastShadows ? 1 : 0;
             const float shadowStrength = light.ShadowStrength;
             const float shadowSoftness = light.ShadowSoftnessPixels;
@@ -1041,7 +1051,7 @@ namespace Limitless
             // to pop edges in/out and produce shadow flicker.
             const std::vector<glm::vec4>& segments = shadowSegments;
 
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, lightColor, intensity, lightDirection, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowDistance, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segments = std::move(segments)](GraphicsContext*) {
+            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, lightColor, intensity, shadowDirection, shadingDirection, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowDistance, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segments = std::move(segments)](GraphicsContext*) {
                 auto* glShader = dynamic_cast<OpenGLShader*>(shaderRef.get());
                 auto* glVertexArray = dynamic_cast<OpenGLVertexArray*>(vertexArrayRef.get());
                 auto* glAlbedoTexture = dynamic_cast<OpenGLTexture2D*>(albedoRef.get());
@@ -1069,7 +1079,9 @@ namespace Limitless
                 if (GLint location = glGetUniformLocation(program, "u_LightIntensity"); location != -1)
                     glUniform1f(location, intensity);
                 if (GLint location = glGetUniformLocation(program, "u_LightDirection"); location != -1)
-                    glUniform2f(location, lightDirection.x, lightDirection.y);
+                    glUniform2f(location, shadowDirection.x, shadowDirection.y);
+                if (GLint location = glGetUniformLocation(program, "u_ShadingLightDirection"); location != -1)
+                    glUniform2f(location, shadingDirection.x, shadingDirection.y);
                 if (GLint location = glGetUniformLocation(program, "u_UseShadows"); location != -1)
                     glUniform1i(location, useShadows);
                 if (GLint location = glGetUniformLocation(program, "u_ShadowStrength"); location != -1)

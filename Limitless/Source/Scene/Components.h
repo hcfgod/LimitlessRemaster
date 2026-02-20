@@ -125,6 +125,7 @@ namespace Limitless
         bool TextureLoadAttempted = false; ///< Prevents per-frame retry/log spam when texture is missing
         glm::vec4 Color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
         glm::vec2 TilingFactor = glm::vec2(1.0f, 1.0f);
+        int32_t RenderOrder = 0; ///< Draw order relative to tile layers/sprites. Lower draws first.
         bool CastShadows = true;
         bool ReceiveShadows = true;
 
