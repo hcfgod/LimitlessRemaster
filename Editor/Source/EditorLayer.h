@@ -66,7 +66,6 @@ namespace Limitless
         void DrawAnimatorGraphPanel();
         void DrawPhysicsDiagnosticsPanel();
         void DrawConsolePanel();
-        void DrawTilemapPanel();
         void DrawTilePalettePanelFrame();
         void DrawSpriteEditorPanel();
 
@@ -205,7 +204,6 @@ namespace Limitless
         bool m_ShowPhysicsDiagnosticsWindow = true;
         bool m_ShowConsoleWindow = true;
         bool m_ShowEditorFpsOverlay = true;
-        bool m_ShowTilemapPanel = true;
         bool m_ShowAnimationTimelinePanel = true;
         bool m_ShowAnimatorGraphPanel = true;
         bool m_ShowBuildSettingsWindow = false;

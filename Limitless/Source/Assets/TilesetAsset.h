@@ -7,7 +7,7 @@
 
 namespace Limitless::Assets
 {
-    /// Serializable tileset metadata used by TilemapComponent.
+    /// Legacy tileset metadata retained for compatibility tooling.
     struct TilesetAssetDefinition
     {
         std::string TextureKey;

@@ -2,118 +2,70 @@
 
 ## Overview
 
-The tilemap feature adds a grid-based world authoring workflow with runtime rendering and editor painting tools. It is designed to match existing scene/entity workflows:
+The engine uses the new Unity-style tile workflow only:
 
-- Tilemaps are regular ECS components (`TilemapComponent`) on entities.
-- Tilemap content serializes directly in scene files and prefab files.
-- Tile painting operations are undoable with editor command history.
-- Tilemap entities are selectable in Scene hierarchy and editable in Inspector.
+- `Grid2DComponent` defines grid layout on a parent entity.
+- `TilemapLayerComponent` stores painted tile data on child layer entities.
+- `TileAsset` (`.tile.json`) represents individual paintable tiles.
+- `TilePaletteAsset` (`.tilepalette.json`) stores palette layout and selection source.
+
+The legacy `TilemapComponent` workflow has been removed.
 
 ## Runtime Data Model
 
-`TilemapComponent` stores:
+### `Grid2DComponent`
 
-- `GridSize`: number of cells (`x`, `y`)
-- `CellSize`: world-space dimensions of each cell
-- `TilesetAssetKey`: optional `.tileset.json` asset reference
-- `TilesetTextureKey`: texture asset key used as tile atlas
-- `TilesetTileSizePixels`: tile dimensions in the atlas texture
-- `TilesetMarginPixels`: optional atlas border margin before first tile
-- `TilesetSpacingPixels`: optional spacing between atlas cells
-- `TilesetExplicitTileRectsPixels`: optional explicit per-tile pixel rectangles for packed atlases
-- `AutoTileEnabled`: optional bitmask autotile remapping
-- `Layers`: ordered tile layers (`Background`, `Collision`, `Foreground` by default)
+- `CellSize`: world-space cell size.
+- `CellGap`: optional spacing between cells.
 
-Each `TilemapLayer` stores:
+### `TilemapLayerComponent`
 
-- `Name`
-- `Visible`
-- `CollisionEnabled`
-- `RenderOrder`
-- `Tiles` (`0` means empty, non-zero means tile id)
-- `PerTileData` (optional user data per cell)
+- `GridSize`: number of cells.
+- `RenderOrder`: draw order relative to sprites/layers.
+- `CollisionEnabled`: layer collision flag for future collision baking/queries.
+- `TileTable`: tile-id-to-`TileAsset` key mapping, where index `0` is always empty.
+- `Tiles`: per-cell tile ids (row-major).
 
 ## Rendering
 
-Tilemaps render in `SceneRenderer::Render` using the existing `Renderer2D` pipeline.
+`SceneRenderer::Render` draws `Grid2DComponent` hierarchies by iterating child `TilemapLayerComponent` entities:
 
-- Negative `RenderOrder` tilemap layers draw before sprites.
-- Zero or positive `RenderOrder` tilemap layers draw after sprites.
-- Tilemap cells use UVs derived from tileset metadata:
-  - explicit tile rects when present, otherwise
-  - grid slicing from tile size + margin + spacing.
-- Autotile mode (optional) applies a 4-neighbor bitmask offset (`+0..+15`) per painted base tile.
-  - Note: explicit tile-rect palettes intentionally skip auto-tile remapping (IDs are compacted, not contiguous atlas grid IDs).
+- Layers are sorted by `RenderOrder`.
+- Each painted cell resolves a `TileAsset` and sub-sprite UVs.
+- UV orientation matches texture import flip behavior.
+- Layer render caches are rebuilt lazily when dirty.
 
 ## Scene Serialization
 
-Scene save/load includes full tilemap payload:
+Scene save/load persists:
 
-- Grid size
-- Cell size
-- Tileset texture asset reference
-- Tileset tile size
-- Auto tile toggle
-- Per-layer tile arrays and per-cell user data
+- `Grid2D` component data.
+- `TilemapLayer` component data (`GridSize`, `RenderOrder`, `CollisionEnabled`, `TileTable`, `Tiles`).
 
-Scene format version was incremented to `9` for this addition.
+For large sparse maps, all-zero `Tiles` arrays are omitted to keep scene files smaller.
 
 ## Editor Workflow
 
-### Inspector
+### Tile Palette Panel
 
-When a selected entity has `TilemapComponent`, Inspector exposes:
+The `Tile Palette` panel is the single authoring surface for tile painting:
 
-- Tileset texture assignment (drag/drop from Project panel)
-  - automatically creates/uses a sidecar `.tileset.json` file for importer metadata.
-  - on first sidecar creation, tile size is auto-detected from the texture (with deterministic fallback).
-  - sparse atlases auto-generate compact explicit tile rects so the tile palette avoids large empty slot ranges.
-- Tileset asset assignment (`.tileset.json`) with texture, tile size, margin, spacing, and optional explicit tile rectangles
-- Grid size / cell size / tile pixel size / margin / spacing
-- Auto tile toggle
-- Layer list (name, visibility, collision flag, render order, add/remove)
-
-### Tilemap Panel
-
-`Tilemap` panel provides paint tool controls:
-
-- Paint enable
-- Grid overlay toggle
-- Paint mode: `Single`, `Rectangle`, `Fill`, `Erase`
-- Brush size
-- Active tile id
-- Optional custom per-tile data painting
-- Active layer selection
-- Tile palette preview and tile selection from tileset texture
+- Select a `TilePaletteAsset`.
+- Drag a sliced sprite sheet into the drop zone to populate the palette.
+- Single-click to select one tile.
+- Drag-select a rectangular stamp for multi-tile painting.
+- Choose active grid and layer targets.
+- Paint directly in Scene viewport with undo/redo support.
 
 ### Viewport Painting
 
-When the selected entity has a tilemap and painting is enabled:
+Painting uses `Grid2DComponent` + `TilemapLayerComponent` targets only.
 
-- Viewport shows tile grid overlay and brush preview
-- Painting is grid-aligned using world-to-local conversion
-- Modes supported: single brush, rectangle paint, flood fill, erase
+- Supports single/stamp painting and erase.
+- Uses stable world-to-grid projection under camera movement/rotation.
+- Each mouse stroke is recorded as one undoable command.
 
-Undo/redo is command-based for tile painting:
+## Notes
 
-- One stroke/fill/rectangle = one undo command
-- Commands store changed cells (layer, coordinates, previous/new tile and data)
-
-## Prefab Support
-
-Tilemap components are copied with prefab instantiation/apply/revert flows through `EditorPrefabSystem`.
-
-Runtime-only tilemap cache state is reset when cloning/loading.
-
-## Tilemap Physics (2D)
-
-`TilemapCollider2DComponent` can be added to the same entity as `TilemapComponent`.
-
-- Generates static physics colliders from painted solid tiles.
-- Uses either:
-  - all layers marked `CollisionEnabled`, or
-  - one specific layer index.
-- `MergeAdjacentTiles` combines neighbors into larger boxes (composite-like optimization).
-- Material/filter properties are exposed (`Friction`, `Restitution`, `IsSensor`, `Layer Bits`, `Mask Bits`).
-
-Collider geometry is rebuilt automatically when tile content, grid/cell sizing, layer collision flags, or relevant collider settings change.
+- Tile Palette assets are standard project assets and persist across editor restarts.
+- Legacy tilemap panel/components are no longer part of the supported workflow.

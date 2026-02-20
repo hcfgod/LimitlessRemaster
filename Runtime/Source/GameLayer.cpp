@@ -785,9 +785,10 @@ namespace Limitless
         auto& registry = m_Scene->GetRegistry();
         const size_t cameraCount = registry.storage<CameraComponent>().size();
         const size_t spriteCount = registry.storage<SpriteComponent>().size();
-        const size_t tilemapCount = registry.storage<TilemapComponent>().size();
-        LT_INFO("GameLayer: scene diagnostics -> cameras={}, sprites={}, tilemaps={}",
-            cameraCount, spriteCount, tilemapCount);
+        const size_t grid2DCount = registry.storage<Grid2DComponent>().size();
+        const size_t tilemapLayerCount = registry.storage<TilemapLayerComponent>().size();
+        LT_INFO("GameLayer: scene diagnostics -> cameras={}, sprites={}, grids={}, layers={}",
+            cameraCount, spriteCount, grid2DCount, tilemapLayerCount);
 
         LT_INFO("GameLayer: scene '{}' loaded.", sceneAssetKey);
         return true;

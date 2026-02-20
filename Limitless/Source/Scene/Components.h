@@ -575,24 +575,6 @@ namespace Limitless
         bool RuntimeShapeCreated = false;
     };
 
-    struct TilemapCollider2DComponent
-    {
-        bool Enabled = true;
-        bool MergeAdjacentTiles = true;
-        bool UseCollisionEnabledLayers = true;
-        int32_t LayerIndex = 0;
-        float Friction = 0.5f;
-        float Restitution = 0.0f;
-        bool IsSensor = false;
-        uint64_t CollisionLayer = 1ull;
-        uint64_t CollisionMask = ~0ull;
-
-        Physics2DBodyHandle RuntimeBodyId = kNullPhysics2DBody;
-        std::vector<Physics2DShapeHandle> RuntimeShapeIds;
-        bool RuntimeBodyCreated = false;
-        uint64_t RuntimeBuiltHash = 0ull;
-    };
-
     struct Joint2DComponent
     {
         enum class JointType
@@ -682,114 +664,6 @@ namespace Limitless
     {
         std::string PrefabAssetKey; ///< Asset key for prefab (example: "Assets/Prefabs/Player.prefab.json")
     };
-
-    /// Single tilemap layer data.
-    /// Tile value 0 = empty; non-zero values are tileset indices offset by +1.
-    struct TilemapLayer
-    {
-        std::string Name = "Layer";
-        bool Visible = true;
-        bool CollisionEnabled = false;
-        int32_t RenderOrder = 0;
-        std::vector<uint32_t> Tiles;
-        std::vector<uint32_t> PerTileData;
-    };
-
-    /// Grid-based tilemap renderer data.
-    /// Uses a single tileset texture and per-layer tile arrays.
-    /// @deprecated Use Grid2DComponent + TilemapLayerComponent for new tilemaps.
-    /// Kept for backward compatibility with existing scenes.
-    struct TilemapComponent
-    {
-        glm::ivec2 GridSize = glm::ivec2(256, 256);
-        glm::vec2 CellSize = glm::vec2(1.0f, 1.0f);
-        glm::ivec2 TilesetTileSizePixels = glm::ivec2(16, 16);
-        glm::ivec2 TilesetMarginPixels = glm::ivec2(0, 0);
-        glm::ivec2 TilesetSpacingPixels = glm::ivec2(0, 0);
-        std::vector<glm::ivec4> TilesetExplicitTileRectsPixels;
-        std::string TilesetAssetKey;
-        std::string TilesetTextureKey;
-        Assets::TextureAsset::Ptr CachedTilesetTexture;
-        bool TilesetTextureLoadAttempted = false;
-        bool TilesetAssetLoadAttempted = false;
-        bool AutoTileEnabled = false;
-        std::vector<TilemapLayer> Layers = {
-            TilemapLayer{ "Background", true, false, -20, {}, {} },
-            TilemapLayer{ "Collision", true, true, 0, {}, {} },
-            TilemapLayer{ "Foreground", true, false, 20, {}, {} }
-        };
-
-        int32_t GetCellCount() const
-        {
-            const int32_t width = std::max(1, GridSize.x);
-            const int32_t height = std::max(1, GridSize.y);
-            return width * height;
-        }
-
-        void EnsureLayerStorage()
-        {
-            const size_t cellCount = static_cast<size_t>(GetCellCount());
-            for (auto& layer : Layers)
-            {
-                if (layer.Tiles.size() != cellCount)
-                    layer.Tiles.resize(cellCount, 0u);
-                if (layer.PerTileData.size() != cellCount)
-                    layer.PerTileData.resize(cellCount, 0u);
-            }
-        }
-
-        void ResizeGrid(const glm::ivec2& requestedGridSize)
-        {
-            const glm::ivec2 previousGridSize = GridSize;
-            GridSize = glm::ivec2(std::max(1, requestedGridSize.x), std::max(1, requestedGridSize.y));
-            if (Layers.empty())
-            {
-                EnsureLayerStorage();
-                return;
-            }
-
-            const int32_t oldWidth = std::max(1, previousGridSize.x);
-            const int32_t oldHeight = std::max(1, previousGridSize.y);
-            const int32_t newWidth = std::max(1, GridSize.x);
-            const int32_t newHeight = std::max(1, GridSize.y);
-            const int32_t copyWidth = std::min(oldWidth, newWidth);
-            const int32_t copyHeight = std::min(oldHeight, newHeight);
-
-            for (auto& layer : Layers)
-            {
-                const std::vector<uint32_t> oldTiles = layer.Tiles;
-                const std::vector<uint32_t> oldData = layer.PerTileData;
-                layer.Tiles.assign(static_cast<size_t>(newWidth * newHeight), 0u);
-                layer.PerTileData.assign(static_cast<size_t>(newWidth * newHeight), 0u);
-
-                for (int32_t y = 0; y < copyHeight; ++y)
-                {
-                    for (int32_t x = 0; x < copyWidth; ++x)
-                    {
-                        const size_t oldIndex = static_cast<size_t>(y * oldWidth + x);
-                        const size_t newIndex = static_cast<size_t>(y * newWidth + x);
-                        if (oldIndex < oldTiles.size())
-                            layer.Tiles[newIndex] = oldTiles[oldIndex];
-                        if (oldIndex < oldData.size())
-                            layer.PerTileData[newIndex] = oldData[oldIndex];
-                    }
-                }
-            }
-        }
-    };
-
-    inline bool IsTilemapCellInBounds(const TilemapComponent& tilemap, int32_t cellX, int32_t cellY)
-    {
-        return cellX >= 0 && cellY >= 0 &&
-               cellX < std::max(1, tilemap.GridSize.x) &&
-               cellY < std::max(1, tilemap.GridSize.y);
-    }
-
-    inline size_t TilemapCellToIndex(const TilemapComponent& tilemap, int32_t cellX, int32_t cellY)
-    {
-        const int32_t width = std::max(1, tilemap.GridSize.x);
-        return static_cast<size_t>(cellY * width + cellX);
-    }
 
     // -------------------------------------------------------------------------
     // Grid2D + TilemapLayer system (Unity-style Tile Palette architecture)

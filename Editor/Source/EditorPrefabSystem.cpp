@@ -155,24 +155,6 @@ namespace Limitless::EditorPrefabSystem
                     destinationUISlider.RuntimeValueChangedThisFrame = false;
                 }
 
-                if (const auto* sourceTilemap = sourceRegistry.try_get<TilemapComponent>(sourceEntity))
-                {
-                    auto& destinationTilemap = destinationRegistry.emplace<TilemapComponent>(destinationEntity, *sourceTilemap);
-                    destinationTilemap.CachedTilesetTexture.reset();
-                    destinationTilemap.TilesetTextureLoadAttempted = false;
-                    destinationTilemap.TilesetAssetLoadAttempted = false;
-                    destinationTilemap.EnsureLayerStorage();
-                }
-
-                if (const auto* sourceTilemapCollider2D = sourceRegistry.try_get<TilemapCollider2DComponent>(sourceEntity))
-                {
-                    auto& destinationTilemapCollider2D = destinationRegistry.emplace<TilemapCollider2DComponent>(destinationEntity, *sourceTilemapCollider2D);
-                    destinationTilemapCollider2D.RuntimeBodyId = kNullPhysics2DBody;
-                    destinationTilemapCollider2D.RuntimeShapeIds.clear();
-                    destinationTilemapCollider2D.RuntimeBodyCreated = false;
-                    destinationTilemapCollider2D.RuntimeBuiltHash = 0ull;
-                }
-
                 if (const auto* sourceCamera = sourceRegistry.try_get<CameraComponent>(sourceEntity))
                     destinationRegistry.emplace<CameraComponent>(destinationEntity, *sourceCamera);
 

@@ -171,22 +171,7 @@ namespace Limitless::EditorInspectorPanel
             (void)Assets::AssetDatabase::GetInstance().ImportOrUpdate(selectedTilesetAssetKey, Assets::AssetType::Tileset);
             (void)Assets::AssetImportPipeline::ReimportChanged(true);
 
-            if (!scene)
-                return true;
-
-            auto& registry = scene->GetRegistry();
-            auto tilemapView = registry.view<TilemapComponent>();
-            for (entt::entity entity : tilemapView)
-            {
-                auto& tilemap = tilemapView.get<TilemapComponent>(entity);
-                if (tilemap.TilesetAssetKey == selectedTilesetAssetKey)
-                {
-                    tilemap.TilesetAssetLoadAttempted = false;
-                    tilemap.TilesetTextureLoadAttempted = false;
-                    tilemap.CachedTilesetTexture.reset();
-                }
-            }
-
+            (void)scene;
             return true;
         }
 

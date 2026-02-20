@@ -149,14 +149,6 @@ namespace Limitless::EditorProjectPanel
                    lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
         }
 
-        bool IsTilesetFileNameLower(const std::string& lowerFileName)
-        {
-            constexpr const char* tilesetSuffix = ".tileset.json";
-            const std::string suffixString = tilesetSuffix;
-            return lowerFileName.size() >= suffixString.size() &&
-                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
-        }
-
         bool IsAudioMixerFileNameLower(const std::string& lowerFileName)
         {
             constexpr const char* audioMixerSuffix = ".audiomixer.json";
@@ -702,12 +694,6 @@ namespace Limitless::EditorProjectPanel
                             CopyTextToBuffer(state.CreateMaterialNameBuffer, "New Material");
                             state.CreateMaterialPopupPending = true;
                         }
-                        if (ImGui::MenuItem("Create Tileset"))
-                        {
-                            state.CreateTilesetParentRelativePath = entryRelativePath;
-                            CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
-                            state.CreateTilesetPopupPending = true;
-                        }
                         if (ImGui::MenuItem("Create Tile Palette"))
                         {
                             state.CreateTilePaletteParentRelativePath = entryRelativePath;
@@ -985,7 +971,6 @@ namespace Limitless::EditorProjectPanel
                     const bool isTexture = IsTextureExtensionLower(entry.LowerExtension);
                     const bool isScene = IsSceneFileNameLower(entry.LowerFileName);
                     const bool isMaterial = IsMaterialFileNameLower(entry.LowerFileName);
-                    const bool isTileset = IsTilesetFileNameLower(entry.LowerFileName);
                     const bool isAudioMixer = IsAudioMixerFileNameLower(entry.LowerFileName);
                     const bool isInputActions = IsInputActionsFileNameLower(entry.LowerFileName);
                     const bool isAnimationClip = IsAnimationClipFileNameLower(entry.LowerFileName);
@@ -1021,7 +1006,6 @@ namespace Limitless::EditorProjectPanel
                     const bool isPrimarySelected =
                         (isTexture && (selectedTextureAssetKey == assetKey)) ||
                         (isMaterial && (selectedMaterialAssetKey == assetKey)) ||
-                        (isTileset && (selectedTilesetAssetKey == assetKey)) ||
                         (isAudioMixer && (selectedAudioMixerAssetKey == assetKey)) ||
                         (isInputActions && (selectedInputActionsAssetKey == assetKey)) ||
                         (isAnimationClip && (selectedAnimationClipAssetKey == assetKey)) ||
@@ -1055,8 +1039,6 @@ namespace Limitless::EditorProjectPanel
                             selectedTextureAssetKey = assetKey;
                         else if (isMaterial)
                             selectedMaterialAssetKey = assetKey;
-                        else if (isTileset)
-                            selectedTilesetAssetKey = assetKey;
                         else if (isNativeScriptFile)
                             selectedNativeScriptAssetKey = assetKey;
                         else if (isPrefab)
@@ -1169,14 +1151,6 @@ namespace Limitless::EditorProjectPanel
                         state.SelectionAnchorAssetKey = assetKey;
                         clearAssetSelection();
                         selectedMaterialAssetKey = assetKey;
-                    }
-                    else if (isTileset && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
-                    {
-                        state.MultiSelectedAssetKeys.clear();
-                        state.MultiSelectedAssetKeys.push_back(assetKey);
-                        state.SelectionAnchorAssetKey = assetKey;
-                        clearAssetSelection();
-                        selectedTilesetAssetKey = assetKey;
                     }
                     else if (isAudioMixer && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
                     {
@@ -1879,12 +1853,6 @@ namespace Limitless::EditorProjectPanel
                 CopyTextToBuffer(state.CreateMaterialNameBuffer, "New Material");
                 state.CreateMaterialPopupPending = true;
             }
-            if (ImGui::MenuItem("Create Tileset"))
-            {
-                state.CreateTilesetParentRelativePath = "";
-                CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
-                state.CreateTilesetPopupPending = true;
-            }
             if (ImGui::MenuItem("Create Tile Palette"))
             {
                 state.CreateTilePaletteParentRelativePath = "";
@@ -1940,12 +1908,6 @@ namespace Limitless::EditorProjectPanel
                     state.CreateMaterialParentRelativePath = "";
                     CopyTextToBuffer(state.CreateMaterialNameBuffer, "New Material");
                     state.CreateMaterialPopupPending = true;
-                }
-                if (ImGui::MenuItem("Create Tileset"))
-                {
-                    state.CreateTilesetParentRelativePath = "";
-                    CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
-                    state.CreateTilesetPopupPending = true;
                 }
                 if (ImGui::MenuItem("Create Tile Palette"))
                 {

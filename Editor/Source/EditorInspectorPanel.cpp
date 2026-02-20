@@ -1588,10 +1588,6 @@ namespace Limitless::EditorInspectorPanel
         {
             DrawPrefabAssetInspector(selectedPrefabAssetKey);
         }
-        else if (!selectedTilesetAssetKey.empty())
-        {
-            DrawTilesetAssetInspector(scene, selectedTilesetAssetKey);
-        }
         else if (!scene || selectedEntity == entt::null || !scene->IsValid(selectedEntity))
         {
             ImGui::Text("Select an object to edit.");
@@ -2137,12 +2133,10 @@ namespace Limitless::EditorInspectorPanel
                 const bool hasRigidbody2DComponent = registry.all_of<Rigidbody2DComponent>(selectedEntity);
                 const bool hasBoxCollider2DComponent = registry.all_of<BoxCollider2DComponent>(selectedEntity);
                 const bool hasCircleCollider2DComponent = registry.all_of<CircleCollider2DComponent>(selectedEntity);
-                const bool hasTilemapCollider2DComponent = registry.all_of<TilemapCollider2DComponent>(selectedEntity);
                 const bool hasJoint2DComponent = registry.all_of<Joint2DComponent>(selectedEntity);
                 const bool hasDirectionalLight2DComponent = registry.all_of<DirectionalLight2DComponent>(selectedEntity);
                 const bool hasPointLight2DComponent = registry.all_of<PointLight2DComponent>(selectedEntity);
                 const bool hasShadowOccluder2DComponent = registry.all_of<ShadowOccluder2DComponent>(selectedEntity);
-                const bool hasTilemapComponent = registry.all_of<TilemapComponent>(selectedEntity);
                 const bool hasGrid2DComponent = registry.all_of<Grid2DComponent>(selectedEntity);
                 const bool hasTilemapLayerComponent = registry.all_of<TilemapLayerComponent>(selectedEntity);
                 const bool hasParticleEmitterComponent = registry.all_of<ParticleEmitterComponent>(selectedEntity);
@@ -2680,23 +2674,6 @@ namespace Limitless::EditorInspectorPanel
                 if (hasCircleCollider2DComponent)
                     ImGui::EndDisabled();
 
-                if (hasTilemapCollider2DComponent)
-                    ImGui::BeginDisabled();
-
-                if (ImGui::MenuItem("Tilemap Collider 2D"))
-                {
-                    if (undoService)
-                        (void)undoService->ExecuteSceneMutation("Add TilemapCollider2D Component", [&](Scene& mutableScene) {
-                            mutableScene.GetRegistry().emplace<TilemapCollider2DComponent>(selectedEntity);
-                            return true;
-                        });
-                    else
-                        registry.emplace<TilemapCollider2DComponent>(selectedEntity);
-                }
-
-                if (hasTilemapCollider2DComponent)
-                    ImGui::EndDisabled();
-
                 if (hasJoint2DComponent)
                     ImGui::BeginDisabled();
 
@@ -2763,30 +2740,6 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 if (hasShadowOccluder2DComponent)
-                    ImGui::EndDisabled();
-
-                if (hasTilemapComponent)
-                    ImGui::BeginDisabled();
-
-                if (ImGui::MenuItem("Tilemap"))
-                {
-                    if (undoService)
-                    {
-                        (void)undoService->ExecuteSceneMutation("Add Tilemap Component", [&](Scene& mutableScene) {
-                            auto& mutableRegistry = mutableScene.GetRegistry();
-                            auto& tilemap = mutableRegistry.emplace<TilemapComponent>(selectedEntity);
-                            tilemap.EnsureLayerStorage();
-                            return true;
-                        });
-                    }
-                    else
-                    {
-                        auto& tilemap = registry.emplace<TilemapComponent>(selectedEntity);
-                        tilemap.EnsureLayerStorage();
-                    }
-                }
-
-                if (hasTilemapComponent)
                     ImGui::EndDisabled();
 
                 if (hasGrid2DComponent)
@@ -3213,36 +3166,6 @@ namespace Limitless::EditorInspectorPanel
                 else
                 {
                     registry.remove<ShadowOccluder2DComponent>(selectedEntity);
-                }
-            }
-
-            if (pendingRemovals.RemoveTilemapComponent)
-            {
-                if (undoService)
-                {
-                    (void)undoService->ExecuteSceneMutation("Remove Tilemap Component", [&](Scene& mutableScene) {
-                        mutableScene.GetRegistry().remove<TilemapComponent>(selectedEntity);
-                        return true;
-                    });
-                }
-                else
-                {
-                    registry.remove<TilemapComponent>(selectedEntity);
-                }
-            }
-
-            if (pendingRemovals.RemoveTilemapCollider2DComponent)
-            {
-                if (undoService)
-                {
-                    (void)undoService->ExecuteSceneMutation("Remove TilemapCollider2D Component", [&](Scene& mutableScene) {
-                        mutableScene.GetRegistry().remove<TilemapCollider2DComponent>(selectedEntity);
-                        return true;
-                    });
-                }
-                else
-                {
-                    registry.remove<TilemapCollider2DComponent>(selectedEntity);
                 }
             }
 

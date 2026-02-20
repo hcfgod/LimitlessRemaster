@@ -35,13 +35,9 @@ namespace Limitless::EditorViewportPanel
     {
         bool Enabled = true;
         bool ShowGridOverlay = true;
-        bool SnapToGrid = true;
         TilemapPaintMode PaintMode = TilemapPaintMode::Single;
-        int32_t ActiveLayerIndex = 0;
         int32_t BrushSize = 1;
         uint32_t ActiveTileId = 1;
-        bool PaintCustomData = false;
-        uint32_t ActiveCustomData = 0;
         bool HasHoveredCell = false;
         glm::ivec2 HoveredCell = glm::ivec2(0, 0);
 
@@ -59,11 +55,6 @@ namespace Limitless::EditorViewportPanel
         // Used to register tiles in the layer's TileTable when painting.
         std::string ActiveTileAssetKey;
         std::vector<std::string> StampTileAssetKeys; // Parallel to StampTileIds.
-
-        // Palette selection state for multi-tile drag.
-        glm::ivec2 PaletteSelectionStart = glm::ivec2(-1, -1);
-        glm::ivec2 PaletteSelectionEnd = glm::ivec2(-1, -1);
-        bool PaletteSelecting = false;
 
         bool HasStamp() const
         {

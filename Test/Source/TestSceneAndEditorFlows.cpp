@@ -153,16 +153,15 @@ TEST_SUITE("Scene And Editor Flows")
         text.Color = { 1.0f, 0.9f, 0.2f, 1.0f };
         text.FontLoadAttempted = true; // runtime-only behavior should reset in clone
 
-        auto& tilemap = registry.emplace<Limitless::TilemapComponent>(child);
-        tilemap.GridSize = { 4, 3 };
-        tilemap.ResizeGrid(tilemap.GridSize);
-        tilemap.CellSize = { 1.0f, 1.0f };
-        tilemap.TilesetTileSizePixels = { 16, 16 };
-        tilemap.TilesetTextureKey = "Assets/Textures/Tiles/Dungeon.png";
-        tilemap.TilesetTextureLoadAttempted = true;
-        tilemap.Layers[0].Tiles[0] = 1;
-        tilemap.Layers[0].Tiles[1] = 2;
-        tilemap.Layers[0].PerTileData[1] = 77;
+        auto& grid2D = registry.emplace<Limitless::Grid2DComponent>(child);
+        grid2D.CellSize = { 1.0f, 1.0f };
+        auto& tilemapLayer = registry.emplace<Limitless::TilemapLayerComponent>(child);
+        tilemapLayer.GridSize = { 4, 3 };
+        tilemapLayer.ResizeGrid(tilemapLayer.GridSize);
+        const uint32_t grassTileId = tilemapLayer.GetOrAddTileTableEntry("Assets/Tiles/Grass.tile.json");
+        const uint32_t stoneTileId = tilemapLayer.GetOrAddTileTableEntry("Assets/Tiles/Stone.tile.json");
+        tilemapLayer.Tiles[0] = grassTileId;
+        tilemapLayer.Tiles[1] = stoneTileId;
 
         auto& camera = registry.emplace<Limitless::CameraComponent>(parent);
         camera.Projection = Limitless::CameraComponent::ProjectionType::Perspective3D;
@@ -252,7 +251,8 @@ TEST_SUITE("Scene And Editor Flows")
         REQUIRE(cloneRegistry.all_of<Limitless::BoxCollider2DComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::CircleCollider2DComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::Joint2DComponent>(clonedChild));
-        REQUIRE(cloneRegistry.all_of<Limitless::TilemapComponent>(clonedChild));
+        REQUIRE(cloneRegistry.all_of<Limitless::Grid2DComponent>(clonedChild));
+        REQUIRE(cloneRegistry.all_of<Limitless::TilemapLayerComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::CameraComponent>(clonedParent));
         REQUIRE(cloneRegistry.all_of<Limitless::AudioListener2DComponent>(clonedParent));
 
@@ -270,15 +270,17 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(clonedText.FontSize == doctest::Approx(text.FontSize));
         CHECK(clonedText.FontLoadAttempted == false);
 
-        const auto& clonedTilemap = cloneRegistry.get<Limitless::TilemapComponent>(clonedChild);
-        CHECK(clonedTilemap.GridSize.x == 4);
-        CHECK(clonedTilemap.GridSize.y == 3);
-        CHECK(clonedTilemap.TilesetTextureKey == tilemap.TilesetTextureKey);
-        CHECK(clonedTilemap.TilesetTextureLoadAttempted == false);
-        REQUIRE(clonedTilemap.Layers.size() >= 1);
-        CHECK(clonedTilemap.Layers[0].Tiles[0] == 1);
-        CHECK(clonedTilemap.Layers[0].Tiles[1] == 2);
-        CHECK(clonedTilemap.Layers[0].PerTileData[1] == 77);
+        const auto& clonedGrid2D = cloneRegistry.get<Limitless::Grid2DComponent>(clonedChild);
+        CHECK(clonedGrid2D.CellSize.x == doctest::Approx(1.0f));
+        CHECK(clonedGrid2D.CellSize.y == doctest::Approx(1.0f));
+        const auto& clonedTilemapLayer = cloneRegistry.get<Limitless::TilemapLayerComponent>(clonedChild);
+        CHECK(clonedTilemapLayer.GridSize.x == 4);
+        CHECK(clonedTilemapLayer.GridSize.y == 3);
+        REQUIRE(clonedTilemapLayer.TileTable.size() >= 3);
+        CHECK(clonedTilemapLayer.TileTable[1] == "Assets/Tiles/Grass.tile.json");
+        CHECK(clonedTilemapLayer.TileTable[2] == "Assets/Tiles/Stone.tile.json");
+        CHECK(clonedTilemapLayer.Tiles[0] == 1);
+        CHECK(clonedTilemapLayer.Tiles[1] == 2);
 
         const auto& clonedAudio = cloneRegistry.get<Limitless::AudioSourceComponent>(clonedChild);
         CHECK(clonedAudio.AudioClipKey == audio.AudioClipKey);
@@ -371,29 +373,17 @@ TEST_SUITE("Scene And Editor Flows")
         auto& sprite = registry.emplace<Limitless::SpriteComponent>(root);
         sprite.TextureKey = "Assets/Textures/Backgrounds/Stage01.png";
 
-        auto& tilemap = registry.emplace<Limitless::TilemapComponent>(root);
-        tilemap.GridSize = { 3, 2 };
-        tilemap.ResizeGrid(tilemap.GridSize);
-        tilemap.CellSize = { 0.5f, 0.5f };
-        tilemap.TilesetTileSizePixels = { 8, 8 };
-        tilemap.TilesetTextureKey = "Assets/Textures/Tiles/CityTiles.png";
-        tilemap.AutoTileEnabled = true;
-        tilemap.Layers[0].Tiles[0] = 1;
-        tilemap.Layers[0].Tiles[1] = 2;
-        tilemap.Layers[0].PerTileData[0] = 3;
-        tilemap.Layers[1].Tiles[3] = 9;
-        tilemap.Layers[1].CollisionEnabled = true;
-        auto& tilemapCollider2D = registry.emplace<Limitless::TilemapCollider2DComponent>(root);
-        tilemapCollider2D.Enabled = true;
-        tilemapCollider2D.MergeAdjacentTiles = true;
-        tilemapCollider2D.UseCollisionEnabledLayers = true;
-        tilemapCollider2D.LayerIndex = 0;
-        tilemapCollider2D.Friction = 0.3f;
-        tilemapCollider2D.Restitution = 0.1f;
-        tilemapCollider2D.IsSensor = false;
-        tilemapCollider2D.CollisionLayer = 0x2ull;
-        tilemapCollider2D.CollisionMask = 0xFFFFFFFEull;
-
+        auto& grid2D = registry.emplace<Limitless::Grid2DComponent>(root);
+        grid2D.CellSize = { 0.5f, 0.5f };
+        auto& tilemapLayer = registry.emplace<Limitless::TilemapLayerComponent>(root);
+        tilemapLayer.GridSize = { 3, 2 };
+        tilemapLayer.ResizeGrid(tilemapLayer.GridSize);
+        tilemapLayer.CollisionEnabled = true;
+        const uint32_t cityTileA = tilemapLayer.GetOrAddTileTableEntry("Assets/Tiles/CityTiles_0.tile.json");
+        const uint32_t cityTileB = tilemapLayer.GetOrAddTileTableEntry("Assets/Tiles/CityTiles_1.tile.json");
+        tilemapLayer.Tiles[0] = cityTileA;
+        tilemapLayer.Tiles[1] = cityTileB;
+        tilemapLayer.Tiles[3] = cityTileB;
         auto& prefabInstance = registry.emplace<Limitless::PrefabInstanceComponent>(root);
         prefabInstance.PrefabAssetKey = "Assets/Prefabs/Ui/Hud.prefab.json";
 
@@ -491,31 +481,21 @@ TEST_SUITE("Scene And Editor Flows")
         const auto& loadedPrefabInstance = loadedRegistry.get<Limitless::PrefabInstanceComponent>(loadedRoot);
         CHECK(loadedPrefabInstance.PrefabAssetKey == "Assets/Prefabs/Ui/Hud.prefab.json");
 
-        REQUIRE(loadedRegistry.all_of<Limitless::TilemapComponent>(loadedRoot));
-        const auto& loadedTilemap = loadedRegistry.get<Limitless::TilemapComponent>(loadedRoot);
-        CHECK(loadedTilemap.GridSize.x == 3);
-        CHECK(loadedTilemap.GridSize.y == 2);
-        CHECK(loadedTilemap.CellSize.x == doctest::Approx(0.5f));
-        CHECK(loadedTilemap.CellSize.y == doctest::Approx(0.5f));
-        CHECK(loadedTilemap.TilesetTileSizePixels.x == 8);
-        CHECK(loadedTilemap.TilesetTileSizePixels.y == 8);
-        CHECK(loadedTilemap.TilesetTextureKey == "Assets/Textures/Tiles/CityTiles.png");
-        CHECK(loadedTilemap.AutoTileEnabled == true);
-        REQUIRE(loadedTilemap.Layers.size() >= 2);
-        CHECK(loadedTilemap.Layers[0].Tiles[0] == 1);
-        CHECK(loadedTilemap.Layers[0].Tiles[1] == 2);
-        CHECK(loadedTilemap.Layers[0].PerTileData[0] == 3);
-        CHECK(loadedTilemap.Layers[1].Tiles[3] == 9);
-        CHECK(loadedTilemap.Layers[1].CollisionEnabled == true);
-
-        REQUIRE(loadedRegistry.all_of<Limitless::TilemapCollider2DComponent>(loadedRoot));
-        const auto& loadedTilemapCollider2D = loadedRegistry.get<Limitless::TilemapCollider2DComponent>(loadedRoot);
-        CHECK(loadedTilemapCollider2D.MergeAdjacentTiles == true);
-        CHECK(loadedTilemapCollider2D.UseCollisionEnabledLayers == true);
-        CHECK(loadedTilemapCollider2D.Friction == doctest::Approx(0.3f));
-        CHECK(loadedTilemapCollider2D.Restitution == doctest::Approx(0.1f));
-        CHECK(loadedTilemapCollider2D.CollisionLayer == 0x2ull);
-        CHECK(loadedTilemapCollider2D.CollisionMask == 0xFFFFFFFEull);
+        REQUIRE(loadedRegistry.all_of<Limitless::Grid2DComponent>(loadedRoot));
+        REQUIRE(loadedRegistry.all_of<Limitless::TilemapLayerComponent>(loadedRoot));
+        const auto& loadedGrid2D = loadedRegistry.get<Limitless::Grid2DComponent>(loadedRoot);
+        CHECK(loadedGrid2D.CellSize.x == doctest::Approx(0.5f));
+        CHECK(loadedGrid2D.CellSize.y == doctest::Approx(0.5f));
+        const auto& loadedTilemapLayer = loadedRegistry.get<Limitless::TilemapLayerComponent>(loadedRoot);
+        CHECK(loadedTilemapLayer.GridSize.x == 3);
+        CHECK(loadedTilemapLayer.GridSize.y == 2);
+        CHECK(loadedTilemapLayer.CollisionEnabled == true);
+        REQUIRE(loadedTilemapLayer.TileTable.size() >= 3);
+        CHECK(loadedTilemapLayer.TileTable[1] == "Assets/Tiles/CityTiles_0.tile.json");
+        CHECK(loadedTilemapLayer.TileTable[2] == "Assets/Tiles/CityTiles_1.tile.json");
+        CHECK(loadedTilemapLayer.Tiles[0] == 1);
+        CHECK(loadedTilemapLayer.Tiles[1] == 2);
+        CHECK(loadedTilemapLayer.Tiles[3] == 2);
 
         REQUIRE(loadedRegistry.all_of<Limitless::DirectionalLight2DComponent>(loadedRoot));
         const auto& loadedDirectionalLight = loadedRegistry.get<Limitless::DirectionalLight2DComponent>(loadedRoot);

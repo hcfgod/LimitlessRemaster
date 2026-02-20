@@ -32,8 +32,6 @@ namespace Limitless::EditorInspectorPanel
         bool RemoveDirectionalLight2DComponent = false;
         bool RemovePointLight2DComponent = false;
         bool RemoveShadowOccluder2DComponent = false;
-        bool RemoveTilemapComponent = false;
-        bool RemoveTilemapCollider2DComponent = false;
         bool RemoveAnimatorComponent = false;
         bool RemoveAnimationEventReceiverComponent = false;
         bool RemoveParticleEmitterComponent = false;

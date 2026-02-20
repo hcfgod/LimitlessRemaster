@@ -12,7 +12,6 @@
 #include "Assets/MaterialAsset.h"
 #include "Assets/MaterialAssetImporter.h"
 #include "Assets/TileAsset.h"
-#include "Assets/TilesetAsset.h"
 #include "Assets/SpriteImportSettings.h"
 #include "Assets/TextureAsset.h"
 #include "Graphics/Camera/Camera.h"
@@ -256,131 +255,6 @@ namespace Limitless
         }
 
         void ProcessUiInteractionSystem(Scene& scene, uint32_t windowWidth, uint32_t windowHeight);
-
-        bool TryComputeTileUvRect(const TilemapComponent& tilemap,
-                                  const Assets::TextureAsset::Ptr& tilesetTexture,
-                                  uint32_t tileId,
-                                  glm::vec2& outUvMin,
-                                  glm::vec2& outUvMax,
-                                  uint32_t* outMaxTileCount = nullptr)
-        {
-            if (!tilesetTexture || !tilesetTexture->GetTexture() || tileId == 0u)
-                return false;
-
-            if (!tilemap.TilesetExplicitTileRectsPixels.empty())
-            {
-                const uint32_t explicitTileCount = static_cast<uint32_t>(tilemap.TilesetExplicitTileRectsPixels.size());
-                if (outMaxTileCount)
-                    *outMaxTileCount = explicitTileCount;
-                if (tileId > explicitTileCount)
-                    return false;
-
-                const glm::ivec4 rectPixels = tilemap.TilesetExplicitTileRectsPixels[tileId - 1u];
-                const uint32_t textureWidth = tilesetTexture->GetTexture()->GetWidth();
-                const uint32_t textureHeight = tilesetTexture->GetTexture()->GetHeight();
-                if (textureWidth == 0u || textureHeight == 0u)
-                    return false;
-                if (rectPixels.z <= 0 || rectPixels.w <= 0)
-                    return false;
-                if (rectPixels.x < 0 || rectPixels.y < 0)
-                    return false;
-                if (static_cast<uint32_t>(rectPixels.x + rectPixels.z) > textureWidth ||
-                    static_cast<uint32_t>(rectPixels.y + rectPixels.w) > textureHeight)
-                {
-                    return false;
-                }
-
-                const float left = static_cast<float>(rectPixels.x) / static_cast<float>(textureWidth);
-                const float right = static_cast<float>(rectPixels.x + rectPixels.z) / static_cast<float>(textureWidth);
-                const float bottom = static_cast<float>(rectPixels.y) / static_cast<float>(textureHeight);
-                const float top = static_cast<float>(rectPixels.y + rectPixels.w) / static_cast<float>(textureHeight);
-                outUvMin = glm::vec2(left, bottom);
-                outUvMax = glm::vec2(right, top);
-                return true;
-            }
-
-            const int32_t tilePixelWidth = std::max(1, tilemap.TilesetTileSizePixels.x);
-            const int32_t tilePixelHeight = std::max(1, tilemap.TilesetTileSizePixels.y);
-            const int32_t marginPixelWidth = std::max(0, tilemap.TilesetMarginPixels.x);
-            const int32_t marginPixelHeight = std::max(0, tilemap.TilesetMarginPixels.y);
-            const int32_t spacingPixelWidth = std::max(0, tilemap.TilesetSpacingPixels.x);
-            const int32_t spacingPixelHeight = std::max(0, tilemap.TilesetSpacingPixels.y);
-            const uint32_t textureWidth = tilesetTexture->GetTexture()->GetWidth();
-            const uint32_t textureHeight = tilesetTexture->GetTexture()->GetHeight();
-            if (textureWidth == 0u || textureHeight == 0u)
-                return false;
-
-            const int32_t usableWidth = static_cast<int32_t>(textureWidth) - marginPixelWidth * 2;
-            const int32_t usableHeight = static_cast<int32_t>(textureHeight) - marginPixelHeight * 2;
-            if (usableWidth < tilePixelWidth || usableHeight < tilePixelHeight)
-                return false;
-
-            const int32_t columnStride = tilePixelWidth + spacingPixelWidth;
-            const int32_t rowStride = tilePixelHeight + spacingPixelHeight;
-            const int32_t columns = (usableWidth + spacingPixelWidth) / columnStride;
-            const int32_t rows = (usableHeight + spacingPixelHeight) / rowStride;
-            if (columns <= 0 || rows <= 0)
-                return false;
-
-            const uint32_t maxTileCount = static_cast<uint32_t>(columns * rows);
-            if (outMaxTileCount)
-                *outMaxTileCount = maxTileCount;
-            if (tileId == 0u || tileId > maxTileCount)
-                return false;
-
-            const uint32_t zeroBasedId = tileId - 1u;
-            const int32_t column = static_cast<int32_t>(zeroBasedId % static_cast<uint32_t>(columns));
-            const int32_t row = static_cast<int32_t>(zeroBasedId / static_cast<uint32_t>(columns));
-            if (row < 0 || row >= rows)
-                return false;
-
-            const int32_t tileLeftPixels = marginPixelWidth + (column * columnStride);
-            const int32_t tileBottomPixels = marginPixelHeight + (row * rowStride);
-            const float left = static_cast<float>(tileLeftPixels) / static_cast<float>(textureWidth);
-            const float right = static_cast<float>(tileLeftPixels + tilePixelWidth) / static_cast<float>(textureWidth);
-            const float bottom = static_cast<float>(tileBottomPixels) / static_cast<float>(textureHeight);
-            const float top = static_cast<float>(tileBottomPixels + tilePixelHeight) / static_cast<float>(textureHeight);
-            outUvMin = glm::vec2(left, bottom);
-            outUvMax = glm::vec2(right, top);
-            return true;
-        }
-
-        uint32_t ComputeAutoTileId(const TilemapComponent& tilemap,
-                                   const TilemapLayer& layer,
-                                   int32_t cellX,
-                                   int32_t cellY,
-                                   uint32_t baseTileId,
-                                   uint32_t maxTileCount)
-        {
-            if (!tilemap.TilesetExplicitTileRectsPixels.empty())
-                return baseTileId;
-            if (!tilemap.AutoTileEnabled || baseTileId == 0u || maxTileCount == 0u)
-                return baseTileId;
-
-            auto hasSolidTile = [&](int32_t x, int32_t y) -> bool {
-                if (!IsTilemapCellInBounds(tilemap, x, y))
-                    return false;
-                const size_t index = TilemapCellToIndex(tilemap, x, y);
-                if (index >= layer.Tiles.size())
-                    return false;
-                return layer.Tiles[index] != 0u;
-            };
-
-            uint32_t neighborMask = 0u;
-            if (hasSolidTile(cellX, cellY + 1))
-                neighborMask |= 1u; // Up
-            if (hasSolidTile(cellX + 1, cellY))
-                neighborMask |= 2u; // Right
-            if (hasSolidTile(cellX, cellY - 1))
-                neighborMask |= 4u; // Down
-            if (hasSolidTile(cellX - 1, cellY))
-                neighborMask |= 8u; // Left
-
-            const uint32_t candidateTileId = baseTileId + neighborMask;
-            if (candidateTileId >= 1u && candidateTileId <= maxTileCount)
-                return candidateTileId;
-            return baseTileId;
-        }
 
         nlohmann::json SerializeScriptPropertyValue(const ScriptPropertyValue& value)
         {
@@ -1136,26 +1010,10 @@ namespace Limitless
                 circleCollider2D->RuntimeShapeCreated = false;
             }
 
-            if (auto* tilemapCollider2D = registry.try_get<TilemapCollider2DComponent>(entity))
-            {
-                tilemapCollider2D->RuntimeBodyId = kNullPhysics2DBody;
-                tilemapCollider2D->RuntimeShapeIds.clear();
-                tilemapCollider2D->RuntimeBodyCreated = false;
-                tilemapCollider2D->RuntimeBuiltHash = 0ull;
-            }
-
             if (auto* joint2D = registry.try_get<Joint2DComponent>(entity))
             {
                 joint2D->RuntimeJointId = kNullPhysics2DJoint;
                 joint2D->RuntimeJointCreated = false;
-            }
-
-            if (auto* tilemap = registry.try_get<TilemapComponent>(entity))
-            {
-                tilemap->CachedTilesetTexture.reset();
-                tilemap->TilesetTextureLoadAttempted = false;
-                tilemap->TilesetAssetLoadAttempted = false;
-                tilemap->EnsureLayerStorage();
             }
 
             if (auto* animator = registry.try_get<AnimatorComponent>(entity))
@@ -1309,15 +1167,6 @@ namespace Limitless
                 if (const auto* sourceUISlider = sourceRegistry.try_get<UISliderComponent>(sourceEntity))
                     destinationRegistry.emplace<UISliderComponent>(destinationEntity, *sourceUISlider);
 
-                if (const auto* sourceTilemap = sourceRegistry.try_get<TilemapComponent>(sourceEntity))
-                {
-                    auto& destinationTilemap = destinationRegistry.emplace<TilemapComponent>(destinationEntity, *sourceTilemap);
-                    destinationTilemap.CachedTilesetTexture.reset();
-                    destinationTilemap.TilesetTextureLoadAttempted = false;
-                    destinationTilemap.TilesetAssetLoadAttempted = false;
-                    destinationTilemap.EnsureLayerStorage();
-                }
-
                 if (const auto* sourceCamera = sourceRegistry.try_get<CameraComponent>(sourceEntity))
                     destinationRegistry.emplace<CameraComponent>(destinationEntity, *sourceCamera);
 
@@ -1352,9 +1201,6 @@ namespace Limitless
 
                 if (const auto* sourceCircleCollider2D = sourceRegistry.try_get<CircleCollider2DComponent>(sourceEntity))
                     destinationRegistry.emplace<CircleCollider2DComponent>(destinationEntity, *sourceCircleCollider2D);
-
-                if (const auto* sourceTilemapCollider2D = sourceRegistry.try_get<TilemapCollider2DComponent>(sourceEntity))
-                    destinationRegistry.emplace<TilemapCollider2DComponent>(destinationEntity, *sourceTilemapCollider2D);
 
                 if (const auto* sourceJoint2D = sourceRegistry.try_get<Joint2DComponent>(sourceEntity))
                     destinationRegistry.emplace<Joint2DComponent>(destinationEntity, *sourceJoint2D);
@@ -2266,15 +2112,6 @@ namespace Limitless
                 destinationSlider.RuntimeValueChangedThisFrame = false;
             }
 
-            if (const auto* tilemap = sourceRegistry.try_get<TilemapComponent>(sourceEntity))
-            {
-                auto& destinationTilemap = destinationRegistry.emplace<TilemapComponent>(destinationEntity, *tilemap);
-                destinationTilemap.CachedTilesetTexture.reset();
-                destinationTilemap.TilesetTextureLoadAttempted = false;
-                destinationTilemap.TilesetAssetLoadAttempted = false;
-                destinationTilemap.EnsureLayerStorage();
-            }
-
             if (const auto* grid2D = sourceRegistry.try_get<Grid2DComponent>(sourceEntity))
             {
                 destinationRegistry.emplace<Grid2DComponent>(destinationEntity, *grid2D);
@@ -2331,15 +2168,6 @@ namespace Limitless
                 auto& destinationCircleCollider2D = destinationRegistry.emplace<CircleCollider2DComponent>(destinationEntity, *circleCollider2D);
                 destinationCircleCollider2D.RuntimeShapeId = kNullPhysics2DShape;
                 destinationCircleCollider2D.RuntimeShapeCreated = false;
-            }
-
-            if (const auto* tilemapCollider2D = sourceRegistry.try_get<TilemapCollider2DComponent>(sourceEntity))
-            {
-                auto& destinationTilemapCollider2D = destinationRegistry.emplace<TilemapCollider2DComponent>(destinationEntity, *tilemapCollider2D);
-                destinationTilemapCollider2D.RuntimeBodyId = kNullPhysics2DBody;
-                destinationTilemapCollider2D.RuntimeShapeIds.clear();
-                destinationTilemapCollider2D.RuntimeBodyCreated = false;
-                destinationTilemapCollider2D.RuntimeBuiltHash = 0ull;
             }
 
             if (const auto* joint2D = sourceRegistry.try_get<Joint2DComponent>(sourceEntity))
@@ -2716,41 +2544,6 @@ namespace Limitless
                 };
             }
 
-            if (const auto* tilemap = m_Registry.try_get<TilemapComponent>(entity))
-            {
-                nlohmann::json tilemapLayers = nlohmann::json::array();
-                for (const auto& layer : tilemap->Layers)
-                {
-                    tilemapLayers.push_back({
-                        { "Name", layer.Name },
-                        { "Visible", layer.Visible },
-                        { "CollisionEnabled", layer.CollisionEnabled },
-                        { "RenderOrder", layer.RenderOrder },
-                        { "Tiles", layer.Tiles },
-                        { "PerTileData", layer.PerTileData }
-                    });
-                }
-
-                nlohmann::json explicitTileRects = nlohmann::json::array();
-                for (const glm::ivec4& tileRect : tilemap->TilesetExplicitTileRectsPixels)
-                {
-                    explicitTileRects.push_back({ tileRect.x, tileRect.y, tileRect.z, tileRect.w });
-                }
-
-                entry["Tilemap"] = {
-                    { "GridSize", { tilemap->GridSize.x, tilemap->GridSize.y } },
-                    { "CellSize", { tilemap->CellSize.x, tilemap->CellSize.y } },
-                    { "TilesetTileSizePixels", { tilemap->TilesetTileSizePixels.x, tilemap->TilesetTileSizePixels.y } },
-                    { "TilesetMarginPixels", { tilemap->TilesetMarginPixels.x, tilemap->TilesetMarginPixels.y } },
-                    { "TilesetSpacingPixels", { tilemap->TilesetSpacingPixels.x, tilemap->TilesetSpacingPixels.y } },
-                    { "TilesetExplicitTileRectsPixels", std::move(explicitTileRects) },
-                    { "TilesetAsset", MakeAssetReferenceJson(tilemap->TilesetAssetKey, Assets::AssetType::Tileset) },
-                    { "TilesetTexture", MakeAssetReferenceJson(tilemap->TilesetTextureKey, Assets::AssetType::Texture2D) },
-                    { "AutoTileEnabled", tilemap->AutoTileEnabled },
-                    { "Layers", std::move(tilemapLayers) }
-                };
-            }
-
             if (const auto* grid2D = m_Registry.try_get<Grid2DComponent>(entity))
             {
                 entry["Grid2D"] = {
@@ -2783,21 +2576,6 @@ namespace Limitless
                     tilemapLayerJson["Tiles"] = tilemapLayer->Tiles;
 
                 entry["TilemapLayer"] = std::move(tilemapLayerJson);
-            }
-
-            if (const auto* tilemapCollider2D = m_Registry.try_get<TilemapCollider2DComponent>(entity))
-            {
-                entry["TilemapCollider2D"] = {
-                    { "Enabled", tilemapCollider2D->Enabled },
-                    { "MergeAdjacentTiles", tilemapCollider2D->MergeAdjacentTiles },
-                    { "UseCollisionEnabledLayers", tilemapCollider2D->UseCollisionEnabledLayers },
-                    { "LayerIndex", tilemapCollider2D->LayerIndex },
-                    { "Friction", tilemapCollider2D->Friction },
-                    { "Restitution", tilemapCollider2D->Restitution },
-                    { "IsSensor", tilemapCollider2D->IsSensor },
-                    { "CollisionLayer", tilemapCollider2D->CollisionLayer },
-                    { "CollisionMask", tilemapCollider2D->CollisionMask }
-                };
             }
 
             if (const auto* camera = m_Registry.try_get<CameraComponent>(entity))
@@ -3494,95 +3272,6 @@ namespace Limitless
                     scene->GetRegistry().emplace<RectTransformComponent>(entity);
             }
 
-            if (entry.contains("Tilemap") && entry["Tilemap"].is_object())
-            {
-                const auto& tilemapJson = entry["Tilemap"];
-                auto& tilemap = scene->GetRegistry().emplace<TilemapComponent>(entity);
-
-                auto gridSize = tilemapJson.value("GridSize", std::vector<int>{ tilemap.GridSize.x, tilemap.GridSize.y });
-                if (gridSize.size() >= 2)
-                    tilemap.GridSize = glm::ivec2(std::max(1, gridSize[0]), std::max(1, gridSize[1]));
-
-                auto cellSize = tilemapJson.value("CellSize", std::vector<float>{ tilemap.CellSize.x, tilemap.CellSize.y });
-                if (cellSize.size() >= 2)
-                    tilemap.CellSize = glm::vec2(std::max(0.001f, cellSize[0]), std::max(0.001f, cellSize[1]));
-
-                auto tileSize = tilemapJson.value("TilesetTileSizePixels",
-                    std::vector<int>{ tilemap.TilesetTileSizePixels.x, tilemap.TilesetTileSizePixels.y });
-                if (tileSize.size() >= 2)
-                    tilemap.TilesetTileSizePixels = glm::ivec2(std::max(1, tileSize[0]), std::max(1, tileSize[1]));
-
-                auto tileMargin = tilemapJson.value("TilesetMarginPixels",
-                    std::vector<int>{ tilemap.TilesetMarginPixels.x, tilemap.TilesetMarginPixels.y });
-                if (tileMargin.size() >= 2)
-                    tilemap.TilesetMarginPixels = glm::ivec2(std::max(0, tileMargin[0]), std::max(0, tileMargin[1]));
-
-                auto tileSpacing = tilemapJson.value("TilesetSpacingPixels",
-                    std::vector<int>{ tilemap.TilesetSpacingPixels.x, tilemap.TilesetSpacingPixels.y });
-                if (tileSpacing.size() >= 2)
-                    tilemap.TilesetSpacingPixels = glm::ivec2(std::max(0, tileSpacing[0]), std::max(0, tileSpacing[1]));
-
-                tilemap.TilesetExplicitTileRectsPixels.clear();
-                if (tilemapJson.contains("TilesetExplicitTileRectsPixels") && tilemapJson["TilesetExplicitTileRectsPixels"].is_array())
-                {
-                    for (const auto& rectJson : tilemapJson["TilesetExplicitTileRectsPixels"])
-                    {
-                        if (!rectJson.is_array() || rectJson.size() < 4)
-                            continue;
-                        const int32_t x = std::max(0, rectJson[0].get<int32_t>());
-                        const int32_t y = std::max(0, rectJson[1].get<int32_t>());
-                        const int32_t width = std::max(1, rectJson[2].get<int32_t>());
-                        const int32_t height = std::max(1, rectJson[3].get<int32_t>());
-                        tilemap.TilesetExplicitTileRectsPixels.emplace_back(x, y, width, height);
-                    }
-                }
-
-                if (tilemapJson.contains("TilesetAsset"))
-                    tilemap.TilesetAssetKey = ResolveAssetKeyFromSceneJson(tilemapJson["TilesetAsset"]);
-                else
-                    tilemap.TilesetAssetKey = tilemapJson.value("TilesetAssetKey", std::string{});
-
-                if (tilemapJson.contains("TilesetTexture"))
-                    tilemap.TilesetTextureKey = ResolveAssetKeyFromSceneJson(tilemapJson["TilesetTexture"]);
-                else
-                    tilemap.TilesetTextureKey = tilemapJson.value("TilesetTextureKey", std::string{});
-
-                tilemap.AutoTileEnabled = tilemapJson.value("AutoTileEnabled", false);
-                tilemap.CachedTilesetTexture.reset();
-                tilemap.TilesetTextureLoadAttempted = false;
-                tilemap.TilesetAssetLoadAttempted = false;
-                tilemap.Layers.clear();
-
-                if (tilemapJson.contains("Layers") && tilemapJson["Layers"].is_array())
-                {
-                    for (const auto& layerJson : tilemapJson["Layers"])
-                    {
-                        if (!layerJson.is_object())
-                            continue;
-                        TilemapLayer layer;
-                        layer.Name = layerJson.value("Name", std::string("Layer"));
-                        layer.Visible = layerJson.value("Visible", true);
-                        layer.CollisionEnabled = layerJson.value("CollisionEnabled", false);
-                        layer.RenderOrder = layerJson.value("RenderOrder", 0);
-                        if (layerJson.contains("Tiles") && layerJson["Tiles"].is_array())
-                            layer.Tiles = layerJson["Tiles"].get<std::vector<uint32_t>>();
-                        if (layerJson.contains("PerTileData") && layerJson["PerTileData"].is_array())
-                            layer.PerTileData = layerJson["PerTileData"].get<std::vector<uint32_t>>();
-                        tilemap.Layers.push_back(std::move(layer));
-                    }
-                }
-
-                if (tilemap.Layers.empty())
-                {
-                    tilemap.Layers = {
-                        TilemapLayer{ "Background", true, false, -20, {}, {} },
-                        TilemapLayer{ "Collision", true, true, 0, {}, {} },
-                        TilemapLayer{ "Foreground", true, false, 20, {}, {} }
-                    };
-                }
-                tilemap.EnsureLayerStorage();
-            }
-
             if (entry.contains("Grid2D") && entry["Grid2D"].is_object())
             {
                 const auto& grid2DJson = entry["Grid2D"];
@@ -3621,25 +3310,6 @@ namespace Limitless
 
                 layer.EnsureStorage();
                 layer.RenderCacheDirty = true;
-            }
-
-            if (entry.contains("TilemapCollider2D") && entry["TilemapCollider2D"].is_object())
-            {
-                const auto& tilemapCollider2DJson = entry["TilemapCollider2D"];
-                auto& tilemapCollider2D = scene->GetRegistry().emplace<TilemapCollider2DComponent>(entity);
-                tilemapCollider2D.Enabled = tilemapCollider2DJson.value("Enabled", true);
-                tilemapCollider2D.MergeAdjacentTiles = tilemapCollider2DJson.value("MergeAdjacentTiles", true);
-                tilemapCollider2D.UseCollisionEnabledLayers = tilemapCollider2DJson.value("UseCollisionEnabledLayers", true);
-                tilemapCollider2D.LayerIndex = std::max(0, tilemapCollider2DJson.value("LayerIndex", 0));
-                tilemapCollider2D.Friction = tilemapCollider2DJson.value("Friction", 0.5f);
-                tilemapCollider2D.Restitution = tilemapCollider2DJson.value("Restitution", 0.0f);
-                tilemapCollider2D.IsSensor = tilemapCollider2DJson.value("IsSensor", false);
-                tilemapCollider2D.CollisionLayer = tilemapCollider2DJson.value("CollisionLayer", 1ull);
-                tilemapCollider2D.CollisionMask = tilemapCollider2DJson.value("CollisionMask", ~0ull);
-                tilemapCollider2D.RuntimeBodyId = kNullPhysics2DBody;
-                tilemapCollider2D.RuntimeShapeIds.clear();
-                tilemapCollider2D.RuntimeBodyCreated = false;
-                tilemapCollider2D.RuntimeBuiltHash = 0ull;
             }
 
             if (entry.contains("Camera") && entry["Camera"].is_object())
@@ -4040,172 +3710,6 @@ namespace Limitless
             : 1.0f;
 
         auto& registry = scene.GetRegistry();
-        auto tilemapView = registry.view<TilemapComponent>();
-        for (entt::entity entity : tilemapView)
-            tilemapView.get<TilemapComponent>(entity).EnsureLayerStorage();
-
-        auto renderTilemapLayers = [&](bool renderForegroundLayers) {
-            auto tilemapViewRender = registry.view<TransformComponent, TilemapComponent>();
-            std::vector<entt::entity> tilemapRenderEntities;
-            tilemapRenderEntities.reserve(tilemapViewRender.size_hint());
-            for (entt::entity entity : tilemapViewRender)
-                tilemapRenderEntities.push_back(entity);
-
-            std::sort(tilemapRenderEntities.begin(), tilemapRenderEntities.end(), [&scene, &registry, interpolationAlpha](entt::entity left, entt::entity right) {
-                const glm::mat4 leftWorld = scene.GetWorldTransformMatrixForRendering(left, interpolationAlpha);
-                const glm::mat4 rightWorld = scene.GetWorldTransformMatrixForRendering(right, interpolationAlpha);
-                // Sort by world-space Z rather than view-space Z so the order stays
-                // stable regardless of the editor camera orientation.
-                const float leftWorldZ = leftWorld[3][2];
-                const float rightWorldZ = rightWorld[3][2];
-                constexpr float kDepthSortEpsilon = 0.005f;
-                if (std::abs(leftWorldZ - rightWorldZ) > kDepthSortEpsilon)
-                    return leftWorldZ < rightWorldZ;
-
-                const auto* leftHierarchy = registry.try_get<HierarchyComponent>(left);
-                const auto* rightHierarchy = registry.try_get<HierarchyComponent>(right);
-                const int32_t leftOrder = leftHierarchy ? leftHierarchy->SiblingOrder : 0;
-                const int32_t rightOrder = rightHierarchy ? rightHierarchy->SiblingOrder : 0;
-                if (leftOrder != rightOrder)
-                    return leftOrder < rightOrder;
-
-                return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
-            });
-
-            for (entt::entity entity : tilemapRenderEntities)
-            {
-                if (!scene.IsEntityEnabledInHierarchy(entity))
-                    continue;
-                auto& tilemap = registry.get<TilemapComponent>(entity);
-                tilemap.EnsureLayerStorage();
-                if (tilemap.Layers.empty())
-                    continue;
-
-                if (!tilemap.TilesetAssetKey.empty() && !tilemap.TilesetAssetLoadAttempted)
-                {
-                    Assets::TilesetAssetDefinition definition{};
-                    if (Assets::TryLoadTilesetAssetDefinition(tilemap.TilesetAssetKey, definition))
-                    {
-                        if (!definition.TextureKey.empty() && tilemap.TilesetTextureKey != definition.TextureKey)
-                        {
-                            tilemap.TilesetTextureKey = definition.TextureKey;
-                            tilemap.CachedTilesetTexture.reset();
-                            tilemap.TilesetTextureLoadAttempted = false;
-                        }
-                        tilemap.TilesetTileSizePixels = glm::ivec2(
-                            std::max(1, definition.TileSizePixels.x),
-                            std::max(1, definition.TileSizePixels.y));
-                        tilemap.TilesetMarginPixels = glm::ivec2(
-                            std::max(0, definition.MarginPixels.x),
-                            std::max(0, definition.MarginPixels.y));
-                        tilemap.TilesetSpacingPixels = glm::ivec2(
-                            std::max(0, definition.SpacingPixels.x),
-                            std::max(0, definition.SpacingPixels.y));
-                        tilemap.TilesetExplicitTileRectsPixels = definition.ExplicitTileRectsPixels;
-                    }
-                    tilemap.TilesetAssetLoadAttempted = true;
-                }
-
-                if (!tilemap.TilesetTextureKey.empty())
-                {
-                    if (!tilemap.CachedTilesetTexture && !tilemap.TilesetTextureLoadAttempted)
-                    {
-                        tilemap.CachedTilesetTexture = std::dynamic_pointer_cast<Assets::TextureAsset>(
-                            Assets::AssetManager::GetCachedByKey(tilemap.TilesetTextureKey));
-                        if (!tilemap.CachedTilesetTexture)
-                        {
-                            if (!g_PendingTextureLoads.contains(tilemap.TilesetTextureKey))
-                                g_PendingTextureLoads.emplace(tilemap.TilesetTextureKey, Assets::TextureAsset::LoadAsync(tilemap.TilesetTextureKey));
-                        }
-                        tilemap.TilesetTextureLoadAttempted = true;
-                    }
-                    else if (!tilemap.CachedTilesetTexture && tilemap.TilesetTextureLoadAttempted)
-                    {
-                        tilemap.CachedTilesetTexture = std::dynamic_pointer_cast<Assets::TextureAsset>(
-                            Assets::AssetManager::GetCachedByKey(tilemap.TilesetTextureKey));
-                        if (!tilemap.CachedTilesetTexture)
-                        {
-                            const auto pendingTexture = g_PendingTextureLoads.find(tilemap.TilesetTextureKey);
-                            if (pendingTexture != g_PendingTextureLoads.end() && pendingTexture->second.IsDone())
-                            {
-                                tilemap.CachedTilesetTexture = pendingTexture->second.Get();
-                                g_PendingTextureLoads.erase(pendingTexture);
-                            }
-                        }
-                    }
-                }
-
-                if (!tilemap.CachedTilesetTexture || !tilemap.CachedTilesetTexture->GetTexture())
-                    continue;
-
-                std::vector<size_t> layerOrder;
-                layerOrder.reserve(tilemap.Layers.size());
-                for (size_t layerIndex = 0; layerIndex < tilemap.Layers.size(); ++layerIndex)
-                    layerOrder.push_back(layerIndex);
-                std::sort(layerOrder.begin(), layerOrder.end(), [&tilemap](size_t left, size_t right) {
-                    const int32_t leftOrder = tilemap.Layers[left].RenderOrder;
-                    const int32_t rightOrder = tilemap.Layers[right].RenderOrder;
-                    if (leftOrder != rightOrder)
-                        return leftOrder < rightOrder;
-                    return left < right;
-                });
-
-                const int32_t gridWidth = std::max(1, tilemap.GridSize.x);
-                const int32_t gridHeight = std::max(1, tilemap.GridSize.y);
-                const glm::vec2 safeCellSize(std::max(0.001f, tilemap.CellSize.x), std::max(0.001f, tilemap.CellSize.y));
-                const glm::vec2 mapCenterOffset = -0.5f * glm::vec2(gridWidth - 1, gridHeight - 1) * safeCellSize;
-                const glm::mat4 mapWorldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
-
-                for (const size_t layerIndex : layerOrder)
-                {
-                    const TilemapLayer& layer = tilemap.Layers[layerIndex];
-                    if (!layer.Visible)
-                        continue;
-                    if (renderForegroundLayers)
-                    {
-                        if (layer.RenderOrder < 0)
-                            continue;
-                    }
-                    else if (layer.RenderOrder >= 0)
-                    {
-                        continue;
-                    }
-
-                    for (int32_t cellY = 0; cellY < gridHeight; ++cellY)
-                    {
-                        for (int32_t cellX = 0; cellX < gridWidth; ++cellX)
-                        {
-                            const size_t tileIndex = TilemapCellToIndex(tilemap, cellX, cellY);
-                            if (tileIndex >= layer.Tiles.size())
-                                continue;
-
-                            const uint32_t baseTileId = layer.Tiles[tileIndex];
-                            if (baseTileId == 0u)
-                                continue;
-
-                            glm::vec2 uvMin(0.0f);
-                            glm::vec2 uvMax(1.0f);
-                            uint32_t maxTileCount = 0u;
-                            if (!TryComputeTileUvRect(tilemap, tilemap.CachedTilesetTexture, baseTileId, uvMin, uvMax, &maxTileCount))
-                                continue;
-                            const uint32_t resolvedTileId = ComputeAutoTileId(tilemap, layer, cellX, cellY, baseTileId, maxTileCount);
-                            if (resolvedTileId != baseTileId)
-                                (void)TryComputeTileUvRect(tilemap, tilemap.CachedTilesetTexture, resolvedTileId, uvMin, uvMax, &maxTileCount);
-
-                            const glm::vec3 localPosition = glm::vec3(
-                                mapCenterOffset.x + static_cast<float>(cellX) * safeCellSize.x,
-                                mapCenterOffset.y + static_cast<float>(cellY) * safeCellSize.y,
-                                0.0f);
-                            glm::mat4 tileTransform = mapWorldTransform;
-                            tileTransform = glm::translate(tileTransform, localPosition);
-                            tileTransform = glm::scale(tileTransform, glm::vec3(safeCellSize, 1.0f));
-                            Renderer2D::DrawQuad(tileTransform, tilemap.CachedTilesetTexture, glm::vec4(1.0f), uvMin, uvMax);
-                        }
-                    }
-                }
-            }
-        };
-
         // ---- Grid2D + TilemapLayer rendering path ----------------------------
         // Renders entities using the new Grid2DComponent + child TilemapLayerComponent
         // architecture. Each Grid2D entity defines the cell layout; its children
@@ -4407,7 +3911,6 @@ namespace Limitless
             }
         };
 
-        renderTilemapLayers(false);
         renderGrid2DLayers(false);
 
         auto view = registry.view<TransformComponent, SpriteComponent>();
@@ -4662,7 +4165,6 @@ namespace Limitless
             }
         }
 
-        renderTilemapLayers(true);
         renderGrid2DLayers(true);
 
         Renderer2D::EndScene();
