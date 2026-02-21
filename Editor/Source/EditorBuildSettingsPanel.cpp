@@ -280,10 +280,18 @@ namespace Limitless::EditorBuildSettingsPanel
         }
 
         /// Start a build in a background thread.
-        void StartBuild(EditorBuildSettingsPanelState& state, bool runAfterBuild)
+        void StartBuild(EditorBuildSettingsPanelState& state,
+                        bool runAfterBuild,
+                        const std::function<bool()>& saveActiveSceneBeforeBuild)
         {
             if (state.BuildInProgress.load())
                 return;
+
+            if (saveActiveSceneBeforeBuild && !saveActiveSceneBeforeBuild())
+            {
+                state.StatusMessage = "Build aborted: failed to save active scene. Save the scene and try again.";
+                return;
+            }
 
             auto& projectManager = Project::ProjectManager::GetInstance();
             if (!projectManager.HasOpenProject())
@@ -377,7 +385,8 @@ namespace Limitless::EditorBuildSettingsPanel
     void Draw(bool& showWindow,
               EditorBuildSettingsPanelState& state,
               const std::string& currentSceneAssetKey,
-              Scene* currentScene)
+              Scene* currentScene,
+              const std::function<bool()>& saveActiveSceneBeforeBuild)
     {
         if (!showWindow)
             return;
@@ -577,7 +586,7 @@ namespace Limitless::EditorBuildSettingsPanel
         if (ImGui::Button("Build", ImVec2(120, 30)))
         {
             SaveSettings(state);
-            StartBuild(state, false);
+            StartBuild(state, false, saveActiveSceneBeforeBuild);
         }
 
         ImGui::SameLine();
@@ -585,7 +594,7 @@ namespace Limitless::EditorBuildSettingsPanel
         if (ImGui::Button("Build And Run", ImVec2(140, 30)))
         {
             SaveSettings(state);
-            StartBuild(state, true);
+            StartBuild(state, true, saveActiveSceneBeforeBuild);
         }
 
         ImGui::EndDisabled();

@@ -185,6 +185,83 @@ namespace Limitless::Project
             LT_CORE_INFO("GameBuilder: executing: {}", command);
             return std::system(command.c_str());
         }
+
+        bool MirrorProjectNativeScriptsToGeneratedDirectory(const GameBuildRequest& request, GameBuildResult& result)
+        {
+            const std::filesystem::path assetsRoot = request.ProjectRoot / "Assets";
+            const std::filesystem::path generatedDirectory = request.ProjectRoot / "Build" / "Generated" / "ScriptCore";
+            if (!std::filesystem::is_directory(assetsRoot))
+            {
+                result.ErrorMessage = "Cannot mirror scripts: project Assets directory not found at " + assetsRoot.string();
+                return false;
+            }
+
+            std::error_code errorCode;
+            std::filesystem::remove_all(generatedDirectory, errorCode);
+            if (errorCode)
+            {
+                result.ErrorMessage = "Cannot clear generated ScriptCore mirror directory: " + errorCode.message();
+                return false;
+            }
+
+            std::filesystem::create_directories(generatedDirectory, errorCode);
+            if (errorCode)
+            {
+                result.ErrorMessage = "Cannot create generated ScriptCore mirror directory: " + errorCode.message();
+                return false;
+            }
+
+            size_t mirroredScriptPairCount = 0;
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(assetsRoot, std::filesystem::directory_options::skip_permission_denied))
+            {
+                if (!entry.is_regular_file() || entry.path().extension() != ".cpp")
+                    continue;
+
+                const std::filesystem::path sourceCppPath = entry.path();
+                const std::filesystem::path sourceHeaderPath = sourceCppPath.parent_path() / (sourceCppPath.stem().string() + ".h");
+                if (!std::filesystem::exists(sourceHeaderPath))
+                    continue;
+
+                std::error_code relativePathError;
+                const std::filesystem::path relativeCppPath = std::filesystem::relative(sourceCppPath, assetsRoot, relativePathError);
+                if (relativePathError || relativeCppPath.empty())
+                    continue;
+
+                const std::filesystem::path relativeHeaderPath = std::filesystem::relative(sourceHeaderPath, assetsRoot, relativePathError);
+                if (relativePathError || relativeHeaderPath.empty())
+                    continue;
+
+                const std::filesystem::path destinationCppPath = generatedDirectory / relativeCppPath;
+                const std::filesystem::path destinationHeaderPath = generatedDirectory / relativeHeaderPath;
+
+                std::filesystem::create_directories(destinationCppPath.parent_path(), errorCode);
+                if (errorCode)
+                {
+                    result.ErrorMessage = "Failed to create generated script directory: " + errorCode.message();
+                    return false;
+                }
+
+                std::filesystem::copy_file(sourceCppPath, destinationCppPath, std::filesystem::copy_options::overwrite_existing, errorCode);
+                if (errorCode)
+                {
+                    result.ErrorMessage = "Failed to mirror script source '" + sourceCppPath.string() + "': " + errorCode.message();
+                    return false;
+                }
+
+                std::filesystem::copy_file(sourceHeaderPath, destinationHeaderPath, std::filesystem::copy_options::overwrite_existing, errorCode);
+                if (errorCode)
+                {
+                    result.ErrorMessage = "Failed to mirror script header '" + sourceHeaderPath.string() + "': " + errorCode.message();
+                    return false;
+                }
+
+                ++mirroredScriptPairCount;
+            }
+
+            result.StepLog.push_back("Mirrored " + std::to_string(mirroredScriptPairCount)
+                + " native script source pair(s) into " + generatedDirectory.string() + ".");
+            return true;
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -288,6 +365,10 @@ namespace Limitless::Project
     bool GameBuilder::BuildScriptCore(const GameBuildRequest& request, GameBuildResult& result)
     {
         result.StepLog.push_back("Building ScriptCore (" + request.Settings.BuildConfiguration + ")...");
+
+        // Keep game-build ScriptCore in sync with current project scripts.
+        if (!MirrorProjectNativeScriptsToGeneratedDirectory(request, result))
+            return false;
 
         const bool internalBackend = IsInternalBackend(request);
         const auto scriptPath = request.EngineRoot / "Scripts" / GetBuildScriptName(internalBackend);

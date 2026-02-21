@@ -968,7 +968,13 @@ namespace Limitless
         }
         EditorProjectSettingsPanel::Draw(m_ShowProjectSettingsWindow, m_ProjectSettingsPanelState);
         EditorBuildSettingsPanel::Draw(m_ShowBuildSettingsWindow, m_BuildSettingsPanelState,
-                                       m_CurrentSceneAssetKey, m_Scene.get());
+                                       m_CurrentSceneAssetKey, m_Scene.get(),
+                                       [this]() -> bool
+                                       {
+                                           if (!m_Scene || m_CurrentSceneAssetKey.empty())
+                                               return true;
+                                           return SaveSceneToAssetKey(m_CurrentSceneAssetKey);
+                                       });
         EditorAssetDiagnosticsPanel::Draw(m_ShowAssetDiagnosticsWindow);
         DrawViewportPanel();
         DrawScenePanel();

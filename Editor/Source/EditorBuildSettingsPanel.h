@@ -5,6 +5,7 @@
 
 #include <array>
 #include <atomic>
+#include <functional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -53,5 +54,6 @@ namespace Limitless::EditorBuildSettingsPanel
     void Draw(bool& showWindow,
               EditorBuildSettingsPanelState& state,
               const std::string& currentSceneAssetKey,
-              Scene* currentScene);
+              Scene* currentScene,
+              const std::function<bool()>& saveActiveSceneBeforeBuild);
 }
