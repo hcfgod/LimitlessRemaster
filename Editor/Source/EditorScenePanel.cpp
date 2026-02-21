@@ -1,5 +1,6 @@
 #include "EditorScenePanel.h"
 
+#include "EditorPrefabSystem.h"
 #include "Scene/Scene.h"
 #include "Undo/EditorUndoService.h"
 #include "imgui/imgui.h"
@@ -7,6 +8,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <string>
 
 namespace Limitless::EditorScenePanel
 {
@@ -41,6 +43,37 @@ namespace Limitless::EditorScenePanel
             if (!payload)
                 return false;
             return std::strcmp(payload->DataType, kSceneEntityPayload) == 0;
+        }
+
+        std::string ReadStringPayload(const ImGuiPayload* payload)
+        {
+            if (!payload || !payload->Data || payload->DataSize <= 0)
+                return {};
+
+            const char* bytes = static_cast<const char*>(payload->Data);
+            const int payloadLength = std::max(0, payload->DataSize - 1);
+            return std::string(bytes, bytes + payloadLength);
+        }
+
+        void ClearAssetSelectionState(std::string& selectedTextureAssetKey,
+                                      Assets::TextureAsset::Ptr& cachedTextureAsset,
+                                      std::string& selectedMaterialAssetKey,
+                                      Assets::MaterialAsset::Ptr& cachedMaterialAsset,
+                                      std::string& selectedNativeScriptAssetKey,
+                                      std::string& selectedPrefabAssetKey,
+                                      std::string& selectedTilesetAssetKey,
+                                      std::string& selectedAudioMixerAssetKey,
+                                      std::string& selectedInputActionsAssetKey)
+        {
+            selectedTextureAssetKey.clear();
+            cachedTextureAsset.reset();
+            selectedMaterialAssetKey.clear();
+            cachedMaterialAsset.reset();
+            selectedNativeScriptAssetKey.clear();
+            selectedPrefabAssetKey.clear();
+            selectedTilesetAssetKey.clear();
+            selectedAudioMixerAssetKey.clear();
+            selectedInputActionsAssetKey.clear();
         }
 
         void DrawHorizontalDropIndicator(float leftX, float rightX, float y)
@@ -315,8 +348,8 @@ namespace Limitless::EditorScenePanel
                 {
                     if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(prefabPayloadId))
                     {
-                        const char* prefabAssetKey = static_cast<const char*>(payload->Data);
-                        if (prefabAssetKey && prefabAssetKey[0] && onInstantiatePrefabAtParent)
+                        const std::string prefabAssetKey = ReadStringPayload(payload);
+                        if (!prefabAssetKey.empty() && onInstantiatePrefabAtParent)
                         {
                             const entt::entity createdEntity = onInstantiatePrefabAtParent(prefabAssetKey, entity);
                             if (createdEntity != entt::null)
@@ -633,8 +666,8 @@ namespace Limitless::EditorScenePanel
                     {
                         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(prefabPayloadId))
                         {
-                            const char* prefabAssetKey = static_cast<const char*>(payload->Data);
-                            if (prefabAssetKey && prefabAssetKey[0] && onInstantiatePrefabAtParent)
+                            const std::string prefabAssetKey = ReadStringPayload(payload);
+                            if (!prefabAssetKey.empty() && onInstantiatePrefabAtParent)
                             {
                                 const entt::entity createdEntity = onInstantiatePrefabAtParent(prefabAssetKey, entt::null);
                                 if (createdEntity != entt::null)
@@ -749,8 +782,8 @@ namespace Limitless::EditorScenePanel
                     {
                         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(prefabPayloadId))
                         {
-                            const char* prefabAssetKey = static_cast<const char*>(payload->Data);
-                            if (prefabAssetKey && prefabAssetKey[0] && onInstantiatePrefabAtParent)
+                            const std::string prefabAssetKey = ReadStringPayload(payload);
+                            if (!prefabAssetKey.empty() && onInstantiatePrefabAtParent)
                             {
                                 const entt::entity createdEntity = onInstantiatePrefabAtParent(prefabAssetKey, entt::null);
                                 if (createdEntity != entt::null)
@@ -774,6 +807,130 @@ namespace Limitless::EditorScenePanel
                 ImGui::PopID();
 
                 ImGui::TreePop();
+            }
+        }
+
+        // Unity-like hierarchy shortcuts:
+        // - Ctrl/Cmd + C: copy selected entity subtree.
+        // - Ctrl/Cmd + V: paste copied subtree as sibling of selection (or root if nothing selected).
+        // - Ctrl/Cmd + D: duplicate selected entity subtree as next sibling.
+        if (scene && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+        {
+            const ImGuiIO& io = ImGui::GetIO();
+            const bool commandDown = io.KeyCtrl || io.KeySuper;
+            const bool canHandleHierarchyShortcuts =
+                commandDown &&
+                !io.WantTextInput &&
+                !ImGui::IsAnyItemActive() &&
+                !state.RenamePopupOpen;
+
+            if (canHandleHierarchyShortcuts)
+            {
+                if (ImGui::IsKeyPressed(ImGuiKey_C, false))
+                {
+                    if (scene->IsValid(selectedEntity))
+                    {
+                        auto copiedSubtree = EditorPrefabSystem::CreateDetachedEntitySubtree(*scene, selectedEntity);
+                        if (copiedSubtree)
+                            state.EntityClipboardScene = std::move(copiedSubtree);
+                    }
+                }
+
+                if (ImGui::IsKeyPressed(ImGuiKey_V, false))
+                {
+                    if (state.EntityClipboardScene)
+                    {
+                        const entt::entity destinationParent =
+                            scene->IsValid(selectedEntity) ? scene->GetParent(selectedEntity) : entt::null;
+                        entt::entity pastedEntity = entt::null;
+
+                        const bool pasted = undoService
+                            ? undoService->ExecuteSceneMutation("Paste Entity", [&](Scene& mutableScene) {
+                                pastedEntity = EditorPrefabSystem::InstantiateDetachedEntitySubtree(
+                                    mutableScene,
+                                    *state.EntityClipboardScene,
+                                    destinationParent);
+                                return pastedEntity != entt::null;
+                            })
+                            : [&]() {
+                                pastedEntity = EditorPrefabSystem::InstantiateDetachedEntitySubtree(
+                                    *scene,
+                                    *state.EntityClipboardScene,
+                                    destinationParent);
+                                return pastedEntity != entt::null;
+                            }();
+
+                        if (pasted)
+                        {
+                            selectedEntity = pastedEntity;
+                            ClearAssetSelectionState(
+                                selectedTextureAssetKey,
+                                cachedTextureAsset,
+                                selectedMaterialAssetKey,
+                                cachedMaterialAsset,
+                                selectedNativeScriptAssetKey,
+                                selectedPrefabAssetKey,
+                                selectedTilesetAssetKey,
+                                selectedAudioMixerAssetKey,
+                                selectedInputActionsAssetKey);
+                        }
+                    }
+                }
+
+                if (ImGui::IsKeyPressed(ImGuiKey_D, false))
+                {
+                    if (scene->IsValid(selectedEntity))
+                    {
+                        const entt::entity sourceEntity = selectedEntity;
+                        const entt::entity destinationParent = scene->GetParent(sourceEntity);
+                        auto copiedSubtree = EditorPrefabSystem::CreateDetachedEntitySubtree(*scene, sourceEntity);
+                        if (copiedSubtree)
+                        {
+                            entt::entity duplicatedEntity = entt::null;
+                            const bool duplicated = undoService
+                                ? undoService->ExecuteSceneMutation("Duplicate Entity", [&](Scene& mutableScene) {
+                                    if (!mutableScene.IsValid(sourceEntity))
+                                        return false;
+
+                                    duplicatedEntity = EditorPrefabSystem::InstantiateDetachedEntitySubtree(
+                                        mutableScene,
+                                        *copiedSubtree,
+                                        destinationParent);
+                                    if (duplicatedEntity == entt::null)
+                                        return false;
+
+                                    (void)mutableScene.SetSiblingOrderAfter(duplicatedEntity, sourceEntity);
+                                    return true;
+                                })
+                                : [&]() {
+                                    duplicatedEntity = EditorPrefabSystem::InstantiateDetachedEntitySubtree(
+                                        *scene,
+                                        *copiedSubtree,
+                                        destinationParent);
+                                    if (duplicatedEntity == entt::null)
+                                        return false;
+
+                                    (void)scene->SetSiblingOrderAfter(duplicatedEntity, sourceEntity);
+                                    return true;
+                                }();
+
+                            if (duplicated)
+                            {
+                                selectedEntity = duplicatedEntity;
+                                ClearAssetSelectionState(
+                                    selectedTextureAssetKey,
+                                    cachedTextureAsset,
+                                    selectedMaterialAssetKey,
+                                    cachedMaterialAsset,
+                                    selectedNativeScriptAssetKey,
+                                    selectedPrefabAssetKey,
+                                    selectedTilesetAssetKey,
+                                    selectedAudioMixerAssetKey,
+                                    selectedInputActionsAssetKey);
+                            }
+                        }
+                    }
+                }
             }
         }
 

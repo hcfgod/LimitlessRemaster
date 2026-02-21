@@ -6,6 +6,7 @@
 
 #include <array>
 #include <functional>
+#include <memory>
 #include <string>
 
 namespace Limitless
@@ -19,6 +20,7 @@ namespace Limitless
         entt::entity RenameEntity = entt::null;
         entt::entity PendingClickSelectionEntity = entt::null;
         bool RenamePopupOpen = false;
+        std::unique_ptr<Scene> EntityClipboardScene;
         std::array<char, 256> RenameBuffer{};
     };
 

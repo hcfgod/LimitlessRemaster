@@ -2,6 +2,7 @@
 
 #include "Limitless.h"
 
+#include <memory>
 #include <string>
 
 namespace Limitless::EditorPrefabSystem
@@ -24,4 +25,12 @@ namespace Limitless::EditorPrefabSystem
     /// Re-instantiates all prefab instances in the scene that reference the given prefab asset key.
     /// This is the "Apply to Instances" behavior used by prefab editing workflows.
     bool ApplyPrefabAssetToInstancesInScene(Scene& scene, const std::string& prefabAssetKey);
+
+    /// Creates a detached scene containing a deep copy of a root entity subtree.
+    /// Returns nullptr on failure.
+    std::unique_ptr<Scene> CreateDetachedEntitySubtree(const Scene& sourceScene, entt::entity sourceRootEntity);
+
+    /// Instantiates a detached entity subtree scene into the destination scene.
+    /// The source scene should contain one root-level entity.
+    entt::entity InstantiateDetachedEntitySubtree(Scene& destinationScene, const Scene& sourceSubtreeScene, entt::entity parentEntity);
 }

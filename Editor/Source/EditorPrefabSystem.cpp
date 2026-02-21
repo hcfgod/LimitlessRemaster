@@ -9,6 +9,7 @@
 #include <glm/gtx/quaternion.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -275,6 +276,117 @@ namespace Limitless::EditorPrefabSystem
                 std::filesystem::create_directories(parentPath, errorCode);
             return !errorCode;
         }
+
+        std::string NormalizeLooseAssetKey(const std::string& assetKey)
+        {
+            auto trim = [](std::string_view value) -> std::string {
+                size_t begin = 0;
+                while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin])) != 0)
+                    ++begin;
+                size_t end = value.size();
+                while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1])) != 0)
+                    --end;
+                return std::string(value.substr(begin, end - begin));
+            };
+
+            std::string normalized = trim(assetKey);
+            if (normalized.empty())
+                return normalized;
+
+            std::replace(normalized.begin(), normalized.end(), '\\', '/');
+
+            std::string collapsed;
+            collapsed.reserve(normalized.size());
+            bool previousWasSlash = false;
+            for (char character : normalized)
+            {
+                if (character == '/')
+                {
+                    if (previousWasSlash)
+                        continue;
+                    previousWasSlash = true;
+                    collapsed.push_back(character);
+                }
+                else
+                {
+                    previousWasSlash = false;
+                    collapsed.push_back(character);
+                }
+            }
+
+            std::string rebuilt;
+            rebuilt.reserve(collapsed.size());
+            size_t segmentStart = 0;
+            while (segmentStart <= collapsed.size())
+            {
+                const size_t separator = collapsed.find('/', segmentStart);
+                const bool hasSeparator = separator != std::string::npos;
+                const size_t segmentEnd = hasSeparator ? separator : collapsed.size();
+                const std::string trimmedSegment = trim(std::string_view(collapsed).substr(segmentStart, segmentEnd - segmentStart));
+                rebuilt += trimmedSegment;
+                if (hasSeparator)
+                {
+                    rebuilt.push_back('/');
+                    segmentStart = separator + 1;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            return rebuilt;
+        }
+
+        Result<std::unique_ptr<Scene>> LoadPrefabSceneFromAssetKey(const std::string& prefabAssetKey, std::string& outEffectivePrefabAssetKey)
+        {
+            outEffectivePrefabAssetKey = prefabAssetKey;
+
+            auto loadedPrefabSceneResult = Scene::LoadFromFile(prefabAssetKey);
+            if (!loadedPrefabSceneResult.IsFailure())
+                return loadedPrefabSceneResult;
+
+            if (const auto resolvedPath = Assets::ResolveAssetKeyToPath(prefabAssetKey); resolvedPath.IsSuccess())
+            {
+                auto resolvedLoadResult = Scene::LoadFromFile(resolvedPath.GetValue());
+                if (!resolvedLoadResult.IsFailure())
+                    return resolvedLoadResult;
+            }
+
+            const std::string normalizedKey = NormalizeLooseAssetKey(prefabAssetKey);
+            if (!normalizedKey.empty() && normalizedKey != prefabAssetKey)
+            {
+                auto normalizedLoadResult = Scene::LoadFromFile(normalizedKey);
+                if (!normalizedLoadResult.IsFailure())
+                {
+                    outEffectivePrefabAssetKey = normalizedKey;
+                    return normalizedLoadResult;
+                }
+
+                if (const auto normalizedResolvedPath = Assets::ResolveAssetKeyToPath(normalizedKey); normalizedResolvedPath.IsSuccess())
+                {
+                    auto normalizedResolvedLoadResult = Scene::LoadFromFile(normalizedResolvedPath.GetValue());
+                    if (!normalizedResolvedLoadResult.IsFailure())
+                    {
+                        outEffectivePrefabAssetKey = normalizedKey;
+                        return normalizedResolvedLoadResult;
+                    }
+                }
+            }
+
+            return loadedPrefabSceneResult;
+        }
+
+        std::string GetRootPrefabAssetKeyIfAny(const Scene& scene, entt::entity rootEntity)
+        {
+            if (!scene.IsValid(rootEntity))
+                return {};
+
+            const auto* prefabInstance = scene.GetRegistry().try_get<PrefabInstanceComponent>(rootEntity);
+            if (!prefabInstance)
+                return {};
+            return prefabInstance->PrefabAssetKey;
+        }
     }
 
     bool CreateOrUpdatePrefabFromEntity(Scene& scene, entt::entity rootEntity, const std::string& prefabAssetKey)
@@ -316,12 +428,16 @@ namespace Limitless::EditorPrefabSystem
         if (prefabAssetKey.empty())
             return entt::null;
 
-        const auto loadedPrefabSceneResult = Scene::LoadFromFile(prefabAssetKey);
+        std::string effectivePrefabAssetKey;
+        const auto loadedPrefabSceneResult = LoadPrefabSceneFromAssetKey(prefabAssetKey, effectivePrefabAssetKey);
         if (loadedPrefabSceneResult.IsFailure())
         {
             LT_WARN("Prefab load failed for '{}': {}", prefabAssetKey, loadedPrefabSceneResult.GetError().GetErrorMessage());
             return entt::null;
         }
+
+        if (effectivePrefabAssetKey != prefabAssetKey)
+            LT_WARN("Prefab instantiate normalized asset key '{}' -> '{}'.", prefabAssetKey, effectivePrefabAssetKey);
 
         auto& loadedPrefabScene = *loadedPrefabSceneResult.GetValue();
         const auto prefabRoots = loadedPrefabScene.GetChildren(entt::null);
@@ -329,7 +445,7 @@ namespace Limitless::EditorPrefabSystem
             return entt::null;
 
         entt::entity createdRoot = entt::null;
-        if (!CopyEntitySubtreeToScene(loadedPrefabScene, destinationScene, prefabRoots.front(), parentEntity, prefabAssetKey, &createdRoot))
+        if (!CopyEntitySubtreeToScene(loadedPrefabScene, destinationScene, prefabRoots.front(), parentEntity, effectivePrefabAssetKey, &createdRoot))
             return entt::null;
 
         return createdRoot;
@@ -376,7 +492,8 @@ namespace Limitless::EditorPrefabSystem
         if (prefabAssetKey.empty())
             return false;
 
-        const auto loadedPrefabSceneResult = Scene::LoadFromFile(prefabAssetKey);
+        std::string effectivePrefabAssetKey;
+        const auto loadedPrefabSceneResult = LoadPrefabSceneFromAssetKey(prefabAssetKey, effectivePrefabAssetKey);
         if (loadedPrefabSceneResult.IsFailure())
         {
             LT_WARN("Prefab load failed for '{}': {}", prefabAssetKey, loadedPrefabSceneResult.GetError().GetErrorMessage());
@@ -394,7 +511,7 @@ namespace Limitless::EditorPrefabSystem
         for (entt::entity entity : view)
         {
             const auto& prefabInstance = view.get<PrefabInstanceComponent>(entity);
-            if (prefabInstance.PrefabAssetKey == prefabAssetKey)
+            if (prefabInstance.PrefabAssetKey == prefabAssetKey || prefabInstance.PrefabAssetKey == effectivePrefabAssetKey)
                 instanceRoots.push_back(entity);
         }
 
@@ -460,5 +577,51 @@ namespace Limitless::EditorPrefabSystem
         }
 
         return anyApplied;
+    }
+
+    std::unique_ptr<Scene> CreateDetachedEntitySubtree(const Scene& sourceScene, entt::entity sourceRootEntity)
+    {
+        if (!sourceScene.IsValid(sourceRootEntity))
+            return nullptr;
+
+        auto detachedScene = std::make_unique<Scene>();
+        const std::string sourcePrefabAssetKey = GetRootPrefabAssetKeyIfAny(sourceScene, sourceRootEntity);
+        entt::entity detachedRoot = entt::null;
+        if (!CopyEntitySubtreeToScene(sourceScene,
+                                      *detachedScene,
+                                      sourceRootEntity,
+                                      entt::null,
+                                      sourcePrefabAssetKey,
+                                      &detachedRoot))
+        {
+            return nullptr;
+        }
+
+        if (detachedRoot == entt::null || !detachedScene->IsValid(detachedRoot))
+            return nullptr;
+
+        return detachedScene;
+    }
+
+    entt::entity InstantiateDetachedEntitySubtree(Scene& destinationScene, const Scene& sourceSubtreeScene, entt::entity parentEntity)
+    {
+        const auto roots = sourceSubtreeScene.GetChildren(entt::null);
+        if (roots.empty())
+            return entt::null;
+
+        const entt::entity sourceRoot = roots.front();
+        const std::string prefabAssetKey = GetRootPrefabAssetKeyIfAny(sourceSubtreeScene, sourceRoot);
+        entt::entity createdRoot = entt::null;
+        if (!CopyEntitySubtreeToScene(sourceSubtreeScene,
+                                      destinationScene,
+                                      sourceRoot,
+                                      parentEntity,
+                                      prefabAssetKey,
+                                      &createdRoot))
+        {
+            return entt::null;
+        }
+
+        return createdRoot;
     }
 }

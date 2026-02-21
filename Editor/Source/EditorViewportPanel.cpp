@@ -1567,8 +1567,14 @@ namespace Limitless::EditorViewportPanel
                     {
                         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(prefabPayloadId))
                         {
-                            const char* key = static_cast<const char*>(payload->Data);
-                            if (key && key[0] && onPrefabDropped)
+                            std::string key;
+                            if (payload->Data && payload->DataSize > 0)
+                            {
+                                const auto* keyChars = static_cast<const char*>(payload->Data);
+                                const int keyLength = std::max(0, payload->DataSize - 1);
+                                key.assign(keyChars, keyChars + keyLength);
+                            }
+                            if (!key.empty() && onPrefabDropped)
                             {
                                 glm::vec3 worldPosition(0.0f);
                                 if (sceneViewCamera)
