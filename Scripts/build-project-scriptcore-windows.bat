@@ -135,6 +135,7 @@ cl /nologo /std:c++20 /EHsc /MD /LD /bigobj /utf-8 /FS ^
    /I "%GENERATED_DIR%" ^
    @"%SOURCES_RSP%" ^
    /link /NOLOGO ^
+   /OPT:NOREF /OPT:NOICF ^
    /OUT:"%OUTPUT_DIR%\ScriptCore.dll" ^
    /IMPLIB:"%OUTPUT_DIR%\ScriptCore.lib" ^
    /PDB:"%OUTPUT_DIR%\ScriptCore.pdb" ^

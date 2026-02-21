@@ -43,6 +43,7 @@
 #include <fstream>
 #include <limits>
 #include <set>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -74,6 +75,58 @@ namespace Limitless
                 return record.GetValue().Key;
 
             return assetKey;
+        }
+
+        std::string GetUnqualifiedScriptClassName(std::string_view className)
+        {
+            const size_t separator = className.rfind("::");
+            if (separator == std::string_view::npos)
+                return std::string(className);
+            return std::string(className.substr(separator + 2));
+        }
+
+        std::string ResolveRegisteredScriptClassName(const std::string& requestedClassName,
+                                                     const std::string& scriptAssetRelativePath)
+        {
+            if (requestedClassName.empty())
+                return {};
+            if (NativeScriptRegistry::HasScript(requestedClassName))
+                return requestedClassName;
+
+            const auto registeredScriptNames = NativeScriptRegistry::GetRegisteredScriptNames();
+            auto resolveByToken = [&](const std::string& classToken) -> std::string {
+                if (classToken.empty())
+                    return {};
+                if (NativeScriptRegistry::HasScript(classToken))
+                    return classToken;
+
+                std::string matchedClassName;
+                for (const std::string& candidate : registeredScriptNames)
+                {
+                    if (candidate == classToken || GetUnqualifiedScriptClassName(candidate) == classToken)
+                    {
+                        if (!matchedClassName.empty())
+                            return {};
+                        matchedClassName = candidate;
+                    }
+                }
+                return matchedClassName;
+            };
+
+            if (const std::string fromRequested = resolveByToken(requestedClassName); !fromRequested.empty())
+                return fromRequested;
+
+            if (!scriptAssetRelativePath.empty())
+            {
+                const std::string stem = std::filesystem::path(scriptAssetRelativePath).stem().string();
+                if (const std::string fromAssetPath = resolveByToken(stem); !fromAssetPath.empty())
+                    return fromAssetPath;
+            }
+
+            if (registeredScriptNames.size() == 1)
+                return registeredScriptNames.front();
+
+            return {};
         }
 
         // Unity-style reference object for scene asset links.
@@ -1736,14 +1789,13 @@ namespace Limitless
                 if (!scriptEntry.RuntimeInstance)
                 {
                     scriptEntry.RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry.ScriptClassName);
-                    if (!scriptEntry.RuntimeInstance && !scriptEntry.ScriptAssetRelativePath.empty())
+                    if (!scriptEntry.RuntimeInstance)
                     {
-                        const std::string fallbackClassName = std::filesystem::path(scriptEntry.ScriptAssetRelativePath).stem().string();
-                        if (!fallbackClassName.empty() &&
-                            fallbackClassName != scriptEntry.ScriptClassName &&
-                            NativeScriptRegistry::HasScript(fallbackClassName))
+                        const std::string resolvedClassName = ResolveRegisteredScriptClassName(scriptEntry.ScriptClassName,
+                                                                                               scriptEntry.ScriptAssetRelativePath);
+                        if (!resolvedClassName.empty())
                         {
-                            scriptEntry.ScriptClassName = fallbackClassName;
+                            scriptEntry.ScriptClassName = resolvedClassName;
                             scriptEntry.RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry.ScriptClassName);
                         }
                     }
@@ -1858,14 +1910,13 @@ namespace Limitless
                 if (!scriptEntry.RuntimeInstance)
                 {
                     scriptEntry.RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry.ScriptClassName);
-                    if (!scriptEntry.RuntimeInstance && !scriptEntry.ScriptAssetRelativePath.empty())
+                    if (!scriptEntry.RuntimeInstance)
                     {
-                        const std::string fallbackClassName = std::filesystem::path(scriptEntry.ScriptAssetRelativePath).stem().string();
-                        if (!fallbackClassName.empty() &&
-                            fallbackClassName != scriptEntry.ScriptClassName &&
-                            NativeScriptRegistry::HasScript(fallbackClassName))
+                        const std::string resolvedClassName = ResolveRegisteredScriptClassName(scriptEntry.ScriptClassName,
+                                                                                               scriptEntry.ScriptAssetRelativePath);
+                        if (!resolvedClassName.empty())
                         {
-                            scriptEntry.ScriptClassName = fallbackClassName;
+                            scriptEntry.ScriptClassName = resolvedClassName;
                             scriptEntry.RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry.ScriptClassName);
                         }
                     }

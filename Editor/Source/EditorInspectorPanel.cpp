@@ -405,8 +405,8 @@ namespace Limitless::EditorInspectorPanel
                             if (isInternalToolchainRootCandidate(cwdToolchain))
                                 return cwdToolchain;
                         }
-
-                        return std::nullopt;
+                        // Internal backend may still run from a source workspace (e.g. VS).
+                        // Fall through to legacy root probes instead of hard-failing here.
                     }
                 }
             }
@@ -441,6 +441,20 @@ namespace Limitless::EditorInspectorPanel
 
         std::optional<std::filesystem::path> GetGeneratedScriptCoreMirrorDirectory()
         {
+            // Internal toolchain builds compile from PROJECT_ROOT/Build/Generated/ScriptCore.
+            // Legacy/source-workspace builds compile from ENGINE_ROOT/Build/Generated/ScriptCore.
+            auto& projectManager = Project::ProjectManager::GetInstance();
+            if (projectManager.HasOpenProject())
+            {
+                const std::filesystem::path projectRoot = projectManager.GetProjectRoot();
+                const auto buildSettingsResult = Project::LoadBuildSettings(projectRoot);
+                if (buildSettingsResult.IsSuccess() &&
+                    buildSettingsResult.GetValue().BuildBackend == Project::BuildBackend::InternalToolchain)
+                {
+                    return projectRoot / "Build" / "Generated" / "ScriptCore";
+                }
+            }
+
             const auto engineRoot = FindEngineWorkspaceRoot();
             if (!engineRoot.has_value())
                 return std::nullopt;
@@ -596,6 +610,31 @@ namespace Limitless::EditorInspectorPanel
                     useInternalBackend = (buildSettingsResult.GetValue().BuildBackend == Project::BuildBackend::InternalToolchain);
             }
 
+            if (useInternalBackend)
+            {
+                // Guard against stale backend mode when running from source workspace:
+                // internal scripts require SDK/include + SDK/lib markers at build root.
+                auto isInternalToolchainRoot = [](const std::filesystem::path& candidate) -> bool
+                {
+                    std::error_code errorCode;
+#if defined(LT_PLATFORM_WINDOWS)
+                    const std::filesystem::path scriptCoreBuildScript = candidate / "Scripts" / "build-project-scriptcore-windows.bat";
+#else
+                    const std::filesystem::path scriptCoreBuildScript = candidate / "Scripts" / "build-project-scriptcore-unix.sh";
+#endif
+                    const std::filesystem::path sdkIncludeRoot = candidate / "SDK" / "include";
+                    const std::filesystem::path sdkLibRoot = candidate / "SDK" / "lib";
+                    const std::filesystem::path generatedRoot = candidate / "Build" / "Generated" / "ScriptCore";
+                    return std::filesystem::exists(scriptCoreBuildScript, errorCode) &&
+                           std::filesystem::is_directory(sdkIncludeRoot, errorCode) &&
+                           std::filesystem::is_directory(sdkLibRoot, errorCode) &&
+                           std::filesystem::is_directory(generatedRoot, errorCode);
+                };
+
+                if (!isInternalToolchainRoot(buildRoot.value()))
+                    useInternalBackend = false;
+            }
+
             if (state.BuildThread && state.BuildThread->joinable())
                 state.BuildThread->join();
 
@@ -614,7 +653,7 @@ namespace Limitless::EditorInspectorPanel
                     ? openedProjectRoot.value()
                     : root;
                 int exitCode = RunBuildScriptBlocking(root, effectiveProjectRoot, configuration, platform, useInternalBackend);
-                if (exitCode == 0 && useInternalBackend && openedProjectRoot.has_value())
+                if (exitCode == 0 && openedProjectRoot.has_value())
                 {
                     const std::filesystem::path builtScriptCorePath = GetBuiltScriptCoreLibraryPath(root, configuration);
                     const std::filesystem::path projectLocalOutputPath =
@@ -781,6 +820,39 @@ namespace Limitless::EditorInspectorPanel
 
             std::sort(discoveredClassNames.begin(), discoveredClassNames.end());
             return discoveredClassNames;
+        }
+
+        std::string GetUnqualifiedScriptClassName(std::string_view className)
+        {
+            const size_t separator = className.rfind("::");
+            if (separator == std::string_view::npos)
+                return std::string(className);
+            return std::string(className.substr(separator + 2));
+        }
+
+        std::string ResolveRegisteredScriptClassName(const std::string& requestedClassName)
+        {
+            if (requestedClassName.empty())
+                return {};
+            if (NativeScriptRegistry::HasScript(requestedClassName))
+                return requestedClassName;
+
+            const auto registeredScriptNames = NativeScriptRegistry::GetRegisteredScriptNames();
+            std::string matchedClassName;
+            for (const std::string& candidate : registeredScriptNames)
+            {
+                if (candidate == requestedClassName)
+                    return candidate;
+
+                if (GetUnqualifiedScriptClassName(candidate) != requestedClassName)
+                    continue;
+
+                if (!matchedClassName.empty())
+                    return {};
+                matchedClassName = candidate;
+            }
+
+            return matchedClassName;
         }
 
         std::string SanitizeNativeScriptClassName(const char* rawName)
@@ -1902,9 +1974,9 @@ namespace Limitless::EditorInspectorPanel
                 {
                     const std::vector<std::string> registeredScriptNames = NativeScriptRegistry::GetRegisteredScriptNames();
                     const auto discoveredScriptNames = DiscoverNativeScriptClassNamesFromProjectAssets();
-                    std::vector<std::string> availableScriptNames = discoveredScriptNames.empty()
-                        ? registeredScriptNames
-                        : discoveredScriptNames;
+                    std::vector<std::string> availableScriptNames = registeredScriptNames.empty()
+                        ? discoveredScriptNames
+                        : registeredScriptNames;
                     if (ImGui::Button("Add Script", ImVec2(-1.0f, 0.0f)))
                     {
                         if (undoService)
@@ -2016,6 +2088,8 @@ namespace Limitless::EditorInspectorPanel
                                         const bool scriptSelected = (scriptEntry.ScriptClassName == scriptName);
                                         if (ImGui::Selectable(scriptName.c_str(), scriptSelected))
                                         {
+                                            const std::string resolvedScriptClassName = ResolveRegisteredScriptClassName(scriptName);
+                                            const std::string& assignedScriptClassName = resolvedScriptClassName.empty() ? scriptName : resolvedScriptClassName;
                                             if (undoService)
                                             {
                                                 (void)undoService->ExecuteSceneMutation("Change Script Class", [&](Scene& mutableScene) {
@@ -2023,7 +2097,7 @@ namespace Limitless::EditorInspectorPanel
                                                     if (!mutableNativeScript || scriptIndex >= mutableNativeScript->Scripts.size())
                                                         return false;
                                                     auto& mutableEntry = mutableNativeScript->Scripts[scriptIndex];
-                                                    mutableEntry.ScriptClassName = scriptName;
+                                                    mutableEntry.ScriptClassName = assignedScriptClassName;
                                                     mutableEntry.ScriptAssetRelativePath.clear();
                                                     mutableEntry.ExposedProperties.clear();
                                                     mutableEntry.RuntimeInitialized = false;
@@ -2033,7 +2107,7 @@ namespace Limitless::EditorInspectorPanel
                                             }
                                             else
                                             {
-                                                scriptEntry.ScriptClassName = scriptName;
+                                                scriptEntry.ScriptClassName = assignedScriptClassName;
                                                 scriptEntry.ScriptAssetRelativePath.clear();
                                                 scriptEntry.ExposedProperties.clear();
                                                 scriptEntry.RuntimeInitialized = false;
@@ -2046,8 +2120,12 @@ namespace Limitless::EditorInspectorPanel
                                     ImGui::EndCombo();
                                 }
 
+                                const std::string resolvedSelectedClassName = ResolveRegisteredScriptClassName(scriptEntry.ScriptClassName);
+                                if (!resolvedSelectedClassName.empty() && resolvedSelectedClassName != scriptEntry.ScriptClassName)
+                                    scriptEntry.ScriptClassName = resolvedSelectedClassName;
+
                                 const bool selectedClassCompiled =
-                                    scriptEntry.ScriptClassName.empty() || NativeScriptRegistry::HasScript(scriptEntry.ScriptClassName);
+                                    scriptEntry.ScriptClassName.empty() || !ResolveRegisteredScriptClassName(scriptEntry.ScriptClassName).empty();
                                 if (!selectedClassCompiled)
                                 {
                                     ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f),

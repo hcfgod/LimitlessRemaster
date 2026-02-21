@@ -16,6 +16,7 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -198,15 +199,8 @@ namespace Limitless::ScriptCoreModuleRuntime
             return std::nullopt;
         }
 
-        std::filesystem::path BuildConfigOutputFolder()
+        std::filesystem::path BuildConfigOutputFolderFor(const std::string& configName)
         {
-            std::string configName = "debug";
-#if defined(LT_CONFIG_RELEASE)
-            configName = "release";
-#elif defined(LT_CONFIG_DIST)
-            configName = "dist";
-#endif
-
             std::string architectureName = "x64";
             std::string platformToken = "x64";
 #if defined(LT_ARCHITECTURE_ARM64)
@@ -226,14 +220,44 @@ namespace Limitless::ScriptCoreModuleRuntime
                 / "Editor";
         }
 
+        std::filesystem::path BuildConfigOutputFolder()
+        {
+            std::string configName = "debug";
+#if defined(LT_CONFIG_RELEASE)
+            configName = "release";
+#elif defined(LT_CONFIG_DIST)
+            configName = "dist";
+#endif
+            return BuildConfigOutputFolderFor(configName);
+        }
+
+        std::filesystem::path BuildDistConfigOutputFolder()
+        {
+            return BuildConfigOutputFolderFor("dist");
+        }
+
         std::vector<std::filesystem::path> BuildScriptCoreLibraryCandidates()
         {
             std::vector<std::filesystem::path> candidates;
+            auto addCandidate = [&](const std::filesystem::path& candidatePath) {
+                if (candidatePath.empty())
+                    return;
+                if (std::find(candidates.begin(), candidates.end(), candidatePath) != candidates.end())
+                    return;
+                candidates.push_back(candidatePath);
+            };
 
             const std::string scriptCoreLibraryFileName = GetScriptCoreLibraryFileName();
+            const std::filesystem::path currentConfigOutput = BuildConfigOutputFolder();
+            const std::filesystem::path distConfigOutput = BuildDistConfigOutputFolder();
+            const std::filesystem::path currentConfigPlatformFolderName = currentConfigOutput.parent_path().filename();
+            const std::filesystem::path distConfigPlatformFolderName = distConfigOutput.parent_path().filename();
             if (const auto projectRoot = GetOpenProjectRoot(); projectRoot.has_value())
             {
-                candidates.push_back(projectRoot.value() / "Build" / "ScriptCore" / BuildConfigOutputFolder().filename() / scriptCoreLibraryFileName);
+                // Project-local ScriptCore staging path uses the config-platform folder name.
+                // Prefer Dist first because script builds are now fixed to Dist.
+                addCandidate(projectRoot.value() / "Build" / "ScriptCore" / distConfigPlatformFolderName / scriptCoreLibraryFileName);
+                addCandidate(projectRoot.value() / "Build" / "ScriptCore" / currentConfigPlatformFolderName / scriptCoreLibraryFileName);
             }
 
             const std::string executablePath = PlatformDetection::GetExecutablePath();
@@ -241,15 +265,19 @@ namespace Limitless::ScriptCoreModuleRuntime
             {
                 const std::filesystem::path executableDirectory = std::filesystem::path(executablePath).parent_path();
                 if (!executableDirectory.empty())
-                    candidates.push_back(executableDirectory / scriptCoreLibraryFileName);
+                    addCandidate(executableDirectory / scriptCoreLibraryFileName);
             }
 
             if (const auto configuredBuildRoot = GetConfiguredBuildRoot(); configuredBuildRoot.has_value())
-                candidates.push_back(configuredBuildRoot.value() / BuildConfigOutputFolder() / scriptCoreLibraryFileName);
+            {
+                addCandidate(configuredBuildRoot.value() / distConfigOutput / scriptCoreLibraryFileName);
+                addCandidate(configuredBuildRoot.value() / currentConfigOutput / scriptCoreLibraryFileName);
+            }
 
             if (const auto engineRoot = FindEngineWorkspaceRoot(); engineRoot.has_value())
             {
-                candidates.push_back(engineRoot.value() / BuildConfigOutputFolder() / scriptCoreLibraryFileName);
+                addCandidate(engineRoot.value() / distConfigOutput / scriptCoreLibraryFileName);
+                addCandidate(engineRoot.value() / currentConfigOutput / scriptCoreLibraryFileName);
             }
 
             return candidates;
@@ -618,10 +646,13 @@ namespace Limitless::ScriptCoreModuleRuntime
                 setScriptInstantiatePrefabBridge(&ForwardScriptInstantiatePrefabToHost);
 
             registerFunction(&RegisterScriptFromModule);
+            const auto registeredScripts = NativeScriptRegistry::GetRegisteredScriptNames();
             s_RuntimeState.SourceLibraryPath = libraryPath;
             s_RuntimeState.LoadedLibraryPath = stagedLibraryPath;
             s_RuntimeState.LastWriteTime = sourceTimestamp;
-            LT_INFO("ScriptCore runtime: loaded scripts from '{}'.", libraryPath.string());
+            LT_INFO("ScriptCore runtime: loaded scripts from '{}' (registered={} script(s)).",
+                    libraryPath.string(),
+                    registeredScripts.size());
             return true;
         }
     }
@@ -699,22 +730,28 @@ namespace Limitless::ScriptCoreModuleRuntime
             return;
         s_RuntimeState.LastPollTime = now;
 
-        std::filesystem::path sourcePath = s_RuntimeState.SourceLibraryPath;
-        if (sourcePath.empty())
+        // Always prefer the highest-priority available candidate. This allows
+        // switching from fallback ScriptCore (e.g. next to Editor.exe) to the
+        // freshly built project-local ScriptCore as soon as it appears.
+        std::filesystem::path sourcePath;
+        for (const auto& candidatePath : BuildScriptCoreLibraryCandidates())
         {
-            for (const auto& candidatePath : BuildScriptCoreLibraryCandidates())
+            std::error_code existsError;
+            if (std::filesystem::exists(candidatePath, existsError))
             {
-                std::error_code existsError;
-                if (std::filesystem::exists(candidatePath, existsError))
-                {
-                    sourcePath = candidatePath;
-                    break;
-                }
+                sourcePath = candidatePath;
+                break;
             }
         }
 
         if (sourcePath.empty())
             return;
+
+        if (s_RuntimeState.SourceLibraryPath != sourcePath)
+        {
+            (void)ReloadScriptCoreModule(sourcePath);
+            return;
+        }
 
         std::error_code timeError;
         const auto writeTime = std::filesystem::last_write_time(sourcePath, timeError);

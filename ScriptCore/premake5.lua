@@ -64,3 +64,11 @@ project "ScriptCore"
     -- Disable linker debug-info file emission in Debug to avoid PDB lock contention.
     filter "configurations:Debug"
         symbols "off"
+
+    -- Keep static script registrar constructors alive in optimized builds.
+    filter "configurations:Release or Dist"
+        linkoptions
+        {
+            "/OPT:NOREF",
+            "/OPT:NOICF"
+        }
