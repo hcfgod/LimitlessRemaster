@@ -41,5 +41,6 @@ namespace Limitless::EditorMenuBar
               bool canReturnFromPrefabMode,
               const std::function<void()>& onReturnFromPrefabMode,
               bool canApplyPrefabToInstances,
-              const std::function<void()>& onApplyPrefabToInstances);
+              const std::function<void()>& onApplyPrefabToInstances,
+              const std::function<void()>& onResetLayoutToDefault);
 }

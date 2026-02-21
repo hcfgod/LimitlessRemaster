@@ -9,6 +9,13 @@
 namespace Limitless::Project
 {
     using json = nlohmann::json;
+    namespace
+    {
+        std::string SanitizeConfiguration(std::string /*configuration*/)
+        {
+            return "Dist";
+        }
+    }
 
     std::filesystem::path GetBuildTargetsSettingsPath(const std::filesystem::path& projectRoot)
     {
@@ -19,7 +26,7 @@ namespace Limitless::Project
     {
         BuildTargetsSettings s;
         s.Version = 1;
-        s.Configuration = "Debug";
+        s.Configuration = "Dist";
         s.Platform = "x64";
         s.AutoRunAfterBuild = false;
         s.Targets = {
@@ -40,7 +47,7 @@ namespace Limitless::Project
 
         s.Version = root.value("version", 1u);
         s.ActiveTargetId = root.value("activeTargetId", s.ActiveTargetId);
-        s.Configuration = root.value("configuration", s.Configuration);
+        s.Configuration = SanitizeConfiguration(root.value("configuration", s.Configuration));
         s.Platform = root.value("platform", s.Platform);
         s.AutoRunAfterBuild = root.value("autoRunAfterBuild", s.AutoRunAfterBuild);
 
@@ -93,7 +100,7 @@ namespace Limitless::Project
         json root;
         root["version"] = s.Version;
         root["activeTargetId"] = s.ActiveTargetId;
-        root["configuration"] = s.Configuration;
+        root["configuration"] = SanitizeConfiguration(s.Configuration);
         root["platform"] = s.Platform;
         root["autoRunAfterBuild"] = s.AutoRunAfterBuild;
 

@@ -10,6 +10,22 @@ namespace Limitless::Project
 {
     using json = nlohmann::json;
 
+    namespace
+    {
+        std::string SanitizeBuildConfiguration(std::string /*configuration*/)
+        {
+            // Build-game workflow now always ships Dist binaries.
+            return "Dist";
+        }
+
+        std::string SanitizeBuildBackend(std::string backend)
+        {
+            if (backend == BuildBackend::LegacySdk || backend == BuildBackend::InternalToolchain)
+                return backend;
+            return BuildBackend::LegacySdk;
+        }
+    }
+
     std::filesystem::path GetBuildSettingsPath(const std::filesystem::path& projectRoot)
     {
         return projectRoot / "Project" / "Settings" / "BuildSettings.json";
@@ -35,10 +51,12 @@ namespace Limitless::Project
 
             BuildSettings out;
             out.Version = root.value("version", 1u);
-            out.BuildConfiguration = root.value("buildConfiguration", std::string{"Release"});
+            out.BuildConfiguration = SanitizeBuildConfiguration(root.value("buildConfiguration", std::string{"Dist"}));
             out.CompressionMode = root.value("compressionMode", std::string{"Zstd"});
             out.ZstdCompressionLevel = root.value("zstdCompressionLevel", 3);
             out.LastOutputDirectory = root.value("lastOutputDirectory", std::string{});
+            out.EngineRootOverride = root.value("engineRootOverride", std::string{});
+            out.BuildBackend = SanitizeBuildBackend(root.value("buildBackend", out.BuildBackend));
 
             if (root.contains("buildScenes") && root["buildScenes"].is_array())
             {
@@ -72,10 +90,12 @@ namespace Limitless::Project
 
             json root;
             root["version"] = settings.Version;
-            root["buildConfiguration"] = settings.BuildConfiguration;
+            root["buildConfiguration"] = SanitizeBuildConfiguration(settings.BuildConfiguration);
             root["compressionMode"] = settings.CompressionMode;
             root["zstdCompressionLevel"] = settings.ZstdCompressionLevel;
             root["lastOutputDirectory"] = settings.LastOutputDirectory;
+            root["engineRootOverride"] = settings.EngineRootOverride;
+            root["buildBackend"] = SanitizeBuildBackend(settings.BuildBackend);
 
             json scenesArray = json::array();
             for (const auto& entry : settings.BuildScenes)

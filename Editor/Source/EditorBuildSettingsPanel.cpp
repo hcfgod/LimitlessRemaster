@@ -11,14 +11,50 @@
 #include "imgui/imgui.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace Limitless::EditorBuildSettingsPanel
 {
     namespace
     {
+        std::filesystem::path FindEngineRoot();
+        std::filesystem::path FindInternalToolchainRoot();
+        void AutoResolveBackendMode(EditorBuildSettingsPanelState& state);
+
+        std::string NormalizeBuildBackend(std::string backend)
+        {
+            if (backend == Project::BuildBackend::LegacySdk || backend == Project::BuildBackend::InternalToolchain)
+                return backend;
+            return Project::BuildBackend::LegacySdk;
+        }
+
+        std::string TrimCopy(std::string value)
+        {
+            auto isWhitespace = [](unsigned char character) {
+                return std::isspace(character) != 0;
+            };
+
+            value.erase(value.begin(), std::find_if(value.begin(), value.end(), [&](char character) {
+                            return !isWhitespace(static_cast<unsigned char>(character));
+                        }));
+            value.erase(std::find_if(value.rbegin(), value.rend(), [&](char character) {
+                            return !isWhitespace(static_cast<unsigned char>(character));
+                        }).base(),
+                        value.end());
+            return value;
+        }
+
+        void CopyStringToBuffer(const std::string& source, std::array<char, 512>& destination)
+        {
+            std::memset(destination.data(), 0, destination.size());
+            std::memcpy(destination.data(), source.c_str(), std::min(source.size(), destination.size() - 1));
+        }
+
         /// Ensure settings are loaded from the current project.
         void EnsureSettingsLoaded(EditorBuildSettingsPanelState& state)
         {
@@ -33,15 +69,16 @@ namespace Limitless::EditorBuildSettingsPanel
             const auto loadResult = Project::LoadBuildSettings(projectRoot);
             if (loadResult.IsSuccess())
                 state.Settings = loadResult.GetValue();
+            state.Settings.BuildConfiguration = "Dist";
+            state.Settings.BuildBackend = NormalizeBuildBackend(state.Settings.BuildBackend);
 
             // Populate output directory buffer from saved settings.
             if (!state.Settings.LastOutputDirectory.empty())
-            {
-                std::memset(state.OutputDirectoryBuffer.data(), 0, state.OutputDirectoryBuffer.size());
-                const auto& dir = state.Settings.LastOutputDirectory;
-                std::memcpy(state.OutputDirectoryBuffer.data(), dir.c_str(),
-                            std::min(dir.size(), state.OutputDirectoryBuffer.size() - 1));
-            }
+                CopyStringToBuffer(state.Settings.LastOutputDirectory, state.OutputDirectoryBuffer);
+            // Root is auto-detected at build-time; clear persisted manual overrides.
+            state.Settings.EngineRootOverride.clear();
+
+            AutoResolveBackendMode(state);
 
             state.SettingsLoaded = true;
         }
@@ -54,7 +91,10 @@ namespace Limitless::EditorBuildSettingsPanel
                 return;
 
             // Update output directory from the buffer.
-            state.Settings.LastOutputDirectory = std::string(state.OutputDirectoryBuffer.data());
+            state.Settings.LastOutputDirectory = TrimCopy(std::string(state.OutputDirectoryBuffer.data()));
+            state.Settings.EngineRootOverride.clear();
+            state.Settings.BuildConfiguration = "Dist";
+            state.Settings.BuildBackend = NormalizeBuildBackend(state.Settings.BuildBackend);
 
             const auto projectRoot = projectManager.GetProjectRoot();
             (void)Project::SaveBuildSettings(projectRoot, state.Settings);
@@ -65,13 +105,29 @@ namespace Limitless::EditorBuildSettingsPanel
         bool IsEngineWorkspaceRoot(const std::filesystem::path& candidate)
         {
             std::error_code errorCode;
-            // The Scripts/ folder with the build scripts is the most reliable marker.
-            if (std::filesystem::is_directory(candidate / "Scripts", errorCode))
-                return true;
-            // Fallback: the solution file only exists at the workspace root.
-            if (std::filesystem::exists(candidate / "LimitlessRemaster.sln", errorCode))
-                return true;
-            return false;
+            const bool hasScripts = std::filesystem::is_directory(candidate / "Scripts", errorCode);
+            const bool hasSolution = std::filesystem::exists(candidate / "LimitlessRemaster.sln", errorCode);
+            const bool hasPremake = std::filesystem::exists(candidate / "premake5.lua", errorCode);
+            return hasScripts && (hasSolution || hasPremake);
+        }
+
+        bool IsInternalToolchainRoot(const std::filesystem::path& candidate)
+        {
+            std::error_code errorCode;
+#if defined(LT_PLATFORM_WINDOWS)
+            const std::filesystem::path scriptCoreScript = candidate / "Scripts" / "build-project-scriptcore-windows.bat";
+#else
+            const std::filesystem::path scriptCoreScript = candidate / "Scripts" / "build-project-scriptcore-unix.sh";
+#endif
+            const std::filesystem::path sdkIncludeRoot = candidate / "SDK" / "include";
+            const std::filesystem::path sdkLibRoot = candidate / "SDK" / "lib";
+            const std::filesystem::path runtimeTemplateRoot = candidate / "RuntimeTemplates";
+            const std::filesystem::path generatedScriptMirrorRoot = candidate / "Build" / "Generated" / "ScriptCore";
+            return std::filesystem::exists(scriptCoreScript, errorCode) &&
+                   std::filesystem::is_directory(sdkIncludeRoot, errorCode) &&
+                   std::filesystem::is_directory(sdkLibRoot, errorCode) &&
+                   std::filesystem::is_directory(runtimeTemplateRoot, errorCode) &&
+                   std::filesystem::is_directory(generatedScriptMirrorRoot, errorCode);
         }
 
         /// Try to locate the engine workspace root from the running editor.
@@ -93,6 +149,14 @@ namespace Limitless::EditorBuildSettingsPanel
                 return {};
             };
 
+            // Environment override is useful for portable editor installs.
+            if (const char* envRoot = std::getenv("LIMITLESS_ENGINE_ROOT"); envRoot && envRoot[0] != '\0')
+            {
+                std::filesystem::path candidate(envRoot);
+                if (IsEngineWorkspaceRoot(candidate))
+                    return candidate;
+            }
+
             // Try from the executable location first (most reliable).
             const auto& platformInfo = PlatformDetection::GetPlatformInfo();
             if (!platformInfo.executablePath.empty())
@@ -109,6 +173,110 @@ namespace Limitless::EditorBuildSettingsPanel
                 return result;
 
             return {};
+        }
+
+        std::filesystem::path FindInternalToolchainRoot()
+        {
+            // Shipped layout contract: <EditorExeDir>/Toolchain
+            const auto& platformInfo = PlatformDetection::GetPlatformInfo();
+            if (!platformInfo.executablePath.empty())
+            {
+                const std::filesystem::path executableDir = std::filesystem::path(platformInfo.executablePath).parent_path();
+                const std::filesystem::path embeddedToolchain = executableDir / "Toolchain";
+                if (IsInternalToolchainRoot(embeddedToolchain))
+                    return embeddedToolchain;
+            }
+
+            if (const char* envRoot = std::getenv("LIMITLESS_TOOLCHAIN_ROOT"); envRoot && envRoot[0] != '\0')
+            {
+                std::filesystem::path candidate(envRoot);
+                if (IsInternalToolchainRoot(candidate))
+                    return candidate;
+            }
+
+            if (!platformInfo.executablePath.empty())
+            {
+                const std::filesystem::path executableDir = std::filesystem::path(platformInfo.executablePath).parent_path();
+                if (IsInternalToolchainRoot(executableDir))
+                    return executableDir;
+            }
+
+            std::error_code errorCode;
+            const std::filesystem::path cwd = std::filesystem::current_path(errorCode);
+            if (!errorCode)
+            {
+                if (IsInternalToolchainRoot(cwd))
+                    return cwd;
+                const std::filesystem::path cwdToolchain = cwd / "Toolchain";
+                if (IsInternalToolchainRoot(cwdToolchain))
+                    return cwdToolchain;
+            }
+
+            return {};
+        }
+
+        std::filesystem::path ResolveBuildBackendRoot(const EditorBuildSettingsPanelState& state)
+        {
+            if (state.Settings.BuildBackend == Project::BuildBackend::InternalToolchain)
+                return FindInternalToolchainRoot();
+            return FindEngineRoot();
+        }
+
+        void AutoResolveBackendMode(EditorBuildSettingsPanelState& state)
+        {
+            const std::filesystem::path detectedInternal = FindInternalToolchainRoot();
+            const std::filesystem::path detectedLegacy = FindEngineRoot();
+            if (!detectedInternal.empty() && detectedLegacy.empty())
+                state.Settings.BuildBackend = Project::BuildBackend::InternalToolchain;
+        }
+
+        std::vector<std::string> GetBuildBackendHealthIssues(const EditorBuildSettingsPanelState& state, const std::filesystem::path& root)
+        {
+            std::vector<std::string> issues;
+            if (root.empty())
+            {
+                if (state.Settings.BuildBackend == Project::BuildBackend::InternalToolchain)
+                    issues.push_back("Toolchain root is not configured or auto-detected.");
+                else
+                    issues.push_back("Engine root is not configured or auto-detected.");
+                return issues;
+            }
+
+            std::error_code errorCode;
+            if (!std::filesystem::is_directory(root, errorCode))
+            {
+                issues.push_back("Configured root does not exist: " + root.string());
+                return issues;
+            }
+
+            if (state.Settings.BuildBackend == Project::BuildBackend::InternalToolchain)
+            {
+                if (!IsInternalToolchainRoot(root))
+                    issues.push_back("Missing internal toolchain markers (Scripts/build-project-scriptcore + SDK/include + SDK/lib + RuntimeTemplates).");
+
+                const std::filesystem::path runtimeTemplates = root / "RuntimeTemplates";
+                if (!std::filesystem::exists(runtimeTemplates, errorCode))
+                    issues.push_back("Missing runtime templates folder: " + runtimeTemplates.string());
+
+                const std::filesystem::path generatedScriptMirrorRoot = root / "Build" / "Generated" / "ScriptCore";
+                if (!std::filesystem::exists(generatedScriptMirrorRoot, errorCode))
+                    issues.push_back("Missing generated script mirror root: " + generatedScriptMirrorRoot.string());
+
+                const std::filesystem::path sdkHeaderRoot = root / "SDK" / "include";
+                if (!std::filesystem::exists(sdkHeaderRoot, errorCode))
+                    issues.push_back("Missing script SDK include root: " + sdkHeaderRoot.string());
+
+                const std::filesystem::path sdkLibraryRoot = root / "SDK" / "lib";
+                if (!std::filesystem::exists(sdkLibraryRoot, errorCode))
+                    issues.push_back("Missing script SDK library root: " + sdkLibraryRoot.string());
+            }
+            else
+            {
+                if (!IsEngineWorkspaceRoot(root))
+                    issues.push_back("Missing legacy workspace markers (Scripts + premake/solution files).");
+            }
+
+            return issues;
         }
 
         /// Start a build in a background thread.
@@ -130,8 +298,19 @@ namespace Limitless::EditorBuildSettingsPanel
             Project::GameBuildRequest request;
             request.OutputDirectory = std::string(state.OutputDirectoryBuffer.data());
             request.Settings = state.Settings;
+            request.Settings.BuildConfiguration = "Dist";
+            request.Settings.BuildBackend = NormalizeBuildBackend(request.Settings.BuildBackend);
             request.ProjectRoot = projectManager.GetProjectRoot();
-            request.EngineRoot = FindEngineRoot();
+            request.EngineRoot = ResolveBuildBackendRoot(state);
+
+            if (request.Settings.BuildBackend == Project::BuildBackend::LegacySdk &&
+                IsInternalToolchainRoot(request.EngineRoot) &&
+                !IsEngineWorkspaceRoot(request.EngineRoot))
+            {
+                request.Settings.BuildBackend = Project::BuildBackend::InternalToolchain;
+                state.Settings.BuildBackend = Project::BuildBackend::InternalToolchain;
+                SaveSettings(state);
+            }
 
             // Use project name from ProjectDefinition.
             const auto definition = projectManager.GetProjectDefinition();
@@ -148,7 +327,17 @@ namespace Limitless::EditorBuildSettingsPanel
 
             if (request.EngineRoot.empty())
             {
-                state.StatusMessage = "Could not locate engine workspace root.";
+                if (request.Settings.BuildBackend == Project::BuildBackend::InternalToolchain)
+                    state.StatusMessage = "Could not locate internal toolchain root.";
+                else
+                    state.StatusMessage = "Could not locate engine workspace root.";
+                return;
+            }
+
+            const auto healthIssues = GetBuildBackendHealthIssues(state, request.EngineRoot);
+            if (!healthIssues.empty())
+            {
+                state.StatusMessage = "Build backend is not ready: " + healthIssues.front();
                 return;
             }
 
@@ -321,20 +510,16 @@ namespace Limitless::EditorBuildSettingsPanel
         ImGui::Separator();
         ImGui::Spacing();
 
-        // -----------------------------------------------------------------
-        // Build Configuration
-        // -----------------------------------------------------------------
-        ImGui::SeparatorText("Build Configuration");
+        state.Settings.BuildConfiguration = "Dist";
 
-        const char* configOptions[] = { "Debug", "Release", "Dist" };
-        int currentConfigIndex = 1; // Default to Release.
-        for (int i = 0; i < 3; ++i)
+        const char* backendOptions[] = { "Internal Toolchain", "Legacy SDK/Workspace" };
+        int currentBackendIndex = (state.Settings.BuildBackend == Project::BuildBackend::InternalToolchain) ? 0 : 1;
+        if (ImGui::Combo("Build Backend", &currentBackendIndex, backendOptions, 2))
         {
-            if (state.Settings.BuildConfiguration == configOptions[i])
-                currentConfigIndex = i;
+            state.Settings.BuildBackend = (currentBackendIndex == 0)
+                ? Project::BuildBackend::InternalToolchain
+                : Project::BuildBackend::LegacySdk;
         }
-        if (ImGui::Combo("Configuration", &currentConfigIndex, configOptions, 3))
-            state.Settings.BuildConfiguration = configOptions[currentConfigIndex];
 
         // -----------------------------------------------------------------
         // Compression
@@ -359,6 +544,26 @@ namespace Limitless::EditorBuildSettingsPanel
         ImGui::SeparatorText("Output");
 
         ImGui::InputText("Output Folder", state.OutputDirectoryBuffer.data(), state.OutputDirectoryBuffer.size());
+        const bool useInternalBackend = (state.Settings.BuildBackend == Project::BuildBackend::InternalToolchain);
+
+        const std::filesystem::path healthRoot = ResolveBuildBackendRoot(state);
+        const char* resolvedRootLabel = useInternalBackend ? "Toolchain Root (auto)" : "Engine Root (auto)";
+        if (!healthRoot.empty())
+            ImGui::Text("%s: %s", resolvedRootLabel, healthRoot.string().c_str());
+        else
+            ImGui::TextDisabled("%s: <not found>", resolvedRootLabel);
+
+        const auto healthIssues = GetBuildBackendHealthIssues(state, healthRoot);
+        if (healthIssues.empty())
+        {
+            ImGui::TextColored(ImVec4(0.3f, 0.9f, 0.3f, 1.0f), "Backend ready: %s", healthRoot.string().c_str());
+        }
+        else
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f), "Backend check:");
+            for (const std::string& issue : healthIssues)
+                ImGui::BulletText("%s", issue.c_str());
+        }
 
         ImGui::Spacing();
         ImGui::Separator();

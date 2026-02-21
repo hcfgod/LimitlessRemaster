@@ -59,6 +59,7 @@ namespace Limitless::Project
         static GameBuildResult BuildAndRunGame(const GameBuildRequest& request);
 
     private:
+        static bool IsInternalBackend(const GameBuildRequest& request);
         static bool ValidateRequest(const GameBuildRequest& request, GameBuildResult& result);
         static bool BuildAssetBundle(const GameBuildRequest& request, GameBuildResult& result);
         static bool BuildScriptCore(const GameBuildRequest& request, GameBuildResult& result);

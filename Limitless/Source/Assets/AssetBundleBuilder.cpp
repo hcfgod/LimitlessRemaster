@@ -21,6 +21,7 @@
 #include <array>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Limitless::Assets
@@ -66,12 +67,15 @@ namespace Limitless::Assets
         if (EndsWith(name, ".prefab.json")) return AssetType::Prefab;
         if (EndsWith(name, ".tilemap.json")) return AssetType::Tilemap;
         if (EndsWith(name, ".tileset.json")) return AssetType::Tileset;
+        if (EndsWith(name, ".tile.json")) return AssetType::Tile;
+        if (EndsWith(name, ".tilepalette.json")) return AssetType::TilePalette;
         if (EndsWith(name, ".animationclip.json") || EndsWith(name, ".animation.json") || EndsWith(name, ".anim.json"))
             return AssetType::AnimationClip;
         if (EndsWith(name, ".animcontroller.json") || EndsWith(name, ".animatorcontroller.json"))
             return AssetType::AnimatorController;
         if (EndsWith(name, ".material.json")) return AssetType::Material;
         if (EndsWith(name, ".inputactions.json")) return AssetType::InputActions;
+        if (EndsWith(name, ".audiomixer.json")) return AssetType::AudioMixer;
         if (ext == ".glsl") return AssetType::Shader;
 
         // Textures
@@ -457,8 +461,11 @@ namespace Limitless::Assets
                 r.Type != AssetType::Prefab &&
                 r.Type != AssetType::Tilemap &&
                 r.Type != AssetType::Tileset &&
+                r.Type != AssetType::Tile &&
+                r.Type != AssetType::TilePalette &&
                 r.Type != AssetType::AnimationClip &&
                 r.Type != AssetType::AnimatorController &&
+                r.Type != AssetType::AudioMixer &&
                 r.Type != AssetType::InputActions &&
                 r.Type != AssetType::AudioClip)
             {
@@ -689,6 +696,52 @@ namespace Limitless::Assets
 
             data.insert(data.end(), storedBytes.begin(), storedBytes.end());
             entries.push_back(std::move(e));
+        }
+
+        // Bundle texture .meta files so runtime can resolve sprite-sheet sub-sprites
+        // (tile/palette rendering depends on this in shipped builds).
+        std::unordered_set<std::string> bundledMetaKeys;
+        bundledMetaKeys.reserve(records.size());
+        for (const auto& r : records)
+        {
+            if (r.Type != AssetType::Texture2D || r.Key.empty() || r.Guid.empty() || r.ResolvedPath.empty())
+                continue;
+
+            const std::string metaKey = r.Key + ".meta";
+            if (bundledMetaKeys.contains(metaKey))
+                continue;
+
+            const std::filesystem::path metaPath = std::filesystem::path(r.ResolvedPath + ".meta");
+            if (!std::filesystem::exists(metaPath))
+                continue;
+
+            const auto metaBytesResult = ReadAllBytes(metaPath);
+            if (metaBytesResult.IsFailure())
+            {
+                LT_CORE_WARN("AssetBundleBuilder: skipping texture meta '{}' (read failed): {}",
+                             metaPath.string(),
+                             metaBytesResult.GetError().GetErrorMessage());
+                continue;
+            }
+
+            const auto& metaBytes = metaBytesResult.GetValue();
+            if (metaBytes.empty())
+                continue;
+
+            OutEntry metaEntry{};
+            metaEntry.Guid = "Meta:" + r.Guid;
+            metaEntry.Key = metaKey;
+            metaEntry.Type = AssetType::Unknown;
+            metaEntry.PayloadFormat = AssetBundlePayloadFormat::Raw;
+            metaEntry.Compression = AssetBundleCompression::None;
+            metaEntry.UncompressedSize = static_cast<uint64_t>(metaBytes.size());
+            metaEntry.ContentHash64 = ::Limitless::Hash::XxHash64::Compute(metaBytes.data(), metaBytes.size(), 0);
+            metaEntry.Offset = static_cast<uint64_t>(data.size());
+            metaEntry.Size = static_cast<uint64_t>(metaBytes.size());
+
+            data.insert(data.end(), metaBytes.begin(), metaBytes.end());
+            entries.push_back(std::move(metaEntry));
+            bundledMetaKeys.insert(metaKey);
         }
 
         // Bundle project settings JSON so runtime builds can resolve settings

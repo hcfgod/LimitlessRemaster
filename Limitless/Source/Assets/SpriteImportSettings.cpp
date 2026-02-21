@@ -1,4 +1,5 @@
 #include "Assets/SpriteImportSettings.h"
+#include "Assets/AssetBundle.h"
 #include "Assets/AssetPaths.h"
 #include "Core/Debug/Log.h"
 
@@ -90,30 +91,8 @@ namespace Limitless::Assets
         return Result<void>();
     }
 
-    // -------------------------------------------------------------------------
-    // Public API
-    // -------------------------------------------------------------------------
-
-    SpriteImportSettings LoadSpriteImportSettings(const std::string& textureAssetKey)
+    static void ParseSpriteSettingsFromMetaJson(const nlohmann::json& j, SpriteImportSettings& settings)
     {
-        if (textureAssetKey.empty())
-            return SpriteImportSettings{};
-
-        {
-            std::lock_guard<std::mutex> lock(s_SpriteSettingsCacheMutex);
-            auto it = s_SpriteSettingsCache.find(textureAssetKey);
-            if (it != s_SpriteSettingsCache.end())
-                return it->second;
-        }
-
-        SpriteImportSettings settings;
-
-        const std::string metaPath = GetMetaPathForAssetKey(textureAssetKey);
-        if (metaPath.empty())
-            return settings;
-
-        const nlohmann::json j = ReadMetaJson(metaPath);
-
         if (j.contains("spriteMode") && j["spriteMode"].is_string())
             settings.Mode = SpriteModeFromString(j["spriteMode"].get<std::string>());
 
@@ -143,6 +122,54 @@ namespace Limitless::Assets
                 settings.SubSprites.push_back(std::move(sub));
             }
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Public API
+    // -------------------------------------------------------------------------
+
+    SpriteImportSettings LoadSpriteImportSettings(const std::string& textureAssetKey)
+    {
+        if (textureAssetKey.empty())
+            return SpriteImportSettings{};
+
+        {
+            std::lock_guard<std::mutex> lock(s_SpriteSettingsCacheMutex);
+            auto it = s_SpriteSettingsCache.find(textureAssetKey);
+            if (it != s_SpriteSettingsCache.end())
+                return it->second;
+        }
+
+        SpriteImportSettings settings;
+
+        // Built/shipped runtime path: read texture meta payload from AssetBundle first.
+        auto& bundle = AssetBundle::GetInstance();
+        if (bundle.IsEnabled() && bundle.IsLoaded())
+        {
+            const auto metaTextResult = bundle.ReadAllTextByKey(textureAssetKey + ".meta");
+            if (metaTextResult.IsSuccess())
+            {
+                try
+                {
+                    const nlohmann::json metaJson = nlohmann::json::parse(metaTextResult.GetValue());
+                    ParseSpriteSettingsFromMetaJson(metaJson, settings);
+                    std::lock_guard<std::mutex> lock(s_SpriteSettingsCacheMutex);
+                    s_SpriteSettingsCache[textureAssetKey] = settings;
+                    return settings;
+                }
+                catch (const std::exception& e)
+                {
+                    LT_CORE_WARN("SpriteImportSettings: failed to parse bundled meta for '{}': {}", textureAssetKey, e.what());
+                }
+            }
+        }
+
+        const std::string metaPath = GetMetaPathForAssetKey(textureAssetKey);
+        if (metaPath.empty())
+            return settings;
+
+        const nlohmann::json j = ReadMetaJson(metaPath);
+        ParseSpriteSettingsFromMetaJson(j, settings);
 
         {
             std::lock_guard<std::mutex> lock(s_SpriteSettingsCacheMutex);

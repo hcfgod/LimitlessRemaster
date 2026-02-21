@@ -39,7 +39,8 @@ namespace Limitless::EditorMenuBar
               bool canReturnFromPrefabMode,
               const std::function<void()>& onReturnFromPrefabMode,
               bool canApplyPrefabToInstances,
-              const std::function<void()>& onApplyPrefabToInstances)
+              const std::function<void()>& onApplyPrefabToInstances,
+              const std::function<void()>& onResetLayoutToDefault)
     {
         if (!ImGui::BeginMainMenuBar())
             return;
@@ -119,6 +120,9 @@ namespace Limitless::EditorMenuBar
             ImGui::MenuItem("Animation Timeline", nullptr, &showAnimationTimelinePanel);
             ImGui::MenuItem("Animator Graph", nullptr, &showAnimatorGraphPanel);
             ImGui::MenuItem("Tile Palette", nullptr, &showTilePalettePanel);
+            ImGui::Separator();
+            if (ImGui::MenuItem("Reset Layout to Default") && onResetLayoutToDefault)
+                onResetLayoutToDefault();
             ImGui::EndMenu();
         }
 

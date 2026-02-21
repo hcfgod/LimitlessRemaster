@@ -15,6 +15,8 @@
 #include "Assets/ShaderAsset.h"
 #include "Assets/TextureAssetImporter.h"
 #include "Graphics/Renderer.h"
+#include "Platform/Platform.h"
+#include "Project/BuildSettings.h"
 #include "Project/BuildTargetsSettings.h"
 #include "Project/ProjectManager.h"
 #include "Scene/Scene.h"
@@ -246,32 +248,193 @@ namespace Limitless::EditorInspectorPanel
         bool s_HasPendingNativeScriptEditorSessionRestore = false;
         EditorInspectorPanel::NativeScriptEditorSessionState s_PendingNativeScriptEditorSessionState;
 
+        std::optional<std::filesystem::path> GetOpenedProjectRoot();
+
+        std::string GetScriptCoreLibraryFileName()
+        {
+#if defined(LT_PLATFORM_WINDOWS)
+            return "ScriptCore.dll";
+#elif defined(LT_PLATFORM_MACOS)
+            return "libScriptCore.dylib";
+#else
+            return "libScriptCore.so";
+#endif
+        }
+
+        std::string ToBuildConfigShortname(const std::string& configuration)
+        {
+            std::string lower = configuration.empty() ? "debug" : configuration;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+#if defined(LT_ARCHITECTURE_ARM64)
+            return lower + "_arm64";
+#else
+            return lower + "_x64";
+#endif
+        }
+
+        std::string BuildConfigFolderName(const std::string& configuration)
+        {
+#if defined(LT_PLATFORM_WINDOWS)
+            const std::string platformToken = "windows";
+#elif defined(LT_PLATFORM_MACOS)
+            const std::string platformToken = "macosx";
+#else
+            const std::string platformToken = "linux";
+#endif
+
+#if defined(LT_ARCHITECTURE_ARM64)
+            const std::string architectureToken = "x64";
+#else
+            const std::string architectureToken = "x64";
+#endif
+            return ToBuildConfigShortname(configuration) + "-" + platformToken + "-" + architectureToken;
+        }
+
         std::optional<std::filesystem::path> FindEngineWorkspaceRoot()
         {
-            std::error_code errorCode;
-            std::filesystem::path probe = std::filesystem::current_path(errorCode);
-            if (errorCode)
-                return std::nullopt;
-
-            for (int depth = 0; depth < 32; ++depth)
+            auto isInternalToolchainRootCandidate = [](const std::filesystem::path& candidate) -> bool
             {
-                const std::filesystem::path buildScriptPath = probe / "Scripts" / "build-windows.bat";
-                const std::filesystem::path solutionPath = probe / "LimitlessRemaster.sln";
-                if (std::filesystem::exists(buildScriptPath, errorCode) &&
-                    std::filesystem::is_regular_file(buildScriptPath, errorCode) &&
-                    std::filesystem::exists(solutionPath, errorCode) &&
-                    std::filesystem::is_regular_file(solutionPath, errorCode))
-                {
-                    return probe;
-                }
+                std::error_code errorCode;
+#if defined(LT_PLATFORM_WINDOWS)
+                const std::filesystem::path scriptCoreBuildScript = candidate / "Scripts" / "build-project-scriptcore-windows.bat";
+#else
+                const std::filesystem::path scriptCoreBuildScript = candidate / "Scripts" / "build-project-scriptcore-unix.sh";
+#endif
+                const std::filesystem::path sdkIncludeRoot = candidate / "SDK" / "include";
+                const std::filesystem::path sdkLibRoot = candidate / "SDK" / "lib";
+                const std::filesystem::path generatedRoot = candidate / "Build" / "Generated" / "ScriptCore";
+                return std::filesystem::exists(scriptCoreBuildScript, errorCode) &&
+                       std::filesystem::is_directory(sdkIncludeRoot, errorCode) &&
+                       std::filesystem::is_directory(sdkLibRoot, errorCode) &&
+                       std::filesystem::is_directory(generatedRoot, errorCode);
+            };
 
-                if (!probe.has_parent_path())
-                    break;
-                const std::filesystem::path parent = probe.parent_path();
-                if (parent == probe)
-                    break;
-                probe = parent;
+            auto isEngineRootCandidate = [](const std::filesystem::path& candidate) -> bool
+            {
+                std::error_code errorCode;
+#if defined(LT_PLATFORM_WINDOWS)
+                const std::filesystem::path scriptCoreBuildScript = candidate / "Scripts" / "build-scriptcore-windows.bat";
+#else
+                const std::filesystem::path scriptCoreBuildScript = candidate / "Scripts" / "build-scriptcore-unix.sh";
+#endif
+                const std::filesystem::path scriptsFolder = candidate / "Scripts";
+                const std::filesystem::path solutionPath = candidate / "LimitlessRemaster.sln";
+
+                if (std::filesystem::exists(scriptCoreBuildScript, errorCode) &&
+                    std::filesystem::is_regular_file(scriptCoreBuildScript, errorCode))
+                    return true;
+                if (std::filesystem::is_directory(scriptsFolder, errorCode) &&
+                    std::filesystem::exists(solutionPath, errorCode))
+                    return true;
+                return false;
+            };
+
+            auto walkUp = [&](std::filesystem::path probe) -> std::optional<std::filesystem::path>
+            {
+                for (int depth = 0; depth < 32 && !probe.empty(); ++depth)
+                {
+                    if (isEngineRootCandidate(probe))
+                        return probe;
+
+                    if (!probe.has_parent_path())
+                        break;
+                    const std::filesystem::path parent = probe.parent_path();
+                    if (parent == probe)
+                        break;
+                    probe = parent;
+                }
+                return std::nullopt;
+            };
+
+            // 1) Per-project settings. BuildBackend drives which root detector is used.
+            if (const auto openedProjectRoot = GetOpenedProjectRoot(); openedProjectRoot.has_value())
+            {
+                const auto buildSettingsResult = Project::LoadBuildSettings(openedProjectRoot.value());
+                if (buildSettingsResult.IsSuccess())
+                {
+                    const auto& buildSettings = buildSettingsResult.GetValue();
+                    bool useInternalBackend = (buildSettings.BuildBackend == Project::BuildBackend::InternalToolchain);
+                    const std::string& overrideRoot = buildSettings.EngineRootOverride;
+                    if (!overrideRoot.empty())
+                    {
+                        std::filesystem::path candidate = std::filesystem::path(overrideRoot);
+                        std::error_code ec;
+                        candidate = std::filesystem::weakly_canonical(candidate, ec);
+                        if (ec)
+                            candidate = std::filesystem::path(overrideRoot);
+                        // Auto-correct stale legacy backend selection when override points at an internal toolchain.
+                        if (!useInternalBackend && isInternalToolchainRootCandidate(candidate))
+                            useInternalBackend = true;
+                        if (useInternalBackend ? isInternalToolchainRootCandidate(candidate) : isEngineRootCandidate(candidate))
+                            return candidate;
+                    }
+
+                    if (useInternalBackend)
+                    {
+                        if (const char* envRoot = std::getenv("LIMITLESS_TOOLCHAIN_ROOT"); envRoot && envRoot[0] != '\0')
+                        {
+                            std::filesystem::path candidate(envRoot);
+                            std::error_code ec;
+                            candidate = std::filesystem::weakly_canonical(candidate, ec);
+                            if (ec)
+                                candidate = std::filesystem::path(envRoot);
+                            if (isInternalToolchainRootCandidate(candidate))
+                                return candidate;
+                        }
+
+                        const auto& platformInfo = PlatformDetection::GetPlatformInfo();
+                        if (!platformInfo.executablePath.empty())
+                        {
+                            const std::filesystem::path executableDirectory = std::filesystem::path(platformInfo.executablePath).parent_path();
+                            const std::filesystem::path toolchainSibling = executableDirectory / "Toolchain";
+                            if (isInternalToolchainRootCandidate(toolchainSibling))
+                                return toolchainSibling;
+                            if (isInternalToolchainRootCandidate(executableDirectory))
+                                return executableDirectory;
+                        }
+
+                        std::error_code errorCode;
+                        const std::filesystem::path cwd = std::filesystem::current_path(errorCode);
+                        if (!errorCode)
+                        {
+                            if (isInternalToolchainRootCandidate(cwd))
+                                return cwd;
+                            const std::filesystem::path cwdToolchain = cwd / "Toolchain";
+                            if (isInternalToolchainRootCandidate(cwdToolchain))
+                                return cwdToolchain;
+                        }
+
+                        return std::nullopt;
+                    }
+                }
             }
+
+            // 2) Legacy mode environment variable override.
+            if (const char* envRoot = std::getenv("LIMITLESS_ENGINE_ROOT"); envRoot && envRoot[0] != '\0')
+            {
+                std::filesystem::path candidate(envRoot);
+                std::error_code ec;
+                candidate = std::filesystem::weakly_canonical(candidate, ec);
+                if (ec)
+                    candidate = std::filesystem::path(envRoot);
+                if (isEngineRootCandidate(candidate))
+                    return candidate;
+            }
+
+            // 3) Walk up from executable location.
+            const auto& platformInfo = PlatformDetection::GetPlatformInfo();
+            if (!platformInfo.executablePath.empty())
+            {
+                if (const auto fromExe = walkUp(std::filesystem::path(platformInfo.executablePath).parent_path()); fromExe.has_value())
+                    return fromExe;
+            }
+
+            // 4) Fallback to current working directory ancestry.
+            std::error_code errorCode;
+            if (const auto fromCwd = walkUp(std::filesystem::current_path(errorCode)); fromCwd.has_value())
+                return fromCwd;
 
             return std::nullopt;
         }
@@ -282,6 +445,16 @@ namespace Limitless::EditorInspectorPanel
             if (!engineRoot.has_value())
                 return std::nullopt;
             return engineRoot.value() / "Build" / "Generated" / "ScriptCore";
+        }
+
+        std::filesystem::path GetBuiltScriptCoreLibraryPath(const std::filesystem::path& buildRoot, const std::string& configuration)
+        {
+            return buildRoot / "Build" / BuildConfigFolderName(configuration) / "Editor" / GetScriptCoreLibraryFileName();
+        }
+
+        std::filesystem::path GetProjectLocalScriptCoreLibraryPath(const std::filesystem::path& projectRoot, const std::string& configuration)
+        {
+            return projectRoot / "Build" / "ScriptCore" / BuildConfigFolderName(configuration) / GetScriptCoreLibraryFileName();
         }
 
         std::optional<std::filesystem::path> GetOpenedProjectAssetScriptsDirectory()
@@ -322,18 +495,28 @@ namespace Limitless::EditorInspectorPanel
             if (buildTargetsResult.IsSuccess())
             {
                 const auto& settings = buildTargetsResult.GetValue();
-                const std::string configuration = settings.Configuration.empty() ? "Debug" : settings.Configuration;
+                const std::string configuration = "Dist";
                 const std::string platform = settings.Platform.empty() ? "x64" : settings.Platform;
                 return { configuration, platform };
             }
 
-            return { "Debug", "x64" };
+            return { "Dist", "x64" };
         }
 
-        int RunBuildScriptBlocking(const std::filesystem::path& projectRoot, const std::string& configuration, const std::string& platform)
+        int RunBuildScriptBlocking(const std::filesystem::path& buildRoot,
+                                   const std::filesystem::path& openedProjectRoot,
+                                   const std::string& configuration,
+                                   const std::string& platform,
+                                   bool useInternalBackend)
         {
 #ifdef LT_PLATFORM_WINDOWS
-            const std::string scriptCommand = "cmd.exe /c \"Scripts\\build-scriptcore-windows.bat " + configuration + " " + platform + "\"";
+            const std::string scriptName = useInternalBackend
+                ? "build-project-scriptcore-windows.bat"
+                : "build-scriptcore-windows.bat";
+            std::string scriptCommand = "cmd.exe /c \"Scripts\\" + scriptName + " " + configuration + " " + platform;
+            if (useInternalBackend)
+                scriptCommand += " \"" + openedProjectRoot.string() + "\"";
+            scriptCommand += "\"";
             STARTUPINFOA startupInfo{};
             startupInfo.cb = sizeof(startupInfo);
             PROCESS_INFORMATION processInformation{};
@@ -347,7 +530,7 @@ namespace Limitless::EditorInspectorPanel
                 FALSE,
                 0,
                 nullptr,
-                projectRoot.string().c_str(),
+                buildRoot.string().c_str(),
                 &startupInfo,
                 &processInformation);
 
@@ -362,8 +545,13 @@ namespace Limitless::EditorInspectorPanel
             CloseHandle(processInformation.hProcess);
             return static_cast<int>(exitCode);
 #else
-            const std::string scriptCommand =
-                "cd \"" + projectRoot.string() + "\" && bash \"Scripts/build-scriptcore-unix.sh\" --config \"" + configuration + "\" --platform \"" + platform + "\"";
+            const std::string scriptName = useInternalBackend
+                ? "build-project-scriptcore-unix.sh"
+                : "build-scriptcore-unix.sh";
+            std::string scriptCommand =
+                "cd \"" + buildRoot.string() + "\" && bash \"Scripts/" + scriptName + "\" --config \"" + configuration + "\" --platform \"" + platform + "\"";
+            if (useInternalBackend)
+                scriptCommand += " --project-root \"" + openedProjectRoot.string() + "\"";
 
             const int systemResult = std::system(scriptCommand.c_str());
             if (systemResult == -1)
@@ -391,12 +579,21 @@ namespace Limitless::EditorInspectorPanel
                 return false;
             }
 
-            const auto engineRoot = FindEngineWorkspaceRoot();
-            if (!engineRoot.has_value())
+            const auto buildRoot = FindEngineWorkspaceRoot();
+            if (!buildRoot.has_value())
             {
-                state.StatusMessage = "Could not locate engine workspace root to run build script.";
+                state.StatusMessage = "Could not locate script build root. Configure Build Settings backend/toolchain root first.";
                 state.StatusIsError = true;
                 return false;
+            }
+
+            bool useInternalBackend = false;
+            const auto openedProjectRoot = GetOpenedProjectRoot();
+            if (openedProjectRoot.has_value())
+            {
+                const auto buildSettingsResult = Project::LoadBuildSettings(openedProjectRoot.value());
+                if (buildSettingsResult.IsSuccess())
+                    useInternalBackend = (buildSettingsResult.GetValue().BuildBackend == Project::BuildBackend::InternalToolchain);
             }
 
             if (state.BuildThread && state.BuildThread->joinable())
@@ -407,13 +604,46 @@ namespace Limitless::EditorInspectorPanel
             state.StatusMessage = "Building native scripts...";
             state.StatusIsError = false;
 
-            const auto openedProjectRoot = GetOpenedProjectRoot();
             const std::filesystem::path settingsRoot = openedProjectRoot.has_value()
                 ? openedProjectRoot.value()
-                : engineRoot.value();
+                : buildRoot.value();
             const auto [configuration, platform] = GetBuildConfigurationAndPlatform(settingsRoot);
-            state.BuildThread = std::make_unique<std::thread>([&state, root = engineRoot.value(), configuration, platform]() {
-                const int exitCode = RunBuildScriptBlocking(root, configuration, platform);
+            state.BuildThread = std::make_unique<std::thread>(
+                [&state, root = buildRoot.value(), configuration, platform, useInternalBackend, openedProjectRoot]() {
+                const std::filesystem::path effectiveProjectRoot = openedProjectRoot.has_value()
+                    ? openedProjectRoot.value()
+                    : root;
+                int exitCode = RunBuildScriptBlocking(root, effectiveProjectRoot, configuration, platform, useInternalBackend);
+                if (exitCode == 0 && useInternalBackend && openedProjectRoot.has_value())
+                {
+                    const std::filesystem::path builtScriptCorePath = GetBuiltScriptCoreLibraryPath(root, configuration);
+                    const std::filesystem::path projectLocalOutputPath =
+                        GetProjectLocalScriptCoreLibraryPath(openedProjectRoot.value(), configuration);
+                    if (!std::filesystem::exists(builtScriptCorePath))
+                    {
+                        exitCode = 1;
+                    }
+                    else
+                    {
+                        std::error_code createDirectoriesError;
+                        std::filesystem::create_directories(projectLocalOutputPath.parent_path(), createDirectoriesError);
+                        if (createDirectoriesError)
+                        {
+                            exitCode = 1;
+                        }
+                        else
+                        {
+                            std::error_code copyError;
+                            std::filesystem::copy_file(
+                                builtScriptCorePath,
+                                projectLocalOutputPath,
+                                std::filesystem::copy_options::overwrite_existing,
+                                copyError);
+                            if (copyError)
+                                exitCode = 1;
+                        }
+                    }
+                }
                 state.LastBuildExitCode.store(exitCode, std::memory_order_relaxed);
                 state.BuildInProgress.store(false, std::memory_order_relaxed);
             });

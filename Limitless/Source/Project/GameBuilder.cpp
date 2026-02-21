@@ -26,6 +26,8 @@ namespace Limitless::Project
 
     namespace
     {
+        std::string GetScriptCoreLibraryName();
+
         /// Converts a user-facing configuration name (e.g. "Release") to the
         /// premake cfg.shortname token (e.g. "release_x64").
         /// Premake shortname format: lowercase(config)_lowercase(platform).
@@ -44,7 +46,7 @@ namespace Limitless::Project
 
         /// Returns the Runtime build output directory for a given config.
         /// Example: <EngineRoot>/Build/release_x64-windows-x64/Runtime/
-        std::filesystem::path GetRuntimeBuildDirectory(const std::filesystem::path& engineRoot, const std::string& configuration)
+        std::filesystem::path GetConfigPlatformBuildFolder(const std::filesystem::path& engineRoot, const std::string& configuration)
         {
 #if defined(LT_PLATFORM_WINDOWS)
             const std::string platformToken = "windows";
@@ -62,29 +64,35 @@ namespace Limitless::Project
 
             const std::string shortname = ToPremakeShortname(configuration);
             const std::string folderName = shortname + "-" + platformToken + "-" + architectureToken;
-            return engineRoot / "Build" / folderName / "Runtime";
+            return engineRoot / "Build" / folderName;
+        }
+
+        std::filesystem::path GetRuntimeBuildDirectory(const std::filesystem::path& engineRoot, const std::string& configuration)
+        {
+            return GetConfigPlatformBuildFolder(engineRoot, configuration) / "Runtime";
         }
 
         /// Returns the ScriptCore build output directory for a given config.
         std::filesystem::path GetScriptCoreBuildDirectory(const std::filesystem::path& engineRoot, const std::string& configuration)
         {
-#if defined(LT_PLATFORM_WINDOWS)
-            const std::string platformToken = "windows";
-#elif defined(LT_PLATFORM_MACOS)
-            const std::string platformToken = "macosx";
-#else
-            const std::string platformToken = "linux";
-#endif
+            return GetConfigPlatformBuildFolder(engineRoot, configuration) / "Editor";
+        }
 
-#if defined(LT_ARCHITECTURE_ARM64)
-            const std::string architectureToken = "x64";
-#else
-            const std::string architectureToken = "x64";
-#endif
+        std::filesystem::path GetInternalRuntimeTemplateDirectory(const std::filesystem::path& toolchainRoot, const std::string& configuration)
+        {
+            const std::string folderName = GetConfigPlatformBuildFolder(std::filesystem::path(), configuration).filename().string();
+            return toolchainRoot / "RuntimeTemplates" / folderName;
+        }
 
-            const std::string shortname = ToPremakeShortname(configuration);
-            const std::string folderName = shortname + "-" + platformToken + "-" + architectureToken;
-            return engineRoot / "Build" / folderName / "Editor";
+        std::filesystem::path GetProjectScriptCoreOutputDirectory(const GameBuildRequest& request)
+        {
+            const std::string folderName = GetConfigPlatformBuildFolder(std::filesystem::path(), request.Settings.BuildConfiguration).filename().string();
+            return request.ProjectRoot / "Build" / "ScriptCore" / folderName;
+        }
+
+        std::filesystem::path GetProjectScriptCoreLibraryPath(const GameBuildRequest& request)
+        {
+            return GetProjectScriptCoreOutputDirectory(request) / GetScriptCoreLibraryName();
         }
 
         std::string GetRuntimeExecutableName()
@@ -116,11 +124,15 @@ namespace Limitless::Project
 #endif
         }
 
-        std::string GetBuildScriptName()
+        std::string GetBuildScriptName(bool internalBackend)
         {
 #if defined(LT_PLATFORM_WINDOWS)
+            if (internalBackend)
+                return "build-project-scriptcore-windows.bat";
             return "build-scriptcore-windows.bat";
 #else
+            if (internalBackend)
+                return "build-project-scriptcore-unix.sh";
             return "build-scriptcore-unix.sh";
 #endif
         }
@@ -179,6 +191,11 @@ namespace Limitless::Project
     // Build Pipeline
     // -------------------------------------------------------------------------
 
+    bool GameBuilder::IsInternalBackend(const GameBuildRequest& request)
+    {
+        return request.Settings.BuildBackend == BuildBackend::InternalToolchain;
+    }
+
     bool GameBuilder::ValidateRequest(const GameBuildRequest& request, GameBuildResult& result)
     {
         // Check project root exists.
@@ -188,11 +205,34 @@ namespace Limitless::Project
             return false;
         }
 
-        // Check engine root exists.
+        // Check selected backend root exists.
         if (request.EngineRoot.empty() || !std::filesystem::is_directory(request.EngineRoot))
         {
-            result.ErrorMessage = "Invalid engine root: " + request.EngineRoot.string();
+            if (IsInternalBackend(request))
+                result.ErrorMessage = "Invalid internal toolchain root: " + request.EngineRoot.string();
+            else
+                result.ErrorMessage = "Invalid engine root: " + request.EngineRoot.string();
             return false;
+        }
+
+        if (IsInternalBackend(request))
+        {
+#if defined(LT_PLATFORM_WINDOWS)
+            const std::filesystem::path scriptCoreBuildScript = request.EngineRoot / "Scripts" / "build-project-scriptcore-windows.bat";
+#else
+            const std::filesystem::path scriptCoreBuildScript = request.EngineRoot / "Scripts" / "build-project-scriptcore-unix.sh";
+#endif
+            const std::filesystem::path runtimeTemplateRoot = request.EngineRoot / "RuntimeTemplates";
+            if (!std::filesystem::exists(scriptCoreBuildScript))
+            {
+                result.ErrorMessage = "Internal toolchain script compile entrypoint missing: " + scriptCoreBuildScript.string();
+                return false;
+            }
+            if (!std::filesystem::is_directory(runtimeTemplateRoot))
+            {
+                result.ErrorMessage = "Internal runtime template directory missing: " + runtimeTemplateRoot.string();
+                return false;
+            }
         }
 
         // Check at least one enabled build scene.
@@ -249,7 +289,8 @@ namespace Limitless::Project
     {
         result.StepLog.push_back("Building ScriptCore (" + request.Settings.BuildConfiguration + ")...");
 
-        const auto scriptPath = request.EngineRoot / "Scripts" / GetBuildScriptName();
+        const bool internalBackend = IsInternalBackend(request);
+        const auto scriptPath = request.EngineRoot / "Scripts" / GetBuildScriptName(internalBackend);
         if (!std::filesystem::exists(scriptPath))
         {
             result.ErrorMessage = "Build script not found: " + scriptPath.string();
@@ -260,11 +301,15 @@ namespace Limitless::Project
         const std::string platformArg = GetBuildPlatformArg();
 
 #if defined(LT_PLATFORM_WINDOWS)
-        const std::string command = "cd /d \"" + request.EngineRoot.string() + "\" && call \""
+        std::string command = "cd /d \"" + request.EngineRoot.string() + "\" && call \""
             + scriptPath.string() + "\" " + configArg + " " + platformArg;
+        if (internalBackend)
+            command += " \"" + request.ProjectRoot.string() + "\"";
 #else
-        const std::string command = "cd \"" + request.EngineRoot.string() + "\" && bash \""
+        std::string command = "cd \"" + request.EngineRoot.string() + "\" && bash \""
             + scriptPath.string() + "\" --config " + configArg + " --platform " + platformArg;
+        if (internalBackend)
+            command += " --project-root \"" + request.ProjectRoot.string() + "\"";
 #endif
 
         const int exitCode = RunCommand(command);
@@ -272,6 +317,34 @@ namespace Limitless::Project
         {
             result.ErrorMessage = "ScriptCore build failed (exit code " + std::to_string(exitCode) + ").";
             return false;
+        }
+
+        if (IsInternalBackend(request))
+        {
+            const std::filesystem::path builtScriptCorePath =
+                GetScriptCoreBuildDirectory(request.EngineRoot, request.Settings.BuildConfiguration)
+                / GetScriptCoreLibraryName();
+            if (!std::filesystem::exists(builtScriptCorePath))
+            {
+                result.ErrorMessage = "Built ScriptCore library not found at " + builtScriptCorePath.string();
+                return false;
+            }
+
+            const std::filesystem::path projectOutputPath = GetProjectScriptCoreLibraryPath(request);
+            std::error_code createDirError;
+            std::filesystem::create_directories(projectOutputPath.parent_path(), createDirError);
+            if (createDirError)
+            {
+                result.ErrorMessage = "Failed to create project ScriptCore output directory: " + createDirError.message();
+                return false;
+            }
+
+            if (!CopySingleFile(builtScriptCorePath, projectOutputPath, result))
+            {
+                result.ErrorMessage = "Failed to stage ScriptCore library into project build output.";
+                return false;
+            }
+            result.StepLog.push_back("Staged ScriptCore to project-local output: " + projectOutputPath.string());
         }
 
         result.StepLog.push_back("ScriptCore built successfully.");
@@ -284,51 +357,66 @@ namespace Limitless::Project
 
         const std::string config = request.Settings.BuildConfiguration;
         const std::string projectName = request.ProjectName.empty() ? "Game" : request.ProjectName;
+        const bool useInternalBackend = IsInternalBackend(request);
+        const std::filesystem::path runtimeDir = useInternalBackend
+            ? GetInternalRuntimeTemplateDirectory(request.EngineRoot, config)
+            : GetRuntimeBuildDirectory(request.EngineRoot, config);
 
-        // Always build the runtime executable for the selected configuration before copying.
-        // This prevents shipping stale binaries (e.g. old Runtime.exe still booting TestLayer).
+        if (useInternalBackend)
+        {
+            if (!std::filesystem::is_directory(runtimeDir))
+            {
+                result.ErrorMessage = "Internal runtime template directory not found: " + runtimeDir.string();
+                return false;
+            }
+            result.StepLog.push_back("Using internal runtime templates: " + runtimeDir.string());
+        }
+        else
+        {
+            // Always build the runtime executable for the selected configuration before copying.
+            // This prevents shipping stale binaries (e.g. old Runtime.exe still booting TestLayer).
 #if defined(LT_PLATFORM_WINDOWS)
-        const auto runtimeBuildScript = request.EngineRoot / "Scripts" / "build-runtime-windows.bat";
-        const auto fallbackBuildScript = request.EngineRoot / "Scripts" / "build-windows.bat";
-        const auto mainBuildScript = std::filesystem::exists(runtimeBuildScript)
-            ? runtimeBuildScript
-            : fallbackBuildScript;
-        if (std::filesystem::exists(mainBuildScript))
-        {
-            result.StepLog.push_back("Building Runtime (" + config + ")...");
-            const std::string buildCommand = "cd /d \"" + request.EngineRoot.string()
-                + "\" && call \"" + mainBuildScript.string() + "\" " + config + " " + GetBuildPlatformArg();
-            const int buildExitCode = RunCommand(buildCommand);
-            if (buildExitCode != 0)
+            const auto runtimeBuildScript = request.EngineRoot / "Scripts" / "build-runtime-windows.bat";
+            const auto fallbackBuildScript = request.EngineRoot / "Scripts" / "build-windows.bat";
+            const auto mainBuildScript = std::filesystem::exists(runtimeBuildScript)
+                ? runtimeBuildScript
+                : fallbackBuildScript;
+            if (std::filesystem::exists(mainBuildScript))
             {
-                result.ErrorMessage = "Failed to build Runtime (exit code " + std::to_string(buildExitCode) + ").";
-                return false;
+                result.StepLog.push_back("Building Runtime (" + config + ")...");
+                const std::string buildCommand = "cd /d \"" + request.EngineRoot.string()
+                    + "\" && call \"" + mainBuildScript.string() + "\" " + config + " " + GetBuildPlatformArg();
+                const int buildExitCode = RunCommand(buildCommand);
+                if (buildExitCode != 0)
+                {
+                    result.ErrorMessage = "Failed to build Runtime (exit code " + std::to_string(buildExitCode) + ").";
+                    return false;
+                }
             }
-        }
 #else
-        const auto runtimeBuildScript = request.EngineRoot / "Scripts" / "build-runtime-unix.sh";
-        const auto fallbackBuildScript = request.EngineRoot / "Scripts" / "build-unix.sh";
-        const auto mainBuildScript = std::filesystem::exists(runtimeBuildScript)
-            ? runtimeBuildScript
-            : fallbackBuildScript;
-        if (std::filesystem::exists(mainBuildScript))
-        {
-            result.StepLog.push_back("Building Runtime (" + config + ")...");
-            std::string buildCommand = "cd \"" + request.EngineRoot.string()
-                + "\" && bash \"" + mainBuildScript.string() + "\" --config " + config;
-            if (mainBuildScript.filename() == "build-runtime-unix.sh")
-                buildCommand += " --platform " + GetBuildPlatformArg();
-            const int buildExitCode = RunCommand(buildCommand);
-            if (buildExitCode != 0)
+            const auto runtimeBuildScript = request.EngineRoot / "Scripts" / "build-runtime-unix.sh";
+            const auto fallbackBuildScript = request.EngineRoot / "Scripts" / "build-unix.sh";
+            const auto mainBuildScript = std::filesystem::exists(runtimeBuildScript)
+                ? runtimeBuildScript
+                : fallbackBuildScript;
+            if (std::filesystem::exists(mainBuildScript))
             {
-                result.ErrorMessage = "Failed to build Runtime (exit code " + std::to_string(buildExitCode) + ").";
-                return false;
+                result.StepLog.push_back("Building Runtime (" + config + ")...");
+                std::string buildCommand = "cd \"" + request.EngineRoot.string()
+                    + "\" && bash \"" + mainBuildScript.string() + "\" --config " + config;
+                if (mainBuildScript.filename() == "build-runtime-unix.sh")
+                    buildCommand += " --platform " + GetBuildPlatformArg();
+                const int buildExitCode = RunCommand(buildCommand);
+                if (buildExitCode != 0)
+                {
+                    result.ErrorMessage = "Failed to build Runtime (exit code " + std::to_string(buildExitCode) + ").";
+                    return false;
+                }
             }
-        }
 #endif
+        }
 
         // 1. Copy Runtime executable (renamed to project name).
-        const auto runtimeDir = GetRuntimeBuildDirectory(request.EngineRoot, config);
         const auto runtimeExePath = runtimeDir / GetRuntimeExecutableName();
         const auto gameExePath = request.OutputDirectory / GetGameExecutableName(projectName);
         if (!std::filesystem::exists(runtimeExePath))
@@ -385,9 +473,14 @@ namespace Limitless::Project
             CopySingleFile(sourceWindowIcon, request.OutputDirectory / "LimitlessLogo.ico", result);
         }
 
-        // 3. Copy ScriptCore DLL.
-        const auto scriptCoreDir = GetScriptCoreBuildDirectory(request.EngineRoot, config);
-        const auto scriptCorePath = scriptCoreDir / GetScriptCoreLibraryName();
+        // 3. Copy ScriptCore DLL (prefer project-local staging in internal mode).
+        std::filesystem::path scriptCorePath = GetScriptCoreBuildDirectory(request.EngineRoot, config) / GetScriptCoreLibraryName();
+        if (useInternalBackend)
+        {
+            const std::filesystem::path projectLocalScriptCore = GetProjectScriptCoreLibraryPath(request);
+            if (std::filesystem::exists(projectLocalScriptCore))
+                scriptCorePath = projectLocalScriptCore;
+        }
         if (std::filesystem::exists(scriptCorePath))
         {
             CopySingleFile(scriptCorePath, request.OutputDirectory / GetScriptCoreLibraryName(), result);

@@ -4,6 +4,8 @@
 #include "Core/Input/InputSystem.h"
 #include "Platform/Platform.h"
 #include "Physics/Physics2DQueries.h"
+#include "Project/BuildSettings.h"
+#include "Project/ProjectManager.h"
 #include "Scene/Scene.h"
 #include "Scene/SceneManager.h"
 #include "Scripting/Physics2D.h"
@@ -15,6 +17,7 @@
 #include <glm/glm.hpp>
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -111,6 +114,32 @@ namespace Limitless::ScriptCoreModuleRuntime
 
         std::optional<std::filesystem::path> FindEngineWorkspaceRoot()
         {
+            if (const char* toolchainRoot = std::getenv("LIMITLESS_TOOLCHAIN_ROOT"); toolchainRoot && toolchainRoot[0] != '\0')
+            {
+                std::error_code errorCode;
+                std::filesystem::path candidate(toolchainRoot);
+                if (std::filesystem::exists(candidate / "Scripts", errorCode))
+                    return candidate;
+            }
+
+            if (const char* engineRoot = std::getenv("LIMITLESS_ENGINE_ROOT"); engineRoot && engineRoot[0] != '\0')
+            {
+                std::error_code errorCode;
+                std::filesystem::path candidate(engineRoot);
+                if (std::filesystem::exists(candidate / "Scripts", errorCode))
+                    return candidate;
+            }
+
+            const std::string executablePath = PlatformDetection::GetExecutablePath();
+            if (!executablePath.empty())
+            {
+                std::error_code errorCode;
+                const std::filesystem::path executableDirectory = std::filesystem::path(executablePath).parent_path();
+                const std::filesystem::path embeddedToolchain = executableDirectory / "Toolchain";
+                if (std::filesystem::exists(embeddedToolchain / "Scripts", errorCode))
+                    return embeddedToolchain;
+            }
+
             std::error_code errorCode;
             std::filesystem::path probe = std::filesystem::current_path(errorCode);
             if (errorCode)
@@ -135,6 +164,37 @@ namespace Limitless::ScriptCoreModuleRuntime
                     break;
                 probe = parent;
             }
+            return std::nullopt;
+        }
+
+        std::optional<std::filesystem::path> GetOpenProjectRoot()
+        {
+            const auto& projectManager = Project::ProjectManager::GetInstance();
+            if (!projectManager.HasOpenProject())
+                return std::nullopt;
+            return projectManager.GetProjectRoot();
+        }
+
+        std::optional<std::filesystem::path> GetConfiguredBuildRoot()
+        {
+            const auto projectRoot = GetOpenProjectRoot();
+            if (!projectRoot.has_value())
+                return std::nullopt;
+
+            const auto buildSettingsResult = Project::LoadBuildSettings(projectRoot.value());
+            if (!buildSettingsResult.IsSuccess())
+                return std::nullopt;
+
+            const auto& settings = buildSettingsResult.GetValue();
+            if (settings.EngineRootOverride.empty())
+                return std::nullopt;
+
+            std::error_code errorCode;
+            std::filesystem::path configuredRoot = std::filesystem::weakly_canonical(settings.EngineRootOverride, errorCode);
+            if (errorCode)
+                configuredRoot = std::filesystem::path(settings.EngineRootOverride);
+            if (std::filesystem::exists(configuredRoot / "Scripts", errorCode))
+                return configuredRoot;
             return std::nullopt;
         }
 
@@ -170,14 +230,22 @@ namespace Limitless::ScriptCoreModuleRuntime
         {
             std::vector<std::filesystem::path> candidates;
 
-            const std::string executablePath = PlatformDetection::GetExecutablePath();
             const std::string scriptCoreLibraryFileName = GetScriptCoreLibraryFileName();
+            if (const auto projectRoot = GetOpenProjectRoot(); projectRoot.has_value())
+            {
+                candidates.push_back(projectRoot.value() / "Build" / "ScriptCore" / BuildConfigOutputFolder().filename() / scriptCoreLibraryFileName);
+            }
+
+            const std::string executablePath = PlatformDetection::GetExecutablePath();
             if (!executablePath.empty())
             {
                 const std::filesystem::path executableDirectory = std::filesystem::path(executablePath).parent_path();
                 if (!executableDirectory.empty())
                     candidates.push_back(executableDirectory / scriptCoreLibraryFileName);
             }
+
+            if (const auto configuredBuildRoot = GetConfiguredBuildRoot(); configuredBuildRoot.has_value())
+                candidates.push_back(configuredBuildRoot.value() / BuildConfigOutputFolder() / scriptCoreLibraryFileName);
 
             if (const auto engineRoot = FindEngineWorkspaceRoot(); engineRoot.has_value())
             {

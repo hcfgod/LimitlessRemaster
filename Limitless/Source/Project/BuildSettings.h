@@ -9,6 +9,12 @@
 
 namespace Limitless::Project
 {
+    namespace BuildBackend
+    {
+        inline constexpr const char* LegacySdk = "LegacySdk";
+        inline constexpr const char* InternalToolchain = "InternalToolchain";
+    }
+
     // -------------------------------------------------------------------------
     // Build Settings
     //
@@ -40,8 +46,8 @@ namespace Limitless::Project
         /// The first enabled scene is the startup scene.
         std::vector<BuildSceneEntry> BuildScenes;
 
-        /// Build configuration: "Debug", "Release", or "Dist".
-        std::string BuildConfiguration = "Release";
+        /// Build configuration for shipped builds (fixed to "Dist").
+        std::string BuildConfiguration = "Dist";
 
         /// Asset bundle compression mode: "None" or "Zstd".
         std::string CompressionMode = "Zstd";
@@ -51,6 +57,15 @@ namespace Limitless::Project
 
         /// Last output directory chosen by the user (remembered across sessions).
         std::string LastOutputDirectory;
+
+        /// Optional override to locate the engine workspace/toolchain root when
+        /// the editor is running outside the source workspace.
+        std::string EngineRootOverride;
+
+        /// Build backend mode used by editor/game build workflows.
+        /// - LegacySdk: existing source-workspace scripts + build paths.
+        /// - InternalToolchain: install-relative bundled toolchain layout.
+        std::string BuildBackend = BuildBackend::LegacySdk;
     };
 
     /// Returns the filesystem path for BuildSettings.json.

@@ -20,7 +20,7 @@ namespace Limitless::Project
         uint32_t Version = 1;
 
         std::string ActiveTargetId;
-        std::string Configuration = "Debug"; // Debug | Release | Dist
+        std::string Configuration = "Dist"; // Fixed to Dist
         std::string Platform = "x64";        // x64 | ARM64 (Windows)
         bool AutoRunAfterBuild = false;
 

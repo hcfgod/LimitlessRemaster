@@ -58,6 +58,7 @@ namespace Limitless
 
     private:
         void DrawMenuBar();
+        void ResetLayoutToDefault();
         void DrawViewportPanel();
         void DrawScenePanel();
         void DrawInspectorPanel();

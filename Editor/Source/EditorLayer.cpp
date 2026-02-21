@@ -1083,7 +1083,35 @@ namespace Limitless
             canReturnFromPrefabMode,
             [this]() { (void)ReturnFromPrefabMode(false); },
             canApplyPrefabToInstances,
-            [this]() { (void)ApplyPrefabStageChangesToInstances(); });
+            [this]() { (void)ApplyPrefabStageChangesToInstances(); },
+            [this]() { ResetLayoutToDefault(); });
+    }
+
+    void EditorLayer::ResetLayoutToDefault()
+    {
+        const std::filesystem::path defaultLayoutPath = "imgui-default.ini";
+        const std::filesystem::path activeLayoutPath = "imgui.ini";
+
+        std::error_code errorCode;
+        if (!std::filesystem::exists(defaultLayoutPath, errorCode))
+        {
+            LT_WARN("Reset Layout failed: '{}' was not found.", defaultLayoutPath.string());
+            return;
+        }
+
+        std::filesystem::copy_file(
+            defaultLayoutPath,
+            activeLayoutPath,
+            std::filesystem::copy_options::overwrite_existing,
+            errorCode);
+        if (errorCode)
+        {
+            LT_WARN("Reset Layout failed while writing '{}': {}", activeLayoutPath.string(), errorCode.message());
+            return;
+        }
+
+        ImGui::LoadIniSettingsFromDisk(activeLayoutPath.string().c_str());
+        LT_INFO("Editor layout reset to default.");
     }
 
     void EditorLayer::DrawPhysicsDiagnosticsPanel()
