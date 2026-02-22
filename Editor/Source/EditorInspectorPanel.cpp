@@ -21,6 +21,7 @@
 #include "Project/ProjectManager.h"
 #include "Scene/Scene.h"
 #include "Scripting/NativeScriptRegistry.h"
+#include "Scripting/NativeScriptExternalEditor.h"
 #include "Core/Debug/Log.h"
 #include "imgui/imgui.h"
 
@@ -303,6 +304,13 @@ namespace Limitless::EditorInspectorPanel
             return ToBuildConfigShortname(configuration, platform) + "-" + platformToken + "-" + architectureToken;
         }
 
+        std::string NormalizeScriptEditorMode(std::string mode)
+        {
+            if (mode == Project::ScriptEditorMode::Internal || mode == Project::ScriptEditorMode::External)
+                return mode;
+            return Project::ScriptEditorMode::Internal;
+        }
+
         bool IsInternalToolchainRootCandidate(const std::filesystem::path& candidate)
         {
             std::error_code errorCode;
@@ -313,11 +321,11 @@ namespace Limitless::EditorInspectorPanel
 #endif
             const std::filesystem::path sdkIncludeRoot = candidate / "SDK" / "include";
             const std::filesystem::path sdkLibRoot = candidate / "SDK" / "lib";
-            const std::filesystem::path generatedRoot = candidate / "Build" / "Generated" / "ScriptCore";
+            // Do not require Build/Generated/ScriptCore to pre-exist.
+            // Script build/mirror paths create this directory on demand.
             return std::filesystem::exists(scriptCoreBuildScript, errorCode) &&
                    std::filesystem::is_directory(sdkIncludeRoot, errorCode) &&
-                   std::filesystem::is_directory(sdkLibRoot, errorCode) &&
-                   std::filesystem::is_directory(generatedRoot, errorCode);
+                   std::filesystem::is_directory(sdkLibRoot, errorCode);
         }
 
         std::optional<std::filesystem::path> FindEngineWorkspaceRoot()
@@ -3785,20 +3793,135 @@ namespace Limitless::EditorInspectorPanel
             return false;
 
         auto& nativeScriptAuthoringState = GetNativeScriptAuthoringState();
-        std::string openError;
         const std::string className = assetPath.stem().string();
-        if (!OpenNativeScriptEditor(className, assetRelativePathWithoutExtension, nativeScriptAuthoringState, openError))
+
+        const auto openInternalEditor = [&](const std::string& optionalStatus = {}, bool isError = false) -> bool
         {
-            nativeScriptAuthoringState.StatusMessage = openError;
-            nativeScriptAuthoringState.StatusIsError = true;
-            nativeScriptAuthoringState.EditorWindowOpen = true;
-            nativeScriptAuthoringState.FocusEditorWindowRequested = true;
+            std::string openError;
+            if (!OpenNativeScriptEditor(className, assetRelativePathWithoutExtension, nativeScriptAuthoringState, openError))
+            {
+                nativeScriptAuthoringState.StatusMessage = openError;
+                nativeScriptAuthoringState.StatusIsError = true;
+                nativeScriptAuthoringState.EditorWindowOpen = true;
+                nativeScriptAuthoringState.FocusEditorWindowRequested = true;
+                return false;
+            }
+
+            nativeScriptAuthoringState.SelectHeaderTabRequested = preferHeaderTab;
+            nativeScriptAuthoringState.SelectSourceTabRequested = preferSourceTab;
+            if (!optionalStatus.empty())
+            {
+                nativeScriptAuthoringState.StatusMessage = optionalStatus;
+                nativeScriptAuthoringState.StatusIsError = isError;
+            }
+            return true;
+        };
+
+        std::string scriptEditorMode = Project::ScriptEditorMode::Internal;
+        bool useInternalBackend = false;
+        const auto openedProjectRoot = GetOpenedProjectRoot();
+        if (openedProjectRoot.has_value())
+        {
+            const auto buildSettingsResult = Project::LoadBuildSettings(openedProjectRoot.value());
+            if (buildSettingsResult.IsSuccess())
+            {
+                const auto& buildSettings = buildSettingsResult.GetValue();
+                scriptEditorMode = NormalizeScriptEditorMode(buildSettings.ScriptEditorMode);
+                useInternalBackend = (buildSettings.BuildBackend == Project::BuildBackend::InternalToolchain);
+            }
+        }
+
+#if defined(LT_PLATFORM_WINDOWS)
+        if (scriptEditorMode == Project::ScriptEditorMode::External)
+        {
+            if (!openedProjectRoot.has_value())
+            {
+                return openInternalEditor("External editor requested, but no project is open. Using built-in editor.", true);
+            }
+
+            std::string mirrorError;
+            if (!MirrorAllProjectNativeScriptsToGeneratedDirectory(mirrorError))
+            {
+                return openInternalEditor(
+                    "Could not prepare external script mirror (" + mirrorError + "). Using built-in editor.",
+                    true);
+            }
+
+            const auto buildRoot = FindEngineWorkspaceRoot();
+            if (!buildRoot.has_value())
+            {
+                return openInternalEditor(
+                    "External editor could not locate engine/toolchain root. Using built-in editor.",
+                    true);
+            }
+
+            if (useInternalBackend)
+            {
+                if (!IsInternalToolchainRootCandidate(buildRoot.value()))
+                    useInternalBackend = false;
+            }
+            else if (IsInternalToolchainRootCandidate(buildRoot.value()))
+            {
+                useInternalBackend = true;
+            }
+
+            const auto resolvedScriptPathResult = Assets::ResolveAssetKeyToPath(normalizedKey);
+            if (resolvedScriptPathResult.IsFailure())
+            {
+                return openInternalEditor(
+                    "Failed resolving script asset path for external editor. Using built-in editor.",
+                    true);
+            }
+
+            const auto [configuration, platform] = GetBuildConfigurationAndPlatform(openedProjectRoot.value());
+            NativeScriptExternalEditor::OpenVisualStudioRequest request;
+            request.ProjectRoot = openedProjectRoot.value();
+            request.BuildRoot = buildRoot.value();
+            request.TargetScriptPath = resolvedScriptPathResult.GetValue();
+            request.Configuration = configuration;
+            request.Platform = platform;
+            request.UseInternalToolchain = useInternalBackend;
+
+            const auto externalOpenResult = NativeScriptExternalEditor::OpenScriptInVisualStudio(request);
+            if (externalOpenResult.Launched)
+                return true;
+
+            const std::string warningMessage =
+                externalOpenResult.ErrorMessage.empty()
+                    ? "External editor launch failed. Using built-in editor."
+                    : externalOpenResult.ErrorMessage + " Falling back to built-in editor.";
+            LT_WARN("Native scripts: {}", warningMessage);
+            return openInternalEditor(warningMessage, true);
+        }
+#else
+        if (scriptEditorMode == Project::ScriptEditorMode::External)
+            return openInternalEditor("External Visual Studio mode is only available on Windows. Using built-in editor.", true);
+#endif
+
+        return openInternalEditor();
+    }
+
+    bool BuildProjectNativeScripts(std::string* outStatusMessage)
+    {
+        auto& nativeScriptAuthoringState = GetNativeScriptAuthoringState();
+        if (nativeScriptAuthoringState.BuildInProgress.load(std::memory_order_relaxed))
+        {
+            if (outStatusMessage)
+                *outStatusMessage = "Native script build already in progress.";
             return false;
         }
-        nativeScriptAuthoringState.SelectHeaderTabRequested = preferHeaderTab;
-        nativeScriptAuthoringState.SelectSourceTabRequested = preferSourceTab;
 
-        return true;
+        const bool started = TriggerNativeScriptsBuild(nativeScriptAuthoringState);
+        if (outStatusMessage)
+        {
+            if (!nativeScriptAuthoringState.StatusMessage.empty())
+                *outStatusMessage = nativeScriptAuthoringState.StatusMessage;
+            else if (started)
+                *outStatusMessage = "Building native scripts...";
+            else
+                *outStatusMessage = "Failed to start native script build.";
+        }
+        return started;
     }
 
     void OnNativeScriptAssetRenamed(const std::string& oldAssetKey, const std::string& newAssetKey)

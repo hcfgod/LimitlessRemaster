@@ -1600,9 +1600,9 @@ namespace Limitless::EditorInspectorPanel
             ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "Pair file missing (.h + .cpp should both exist).");
 
         ImGui::Spacing();
-        if (ImGui::Button("Open In Native Script Editor", ImVec2(-1.0f, 0.0f)))
+        if (ImGui::Button("Open Script", ImVec2(-1.0f, 0.0f)))
             (void)EditorInspectorPanel::OpenNativeScriptEditorForAssetKey(selectedNativeScriptAssetKey);
-        if (pairedExists && ImGui::Button("Open Paired File", ImVec2(-1.0f, 0.0f)))
+        if (pairedExists && ImGui::Button("Open Paired Script", ImVec2(-1.0f, 0.0f)))
             (void)EditorInspectorPanel::OpenNativeScriptEditorForAssetKey(pairedAssetKey);
     }
 

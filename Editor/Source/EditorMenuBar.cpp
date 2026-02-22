@@ -18,6 +18,7 @@ namespace Limitless::EditorMenuBar
               const std::function<void()>& onCreateProject,
               const std::function<void()>& onProjectSettings,
               const std::function<void()>& onBuildSettings,
+              const std::function<void()>& onBuildScripts,
               const std::function<void()>& onReimportChangedAssets,
               const std::function<void()>& onReimportAllAssets,
               const std::function<void()>& onValidateAssetDatabase,
@@ -98,6 +99,13 @@ namespace Limitless::EditorMenuBar
             ImGui::Separator();
             if (ImGui::MenuItem("Validate Asset Database"))
                 onValidateAssetDatabase();
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Tools"))
+        {
+            if (ImGui::MenuItem("Build Scripts", "Ctrl+Shift+R"))
+                onBuildScripts();
             ImGui::EndMenu();
         }
 

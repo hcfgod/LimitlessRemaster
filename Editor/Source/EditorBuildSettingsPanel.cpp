@@ -36,6 +36,13 @@ namespace Limitless::EditorBuildSettingsPanel
             return Project::BuildBackend::LegacySdk;
         }
 
+        std::string NormalizeScriptEditorMode(std::string mode)
+        {
+            if (mode == Project::ScriptEditorMode::Internal || mode == Project::ScriptEditorMode::External)
+                return mode;
+            return Project::ScriptEditorMode::Internal;
+        }
+
         std::string TrimCopy(std::string value)
         {
             auto isWhitespace = [](unsigned char character) {
@@ -133,6 +140,7 @@ namespace Limitless::EditorBuildSettingsPanel
                 state.Settings = loadResult.GetValue();
             state.Settings.BuildConfiguration = "Dist";
             state.Settings.BuildBackend = NormalizeBuildBackend(state.Settings.BuildBackend);
+            state.Settings.ScriptEditorMode = NormalizeScriptEditorMode(state.Settings.ScriptEditorMode);
 
             // Populate editable text buffers from saved settings.
             CopyStringToBuffer("", state.OutputDirectoryBuffer);
@@ -162,6 +170,7 @@ namespace Limitless::EditorBuildSettingsPanel
             state.Settings.EngineRootOverride.clear();
             state.Settings.BuildConfiguration = "Dist";
             state.Settings.BuildBackend = NormalizeBuildBackend(state.Settings.BuildBackend);
+            state.Settings.ScriptEditorMode = NormalizeScriptEditorMode(state.Settings.ScriptEditorMode);
 
             const auto projectRoot = projectManager.GetProjectRoot();
             const auto iconValidationResult = ValidateWindowIconPath(projectRoot, state.Settings.GameWindowIconPath);
@@ -645,6 +654,15 @@ namespace Limitless::EditorBuildSettingsPanel
             state.Settings.BuildBackend = (currentBackendIndex == 0)
                 ? Project::BuildBackend::InternalToolchain
                 : Project::BuildBackend::LegacySdk;
+        }
+
+        const char* scriptEditorOptions[] = { "Internal (Built-in)", "External (Visual Studio)" };
+        int currentScriptEditorIndex = (state.Settings.ScriptEditorMode == Project::ScriptEditorMode::External) ? 1 : 0;
+        if (ImGui::Combo("Script Editor", &currentScriptEditorIndex, scriptEditorOptions, 2))
+        {
+            state.Settings.ScriptEditorMode = (currentScriptEditorIndex == 0)
+                ? Project::ScriptEditorMode::Internal
+                : Project::ScriptEditorMode::External;
         }
 
         // -----------------------------------------------------------------

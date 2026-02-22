@@ -82,6 +82,7 @@ namespace Limitless
         void NewScene(bool forceWithoutConfirmation);
         void SaveScene();
         void SaveSceneAs();
+        void BuildProjectScripts();
         void DrawSaveScenePopup();
         void DrawSceneSwitchConfirmationPopup();
         bool LoadSceneFromAssetKey(const std::string& assetKey);

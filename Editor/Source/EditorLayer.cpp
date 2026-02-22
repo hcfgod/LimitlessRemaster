@@ -804,6 +804,9 @@ namespace Limitless
                 SaveSceneAs();
             else if (!io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_S, false))
                 SaveScene();
+
+            if (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_R, false))
+                BuildProjectScripts();
         }
     }
 
@@ -1007,6 +1010,16 @@ namespace Limitless
             m_EditorCameraController.get());
     }
 
+    void EditorLayer::BuildProjectScripts()
+    {
+        std::string scriptBuildStatus;
+        const bool buildStarted = EditorInspectorPanel::BuildProjectNativeScripts(&scriptBuildStatus);
+        if (buildStarted)
+            LT_INFO("Native scripts: {}", scriptBuildStatus.empty() ? "building..." : scriptBuildStatus);
+        else
+            LT_WARN("Native scripts: {}", scriptBuildStatus.empty() ? "build did not start." : scriptBuildStatus);
+    }
+
     void EditorLayer::DrawMenuBar()
     {
         const bool isEditingPrefabAsset = IsPrefabAssetKey(m_CurrentSceneAssetKey);
@@ -1027,6 +1040,7 @@ namespace Limitless
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Create); },
             [this]() { m_ShowProjectSettingsWindow = true; },
             [this]() { m_ShowBuildSettingsWindow = true; },
+            [this]() { BuildProjectScripts(); },
             [this]() {
                 const auto result = Assets::AssetImportPipeline::ReimportChanged(true);
                 if (result.IsFailure())

@@ -24,6 +24,13 @@ namespace Limitless::Project
                 return backend;
             return BuildBackend::LegacySdk;
         }
+
+        std::string SanitizeScriptEditorMode(std::string mode)
+        {
+            if (mode == ScriptEditorMode::Internal || mode == ScriptEditorMode::External)
+                return mode;
+            return ScriptEditorMode::Internal;
+        }
     }
 
     std::filesystem::path GetBuildSettingsPath(const std::filesystem::path& projectRoot)
@@ -58,6 +65,7 @@ namespace Limitless::Project
             out.GameWindowIconPath = root.value("gameWindowIconPath", std::string{});
             out.EngineRootOverride = root.value("engineRootOverride", std::string{});
             out.BuildBackend = SanitizeBuildBackend(root.value("buildBackend", out.BuildBackend));
+            out.ScriptEditorMode = SanitizeScriptEditorMode(root.value("scriptEditorMode", out.ScriptEditorMode));
 
             if (root.contains("buildScenes") && root["buildScenes"].is_array())
             {
@@ -98,6 +106,7 @@ namespace Limitless::Project
             root["gameWindowIconPath"] = settings.GameWindowIconPath;
             root["engineRootOverride"] = settings.EngineRootOverride;
             root["buildBackend"] = SanitizeBuildBackend(settings.BuildBackend);
+            root["scriptEditorMode"] = SanitizeScriptEditorMode(settings.ScriptEditorMode);
 
             json scenesArray = json::array();
             for (const auto& entry : settings.BuildScenes)

@@ -20,6 +20,7 @@ namespace Limitless::EditorMenuBar
               const std::function<void()>& onCreateProject,
               const std::function<void()>& onProjectSettings,
               const std::function<void()>& onBuildSettings,
+              const std::function<void()>& onBuildScripts,
               const std::function<void()>& onReimportChangedAssets,
               const std::function<void()>& onReimportAllAssets,
               const std::function<void()>& onValidateAssetDatabase,

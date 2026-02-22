@@ -15,6 +15,12 @@ namespace Limitless::Project
         inline constexpr const char* InternalToolchain = "InternalToolchain";
     }
 
+    namespace ScriptEditorMode
+    {
+        inline constexpr const char* Internal = "Internal";
+        inline constexpr const char* External = "External";
+    }
+
     // -------------------------------------------------------------------------
     // Build Settings
     //
@@ -71,6 +77,11 @@ namespace Limitless::Project
         /// - LegacySdk: existing source-workspace scripts + build paths.
         /// - InternalToolchain: install-relative bundled toolchain layout.
         std::string BuildBackend = BuildBackend::LegacySdk;
+
+        /// Native script editor mode used by authoring UI.
+        /// - Internal: built-in script editor window.
+        /// - External: launch host editor integration (Visual Studio on Windows).
+        std::string ScriptEditorMode = ScriptEditorMode::Internal;
     };
 
     /// Returns the filesystem path for BuildSettings.json.
