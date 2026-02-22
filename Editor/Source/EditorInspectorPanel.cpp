@@ -261,20 +261,31 @@ namespace Limitless::EditorInspectorPanel
 #endif
         }
 
-        std::string ToBuildConfigShortname(const std::string& configuration)
+        std::string NormalizeBuildPlatformToken(const std::string& platform)
+        {
+            if (platform.empty())
+                return "x64";
+
+            std::string upper = platform;
+            std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char c) {
+                return static_cast<char>(std::toupper(c));
+            });
+            if (upper == "ARM64")
+                return "ARM64";
+            return "x64";
+        }
+
+        std::string ToBuildConfigShortname(const std::string& configuration, const std::string& platform)
         {
             std::string lower = configuration.empty() ? "debug" : configuration;
             std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
                 return static_cast<char>(std::tolower(c));
             });
-#if defined(LT_ARCHITECTURE_ARM64)
-            return lower + "_arm64";
-#else
-            return lower + "_x64";
-#endif
+            const std::string normalizedPlatform = NormalizeBuildPlatformToken(platform);
+            return lower + (normalizedPlatform == "ARM64" ? "_arm64" : "_x64");
         }
 
-        std::string BuildConfigFolderName(const std::string& configuration)
+        std::string BuildConfigFolderName(const std::string& configuration, const std::string& platform)
         {
 #if defined(LT_PLATFORM_WINDOWS)
             const std::string platformToken = "windows";
@@ -284,12 +295,8 @@ namespace Limitless::EditorInspectorPanel
             const std::string platformToken = "linux";
 #endif
 
-#if defined(LT_ARCHITECTURE_ARM64)
-            const std::string architectureToken = "x64";
-#else
-            const std::string architectureToken = "x64";
-#endif
-            return ToBuildConfigShortname(configuration) + "-" + platformToken + "-" + architectureToken;
+            const std::string architectureToken = NormalizeBuildPlatformToken(platform);
+            return ToBuildConfigShortname(configuration, platform) + "-" + platformToken + "-" + architectureToken;
         }
 
         bool IsInternalToolchainRootCandidate(const std::filesystem::path& candidate)
@@ -530,14 +537,18 @@ namespace Limitless::EditorInspectorPanel
             return std::nullopt;
         }
 
-        std::filesystem::path GetBuiltScriptCoreLibraryPath(const std::filesystem::path& buildRoot, const std::string& configuration)
+        std::filesystem::path GetBuiltScriptCoreLibraryPath(const std::filesystem::path& buildRoot,
+                                                            const std::string& configuration,
+                                                            const std::string& platform)
         {
-            return buildRoot / "Build" / BuildConfigFolderName(configuration) / "Editor" / GetScriptCoreLibraryFileName();
+            return buildRoot / "Build" / BuildConfigFolderName(configuration, platform) / "Editor" / GetScriptCoreLibraryFileName();
         }
 
-        std::filesystem::path GetProjectLocalScriptCoreLibraryPath(const std::filesystem::path& projectRoot, const std::string& configuration)
+        std::filesystem::path GetProjectLocalScriptCoreLibraryPath(const std::filesystem::path& projectRoot,
+                                                                   const std::string& configuration,
+                                                                   const std::string& platform)
         {
-            return projectRoot / "Build" / "ScriptCore" / BuildConfigFolderName(configuration) / GetScriptCoreLibraryFileName();
+            return projectRoot / "Build" / "ScriptCore" / BuildConfigFolderName(configuration, platform) / GetScriptCoreLibraryFileName();
         }
 
         std::optional<std::filesystem::path> GetOpenedProjectAssetScriptsDirectory()
@@ -713,9 +724,9 @@ namespace Limitless::EditorInspectorPanel
                 int exitCode = RunBuildScriptBlocking(root, effectiveProjectRoot, configuration, platform, useInternalBackend);
                 if (exitCode == 0 && openedProjectRoot.has_value())
                 {
-                    const std::filesystem::path builtScriptCorePath = GetBuiltScriptCoreLibraryPath(root, configuration);
+                    const std::filesystem::path builtScriptCorePath = GetBuiltScriptCoreLibraryPath(root, configuration, platform);
                     const std::filesystem::path projectLocalOutputPath =
-                        GetProjectLocalScriptCoreLibraryPath(openedProjectRoot.value(), configuration);
+                        GetProjectLocalScriptCoreLibraryPath(openedProjectRoot.value(), configuration, platform);
                     if (!std::filesystem::exists(builtScriptCorePath))
                     {
                         exitCode = 1;

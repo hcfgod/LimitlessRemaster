@@ -10,11 +10,22 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
+#include <vector>
+
+#if defined(LT_PLATFORM_WINDOWS)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shlobj_core.h>
+#endif
 
 namespace Limitless::Project
 {
@@ -57,7 +68,7 @@ namespace Limitless::Project
 #endif
 
 #if defined(LT_ARCHITECTURE_ARM64)
-            const std::string architectureToken = "x64"; // premake uses "x64" even in dir suffix
+            const std::string architectureToken = "ARM64";
 #else
             const std::string architectureToken = "x64";
 #endif
@@ -145,6 +156,286 @@ namespace Limitless::Project
             return "x64";
 #endif
         }
+
+        bool ResolveConfiguredWindowIconPath(const GameBuildRequest& request,
+                                             std::filesystem::path& resolvedPath,
+                                             std::string& errorMessage)
+        {
+            resolvedPath.clear();
+            errorMessage.clear();
+
+            if (request.Settings.GameWindowIconPath.empty())
+                return true;
+
+            const std::filesystem::path configuredPath(request.Settings.GameWindowIconPath);
+            std::vector<std::filesystem::path> candidates;
+
+            if (configuredPath.is_absolute())
+            {
+                candidates.push_back(configuredPath);
+            }
+            else
+            {
+                candidates.push_back(request.ProjectRoot / configuredPath);
+                candidates.push_back(request.ProjectRoot / "Assets" / configuredPath);
+            }
+
+            std::error_code errorCode;
+            for (const std::filesystem::path& candidate : candidates)
+            {
+                errorCode.clear();
+                if (std::filesystem::is_regular_file(candidate, errorCode))
+                {
+                    resolvedPath = candidate;
+                    return true;
+                }
+            }
+
+            std::ostringstream message;
+            message << "Configured game window icon not found: '" << request.Settings.GameWindowIconPath << "'.";
+            message << " Checked: ";
+            for (size_t index = 0; index < candidates.size(); ++index)
+            {
+                if (index > 0)
+                    message << "; ";
+                message << "'" << candidates[index].string() << "'";
+            }
+            errorMessage = message.str();
+            return false;
+        }
+
+#if defined(LT_PLATFORM_WINDOWS)
+        std::string FormatWindowsErrorMessage(DWORD errorCode)
+        {
+            LPSTR messageBuffer = nullptr;
+            const DWORD size = FormatMessageA(
+                FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                nullptr,
+                errorCode,
+                MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                reinterpret_cast<LPSTR>(&messageBuffer),
+                0,
+                nullptr);
+
+            std::string message = (size > 0 && messageBuffer) ? std::string(messageBuffer, size) : "Unknown Win32 error";
+            if (messageBuffer)
+                LocalFree(messageBuffer);
+
+            while (!message.empty() && (message.back() == '\r' || message.back() == '\n'))
+                message.pop_back();
+            return message;
+        }
+
+        bool HasIcoExtension(const std::filesystem::path& iconPath)
+        {
+            std::string extension = iconPath.extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                           [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+            return extension == ".ico";
+        }
+
+        void NotifyWindowsShellFileChanged(const std::filesystem::path& filePath)
+        {
+            const std::wstring filePathWide = filePath.wstring();
+            SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW, filePathWide.c_str(), nullptr);
+
+            if (filePath.has_parent_path())
+            {
+                const std::wstring parentPathWide = filePath.parent_path().wstring();
+                SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW, parentPathWide.c_str(), nullptr);
+            }
+
+            // Force icon association refresh so Explorer picks the updated PE icon
+            // for existing filenames instead of stale cached entries.
+            SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+        }
+
+#pragma pack(push, 1)
+        struct IcoDirectoryHeader final
+        {
+            std::uint16_t Reserved = 0;
+            std::uint16_t Type = 0;
+            std::uint16_t Count = 0;
+        };
+
+        struct IcoDirectoryEntry final
+        {
+            std::uint8_t Width = 0;
+            std::uint8_t Height = 0;
+            std::uint8_t ColorCount = 0;
+            std::uint8_t Reserved = 0;
+            std::uint16_t Planes = 0;
+            std::uint16_t BitCount = 0;
+            std::uint32_t BytesInRes = 0;
+            std::uint32_t ImageOffset = 0;
+        };
+
+        struct GroupIconDirectoryHeader final
+        {
+            std::uint16_t Reserved = 0;
+            std::uint16_t Type = 1;
+            std::uint16_t Count = 0;
+        };
+
+        struct GroupIconDirectoryEntry final
+        {
+            std::uint8_t Width = 0;
+            std::uint8_t Height = 0;
+            std::uint8_t ColorCount = 0;
+            std::uint8_t Reserved = 0;
+            std::uint16_t Planes = 0;
+            std::uint16_t BitCount = 0;
+            std::uint32_t BytesInRes = 0;
+            std::uint16_t ResourceId = 0;
+        };
+#pragma pack(pop)
+
+        bool EmbedIconIntoWindowsExecutable(const std::filesystem::path& executablePath,
+                                            const std::filesystem::path& iconPath,
+                                            std::string& errorMessage)
+        {
+            errorMessage.clear();
+
+            std::ifstream iconStream(iconPath, std::ios::binary | std::ios::ate);
+            if (!iconStream.is_open())
+            {
+                errorMessage = "Could not open icon file: " + iconPath.string();
+                return false;
+            }
+
+            const std::streamoff streamSize = iconStream.tellg();
+            if (streamSize <= 0)
+            {
+                errorMessage = "Icon file is empty: " + iconPath.string();
+                return false;
+            }
+
+            std::vector<std::uint8_t> iconBytes(static_cast<size_t>(streamSize));
+            iconStream.seekg(0, std::ios::beg);
+            iconStream.read(reinterpret_cast<char*>(iconBytes.data()), static_cast<std::streamsize>(iconBytes.size()));
+            if (!iconStream)
+            {
+                errorMessage = "Failed reading icon file bytes: " + iconPath.string();
+                return false;
+            }
+
+            if (iconBytes.size() < sizeof(IcoDirectoryHeader))
+            {
+                errorMessage = "Icon file is too small to be a valid .ico: " + iconPath.string();
+                return false;
+            }
+
+            const auto* directoryHeader = reinterpret_cast<const IcoDirectoryHeader*>(iconBytes.data());
+            if (directoryHeader->Reserved != 0 || directoryHeader->Type != 1 || directoryHeader->Count == 0)
+            {
+                errorMessage = "Icon file has invalid ICO header: " + iconPath.string();
+                return false;
+            }
+
+            const size_t iconCount = static_cast<size_t>(directoryHeader->Count);
+            const size_t tableSize = sizeof(IcoDirectoryHeader) + iconCount * sizeof(IcoDirectoryEntry);
+            if (iconBytes.size() < tableSize)
+            {
+                errorMessage = "Icon file is truncated (directory table out of bounds): " + iconPath.string();
+                return false;
+            }
+
+            const auto* iconEntries = reinterpret_cast<const IcoDirectoryEntry*>(iconBytes.data() + sizeof(IcoDirectoryHeader));
+            for (size_t index = 0; index < iconCount; ++index)
+            {
+                const size_t imageOffset = static_cast<size_t>(iconEntries[index].ImageOffset);
+                const size_t imageSize = static_cast<size_t>(iconEntries[index].BytesInRes);
+                if (imageSize == 0 || imageOffset > iconBytes.size() || imageSize > (iconBytes.size() - imageOffset))
+                {
+                    errorMessage = "Icon file contains invalid image payload bounds: " + iconPath.string();
+                    return false;
+                }
+            }
+
+            HANDLE updateHandle = BeginUpdateResourceW(executablePath.wstring().c_str(), FALSE);
+            if (!updateHandle)
+            {
+                const DWORD winError = GetLastError();
+                errorMessage = "BeginUpdateResource failed for '" + executablePath.string() + "': " + FormatWindowsErrorMessage(winError);
+                return false;
+            }
+
+            auto failAndDiscard = [&](const std::string& message) -> bool
+            {
+                EndUpdateResourceW(updateHandle, TRUE);
+                errorMessage = message;
+                return false;
+            };
+
+            constexpr std::uint16_t languageId = MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL);
+            constexpr std::uint16_t firstIconResourceId = 1;
+
+            for (size_t index = 0; index < iconCount; ++index)
+            {
+                const auto& sourceEntry = iconEntries[index];
+                const std::uint8_t* imageData = iconBytes.data() + static_cast<size_t>(sourceEntry.ImageOffset);
+                const DWORD imageSize = static_cast<DWORD>(sourceEntry.BytesInRes);
+                const WORD iconResourceId = static_cast<WORD>(firstIconResourceId + index);
+                if (!UpdateResourceW(updateHandle,
+                                     RT_ICON,
+                                     MAKEINTRESOURCEW(iconResourceId),
+                                     languageId,
+                                     const_cast<std::uint8_t*>(imageData),
+                                     imageSize))
+                {
+                    const DWORD winError = GetLastError();
+                    return failAndDiscard("UpdateResource(RT_ICON) failed for '" + executablePath.string()
+                                          + "': " + FormatWindowsErrorMessage(winError));
+                }
+            }
+
+            std::vector<std::uint8_t> groupData(
+                sizeof(GroupIconDirectoryHeader) + iconCount * sizeof(GroupIconDirectoryEntry),
+                0);
+            auto* groupHeader = reinterpret_cast<GroupIconDirectoryHeader*>(groupData.data());
+            groupHeader->Reserved = 0;
+            groupHeader->Type = 1;
+            groupHeader->Count = static_cast<std::uint16_t>(iconCount);
+
+            auto* groupEntries = reinterpret_cast<GroupIconDirectoryEntry*>(groupData.data() + sizeof(GroupIconDirectoryHeader));
+            for (size_t index = 0; index < iconCount; ++index)
+            {
+                const auto& sourceEntry = iconEntries[index];
+                auto& destinationEntry = groupEntries[index];
+                destinationEntry.Width = sourceEntry.Width;
+                destinationEntry.Height = sourceEntry.Height;
+                destinationEntry.ColorCount = sourceEntry.ColorCount;
+                destinationEntry.Reserved = sourceEntry.Reserved;
+                destinationEntry.Planes = sourceEntry.Planes;
+                destinationEntry.BitCount = sourceEntry.BitCount;
+                destinationEntry.BytesInRes = sourceEntry.BytesInRes;
+                destinationEntry.ResourceId = static_cast<std::uint16_t>(firstIconResourceId + index);
+            }
+
+            if (!UpdateResourceW(updateHandle,
+                                 RT_GROUP_ICON,
+                                 L"IDI_MAIN_ICON",
+                                 languageId,
+                                 groupData.data(),
+                                 static_cast<DWORD>(groupData.size())))
+            {
+                const DWORD winError = GetLastError();
+                return failAndDiscard("UpdateResource(RT_GROUP_ICON) failed for '" + executablePath.string()
+                                      + "': " + FormatWindowsErrorMessage(winError));
+            }
+
+            if (!EndUpdateResourceW(updateHandle, FALSE))
+            {
+                const DWORD winError = GetLastError();
+                errorMessage = "EndUpdateResource failed for '" + executablePath.string() + "': " + FormatWindowsErrorMessage(winError);
+                return false;
+            }
+
+            NotifyWindowsShellFileChanged(executablePath);
+
+            return true;
+        }
+#endif
 
         /// Copy a single file with overwrite semantics. Logs and returns false on failure.
         bool CopySingleFile(const std::filesystem::path& source,
@@ -360,6 +651,14 @@ namespace Limitless::Project
             return false;
         }
 
+        std::filesystem::path configuredWindowIconPath;
+        std::string configuredWindowIconError;
+        if (!ResolveConfiguredWindowIconPath(request, configuredWindowIconPath, configuredWindowIconError))
+        {
+            result.ErrorMessage = configuredWindowIconError;
+            return false;
+        }
+
         result.StepLog.push_back("Validation passed: " + std::to_string(enabledScenes.size()) + " scene(s) enabled.");
         return true;
     }
@@ -538,6 +837,20 @@ namespace Limitless::Project
         }
         result.OutputExecutablePath = gameExePath;
 
+        std::filesystem::path configuredWindowIconPath;
+        std::string configuredWindowIconError;
+        if (!ResolveConfiguredWindowIconPath(request, configuredWindowIconPath, configuredWindowIconError))
+        {
+            result.ErrorMessage = configuredWindowIconError;
+            return false;
+        }
+
+        const bool hasConfiguredWindowIcon = !configuredWindowIconPath.empty();
+        const std::string shippedWindowIconName = hasConfiguredWindowIcon
+            ? configuredWindowIconPath.filename().string()
+            : "LimitlessLogo.ico";
+        std::filesystem::path shippedWindowIconPath = request.OutputDirectory / shippedWindowIconName;
+
         // 2. Copy config.json.
         const auto sourceConfig = runtimeDir / "config.json";
         if (std::filesystem::exists(sourceConfig))
@@ -545,7 +858,7 @@ namespace Limitless::Project
             CopySingleFile(sourceConfig, request.OutputDirectory / "config.json", result);
             try
             {
-                // Stamp the shipped game window title with the project name.
+                // Stamp shipped game config with project-specific title/icon.
                 const auto outputConfigPath = request.OutputDirectory / "config.json";
                 std::ifstream in(outputConfigPath, std::ios::in | std::ios::binary);
                 if (in.is_open())
@@ -557,27 +870,85 @@ namespace Limitless::Project
                     if (!configRoot.contains("window") || !configRoot["window"].is_object())
                         configRoot["window"] = json::object();
                     configRoot["window"]["title"] = projectName;
+                    configRoot["window"]["icon"] = shippedWindowIconName;
 
                     std::ofstream out(outputConfigPath, std::ios::out | std::ios::binary | std::ios::trunc);
                     if (out.is_open())
                     {
                         out << configRoot.dump(4);
-                        result.StepLog.push_back("Updated config.json window title to '" + projectName + "'.");
+                        result.StepLog.push_back("Updated config.json window settings (title='" + projectName
+                            + "', icon='" + shippedWindowIconName + "').");
                     }
                 }
             }
             catch (const std::exception& e)
             {
-                result.StepLog.push_back(std::string("Warning: failed to update window title in config.json: ") + e.what());
+                result.StepLog.push_back(std::string("Warning: failed to update window settings in config.json: ") + e.what());
             }
         }
 
-        // 2b. Copy runtime window icon so shipped config can resolve `window.icon`.
-        const auto sourceWindowIcon = runtimeDir / "LimitlessLogo.ico";
-        if (std::filesystem::exists(sourceWindowIcon))
+        // 2b. Copy game window icon so shipped config can resolve `window.icon`.
+        if (hasConfiguredWindowIcon)
         {
-            CopySingleFile(sourceWindowIcon, request.OutputDirectory / "LimitlessLogo.ico", result);
+            if (!CopySingleFile(configuredWindowIconPath, shippedWindowIconPath, result))
+            {
+                result.ErrorMessage = "Failed to copy configured game window icon: " + configuredWindowIconPath.string();
+                return false;
+            }
+            result.StepLog.push_back("Copied configured game window icon: " + configuredWindowIconPath.string());
         }
+        else
+        {
+            const auto sourceWindowIcon = runtimeDir / "LimitlessLogo.ico";
+            if (std::filesystem::exists(sourceWindowIcon))
+            {
+                shippedWindowIconPath = request.OutputDirectory / "LimitlessLogo.ico";
+                if (!CopySingleFile(sourceWindowIcon, shippedWindowIconPath, result))
+                {
+                    result.ErrorMessage = "Failed to copy runtime window icon.";
+                    return false;
+                }
+            }
+        }
+
+#if defined(LT_PLATFORM_WINDOWS)
+        if (hasConfiguredWindowIcon)
+        {
+            std::filesystem::path executableIconPath = shippedWindowIconPath;
+            if (!HasIcoExtension(executableIconPath))
+            {
+                // Explorer executable icons require .ico resource data.
+                // If the runtime icon is non-.ico (png/jpg/etc), allow a companion
+                // same-stem .ico to drive executable metadata.
+                std::filesystem::path companionIcoPath = configuredWindowIconPath;
+                companionIcoPath.replace_extension(".ico");
+                if (!std::filesystem::exists(companionIcoPath))
+                {
+                    result.ErrorMessage =
+                        "Configured game window icon updates runtime window icon, but Windows executable icon embedding "
+                        "requires a .ico file. Provide a .ico icon path (or add companion icon: "
+                        + companionIcoPath.string() + ").";
+                    return false;
+                }
+
+                executableIconPath = request.OutputDirectory / companionIcoPath.filename();
+                if (!CopySingleFile(companionIcoPath, executableIconPath, result))
+                {
+                    result.ErrorMessage = "Failed to copy companion .ico for executable embedding: " + companionIcoPath.string();
+                    return false;
+                }
+                result.StepLog.push_back("Copied companion .ico for executable icon embedding: " + companionIcoPath.string());
+            }
+
+            std::string embedError;
+            if (!EmbedIconIntoWindowsExecutable(gameExePath, executableIconPath, embedError))
+            {
+                result.ErrorMessage = "Failed to embed executable icon: " + embedError;
+                return false;
+            }
+            result.StepLog.push_back("Embedded Windows executable icon from: " + executableIconPath.string());
+        }
+#endif
 
         // 3. Copy ScriptCore DLL (prefer project-local staging in internal mode).
         std::filesystem::path scriptCorePath = GetScriptCoreBuildDirectory(request.EngineRoot, config) / GetScriptCoreLibraryName();
@@ -647,6 +1018,239 @@ namespace Limitless::Project
         return true;
     }
 
+    bool GameBuilder::FinalizePlatformArtifacts(const GameBuildRequest& request, GameBuildResult& result)
+    {
+        const std::string projectName = request.ProjectName.empty() ? "Game" : request.ProjectName;
+
+#if defined(LT_PLATFORM_MACOS)
+        if (result.OutputExecutablePath.empty() || !std::filesystem::exists(result.OutputExecutablePath))
+        {
+            result.ErrorMessage = "Cannot create macOS app bundle: output executable not found.";
+            return false;
+        }
+
+        const std::filesystem::path appBundlePath = request.OutputDirectory / (projectName + ".app");
+        const std::filesystem::path contentsPath = appBundlePath / "Contents";
+        const std::filesystem::path macosPath = contentsPath / "MacOS";
+        const std::filesystem::path resourcesPath = contentsPath / "Resources";
+
+        std::error_code ec;
+        std::filesystem::remove_all(appBundlePath, ec);
+        ec.clear();
+        std::filesystem::create_directories(macosPath, ec);
+        if (ec)
+        {
+            result.ErrorMessage = "Failed to create macOS bundle directory '" + macosPath.string() + "': " + ec.message();
+            return false;
+        }
+        ec.clear();
+        std::filesystem::create_directories(resourcesPath, ec);
+        if (ec)
+        {
+            result.ErrorMessage = "Failed to create macOS bundle resources directory '" + resourcesPath.string() + "': " + ec.message();
+            return false;
+        }
+
+        for (const auto& entry : std::filesystem::directory_iterator(request.OutputDirectory))
+        {
+            const std::filesystem::path sourcePath = entry.path();
+            if (sourcePath == appBundlePath)
+                continue;
+
+            const std::filesystem::path destinationPath = macosPath / sourcePath.filename();
+            ec.clear();
+            if (entry.is_directory())
+            {
+                std::filesystem::copy(sourcePath,
+                                      destinationPath,
+                                      std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing,
+                                      ec);
+            }
+            else if (entry.is_regular_file())
+            {
+                std::filesystem::copy_file(sourcePath, destinationPath, std::filesystem::copy_options::overwrite_existing, ec);
+            }
+
+            if (ec)
+            {
+                result.ErrorMessage = "Failed to stage file into macOS app bundle ('" + sourcePath.string() + "'): " + ec.message();
+                return false;
+            }
+        }
+
+        const std::filesystem::path bundledExecutablePath = macosPath / result.OutputExecutablePath.filename();
+        ec.clear();
+        std::filesystem::permissions(
+            bundledExecutablePath,
+            std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
+            std::filesystem::perm_options::add,
+            ec);
+        if (ec)
+        {
+            result.ErrorMessage = "Failed to mark bundled executable as executable: " + ec.message();
+            return false;
+        }
+
+        const std::filesystem::path shippedIconPath = request.OutputDirectory /
+            (request.Settings.GameWindowIconPath.empty()
+                 ? std::string("LimitlessLogo.ico")
+                 : std::filesystem::path(request.Settings.GameWindowIconPath).filename().string());
+
+        std::string iconPlistValue;
+        if (std::filesystem::exists(shippedIconPath))
+        {
+            std::string extension = shippedIconPath.extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (extension == ".icns")
+            {
+                const std::filesystem::path iconDestination = resourcesPath / shippedIconPath.filename();
+                ec.clear();
+                std::filesystem::copy_file(shippedIconPath, iconDestination, std::filesystem::copy_options::overwrite_existing, ec);
+                if (ec)
+                {
+                    result.ErrorMessage = "Failed to copy .icns into app bundle resources: " + ec.message();
+                    return false;
+                }
+                iconPlistValue = shippedIconPath.filename().string();
+            }
+            else if (!request.Settings.GameWindowIconPath.empty())
+            {
+                result.StepLog.push_back("Warning: macOS app icon embedding requires a .icns file; using window icon only.");
+            }
+        }
+
+        auto sanitizeIdentifierPart = [](std::string value)
+        {
+            for (char& c : value)
+            {
+                const bool isAlnum = std::isalnum(static_cast<unsigned char>(c)) != 0;
+                if (!isAlnum && c != '-' && c != '.')
+                    c = '-';
+            }
+            if (value.empty())
+                value = "game";
+            return value;
+        };
+        const std::string bundleIdentifier = "com.limitless." + sanitizeIdentifierPart(projectName);
+
+        const std::filesystem::path infoPlistPath = contentsPath / "Info.plist";
+        std::ofstream infoPlist(infoPlistPath, std::ios::out | std::ios::trunc);
+        if (!infoPlist.is_open())
+        {
+            result.ErrorMessage = "Failed to write Info.plist for macOS app bundle.";
+            return false;
+        }
+
+        infoPlist
+            << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+            << "<plist version=\"1.0\">\n"
+            << "<dict>\n"
+            << "    <key>CFBundleName</key>\n"
+            << "    <string>" << projectName << "</string>\n"
+            << "    <key>CFBundleDisplayName</key>\n"
+            << "    <string>" << projectName << "</string>\n"
+            << "    <key>CFBundleExecutable</key>\n"
+            << "    <string>" << result.OutputExecutablePath.filename().string() << "</string>\n"
+            << "    <key>CFBundleIdentifier</key>\n"
+            << "    <string>" << bundleIdentifier << "</string>\n"
+            << "    <key>CFBundlePackageType</key>\n"
+            << "    <string>APPL</string>\n"
+            << "    <key>CFBundleVersion</key>\n"
+            << "    <string>1.0</string>\n"
+            << "    <key>CFBundleShortVersionString</key>\n"
+            << "    <string>1.0</string>\n";
+        if (!iconPlistValue.empty())
+        {
+            infoPlist
+                << "    <key>CFBundleIconFile</key>\n"
+                << "    <string>" << iconPlistValue << "</string>\n";
+        }
+        infoPlist
+            << "</dict>\n"
+            << "</plist>\n";
+        infoPlist.close();
+
+        if (!infoPlist.good())
+        {
+            result.ErrorMessage = "Failed writing Info.plist content for macOS app bundle.";
+            return false;
+        }
+
+        result.OutputExecutablePath = appBundlePath;
+        result.StepLog.push_back("Created macOS app bundle: " + appBundlePath.string());
+        return true;
+#elif defined(LT_PLATFORM_LINUX)
+        if (result.OutputExecutablePath.empty() || !std::filesystem::exists(result.OutputExecutablePath))
+        {
+            result.ErrorMessage = "Cannot create Linux desktop launcher: output executable not found.";
+            return false;
+        }
+
+        const std::filesystem::path shippedIconPath = request.OutputDirectory /
+            (request.Settings.GameWindowIconPath.empty()
+                 ? std::string("LimitlessLogo.ico")
+                 : std::filesystem::path(request.Settings.GameWindowIconPath).filename().string());
+        const std::filesystem::path desktopPath = request.OutputDirectory / (projectName + ".desktop");
+
+        auto escapeDesktopValue = [](std::string value)
+        {
+            std::string escaped;
+            escaped.reserve(value.size() + 8);
+            for (char c : value)
+            {
+                if (c == '\\' || c == ' ')
+                    escaped.push_back('\\');
+                escaped.push_back(c);
+            }
+            return escaped;
+        };
+
+        std::ofstream desktopFile(desktopPath, std::ios::out | std::ios::trunc);
+        if (!desktopFile.is_open())
+        {
+            result.ErrorMessage = "Failed to write Linux desktop entry: " + desktopPath.string();
+            return false;
+        }
+
+        desktopFile
+            << "[Desktop Entry]\n"
+            << "Version=1.0\n"
+            << "Type=Application\n"
+            << "Name=" << projectName << "\n"
+            << "Exec=" << escapeDesktopValue(result.OutputExecutablePath.string()) << "\n"
+            << "Terminal=false\n"
+            << "Categories=Game;\n";
+        if (std::filesystem::exists(shippedIconPath))
+            desktopFile << "Icon=" << escapeDesktopValue(shippedIconPath.string()) << "\n";
+        desktopFile.close();
+
+        if (!desktopFile.good())
+        {
+            result.ErrorMessage = "Failed writing Linux desktop entry content.";
+            return false;
+        }
+
+        std::error_code ec;
+        std::filesystem::permissions(
+            desktopPath,
+            std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
+            std::filesystem::perm_options::add,
+            ec);
+        if (ec)
+            result.StepLog.push_back("Warning: could not mark desktop entry executable: " + ec.message());
+
+        result.StepLog.push_back("Generated Linux desktop launcher: " + desktopPath.string());
+        result.StepLog.push_back("Note: Linux executable files do not support embedded icon metadata; launcher icon is provided via .desktop file.");
+        return true;
+#else
+        (void)request;
+        (void)result;
+        return true;
+#endif
+    }
+
     void GameBuilder::LaunchExecutable(const std::filesystem::path& executablePath)
     {
         if (executablePath.empty() || !std::filesystem::exists(executablePath))
@@ -654,7 +1258,7 @@ namespace Limitless::Project
 
         const std::string command =
 #if defined(LT_PLATFORM_WINDOWS)
-            "start \"\" \"" + executablePath.string() + "\"";
+            "start \"\" /D \"" + executablePath.parent_path().string() + "\" \"" + executablePath.string() + "\"";
 #elif defined(LT_PLATFORM_MACOS)
             "open \"" + executablePath.string() + "\" &";
 #else
@@ -701,6 +1305,12 @@ namespace Limitless::Project
         }
 
         if (!WriteGameBootstrap(request, result))
+        {
+            result.StepLog.push_back("Build failed: " + result.ErrorMessage);
+            return result;
+        }
+
+        if (!FinalizePlatformArtifacts(request, result))
         {
             result.StepLog.push_back("Build failed: " + result.ErrorMessage);
             return result;

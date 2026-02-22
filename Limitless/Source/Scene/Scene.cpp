@@ -3049,10 +3049,42 @@ namespace Limitless
             root["Entities"].push_back(std::move(entry));
         }
 
-        std::ofstream output(path, std::ios::binary | std::ios::trunc);
-        if (!output.is_open())
-            return Result<void>(ErrorCode::FileAccessDenied, "Scene::SaveToFile failed opening destination file");
-        output << root.dump(2);
+        const std::filesystem::path tempPath = path.string() + ".tmp";
+        {
+            std::ofstream output(tempPath, std::ios::binary | std::ios::trunc);
+            if (!output.is_open())
+                return Result<void>(ErrorCode::FileAccessDenied, "Scene::SaveToFile failed opening temp destination file");
+
+            output << root.dump(2);
+            output.flush();
+            if (!output.good())
+            {
+                std::error_code cleanupError;
+                std::filesystem::remove(tempPath, cleanupError);
+                return Result<void>(ErrorCode::FileAccessDenied, "Scene::SaveToFile failed writing scene data");
+            }
+        }
+
+        std::error_code renameError;
+        std::filesystem::rename(tempPath, path, renameError);
+        if (renameError)
+        {
+            std::error_code copyError;
+            std::filesystem::copy_file(tempPath, path, std::filesystem::copy_options::overwrite_existing, copyError);
+            if (copyError)
+            {
+                std::error_code cleanupError;
+                std::filesystem::remove(tempPath, cleanupError);
+                return Result<void>(
+                    ErrorCode::FileAccessDenied,
+                    "Scene::SaveToFile failed replacing destination file. Rename failed: " + renameError.message() +
+                    "; fallback copy failed: " + copyError.message());
+            }
+
+            std::error_code cleanupError;
+            std::filesystem::remove(tempPath, cleanupError);
+        }
+
         return Result<void>();
     }
 

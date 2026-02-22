@@ -33,8 +33,8 @@ int main(int argc, char** argv)
     //
     // Many dev setups have multiple config.json files (project root, Runtime/, build output).
     // To make behavior deterministic, we pick the first existing path in this order:
-    // - Current working directory: ./config.json
-    // - Executable directory: <exeDir>/config.json
+    // - Distribution builds: executable directory first, then current working directory.
+    // - Non-distribution builds: current working directory first, then executable directory.
     //
     // We pass an absolute path to ConfigManager so hot reload watches the correct file.
     // ---------------------------------------------------------------------------------
@@ -55,10 +55,21 @@ int main(int argc, char** argv)
         }
     }
 
-    std::filesystem::path chosenConfig =
-        std::filesystem::exists(cwdConfig) ? cwdConfig :
-        (!exeConfig.empty() && std::filesystem::exists(exeConfig)) ? exeConfig :
+    const bool hasCwdConfig = std::filesystem::exists(cwdConfig);
+    const bool hasExeConfig = !exeConfig.empty() && std::filesystem::exists(exeConfig);
+
+    std::filesystem::path chosenConfig;
+#if defined(LT_CONFIG_DIST)
+    chosenConfig =
+        hasExeConfig ? exeConfig :
+        hasCwdConfig ? cwdConfig :
+        (!exeConfig.empty() ? exeConfig : cwdConfig);
+#else
+    chosenConfig =
+        hasCwdConfig ? cwdConfig :
+        hasExeConfig ? exeConfig :
         cwdConfig;
+#endif
 
     // Print before logging init so you can see it even if logging config is misconfigured.
     std::cout << "[Limitless] Working directory: " << std::filesystem::current_path().string() << std::endl;

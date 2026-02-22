@@ -79,9 +79,13 @@ namespace Limitless::EditorBuildSettingsPanel
             state.Settings.BuildConfiguration = "Dist";
             state.Settings.BuildBackend = NormalizeBuildBackend(state.Settings.BuildBackend);
 
-            // Populate output directory buffer from saved settings.
+            // Populate editable text buffers from saved settings.
+            CopyStringToBuffer("", state.OutputDirectoryBuffer);
+            CopyStringToBuffer("", state.WindowIconPathBuffer);
             if (!state.Settings.LastOutputDirectory.empty())
                 CopyStringToBuffer(state.Settings.LastOutputDirectory, state.OutputDirectoryBuffer);
+            if (!state.Settings.GameWindowIconPath.empty())
+                CopyStringToBuffer(state.Settings.GameWindowIconPath, state.WindowIconPathBuffer);
             // Root is auto-detected at build-time; clear persisted manual overrides.
             state.Settings.EngineRootOverride.clear();
 
@@ -99,6 +103,7 @@ namespace Limitless::EditorBuildSettingsPanel
 
             // Update output directory from the buffer.
             state.Settings.LastOutputDirectory = TrimCopy(std::string(state.OutputDirectoryBuffer.data()));
+            state.Settings.GameWindowIconPath = TrimCopy(std::string(state.WindowIconPathBuffer.data()));
             state.Settings.EngineRootOverride.clear();
             state.Settings.BuildConfiguration = "Dist";
             state.Settings.BuildBackend = NormalizeBuildBackend(state.Settings.BuildBackend);
@@ -607,6 +612,9 @@ namespace Limitless::EditorBuildSettingsPanel
         ImGui::SeparatorText("Output");
 
         ImGui::InputText("Output Folder", state.OutputDirectoryBuffer.data(), state.OutputDirectoryBuffer.size());
+        ImGui::InputText("Game Window Icon", state.WindowIconPathBuffer.data(), state.WindowIconPathBuffer.size());
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Optional. Absolute or project-relative path (example: Assets/Icons/Game.ico).");
         const bool useInternalBackend = (state.Settings.BuildBackend == Project::BuildBackend::InternalToolchain);
 
         const std::filesystem::path healthRoot = ResolveBuildBackendRoot(state);

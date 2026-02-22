@@ -58,6 +58,11 @@ namespace Limitless::Project
         /// Last output directory chosen by the user (remembered across sessions).
         std::string LastOutputDirectory;
 
+        /// Optional project-specific icon path copied into shipped output and
+        /// written into Runtime config as `window.icon`.
+        /// Supports absolute paths and project-relative paths (e.g. `Assets/Icons/Game.ico`).
+        std::string GameWindowIconPath;
+
         /// Optional override to locate the engine workspace/toolchain root when
         /// the editor is running outside the source workspace.
         std::string EngineRootOverride;

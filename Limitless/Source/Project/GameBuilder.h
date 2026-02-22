@@ -65,6 +65,7 @@ namespace Limitless::Project
         static bool BuildScriptCore(const GameBuildRequest& request, GameBuildResult& result);
         static bool CopyRuntimeFiles(const GameBuildRequest& request, GameBuildResult& result);
         static bool WriteGameBootstrap(const GameBuildRequest& request, GameBuildResult& result);
+        static bool FinalizePlatformArtifacts(const GameBuildRequest& request, GameBuildResult& result);
         static void LaunchExecutable(const std::filesystem::path& executablePath);
     };
 }

@@ -55,6 +55,7 @@ namespace Limitless::Project
             out.CompressionMode = root.value("compressionMode", std::string{"Zstd"});
             out.ZstdCompressionLevel = root.value("zstdCompressionLevel", 3);
             out.LastOutputDirectory = root.value("lastOutputDirectory", std::string{});
+            out.GameWindowIconPath = root.value("gameWindowIconPath", std::string{});
             out.EngineRootOverride = root.value("engineRootOverride", std::string{});
             out.BuildBackend = SanitizeBuildBackend(root.value("buildBackend", out.BuildBackend));
 
@@ -94,6 +95,7 @@ namespace Limitless::Project
             root["compressionMode"] = settings.CompressionMode;
             root["zstdCompressionLevel"] = settings.ZstdCompressionLevel;
             root["lastOutputDirectory"] = settings.LastOutputDirectory;
+            root["gameWindowIconPath"] = settings.GameWindowIconPath;
             root["engineRootOverride"] = settings.EngineRootOverride;
             root["buildBackend"] = SanitizeBuildBackend(settings.BuildBackend);
 

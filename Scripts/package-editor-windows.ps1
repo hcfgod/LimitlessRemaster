@@ -140,7 +140,7 @@ Copy-IfExists -Source (Join-Path $repoRoot "Limitless\Vendor\ffmpeg\libs\avutil.
 Copy-IfExists -Source (Join-Path $repoRoot "Limitless\Vendor\ffmpeg\libs\swresample.lib") -Destination (Join-Path $sdkLibRoot "swresample.lib")
 
 Write-Host "Building ScriptCore host glue static library..."
-$glueSourcePath = Join-Path $repoRoot "Scripts\ScriptCoreHostGlue.cpp"
+$glueSourcePath = Join-Path $repoRoot "ScriptCore\Toolchain\ScriptCoreHostGlue.cpp"
 if (!(Test-Path -LiteralPath $glueSourcePath)) {
     throw "Missing ScriptCore host glue source: $glueSourcePath"
 }

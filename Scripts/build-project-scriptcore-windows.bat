@@ -28,8 +28,10 @@ if /I "%CONFIGURATION%"=="Debug" (
 set "PLATFORM_LOWER=%PLATFORM%"
 if /I "%PLATFORM%"=="ARM64" (
     set "PLATFORM_LOWER=arm64"
+    set "ARCH_DEFINE=LT_ARCHITECTURE_ARM64"
 ) else if /I "%PLATFORM%"=="x64" (
     set "PLATFORM_LOWER=x64"
+    set "ARCH_DEFINE=LT_ARCHITECTURE_X64"
 ) else (
     echo Error: Invalid platform "%PLATFORM%". Expected x64 or ARM64.
     exit /b 1
@@ -104,7 +106,7 @@ for %%A in ("%SOURCES_RSP%") do if %%~zA EQU 0 (
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 set "VSINSTALL="
 if exist "%VSWHERE%" (
-    for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
+    for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -requiresAny -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath`) do (
         if not defined VSINSTALL set "VSINSTALL=%%i"
     )
 )
@@ -113,7 +115,15 @@ if not defined VSINSTALL (
     exit /b 1
 )
 
-call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
+if /I "%PLATFORM%"=="ARM64" (
+    if exist "%VSINSTALL%\VC\Auxiliary\Build\vcvarsamd64_arm64.bat" (
+        call "%VSINSTALL%\VC\Auxiliary\Build\vcvarsamd64_arm64.bat" >nul 2>&1
+    ) else (
+        call "%VSINSTALL%\VC\Auxiliary\Build\vcvarsarm64.bat" >nul 2>&1
+    )
+) else (
+    call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
+)
 if errorlevel 1 (
     echo Error: Failed to initialize MSVC build environment.
     exit /b 1
@@ -121,7 +131,7 @@ if errorlevel 1 (
 
 echo Building project ScriptCore module from generated scripts...
 cl /nologo /std:c++20 /EHsc /MD /LD /bigobj /utf-8 /FS ^
-   /D %CONFIG_DEFINE% /D LT_PLATFORM_WINDOWS /D SCRIPTCORE_EXPORTS /D _UNICODE /D UNICODE ^
+   /D %CONFIG_DEFINE% /D %ARCH_DEFINE% /D LT_PLATFORM_WINDOWS /D SCRIPTCORE_EXPORTS /D _UNICODE /D UNICODE ^
    /I "%SDK_INCLUDE_DIR%" ^
    /I "%SDK_VENDOR_DIR%" ^
    /I "%SDK_VENDOR_DIR%\box2d\include" ^
@@ -135,6 +145,7 @@ cl /nologo /std:c++20 /EHsc /MD /LD /bigobj /utf-8 /FS ^
    /I "%GENERATED_DIR%" ^
    @"%SOURCES_RSP%" ^
    /link /NOLOGO ^
+   /MACHINE:%PLATFORM% ^
    /OPT:NOREF /OPT:NOICF ^
    /OUT:"%OUTPUT_DIR%\ScriptCore.dll" ^
    /IMPLIB:"%OUTPUT_DIR%\ScriptCore.lib" ^

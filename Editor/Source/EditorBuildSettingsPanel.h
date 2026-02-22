@@ -36,6 +36,9 @@ namespace Limitless::EditorBuildSettingsPanel
         /// Output folder path buffer (editable text field).
         std::array<char, 512> OutputDirectoryBuffer{};
 
+        /// Optional shipped game window icon path buffer.
+        std::array<char, 512> WindowIconPathBuffer{};
+
         /// Build in progress flag (set by build thread, read by UI thread).
         std::atomic<bool> BuildInProgress{false};
 
