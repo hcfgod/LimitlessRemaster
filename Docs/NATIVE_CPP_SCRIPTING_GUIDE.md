@@ -33,6 +33,9 @@ Derive from `ScriptableEntity` and override any of:
 - `Entity GetParent(const Entity& entity)`
 - `std::vector<Entity> GetChildren(const Entity& parent)`
 - `std::vector<Entity> GetHierarchy(const Entity& root, bool includeRoot = true)` (breadth-first)
+- `ScriptType* GetScript<ScriptType>()` (find first matching native script on this entity)
+- `ScriptType* GetScript<ScriptType>(const Entity& entity)` (find first matching native script on another entity)
+- `ScriptableEntity* GetScript(const std::string& className)` / `GetScript(const Entity&, const std::string&)`
 - `bool entity.HasComponent<T>()`
 - `T& entity.GetComponent<T>()` -- throws if component is missing
 - `T* entity.TryGetComponent<T>()` -- returns `nullptr` if missing (**recommended**)
@@ -96,6 +99,41 @@ protected:
     }
 };
 ```
+
+### Referencing Other Native Scripts
+
+You can now resolve other native scripts directly from script code, including during `OnCreate()`:
+
+```cpp
+class WeaponAimScript final : public Limitless::ScriptableEntity
+{
+public:
+    Limitless::Entity TargetEntity;
+
+protected:
+    LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()
+        LT_AUTO_EXPOSED_FIELD(TargetEntity)
+    LT_END_AUTO_EXPOSED_FIELD_SYNC()
+
+    void OnCreate() override
+    {
+        // Script on the same entity.
+        auto* movement = GetScript<PlayerShipMovementScript>();
+
+        // Script on another entity assigned through inspector Entity slot.
+        auto* targetHealth = GetScript<HealthScript>(TargetEntity);
+
+        if (movement && targetHealth)
+            movement->SetAimTarget(targetHealth->GetEntity());
+    }
+};
+```
+
+Notes:
+
+- `GetScript<T>()` returns the first matching native script instance, or `nullptr`.
+- If multiple scripts of the same type are attached, order follows the script list order in `Native Script`.
+- Name-based lookup (`GetScript("ClassName")`) matches both fully-qualified and unqualified names.
 
 ### Basic Example
 

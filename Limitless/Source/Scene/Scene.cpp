@@ -1817,6 +1817,58 @@ namespace Limitless
             scriptEntry->RuntimeUpdateCount = 0;
             scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
         };
+
+        // Two-phase runtime bootstrapping:
+        // 1) Create all script instances for currently active slots.
+        // 2) Invoke OnCreate/OnUpdate in slot order.
+        // This lets scripts safely reference sibling scripts during OnCreate,
+        // even when the referenced script appears later in the list.
+        for (const auto& scriptSlot : scriptSlots)
+        {
+            const entt::entity entity = scriptSlot.first;
+            const size_t scriptIndex = scriptSlot.second;
+            NativeScriptEntry* scriptEntry = tryGetScriptEntry(entity, scriptIndex);
+            if (!scriptEntry)
+                continue;
+
+            if (!scriptEntry->Enabled || scriptEntry->ScriptClassName.empty() || !IsEntityEnabledInHierarchy(entity))
+                continue;
+
+            if (!scriptEntry->RuntimeInstance)
+            {
+                scriptEntry->RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry->ScriptClassName);
+                if (!scriptEntry->RuntimeInstance)
+                {
+                    const std::string resolvedClassName = ResolveRegisteredScriptClassName(scriptEntry->ScriptClassName,
+                                                                                           scriptEntry->ScriptAssetRelativePath);
+                    if (!resolvedClassName.empty())
+                    {
+                        scriptEntry->ScriptClassName = resolvedClassName;
+                        scriptEntry->RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry->ScriptClassName);
+                    }
+                }
+                if (scriptEntry->RuntimeInstance)
+                {
+                    scriptEntry->RuntimeInstance->m_Scene = this;
+                    scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
+                    scriptEntry->RuntimeInstance->m_EntityHandle = entity;
+                    scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+                    scriptEntry->RuntimeInitialized = false;
+                    scriptEntry->RuntimeUpdateCount = 0;
+                    scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
+                    scriptEntry->RuntimeWarnedMissingCompiledScript = false;
+                }
+            }
+
+            if (scriptEntry->RuntimeInstance)
+            {
+                scriptEntry->RuntimeInstance->m_Scene = this;
+                scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
+                scriptEntry->RuntimeInstance->m_EntityHandle = entity;
+                scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+            }
+        }
+
         for (const auto& scriptSlot : scriptSlots)
         {
             const entt::entity entity = scriptSlot.first;
@@ -2043,6 +2095,55 @@ namespace Limitless
             scriptEntry->RuntimeUpdateCount = 0;
             scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
         };
+
+        // Mirror Update() bootstrap so FixedUpdate callbacks can also resolve
+        // other scripts during OnCreate regardless of declaration order.
+        for (const auto& scriptSlot : scriptSlots)
+        {
+            const entt::entity entity = scriptSlot.first;
+            const size_t scriptIndex = scriptSlot.second;
+            NativeScriptEntry* scriptEntry = tryGetScriptEntry(entity, scriptIndex);
+            if (!scriptEntry)
+                continue;
+
+            if (!scriptEntry->Enabled || scriptEntry->ScriptClassName.empty() || !IsEntityEnabledInHierarchy(entity))
+                continue;
+
+            if (!scriptEntry->RuntimeInstance)
+            {
+                scriptEntry->RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry->ScriptClassName);
+                if (!scriptEntry->RuntimeInstance)
+                {
+                    const std::string resolvedClassName = ResolveRegisteredScriptClassName(scriptEntry->ScriptClassName,
+                                                                                           scriptEntry->ScriptAssetRelativePath);
+                    if (!resolvedClassName.empty())
+                    {
+                        scriptEntry->ScriptClassName = resolvedClassName;
+                        scriptEntry->RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry->ScriptClassName);
+                    }
+                }
+                if (scriptEntry->RuntimeInstance)
+                {
+                    scriptEntry->RuntimeInstance->m_Scene = this;
+                    scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
+                    scriptEntry->RuntimeInstance->m_EntityHandle = entity;
+                    scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+                    scriptEntry->RuntimeInitialized = false;
+                    scriptEntry->RuntimeUpdateCount = 0;
+                    scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
+                    scriptEntry->RuntimeWarnedMissingCompiledScript = false;
+                }
+            }
+
+            if (scriptEntry->RuntimeInstance)
+            {
+                scriptEntry->RuntimeInstance->m_Scene = this;
+                scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
+                scriptEntry->RuntimeInstance->m_EntityHandle = entity;
+                scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+            }
+        }
+
         for (const auto& scriptSlot : scriptSlots)
         {
             const entt::entity entity = scriptSlot.first;

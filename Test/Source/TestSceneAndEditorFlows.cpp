@@ -3,6 +3,7 @@
 #include "Project/ProjectSettings.h"
 #include "Scene/Scene.h"
 #include "Scene/SceneManager.h"
+#include "Scripting/NativeScriptRegistry.h"
 
 #include <filesystem>
 #include <fstream>
@@ -12,6 +13,47 @@
 
 namespace
 {
+    class SecondaryScript final : public Limitless::ScriptableEntity
+    {
+    public:
+        bool ReceivedPing = false;
+
+        void Ping()
+        {
+            ReceivedPing = true;
+        }
+    };
+
+    class PrimaryScript final : public Limitless::ScriptableEntity
+    {
+    public:
+        Limitless::Entity TargetEntity;
+        bool FoundSelfInOnCreate = false;
+        bool FoundTargetInOnCreate = false;
+        bool FoundByNameOnSelfInOnCreate = false;
+
+    protected:
+        LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()
+            LT_AUTO_EXPOSED_FIELD(TargetEntity)
+        LT_END_AUTO_EXPOSED_FIELD_SYNC()
+
+        void OnCreate() override
+        {
+            auto* selfScript = GetScript<SecondaryScript>();
+            auto* targetScript = GetScript<SecondaryScript>(TargetEntity);
+            auto* selfScriptByName = GetScript("SecondaryScript");
+
+            FoundSelfInOnCreate = selfScript != nullptr;
+            FoundTargetInOnCreate = targetScript != nullptr;
+            FoundByNameOnSelfInOnCreate = selfScriptByName != nullptr;
+
+            if (selfScript)
+                selfScript->Ping();
+            if (targetScript)
+                targetScript->Ping();
+        }
+    };
+
     bool IsNullEntity(entt::entity entity)
     {
         return entity == entt::null;
@@ -118,6 +160,58 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(request->SceneIdentifier == "Assets/Scenes/B.scene.json");
 
         Limitless::SceneManager::ClearPendingSceneTransition();
+    }
+
+    TEST_CASE("Native scripts can reference other native scripts during OnCreate")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<PrimaryScript>("PrimaryScript");
+        Limitless::NativeScriptRegistry::RegisterScript<SecondaryScript>("SecondaryScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+
+        const entt::entity controller = scene.CreateEntity("Controller");
+        const entt::entity target = scene.CreateEntity("Target");
+
+        auto& controllerScripts = registry.emplace<Limitless::NativeScriptComponent>(controller);
+        controllerScripts.Scripts.emplace_back();
+        controllerScripts.Scripts[0].ScriptClassName = "PrimaryScript";
+        controllerScripts.Scripts[0].ExposedProperties["TargetEntity"] = Limitless::ScriptEntityReference{ "Target" };
+
+        // Intentionally place SecondaryScript after PrimaryScript to verify
+        // references resolve during OnCreate regardless of list order.
+        controllerScripts.Scripts.emplace_back();
+        controllerScripts.Scripts[1].ScriptClassName = "SecondaryScript";
+
+        auto& targetScripts = registry.emplace<Limitless::NativeScriptComponent>(target);
+        targetScripts.Scripts.emplace_back();
+        targetScripts.Scripts[0].ScriptClassName = "SecondaryScript";
+
+        scene.Update(1.0f / 60.0f);
+
+        REQUIRE(controllerScripts.Scripts[0].RuntimeInstance != nullptr);
+        auto* primary = dynamic_cast<PrimaryScript*>(controllerScripts.Scripts[0].RuntimeInstance.get());
+        REQUIRE(primary != nullptr);
+        CHECK(primary->FoundSelfInOnCreate);
+        CHECK(primary->FoundTargetInOnCreate);
+        CHECK(primary->FoundByNameOnSelfInOnCreate);
+
+        auto* selfSecondary = dynamic_cast<SecondaryScript*>(controllerScripts.Scripts[1].RuntimeInstance.get());
+        auto* targetSecondary = dynamic_cast<SecondaryScript*>(targetScripts.Scripts[0].RuntimeInstance.get());
+        REQUIRE(selfSecondary != nullptr);
+        REQUIRE(targetSecondary != nullptr);
+        CHECK(selfSecondary->ReceivedPing);
+        CHECK(targetSecondary->ReceivedPing);
     }
 
     TEST_CASE("Scene clone preserves authored data and resets runtime state")

@@ -9,6 +9,7 @@
 #include <glm/glm.hpp>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -127,6 +128,38 @@ namespace Limitless
                 m_Registry->remove<ComponentType>(entity);
         }
 
+        template<typename ScriptType>
+        ScriptType* GetScript()
+        {
+            return GetScript<ScriptType>(m_EntityHandle);
+        }
+
+        template<typename ScriptType>
+        ScriptType* GetScript(const Entity& entity)
+        {
+            return GetScript<ScriptType>(entity.GetHandle());
+        }
+
+        template<typename ScriptType>
+        ScriptType* GetScript(entt::entity entity)
+        {
+            static_assert(std::is_base_of_v<ScriptableEntity, ScriptType>, "ScriptType must derive from ScriptableEntity");
+            const std::vector<ScriptableEntity*> scripts = GetRuntimeScripts(entity);
+            for (ScriptableEntity* script : scripts)
+            {
+                if (auto* typedScript = dynamic_cast<ScriptType*>(script))
+                    return typedScript;
+            }
+            return nullptr;
+        }
+
+        ScriptableEntity* GetScript(const std::string& className);
+        ScriptableEntity* GetScript(const Entity& entity, const std::string& className);
+        ScriptableEntity* GetScript(entt::entity entity, const std::string& className);
+        std::vector<ScriptableEntity*> GetScripts();
+        std::vector<ScriptableEntity*> GetScripts(const Entity& entity);
+        std::vector<ScriptableEntity*> GetScripts(entt::entity entity);
+
         Entity CreateEntity(const std::string& name = "Entity");
         entt::entity CreateEntityHandle(const std::string& name = "Entity");
         Entity Instantiate(const std::string& prefabAssetKey, entt::entity parentEntity = entt::null);
@@ -242,6 +275,8 @@ namespace Limitless
         std::vector<CoroutineHandle> m_PendingCoroutineStops;
         uint64_t m_NextCoroutineIdentifier = 1;
         bool m_IsAdvancingCoroutines = false;
+
+        std::vector<ScriptableEntity*> GetRuntimeScripts(entt::entity entity) const;
     };
 }
 

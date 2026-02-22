@@ -18,6 +18,21 @@ namespace Limitless
         ScriptCreateEntityBridgeCallback s_CreateEntityBridgeCallback = nullptr;
         ScriptDestroyEntityBridgeCallback s_DestroyEntityBridgeCallback = nullptr;
         ScriptInstantiatePrefabBridgeCallback s_InstantiatePrefabBridgeCallback = nullptr;
+
+        std::string GetUnqualifiedClassName(const std::string& className)
+        {
+            const size_t separator = className.rfind("::");
+            if (separator == std::string::npos)
+                return className;
+            return className.substr(separator + 2);
+        }
+
+        bool ScriptClassNamesMatch(const std::string& left, const std::string& right)
+        {
+            if (left == right)
+                return true;
+            return GetUnqualifiedClassName(left) == GetUnqualifiedClassName(right);
+        }
     }
 
     void ScriptableEntity::SetCreateEntityBridgeCallback(ScriptCreateEntityBridgeCallback callback)
@@ -270,6 +285,70 @@ namespace Limitless
         }
 
         return result;
+    }
+
+    std::vector<ScriptableEntity*> ScriptableEntity::GetRuntimeScripts(entt::entity entity) const
+    {
+        if (m_Registry == nullptr || entity == entt::null || !m_Registry->valid(entity))
+            return {};
+
+        const auto* nativeScriptComponent = m_Registry->try_get<NativeScriptComponent>(entity);
+        if (!nativeScriptComponent)
+            return {};
+
+        std::vector<ScriptableEntity*> scripts;
+        scripts.reserve(nativeScriptComponent->Scripts.size());
+        for (const auto& scriptEntry : nativeScriptComponent->Scripts)
+        {
+            if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty() || !scriptEntry.RuntimeInstance)
+                continue;
+            scripts.push_back(scriptEntry.RuntimeInstance.get());
+        }
+        return scripts;
+    }
+
+    ScriptableEntity* ScriptableEntity::GetScript(const std::string& className)
+    {
+        return GetScript(m_EntityHandle, className);
+    }
+
+    ScriptableEntity* ScriptableEntity::GetScript(const Entity& entity, const std::string& className)
+    {
+        return GetScript(entity.GetHandle(), className);
+    }
+
+    ScriptableEntity* ScriptableEntity::GetScript(entt::entity entity, const std::string& className)
+    {
+        if (className.empty() || m_Registry == nullptr || entity == entt::null || !m_Registry->valid(entity))
+            return nullptr;
+
+        const auto* nativeScriptComponent = m_Registry->try_get<NativeScriptComponent>(entity);
+        if (!nativeScriptComponent)
+            return nullptr;
+
+        for (const auto& scriptEntry : nativeScriptComponent->Scripts)
+        {
+            if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty() || !scriptEntry.RuntimeInstance)
+                continue;
+            if (ScriptClassNamesMatch(scriptEntry.ScriptClassName, className))
+                return scriptEntry.RuntimeInstance.get();
+        }
+        return nullptr;
+    }
+
+    std::vector<ScriptableEntity*> ScriptableEntity::GetScripts()
+    {
+        return GetRuntimeScripts(m_EntityHandle);
+    }
+
+    std::vector<ScriptableEntity*> ScriptableEntity::GetScripts(const Entity& entity)
+    {
+        return GetRuntimeScripts(entity.GetHandle());
+    }
+
+    std::vector<ScriptableEntity*> ScriptableEntity::GetScripts(entt::entity entity)
+    {
+        return GetRuntimeScripts(entity);
     }
 
     float ScriptableEntity::GetExposedFloat(const std::string& name, float fallbackValue) const
