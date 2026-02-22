@@ -118,7 +118,11 @@ namespace Limitless::Project
                     return Result<void>(ErrorCode::FileAccessDenied, "Failed to write BuildSettings temp file.");
                 outputStream << root.dump(2);
                 if (!outputStream.good())
+                {
+                    std::error_code cleanupError;
+                    std::filesystem::remove(tempPath, cleanupError);
                     return Result<void>(ErrorCode::FileAccessDenied, "Failed writing BuildSettings temp file contents.");
+                }
             }
 
             std::error_code renameError;

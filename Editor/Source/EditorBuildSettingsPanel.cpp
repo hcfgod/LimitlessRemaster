@@ -16,6 +16,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -60,6 +62,59 @@ namespace Limitless::EditorBuildSettingsPanel
         {
             std::memset(destination.data(), 0, destination.size());
             std::memcpy(destination.data(), source.c_str(), std::min(source.size(), destination.size() - 1));
+        }
+
+        std::vector<std::filesystem::path> BuildWindowIconCandidates(const std::filesystem::path& projectRoot, const std::string& configuredPath)
+        {
+            std::vector<std::filesystem::path> candidates;
+            if (configuredPath.empty())
+                return candidates;
+
+            const std::filesystem::path iconPath(configuredPath);
+            if (iconPath.is_absolute())
+            {
+                candidates.push_back(iconPath);
+            }
+            else
+            {
+                candidates.push_back(projectRoot / iconPath);
+                candidates.push_back(projectRoot / "Assets" / iconPath);
+            }
+            return candidates;
+        }
+
+        std::optional<std::filesystem::path> ResolveExistingWindowIconPath(const std::filesystem::path& projectRoot, const std::string& configuredPath)
+        {
+            const auto candidates = BuildWindowIconCandidates(projectRoot, configuredPath);
+            std::error_code errorCode;
+            for (const auto& candidate : candidates)
+            {
+                errorCode.clear();
+                if (std::filesystem::is_regular_file(candidate, errorCode))
+                    return candidate;
+            }
+            return std::nullopt;
+        }
+
+        Result<void> ValidateWindowIconPath(const std::filesystem::path& projectRoot, const std::string& configuredPath)
+        {
+            if (configuredPath.empty())
+                return Result<void>();
+
+            const auto resolved = ResolveExistingWindowIconPath(projectRoot, configuredPath);
+            if (resolved.has_value())
+                return Result<void>();
+
+            std::ostringstream message;
+            message << "Game window icon path does not exist: '" << configuredPath << "'. Checked: ";
+            const auto candidates = BuildWindowIconCandidates(projectRoot, configuredPath);
+            for (size_t index = 0; index < candidates.size(); ++index)
+            {
+                if (index > 0)
+                    message << "; ";
+                message << "'" << candidates[index].string() << "'";
+            }
+            return Result<void>(ErrorCode::ResourceNotFound, message.str());
         }
 
         /// Ensure settings are loaded from the current project.
@@ -109,6 +164,9 @@ namespace Limitless::EditorBuildSettingsPanel
             state.Settings.BuildBackend = NormalizeBuildBackend(state.Settings.BuildBackend);
 
             const auto projectRoot = projectManager.GetProjectRoot();
+            const auto iconValidationResult = ValidateWindowIconPath(projectRoot, state.Settings.GameWindowIconPath);
+            if (iconValidationResult.IsFailure())
+                return iconValidationResult;
             return Project::SaveBuildSettings(projectRoot, state.Settings);
         }
 
@@ -615,6 +673,42 @@ namespace Limitless::EditorBuildSettingsPanel
         ImGui::InputText("Game Window Icon", state.WindowIconPathBuffer.data(), state.WindowIconPathBuffer.size());
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Optional. Absolute or project-relative path (example: Assets/Icons/Game.ico).");
+
+        const std::string configuredWindowIconPath = TrimCopy(std::string(state.WindowIconPathBuffer.data()));
+        auto& projectManager = Project::ProjectManager::GetInstance();
+        const std::filesystem::path currentProjectRoot = projectManager.HasOpenProject() ? projectManager.GetProjectRoot() : std::filesystem::path();
+        if (!configuredWindowIconPath.empty() && !currentProjectRoot.empty())
+        {
+            const auto resolvedIcon = ResolveExistingWindowIconPath(currentProjectRoot, configuredWindowIconPath);
+            if (resolvedIcon.has_value())
+            {
+                ImGui::TextColored(ImVec4(0.3f, 0.85f, 0.3f, 1.0f), "Icon found: %s", resolvedIcon->string().c_str());
+
+                std::string extension = resolvedIcon->extension().string();
+                std::transform(extension.begin(), extension.end(), extension.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+#if defined(LT_PLATFORM_WINDOWS)
+                if (extension != ".ico")
+                {
+                    std::filesystem::path companionIco = resolvedIcon.value();
+                    companionIco.replace_extension(".ico");
+                    const bool hasCompanionIco = std::filesystem::exists(companionIco);
+                    if (hasCompanionIco)
+                        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.25f, 1.0f), "Explorer icon uses companion .ico: %s", companionIco.string().c_str());
+                    else
+                        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.25f, 1.0f), "Windows executable icon needs .ico (or companion .ico).");
+                }
+#elif defined(LT_PLATFORM_MACOS)
+                if (extension != ".icns")
+                    ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.25f, 1.0f), "macOS app icon metadata uses .icns (window icon still applies).");
+#endif
+            }
+            else
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.25f, 1.0f), "Icon not found. Save/build will fail until resolved.");
+            }
+        }
+
         const bool useInternalBackend = (state.Settings.BuildBackend == Project::BuildBackend::InternalToolchain);
 
         const std::filesystem::path healthRoot = ResolveBuildBackendRoot(state);

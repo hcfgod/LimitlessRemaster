@@ -19,6 +19,9 @@ namespace Limitless
 
 namespace Limitless::EditorBuildSettingsPanel
 {
+    struct EditorBuildSettingsPanelState;
+    void Shutdown(EditorBuildSettingsPanelState& state);
+
     // -------------------------------------------------------------------------
     // Build Settings Panel State
     //
@@ -67,8 +70,7 @@ namespace Limitless::EditorBuildSettingsPanel
 
         ~EditorBuildSettingsPanelState()
         {
-            if (BuildThread.joinable())
-                BuildThread.detach();
+            Shutdown(*this);
         }
     };
 
@@ -79,6 +81,4 @@ namespace Limitless::EditorBuildSettingsPanel
               Scene* currentScene,
               const std::function<bool()>& saveActiveSceneBeforeBuild);
 
-    /// Ensures any in-flight build work is finalized before panel owner shutdown.
-    void Shutdown(EditorBuildSettingsPanelState& state);
 }

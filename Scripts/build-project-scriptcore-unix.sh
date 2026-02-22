@@ -2,13 +2,61 @@
 
 set -euo pipefail
 
-CONFIGURATION="${1:-Debug}"
-PLATFORM="${2:-x64}"
-PROJECT_ROOT="${3:-}"
+CONFIGURATION="Debug"
+PLATFORM="x64"
+PROJECT_ROOT=""
+
+print_usage() {
+    echo "Usage (preferred): $0 --config [Debug|Release|Dist] --platform [x64|ARM64] --project-root /path/to/project"
+    echo "Usage (legacy):    $0 [Debug|Release|Dist] [x64|ARM64] /path/to/project"
+}
+
+# Support both the newer flag-style contract and legacy positional args.
+if [[ $# -gt 0 && "$1" == --* ]]; then
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --config)
+                CONFIGURATION="${2:-}"
+                shift 2
+                ;;
+            --platform)
+                PLATFORM="${2:-}"
+                shift 2
+                ;;
+            --project-root)
+                PROJECT_ROOT="${2:-}"
+                shift 2
+                ;;
+            --help|-h)
+                print_usage
+                exit 0
+                ;;
+            *)
+                echo "Error: Unknown option '$1'."
+                print_usage
+                exit 1
+                ;;
+        esac
+    done
+else
+    CONFIGURATION="${1:-Debug}"
+    PLATFORM="${2:-x64}"
+    PROJECT_ROOT="${3:-}"
+fi
 
 if [[ -z "$PROJECT_ROOT" ]]; then
     echo "Error: Missing project root argument."
-    echo "Usage: build-project-scriptcore-unix.sh [Debug|Release|Dist] [x64|ARM64] /path/to/project"
+    print_usage
+    exit 1
+fi
+
+if [[ "$CONFIGURATION" != "Debug" && "$CONFIGURATION" != "Release" && "$CONFIGURATION" != "Dist" ]]; then
+    echo "Error: Invalid configuration '$CONFIGURATION'. Expected Debug, Release, or Dist."
+    exit 1
+fi
+
+if [[ "$PLATFORM" != "x64" && "$PLATFORM" != "ARM64" ]]; then
+    echo "Error: Invalid platform '$PLATFORM'. Expected x64 or ARM64."
     exit 1
 fi
 
@@ -149,9 +197,16 @@ extern "C" LT_SCRIPTCORE_API void LT_SetScriptInstantiatePrefabBridge(Limitless:
 EOF
 
 mapfile -t SOURCE_FILES < <(find "$GENERATED_DIR" -type f -name '*.cpp' ! -name 'ScriptCoreHostGlue.cpp')
+if [[ "$SYSTEM_NAME" == "macosx" ]]; then
+    OUTPUT_EXTENSION="dylib"
+    CXX_BIN="${CXX:-clang++}"
+else
+    OUTPUT_EXTENSION="so"
+    CXX_BIN="${CXX:-g++}"
+fi
 
-OUTPUT_LIB="$OUTPUT_DIR/libScriptCore.so"
-g++ -shared -fPIC -std=c++20 -O2 \
+OUTPUT_LIB="$OUTPUT_DIR/libScriptCore.${OUTPUT_EXTENSION}"
+"$CXX_BIN" -shared -fPIC -std=c++20 -O2 \
     -I"$SDK_INCLUDE_DIR" -I"$SDK_VENDOR_DIR" -I"$GENERATED_DIR" \
     "$GLUE_CPP" "${SOURCE_FILES[@]}" \
     -L"$SDK_LIB_DIR" -lLimitless \
