@@ -21,10 +21,12 @@
 #include "Project/ProjectManager.h"
 #include "Scene/Scene.h"
 #include "Scripting/NativeScriptRegistry.h"
+#include "Core/Debug/Log.h"
 #include "imgui/imgui.h"
 
 #include <array>
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
@@ -231,6 +233,8 @@ namespace Limitless::EditorInspectorPanel
             std::atomic<bool> BuildInProgress{ false };
             std::atomic<int> LastBuildExitCode{ -1 };
             std::unique_ptr<std::thread> BuildThread;
+            std::mutex LastBuildOutputMutex;
+            std::string LastBuildOutput;
 
             ~NativeScriptAuthoringState()
             {
@@ -597,12 +601,36 @@ namespace Limitless::EditorInspectorPanel
             return { "Dist", "x64" };
         }
 
+        std::filesystem::path BuildNativeScriptBuildLogPath()
+        {
+            std::error_code errorCode;
+            std::filesystem::path tempRoot = std::filesystem::temp_directory_path(errorCode);
+            if (errorCode || tempRoot.empty())
+                tempRoot = std::filesystem::current_path(errorCode);
+
+            const auto uniqueSuffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+            return tempRoot / ("limitless-native-script-build-" + uniqueSuffix + ".log");
+        }
+
+        std::string ReadTextFileOrEmpty(const std::filesystem::path& path)
+        {
+            std::ifstream input(path, std::ios::in | std::ios::binary);
+            if (!input.is_open())
+                return {};
+
+            return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+        }
+
         int RunBuildScriptBlocking(const std::filesystem::path& buildRoot,
                                    const std::filesystem::path& openedProjectRoot,
                                    const std::string& configuration,
                                    const std::string& platform,
-                                   bool useInternalBackend)
+                                   bool useInternalBackend,
+                                   std::string& outBuildOutput)
         {
+            outBuildOutput.clear();
+            const std::filesystem::path buildLogPath = BuildNativeScriptBuildLogPath();
+
 #ifdef LT_PLATFORM_WINDOWS
             const std::string scriptName = useInternalBackend
                 ? "build-project-scriptcore-windows.bat"
@@ -610,7 +638,7 @@ namespace Limitless::EditorInspectorPanel
             std::string scriptCommand = "cmd.exe /c \"Scripts\\" + scriptName + " " + configuration + " " + platform;
             if (useInternalBackend)
                 scriptCommand += " \"" + openedProjectRoot.string() + "\"";
-            scriptCommand += "\"";
+            scriptCommand += " > \"" + buildLogPath.string() + "\" 2>&1\"";
             STARTUPINFOA startupInfo{};
             startupInfo.cb = sizeof(startupInfo);
             PROCESS_INFORMATION processInformation{};
@@ -629,7 +657,10 @@ namespace Limitless::EditorInspectorPanel
                 &processInformation);
 
             if (!created)
+            {
+                outBuildOutput = "Failed to start native script build process.";
                 return 1;
+            }
 
             WaitForSingleObject(processInformation.hProcess, INFINITE);
 
@@ -637,6 +668,11 @@ namespace Limitless::EditorInspectorPanel
             (void)GetExitCodeProcess(processInformation.hProcess, &exitCode);
             CloseHandle(processInformation.hThread);
             CloseHandle(processInformation.hProcess);
+            outBuildOutput = ReadTextFileOrEmpty(buildLogPath);
+
+            std::error_code cleanupError;
+            std::filesystem::remove(buildLogPath, cleanupError);
+
             return static_cast<int>(exitCode);
 #else
             const std::string scriptName = useInternalBackend
@@ -646,8 +682,14 @@ namespace Limitless::EditorInspectorPanel
                 "cd \"" + buildRoot.string() + "\" && bash \"Scripts/" + scriptName + "\" --config \"" + configuration + "\" --platform \"" + platform + "\"";
             if (useInternalBackend)
                 scriptCommand += " --project-root \"" + openedProjectRoot.string() + "\"";
+            scriptCommand += " > \"" + buildLogPath.string() + "\" 2>&1";
 
             const int systemResult = std::system(scriptCommand.c_str());
+            outBuildOutput = ReadTextFileOrEmpty(buildLogPath);
+
+            std::error_code cleanupError;
+            std::filesystem::remove(buildLogPath, cleanupError);
+
             if (systemResult == -1)
                 return 1;
 
@@ -709,6 +751,10 @@ namespace Limitless::EditorInspectorPanel
 
             state.BuildInProgress.store(true, std::memory_order_relaxed);
             state.LastBuildExitCode.store(-1, std::memory_order_relaxed);
+            {
+                std::lock_guard<std::mutex> lock(state.LastBuildOutputMutex);
+                state.LastBuildOutput.clear();
+            }
             state.StatusMessage = "Building native scripts...";
             state.StatusIsError = false;
 
@@ -721,7 +767,8 @@ namespace Limitless::EditorInspectorPanel
                 const std::filesystem::path effectiveProjectRoot = openedProjectRoot.has_value()
                     ? openedProjectRoot.value()
                     : root;
-                int exitCode = RunBuildScriptBlocking(root, effectiveProjectRoot, configuration, platform, useInternalBackend);
+                std::string buildOutput;
+                int exitCode = RunBuildScriptBlocking(root, effectiveProjectRoot, configuration, platform, useInternalBackend, buildOutput);
                 if (exitCode == 0 && openedProjectRoot.has_value())
                 {
                     const std::filesystem::path builtScriptCorePath = GetBuiltScriptCoreLibraryPath(root, configuration, platform);
@@ -729,6 +776,7 @@ namespace Limitless::EditorInspectorPanel
                         GetProjectLocalScriptCoreLibraryPath(openedProjectRoot.value(), configuration, platform);
                     if (!std::filesystem::exists(builtScriptCorePath))
                     {
+                        buildOutput += "\nBuilt ScriptCore library not found at: " + builtScriptCorePath.string();
                         exitCode = 1;
                     }
                     else
@@ -737,6 +785,7 @@ namespace Limitless::EditorInspectorPanel
                         std::filesystem::create_directories(projectLocalOutputPath.parent_path(), createDirectoriesError);
                         if (createDirectoriesError)
                         {
+                            buildOutput += "\nFailed creating project ScriptCore output directory: " + createDirectoriesError.message();
                             exitCode = 1;
                         }
                         else
@@ -748,9 +797,16 @@ namespace Limitless::EditorInspectorPanel
                                 std::filesystem::copy_options::overwrite_existing,
                                 copyError);
                             if (copyError)
+                            {
+                                buildOutput += "\nFailed copying ScriptCore to project-local output: " + copyError.message();
                                 exitCode = 1;
+                            }
                         }
                     }
+                }
+                {
+                    std::lock_guard<std::mutex> lock(state.LastBuildOutputMutex);
+                    state.LastBuildOutput = std::move(buildOutput);
                 }
                 state.LastBuildExitCode.store(exitCode, std::memory_order_relaxed);
                 state.BuildInProgress.store(false, std::memory_order_relaxed);
@@ -1857,15 +1913,30 @@ namespace Limitless::EditorInspectorPanel
             const int finishedBuildExitCode = state.LastBuildExitCode.exchange(-1, std::memory_order_relaxed);
             if (finishedBuildExitCode >= 0)
             {
+                std::string finishedBuildOutput;
+                {
+                    std::lock_guard<std::mutex> lock(state.LastBuildOutputMutex);
+                    finishedBuildOutput = state.LastBuildOutput;
+                }
+
                 if (finishedBuildExitCode == 0)
                 {
                     state.StatusMessage = "Native script build succeeded.";
                     state.StatusIsError = false;
+                    if (!finishedBuildOutput.empty())
+                        LT_INFO("Native script build output:\n{}", finishedBuildOutput);
                 }
                 else
                 {
-                    state.StatusMessage = "Native script build failed (exit code " + std::to_string(finishedBuildExitCode) + ").";
+                    state.StatusMessage =
+                        "Native script build failed (exit code "
+                        + std::to_string(finishedBuildExitCode)
+                        + "). Check console or build output section below.";
                     state.StatusIsError = true;
+                    if (!finishedBuildOutput.empty())
+                        LT_ERROR("Native script build failed (exit code {}). Output:\n{}", finishedBuildExitCode, finishedBuildOutput);
+                    else
+                        LT_ERROR("Native script build failed (exit code {}) with no build output captured.", finishedBuildExitCode);
                 }
             }
 
@@ -1875,6 +1946,22 @@ namespace Limitless::EditorInspectorPanel
                     ? ImVec4(1.0f, 0.35f, 0.35f, 1.0f)
                     : ImVec4(0.35f, 1.0f, 0.45f, 1.0f);
                 ImGui::TextColored(statusColor, "%s", state.StatusMessage.c_str());
+            }
+
+            std::string lastBuildOutputSnapshot;
+            {
+                std::lock_guard<std::mutex> lock(state.LastBuildOutputMutex);
+                lastBuildOutputSnapshot = state.LastBuildOutput;
+            }
+            if (!lastBuildOutputSnapshot.empty() &&
+                ImGui::CollapsingHeader("Last Native Script Build Output", ImGuiTreeNodeFlags_DefaultOpen))
+            {
+                if (ImGui::Button("Copy Build Output", ImVec2(160.0f, 0.0f)))
+                    ImGui::SetClipboardText(lastBuildOutputSnapshot.c_str());
+
+                ImGui::BeginChild("NativeScriptBuildOutput", ImVec2(0.0f, 160.0f), true);
+                ImGui::TextUnformatted(lastBuildOutputSnapshot.c_str());
+                ImGui::EndChild();
             }
 
             ImGui::Separator();
