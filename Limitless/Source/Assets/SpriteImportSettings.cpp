@@ -5,8 +5,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <unordered_map>
 
@@ -238,5 +240,50 @@ namespace Limitless::Assets
         const float uvMaxY = static_cast<float>(rectPixels.y + rectPixels.w) * invH;
 
         return glm::vec4(uvMinX, uvMinY, uvMaxX, uvMaxY);
+    }
+
+    bool TryParseSubSpriteAssetKey(const std::string& assetKey,
+                                   std::string& outTextureAssetKey,
+                                   int32_t& outSubSpriteIndex)
+    {
+        outTextureAssetKey.clear();
+        outSubSpriteIndex = -1;
+
+        if (assetKey.empty())
+            return false;
+
+        const size_t hashPos = assetKey.rfind('#');
+        if (hashPos == std::string::npos || hashPos == 0 || hashPos + 1 >= assetKey.size())
+            return false;
+
+        const std::string indexText = assetKey.substr(hashPos + 1);
+        if (indexText.empty())
+            return false;
+        if (!std::all_of(indexText.begin(), indexText.end(), [](unsigned char ch) {
+                return ch >= '0' && ch <= '9';
+            }))
+        {
+            return false;
+        }
+
+        int64_t parsedIndex = -1;
+        try
+        {
+            parsedIndex = std::stoll(indexText);
+        }
+        catch (...)
+        {
+            return false;
+        }
+        if (parsedIndex < 0 || parsedIndex > static_cast<int64_t>(std::numeric_limits<int32_t>::max()))
+            return false;
+
+        const std::string textureKey = assetKey.substr(0, hashPos);
+        if (textureKey.empty())
+            return false;
+
+        outTextureAssetKey = textureKey;
+        outSubSpriteIndex = static_cast<int32_t>(parsedIndex);
+        return true;
     }
 }

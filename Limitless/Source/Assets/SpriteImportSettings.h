@@ -53,4 +53,10 @@ namespace Limitless::Assets
     [[nodiscard]] glm::vec4 ComputeSubSpriteUvs(const glm::ivec4& rectPixels,
                                                  uint32_t textureWidth,
                                                  uint32_t textureHeight);
+
+    /// Parse a virtual sub-sprite key in the form "<textureAssetKey>#<index>".
+    /// Returns true when parsing succeeds and fills outTextureAssetKey + outSubSpriteIndex.
+    [[nodiscard]] bool TryParseSubSpriteAssetKey(const std::string& assetKey,
+                                                 std::string& outTextureAssetKey,
+                                                 int32_t& outSubSpriteIndex);
 }

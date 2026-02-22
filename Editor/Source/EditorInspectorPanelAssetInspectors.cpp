@@ -39,6 +39,89 @@ namespace Limitless::EditorInspectorPanel
 {
     namespace
     {
+        constexpr const char* kSubSpritePayloadId = "SUB_SPRITE_KEY";
+
+        std::string ResolveTextureKeyFromDroppedKey(const std::string& droppedKey)
+        {
+            std::string textureKey;
+            int32_t subSpriteIndex = -1;
+            if (Assets::TryParseSubSpriteAssetKey(droppedKey, textureKey, subSpriteIndex))
+                return textureKey;
+            return droppedKey;
+        }
+
+        std::vector<std::string> ParseAssetKeyListPayload(const ImGuiPayload* payload)
+        {
+            std::vector<std::string> keys;
+            if (!payload || !payload->Data || payload->DataSize <= 0)
+                return keys;
+
+            std::string payloadText(static_cast<const char*>(payload->Data), static_cast<size_t>(payload->DataSize));
+            while (!payloadText.empty() && payloadText.back() == '\0')
+                payloadText.pop_back();
+            if (payloadText.empty())
+                return keys;
+
+            size_t lineStart = 0;
+            while (lineStart < payloadText.size())
+            {
+                const size_t lineEnd = payloadText.find('\n', lineStart);
+                const size_t count = (lineEnd == std::string::npos) ? (payloadText.size() - lineStart) : (lineEnd - lineStart);
+                std::string key = payloadText.substr(lineStart, count);
+                if (!key.empty())
+                    keys.push_back(std::move(key));
+                if (lineEnd == std::string::npos)
+                    break;
+                lineStart = lineEnd + 1;
+            }
+
+            return keys;
+        }
+
+        struct ResolvedTextureDrop
+        {
+            std::string TextureKey;
+            bool HasSubRect = false;
+            glm::vec2 UvMin = glm::vec2(0.0f);
+            glm::vec2 UvMax = glm::vec2(1.0f);
+        };
+
+        bool TryResolveTextureDrop(const std::string& droppedKey, ResolvedTextureDrop& outDrop)
+        {
+            outDrop = ResolvedTextureDrop{};
+            if (droppedKey.empty())
+                return false;
+
+            std::string textureKey;
+            int32_t subSpriteIndex = -1;
+            if (!Assets::TryParseSubSpriteAssetKey(droppedKey, textureKey, subSpriteIndex))
+            {
+                outDrop.TextureKey = droppedKey;
+                return !outDrop.TextureKey.empty();
+            }
+
+            outDrop.TextureKey = textureKey;
+            if (textureKey.empty())
+                return false;
+
+            const auto spriteSettings = Assets::LoadSpriteImportSettings(textureKey);
+            if (subSpriteIndex < 0 || subSpriteIndex >= static_cast<int32_t>(spriteSettings.SubSprites.size()))
+                return true;
+
+            auto textureAsset = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(textureKey);
+            if (!textureAsset || !textureAsset->GetTexture())
+                return true;
+
+            const auto uvs = Assets::ComputeSubSpriteUvs(
+                spriteSettings.SubSprites[static_cast<size_t>(subSpriteIndex)].RectPixels,
+                textureAsset->GetTexture()->GetWidth(),
+                textureAsset->GetTexture()->GetHeight());
+            outDrop.HasSubRect = true;
+            outDrop.UvMin = glm::vec2(uvs.x, uvs.y);
+            outDrop.UvMax = glm::vec2(uvs.z, uvs.w);
+            return true;
+        }
+
         std::vector<std::string> BuildAssetPickerKeysByType(Assets::AssetType assetType)
         {
             std::vector<std::string> keys;
@@ -779,13 +862,25 @@ namespace Limitless::EditorInspectorPanel
                               std::string& selectedTextureAssetKey,
                               Assets::TextureAsset::Ptr& cachedTextureAsset)
     {
-        if (!cachedTextureAsset || cachedTextureAsset->GetKey() != selectedTextureAssetKey)
-            cachedTextureAsset = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(selectedTextureAssetKey);
+        std::string resolvedTextureAssetKey = selectedTextureAssetKey;
+        int32_t selectedSubSpriteIndex = -1;
+        std::string parsedTextureAssetKey;
+        if (Assets::TryParseSubSpriteAssetKey(selectedTextureAssetKey, parsedTextureAssetKey, selectedSubSpriteIndex))
+            resolvedTextureAssetKey = parsedTextureAssetKey;
+
+        if (resolvedTextureAssetKey.empty())
+        {
+            ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Invalid texture selection.");
+            return;
+        }
+
+        if (!cachedTextureAsset || cachedTextureAsset->GetKey() != resolvedTextureAssetKey)
+            cachedTextureAsset = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(resolvedTextureAssetKey);
 
         auto textureAsset = cachedTextureAsset;
         if (!textureAsset)
         {
-            ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Failed to load texture: %s", selectedTextureAssetKey.c_str());
+            ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Failed to load texture: %s", resolvedTextureAssetKey.c_str());
             cachedTextureAsset.reset();
             return;
         }
@@ -797,15 +892,59 @@ namespace Limitless::EditorInspectorPanel
             return;
         }
 
-        const std::string fileName = std::filesystem::path(selectedTextureAssetKey).filename().string();
+        const std::string fileName = std::filesystem::path(resolvedTextureAssetKey).filename().string();
         ImGui::Text("Texture: %s", fileName.c_str());
         ImGui::Text("%u x %u", texture->GetWidth(), texture->GetHeight());
         ImGui::Spacing();
 
+        // Cache the sprite settings per-texture to avoid reading .meta every frame.
+        struct SpriteSettingsCache
+        {
+            std::string TextureKey;
+            Assets::SpriteImportSettings Settings;
+            bool Loaded = false;
+        };
+        static SpriteSettingsCache s_SpriteCache;
+
+        if (!s_SpriteCache.Loaded || s_SpriteCache.TextureKey != resolvedTextureAssetKey)
+        {
+            s_SpriteCache.TextureKey = resolvedTextureAssetKey;
+            s_SpriteCache.Settings = Assets::LoadSpriteImportSettings(resolvedTextureAssetKey);
+            s_SpriteCache.Loaded = true;
+        }
+
+        auto& spriteSettings = s_SpriteCache.Settings;
+        const bool showingSubSpritePreview =
+            selectedSubSpriteIndex >= 0 &&
+            selectedSubSpriteIndex < static_cast<int32_t>(spriteSettings.SubSprites.size());
+
+        float previewSourceWidth = static_cast<float>(texture->GetWidth());
+        float previewSourceHeight = static_cast<float>(texture->GetHeight());
+        ImVec2 uv0(0.0f, 1.0f);
+        ImVec2 uv1(1.0f, 0.0f);
+        if (showingSubSpritePreview)
+        {
+            const auto& sub = spriteSettings.SubSprites[static_cast<size_t>(selectedSubSpriteIndex)];
+            previewSourceWidth = static_cast<float>(std::max(1, sub.RectPixels.z));
+            previewSourceHeight = static_cast<float>(std::max(1, sub.RectPixels.w));
+            const glm::vec4 subUvs = Assets::ComputeSubSpriteUvs(
+                sub.RectPixels,
+                texture->GetWidth(),
+                texture->GetHeight());
+            uv0 = ImVec2(subUvs.x, 1.0f - subUvs.y);
+            uv1 = ImVec2(subUvs.z, 1.0f - subUvs.w);
+
+            ImGui::TextDisabled("Sub-Sprite: %s (#%d)",
+                                sub.Name.empty() ? "(unnamed)" : sub.Name.c_str(),
+                                selectedSubSpriteIndex);
+        }
+        else if (selectedSubSpriteIndex >= 0)
+        {
+            ImGui::TextDisabled("Sub-Sprite: invalid index #%d", selectedSubSpriteIndex);
+        }
+
         const float previewSize = 256.0f;
-        const float aspect = static_cast<float>(texture->GetHeight()) / static_cast<float>(texture->GetWidth());
-        const ImVec2 uv0(0.0f, 1.0f);
-        const ImVec2 uv1(1.0f, 0.0f);
+        const float aspect = previewSourceHeight / std::max(1.0f, previewSourceWidth);
         const ImVec4 tintColor(1.0f, 1.0f, 1.0f, 1.0f);
         const ImVec4 borderColor(0.4f, 0.4f, 0.4f, 1.0f);
         if (aspect > 1.0f)
@@ -823,42 +962,23 @@ namespace Limitless::EditorInspectorPanel
         ImGui::Separator();
         ImGui::Spacing();
 
-        // --- Sprite Import Settings ---
-        // Cache the sprite settings per-texture to avoid reading .meta every frame.
-        struct SpriteSettingsCache
-        {
-            std::string TextureKey;
-            Assets::SpriteImportSettings Settings;
-            bool Loaded = false;
-        };
-        static SpriteSettingsCache s_SpriteCache;
-
-        if (!s_SpriteCache.Loaded || s_SpriteCache.TextureKey != selectedTextureAssetKey)
-        {
-            s_SpriteCache.TextureKey = selectedTextureAssetKey;
-            s_SpriteCache.Settings = Assets::LoadSpriteImportSettings(selectedTextureAssetKey);
-            s_SpriteCache.Loaded = true;
-        }
-
-        auto& spriteSettings = s_SpriteCache.Settings;
-
         const char* spriteModeNames[] = { "Single", "Multiple" };
         int spriteModeIndex = static_cast<int>(spriteSettings.Mode);
         if (ImGui::Combo("Sprite Mode", &spriteModeIndex, spriteModeNames, 2))
         {
             spriteSettings.Mode = static_cast<Assets::SpriteImportSettings::SpriteMode>(spriteModeIndex);
-            const auto saveResult = Assets::SaveSpriteImportSettings(selectedTextureAssetKey, spriteSettings);
+            const auto saveResult = Assets::SaveSpriteImportSettings(resolvedTextureAssetKey, spriteSettings);
             if (!saveResult.IsSuccess())
-                LT_CORE_WARN("Failed to save sprite import settings for '{}': {}", selectedTextureAssetKey, saveResult.GetError().GetErrorMessage());
+                LT_CORE_WARN("Failed to save sprite import settings for '{}': {}", resolvedTextureAssetKey, saveResult.GetError().GetErrorMessage());
         }
 
         float ppu = spriteSettings.PixelsPerUnit;
         if (ImGui::DragFloat("Pixels Per Unit", &ppu, 0.5f, 0.01f, 4096.0f, "%.1f"))
         {
             spriteSettings.PixelsPerUnit = std::max(0.01f, ppu);
-            const auto saveResult = Assets::SaveSpriteImportSettings(selectedTextureAssetKey, spriteSettings);
+            const auto saveResult = Assets::SaveSpriteImportSettings(resolvedTextureAssetKey, spriteSettings);
             if (!saveResult.IsSuccess())
-                LT_CORE_WARN("Failed to save sprite import settings for '{}': {}", selectedTextureAssetKey, saveResult.GetError().GetErrorMessage());
+                LT_CORE_WARN("Failed to save sprite import settings for '{}': {}", resolvedTextureAssetKey, saveResult.GetError().GetErrorMessage());
         }
 
         if (spriteSettings.Mode == Assets::SpriteImportSettings::SpriteMode::Multiple)
@@ -866,7 +986,7 @@ namespace Limitless::EditorInspectorPanel
             ImGui::Spacing();
             if (ImGui::Button("Open Sprite Editor", ImVec2(-1, 0)))
             {
-                s_PendingSpriteEditorTextureKey = selectedTextureAssetKey;
+                s_PendingSpriteEditorTextureKey = resolvedTextureAssetKey;
             }
 
             if (!spriteSettings.SubSprites.empty())
@@ -985,14 +1105,32 @@ namespace Limitless::EditorInspectorPanel
         ImGui::Button((textureLabel + "##TilesetTexture").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 90.0f, 0.0f));
         if (ImGui::BeginDragDropTarget())
         {
-            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSubSpritePayloadId))
             {
                 const char* key = static_cast<const char*>(payload->Data);
-                if (key && key[0] && textureKey != key)
+                if (key && key[0])
                 {
-                    textureKey = key;
-                    s_State.Json["TextureKey"] = textureKey;
-                    (void)SaveTilesetJson(scene, selectedTilesetAssetKey, s_State.Json, s_State.ResolvedPath);
+                    const std::string resolvedTextureKey = ResolveTextureKeyFromDroppedKey(key);
+                    if (!resolvedTextureKey.empty() && textureKey != resolvedTextureKey)
+                    {
+                        textureKey = resolvedTextureKey;
+                        s_State.Json["TextureKey"] = textureKey;
+                        (void)SaveTilesetJson(scene, selectedTilesetAssetKey, s_State.Json, s_State.ResolvedPath);
+                    }
+                }
+            }
+            else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
+            {
+                const char* key = static_cast<const char*>(payload->Data);
+                if (key && key[0])
+                {
+                    const std::string resolvedTextureKey = ResolveTextureKeyFromDroppedKey(key);
+                    if (!resolvedTextureKey.empty() && textureKey != resolvedTextureKey)
+                    {
+                        textureKey = resolvedTextureKey;
+                        s_State.Json["TextureKey"] = textureKey;
+                        (void)SaveTilesetJson(scene, selectedTilesetAssetKey, s_State.Json, s_State.ResolvedPath);
+                    }
                 }
             }
             ImGui::EndDragDropTarget();
@@ -1717,7 +1855,11 @@ namespace Limitless::EditorInspectorPanel
             return "None";
         };
 
-        auto setTextureForSlot = [&](const TextureSlotDescriptor& slot, Assets::TextureAsset::Ptr textureAsset) {
+        auto setTextureForSlot = [&](const TextureSlotDescriptor& slot,
+                                     Assets::TextureAsset::Ptr textureAsset,
+                                     bool hasSubRect = false,
+                                     const glm::vec2& subUvMin = glm::vec2(0.0f),
+                                     const glm::vec2& subUvMax = glm::vec2(1.0f)) {
             if (!textureAsset)
                 return;
 
@@ -1730,6 +1872,17 @@ namespace Limitless::EditorInspectorPanel
             {
                 // Runtime compatibility: renderer currently consumes mainTexture/mainTextureSpec.
                 s_State.Json["mainTexture"] = textureRef;
+                if (hasSubRect)
+                {
+                    s_State.Json["mainTextureSubRect"] = {
+                        { "uvMin", { subUvMin.x, subUvMin.y } },
+                        { "uvMax", { subUvMax.x, subUvMax.y } }
+                    };
+                }
+                else
+                {
+                    s_State.Json.erase("mainTextureSubRect");
+                }
             }
 
             nlohmann::json* slotObject = getSlotObject(slot, true);
@@ -1740,7 +1893,10 @@ namespace Limitless::EditorInspectorPanel
 
         auto clearTextureForSlot = [&](const TextureSlotDescriptor& slot) {
             if (slot.IsAlbedo)
+            {
                 s_State.Json.erase("mainTexture");
+                s_State.Json.erase("mainTextureSubRect");
+            }
 
             if (nlohmann::json* slotObject = getSlotObject(slot, false))
             {
@@ -1893,6 +2049,13 @@ namespace Limitless::EditorInspectorPanel
             }
             if (textureLabel == "None")
                 textureLabel = getTextureLabelForRef(getTextureRefForSlot(slot));
+            if (slot.IsAlbedo &&
+                s_State.Json.contains("mainTextureSubRect") &&
+                s_State.Json["mainTextureSubRect"].is_object() &&
+                textureLabel != "None")
+            {
+                textureLabel += " (Sub)";
+            }
 
             ImGuiTreeNodeFlags slotFlags = ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
             const bool slotOpen = ImGui::TreeNodeEx(slot.DisplayName, slotFlags);
@@ -1901,14 +2064,46 @@ namespace Limitless::EditorInspectorPanel
             ImGui::Button((textureLabel + "##Texture").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 90.0f, 0.0f));
             if (ImGui::BeginDragDropTarget())
             {
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSubSpritePayloadId))
                 {
                     const char* key = static_cast<const char*>(payload->Data);
                     if (key && key[0])
                     {
-                        auto textureAsset = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(key);
+                        ResolvedTextureDrop drop;
+                        if (!TryResolveTextureDrop(key, drop))
+                            drop.TextureKey = ResolveTextureKeyFromDroppedKey(key);
+                        auto textureAsset = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(drop.TextureKey);
                         if (textureAsset)
-                            setTextureForSlot(slot, textureAsset);
+                            setTextureForSlot(slot, textureAsset, slot.IsAlbedo && drop.HasSubRect, drop.UvMin, drop.UvMax);
+                    }
+                }
+                else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
+                {
+                    const char* key = static_cast<const char*>(payload->Data);
+                    if (key && key[0])
+                    {
+                        ResolvedTextureDrop drop;
+                        if (!TryResolveTextureDrop(key, drop))
+                            drop.TextureKey = ResolveTextureKeyFromDroppedKey(key);
+                        auto textureAsset = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(drop.TextureKey);
+                        if (textureAsset)
+                            setTextureForSlot(slot, textureAsset, slot.IsAlbedo && drop.HasSubRect, drop.UvMin, drop.UvMax);
+                    }
+                }
+                else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_MULTI_KEYS"))
+                {
+                    const std::vector<std::string> droppedKeys = ParseAssetKeyListPayload(payload);
+                    for (const auto& key : droppedKeys)
+                    {
+                        ResolvedTextureDrop drop;
+                        if (!TryResolveTextureDrop(key, drop))
+                            drop.TextureKey = ResolveTextureKeyFromDroppedKey(key);
+                        auto textureAsset = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(drop.TextureKey);
+                        if (textureAsset)
+                        {
+                            setTextureForSlot(slot, textureAsset, slot.IsAlbedo && drop.HasSubRect, drop.UvMin, drop.UvMax);
+                            break;
+                        }
                     }
                 }
                 ImGui::EndDragDropTarget();
@@ -1926,7 +2121,7 @@ namespace Limitless::EditorInspectorPanel
                     {
                         auto textureAsset = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(key);
                         if (textureAsset)
-                            setTextureForSlot(slot, textureAsset);
+                            setTextureForSlot(slot, textureAsset, false);
                         ImGui::CloseCurrentPopup();
                     }
                     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))

@@ -54,6 +54,9 @@ namespace Limitless::Assets
         float GetNormalStrength() const { return m_NormalStrength; }
         float GetRoughness() const { return m_Roughness; }
         float GetSpecularIntensity() const { return m_SpecularIntensity; }
+        bool HasMainTextureSubRect() const { return m_HasMainTextureSubRect; }
+        const glm::vec2& GetMainTextureUvMin() const { return m_MainTextureUvMin; }
+        const glm::vec2& GetMainTextureUvMax() const { return m_MainTextureUvMax; }
 
         // Submit material binds to render command stream.
         void SubmitBind(Limitless::Renderer& renderer, const glm::mat4& viewProjection, const glm::mat4& model) const;
@@ -76,6 +79,9 @@ namespace Limitless::Assets
 
         bool m_HasMainTextureSpecOverride = false;
         TextureSpecification m_MainTextureSpecOverride{};
+        bool m_HasMainTextureSubRect = false;
+        glm::vec2 m_MainTextureUvMin = glm::vec2(0.0f, 0.0f);
+        glm::vec2 m_MainTextureUvMax = glm::vec2(1.0f, 1.0f);
 
         float m_NormalStrength = 1.0f;
         float m_Roughness = 0.5f;

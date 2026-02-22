@@ -91,6 +91,10 @@ namespace Limitless
         // Multi-select state for Project assets (Ctrl/Shift click + multi-drag).
         std::vector<std::string> MultiSelectedAssetKeys;
         std::string SelectionAnchorAssetKey;
+
+        // Multi-select state for texture sub-sprites (virtual keys: "Texture.png#idx").
+        std::vector<std::string> MultiSelectedSubSpriteKeys;
+        std::string SubSpriteSelectionAnchorKey;
     };
 
     namespace EditorProjectPanel

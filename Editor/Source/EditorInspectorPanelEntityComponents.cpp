@@ -4,6 +4,7 @@
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/SpriteImportSettings.h"
+#include "Assets/TextureAssetImporter.h"
 #include "Assets/AssetTypes.h"
 #include "Assets/AudioClipAsset.h"
 #include "Project/ProjectManager.h"
@@ -45,6 +46,61 @@ namespace Limitless::EditorInspectorPanel
                 undoService->BeginInteractiveSceneMutation();
             if (ImGui::IsItemDeactivatedAfterEdit())
                 (void)undoService->CommitInteractiveSceneMutation(label);
+        }
+
+        constexpr const char* kSubSpritePayloadId = "SUB_SPRITE_KEY";
+
+        struct SpriteDropAssignment
+        {
+            std::string TextureKey;
+            int32_t SubSpriteIndex = -1;
+            glm::vec2 UvMin = glm::vec2(0.0f);
+            glm::vec2 UvMax = glm::vec2(1.0f);
+        };
+
+        bool ResolveSpriteDropAssignment(const std::string& droppedKey, SpriteDropAssignment& outAssignment)
+        {
+            outAssignment = SpriteDropAssignment{};
+            if (droppedKey.empty())
+                return false;
+
+            std::string textureKey;
+            int32_t subSpriteIndex = -1;
+            if (!Assets::TryParseSubSpriteAssetKey(droppedKey, textureKey, subSpriteIndex))
+            {
+                outAssignment.TextureKey = droppedKey;
+                return true;
+            }
+
+            outAssignment.TextureKey = textureKey;
+            if (textureKey.empty())
+                return false;
+
+            const auto settings = Assets::LoadSpriteImportSettings(textureKey);
+            if (subSpriteIndex < 0 || subSpriteIndex >= static_cast<int32_t>(settings.SubSprites.size()))
+                return true;
+
+            auto textureAsset = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(textureKey);
+            if (!textureAsset || !textureAsset->GetTexture())
+                return true;
+
+            const auto uvs = Assets::ComputeSubSpriteUvs(
+                settings.SubSprites[static_cast<size_t>(subSpriteIndex)].RectPixels,
+                textureAsset->GetTexture()->GetWidth(),
+                textureAsset->GetTexture()->GetHeight());
+            outAssignment.SubSpriteIndex = subSpriteIndex;
+            outAssignment.UvMin = glm::vec2(uvs.x, uvs.y);
+            outAssignment.UvMax = glm::vec2(uvs.z, uvs.w);
+            return true;
+        }
+
+        std::string ResolveTextureKeyFromDroppedKey(const std::string& droppedKey)
+        {
+            std::string textureKey;
+            int32_t subSpriteIndex = -1;
+            if (Assets::TryParseSubSpriteAssetKey(droppedKey, textureKey, subSpriteIndex))
+                return textureKey;
+            return droppedKey;
         }
 
         bool IsAssetKeyUnderOpenProjectAssets(const std::string& assetKey)
@@ -1909,15 +1965,18 @@ namespace Limitless::EditorInspectorPanel
 
             if (uiImageOpen)
             {
-                const auto assignUiImageTextureKey = [&](const std::string& key) {
+                const auto assignUiImageTexture = [&](const SpriteDropAssignment& assignment) {
                     if (undoService)
                     {
-                        (void)undoService->ExecuteSceneMutation(key.empty() ? "Clear UI Image Texture" : "Assign UI Image Texture", [&](Scene& mutableScene) {
+                        (void)undoService->ExecuteSceneMutation(assignment.TextureKey.empty() ? "Clear UI Image Texture" : "Assign UI Image Texture", [&](Scene& mutableScene) {
                             auto& mutableRegistry = mutableScene.GetRegistry();
                             auto* mutableSprite = mutableRegistry.try_get<SpriteComponent>(selectedEntity);
                             if (!mutableSprite)
                                 mutableSprite = &mutableRegistry.emplace<SpriteComponent>(selectedEntity);
-                            mutableSprite->TextureKey = key;
+                            mutableSprite->TextureKey = assignment.TextureKey;
+                            mutableSprite->SubSpriteIndex = assignment.SubSpriteIndex;
+                            mutableSprite->UvMin = assignment.UvMin;
+                            mutableSprite->UvMax = assignment.UvMax;
                             mutableSprite->CachedTexture.reset();
                             mutableSprite->TextureLoadAttempted = false;
                             return true;
@@ -1928,7 +1987,10 @@ namespace Limitless::EditorInspectorPanel
                         auto* sprite = registry.try_get<SpriteComponent>(selectedEntity);
                         if (!sprite)
                             sprite = &registry.emplace<SpriteComponent>(selectedEntity);
-                        sprite->TextureKey = key;
+                        sprite->TextureKey = assignment.TextureKey;
+                        sprite->SubSpriteIndex = assignment.SubSpriteIndex;
+                        sprite->UvMin = assignment.UvMin;
+                        sprite->UvMax = assignment.UvMax;
                         sprite->CachedTexture.reset();
                         sprite->TextureLoadAttempted = false;
                     }
@@ -1943,11 +2005,25 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::Button((imageTextureLabel + "##UIImageTexture").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 60.0f, 0.0f));
                 if (ImGui::BeginDragDropTarget())
                 {
-                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSubSpritePayloadId))
                     {
                         const char* key = static_cast<const char*>(payload->Data);
                         if (key && key[0])
-                            assignUiImageTextureKey(key);
+                        {
+                            SpriteDropAssignment assignment;
+                            if (ResolveSpriteDropAssignment(key, assignment))
+                                assignUiImageTexture(assignment);
+                        }
+                    }
+                    else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
+                    {
+                        const char* key = static_cast<const char*>(payload->Data);
+                        if (key && key[0])
+                        {
+                            SpriteDropAssignment assignment;
+                            if (ResolveSpriteDropAssignment(key, assignment))
+                                assignUiImageTexture(assignment);
+                        }
                     }
                     ImGui::EndDragDropTarget();
                 }
@@ -1955,7 +2031,7 @@ namespace Limitless::EditorInspectorPanel
                 {
                     ImGui::SameLine();
                     if (ImGui::Button("Clear##UIImageTexture"))
-                        assignUiImageTextureKey({});
+                        assignUiImageTexture(SpriteDropAssignment{});
                 }
 
                 ImGui::Checkbox("Raycast Target", &uiImage->RaycastTarget);
@@ -1982,15 +2058,18 @@ namespace Limitless::EditorInspectorPanel
 
             if (uiPanelOpen)
             {
-                const auto assignUiPanelTextureKey = [&](const std::string& key) {
+                const auto assignUiPanelTexture = [&](const SpriteDropAssignment& assignment) {
                     if (undoService)
                     {
-                        (void)undoService->ExecuteSceneMutation(key.empty() ? "Clear UI Panel Texture" : "Assign UI Panel Texture", [&](Scene& mutableScene) {
+                        (void)undoService->ExecuteSceneMutation(assignment.TextureKey.empty() ? "Clear UI Panel Texture" : "Assign UI Panel Texture", [&](Scene& mutableScene) {
                             auto& mutableRegistry = mutableScene.GetRegistry();
                             auto* mutableSprite = mutableRegistry.try_get<SpriteComponent>(selectedEntity);
                             if (!mutableSprite)
                                 mutableSprite = &mutableRegistry.emplace<SpriteComponent>(selectedEntity);
-                            mutableSprite->TextureKey = key;
+                            mutableSprite->TextureKey = assignment.TextureKey;
+                            mutableSprite->SubSpriteIndex = assignment.SubSpriteIndex;
+                            mutableSprite->UvMin = assignment.UvMin;
+                            mutableSprite->UvMax = assignment.UvMax;
                             mutableSprite->CachedTexture.reset();
                             mutableSprite->TextureLoadAttempted = false;
                             return true;
@@ -2001,7 +2080,10 @@ namespace Limitless::EditorInspectorPanel
                         auto* sprite = registry.try_get<SpriteComponent>(selectedEntity);
                         if (!sprite)
                             sprite = &registry.emplace<SpriteComponent>(selectedEntity);
-                        sprite->TextureKey = key;
+                        sprite->TextureKey = assignment.TextureKey;
+                        sprite->SubSpriteIndex = assignment.SubSpriteIndex;
+                        sprite->UvMin = assignment.UvMin;
+                        sprite->UvMax = assignment.UvMax;
                         sprite->CachedTexture.reset();
                         sprite->TextureLoadAttempted = false;
                     }
@@ -2016,11 +2098,25 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::Button((panelTextureLabel + "##UIPanelTexture").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 60.0f, 0.0f));
                 if (ImGui::BeginDragDropTarget())
                 {
-                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSubSpritePayloadId))
                     {
                         const char* key = static_cast<const char*>(payload->Data);
                         if (key && key[0])
-                            assignUiPanelTextureKey(key);
+                        {
+                            SpriteDropAssignment assignment;
+                            if (ResolveSpriteDropAssignment(key, assignment))
+                                assignUiPanelTexture(assignment);
+                        }
+                    }
+                    else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
+                    {
+                        const char* key = static_cast<const char*>(payload->Data);
+                        if (key && key[0])
+                        {
+                            SpriteDropAssignment assignment;
+                            if (ResolveSpriteDropAssignment(key, assignment))
+                                assignUiPanelTexture(assignment);
+                        }
                     }
                     ImGui::EndDragDropTarget();
                 }
@@ -2028,7 +2124,7 @@ namespace Limitless::EditorInspectorPanel
                 {
                     ImGui::SameLine();
                     if (ImGui::Button("Clear##UIPanelTexture"))
-                        assignUiPanelTextureKey({});
+                        assignUiPanelTexture(SpriteDropAssignment{});
                 }
 
                 ImGui::ColorEdit4("Background Color##UIPanel", &uiPanel->BackgroundColor.r);
@@ -2477,12 +2573,22 @@ namespace Limitless::EditorInspectorPanel
 
                     if (ImGui::BeginDragDropTarget())
                     {
-                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSubSpritePayloadId))
                         {
                             const char* key = static_cast<const char*>(payload->Data);
                             if (key && key[0])
                             {
-                                particleEmitter->TextureKey = key;
+                                particleEmitter->TextureKey = ResolveTextureKeyFromDroppedKey(key);
+                                particleEmitter->CachedTexture.reset();
+                                particleEmitter->TextureLoadAttempted = false;
+                            }
+                        }
+                        else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
+                        {
+                            const char* key = static_cast<const char*>(payload->Data);
+                            if (key && key[0])
+                            {
+                                particleEmitter->TextureKey = ResolveTextureKeyFromDroppedKey(key);
                                 particleEmitter->CachedTexture.reset();
                                 particleEmitter->TextureLoadAttempted = false;
                             }

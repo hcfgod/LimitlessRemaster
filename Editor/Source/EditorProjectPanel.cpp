@@ -281,6 +281,10 @@ namespace Limitless::EditorProjectPanel
         {
             if (!assetOrFolderKey || !assetOrFolderKey[0])
                 return;
+            std::string textureKey;
+            int32_t subSpriteIndex = -1;
+            if (Assets::TryParseSubSpriteAssetKey(assetOrFolderKey, textureKey, subSpriteIndex))
+                return;
 
             const bool moved = std::filesystem::path(assetOrFolderKey).extension().empty()
                 ? ProjectAssetOperations::MoveFolderToFolder(assetOrFolderKey, destinationFolderRelativePath)
@@ -296,6 +300,10 @@ namespace Limitless::EditorProjectPanel
             for (const auto& key : assetKeys)
             {
                 if (key.empty())
+                    continue;
+                std::string textureKey;
+                int32_t subSpriteIndex = -1;
+                if (Assets::TryParseSubSpriteAssetKey(key, textureKey, subSpriteIndex))
                     continue;
                 const bool moved = std::filesystem::path(key).extension().empty()
                     ? ProjectAssetOperations::MoveFolderToFolder(key.c_str(), destinationFolderRelativePath)
@@ -1011,8 +1019,14 @@ namespace Limitless::EditorProjectPanel
                     const ImGuiTreeNodeFlags leafFlags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
                     const ImGuiTreeNodeFlags expandableFlags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
                     const ImGuiTreeNodeFlags flags = hasSubSprites ? expandableFlags : leafFlags;
+                    std::string selectedTextureParentKey;
+                    int32_t selectedTextureSubIndex = -1;
+                    const bool selectedTextureIsSubSprite =
+                        Assets::TryParseSubSpriteAssetKey(selectedTextureAssetKey, selectedTextureParentKey, selectedTextureSubIndex);
+                    (void)selectedTextureSubIndex;
                     const bool isPrimarySelected =
-                        (isTexture && (selectedTextureAssetKey == assetKey)) ||
+                        (isTexture && (selectedTextureAssetKey == assetKey ||
+                                       (selectedTextureIsSubSprite && selectedTextureParentKey == assetKey))) ||
                         (isMaterial && (selectedMaterialAssetKey == assetKey)) ||
                         (isAudioMixer && (selectedAudioMixerAssetKey == assetKey)) ||
                         (isInputActions && (selectedInputActionsAssetKey == assetKey)) ||
@@ -1065,6 +1079,8 @@ namespace Limitless::EditorProjectPanel
                         const ImGuiIO& io = ImGui::GetIO();
                         const bool shiftPressed = io.KeyShift;
                         const bool controlPressed = io.KeyCtrl;
+                        state.MultiSelectedSubSpriteKeys.clear();
+                        state.SubSpriteSelectionAnchorKey.clear();
 
                         if (shiftPressed)
                         {
@@ -1307,26 +1323,127 @@ namespace Limitless::EditorProjectPanel
                     if (hasSubSprites && treeNodeOpen)
                     {
                         const auto& spriteSettings = GetCachedSpriteImportSettings(assetKey);
+                        const auto findSubSpriteSelectionIndex = [&](const std::string& key) -> int32_t {
+                            std::string selectedTextureKey;
+                            int32_t selectedSubIndex = -1;
+                            if (!Assets::TryParseSubSpriteAssetKey(key, selectedTextureKey, selectedSubIndex))
+                                return -1;
+                            if (selectedTextureKey != assetKey)
+                                return -1;
+                            if (selectedSubIndex < 0 || selectedSubIndex >= static_cast<int32_t>(spriteSettings.SubSprites.size()))
+                                return -1;
+                            return selectedSubIndex;
+                        };
                         for (size_t subIdx = 0; subIdx < spriteSettings.SubSprites.size(); ++subIdx)
                         {
                             const auto& sub = spriteSettings.SubSprites[subIdx];
-                            const std::string subLabel = sub.Name + "###sub_" + std::to_string(subIdx);
+                            const std::string subLabel = sub.Name + "###sub_" + assetKey + "_" + std::to_string(subIdx);
                             const std::string subSpriteKey = assetKey + "#" + std::to_string(subIdx);
                             const ImGuiTreeNodeFlags subFlags =
                                 ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen |
                                 ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Bullet;
+                            const bool subSpriteIsMultiSelected =
+                                std::find(state.MultiSelectedSubSpriteKeys.begin(), state.MultiSelectedSubSpriteKeys.end(), subSpriteKey) != state.MultiSelectedSubSpriteKeys.end();
 
-                            ImGui::TreeNodeEx(subLabel.c_str(), subFlags);
+                            ImGui::TreeNodeEx(subLabel.c_str(), subSpriteIsMultiSelected ? (subFlags | ImGuiTreeNodeFlags_Selected) : subFlags);
+
+                            const bool releasedOnSubSpriteWithoutDrag =
+                                ImGui::IsItemHovered() &&
+                                ImGui::IsMouseReleased(0) &&
+                                (ImGui::GetDragDropPayload() == nullptr);
+                            if (releasedOnSubSpriteWithoutDrag)
+                            {
+                                const ImGuiIO& io = ImGui::GetIO();
+                                const bool shiftPressed = io.KeyShift;
+                                const bool controlPressed = io.KeyCtrl;
+
+                                // Sub-sprite picks are separate from file/folder multi-selection.
+                                state.MultiSelectedAssetKeys.clear();
+                                state.SelectionAnchorAssetKey.clear();
+
+                                if (shiftPressed)
+                                {
+                                    const int32_t anchorIndex = findSubSpriteSelectionIndex(state.SubSpriteSelectionAnchorKey);
+                                    const int32_t clickedIndex = static_cast<int32_t>(subIdx);
+                                    if (!controlPressed)
+                                        state.MultiSelectedSubSpriteKeys.clear();
+
+                                    if (anchorIndex >= 0)
+                                    {
+                                        const int32_t minIndex = std::min(anchorIndex, clickedIndex);
+                                        const int32_t maxIndex = std::max(anchorIndex, clickedIndex);
+                                        for (int32_t rangeIndex = minIndex; rangeIndex <= maxIndex; ++rangeIndex)
+                                        {
+                                            const std::string rangeKey = assetKey + "#" + std::to_string(rangeIndex);
+                                            if (std::find(state.MultiSelectedSubSpriteKeys.begin(), state.MultiSelectedSubSpriteKeys.end(), rangeKey) == state.MultiSelectedSubSpriteKeys.end())
+                                                state.MultiSelectedSubSpriteKeys.push_back(rangeKey);
+                                        }
+                                    }
+                                    else if (std::find(state.MultiSelectedSubSpriteKeys.begin(), state.MultiSelectedSubSpriteKeys.end(), subSpriteKey) == state.MultiSelectedSubSpriteKeys.end())
+                                    {
+                                        state.MultiSelectedSubSpriteKeys.push_back(subSpriteKey);
+                                    }
+                                }
+                                else if (controlPressed)
+                                {
+                                    const auto foundIt = std::find(state.MultiSelectedSubSpriteKeys.begin(), state.MultiSelectedSubSpriteKeys.end(), subSpriteKey);
+                                    if (foundIt != state.MultiSelectedSubSpriteKeys.end())
+                                        state.MultiSelectedSubSpriteKeys.erase(foundIt);
+                                    else
+                                        state.MultiSelectedSubSpriteKeys.push_back(subSpriteKey);
+                                }
+                                else
+                                {
+                                    state.MultiSelectedSubSpriteKeys.clear();
+                                    state.MultiSelectedSubSpriteKeys.push_back(subSpriteKey);
+                                }
+
+                                const bool clickedStillSelected =
+                                    std::find(state.MultiSelectedSubSpriteKeys.begin(), state.MultiSelectedSubSpriteKeys.end(), subSpriteKey) != state.MultiSelectedSubSpriteKeys.end();
+                                if (!state.MultiSelectedSubSpriteKeys.empty())
+                                {
+                                    state.SubSpriteSelectionAnchorKey = subSpriteKey;
+                                    // Keep current primary asset selection (e.g. Animation Clip)
+                                    // so Timeline/Inspector context does not collapse while users
+                                    // sub-select frames for drag-drop.
+                                    selectedTextureAssetKey = clickedStillSelected
+                                        ? subSpriteKey
+                                        : state.MultiSelectedSubSpriteKeys.front();
+                                }
+                                else
+                                {
+                                    state.SubSpriteSelectionAnchorKey.clear();
+                                }
+                            }
 
                             // Drag-drop source: sub-sprite virtual key.
                             if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
                             {
-                                ImGui::SetDragDropPayload(
-                                    kSubSpritePayloadId,
-                                    subSpriteKey.c_str(),
-                                    static_cast<uint32_t>(subSpriteKey.size() + 1),
-                                    ImGuiCond_Once);
-                                ImGui::Text("%s", sub.Name.c_str());
+                                const bool draggingMultiSubSprites =
+                                    state.MultiSelectedSubSpriteKeys.size() > 1 &&
+                                    std::find(state.MultiSelectedSubSpriteKeys.begin(), state.MultiSelectedSubSpriteKeys.end(), subSpriteKey) != state.MultiSelectedSubSpriteKeys.end();
+                                if (draggingMultiSubSprites)
+                                {
+                                    const std::string payloadText = EncodeAssetKeyListPayload(state.MultiSelectedSubSpriteKeys);
+                                    if (!payloadText.empty())
+                                    {
+                                        ImGui::SetDragDropPayload(
+                                            kAssetMultiSelectionPayload,
+                                            payloadText.c_str(),
+                                            static_cast<uint32_t>(payloadText.size() + 1),
+                                            ImGuiCond_Once);
+                                    }
+                                    ImGui::Text("%zu sub-sprites", state.MultiSelectedSubSpriteKeys.size());
+                                }
+                                else
+                                {
+                                    ImGui::SetDragDropPayload(
+                                        kSubSpritePayloadId,
+                                        subSpriteKey.c_str(),
+                                        static_cast<uint32_t>(subSpriteKey.size() + 1),
+                                        ImGuiCond_Once);
+                                    ImGui::Text("%s", sub.Name.c_str());
+                                }
                                 ImGui::EndDragDropSource();
                             }
 

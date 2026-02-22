@@ -7,6 +7,8 @@
 #include "Assets/AssetManager.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetTypes.h"
+#include "Assets/SpriteImportSettings.h"
+#include "Assets/TextureAsset.h"
 #include "Core/Debug/Log.h"
 #include "Undo/EditorTextAssetCommand.h"
 #include "Undo/EditorUndoService.h"
@@ -15,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -30,6 +33,7 @@ namespace Limitless::EditorAnimationTimelinePanel
     namespace
     {
         using json = nlohmann::json;
+        constexpr const char* kSubSpritePayloadId = "SUB_SPRITE_KEY";
 
         struct TimelineEditorState
         {
@@ -115,16 +119,29 @@ namespace Limitless::EditorAnimationTimelinePanel
             return keys;
         }
 
+        std::string ResolveTextureKeyFromDroppedKey(const std::string& droppedKey)
+        {
+            std::string textureKey;
+            int32_t subSpriteIndex = -1;
+            if (Assets::TryParseSubSpriteAssetKey(droppedKey, textureKey, subSpriteIndex))
+                return textureKey;
+            return droppedKey;
+        }
+
         bool IsTextureAssetKey(const std::string& assetKey)
         {
             if (assetKey.empty())
                 return false;
 
-            const auto record = Assets::AssetDatabase::GetInstance().FindByKey(assetKey);
+            const std::string resolvedKey = ResolveTextureKeyFromDroppedKey(assetKey);
+            if (resolvedKey.empty())
+                return false;
+
+            const auto record = Assets::AssetDatabase::GetInstance().FindByKey(resolvedKey);
             if (record.IsSuccess())
                 return record.GetValue().Type == Assets::AssetType::Texture2D;
 
-            const std::filesystem::path keyPath(assetKey);
+            const std::filesystem::path keyPath(resolvedKey);
             std::string extension = keyPath.extension().string();
             std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char character) {
                 return static_cast<char>(std::tolower(character));
@@ -144,6 +161,89 @@ namespace Limitless::EditorAnimationTimelinePanel
                     textureKeys.push_back(key);
             }
             return textureKeys;
+        }
+
+        struct DroppedSpriteEntry
+        {
+            std::string TextureKey;
+            int32_t SubSpriteIndex = -1;
+            bool HasSubRect = false;
+            glm::vec2 UvMin = glm::vec2(0.0f);
+            glm::vec2 UvMax = glm::vec2(1.0f);
+        };
+
+        bool TryResolveDroppedSpriteEntry(const std::string& droppedKey, DroppedSpriteEntry& outEntry)
+        {
+            outEntry = DroppedSpriteEntry{};
+            if (!IsTextureAssetKey(droppedKey))
+                return false;
+
+            std::string textureKey;
+            int32_t subSpriteIndex = -1;
+            if (!Assets::TryParseSubSpriteAssetKey(droppedKey, textureKey, subSpriteIndex))
+            {
+                outEntry.TextureKey = droppedKey;
+                return true;
+            }
+
+            outEntry.TextureKey = textureKey;
+            if (textureKey.empty())
+                return false;
+
+            const auto spriteSettings = Assets::LoadSpriteImportSettings(textureKey);
+            if (subSpriteIndex < 0 || subSpriteIndex >= static_cast<int32_t>(spriteSettings.SubSprites.size()))
+                return true;
+            outEntry.SubSpriteIndex = subSpriteIndex;
+
+            Assets::TextureAsset::Ptr textureAsset =
+                std::dynamic_pointer_cast<Assets::TextureAsset>(Assets::AssetManager::GetCachedByKey(textureKey));
+            if (!textureAsset)
+                textureAsset = Assets::TextureAsset::LoadBlocking(textureKey);
+            if (!textureAsset || !textureAsset->GetTexture())
+                return true;
+
+            const auto uvs = Assets::ComputeSubSpriteUvs(
+                spriteSettings.SubSprites[static_cast<size_t>(subSpriteIndex)].RectPixels,
+                textureAsset->GetTexture()->GetWidth(),
+                textureAsset->GetTexture()->GetHeight());
+            outEntry.HasSubRect = true;
+            outEntry.UvMin = glm::vec2(uvs.x, uvs.y);
+            outEntry.UvMax = glm::vec2(uvs.z, uvs.w);
+            return true;
+        }
+
+        json BuildTextureKeyframeTextureObject(const DroppedSpriteEntry& entry)
+        {
+            json textureObject = json::object();
+            textureObject["key"] = entry.TextureKey;
+            if (entry.SubSpriteIndex >= 0)
+                textureObject["subSpriteIndex"] = entry.SubSpriteIndex;
+            return textureObject;
+        }
+
+        void UpsertSubRectKeyframe(json& subRectTrackArray,
+                                   float timeSeconds,
+                                   const glm::vec2& uvMin,
+                                   const glm::vec2& uvMax)
+        {
+            for (auto& keyframe : subRectTrackArray)
+            {
+                if (!keyframe.is_object())
+                    continue;
+                const float existingTime = keyframe.value("TimeSeconds", -1.0f);
+                if (std::abs(existingTime - timeSeconds) <= 0.0001f)
+                {
+                    keyframe["UvMin"] = { uvMin.x, uvMin.y };
+                    keyframe["UvMax"] = { uvMax.x, uvMax.y };
+                    return;
+                }
+            }
+
+            subRectTrackArray.push_back({
+                {"TimeSeconds", timeSeconds},
+                {"UvMin", {uvMin.x, uvMin.y}},
+                {"UvMax", {uvMax.x, uvMax.y}}
+            });
         }
 
         bool LoadJsonFromPath(const std::filesystem::path& path, json& outJson)
@@ -371,7 +471,7 @@ namespace Limitless::EditorAnimationTimelinePanel
             SortTrackByTime(trackArray);
         }
 
-        void DrawSpriteTextureTrack(json& trackArray, float samplesPerSecond)
+        void DrawSpriteTextureTrack(json& trackArray, json& subRectTrackArray, float samplesPerSecond)
         {
             ImGui::SeparatorText("Sprite Texture Track");
             if (ImGui::Button("Add Texture Keyframe"))
@@ -385,32 +485,64 @@ namespace Limitless::EditorAnimationTimelinePanel
             ImGui::Button("Drop Textures Here##SpriteTextureTrackDropTarget", ImVec2(240.0f, 0.0f));
             if (ImGui::BeginDragDropTarget())
             {
-                std::vector<std::string> droppedTextureKeys;
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
+                std::vector<DroppedSpriteEntry> droppedEntries;
+                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSubSpritePayloadId))
                 {
                     const char* key = static_cast<const char*>(payload->Data);
-                    if (key && key[0] && IsTextureAssetKey(key))
-                        droppedTextureKeys.emplace_back(key);
+                    if (key && key[0])
+                    {
+                        DroppedSpriteEntry entry;
+                        if (TryResolveDroppedSpriteEntry(key, entry))
+                            droppedEntries.push_back(std::move(entry));
+                    }
+                }
+                else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
+                {
+                    const char* key = static_cast<const char*>(payload->Data);
+                    if (key && key[0])
+                    {
+                        DroppedSpriteEntry entry;
+                        if (TryResolveDroppedSpriteEntry(key, entry))
+                            droppedEntries.push_back(std::move(entry));
+                    }
                 }
                 else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_MULTI_KEYS"))
                 {
-                    droppedTextureKeys = FilterTextureAssetKeys(ParseAssetKeyListPayload(payload));
+                    const std::vector<std::string> droppedKeys = FilterTextureAssetKeys(ParseAssetKeyListPayload(payload));
+                    droppedEntries.reserve(droppedKeys.size());
+                    for (const auto& key : droppedKeys)
+                    {
+                        DroppedSpriteEntry entry;
+                        if (TryResolveDroppedSpriteEntry(key, entry))
+                            droppedEntries.push_back(std::move(entry));
+                    }
                 }
 
-                if (!droppedTextureKeys.empty())
+                if (!droppedEntries.empty())
                 {
                     const float frameStepSeconds = 1.0f / std::max(1.0f, samplesPerSecond);
                     const float startTime = trackArray.empty()
                         ? 0.0f
                         : (trackArray.back().value("TimeSeconds", 0.0f) + frameStepSeconds);
+                    bool subRectTrackMutated = false;
 
-                    for (size_t keyIndex = 0; keyIndex < droppedTextureKeys.size(); ++keyIndex)
+                    for (size_t keyIndex = 0; keyIndex < droppedEntries.size(); ++keyIndex)
                     {
+                        const float keyframeTime = startTime + static_cast<float>(keyIndex) * frameStepSeconds;
+                        const auto& entry = droppedEntries[keyIndex];
                         trackArray.push_back({
-                            {"TimeSeconds", startTime + static_cast<float>(keyIndex) * frameStepSeconds},
-                            {"Texture", {{"key", droppedTextureKeys[keyIndex]}}}
+                            {"TimeSeconds", keyframeTime},
+                            {"Texture", BuildTextureKeyframeTextureObject(entry)}
                         });
+                        if (entry.HasSubRect)
+                        {
+                            UpsertSubRectKeyframe(subRectTrackArray, keyframeTime, entry.UvMin, entry.UvMax);
+                            subRectTrackMutated = true;
+                        }
                     }
+
+                    if (subRectTrackMutated)
+                        SortTrackByTime(subRectTrackArray);
                 }
                 ImGui::EndDragDropTarget();
             }
@@ -430,9 +562,11 @@ namespace Limitless::EditorAnimationTimelinePanel
                     if (!keyframe.contains("Texture") || !keyframe["Texture"].is_object())
                         keyframe["Texture"] = json::object();
                     std::string textureKey = keyframe["Texture"].value("key", std::string{});
+                    const int32_t textureSubSpriteIndex = keyframe["Texture"].value("subSpriteIndex", -1);
                     const std::string textureLabel = textureKey.empty()
                         ? std::string("None")
-                        : EditorAssetNaming::GetAssetDisplayNameFromAssetKey(textureKey);
+                        : (EditorAssetNaming::GetAssetDisplayNameFromAssetKey(textureKey) +
+                           (textureSubSpriteIndex >= 0 ? ("#" + std::to_string(textureSubSpriteIndex)) : std::string{}));
 
                     ImGui::AlignTextToFramePadding();
                     ImGui::Text("Texture");
@@ -440,31 +574,110 @@ namespace Limitless::EditorAnimationTimelinePanel
                     ImGui::Button((textureLabel + "##TextureKeyframeSlot").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 120.0f, 0.0f));
                     if (ImGui::BeginDragDropTarget())
                     {
-                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSubSpritePayloadId))
                         {
                             const char* key = static_cast<const char*>(payload->Data);
-                            if (key && key[0] && textureKey != key)
+                            if (key && key[0])
                             {
-                                textureKey = key;
-                                keyframe["Texture"]["key"] = textureKey;
+                                DroppedSpriteEntry entry;
+                                if (TryResolveDroppedSpriteEntry(key, entry))
+                                {
+                                    if (textureKey != entry.TextureKey)
+                                    {
+                                        textureKey = entry.TextureKey;
+                                        keyframe["Texture"]["key"] = textureKey;
+                                    }
+                                    if (entry.SubSpriteIndex >= 0)
+                                        keyframe["Texture"]["subSpriteIndex"] = entry.SubSpriteIndex;
+                                    else
+                                        keyframe["Texture"].erase("subSpriteIndex");
+                                    if (entry.HasSubRect)
+                                    {
+                                        UpsertSubRectKeyframe(
+                                            subRectTrackArray,
+                                            keyframe.value("TimeSeconds", 0.0f),
+                                            entry.UvMin,
+                                            entry.UvMax);
+                                        SortTrackByTime(subRectTrackArray);
+                                    }
+                                }
+                            }
+                        }
+                        else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
+                        {
+                            const char* key = static_cast<const char*>(payload->Data);
+                            if (key && key[0])
+                            {
+                                DroppedSpriteEntry entry;
+                                if (TryResolveDroppedSpriteEntry(key, entry))
+                                {
+                                    if (textureKey != entry.TextureKey)
+                                    {
+                                        textureKey = entry.TextureKey;
+                                        keyframe["Texture"]["key"] = textureKey;
+                                    }
+                                    if (entry.SubSpriteIndex >= 0)
+                                        keyframe["Texture"]["subSpriteIndex"] = entry.SubSpriteIndex;
+                                    else
+                                        keyframe["Texture"].erase("subSpriteIndex");
+                                    if (entry.HasSubRect)
+                                    {
+                                        UpsertSubRectKeyframe(
+                                            subRectTrackArray,
+                                            keyframe.value("TimeSeconds", 0.0f),
+                                            entry.UvMin,
+                                            entry.UvMax);
+                                        SortTrackByTime(subRectTrackArray);
+                                    }
+                                }
                             }
                         }
                         else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_MULTI_KEYS"))
                         {
-                            const std::vector<std::string> droppedTextureKeys = FilterTextureAssetKeys(ParseAssetKeyListPayload(payload));
-                            if (!droppedTextureKeys.empty())
+                            const std::vector<std::string> droppedKeys = FilterTextureAssetKeys(ParseAssetKeyListPayload(payload));
+                            std::vector<DroppedSpriteEntry> droppedEntries;
+                            droppedEntries.reserve(droppedKeys.size());
+                            for (const auto& key : droppedKeys)
+                            {
+                                DroppedSpriteEntry entry;
+                                if (TryResolveDroppedSpriteEntry(key, entry))
+                                    droppedEntries.push_back(std::move(entry));
+                            }
+
+                            if (!droppedEntries.empty())
                             {
                                 const float frameStepSeconds = 1.0f / std::max(1.0f, samplesPerSecond);
                                 const float startTime = keyframe.value("TimeSeconds", 0.0f);
+                                bool subRectTrackMutated = false;
 
-                                keyframe["Texture"]["key"] = droppedTextureKeys.front();
-                                for (size_t keyIndex = 1; keyIndex < droppedTextureKeys.size(); ++keyIndex)
+                                keyframe["Texture"]["key"] = droppedEntries.front().TextureKey;
+                                if (droppedEntries.front().SubSpriteIndex >= 0)
+                                    keyframe["Texture"]["subSpriteIndex"] = droppedEntries.front().SubSpriteIndex;
+                                else
+                                    keyframe["Texture"].erase("subSpriteIndex");
+                                if (droppedEntries.front().HasSubRect)
                                 {
-                                    trackArray.push_back({
-                                        {"TimeSeconds", startTime + static_cast<float>(keyIndex) * frameStepSeconds},
-                                        {"Texture", {{"key", droppedTextureKeys[keyIndex]}}}
-                                    });
+                                    UpsertSubRectKeyframe(subRectTrackArray, startTime, droppedEntries.front().UvMin, droppedEntries.front().UvMax);
+                                    subRectTrackMutated = true;
                                 }
+
+                                for (size_t keyIndex = 1; keyIndex < droppedEntries.size(); ++keyIndex)
+                                {
+                                    const float keyframeTime = startTime + static_cast<float>(keyIndex) * frameStepSeconds;
+                                    const auto& entry = droppedEntries[keyIndex];
+                                    trackArray.push_back({
+                                        {"TimeSeconds", keyframeTime},
+                                        {"Texture", BuildTextureKeyframeTextureObject(entry)}
+                                    });
+                                    if (entry.HasSubRect)
+                                    {
+                                        UpsertSubRectKeyframe(subRectTrackArray, keyframeTime, entry.UvMin, entry.UvMax);
+                                        subRectTrackMutated = true;
+                                    }
+                                }
+
+                                if (subRectTrackMutated)
+                                    SortTrackByTime(subRectTrackArray);
                             }
                         }
                         ImGui::EndDragDropTarget();
@@ -479,6 +692,7 @@ namespace Limitless::EditorAnimationTimelinePanel
                         {
                             textureKey.clear();
                             keyframe["Texture"]["key"] = "";
+                            keyframe["Texture"].erase("subSpriteIndex");
                             ImGui::CloseCurrentPopup();
                         }
                         ImGui::Separator();
@@ -492,6 +706,7 @@ namespace Limitless::EditorAnimationTimelinePanel
                             {
                                 textureKey = key;
                                 keyframe["Texture"]["key"] = textureKey;
+                                keyframe["Texture"].erase("subSpriteIndex");
                                 ImGui::CloseCurrentPopup();
                             }
                             if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
@@ -505,6 +720,7 @@ namespace Limitless::EditorAnimationTimelinePanel
                     {
                         textureKey.clear();
                         keyframe["Texture"]["key"] = "";
+                        keyframe["Texture"].erase("subSpriteIndex");
                     }
 
                     if (ImGui::Button("Remove Keyframe"))
@@ -756,9 +972,13 @@ namespace Limitless::EditorAnimationTimelinePanel
             const std::string previewTextureKey = sampledTexture->contains("Texture") && (*sampledTexture)["Texture"].is_object()
                 ? (*sampledTexture)["Texture"].value("key", std::string{})
                 : sampledTexture->value("TextureKey", std::string{});
+            const int32_t previewSubSpriteIndex = sampledTexture->contains("Texture") && (*sampledTexture)["Texture"].is_object()
+                ? (*sampledTexture)["Texture"].value("subSpriteIndex", -1)
+                : -1;
             const std::string previewTextureLabel = previewTextureKey.empty()
                 ? std::string("None")
-                : EditorAssetNaming::GetAssetDisplayNameFromAssetKey(previewTextureKey);
+                : (EditorAssetNaming::GetAssetDisplayNameFromAssetKey(previewTextureKey) +
+                   (previewSubSpriteIndex >= 0 ? ("#" + std::to_string(previewSubSpriteIndex)) : std::string{}));
             ImGui::Text("Preview Texture: %s", previewTextureLabel.c_str());
         }
         else
@@ -767,7 +987,10 @@ namespace Limitless::EditorAnimationTimelinePanel
         }
 
         DrawSpriteSubRectTrack(state.WorkingJson["SpriteSubRectTrack"]);
-        DrawSpriteTextureTrack(state.WorkingJson["SpriteTextureTrack"], state.WorkingJson.value("SamplesPerSecond", 30.0f));
+        DrawSpriteTextureTrack(
+            state.WorkingJson["SpriteTextureTrack"],
+            state.WorkingJson["SpriteSubRectTrack"],
+            state.WorkingJson.value("SamplesPerSecond", 30.0f));
         DrawVector3Track("Position Track", state.WorkingJson["PositionTrack"]);
         DrawVector3Track("Scale Track", state.WorkingJson["ScaleTrack"]);
         DrawFloatTrack(state.WorkingJson["RotationZTrack"]);

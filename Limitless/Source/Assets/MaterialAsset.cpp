@@ -320,6 +320,45 @@ namespace Limitless::Assets
         return spec;
     }
 
+    static void ParseMainTextureSubRect(const json& root,
+                                        bool& outHasSubRect,
+                                        glm::vec2& outUvMin,
+                                        glm::vec2& outUvMax)
+    {
+        outHasSubRect = false;
+        outUvMin = glm::vec2(0.0f, 0.0f);
+        outUvMax = glm::vec2(1.0f, 1.0f);
+
+        if (!root.contains("mainTextureSubRect") || !root["mainTextureSubRect"].is_object())
+            return;
+        const json& subRect = root["mainTextureSubRect"];
+        if (!subRect.contains("uvMin") || !subRect["uvMin"].is_array() || subRect["uvMin"].size() < 2)
+            return;
+        if (!subRect.contains("uvMax") || !subRect["uvMax"].is_array() || subRect["uvMax"].size() < 2)
+            return;
+
+        try
+        {
+            outUvMin = glm::vec2(
+                std::clamp(subRect["uvMin"][0].get<float>(), 0.0f, 1.0f),
+                std::clamp(subRect["uvMin"][1].get<float>(), 0.0f, 1.0f));
+            outUvMax = glm::vec2(
+                std::clamp(subRect["uvMax"][0].get<float>(), 0.0f, 1.0f),
+                std::clamp(subRect["uvMax"][1].get<float>(), 0.0f, 1.0f));
+        }
+        catch (...)
+        {
+            outHasSubRect = false;
+            outUvMin = glm::vec2(0.0f, 0.0f);
+            outUvMax = glm::vec2(1.0f, 1.0f);
+            return;
+        }
+
+        if (outUvMax.x - outUvMin.x <= 0.0001f || outUvMax.y - outUvMin.y <= 0.0001f)
+            return;
+        outHasSubRect = true;
+    }
+
     Async::Task<MaterialAsset::Ptr> MaterialAsset::LoadAsync(const std::string& key, Settings settings)
     {
         // Materials are CPU-only to parse, then reference other assets.
@@ -500,6 +539,7 @@ namespace Limitless::Assets
                     {
                         m_HasMainTextureSpecOverride = false;
                     }
+                    ParseMainTextureSubRect(root, m_HasMainTextureSubRect, m_MainTextureUvMin, m_MainTextureUvMax);
 
                     updateDependencies();
                     ClearMaterialOpenFailureSuppression(key);
@@ -583,6 +623,7 @@ namespace Limitless::Assets
         {
             m_HasMainTextureSpecOverride = false;
         }
+        ParseMainTextureSubRect(root, m_HasMainTextureSubRect, m_MainTextureUvMin, m_MainTextureUvMax);
         updateDependencies();
         ClearMaterialOpenFailureSuppression(m_ResolvedPath);
         return true;

@@ -4244,7 +4244,10 @@ namespace Limitless
                 std::max(0.001f, sprite.TilingFactor.y));
             glm::vec2 renderUvMin(0.0f, 0.0f);
             glm::vec2 renderUvMax = safeTilingFactor;
-            if (animator && animator->Enabled && animator->ApplyToSprite && animator->RuntimeHasSpriteSubRect)
+            const bool hasAnimatorSubRect =
+                animator && animator->Enabled && animator->ApplyToSprite && animator->RuntimeHasSpriteSubRect;
+            const bool hasSpriteSubRect = sprite.SubSpriteIndex >= 0;
+            if (hasAnimatorSubRect)
             {
                 renderUvMin = animator->RuntimeSpriteUvMin;
                 glm::vec2 frameSpan = animator->RuntimeSpriteUvMax - animator->RuntimeSpriteUvMin;
@@ -4252,7 +4255,7 @@ namespace Limitless
                     frameSpan = glm::vec2(1.0f, 1.0f);
                 renderUvMax = animator->RuntimeSpriteUvMin + frameSpan * safeTilingFactor;
             }
-            else if (sprite.SubSpriteIndex >= 0)
+            else if (hasSpriteSubRect)
             {
                 renderUvMin = sprite.UvMin;
                 glm::vec2 subSpan = sprite.UvMax - sprite.UvMin;
@@ -4297,7 +4300,8 @@ namespace Limitless
             // Material override (Unity-style): if the entity has a MaterialComponent, prefer its main texture.
             // Animator texture override still has highest priority so animation remains visible.
             Assets::TextureAsset::Ptr materialMainTextureAsset;
-            if (auto* material = registry.try_get<MaterialComponent>(entity))
+            auto* material = registry.try_get<MaterialComponent>(entity);
+            if (material)
             {
                 if (!material->MaterialKey.empty())
                 {
@@ -4335,6 +4339,17 @@ namespace Limitless
                         useMissingAssetFallback = true;
                     }
                 }
+            }
+
+            if (!hasAnimatorSubRect && !hasSpriteSubRect &&
+                materialMainTextureAsset && material &&
+                material->CachedMaterial && material->CachedMaterial->HasMainTextureSubRect())
+            {
+                renderUvMin = material->CachedMaterial->GetMainTextureUvMin();
+                glm::vec2 subSpan = material->CachedMaterial->GetMainTextureUvMax() - material->CachedMaterial->GetMainTextureUvMin();
+                if (subSpan.x <= 0.0001f || subSpan.y <= 0.0001f)
+                    subSpan = glm::vec2(1.0f, 1.0f);
+                renderUvMax = material->CachedMaterial->GetMainTextureUvMin() + subSpan * safeTilingFactor;
             }
 
             Assets::TextureAsset::Ptr resolvedTextureAsset = animatedTextureAsset ? animatedTextureAsset : materialMainTextureAsset;
