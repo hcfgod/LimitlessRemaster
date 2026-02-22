@@ -64,6 +64,12 @@ namespace Limitless
         std::filesystem::path CreateAudioMixerParentRelativePath;
         std::array<char, 256> CreateAudioMixerNameBuffer{};
 
+        // Input actions asset creation popup state.
+        bool CreateInputActionsPopupPending = false;
+        bool CreateInputActionsPopupOpen = false;
+        std::filesystem::path CreateInputActionsParentRelativePath;
+        std::array<char, 256> CreateInputActionsNameBuffer{};
+
         // Animation clip asset creation popup state.
         bool CreateAnimationClipPopupPending = false;
         bool CreateAnimationClipPopupOpen = false;
@@ -116,6 +122,7 @@ namespace Limitless
                   const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
                   const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
                   const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAudioMixerRequested,
+                  const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateInputActionsRequested,
                   const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimationClipRequested,
                   const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimatorControllerRequested,
                   const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,

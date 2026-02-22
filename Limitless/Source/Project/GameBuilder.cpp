@@ -189,26 +189,40 @@ namespace Limitless::Project
         bool MirrorProjectNativeScriptsToGeneratedDirectory(const GameBuildRequest& request, GameBuildResult& result)
         {
             const std::filesystem::path assetsRoot = request.ProjectRoot / "Assets";
-            const std::filesystem::path generatedDirectory = request.ProjectRoot / "Build" / "Generated" / "ScriptCore";
             if (!std::filesystem::is_directory(assetsRoot))
             {
                 result.ErrorMessage = "Cannot mirror scripts: project Assets directory not found at " + assetsRoot.string();
                 return false;
             }
 
-            std::error_code errorCode;
-            std::filesystem::remove_all(generatedDirectory, errorCode);
-            if (errorCode)
+            // Mirror into both project-local and engine-local generated roots.
+            // - Internal backend script compile reads project-local generated sources.
+            // - External backend ScriptCore.vcxproj reads engine-local generated sources.
+            std::vector<std::filesystem::path> generatedDirectories;
+            generatedDirectories.push_back(request.ProjectRoot / "Build" / "Generated" / "ScriptCore");
+            if (!request.EngineRoot.empty())
             {
-                result.ErrorMessage = "Cannot clear generated ScriptCore mirror directory: " + errorCode.message();
-                return false;
+                const std::filesystem::path engineGeneratedDirectory = request.EngineRoot / "Build" / "Generated" / "ScriptCore";
+                if (std::find(generatedDirectories.begin(), generatedDirectories.end(), engineGeneratedDirectory) == generatedDirectories.end())
+                    generatedDirectories.push_back(engineGeneratedDirectory);
             }
 
-            std::filesystem::create_directories(generatedDirectory, errorCode);
-            if (errorCode)
+            std::error_code errorCode;
+            for (const std::filesystem::path& generatedDirectory : generatedDirectories)
             {
-                result.ErrorMessage = "Cannot create generated ScriptCore mirror directory: " + errorCode.message();
-                return false;
+                std::filesystem::remove_all(generatedDirectory, errorCode);
+                if (errorCode)
+                {
+                    result.ErrorMessage = "Cannot clear generated ScriptCore mirror directory '" + generatedDirectory.string() + "': " + errorCode.message();
+                    return false;
+                }
+
+                std::filesystem::create_directories(generatedDirectory, errorCode);
+                if (errorCode)
+                {
+                    result.ErrorMessage = "Cannot create generated ScriptCore mirror directory '" + generatedDirectory.string() + "': " + errorCode.message();
+                    return false;
+                }
             }
 
             size_t mirroredScriptPairCount = 0;
@@ -231,35 +245,46 @@ namespace Limitless::Project
                 if (relativePathError || relativeHeaderPath.empty())
                     continue;
 
-                const std::filesystem::path destinationCppPath = generatedDirectory / relativeCppPath;
-                const std::filesystem::path destinationHeaderPath = generatedDirectory / relativeHeaderPath;
-
-                std::filesystem::create_directories(destinationCppPath.parent_path(), errorCode);
-                if (errorCode)
+                for (const std::filesystem::path& generatedDirectory : generatedDirectories)
                 {
-                    result.ErrorMessage = "Failed to create generated script directory: " + errorCode.message();
-                    return false;
-                }
+                    const std::filesystem::path destinationCppPath = generatedDirectory / relativeCppPath;
+                    const std::filesystem::path destinationHeaderPath = generatedDirectory / relativeHeaderPath;
 
-                std::filesystem::copy_file(sourceCppPath, destinationCppPath, std::filesystem::copy_options::overwrite_existing, errorCode);
-                if (errorCode)
-                {
-                    result.ErrorMessage = "Failed to mirror script source '" + sourceCppPath.string() + "': " + errorCode.message();
-                    return false;
-                }
+                    std::filesystem::create_directories(destinationCppPath.parent_path(), errorCode);
+                    if (errorCode)
+                    {
+                        result.ErrorMessage = "Failed to create generated script directory '" + destinationCppPath.parent_path().string() + "': " + errorCode.message();
+                        return false;
+                    }
 
-                std::filesystem::copy_file(sourceHeaderPath, destinationHeaderPath, std::filesystem::copy_options::overwrite_existing, errorCode);
-                if (errorCode)
-                {
-                    result.ErrorMessage = "Failed to mirror script header '" + sourceHeaderPath.string() + "': " + errorCode.message();
-                    return false;
+                    std::filesystem::copy_file(sourceCppPath, destinationCppPath, std::filesystem::copy_options::overwrite_existing, errorCode);
+                    if (errorCode)
+                    {
+                        result.ErrorMessage = "Failed to mirror script source '" + sourceCppPath.string() + "' to '" + destinationCppPath.string() + "': " + errorCode.message();
+                        return false;
+                    }
+
+                    std::filesystem::copy_file(sourceHeaderPath, destinationHeaderPath, std::filesystem::copy_options::overwrite_existing, errorCode);
+                    if (errorCode)
+                    {
+                        result.ErrorMessage = "Failed to mirror script header '" + sourceHeaderPath.string() + "' to '" + destinationHeaderPath.string() + "': " + errorCode.message();
+                        return false;
+                    }
                 }
 
                 ++mirroredScriptPairCount;
             }
 
+            std::string mirroredDirectoriesText;
+            for (size_t index = 0; index < generatedDirectories.size(); ++index)
+            {
+                if (index != 0)
+                    mirroredDirectoriesText += "; ";
+                mirroredDirectoriesText += generatedDirectories[index].string();
+            }
+
             result.StepLog.push_back("Mirrored " + std::to_string(mirroredScriptPairCount)
-                + " native script source pair(s) into " + generatedDirectory.string() + ".");
+                + " native script source pair(s) into: " + mirroredDirectoriesText + ".");
             return true;
         }
     }

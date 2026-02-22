@@ -448,6 +448,7 @@ TEST_SUITE("Scene And Editor Flows")
         nativeScripts.Scripts[0].ScriptAssetRelativePath = "Gameplay/Ui/HudScript";
         nativeScripts.Scripts[0].ExposedProperties["FollowTarget"] = Limitless::ScriptEntityReference{ "Root" };
         nativeScripts.Scripts[0].ExposedProperties["DisplayName"] = std::string("HudLabel");
+        nativeScripts.Scripts[0].ExposedProperties["EnemyPrefab"] = Limitless::Prefab{ "Assets/Prefabs/Enemies/BasicEnemy.prefab.json" };
 
         const std::filesystem::path scenePath = MakeTempScenePath("SceneRoundTrip.scene.json");
         const auto saveResult = scene.SaveToFile(scenePath);
@@ -552,6 +553,10 @@ TEST_SUITE("Scene And Editor Flows")
         const auto* loadedFollowTarget = std::get_if<Limitless::ScriptEntityReference>(&loadedNativeScripts.Scripts[0].ExposedProperties.at("FollowTarget"));
         REQUIRE(loadedFollowTarget != nullptr);
         CHECK(loadedFollowTarget->Tag == "Root");
+        REQUIRE(loadedNativeScripts.Scripts[0].ExposedProperties.contains("EnemyPrefab"));
+        const auto* loadedEnemyPrefab = std::get_if<Limitless::Prefab>(&loadedNativeScripts.Scripts[0].ExposedProperties.at("EnemyPrefab"));
+        REQUIRE(loadedEnemyPrefab != nullptr);
+        CHECK(loadedEnemyPrefab->AssetKey == "Assets/Prefabs/Enemies/BasicEnemy.prefab.json");
 
         REQUIRE(loadedScene.GetEditorCameraBookmark().has_value());
         CHECK(loadedScene.GetEditorCameraBookmark()->YawDegrees == doctest::Approx(-45.0f));

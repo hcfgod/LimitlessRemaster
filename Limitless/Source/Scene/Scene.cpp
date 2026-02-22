@@ -40,6 +40,7 @@
 #include <SDL3/SDL_mouse.h>
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <fstream>
 #include <limits>
 #include <set>
@@ -410,16 +411,20 @@ namespace Limitless
             }
             if (typeName == "Prefab")
             {
-                ScriptEntityReference entityReference{};
+                Prefab prefabReference{};
                 if (root.contains("Value"))
                 {
                     const auto& value = root["Value"];
                     if (value.is_object())
-                        entityReference.PrefabAssetKey = value.value("AssetKey", std::string{});
+                    {
+                        prefabReference.AssetKey = value.value("AssetKey", std::string{});
+                        if (prefabReference.AssetKey.empty())
+                            prefabReference.AssetKey = value.value("PrefabAssetKey", std::string{});
+                    }
                     else if (value.is_string())
-                        entityReference.PrefabAssetKey = value.get<std::string>();
+                        prefabReference.AssetKey = value.get<std::string>();
                 }
-                outValue = std::move(entityReference);
+                outValue = std::move(prefabReference);
                 return true;
             }
 
@@ -1764,115 +1769,219 @@ namespace Limitless
             ProcessUiInteractionSystem(*this, 0, 0);
         }
         static uint64_t s_AnimationDispatchFrameCounter = 0;
-        auto view = m_Registry.view<NativeScriptComponent>();
-        for (entt::entity entity : view)
+        std::vector<std::pair<entt::entity, size_t>> scriptSlots;
         {
-            auto& nativeScript = view.get<NativeScriptComponent>(entity);
-            for (auto& scriptEntry : nativeScript.Scripts)
+            auto snapshotView = m_Registry.view<NativeScriptComponent>();
+            for (entt::entity entity : snapshotView)
             {
-                if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty() || !IsEntityEnabledInHierarchy(entity))
+                const auto& nativeScript = snapshotView.get<NativeScriptComponent>(entity);
+                for (size_t scriptIndex = 0; scriptIndex < nativeScript.Scripts.size(); ++scriptIndex)
+                    scriptSlots.emplace_back(entity, scriptIndex);
+            }
+        }
+
+        auto tryGetScriptEntry = [&](entt::entity scriptEntity, size_t scriptIndex) -> NativeScriptEntry* {
+            auto* nativeScript = m_Registry.try_get<NativeScriptComponent>(scriptEntity);
+            if (!nativeScript || scriptIndex >= nativeScript->Scripts.size())
+                return nullptr;
+            return &nativeScript->Scripts[scriptIndex];
+        };
+
+        auto handleScriptCallbackFailure = [&](entt::entity scriptEntity,
+                                               size_t scriptIndex,
+                                               std::string_view callbackName,
+                                               const char* message) {
+            NativeScriptEntry* scriptEntry = tryGetScriptEntry(scriptEntity, scriptIndex);
+            const auto* tag = m_Registry.try_get<TagComponent>(scriptEntity);
+            LT_ERROR("Script '{}' on entity '{}' failed during {}: {}",
+                     scriptEntry ? scriptEntry->ScriptClassName : "<unknown>",
+                     tag ? tag->Tag : "Entity",
+                     callbackName,
+                     message ? message : "unknown error");
+
+            if (!scriptEntry)
+                return;
+
+            if (scriptEntry->RuntimeInstance)
+            {
+                try
                 {
-                    if (scriptEntry.RuntimeInstance)
+                    Coroutine::StopAll(*scriptEntry->RuntimeInstance);
+                }
+                catch (...)
+                {
+                }
+            }
+            scriptEntry->RuntimeInstance.reset();
+            scriptEntry->RuntimeInitialized = false;
+            scriptEntry->RuntimeUpdateCount = 0;
+            scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
+        };
+        for (const auto& scriptSlot : scriptSlots)
+        {
+            const entt::entity entity = scriptSlot.first;
+            const size_t scriptIndex = scriptSlot.second;
+            NativeScriptEntry* scriptEntry = tryGetScriptEntry(entity, scriptIndex);
+            if (!scriptEntry)
+                continue;
+
+            if (!scriptEntry->Enabled || scriptEntry->ScriptClassName.empty() || !IsEntityEnabledInHierarchy(entity))
+            {
+                if (scriptEntry->RuntimeInstance)
+                {
+                    if (scriptEntry->RuntimeInitialized)
                     {
-                        if (scriptEntry.RuntimeInitialized)
-                            scriptEntry.RuntimeInstance->OnDestroy();
-                        Coroutine::StopAll(*scriptEntry.RuntimeInstance);
-                        scriptEntry.RuntimeInstance.reset();
+                        try
+                        {
+                            scriptEntry->RuntimeInstance->OnDestroy();
+                        }
+                        catch (const std::exception& exception)
+                        {
+                            handleScriptCallbackFailure(entity, scriptIndex, "OnDestroy", exception.what());
+                        }
+                        catch (...)
+                        {
+                            handleScriptCallbackFailure(entity, scriptIndex, "OnDestroy", "non-standard exception");
+                        }
                     }
-                    scriptEntry.RuntimeInitialized = false;
-                    scriptEntry.RuntimeUpdateCount = 0;
-                    scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-                    scriptEntry.RuntimeWarnedMissingCompiledScript = false;
+                }
+
+                scriptEntry = tryGetScriptEntry(entity, scriptIndex);
+                if (!scriptEntry)
+                    continue;
+
+                if (scriptEntry->RuntimeInstance)
+                {
+                    Coroutine::StopAll(*scriptEntry->RuntimeInstance);
+                    scriptEntry->RuntimeInstance.reset();
+                }
+                scriptEntry->RuntimeInitialized = false;
+                scriptEntry->RuntimeUpdateCount = 0;
+                scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
+                scriptEntry->RuntimeWarnedMissingCompiledScript = false;
+                continue;
+            }
+
+            if (!scriptEntry->RuntimeInstance)
+            {
+                scriptEntry->RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry->ScriptClassName);
+                if (!scriptEntry->RuntimeInstance)
+                {
+                    const std::string resolvedClassName = ResolveRegisteredScriptClassName(scriptEntry->ScriptClassName,
+                                                                                           scriptEntry->ScriptAssetRelativePath);
+                    if (!resolvedClassName.empty())
+                    {
+                        scriptEntry->ScriptClassName = resolvedClassName;
+                        scriptEntry->RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry->ScriptClassName);
+                    }
+                }
+                if (scriptEntry->RuntimeInstance)
+                {
+                    scriptEntry->RuntimeInstance->m_Scene = this;
+                    scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
+                    scriptEntry->RuntimeInstance->m_EntityHandle = entity;
+                    scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+                    scriptEntry->RuntimeInitialized = false;
+                    scriptEntry->RuntimeUpdateCount = 0;
+                    scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
+                    scriptEntry->RuntimeWarnedMissingCompiledScript = false;
+                }
+            }
+
+            if (!scriptEntry->RuntimeInstance)
+            {
+                if (!scriptEntry->RuntimeWarnedMissingCompiledScript)
+                {
+                    const auto* tag = m_Registry.try_get<TagComponent>(entity);
+                    LT_WARN("Script '{}' on entity '{}' is not compiled/registered in ScriptCore. Build project scripts before entering Play Mode.",
+                            scriptEntry->ScriptClassName,
+                            tag ? tag->Tag : "Entity");
+                    scriptEntry->RuntimeWarnedMissingCompiledScript = true;
+                }
+                continue;
+            }
+
+            // Rebind runtime context every frame. NativeScriptEntry objects can move in memory
+            // when the scripts vector grows/reorders, so cached pointers must be refreshed.
+            scriptEntry->RuntimeInstance->m_Scene = this;
+            scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
+            scriptEntry->RuntimeInstance->m_EntityHandle = entity;
+            scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+
+            if (!scriptEntry->RuntimeInitialized)
+            {
+                try
+                {
+                    scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
+                    scriptEntry->RuntimeInstance->OnCreate();
+                }
+                catch (const std::exception& exception)
+                {
+                    handleScriptCallbackFailure(entity, scriptIndex, "OnCreate", exception.what());
+                    continue;
+                }
+                catch (...)
+                {
+                    handleScriptCallbackFailure(entity, scriptIndex, "OnCreate", "non-standard exception");
                     continue;
                 }
 
-                if (!scriptEntry.RuntimeInstance)
-                {
-                    scriptEntry.RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry.ScriptClassName);
-                    if (!scriptEntry.RuntimeInstance)
-                    {
-                        const std::string resolvedClassName = ResolveRegisteredScriptClassName(scriptEntry.ScriptClassName,
-                                                                                               scriptEntry.ScriptAssetRelativePath);
-                        if (!resolvedClassName.empty())
-                        {
-                            scriptEntry.ScriptClassName = resolvedClassName;
-                            scriptEntry.RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry.ScriptClassName);
-                        }
-                    }
-                    if (scriptEntry.RuntimeInstance)
-                    {
-                        scriptEntry.RuntimeInstance->m_Scene = this;
-                        scriptEntry.RuntimeInstance->m_Registry = &m_Registry;
-                        scriptEntry.RuntimeInstance->m_EntityHandle = entity;
-                        scriptEntry.RuntimeInstance->m_ExposedProperties = &scriptEntry.ExposedProperties;
-                        scriptEntry.RuntimeInitialized = false;
-                        scriptEntry.RuntimeUpdateCount = 0;
-                        scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-                        scriptEntry.RuntimeWarnedMissingCompiledScript = false;
-                    }
-                }
+                scriptEntry = tryGetScriptEntry(entity, scriptIndex);
+                if (!scriptEntry || !scriptEntry->RuntimeInstance)
+                    continue;
+                scriptEntry->RuntimeInitialized = true;
+            }
 
-                if (!scriptEntry.RuntimeInstance)
+            TransformComponent transformBeforeUpdate{};
+            bool trackTransformMutation = false;
+            if (auto* transform = m_Registry.try_get<TransformComponent>(entity))
+            {
+                transformBeforeUpdate = *transform;
+                if (const auto* rigidbody2D = m_Registry.try_get<Rigidbody2DComponent>(entity))
                 {
-                    if (!scriptEntry.RuntimeWarnedMissingCompiledScript)
+                    trackTransformMutation = rigidbody2D->Type == Rigidbody2DComponent::BodyType::Dynamic ||
+                                            rigidbody2D->Type == Rigidbody2DComponent::BodyType::Kinematic;
+                }
+            }
+
+            try
+            {
+                scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
+                scriptEntry->RuntimeInstance->OnUpdate(deltaTime);
+                Coroutine::TickOwner(*scriptEntry->RuntimeInstance, deltaTime);
+            }
+            catch (const std::exception& exception)
+            {
+                handleScriptCallbackFailure(entity, scriptIndex, "OnUpdate", exception.what());
+                continue;
+            }
+            catch (...)
+            {
+                handleScriptCallbackFailure(entity, scriptIndex, "OnUpdate", "non-standard exception");
+                continue;
+            }
+
+            scriptEntry = tryGetScriptEntry(entity, scriptIndex);
+            if (!scriptEntry || !scriptEntry->RuntimeInstance)
+                continue;
+            ++scriptEntry->RuntimeUpdateCount;
+
+            if (trackTransformMutation && !scriptEntry->RuntimeWarnedOnUpdateTransformMutation)
+            {
+                const auto* transformAfterUpdate = m_Registry.try_get<TransformComponent>(entity);
+                if (transformAfterUpdate)
+                {
+                    constexpr float kGuardrailEpsilon = 0.0001f;
+                    const bool positionChanged = glm::length(transformAfterUpdate->Position - transformBeforeUpdate.Position) > kGuardrailEpsilon;
+                    const bool rotationChanged = glm::length(transformAfterUpdate->Rotation - transformBeforeUpdate.Rotation) > kGuardrailEpsilon;
+                    const bool scaleChanged = glm::length(transformAfterUpdate->Scale - transformBeforeUpdate.Scale) > kGuardrailEpsilon;
+                    if (positionChanged || rotationChanged || scaleChanged)
                     {
                         const auto* tag = m_Registry.try_get<TagComponent>(entity);
-                        LT_WARN("Script '{}' on entity '{}' is not compiled/registered in ScriptCore. Build project scripts before entering Play Mode.",
-                                scriptEntry.ScriptClassName,
+                        LT_WARN("Script '{}' on entity '{}' is mutating Transform in OnUpdate while Rigidbody2D is Dynamic/Kinematic. Move physics-related transform writes to OnFixedUpdate for stable simulation.",
+                                scriptEntry->ScriptClassName,
                                 tag ? tag->Tag : "Entity");
-                        scriptEntry.RuntimeWarnedMissingCompiledScript = true;
-                    }
-                    continue;
-                }
-
-                // Rebind runtime context every frame. NativeScriptEntry objects can move in memory
-                // when the scripts vector grows/reorders, so cached pointers must be refreshed.
-                scriptEntry.RuntimeInstance->m_Scene = this;
-                scriptEntry.RuntimeInstance->m_Registry = &m_Registry;
-                scriptEntry.RuntimeInstance->m_EntityHandle = entity;
-                scriptEntry.RuntimeInstance->m_ExposedProperties = &scriptEntry.ExposedProperties;
-
-                if (!scriptEntry.RuntimeInitialized)
-                {
-                    scriptEntry.RuntimeInstance->OnSynchronizeExposedFields();
-                    scriptEntry.RuntimeInstance->OnCreate();
-                    scriptEntry.RuntimeInitialized = true;
-                }
-
-                TransformComponent transformBeforeUpdate{};
-                bool trackTransformMutation = false;
-                if (auto* transform = m_Registry.try_get<TransformComponent>(entity))
-                {
-                    transformBeforeUpdate = *transform;
-                    if (const auto* rigidbody2D = m_Registry.try_get<Rigidbody2DComponent>(entity))
-                    {
-                        trackTransformMutation = rigidbody2D->Type == Rigidbody2DComponent::BodyType::Dynamic ||
-                                                rigidbody2D->Type == Rigidbody2DComponent::BodyType::Kinematic;
-                    }
-                }
-
-                scriptEntry.RuntimeInstance->OnSynchronizeExposedFields();
-                scriptEntry.RuntimeInstance->OnUpdate(deltaTime);
-                Coroutine::TickOwner(*scriptEntry.RuntimeInstance, deltaTime);
-                ++scriptEntry.RuntimeUpdateCount;
-
-                if (trackTransformMutation && !scriptEntry.RuntimeWarnedOnUpdateTransformMutation)
-                {
-                    const auto* transformAfterUpdate = m_Registry.try_get<TransformComponent>(entity);
-                    if (transformAfterUpdate)
-                    {
-                        constexpr float kGuardrailEpsilon = 0.0001f;
-                        const bool positionChanged = glm::length(transformAfterUpdate->Position - transformBeforeUpdate.Position) > kGuardrailEpsilon;
-                        const bool rotationChanged = glm::length(transformAfterUpdate->Rotation - transformBeforeUpdate.Rotation) > kGuardrailEpsilon;
-                        const bool scaleChanged = glm::length(transformAfterUpdate->Scale - transformBeforeUpdate.Scale) > kGuardrailEpsilon;
-                        if (positionChanged || rotationChanged || scaleChanged)
-                        {
-                            const auto* tag = m_Registry.try_get<TagComponent>(entity);
-                            LT_WARN("Script '{}' on entity '{}' is mutating Transform in OnUpdate while Rigidbody2D is Dynamic/Kinematic. Move physics-related transform writes to OnFixedUpdate for stable simulation.",
-                                    scriptEntry.ScriptClassName,
-                                    tag ? tag->Tag : "Entity");
-                            scriptEntry.RuntimeWarnedOnUpdateTransformMutation = true;
-                        }
+                        scriptEntry->RuntimeWarnedOnUpdateTransformMutation = true;
                     }
                 }
             }
@@ -1886,80 +1995,180 @@ namespace Limitless
     void Scene::FixedUpdate(float fixedDeltaTime)
     {
         Physics2DQueries::SetActiveSceneForScriptQueries(this);
-        auto view = m_Registry.view<NativeScriptComponent>();
-        for (entt::entity entity : view)
+        std::vector<std::pair<entt::entity, size_t>> scriptSlots;
         {
-            auto& nativeScript = view.get<NativeScriptComponent>(entity);
-            for (auto& scriptEntry : nativeScript.Scripts)
+            auto snapshotView = m_Registry.view<NativeScriptComponent>();
+            for (entt::entity entity : snapshotView)
             {
-                if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty() || !IsEntityEnabledInHierarchy(entity))
-                {
-                    if (scriptEntry.RuntimeInstance)
-                    {
-                        if (scriptEntry.RuntimeInitialized)
-                            scriptEntry.RuntimeInstance->OnDestroy();
-                        Coroutine::StopAll(*scriptEntry.RuntimeInstance);
-                        scriptEntry.RuntimeInstance.reset();
-                    }
-                    scriptEntry.RuntimeInitialized = false;
-                    scriptEntry.RuntimeUpdateCount = 0;
-                    scriptEntry.RuntimeWarnedMissingCompiledScript = false;
-                    continue;
-                }
+                const auto& nativeScript = snapshotView.get<NativeScriptComponent>(entity);
+                for (size_t scriptIndex = 0; scriptIndex < nativeScript.Scripts.size(); ++scriptIndex)
+                    scriptSlots.emplace_back(entity, scriptIndex);
+            }
+        }
 
-                if (!scriptEntry.RuntimeInstance)
+        auto tryGetScriptEntry = [&](entt::entity scriptEntity, size_t scriptIndex) -> NativeScriptEntry* {
+            auto* nativeScript = m_Registry.try_get<NativeScriptComponent>(scriptEntity);
+            if (!nativeScript || scriptIndex >= nativeScript->Scripts.size())
+                return nullptr;
+            return &nativeScript->Scripts[scriptIndex];
+        };
+
+        auto handleScriptCallbackFailure = [&](entt::entity scriptEntity,
+                                               size_t scriptIndex,
+                                               std::string_view callbackName,
+                                               const char* message) {
+            NativeScriptEntry* scriptEntry = tryGetScriptEntry(scriptEntity, scriptIndex);
+            const auto* tag = m_Registry.try_get<TagComponent>(scriptEntity);
+            LT_ERROR("Script '{}' on entity '{}' failed during {}: {}",
+                     scriptEntry ? scriptEntry->ScriptClassName : "<unknown>",
+                     tag ? tag->Tag : "Entity",
+                     callbackName,
+                     message ? message : "unknown error");
+
+            if (!scriptEntry)
+                return;
+
+            if (scriptEntry->RuntimeInstance)
+            {
+                try
                 {
-                    scriptEntry.RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry.ScriptClassName);
-                    if (!scriptEntry.RuntimeInstance)
+                    Coroutine::StopAll(*scriptEntry->RuntimeInstance);
+                }
+                catch (...)
+                {
+                }
+            }
+            scriptEntry->RuntimeInstance.reset();
+            scriptEntry->RuntimeInitialized = false;
+            scriptEntry->RuntimeUpdateCount = 0;
+            scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
+        };
+        for (const auto& scriptSlot : scriptSlots)
+        {
+            const entt::entity entity = scriptSlot.first;
+            const size_t scriptIndex = scriptSlot.second;
+            NativeScriptEntry* scriptEntry = tryGetScriptEntry(entity, scriptIndex);
+            if (!scriptEntry)
+                continue;
+
+            if (!scriptEntry->Enabled || scriptEntry->ScriptClassName.empty() || !IsEntityEnabledInHierarchy(entity))
+            {
+                if (scriptEntry->RuntimeInstance)
+                {
+                    if (scriptEntry->RuntimeInitialized)
                     {
-                        const std::string resolvedClassName = ResolveRegisteredScriptClassName(scriptEntry.ScriptClassName,
-                                                                                               scriptEntry.ScriptAssetRelativePath);
-                        if (!resolvedClassName.empty())
+                        try
                         {
-                            scriptEntry.ScriptClassName = resolvedClassName;
-                            scriptEntry.RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry.ScriptClassName);
+                            scriptEntry->RuntimeInstance->OnDestroy();
+                        }
+                        catch (const std::exception& exception)
+                        {
+                            handleScriptCallbackFailure(entity, scriptIndex, "OnDestroy", exception.what());
+                        }
+                        catch (...)
+                        {
+                            handleScriptCallbackFailure(entity, scriptIndex, "OnDestroy", "non-standard exception");
                         }
                     }
-                    if (scriptEntry.RuntimeInstance)
-                    {
-                        scriptEntry.RuntimeInstance->m_Scene = this;
-                        scriptEntry.RuntimeInstance->m_Registry = &m_Registry;
-                        scriptEntry.RuntimeInstance->m_EntityHandle = entity;
-                        scriptEntry.RuntimeInstance->m_ExposedProperties = &scriptEntry.ExposedProperties;
-                        scriptEntry.RuntimeInitialized = false;
-                        scriptEntry.RuntimeUpdateCount = 0;
-                        scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-                        scriptEntry.RuntimeWarnedMissingCompiledScript = false;
-                    }
                 }
 
-                if (!scriptEntry.RuntimeInstance)
+                scriptEntry = tryGetScriptEntry(entity, scriptIndex);
+                if (!scriptEntry)
+                    continue;
+
+                if (scriptEntry->RuntimeInstance)
                 {
-                    if (!scriptEntry.RuntimeWarnedMissingCompiledScript)
+                    Coroutine::StopAll(*scriptEntry->RuntimeInstance);
+                    scriptEntry->RuntimeInstance.reset();
+                }
+                scriptEntry->RuntimeInitialized = false;
+                scriptEntry->RuntimeUpdateCount = 0;
+                scriptEntry->RuntimeWarnedMissingCompiledScript = false;
+                continue;
+            }
+
+            if (!scriptEntry->RuntimeInstance)
+            {
+                scriptEntry->RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry->ScriptClassName);
+                if (!scriptEntry->RuntimeInstance)
+                {
+                    const std::string resolvedClassName = ResolveRegisteredScriptClassName(scriptEntry->ScriptClassName,
+                                                                                           scriptEntry->ScriptAssetRelativePath);
+                    if (!resolvedClassName.empty())
                     {
-                        const auto* tag = m_Registry.try_get<TagComponent>(entity);
-                        LT_WARN("Script '{}' on entity '{}' is not compiled/registered in ScriptCore. Build project scripts before entering Play Mode.",
-                                scriptEntry.ScriptClassName,
-                                tag ? tag->Tag : "Entity");
-                        scriptEntry.RuntimeWarnedMissingCompiledScript = true;
+                        scriptEntry->ScriptClassName = resolvedClassName;
+                        scriptEntry->RuntimeInstance = NativeScriptRegistry::CreateScript(scriptEntry->ScriptClassName);
                     }
+                }
+                if (scriptEntry->RuntimeInstance)
+                {
+                    scriptEntry->RuntimeInstance->m_Scene = this;
+                    scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
+                    scriptEntry->RuntimeInstance->m_EntityHandle = entity;
+                    scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+                    scriptEntry->RuntimeInitialized = false;
+                    scriptEntry->RuntimeUpdateCount = 0;
+                    scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
+                    scriptEntry->RuntimeWarnedMissingCompiledScript = false;
+                }
+            }
+
+            if (!scriptEntry->RuntimeInstance)
+            {
+                if (!scriptEntry->RuntimeWarnedMissingCompiledScript)
+                {
+                    const auto* tag = m_Registry.try_get<TagComponent>(entity);
+                    LT_WARN("Script '{}' on entity '{}' is not compiled/registered in ScriptCore. Build project scripts before entering Play Mode.",
+                            scriptEntry->ScriptClassName,
+                            tag ? tag->Tag : "Entity");
+                    scriptEntry->RuntimeWarnedMissingCompiledScript = true;
+                }
+                continue;
+            }
+
+            scriptEntry->RuntimeInstance->m_Scene = this;
+            scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
+            scriptEntry->RuntimeInstance->m_EntityHandle = entity;
+            scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+
+            if (!scriptEntry->RuntimeInitialized)
+            {
+                try
+                {
+                    scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
+                    scriptEntry->RuntimeInstance->OnCreate();
+                }
+                catch (const std::exception& exception)
+                {
+                    handleScriptCallbackFailure(entity, scriptIndex, "OnCreate", exception.what());
+                    continue;
+                }
+                catch (...)
+                {
+                    handleScriptCallbackFailure(entity, scriptIndex, "OnCreate", "non-standard exception");
                     continue;
                 }
 
-                scriptEntry.RuntimeInstance->m_Scene = this;
-                scriptEntry.RuntimeInstance->m_Registry = &m_Registry;
-                scriptEntry.RuntimeInstance->m_EntityHandle = entity;
-                scriptEntry.RuntimeInstance->m_ExposedProperties = &scriptEntry.ExposedProperties;
+                scriptEntry = tryGetScriptEntry(entity, scriptIndex);
+                if (!scriptEntry || !scriptEntry->RuntimeInstance)
+                    continue;
+                scriptEntry->RuntimeInitialized = true;
+            }
 
-                if (!scriptEntry.RuntimeInitialized)
-                {
-                    scriptEntry.RuntimeInstance->OnSynchronizeExposedFields();
-                    scriptEntry.RuntimeInstance->OnCreate();
-                    scriptEntry.RuntimeInitialized = true;
-                }
-
-                scriptEntry.RuntimeInstance->OnSynchronizeExposedFields();
-                scriptEntry.RuntimeInstance->OnFixedUpdate(fixedDeltaTime);
+            try
+            {
+                scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
+                scriptEntry->RuntimeInstance->OnFixedUpdate(fixedDeltaTime);
+            }
+            catch (const std::exception& exception)
+            {
+                handleScriptCallbackFailure(entity, scriptIndex, "OnFixedUpdate", exception.what());
+                continue;
+            }
+            catch (...)
+            {
+                handleScriptCallbackFailure(entity, scriptIndex, "OnFixedUpdate", "non-standard exception");
+                continue;
             }
         }
     }

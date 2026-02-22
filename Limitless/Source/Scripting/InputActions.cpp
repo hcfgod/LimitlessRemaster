@@ -67,105 +67,121 @@ namespace Limitless
 
     bool InputActions::IsPressed(std::string_view mapName, std::string_view actionName, float deadzone)
     {
-#ifdef SCRIPTCORE_EXPORTS
-        if (!s_PressedBridgeCallback)
-            return false;
-        const std::string mapNameText = ToOwned(mapName);
-        const std::string actionNameText = ToOwned(actionName);
-        return s_PressedBridgeCallback(mapNameText.c_str(), actionNameText.c_str(), deadzone);
-#else
+        if (s_PressedBridgeCallback)
+        {
+            const std::string mapNameText = ToOwned(mapName);
+            const std::string actionNameText = ToOwned(actionName);
+            return s_PressedBridgeCallback(mapNameText.c_str(), actionNameText.c_str(), deadzone);
+        }
+#ifndef SCRIPTCORE_EXPORTS
         return InputSystem::GetInstance().IsActionPressed(mapName, actionName, deadzone);
+#else
+        return false;
 #endif
     }
 
     bool InputActions::WasStartedThisFrame(std::string_view mapName, std::string_view actionName)
     {
-#ifdef SCRIPTCORE_EXPORTS
-        if (!s_StartedBridgeCallback)
-            return false;
-        const std::string mapNameText = ToOwned(mapName);
-        const std::string actionNameText = ToOwned(actionName);
-        return s_StartedBridgeCallback(mapNameText.c_str(), actionNameText.c_str());
-#else
+        if (s_StartedBridgeCallback)
+        {
+            const std::string mapNameText = ToOwned(mapName);
+            const std::string actionNameText = ToOwned(actionName);
+            return s_StartedBridgeCallback(mapNameText.c_str(), actionNameText.c_str());
+        }
+#ifndef SCRIPTCORE_EXPORTS
         return InputSystem::GetInstance().WasActionStartedThisFrame(mapName, actionName);
+#else
+        return false;
 #endif
     }
 
     bool InputActions::WasPerformedThisFrame(std::string_view mapName, std::string_view actionName)
     {
-#ifdef SCRIPTCORE_EXPORTS
-        if (!s_PerformedBridgeCallback)
-            return false;
-        const std::string mapNameText = ToOwned(mapName);
-        const std::string actionNameText = ToOwned(actionName);
-        return s_PerformedBridgeCallback(mapNameText.c_str(), actionNameText.c_str());
-#else
+        if (s_PerformedBridgeCallback)
+        {
+            const std::string mapNameText = ToOwned(mapName);
+            const std::string actionNameText = ToOwned(actionName);
+            return s_PerformedBridgeCallback(mapNameText.c_str(), actionNameText.c_str());
+        }
+#ifndef SCRIPTCORE_EXPORTS
         return InputSystem::GetInstance().WasActionPerformedThisFrame(mapName, actionName);
+#else
+        return false;
 #endif
     }
 
     bool InputActions::WasCanceledThisFrame(std::string_view mapName, std::string_view actionName)
     {
-#ifdef SCRIPTCORE_EXPORTS
-        if (!s_CanceledBridgeCallback)
-            return false;
-        const std::string mapNameText = ToOwned(mapName);
-        const std::string actionNameText = ToOwned(actionName);
-        return s_CanceledBridgeCallback(mapNameText.c_str(), actionNameText.c_str());
-#else
+        if (s_CanceledBridgeCallback)
+        {
+            const std::string mapNameText = ToOwned(mapName);
+            const std::string actionNameText = ToOwned(actionName);
+            return s_CanceledBridgeCallback(mapNameText.c_str(), actionNameText.c_str());
+        }
+#ifndef SCRIPTCORE_EXPORTS
         return InputSystem::GetInstance().WasActionCanceledThisFrame(mapName, actionName);
+#else
+        return false;
 #endif
     }
 
     bool InputActions::ReadButton(std::string_view mapName, std::string_view actionName)
     {
-#ifdef SCRIPTCORE_EXPORTS
-        if (!s_ButtonBridgeCallback)
-            return false;
-        const std::string mapNameText = ToOwned(mapName);
-        const std::string actionNameText = ToOwned(actionName);
-        return s_ButtonBridgeCallback(mapNameText.c_str(), actionNameText.c_str());
-#else
+        if (s_ButtonBridgeCallback)
+        {
+            const std::string mapNameText = ToOwned(mapName);
+            const std::string actionNameText = ToOwned(actionName);
+            return s_ButtonBridgeCallback(mapNameText.c_str(), actionNameText.c_str());
+        }
+#ifndef SCRIPTCORE_EXPORTS
         return InputSystem::GetInstance().ReadActionButton(mapName, actionName);
+#else
+        return false;
 #endif
     }
 
     float InputActions::ReadAxis1D(std::string_view mapName, std::string_view actionName)
     {
-#ifdef SCRIPTCORE_EXPORTS
-        if (!s_Axis1DBridgeCallback)
-            return 0.0f;
-        const std::string mapNameText = ToOwned(mapName);
-        const std::string actionNameText = ToOwned(actionName);
-        return s_Axis1DBridgeCallback(mapNameText.c_str(), actionNameText.c_str());
-#else
+        if (s_Axis1DBridgeCallback)
+        {
+            const std::string mapNameText = ToOwned(mapName);
+            const std::string actionNameText = ToOwned(actionName);
+            return s_Axis1DBridgeCallback(mapNameText.c_str(), actionNameText.c_str());
+        }
+#ifndef SCRIPTCORE_EXPORTS
         return InputSystem::GetInstance().ReadActionAxis1D(mapName, actionName);
+#else
+        return 0.0f;
 #endif
     }
 
     glm::vec2 InputActions::ReadAxis2D(std::string_view mapName, std::string_view actionName)
     {
-#ifdef SCRIPTCORE_EXPORTS
-        if (!s_Axis2DBridgeCallback)
-            return glm::vec2(0.0f);
-        const std::string mapNameText = ToOwned(mapName);
-        const std::string actionNameText = ToOwned(actionName);
-        return s_Axis2DBridgeCallback(mapNameText.c_str(), actionNameText.c_str());
-#else
+        if (s_Axis2DBridgeCallback)
+        {
+            const std::string mapNameText = ToOwned(mapName);
+            const std::string actionNameText = ToOwned(actionName);
+            return s_Axis2DBridgeCallback(mapNameText.c_str(), actionNameText.c_str());
+        }
+#ifndef SCRIPTCORE_EXPORTS
         return InputSystem::GetInstance().ReadActionAxis2D(mapName, actionName);
+#else
+        return glm::vec2(0.0f);
 #endif
     }
 
     bool InputActions::HasAction(std::string_view mapName, std::string_view actionName)
     {
-#ifdef SCRIPTCORE_EXPORTS
-        if (!s_ExistsBridgeCallback)
-            return false;
-        const std::string mapNameText = ToOwned(mapName);
-        const std::string actionNameText = ToOwned(actionName);
-        return s_ExistsBridgeCallback(mapNameText.c_str(), actionNameText.c_str());
-#else
+        if (s_ExistsBridgeCallback)
+        {
+            const std::string mapNameText = ToOwned(mapName);
+            const std::string actionNameText = ToOwned(actionName);
+            return s_ExistsBridgeCallback(mapNameText.c_str(), actionNameText.c_str());
+        }
+#ifndef SCRIPTCORE_EXPORTS
         return InputSystem::GetInstance().HasAction(mapName, actionName);
+#else
+        return false;
 #endif
     }
 }

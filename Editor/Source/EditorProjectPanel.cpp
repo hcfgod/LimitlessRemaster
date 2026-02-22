@@ -623,6 +623,7 @@ namespace Limitless::EditorProjectPanel
                            const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
                            const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
                            const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAudioMixerRequested,
+                           const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateInputActionsRequested,
                           const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimationClipRequested,
                           const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimatorControllerRequested,
                            const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
@@ -705,6 +706,12 @@ namespace Limitless::EditorProjectPanel
                             state.CreateAudioMixerParentRelativePath = entryRelativePath;
                             CopyTextToBuffer(state.CreateAudioMixerNameBuffer, "New Audio Mixer");
                             state.CreateAudioMixerPopupPending = true;
+                        }
+                        if (ImGui::MenuItem("Create Input Actions"))
+                        {
+                            state.CreateInputActionsParentRelativePath = entryRelativePath;
+                            CopyTextToBuffer(state.CreateInputActionsNameBuffer, "New Input Actions");
+                            state.CreateInputActionsPopupPending = true;
                         }
                         if (ImGui::MenuItem("Create Animation Clip"))
                         {
@@ -815,6 +822,7 @@ namespace Limitless::EditorProjectPanel
                                       onCreateMaterialRequested,
                                       onCreateTilesetRequested,
                                       onCreateAudioMixerRequested,
+                                     onCreateInputActionsRequested,
                                       onCreateAnimationClipRequested,
                                       onCreateAnimatorControllerRequested,
                                       onCreatePrefabFromSceneEntityRequested,
@@ -1341,6 +1349,7 @@ namespace Limitless::EditorProjectPanel
                                      const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
                                      const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
                                      const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAudioMixerRequested,
+                                     const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateInputActionsRequested,
                                      const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimationClipRequested,
                                      const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimatorControllerRequested,
                                      const std::function<void(const std::string&, const std::string&)>& onAssetRenamed)
@@ -1466,6 +1475,14 @@ namespace Limitless::EditorProjectPanel
                 ImGui::SetNextWindowFocus();
                 state.CreateAudioMixerPopupPending = false;
                 state.CreateAudioMixerPopupOpen = true;
+            }
+
+            if (state.CreateInputActionsPopupPending)
+            {
+                ImGui::OpenPopup("CreateInputActionsAsset");
+                ImGui::SetNextWindowFocus();
+                state.CreateInputActionsPopupPending = false;
+                state.CreateInputActionsPopupOpen = true;
             }
 
             if (state.CreateAnimationClipPopupPending)
@@ -1726,6 +1743,33 @@ namespace Limitless::EditorProjectPanel
                 ImGui::EndPopup();
             }
 
+            if (ImGui::BeginPopupModal("CreateInputActionsAsset", &state.CreateInputActionsPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::Text("Create Input Actions");
+                ImGui::Separator();
+                if (ImGui::IsWindowAppearing())
+                    ImGui::SetKeyboardFocusHere();
+
+                const bool create = ImGui::InputText("Name",
+                                                     state.CreateInputActionsNameBuffer.data(),
+                                                     state.CreateInputActionsNameBuffer.size(),
+                                                     ImGuiInputTextFlags_EnterReturnsTrue);
+                if (ImGui::Button("Create", ImVec2(120, 0)) || create)
+                {
+                    const std::string requestedName = state.CreateInputActionsNameBuffer.data();
+                    if (!requestedName.empty() && onCreateInputActionsRequested)
+                    {
+                        onCreateInputActionsRequested(state.CreateInputActionsParentRelativePath, requestedName);
+                        state.CreateInputActionsPopupOpen = false;
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                    state.CreateInputActionsPopupOpen = false;
+
+                ImGui::EndPopup();
+            }
+
             if (ImGui::BeginPopupModal("CreateAnimationClipAsset", &state.CreateAnimationClipPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
             {
                 ImGui::Text("Create Animation Clip");
@@ -1808,6 +1852,7 @@ namespace Limitless::EditorProjectPanel
               const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
               const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,
               const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAudioMixerRequested,
+              const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateInputActionsRequested,
               const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimationClipRequested,
               const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateAnimatorControllerRequested,
               const std::function<void(entt::entity, const std::filesystem::path&)>& onCreatePrefabFromSceneEntityRequested,
@@ -1865,6 +1910,12 @@ namespace Limitless::EditorProjectPanel
                 CopyTextToBuffer(state.CreateAudioMixerNameBuffer, "New Audio Mixer");
                 state.CreateAudioMixerPopupPending = true;
             }
+            if (ImGui::MenuItem("Create Input Actions"))
+            {
+                state.CreateInputActionsParentRelativePath = "";
+                CopyTextToBuffer(state.CreateInputActionsNameBuffer, "New Input Actions");
+                state.CreateInputActionsPopupPending = true;
+            }
             if (ImGui::MenuItem("Create Animation Clip"))
             {
                 state.CreateAnimationClipParentRelativePath = "";
@@ -1920,6 +1971,12 @@ namespace Limitless::EditorProjectPanel
                     state.CreateAudioMixerParentRelativePath = "";
                     CopyTextToBuffer(state.CreateAudioMixerNameBuffer, "New Audio Mixer");
                     state.CreateAudioMixerPopupPending = true;
+                }
+                if (ImGui::MenuItem("Create Input Actions"))
+                {
+                    state.CreateInputActionsParentRelativePath = "";
+                    CopyTextToBuffer(state.CreateInputActionsNameBuffer, "New Input Actions");
+                    state.CreateInputActionsPopupPending = true;
                 }
                 if (ImGui::MenuItem("Create Animation Clip"))
                 {
@@ -2007,6 +2064,7 @@ namespace Limitless::EditorProjectPanel
                           onCreateMaterialRequested,
                           onCreateTilesetRequested,
                           onCreateAudioMixerRequested,
+                          onCreateInputActionsRequested,
                           onCreateAnimationClipRequested,
                           onCreateAnimatorControllerRequested,
                           onCreatePrefabFromSceneEntityRequested,
@@ -2040,6 +2098,7 @@ namespace Limitless::EditorProjectPanel
             onCreateMaterialRequested,
             onCreateTilesetRequested,
             onCreateAudioMixerRequested,
+            onCreateInputActionsRequested,
             onCreateAnimationClipRequested,
             onCreateAnimatorControllerRequested,
             onAssetRenamed);

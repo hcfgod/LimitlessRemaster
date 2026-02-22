@@ -292,25 +292,25 @@ namespace Limitless::EditorInspectorPanel
             return ToBuildConfigShortname(configuration) + "-" + platformToken + "-" + architectureToken;
         }
 
+        bool IsInternalToolchainRootCandidate(const std::filesystem::path& candidate)
+        {
+            std::error_code errorCode;
+#if defined(LT_PLATFORM_WINDOWS)
+            const std::filesystem::path scriptCoreBuildScript = candidate / "Scripts" / "build-project-scriptcore-windows.bat";
+#else
+            const std::filesystem::path scriptCoreBuildScript = candidate / "Scripts" / "build-project-scriptcore-unix.sh";
+#endif
+            const std::filesystem::path sdkIncludeRoot = candidate / "SDK" / "include";
+            const std::filesystem::path sdkLibRoot = candidate / "SDK" / "lib";
+            const std::filesystem::path generatedRoot = candidate / "Build" / "Generated" / "ScriptCore";
+            return std::filesystem::exists(scriptCoreBuildScript, errorCode) &&
+                   std::filesystem::is_directory(sdkIncludeRoot, errorCode) &&
+                   std::filesystem::is_directory(sdkLibRoot, errorCode) &&
+                   std::filesystem::is_directory(generatedRoot, errorCode);
+        }
+
         std::optional<std::filesystem::path> FindEngineWorkspaceRoot()
         {
-            auto isInternalToolchainRootCandidate = [](const std::filesystem::path& candidate) -> bool
-            {
-                std::error_code errorCode;
-#if defined(LT_PLATFORM_WINDOWS)
-                const std::filesystem::path scriptCoreBuildScript = candidate / "Scripts" / "build-project-scriptcore-windows.bat";
-#else
-                const std::filesystem::path scriptCoreBuildScript = candidate / "Scripts" / "build-project-scriptcore-unix.sh";
-#endif
-                const std::filesystem::path sdkIncludeRoot = candidate / "SDK" / "include";
-                const std::filesystem::path sdkLibRoot = candidate / "SDK" / "lib";
-                const std::filesystem::path generatedRoot = candidate / "Build" / "Generated" / "ScriptCore";
-                return std::filesystem::exists(scriptCoreBuildScript, errorCode) &&
-                       std::filesystem::is_directory(sdkIncludeRoot, errorCode) &&
-                       std::filesystem::is_directory(sdkLibRoot, errorCode) &&
-                       std::filesystem::is_directory(generatedRoot, errorCode);
-            };
-
             auto isEngineRootCandidate = [](const std::filesystem::path& candidate) -> bool
             {
                 std::error_code errorCode;
@@ -365,9 +365,9 @@ namespace Limitless::EditorInspectorPanel
                         if (ec)
                             candidate = std::filesystem::path(overrideRoot);
                         // Auto-correct stale legacy backend selection when override points at an internal toolchain.
-                        if (!useInternalBackend && isInternalToolchainRootCandidate(candidate))
+                        if (!useInternalBackend && IsInternalToolchainRootCandidate(candidate))
                             useInternalBackend = true;
-                        if (useInternalBackend ? isInternalToolchainRootCandidate(candidate) : isEngineRootCandidate(candidate))
+                        if (useInternalBackend ? IsInternalToolchainRootCandidate(candidate) : isEngineRootCandidate(candidate))
                             return candidate;
                     }
 
@@ -380,7 +380,7 @@ namespace Limitless::EditorInspectorPanel
                             candidate = std::filesystem::weakly_canonical(candidate, ec);
                             if (ec)
                                 candidate = std::filesystem::path(envRoot);
-                            if (isInternalToolchainRootCandidate(candidate))
+                            if (IsInternalToolchainRootCandidate(candidate))
                                 return candidate;
                         }
 
@@ -389,9 +389,9 @@ namespace Limitless::EditorInspectorPanel
                         {
                             const std::filesystem::path executableDirectory = std::filesystem::path(platformInfo.executablePath).parent_path();
                             const std::filesystem::path toolchainSibling = executableDirectory / "Toolchain";
-                            if (isInternalToolchainRootCandidate(toolchainSibling))
+                            if (IsInternalToolchainRootCandidate(toolchainSibling))
                                 return toolchainSibling;
-                            if (isInternalToolchainRootCandidate(executableDirectory))
+                            if (IsInternalToolchainRootCandidate(executableDirectory))
                                 return executableDirectory;
                         }
 
@@ -399,10 +399,10 @@ namespace Limitless::EditorInspectorPanel
                         const std::filesystem::path cwd = std::filesystem::current_path(errorCode);
                         if (!errorCode)
                         {
-                            if (isInternalToolchainRootCandidate(cwd))
+                            if (IsInternalToolchainRootCandidate(cwd))
                                 return cwd;
                             const std::filesystem::path cwdToolchain = cwd / "Toolchain";
-                            if (isInternalToolchainRootCandidate(cwdToolchain))
+                            if (IsInternalToolchainRootCandidate(cwdToolchain))
                                 return cwdToolchain;
                         }
                         // Internal backend may still run from a source workspace (e.g. VS).
@@ -436,29 +436,98 @@ namespace Limitless::EditorInspectorPanel
             if (const auto fromCwd = walkUp(std::filesystem::current_path(errorCode)); fromCwd.has_value())
                 return fromCwd;
 
+            // 5) Last-chance fallback for shipped editors where project BuildSettings
+            // may still be on LegacySdk while a bundled internal toolchain is present.
+            if (const char* envRoot = std::getenv("LIMITLESS_TOOLCHAIN_ROOT"); envRoot && envRoot[0] != '\0')
+            {
+                std::filesystem::path candidate(envRoot);
+                std::error_code ec;
+                candidate = std::filesystem::weakly_canonical(candidate, ec);
+                if (ec)
+                    candidate = std::filesystem::path(envRoot);
+                if (IsInternalToolchainRootCandidate(candidate))
+                    return candidate;
+            }
+
+            if (!platformInfo.executablePath.empty())
+            {
+                const std::filesystem::path executableDirectory = std::filesystem::path(platformInfo.executablePath).parent_path();
+                const std::filesystem::path toolchainSibling = executableDirectory / "Toolchain";
+                if (IsInternalToolchainRootCandidate(toolchainSibling))
+                    return toolchainSibling;
+                if (IsInternalToolchainRootCandidate(executableDirectory))
+                    return executableDirectory;
+            }
+
+            std::error_code fallbackErrorCode;
+            const std::filesystem::path fallbackCwd = std::filesystem::current_path(fallbackErrorCode);
+            if (!fallbackErrorCode)
+            {
+                if (IsInternalToolchainRootCandidate(fallbackCwd))
+                    return fallbackCwd;
+                const std::filesystem::path cwdToolchain = fallbackCwd / "Toolchain";
+                if (IsInternalToolchainRootCandidate(cwdToolchain))
+                    return cwdToolchain;
+            }
+
             return std::nullopt;
+        }
+
+        std::vector<std::filesystem::path> GetGeneratedScriptCoreMirrorDirectories()
+        {
+            std::vector<std::filesystem::path> directories;
+
+            // Always include project-local generated mirrors when a project is open.
+            // This keeps shipped/internal editor workflows functional even when the
+            // engine root is intentionally unavailable.
+            auto& projectManager = Project::ProjectManager::GetInstance();
+            if (projectManager.HasOpenProject())
+                directories.push_back(projectManager.GetProjectRoot() / "Build" / "Generated" / "ScriptCore");
+
+            // Also include engine/toolchain mirror when discoverable so legacy builds
+            // and source-workspace ScriptCore builds stay in sync.
+            if (const auto engineRoot = FindEngineWorkspaceRoot(); engineRoot.has_value())
+            {
+                const std::filesystem::path engineMirror = engineRoot.value() / "Build" / "Generated" / "ScriptCore";
+                if (std::find(directories.begin(), directories.end(), engineMirror) == directories.end())
+                    directories.push_back(engineMirror);
+            }
+
+            return directories;
         }
 
         std::optional<std::filesystem::path> GetGeneratedScriptCoreMirrorDirectory()
         {
-            // Internal toolchain builds compile from PROJECT_ROOT/Build/Generated/ScriptCore.
-            // Legacy/source-workspace builds compile from ENGINE_ROOT/Build/Generated/ScriptCore.
-            auto& projectManager = Project::ProjectManager::GetInstance();
-            if (projectManager.HasOpenProject())
+            const std::vector<std::filesystem::path> directories = GetGeneratedScriptCoreMirrorDirectories();
+            if (directories.empty())
+                return std::nullopt;
+            return directories.front();
+        }
+
+        std::optional<std::filesystem::path> InferProjectRootFromScriptSourcePath(const std::filesystem::path& sourcePath)
+        {
+            if (sourcePath.empty())
+                return std::nullopt;
+
+            std::filesystem::path probe = sourcePath.parent_path();
+            for (int depth = 0; depth < 48 && !probe.empty(); ++depth)
             {
-                const std::filesystem::path projectRoot = projectManager.GetProjectRoot();
-                const auto buildSettingsResult = Project::LoadBuildSettings(projectRoot);
-                if (buildSettingsResult.IsSuccess() &&
-                    buildSettingsResult.GetValue().BuildBackend == Project::BuildBackend::InternalToolchain)
+                if (probe.filename() == "Assets")
                 {
-                    return projectRoot / "Build" / "Generated" / "ScriptCore";
+                    if (probe.has_parent_path())
+                        return probe.parent_path();
+                    return std::nullopt;
                 }
+
+                if (!probe.has_parent_path())
+                    break;
+                const std::filesystem::path parent = probe.parent_path();
+                if (parent == probe)
+                    break;
+                probe = parent;
             }
 
-            const auto engineRoot = FindEngineWorkspaceRoot();
-            if (!engineRoot.has_value())
-                return std::nullopt;
-            return engineRoot.value() / "Build" / "Generated" / "ScriptCore";
+            return std::nullopt;
         }
 
         std::filesystem::path GetBuiltScriptCoreLibraryPath(const std::filesystem::path& buildRoot, const std::string& configuration)
@@ -610,29 +679,18 @@ namespace Limitless::EditorInspectorPanel
                     useInternalBackend = (buildSettingsResult.GetValue().BuildBackend == Project::BuildBackend::InternalToolchain);
             }
 
+            // Guard against stale backend mode:
+            // - If internal is requested but root is not an internal toolchain, fall back.
+            // - If legacy is selected but root resolves to an internal toolchain (shipped editor),
+            //   auto-correct so we call build-project-scriptcore.
             if (useInternalBackend)
             {
-                // Guard against stale backend mode when running from source workspace:
-                // internal scripts require SDK/include + SDK/lib markers at build root.
-                auto isInternalToolchainRoot = [](const std::filesystem::path& candidate) -> bool
-                {
-                    std::error_code errorCode;
-#if defined(LT_PLATFORM_WINDOWS)
-                    const std::filesystem::path scriptCoreBuildScript = candidate / "Scripts" / "build-project-scriptcore-windows.bat";
-#else
-                    const std::filesystem::path scriptCoreBuildScript = candidate / "Scripts" / "build-project-scriptcore-unix.sh";
-#endif
-                    const std::filesystem::path sdkIncludeRoot = candidate / "SDK" / "include";
-                    const std::filesystem::path sdkLibRoot = candidate / "SDK" / "lib";
-                    const std::filesystem::path generatedRoot = candidate / "Build" / "Generated" / "ScriptCore";
-                    return std::filesystem::exists(scriptCoreBuildScript, errorCode) &&
-                           std::filesystem::is_directory(sdkIncludeRoot, errorCode) &&
-                           std::filesystem::is_directory(sdkLibRoot, errorCode) &&
-                           std::filesystem::is_directory(generatedRoot, errorCode);
-                };
-
-                if (!isInternalToolchainRoot(buildRoot.value()))
+                if (!IsInternalToolchainRootCandidate(buildRoot.value()))
                     useInternalBackend = false;
+            }
+            else if (IsInternalToolchainRootCandidate(buildRoot.value()))
+            {
+                useInternalBackend = true;
             }
 
             if (state.BuildThread && state.BuildThread->joinable())
@@ -699,26 +757,29 @@ namespace Limitless::EditorInspectorPanel
                 return false;
             }
 
-            const auto generatedDirectory = GetGeneratedScriptCoreMirrorDirectory();
-            if (!generatedDirectory.has_value())
+            const std::vector<std::filesystem::path> generatedDirectories = GetGeneratedScriptCoreMirrorDirectories();
+            if (generatedDirectories.empty())
             {
                 outError = "Cannot mirror scripts: generated ScriptCore mirror directory was not found.";
                 return false;
             }
 
             std::error_code createDirectoriesError;
-            std::filesystem::remove_all(generatedDirectory.value(), createDirectoriesError);
-            if (createDirectoriesError)
+            for (const std::filesystem::path& generatedDirectory : generatedDirectories)
             {
-                outError = "Cannot clear generated ScriptCore mirror directory: " + createDirectoriesError.message();
-                return false;
-            }
+                std::filesystem::remove_all(generatedDirectory, createDirectoriesError);
+                if (createDirectoriesError)
+                {
+                    outError = "Cannot clear generated ScriptCore mirror directory '" + generatedDirectory.string() + "': " + createDirectoriesError.message();
+                    return false;
+                }
 
-            std::filesystem::create_directories(generatedDirectory.value(), createDirectoriesError);
-            if (createDirectoriesError)
-            {
-                outError = "Cannot create generated ScriptCore mirror directory: " + createDirectoriesError.message();
-                return false;
+                std::filesystem::create_directories(generatedDirectory, createDirectoriesError);
+                if (createDirectoriesError)
+                {
+                    outError = "Cannot create generated ScriptCore mirror directory '" + generatedDirectory.string() + "': " + createDirectoriesError.message();
+                    return false;
+                }
             }
 
             for (const auto& entry : std::filesystem::recursive_directory_iterator(assetsRoot.value(), std::filesystem::directory_options::skip_permission_denied))
@@ -742,31 +803,33 @@ namespace Limitless::EditorInspectorPanel
                 if (relativeError || relativeHeaderPath.empty())
                     continue;
 
-                const std::filesystem::path destinationCppPath = generatedDirectory.value() / relativeCppPath;
-                const std::filesystem::path destinationHeaderPath = generatedDirectory.value() / relativeHeaderPath;
-
-                std::filesystem::create_directories(destinationCppPath.parent_path(), createDirectoriesError);
-                if (createDirectoriesError)
+                for (const std::filesystem::path& generatedDirectory : generatedDirectories)
                 {
-                    outError = "Failed to create generated script directory: " + createDirectoriesError.message();
-                    return false;
-                }
+                    const std::filesystem::path destinationCppPath = generatedDirectory / relativeCppPath;
+                    const std::filesystem::path destinationHeaderPath = generatedDirectory / relativeHeaderPath;
 
-                std::error_code copyError;
-                std::filesystem::copy_file(sourceCppPath, destinationCppPath, std::filesystem::copy_options::overwrite_existing, copyError);
-                if (copyError)
-                {
-                    outError = "Failed to mirror source file '" + sourceCppPath.string() + "': " + copyError.message();
-                    return false;
-                }
+                    std::filesystem::create_directories(destinationCppPath.parent_path(), createDirectoriesError);
+                    if (createDirectoriesError)
+                    {
+                        outError = "Failed to create generated script directory '" + destinationCppPath.parent_path().string() + "': " + createDirectoriesError.message();
+                        return false;
+                    }
 
-                std::filesystem::copy_file(sourceHeaderPath, destinationHeaderPath, std::filesystem::copy_options::overwrite_existing, copyError);
-                if (copyError)
-                {
-                    outError = "Failed to mirror header file '" + sourceHeaderPath.string() + "': " + copyError.message();
-                    return false;
-                }
+                    std::error_code copyError;
+                    std::filesystem::copy_file(sourceCppPath, destinationCppPath, std::filesystem::copy_options::overwrite_existing, copyError);
+                    if (copyError)
+                    {
+                        outError = "Failed to mirror source file '" + sourceCppPath.string() + "' to '" + destinationCppPath.string() + "': " + copyError.message();
+                        return false;
+                    }
 
+                    std::filesystem::copy_file(sourceHeaderPath, destinationHeaderPath, std::filesystem::copy_options::overwrite_existing, copyError);
+                    if (copyError)
+                    {
+                        outError = "Failed to mirror header file '" + sourceHeaderPath.string() + "' to '" + destinationHeaderPath.string() + "': " + copyError.message();
+                        return false;
+                    }
+                }
             }
 
             outError.clear();
@@ -1153,7 +1216,7 @@ namespace Limitless::EditorInspectorPanel
             // std::string Label = "Player";
             // Limitless::Entity TargetEntity;
             // Limitless::Entity EnemyPrefab = "Assets/Prefabs/Enemy.prefab.json";
-            // Limitless::Prefab LegacyPrefab = "Assets/Prefabs/Enemy.prefab.json";
+            // Limitless::Prefab LegacyPrefab = "Assets/Prefabs/Enemy.prefab.json"; // Legacy/deprecated. Prefer Limitless::Entity.
             const std::regex fieldPattern(
                 R"(^\s*(?:const\s+)?(?:static\s+)?(float|int32_t|int|bool|glm::vec3|std::string|Limitless::Entity|Entity|Limitless::Prefab|Prefab|Limitless::ScriptPrefabReference|ScriptPrefabReference)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*([^;]+))?\s*;\s*$)");
 
@@ -1489,11 +1552,19 @@ namespace Limitless::EditorInspectorPanel
 
         bool MirrorScriptToGeneratedDirectory(const NativeScriptAuthoringState& state, std::string& outError)
         {
-            const auto generatedDirectory = GetGeneratedScriptCoreMirrorDirectory();
-            if (!generatedDirectory.has_value())
+            std::vector<std::filesystem::path> generatedDirectories = GetGeneratedScriptCoreMirrorDirectories();
+            if (generatedDirectories.empty())
             {
+                if (const auto inferredProjectRoot = InferProjectRootFromScriptSourcePath(state.SourcePath); inferredProjectRoot.has_value())
+                    generatedDirectories.push_back(inferredProjectRoot.value() / "Build" / "Generated" / "ScriptCore");
+            }
+
+            if (generatedDirectories.empty())
+            {
+                // Do not block save/build here. Full build path mirrors all scripts
+                // and provides clearer diagnostics if project configuration is missing.
                 outError = "Could not locate generated ScriptCore mirror directory.";
-                return false;
+                return true;
             }
 
             std::filesystem::path relativeMirrorPathWithoutExtension = state.ClassName;
@@ -1509,23 +1580,26 @@ namespace Limitless::EditorInspectorPanel
                 }
             }
 
-            const std::filesystem::path generatedHeaderPath = generatedDirectory.value() / relativeMirrorPathWithoutExtension;
-            const std::filesystem::path generatedSourcePath = generatedDirectory.value() / relativeMirrorPathWithoutExtension;
-            const std::filesystem::path generatedHeaderFile = generatedHeaderPath.string() + ".h";
-            const std::filesystem::path generatedSourceFile = generatedSourcePath.string() + ".cpp";
-
             std::error_code createDirectoriesError;
-            std::filesystem::create_directories(generatedHeaderFile.parent_path(), createDirectoriesError);
-            if (createDirectoriesError)
+            for (const std::filesystem::path& generatedDirectory : generatedDirectories)
             {
-                outError = "Failed to create generated ScriptCore mirror directory: " + createDirectoriesError.message();
-                return false;
-            }
+                const std::filesystem::path generatedHeaderPath = generatedDirectory / relativeMirrorPathWithoutExtension;
+                const std::filesystem::path generatedSourcePath = generatedDirectory / relativeMirrorPathWithoutExtension;
+                const std::filesystem::path generatedHeaderFile = generatedHeaderPath.string() + ".h";
+                const std::filesystem::path generatedSourceFile = generatedSourcePath.string() + ".cpp";
 
-            if (!SaveBufferToTextFile(generatedHeaderFile, state.HeaderBuffer, outError))
-                return false;
-            if (!SaveBufferToTextFile(generatedSourceFile, state.SourceBuffer, outError))
-                return false;
+                std::filesystem::create_directories(generatedHeaderFile.parent_path(), createDirectoriesError);
+                if (createDirectoriesError)
+                {
+                    outError = "Failed to create generated ScriptCore mirror directory '" + generatedHeaderFile.parent_path().string() + "': " + createDirectoriesError.message();
+                    return false;
+                }
+
+                if (!SaveBufferToTextFile(generatedHeaderFile, state.HeaderBuffer, outError))
+                    return false;
+                if (!SaveBufferToTextFile(generatedSourceFile, state.SourceBuffer, outError))
+                    return false;
+            }
             return true;
         }
 
@@ -1674,24 +1748,31 @@ namespace Limitless::EditorInspectorPanel
                 state.HeaderDirty = false;
                 state.SourceDirty = false;
 
-                bool canBuild = true;
-                if (!MirrorScriptToGeneratedDirectory(state, saveError))
+                const bool mirrorSucceeded = MirrorScriptToGeneratedDirectory(state, saveError);
+                if (!mirrorSucceeded)
                 {
                     state.StatusMessage = saveError;
                     state.StatusIsError = true;
-                    canBuild = false;
                 }
                 else
                 {
-                    state.StatusMessage = "Script files saved and mirrored to generated build directory.";
-                    state.StatusIsError = false;
+                    if (!saveError.empty())
+                    {
+                        state.StatusMessage = "Script files saved. " + saveError + " Build will mirror all scripts.";
+                        state.StatusIsError = false;
+                    }
+                    else
+                    {
+                        state.StatusMessage = "Script files saved and mirrored to generated build directory.";
+                        state.StatusIsError = false;
+                    }
                 }
 
-                const bool shouldBuildNow = canBuild && (forceBuildAfterSave || state.AutoBuildAfterSave);
+                const bool shouldBuildNow = (forceBuildAfterSave || state.AutoBuildAfterSave);
                 if (shouldBuildNow)
                     (void)TriggerNativeScriptsBuild(state);
 
-                return canBuild;
+                return mirrorSucceeded;
             };
 
             const auto reloadEditorFiles = [&]() -> bool
@@ -2153,7 +2234,8 @@ namespace Limitless::EditorInspectorPanel
                                 else if (!syncedFromScript)
                                 {
                                     ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", fieldSyncError.c_str());
-                                    ImGui::TextDisabled("Supported public field types: float, int/int32_t, bool, glm::vec3, std::string, Limitless::Entity, Limitless::Prefab.");
+                                    ImGui::TextDisabled("Supported public field types: float, int/int32_t, bool, glm::vec3, std::string, Limitless::Entity.");
+                                    ImGui::TextDisabled("Legacy (deprecated): Limitless::Prefab / Limitless::ScriptPrefabReference.");
                                 }
                                 else if (declaredFieldNames.empty())
                                 {
@@ -2353,6 +2435,7 @@ namespace Limitless::EditorInspectorPanel
                                         }
                                         else if (auto* prefabValue = std::get_if<ScriptPrefabReference>(&propertyValue))
                                         {
+                                            ImGui::TextDisabled("Legacy prefab field. Prefer Limitless::Entity for new script references.");
                                             auto assignPrefabKey = [&](const std::string& prefabKey) {
                                                 if (undoService)
                                                 {

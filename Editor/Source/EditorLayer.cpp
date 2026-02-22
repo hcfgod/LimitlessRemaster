@@ -1578,6 +1578,9 @@ namespace Limitless
                 (void)CreateAudioMixerAssetInFolder(relativeFolderPath, preferredName);
             },
             [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
+                (void)CreateInputActionsAssetInFolder(relativeFolderPath, preferredName);
+            },
+            [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
                 (void)CreateAnimationClipAssetInFolder(relativeFolderPath, preferredName);
             },
             [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
@@ -3502,6 +3505,92 @@ namespace Limitless
         m_SelectedPrefabAssetKey.clear();
         m_SelectedTilesetAssetKey.clear();
         m_SelectedInputActionsAssetKey.clear();
+        m_SelectedAnimationClipAssetKey.clear();
+        m_SelectedAnimatorControllerAssetKey.clear();
+        m_SelectedEntity = entt::null;
+        return assetKey;
+    }
+
+    std::string EditorLayer::CreateInputActionsAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName)
+    {
+        const auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
+        if (rootResult.IsFailure())
+        {
+            LT_ERROR("Could not create input actions asset: {}", rootResult.GetError().GetErrorMessage());
+            return {};
+        }
+
+        const std::filesystem::path assetsDirectory = rootResult.GetValue() / "Assets";
+        const std::filesystem::path targetDirectory = assetsDirectory / relativeFolderPath;
+        std::error_code errorCode;
+        std::filesystem::create_directories(targetDirectory, errorCode);
+        if (errorCode)
+        {
+            LT_ERROR("Could not create input actions folder {}: {}", targetDirectory.string(), errorCode.message());
+            return {};
+        }
+
+        const std::string baseName = preferredFileName.empty() ? std::string("New Input Actions") : preferredFileName;
+        std::string finalFileName = baseName;
+        if (!finalFileName.ends_with(".inputactions.json"))
+            finalFileName += ".inputactions.json";
+
+        std::filesystem::path inputActionsPath = targetDirectory / finalFileName;
+        if (std::filesystem::exists(inputActionsPath, errorCode))
+        {
+            for (int32_t index = 1; index < 1024; ++index)
+            {
+                const std::filesystem::path candidate = targetDirectory / ("New Input Actions " + std::to_string(index) + ".inputactions.json");
+                if (!std::filesystem::exists(candidate, errorCode))
+                {
+                    inputActionsPath = candidate;
+                    break;
+                }
+            }
+        }
+
+        nlohmann::json inputActionsJson = {
+            { "maps", nlohmann::json::array({
+                {
+                    { "name", "Gameplay" },
+                    { "enabled", true },
+                    { "actions", nlohmann::json::array() }
+                }
+            }) }
+        };
+
+        {
+            std::ofstream output(inputActionsPath, std::ios::out | std::ios::binary | std::ios::trunc);
+            if (!output.is_open())
+            {
+                LT_ERROR("Could not create input actions asset {}", inputActionsPath.string());
+                return {};
+            }
+            output << inputActionsJson.dump(2);
+        }
+
+        std::filesystem::path relativeAssetPath = std::filesystem::relative(inputActionsPath, assetsDirectory, errorCode);
+        if (errorCode)
+        {
+            LT_ERROR("Could not compute input actions asset key for {}", inputActionsPath.string());
+            return {};
+        }
+
+        const std::string assetKey = "Assets/" + relativeAssetPath.generic_string();
+        const auto importResult = Assets::AssetDatabase::GetInstance().ImportOrUpdate(assetKey, Assets::AssetType::InputActions);
+        if (importResult.IsFailure())
+            LT_WARN("Created input actions asset but failed to import into AssetDatabase ({}): {}", assetKey, importResult.GetError().GetErrorMessage());
+
+        LT_INFO("Created input actions asset {}", assetKey);
+        m_SelectedInputActionsAssetKey = assetKey;
+        m_SelectedTextureAssetKey.clear();
+        m_CachedTextureAsset.reset();
+        m_SelectedMaterialAssetKey.clear();
+        m_CachedMaterialAsset.reset();
+        m_SelectedNativeScriptAssetKey.clear();
+        m_SelectedPrefabAssetKey.clear();
+        m_SelectedTilesetAssetKey.clear();
+        m_SelectedAudioMixerAssetKey.clear();
         m_SelectedAnimationClipAssetKey.clear();
         m_SelectedAnimatorControllerAssetKey.clear();
         m_SelectedEntity = entt::null;

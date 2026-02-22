@@ -20,6 +20,7 @@ namespace Limitless
     };
 
     // Backward compatibility alias for older scripts.
+    // Prefer Limitless::Entity fields in new scripts for Unity-style object references.
     using ScriptPrefabReference = Prefab;
 
     enum class ScriptPropertyType : uint32_t

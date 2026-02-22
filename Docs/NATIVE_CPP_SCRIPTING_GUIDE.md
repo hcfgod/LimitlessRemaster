@@ -306,7 +306,9 @@ Each `Native Script` component automatically exposes supported `public` fields f
 
 - Declare fields in your script class (not in the inspector UI).
 - Inspector values are serialized with the scene.
-- Supported field types: `float`, `int`/`int32_t`, `bool`, `glm::vec3`, `std::string`, `Limitless::Entity`, `Limitless::Prefab` (legacy alias `Limitless::ScriptPrefabReference` remains supported).
+- Supported field types: `float`, `int`/`int32_t`, `bool`, `glm::vec3`, `std::string`, `Limitless::Entity`.
+- Legacy field support remains for migration only: `Limitless::Prefab` and `Limitless::ScriptPrefabReference`.
+- For new scripts, prefer `Limitless::Entity` everywhere for Unity-style object references (scene entities + prefabs in one slot).
 - `Limitless::Entity` fields are Unity-style object slots in Inspector:
   - Choose from a dropdown of scene entities
   - Choose prefab assets from the same slot (prefab entries are marked as prefab)
@@ -314,7 +316,7 @@ Each `Native Script` component automatically exposes supported `public` fields f
   - Drag prefab assets from the Project panel directly into the same slot
   - Clear with `X`
   - Runtime resolution is tag-based, so tags should be unique.
-- `Limitless::Prefab` / `Limitless::ScriptPrefabReference` fields are prefab asset slots in Inspector:
+- `Limitless::Prefab` / `Limitless::ScriptPrefabReference` fields are legacy prefab-only slots (deprecated for new scripts):
   - Choose from a prefab dropdown
   - Drag prefab assets from the Project panel
   - Clear with `X`
