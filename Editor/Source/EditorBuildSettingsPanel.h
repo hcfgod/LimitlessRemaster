@@ -6,6 +6,8 @@
 #include <array>
 #include <atomic>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -40,14 +42,31 @@ namespace Limitless::EditorBuildSettingsPanel
         /// Build result from the last completed build.
         Project::GameBuildResult LastBuildResult;
 
-        /// Build thread (detached; joins itself).
+        struct BuildJobState final
+        {
+            std::mutex Mutex;
+            bool Completed = false;
+            Project::GameBuildResult Result;
+        };
+
+        /// Build worker thread.
         std::thread BuildThread;
 
-        /// Status message shown in the panel (set by build thread / UI).
+        /// Shared build job state held by worker and UI threads.
+        std::shared_ptr<BuildJobState> ActiveBuildJob;
+
+        /// Status message shown in the panel (UI thread only).
         std::string StatusMessage;
+        bool StatusIsError = false;
 
         /// Scene list helper status shown near the "Add Current Scene" action.
         std::string SceneListStatusMessage;
+
+        ~EditorBuildSettingsPanelState()
+        {
+            if (BuildThread.joinable())
+                BuildThread.detach();
+        }
     };
 
     /// Draw the Build Settings window. Returns true if the window is still open.
@@ -56,4 +75,7 @@ namespace Limitless::EditorBuildSettingsPanel
               const std::string& currentSceneAssetKey,
               Scene* currentScene,
               const std::function<bool()>& saveActiveSceneBeforeBuild);
+
+    /// Ensures any in-flight build work is finalized before panel owner shutdown.
+    void Shutdown(EditorBuildSettingsPanelState& state);
 }

@@ -115,6 +115,8 @@ namespace Limitless::Project
                 if (!outputStream.is_open())
                     return Result<void>(ErrorCode::FileAccessDenied, "Failed to write BuildSettings temp file.");
                 outputStream << root.dump(2);
+                if (!outputStream.good())
+                    return Result<void>(ErrorCode::FileAccessDenied, "Failed writing BuildSettings temp file contents.");
             }
 
             std::error_code renameError;
@@ -122,8 +124,24 @@ namespace Limitless::Project
             if (renameError)
             {
                 // Fallback: direct overwrite if rename fails (cross-device, etc.)
-                std::filesystem::copy_file(tempPath, settingsPath, std::filesystem::copy_options::overwrite_existing, renameError);
-                std::filesystem::remove(tempPath, renameError);
+                std::error_code copyError;
+                std::filesystem::copy_file(tempPath, settingsPath, std::filesystem::copy_options::overwrite_existing, copyError);
+                if (copyError)
+                {
+                    std::error_code cleanupError;
+                    std::filesystem::remove(tempPath, cleanupError);
+                    return Result<void>(
+                        ErrorCode::FileAccessDenied,
+                        "Failed to finalize BuildSettings save. Rename failed: " + renameError.message()
+                        + "; fallback copy failed: " + copyError.message());
+                }
+
+                std::error_code cleanupError;
+                std::filesystem::remove(tempPath, cleanupError);
+                if (cleanupError)
+                    LT_CORE_WARN("SaveBuildSettings: copied fallback succeeded but failed to remove temp file '{}': {}",
+                                 tempPath,
+                                 cleanupError.message());
             }
         }
         catch (const std::exception& e)

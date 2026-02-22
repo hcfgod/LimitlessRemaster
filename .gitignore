@@ -81,6 +81,7 @@ tmp/
 config.local.json
 config.dev.json
 config.prod.json
+imgui.ini
 
 # Dependencies (if using package managers)
 node_modules/

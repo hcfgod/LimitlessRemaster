@@ -2,6 +2,7 @@
 #include "EditorBuildSettingsPanel.h"
 
 #include "Assets/AssetDatabase.h"
+#include "Core/Debug/Log.h"
 #include "Project/BuildSettings.h"
 #include "Project/GameBuilder.h"
 #include "Project/ProjectManager.h"
@@ -49,6 +50,12 @@ namespace Limitless::EditorBuildSettingsPanel
             return value;
         }
 
+        void SetStatus(EditorBuildSettingsPanelState& state, std::string message, bool isError)
+        {
+            state.StatusMessage = std::move(message);
+            state.StatusIsError = isError;
+        }
+
         void CopyStringToBuffer(const std::string& source, std::array<char, 512>& destination)
         {
             std::memset(destination.data(), 0, destination.size());
@@ -84,11 +91,11 @@ namespace Limitless::EditorBuildSettingsPanel
         }
 
         /// Persist settings to disk.
-        void SaveSettings(EditorBuildSettingsPanelState& state)
+        Result<void> SaveSettings(EditorBuildSettingsPanelState& state)
         {
             auto& projectManager = Project::ProjectManager::GetInstance();
             if (!projectManager.HasOpenProject())
-                return;
+                return Result<void>(ErrorCode::InvalidState, "No project is open.");
 
             // Update output directory from the buffer.
             state.Settings.LastOutputDirectory = TrimCopy(std::string(state.OutputDirectoryBuffer.data()));
@@ -97,7 +104,7 @@ namespace Limitless::EditorBuildSettingsPanel
             state.Settings.BuildBackend = NormalizeBuildBackend(state.Settings.BuildBackend);
 
             const auto projectRoot = projectManager.GetProjectRoot();
-            (void)Project::SaveBuildSettings(projectRoot, state.Settings);
+            return Project::SaveBuildSettings(projectRoot, state.Settings);
         }
 
         /// Returns true when `candidate` looks like the engine workspace root.
@@ -279,29 +286,71 @@ namespace Limitless::EditorBuildSettingsPanel
             return issues;
         }
 
+        void ConsumeCompletedBuildResult(EditorBuildSettingsPanelState& state)
+        {
+            const std::shared_ptr<EditorBuildSettingsPanelState::BuildJobState> buildJob = state.ActiveBuildJob;
+            if (!buildJob)
+                return;
+
+            Project::GameBuildResult completedResult;
+            bool hasCompletedResult = false;
+            {
+                std::lock_guard<std::mutex> lock(buildJob->Mutex);
+                if (buildJob->Completed)
+                {
+                    completedResult = std::move(buildJob->Result);
+                    buildJob->Completed = false;
+                    hasCompletedResult = true;
+                }
+            }
+
+            if (!hasCompletedResult)
+                return;
+
+            if (state.BuildThread.joinable())
+                state.BuildThread.join();
+
+            state.ActiveBuildJob.reset();
+            state.BuildInProgress.store(false, std::memory_order_release);
+            state.LastBuildResult = std::move(completedResult);
+            if (state.LastBuildResult.Success)
+                SetStatus(state, "Build succeeded (" + std::to_string(state.LastBuildResult.ElapsedSeconds) + "s).", false);
+            else
+                SetStatus(state, "Build failed: " + state.LastBuildResult.ErrorMessage, true);
+        }
+
         /// Start a build in a background thread.
         void StartBuild(EditorBuildSettingsPanelState& state,
                         bool runAfterBuild,
                         const std::function<bool()>& saveActiveSceneBeforeBuild)
         {
+            ConsumeCompletedBuildResult(state);
+
             if (state.BuildInProgress.load())
                 return;
 
             if (saveActiveSceneBeforeBuild && !saveActiveSceneBeforeBuild())
             {
-                state.StatusMessage = "Build aborted: failed to save active scene. Save the scene and try again.";
+                SetStatus(state, "Build aborted: failed to save active scene. Save the scene and try again.", true);
                 return;
             }
 
             auto& projectManager = Project::ProjectManager::GetInstance();
             if (!projectManager.HasOpenProject())
             {
-                state.StatusMessage = "No project is open.";
+                SetStatus(state, "No project is open.", true);
                 return;
             }
 
             // Save settings before building.
-            SaveSettings(state);
+            const auto saveSettingsResult = SaveSettings(state);
+            if (saveSettingsResult.IsFailure())
+            {
+                SetStatus(state,
+                          "Build aborted: failed to save build settings: " + saveSettingsResult.GetError().GetErrorMessage(),
+                          true);
+                return;
+            }
 
             Project::GameBuildRequest request;
             request.OutputDirectory = std::string(state.OutputDirectoryBuffer.data());
@@ -317,7 +366,14 @@ namespace Limitless::EditorBuildSettingsPanel
             {
                 request.Settings.BuildBackend = Project::BuildBackend::InternalToolchain;
                 state.Settings.BuildBackend = Project::BuildBackend::InternalToolchain;
-                SaveSettings(state);
+                const auto backendSaveResult = SaveSettings(state);
+                if (backendSaveResult.IsFailure())
+                {
+                    SetStatus(state,
+                              "Build aborted: failed to persist backend selection: " + backendSaveResult.GetError().GetErrorMessage(),
+                              true);
+                    return;
+                }
             }
 
             // Use project name from ProjectDefinition.
@@ -329,34 +385,36 @@ namespace Limitless::EditorBuildSettingsPanel
 
             if (request.OutputDirectory.empty())
             {
-                state.StatusMessage = "Please set an output directory.";
+                SetStatus(state, "Please set an output directory.", true);
                 return;
             }
 
             if (request.EngineRoot.empty())
             {
                 if (request.Settings.BuildBackend == Project::BuildBackend::InternalToolchain)
-                    state.StatusMessage = "Could not locate internal toolchain root.";
+                    SetStatus(state, "Could not locate internal toolchain root.", true);
                 else
-                    state.StatusMessage = "Could not locate engine workspace root.";
+                    SetStatus(state, "Could not locate engine workspace root.", true);
                 return;
             }
 
             const auto healthIssues = GetBuildBackendHealthIssues(state, request.EngineRoot);
             if (!healthIssues.empty())
             {
-                state.StatusMessage = "Build backend is not ready: " + healthIssues.front();
+                SetStatus(state, "Build backend is not ready: " + healthIssues.front(), true);
                 return;
             }
 
-            state.BuildInProgress.store(true);
-            state.StatusMessage = "Building...";
+            state.BuildInProgress.store(true, std::memory_order_release);
+            SetStatus(state, "Building...", false);
 
-            // Launch build on a detached background thread.
+            // Launch build on a managed background thread.
             if (state.BuildThread.joinable())
                 state.BuildThread.join();
+            state.ActiveBuildJob = std::make_shared<EditorBuildSettingsPanelState::BuildJobState>();
+            const std::shared_ptr<EditorBuildSettingsPanelState::BuildJobState> buildJob = state.ActiveBuildJob;
 
-            state.BuildThread = std::thread([&state, request, runAfterBuild]()
+            state.BuildThread = std::thread([buildJob, request, runAfterBuild]()
             {
                 Project::GameBuildResult result;
                 if (runAfterBuild)
@@ -364,17 +422,12 @@ namespace Limitless::EditorBuildSettingsPanel
                 else
                     result = Project::GameBuilder::BuildGame(request);
 
-                state.LastBuildResult = std::move(result);
-
-                if (state.LastBuildResult.Success)
-                    state.StatusMessage = "Build succeeded (" + std::to_string(state.LastBuildResult.ElapsedSeconds) + "s).";
-                else
-                    state.StatusMessage = "Build failed: " + state.LastBuildResult.ErrorMessage;
-
-                state.BuildInProgress.store(false);
+                {
+                    std::lock_guard<std::mutex> lock(buildJob->Mutex);
+                    buildJob->Result = std::move(result);
+                    buildJob->Completed = true;
+                }
             });
-
-            state.BuildThread.detach();
         }
     }
 
@@ -392,6 +445,7 @@ namespace Limitless::EditorBuildSettingsPanel
             return;
 
         EnsureSettingsLoaded(state);
+        ConsumeCompletedBuildResult(state);
 
         ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_FirstUseEver);
         if (!ImGui::Begin("Build Settings", &showWindow))
@@ -400,7 +454,7 @@ namespace Limitless::EditorBuildSettingsPanel
             return;
         }
 
-        const bool buildInProgress = state.BuildInProgress.load();
+        const bool buildInProgress = state.BuildInProgress.load(std::memory_order_acquire);
 
         // -----------------------------------------------------------------
         // Scenes In Build
@@ -585,7 +639,6 @@ namespace Limitless::EditorBuildSettingsPanel
 
         if (ImGui::Button("Build", ImVec2(120, 30)))
         {
-            SaveSettings(state);
             StartBuild(state, false, saveActiveSceneBeforeBuild);
         }
 
@@ -593,7 +646,6 @@ namespace Limitless::EditorBuildSettingsPanel
 
         if (ImGui::Button("Build And Run", ImVec2(140, 30)))
         {
-            SaveSettings(state);
             StartBuild(state, true, saveActiveSceneBeforeBuild);
         }
 
@@ -601,7 +653,13 @@ namespace Limitless::EditorBuildSettingsPanel
 
         ImGui::SameLine();
         if (ImGui::Button("Save Settings", ImVec2(120, 30)))
-            SaveSettings(state);
+        {
+            const auto saveResult = SaveSettings(state);
+            if (saveResult.IsFailure())
+                SetStatus(state, "Failed to save build settings: " + saveResult.GetError().GetErrorMessage(), true);
+            else
+                SetStatus(state, "Build settings saved.", false);
+        }
 
         // -----------------------------------------------------------------
         // Build status / log
@@ -614,7 +672,7 @@ namespace Limitless::EditorBuildSettingsPanel
             ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Building...");
         else if (!state.StatusMessage.empty())
         {
-            if (state.LastBuildResult.Success)
+            if (!state.StatusIsError)
                 ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "%s", state.StatusMessage.c_str());
             else
                 ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", state.StatusMessage.c_str());
@@ -633,5 +691,31 @@ namespace Limitless::EditorBuildSettingsPanel
         }
 
         ImGui::End();
+    }
+
+    void Shutdown(EditorBuildSettingsPanelState& state)
+    {
+        ConsumeCompletedBuildResult(state);
+        if (!state.BuildThread.joinable())
+            return;
+
+        bool completed = false;
+        if (state.ActiveBuildJob)
+        {
+            std::lock_guard<std::mutex> lock(state.ActiveBuildJob->Mutex);
+            completed = state.ActiveBuildJob->Completed;
+        }
+
+        if (completed)
+        {
+            state.BuildThread.join();
+            ConsumeCompletedBuildResult(state);
+            return;
+        }
+
+        LT_WARN("Build Settings: build is still running during editor shutdown; detaching to avoid blocking close.");
+        state.BuildThread.detach();
+        state.ActiveBuildJob.reset();
+        state.BuildInProgress.store(false, std::memory_order_release);
     }
 }

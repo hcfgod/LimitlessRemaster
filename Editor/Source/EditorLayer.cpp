@@ -653,6 +653,9 @@ namespace Limitless
         if (m_PlayModeState != EditorPlayModeState::Edit)
             ExitPlayMode();
 
+        // Explicitly finalize any in-flight Build Settings build job before shutdown.
+        EditorBuildSettingsPanel::Shutdown(m_BuildSettingsPanelState);
+
         // Persist pending animation asset editor changes before shutdown.
         if (!EditorAnimationTimelinePanel::ApplyPendingChanges(&m_EditorUndoService))
             LT_WARN("Editor exit: failed to auto-save pending Animation Clip edits.");
