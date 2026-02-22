@@ -4,6 +4,7 @@
 
 #include "Assets/AssetManager.h"
 #include "Assets/MaterialAssetImporter.h"
+#include "Assets/ShaderAsset.h"
 
 #include "Graphics/Buffer.h"
 #include "Graphics/RenderCommand.h"
@@ -22,6 +23,11 @@ namespace Limitless
 {
     namespace
     {
+        constexpr const char* kDefaultTexturedMaterialKey = "Assets/Materials/Renderer2D_TexturedQuad.material.json";
+        constexpr const char* kDefaultTexturedShaderKey = "Assets/Shaders/Renderer2D_TexturedQuad.glsl";
+        constexpr const char* kDefaultTextMaterialKey = "Assets/Materials/Renderer2D_MSDFText.material.json";
+        constexpr const char* kDefaultTextShaderKey = "Assets/Shaders/Renderer2D_MSDFText.glsl";
+
         struct QuadVertex
         {
             glm::vec3 Position{0.0f};
@@ -142,22 +148,29 @@ namespace Limitless
         g_Data.WhiteTexture = Texture2D::CreateFromRGBA8(1, 1, &whitePixelRGBA8, whiteSpec);
 
         // Default 2D material (shader + placeholder texture ref).
-        g_Data.Material = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>("Assets/Materials/Renderer2D_TexturedQuad.material.json");
-        if (!g_Data.Material)
+        g_Data.Material = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(kDefaultTexturedMaterialKey);
+        if (g_Data.Material)
         {
-            LT_CORE_ERROR("Renderer2D: failed to load default material asset (Renderer2D_TexturedQuad)");
-            return;
-        }
-
-        g_Data.ShaderProgram = g_Data.Material->GetShader();
-        if (!g_Data.ShaderProgram)
-        {
-            LT_CORE_INFO("Renderer2D: default material shader loading (view on-screen progress in viewport)");
-            // Keep initialized; the shader can arrive later via the asset system.
+            g_Data.ShaderProgram = g_Data.Material->GetShader();
         }
         else
         {
-            // Bind sampler array once: u_Textures[i] -> texture unit i.
+            // Shipped bundles may omit default material JSON assets when projects only
+            // use custom materials. Fall back to loading the built-in shader directly.
+            LT_CORE_WARN("Renderer2D: default material asset missing; falling back to shader asset '{}'", kDefaultTexturedShaderKey);
+            auto fallbackShaderAsset = Assets::ShaderAsset::LoadBlocking(kDefaultTexturedShaderKey);
+            if (fallbackShaderAsset)
+                g_Data.ShaderProgram = fallbackShaderAsset->GetShader();
+        }
+        if (!g_Data.ShaderProgram)
+        {
+            LT_CORE_ERROR("Renderer2D: failed to load default 2D shader (material='{}', shader='{}')",
+                          kDefaultTexturedMaterialKey, kDefaultTexturedShaderKey);
+            return;
+        }
+
+        // Bind sampler array once: u_Textures[i] -> texture unit i.
+        {
             std::array<int, Renderer2DData::kMaxTextureSlots> samplers{};
             for (uint32_t i = 0; i < Renderer2DData::kMaxTextureSlots; ++i)
             {
@@ -166,14 +179,19 @@ namespace Limitless
             g_Data.ShaderProgram->SetIntArray("u_Textures", samplers.data(), static_cast<uint32_t>(samplers.size()));
         }
 
-        g_Data.TextMaterial = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>("Assets/Materials/Renderer2D_MSDFText.material.json");
-        if (!g_Data.TextMaterial)
+        g_Data.TextMaterial = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(kDefaultTextMaterialKey);
+        if (g_Data.TextMaterial)
         {
-            LT_CORE_ERROR("Renderer2D: failed to load text material asset (Renderer2D_MSDFText)");
-            return;
+            g_Data.TextShaderProgram = g_Data.TextMaterial->GetShader();
+        }
+        else
+        {
+            LT_CORE_WARN("Renderer2D: text material asset missing; falling back to shader asset '{}'", kDefaultTextShaderKey);
+            auto fallbackTextShaderAsset = Assets::ShaderAsset::LoadBlocking(kDefaultTextShaderKey);
+            if (fallbackTextShaderAsset)
+                g_Data.TextShaderProgram = fallbackTextShaderAsset->GetShader();
         }
 
-        g_Data.TextShaderProgram = g_Data.TextMaterial->GetShader();
         if (g_Data.TextShaderProgram)
         {
             std::array<int, Renderer2DData::kMaxTextureSlots> samplers{};
@@ -185,7 +203,8 @@ namespace Limitless
         }
         else
         {
-            LT_CORE_INFO("Renderer2D: text shader loading (MSDF text rendering will activate when ready)");
+            LT_CORE_WARN("Renderer2D: text shader unavailable (material='{}', shader='{}'); text rendering disabled",
+                         kDefaultTextMaterialKey, kDefaultTextShaderKey);
         }
 
         g_Data.VertexBufferBase = std::make_unique<QuadVertex[]>(Renderer2DData::kMaxVertices);

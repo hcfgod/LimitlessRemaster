@@ -393,11 +393,49 @@ namespace Limitless::Assets
             discovered++;
         }
 
-        const auto records = AssetDatabase::GetInstance().GetAllRecords();
+        auto records = AssetDatabase::GetInstance().GetAllRecords();
         if (records.empty())
         {
             return Result<void>(ErrorCode::ResourceNotFound, "AssetBundleBuilder: AssetDatabase has no records (load/import failed)");
         }
+
+        auto ensureRequiredRecord = [&](const std::string& key, AssetType type)
+        {
+            if (key.empty())
+                return;
+
+            bool alreadyPresent = false;
+            for (const auto& record : records)
+            {
+                if (record.Key == key)
+                {
+                    alreadyPresent = true;
+                    break;
+                }
+            }
+            if (alreadyPresent)
+                return;
+
+            const auto imported = AssetDatabase::GetInstance().ImportOrUpdate(key, type, nlohmann::json::object());
+            if (imported.IsSuccess())
+            {
+                records.push_back(imported.GetValue());
+                LT_CORE_INFO("AssetBundleBuilder: seeded required runtime asset '{}' for shipping bundle", key);
+            }
+            else
+            {
+                LT_CORE_WARN("AssetBundleBuilder: required runtime asset '{}' could not be imported: {}",
+                             key,
+                             imported.GetError().GetErrorMessage());
+            }
+        };
+
+        // Ensure core renderer defaults are always bundled so shipped Runtime can
+        // bootstrap 2D rendering even when projects only reference custom materials.
+        ensureRequiredRecord("Assets/Materials/Renderer2D_TexturedQuad.material.json", AssetType::Material);
+        ensureRequiredRecord("Assets/Materials/Renderer2D_MSDFText.material.json", AssetType::Material);
+        ensureRequiredRecord("Assets/Shaders/Renderer2D_TexturedQuad.glsl", AssetType::Shader);
+        ensureRequiredRecord("Assets/Shaders/Renderer2D_MSDFText.glsl", AssetType::Shader);
 
         const std::filesystem::path cachePath = outputDirectory / "AssetBundleCache.json";
         const std::filesystem::path cacheDirectory = outputDirectory / "Cache";
