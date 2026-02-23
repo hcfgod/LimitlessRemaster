@@ -300,7 +300,8 @@ namespace Limitless::EditorProjectSettingsPanel
                 static std::array<char, 128> nameBuffer{};
                 std::snprintf(nameBuffer.data(), nameBuffer.size(), "%s", layers.Layers[selectedIndex].c_str());
 
-                ImGui::InputText("Name", nameBuffer.data(), nameBuffer.size());
+                ImGui::TextUnformatted("Name");
+                ImGui::InputText("##LayerName", nameBuffer.data(), nameBuffer.size());
                 if (ImGui::Button("Apply Rename", ImVec2(120, 0)))
                 {
                     std::string newName = nameBuffer.data();
@@ -365,23 +366,30 @@ namespace Limitless::EditorProjectSettingsPanel
         {
             if (ImGui::BeginTabItem("Render"))
             {
-                ImGui::Checkbox("VSync", &state.Render.VSync);
-                ImGui::SliderInt("MSAA Samples", &state.Render.MsaaSamples, 1, 8);
-                ImGui::SliderFloat("Render Scale", &state.Render.RenderScale, 0.5f, 2.0f, "%.2f");
-                ImGui::ColorEdit4("Clear Color", state.Render.ClearColor, ImGuiColorEditFlags_Float);
+                ImGui::TextUnformatted("VSync");
+                ImGui::Checkbox("##RenderVSync", &state.Render.VSync);
+                ImGui::TextUnformatted("MSAA Samples");
+                ImGui::SliderInt("##RenderMsaaSamples", &state.Render.MsaaSamples, 1, 8);
+                ImGui::TextUnformatted("Render Scale");
+                ImGui::SliderFloat("##RenderScale", &state.Render.RenderScale, 0.5f, 2.0f, "%.2f");
+                ImGui::TextUnformatted("Clear Color");
+                ImGui::ColorEdit4("##RenderClearColor", state.Render.ClearColor, ImGuiColorEditFlags_Float);
                 ImGui::EndTabItem();
             }
 
             if (ImGui::BeginTabItem("Audio"))
             {
-                ImGui::Checkbox("Muted", &state.Audio.Muted);
-                ImGui::SliderFloat("Master Volume", &state.Audio.MasterVolume, 0.0f, 1.0f, "%.2f");
+                ImGui::TextUnformatted("Muted");
+                ImGui::Checkbox("##AudioMuted", &state.Audio.Muted);
+                ImGui::TextUnformatted("Master Volume");
+                ImGui::SliderFloat("##AudioMasterVolume", &state.Audio.MasterVolume, 0.0f, 1.0f, "%.2f");
 
                 const bool hasAudioMixer = !state.Audio.MixerAssetKey.empty();
                 const std::string audioMixerDisplayName = hasAudioMixer
                     ? InputActionsDisplayNameFromKey(state.Audio.MixerAssetKey)
                     : std::string("None");
-                if (ImGui::BeginCombo("Audio Mixer Asset", audioMixerDisplayName.c_str()))
+                ImGui::TextUnformatted("Audio Mixer Asset");
+                if (ImGui::BeginCombo("##AudioMixerAsset", audioMixerDisplayName.c_str()))
                 {
                     const bool selectedNone = state.Audio.MixerAssetKey.empty();
                     if (ImGui::Selectable("None", selectedNone))
@@ -413,7 +421,8 @@ namespace Limitless::EditorProjectSettingsPanel
                 const std::string defaultDisplay = hasDefault
                     ? InputActionsDisplayNameFromKey(state.Input.ProjectInputActionsKey)
                     : std::string("None");
-                if (ImGui::BeginCombo("Default InputActions", defaultDisplay.c_str()))
+                ImGui::TextUnformatted("Default InputActions");
+                if (ImGui::BeginCombo("##DefaultInputActions", defaultDisplay.c_str()))
                 {
                     const bool selectedNone = state.Input.ProjectInputActionsKey.empty();
                     if (ImGui::Selectable("None", selectedNone))
@@ -467,7 +476,8 @@ namespace Limitless::EditorProjectSettingsPanel
                     availablePreview = state.AvailableInputActionsAssetKeys[static_cast<size_t>(state.SelectedAvailableInputActionsIndex)].c_str();
                 }
 
-                if (ImGui::BeginCombo("Available InputActions", availablePreview))
+                ImGui::TextUnformatted("Available InputActions");
+                if (ImGui::BeginCombo("##AvailableInputActions", availablePreview))
                 {
                     for (int32_t index = 0; index < static_cast<int32_t>(state.AvailableInputActionsAssetKeys.size()); ++index)
                     {
@@ -532,7 +542,8 @@ namespace Limitless::EditorProjectSettingsPanel
                     Project::InputActionsAssetAliasEntry& selectedEntry =
                         state.Input.AdditionalInputActionsAssets[static_cast<size_t>(state.SelectedAdditionalInputActionsIndex)];
 
-                    ImGui::InputText("Alias", state.SelectedAdditionalInputAliasBuffer.data(), state.SelectedAdditionalInputAliasBuffer.size());
+                    ImGui::TextUnformatted("Alias");
+                    ImGui::InputText("##AdditionalInputAlias", state.SelectedAdditionalInputAliasBuffer.data(), state.SelectedAdditionalInputAliasBuffer.size());
                     if (ImGui::Button("Apply Alias", ImVec2(150, 0)))
                     {
                         const std::string desiredAlias = state.SelectedAdditionalInputAliasBuffer.data();
@@ -577,39 +588,65 @@ namespace Limitless::EditorProjectSettingsPanel
 
             if (ImGui::BeginTabItem("Physics 2D"))
             {
-                ImGui::DragFloat2("Gravity", &state.Physics2D.GravityX, 0.05f, -100.0f, 100.0f);
-                ImGui::SliderInt("Velocity Sub Steps", &state.Physics2D.VelocitySubSteps, 1, 24);
-                ImGui::Checkbox("Enable Sleep", &state.Physics2D.EnableSleep);
-                ImGui::Checkbox("Enable Continuous Collision", &state.Physics2D.EnableContinuousCollision);
-                ImGui::Checkbox("High Contact Quality Mode", &state.Physics2D.HighContactQualityMode);
-                ImGui::DragInt("High Quality Extra Sub Steps", &state.Physics2D.HighContactQualityExtraSubSteps, 1.0f, 0, 24);
+                ImGui::TextUnformatted("Gravity");
+                ImGui::DragFloat2("##PhysicsGravity", &state.Physics2D.GravityX, 0.05f, -100.0f, 100.0f);
+                ImGui::TextUnformatted("Velocity Sub Steps");
+                ImGui::SliderInt("##PhysicsVelocitySubSteps", &state.Physics2D.VelocitySubSteps, 1, 24);
+                ImGui::TextUnformatted("Enable Sleep");
+                ImGui::Checkbox("##PhysicsEnableSleep", &state.Physics2D.EnableSleep);
+                ImGui::TextUnformatted("Enable Continuous Collision");
+                ImGui::Checkbox("##PhysicsEnableContinuousCollision", &state.Physics2D.EnableContinuousCollision);
+                ImGui::TextUnformatted("High Contact Quality Mode");
+                ImGui::Checkbox("##PhysicsHighContactQualityMode", &state.Physics2D.HighContactQualityMode);
+                ImGui::TextUnformatted("High Quality Extra Sub Steps");
+                ImGui::DragInt("##PhysicsHighQualityExtraSubSteps", &state.Physics2D.HighContactQualityExtraSubSteps, 1.0f, 0, 24);
                 state.Physics2D.HighContactQualityExtraSubSteps = std::max(0, state.Physics2D.HighContactQualityExtraSubSteps);
-                ImGui::DragFloat("Contact Hertz", &state.Physics2D.ContactHertz, 0.5f, 1.0f, 240.0f);
-                ImGui::DragFloat("Contact Damping Ratio", &state.Physics2D.ContactDampingRatio, 0.01f, 0.0f, 2.0f);
-                ImGui::DragFloat("Contact Push Speed", &state.Physics2D.ContactPushSpeed, 0.1f, 0.1f, 64.0f);
+                ImGui::TextUnformatted("Contact Hertz");
+                ImGui::DragFloat("##PhysicsContactHertz", &state.Physics2D.ContactHertz, 0.5f, 1.0f, 240.0f);
+                ImGui::TextUnformatted("Contact Damping Ratio");
+                ImGui::DragFloat("##PhysicsContactDampingRatio", &state.Physics2D.ContactDampingRatio, 0.01f, 0.0f, 2.0f);
+                ImGui::TextUnformatted("Contact Push Speed");
+                ImGui::DragFloat("##PhysicsContactPushSpeed", &state.Physics2D.ContactPushSpeed, 0.1f, 0.1f, 64.0f);
                 ImGui::TextDisabled("Higher sub-steps/contact tuning reduces clipping on fast/rotating collisions.");
                 ImGui::EndTabItem();
             }
 
             if (ImGui::BeginTabItem("Lighting 2D"))
             {
-                ImGui::Checkbox("Enabled", &state.Lighting2D.Enabled);
-                ImGui::Checkbox("Enable Normal Maps", &state.Lighting2D.EnableNormalMaps);
-                ImGui::Checkbox("Enable Shadows", &state.Lighting2D.EnableShadows);
-                ImGui::ColorEdit3("Ambient Color", state.Lighting2D.AmbientColor);
-                ImGui::SliderFloat("Ambient Intensity", &state.Lighting2D.AmbientIntensity, 0.0f, 4.0f, "%.2f");
-                ImGui::SliderInt("Shadow Quality", &state.Lighting2D.ShadowQualityLevel, 0, 2);
-                ImGui::DragInt("Max Directional Lights", &state.Lighting2D.MaxDirectionalLights, 1.0f, 0, 32);
-                ImGui::DragInt("Max Point Lights", &state.Lighting2D.MaxPointLights, 1.0f, 0, 256);
-                ImGui::DragInt("Max Shadow Segments", &state.Lighting2D.MaxShadowSegments, 1.0f, 8, 512);
-                ImGui::DragFloat("Shadow Softness Scale", &state.Lighting2D.ShadowSoftnessScale, 0.01f, 0.0f, 16.0f, "%.2f");
-                ImGui::DragFloat("Directional Shadow Bias Scale", &state.Lighting2D.DirectionalShadowBiasScale, 0.01f, 0.0f, 8.0f, "%.2f");
-                ImGui::SliderFloat("Shadow Alpha Cutoff", &state.Lighting2D.ShadowAlphaCutoff, 0.0f, 1.0f, "%.2f");
-                ImGui::DragFloat("Shadow Segment Snap Pixels", &state.Lighting2D.ShadowSegmentSnapPixels, 0.05f, 0.0f, 4.0f, "%.2f");
-                ImGui::Checkbox("Enable High Angular Velocity Shadow Freeze", &state.Lighting2D.EnableHighAngularVelocityShadowFreeze);
-                ImGui::DragFloat("Shadow Freeze Angular Velocity (Deg/Sec)", &state.Lighting2D.ShadowFreezeAngularVelocityDegreesPerSecond, 1.0f, 1.0f, 1440.0f, "%.1f");
-                ImGui::DragInt("Shadow Freeze Frame Count", &state.Lighting2D.ShadowFreezeFrameCount, 1.0f, 1, 16);
-                ImGui::DragInt("Max Shadow Samples Per Light", &state.Lighting2D.MaxShadowSamplesPerLight, 1.0f, 1, 32);
+                ImGui::TextUnformatted("Enabled");
+                ImGui::Checkbox("##LightingEnabled", &state.Lighting2D.Enabled);
+                ImGui::TextUnformatted("Enable Normal Maps");
+                ImGui::Checkbox("##LightingEnableNormalMaps", &state.Lighting2D.EnableNormalMaps);
+                ImGui::TextUnformatted("Enable Shadows");
+                ImGui::Checkbox("##LightingEnableShadows", &state.Lighting2D.EnableShadows);
+                ImGui::TextUnformatted("Ambient Color");
+                ImGui::ColorEdit3("##LightingAmbientColor", state.Lighting2D.AmbientColor);
+                ImGui::TextUnformatted("Ambient Intensity");
+                ImGui::SliderFloat("##LightingAmbientIntensity", &state.Lighting2D.AmbientIntensity, 0.0f, 4.0f, "%.2f");
+                ImGui::TextUnformatted("Shadow Quality");
+                ImGui::SliderInt("##LightingShadowQuality", &state.Lighting2D.ShadowQualityLevel, 0, 2);
+                ImGui::TextUnformatted("Max Directional Lights");
+                ImGui::DragInt("##LightingMaxDirectionalLights", &state.Lighting2D.MaxDirectionalLights, 1.0f, 0, 32);
+                ImGui::TextUnformatted("Max Point Lights");
+                ImGui::DragInt("##LightingMaxPointLights", &state.Lighting2D.MaxPointLights, 1.0f, 0, 256);
+                ImGui::TextUnformatted("Max Shadow Segments");
+                ImGui::DragInt("##LightingMaxShadowSegments", &state.Lighting2D.MaxShadowSegments, 1.0f, 8, 512);
+                ImGui::TextUnformatted("Shadow Softness Scale");
+                ImGui::DragFloat("##LightingShadowSoftnessScale", &state.Lighting2D.ShadowSoftnessScale, 0.01f, 0.0f, 16.0f, "%.2f");
+                ImGui::TextUnformatted("Directional Shadow Bias Scale");
+                ImGui::DragFloat("##LightingDirectionalShadowBiasScale", &state.Lighting2D.DirectionalShadowBiasScale, 0.01f, 0.0f, 8.0f, "%.2f");
+                ImGui::TextUnformatted("Shadow Alpha Cutoff");
+                ImGui::SliderFloat("##LightingShadowAlphaCutoff", &state.Lighting2D.ShadowAlphaCutoff, 0.0f, 1.0f, "%.2f");
+                ImGui::TextUnformatted("Shadow Segment Snap Pixels");
+                ImGui::DragFloat("##LightingShadowSegmentSnapPixels", &state.Lighting2D.ShadowSegmentSnapPixels, 0.05f, 0.0f, 4.0f, "%.2f");
+                ImGui::TextUnformatted("Enable High Angular Velocity Shadow Freeze");
+                ImGui::Checkbox("##LightingEnableShadowFreeze", &state.Lighting2D.EnableHighAngularVelocityShadowFreeze);
+                ImGui::TextUnformatted("Shadow Freeze Angular Velocity (Deg/Sec)");
+                ImGui::DragFloat("##LightingShadowFreezeAngularVelocity", &state.Lighting2D.ShadowFreezeAngularVelocityDegreesPerSecond, 1.0f, 1.0f, 1440.0f, "%.1f");
+                ImGui::TextUnformatted("Shadow Freeze Frame Count");
+                ImGui::DragInt("##LightingShadowFreezeFrameCount", &state.Lighting2D.ShadowFreezeFrameCount, 1.0f, 1, 16);
+                ImGui::TextUnformatted("Max Shadow Samples Per Light");
+                ImGui::DragInt("##LightingMaxShadowSamplesPerLight", &state.Lighting2D.MaxShadowSamplesPerLight, 1.0f, 1, 32);
 
                 state.Lighting2D.ShadowQualityLevel = std::clamp(state.Lighting2D.ShadowQualityLevel, 0, 2);
                 state.Lighting2D.MaxDirectionalLights = std::max(0, state.Lighting2D.MaxDirectionalLights);

@@ -46,6 +46,8 @@ namespace Limitless::EditorInspectorPanel
                                              const char* audioPayloadId,
                                              const char* materialPayloadId,
                                              const char* fontPayloadId,
+                                             std::string& selectedAnimationClipAssetKey,
+                                             std::string& selectedAnimatorControllerAssetKey,
                                              PendingEntityComponentRemovals& pendingRemovals,
                                              Limitless::EditorUndoService* undoService);
 }

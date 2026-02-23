@@ -598,6 +598,56 @@ namespace Limitless::EditorProjectPanel
             return removedAny;
         }
 
+        bool DeleteAssetKeysInAssets(const std::filesystem::path& assetsDirectory, const std::vector<std::string>& assetKeys)
+        {
+            bool removedAny = false;
+            bool removedRegularAsset = false;
+            std::unordered_set<std::string> deduplicatedKeys;
+            deduplicatedKeys.reserve(assetKeys.size());
+
+            for (const std::string& assetKey : assetKeys)
+            {
+                if (assetKey.empty() || !deduplicatedKeys.insert(assetKey).second)
+                    continue;
+
+                std::string textureKey;
+                int32_t subSpriteIndex = -1;
+                if (Assets::TryParseSubSpriteAssetKey(assetKey, textureKey, subSpriteIndex))
+                    continue;
+
+                if (assetKey.rfind("Assets/", 0) != 0)
+                    continue;
+
+                const std::filesystem::path relativePath = std::filesystem::path(assetKey.substr(7));
+                const std::filesystem::path absolutePath = assetsDirectory / relativePath;
+                const std::string lowerExtension = ToLowerAscii(absolutePath.extension().string());
+
+                if (IsNativeScriptExtensionLower(lowerExtension))
+                {
+                    removedAny |= DeleteNativeScriptPairInAssets(assetsDirectory, relativePath);
+                    continue;
+                }
+
+                std::error_code deleteErrorCode;
+                const bool removed = std::filesystem::remove(absolutePath, deleteErrorCode);
+                if (!removed || deleteErrorCode)
+                    continue;
+
+                removedAny = true;
+                removedRegularAsset = true;
+                const std::filesystem::path metaPath = absolutePath.parent_path() / (absolutePath.filename().string() + ".meta");
+                std::filesystem::remove(metaPath, deleteErrorCode);
+            }
+
+            if (removedRegularAsset)
+            {
+                (void)Assets::AssetImportPipeline::ReimportChanged(true);
+                InvalidateProjectDirectoryCache();
+            }
+
+            return removedAny;
+        }
+
         std::string GetAssetDisplayName(const std::filesystem::path& path)
         {
             return EditorAssetNaming::GetAssetDisplayNameFromPath(path);
@@ -914,9 +964,30 @@ namespace Limitless::EditorProjectPanel
                                 }
                                 if (ImGui::MenuItem("Delete Script Pair"))
                                 {
-                                    const bool removed = DeleteNativeScriptPairInAssets(assetsDirectory, sourceRelativePath);
+                                    const bool deleteMultiSelection =
+                                        state.MultiSelectedAssetKeys.size() > 1 &&
+                                        std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), sourceAssetKey) != state.MultiSelectedAssetKeys.end();
+                                    const bool removed = deleteMultiSelection
+                                        ? DeleteAssetKeysInAssets(assetsDirectory, state.MultiSelectedAssetKeys)
+                                        : DeleteAssetKeysInAssets(assetsDirectory, { sourceAssetKey });
                                     if (removed)
                                     {
+                                        state.MultiSelectedAssetKeys.clear();
+                                        state.SelectionAnchorAssetKey.clear();
+                                        state.MultiSelectedSubSpriteKeys.clear();
+                                        state.SubSpriteSelectionAnchorKey.clear();
+                                        selectedNativeScriptAssetKey.clear();
+                                        selectedPrefabAssetKey.clear();
+                                        selectedTextureAssetKey.clear();
+                                        selectedMaterialAssetKey.clear();
+                                        selectedTilesetAssetKey.clear();
+                                        selectedAudioMixerAssetKey.clear();
+                                        selectedInputActionsAssetKey.clear();
+                                        selectedAnimationClipAssetKey.clear();
+                                        selectedAnimatorControllerAssetKey.clear();
+                                        selectedEntity = entt::null;
+                                        cachedTextureAsset.reset();
+                                        cachedMaterialAsset.reset();
                                         InvalidateProjectDirectoryCache();
                                         LT_INFO("Deleted native script pair {}", scriptBaseName);
                                     }
@@ -1253,25 +1324,21 @@ namespace Limitless::EditorProjectPanel
                         }
                         if (ImGui::MenuItem(hasPairedScriptFile ? "Delete Script Pair" : "Delete"))
                         {
-                            bool removed = false;
-                            if (hasPairedScriptFile)
-                            {
-                                removed = DeleteNativeScriptPairInAssets(assetsDirectory, entryRelativePath);
-                            }
-                            else
-                            {
-                                std::error_code deleteErrorCode;
-                                removed = std::filesystem::remove(entry.AbsolutePath, deleteErrorCode);
-                                if (removed && !deleteErrorCode)
-                                {
-                                    const std::filesystem::path metaPath = entry.AbsolutePath.parent_path() / (entry.AbsolutePath.filename().string() + ".meta");
-                                    std::filesystem::remove(metaPath, deleteErrorCode);
-                                    (void)Assets::AssetImportPipeline::ReimportChanged(true);
-                                    InvalidateProjectDirectoryCache();
-                                }
-                            }
+                            const bool deleteMultiSelection =
+                                state.MultiSelectedAssetKeys.size() > 1 &&
+                                std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), assetKey) != state.MultiSelectedAssetKeys.end();
+                            const bool removed = deleteMultiSelection
+                                ? DeleteAssetKeysInAssets(assetsDirectory, state.MultiSelectedAssetKeys)
+                                : DeleteAssetKeysInAssets(assetsDirectory, { assetKey });
                             if (removed)
+                            {
+                                state.MultiSelectedAssetKeys.clear();
+                                state.SelectionAnchorAssetKey.clear();
+                                state.MultiSelectedSubSpriteKeys.clear();
+                                state.SubSpriteSelectionAnchorKey.clear();
+                                clearAssetSelection();
                                 LT_INFO("Deleted asset {}", assetKey);
+                            }
                         }
                         ImGui::EndPopup();
                     }
@@ -1999,6 +2066,25 @@ namespace Limitless::EditorProjectPanel
             return;
         }
 
+        const auto clearProjectAssetSelection = [&]() {
+            selectedTextureAssetKey.clear();
+            selectedMaterialAssetKey.clear();
+            selectedNativeScriptAssetKey.clear();
+            selectedPrefabAssetKey.clear();
+            selectedTilesetAssetKey.clear();
+            selectedAudioMixerAssetKey.clear();
+            selectedInputActionsAssetKey.clear();
+            selectedAnimationClipAssetKey.clear();
+            selectedAnimatorControllerAssetKey.clear();
+            selectedEntity = entt::null;
+            cachedTextureAsset.reset();
+            cachedMaterialAsset.reset();
+            state.MultiSelectedAssetKeys.clear();
+            state.SelectionAnchorAssetKey.clear();
+            state.MultiSelectedSubSpriteKeys.clear();
+            state.SubSpriteSelectionAnchorKey.clear();
+        };
+
         if (ImGui::BeginPopupContextWindow("ProjectContext", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
         {
             if (ImGui::MenuItem("Create Folder"))
@@ -2191,6 +2277,22 @@ namespace Limitless::EditorProjectPanel
                           onAssetRenamed,
                           onNativeScriptAssetActivated);
             ImGui::TreePop();
+        }
+
+        if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+        {
+            const ImGuiIO& io = ImGui::GetIO();
+            const bool canDeleteSelection =
+                !io.WantTextInput &&
+                !ImGui::IsAnyItemActive() &&
+                !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId);
+            if (canDeleteSelection &&
+                ImGui::IsKeyPressed(ImGuiKey_Delete, false) &&
+                !state.MultiSelectedAssetKeys.empty())
+            {
+                if (DeleteAssetKeysInAssets(assetsDirectory, state.MultiSelectedAssetKeys))
+                    clearProjectAssetSelection();
+            }
         }
 
         if (!state.PendingExternalDropPaths.empty() &&

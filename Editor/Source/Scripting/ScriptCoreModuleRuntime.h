@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../EditorPlayMode.h"
+#include "Core/EditorPlayMode.h"
 
 namespace Limitless::ScriptCoreModuleRuntime
 {

@@ -1038,7 +1038,6 @@ namespace Limitless::EditorInspectorPanel
 
         ImGui::AlignTextToFramePadding();
         ImGui::Text("Generate Mipmaps");
-        ImGui::SameLine(160);
         bool generateMipmaps = specification.GenerateMipmaps;
         if (ImGui::Checkbox("##GenerateMipmaps", &generateMipmaps))
         {
@@ -1052,7 +1051,6 @@ namespace Limitless::EditorInspectorPanel
 
         ImGui::AlignTextToFramePadding();
         ImGui::Text("Flip Vertically On Load");
-        ImGui::SameLine(160);
         bool flipVerticallyOnLoad = specification.FlipVerticallyOnLoad;
         if (ImGui::Checkbox("##FlipVerticallyOnLoad", &flipVerticallyOnLoad))
         {
@@ -1101,8 +1099,8 @@ namespace Limitless::EditorInspectorPanel
             : EditorAssetNaming::GetAssetDisplayNameFromAssetKey(textureKey);
         ImGui::AlignTextToFramePadding();
         ImGui::Text("Texture");
-        ImGui::SameLine(160.0f);
-        ImGui::Button((textureLabel + "##TilesetTexture").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 90.0f, 0.0f));
+        ImGui::Button((textureLabel + "##TilesetTexture").c_str(),
+                      ImVec2(std::max(60.0f, ImGui::GetContentRegionAvail().x - 90.0f), 0.0f));
         if (ImGui::BeginDragDropTarget())
         {
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSubSpritePayloadId))
@@ -1736,8 +1734,8 @@ namespace Limitless::EditorInspectorPanel
 
         ImGui::AlignTextToFramePadding();
         ImGui::Text("Shader");
-        ImGui::SameLine(80);
-        ImGui::Button((shaderLabel + "##MaterialShader").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 30.0f, 0));
+        ImGui::Button((shaderLabel + "##MaterialShader").c_str(),
+                      ImVec2(std::max(60.0f, ImGui::GetContentRegionAvail().x - 30.0f), 0));
         if (ImGui::BeginDragDropTarget())
         {
             if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(shaderPayloadId))
@@ -2060,8 +2058,8 @@ namespace Limitless::EditorInspectorPanel
             ImGuiTreeNodeFlags slotFlags = ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
             const bool slotOpen = ImGui::TreeNodeEx(slot.DisplayName, slotFlags);
 
-            ImGui::SameLine(220.0f);
-            ImGui::Button((textureLabel + "##Texture").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 90.0f, 0.0f));
+            ImGui::Button((textureLabel + "##Texture").c_str(),
+                          ImVec2(std::max(60.0f, ImGui::GetContentRegionAvail().x - 90.0f), 0.0f));
             if (ImGui::BeginDragDropTarget())
             {
                 if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSubSpritePayloadId))

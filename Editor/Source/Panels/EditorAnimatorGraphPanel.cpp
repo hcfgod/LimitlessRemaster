@@ -473,8 +473,8 @@ namespace Limitless::EditorAnimatorGraphPanel
 
                     ImGui::AlignTextToFramePadding();
                     ImGui::Text("Clip");
-                    ImGui::SameLine(110.0f);
-                    ImGui::Button((clipLabel + "##AnimatorStateClip").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 120.0f, 0.0f));
+                    ImGui::Button((clipLabel + "##AnimatorStateClip").c_str(),
+                                  ImVec2(std::max(60.0f, ImGui::GetContentRegionAvail().x - 120.0f), 0.0f));
                     if (ImGui::BeginDragDropTarget())
                     {
                         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_MOVE"))

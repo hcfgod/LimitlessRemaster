@@ -37,6 +37,16 @@ project "Editor"
 
     includedirs
     {
+        "Source",
+        "Source/Panels",
+        "Source/Layer",
+        "Source/Core",
+        "Source/Systems",
+        "Source/Operations",
+        "Source/Dialogs",
+        "Source/Utilities",
+        "Source/Scripting",
+        "Source/Undo",
         "../Limitless/Vendor",
         "../Limitless/Vendor/box2d/include",
         "../Limitless/Source",

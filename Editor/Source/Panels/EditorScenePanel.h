@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace Limitless
 {
@@ -16,11 +17,17 @@ namespace Limitless
 
     struct EditorScenePanelState
     {
-        entt::entity PendingDeleteEntity = entt::null;
+        std::vector<entt::entity> PendingDeleteEntities;
         entt::entity RenameEntity = entt::null;
         entt::entity PendingClickSelectionEntity = entt::null;
+        bool PendingClickCtrlModifier = false;
+        bool PendingClickShiftModifier = false;
+        entt::entity SelectionAnchorEntity = entt::null;
+        std::vector<entt::entity> MultiSelectedEntities;
+        std::vector<entt::entity> DrawOrderEntities;
         bool RenamePopupOpen = false;
         std::unique_ptr<Scene> EntityClipboardScene;
+        std::vector<std::unique_ptr<Scene>> EntityClipboardScenes;
         std::array<char, 256> RenameBuffer{};
     };
 

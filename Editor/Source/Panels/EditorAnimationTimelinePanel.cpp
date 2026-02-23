@@ -405,7 +405,10 @@ namespace Limitless::EditorAnimationTimelinePanel
 
         void DrawFloatField(const char* label, float& value, float speed = 0.01f)
         {
-            ImGui::DragFloat(label, &value, speed);
+            ImGui::TextUnformatted(label);
+            std::string widgetId = "##";
+            widgetId += label;
+            ImGui::DragFloat(widgetId.c_str(), &value, speed);
         }
 
         void DrawVec2Field(const char* label, json& valueArray, float speed = 0.01f)
@@ -416,7 +419,10 @@ namespace Limitless::EditorAnimationTimelinePanel
                 valueArray[0].get<float>(),
                 valueArray[1].get<float>()
             };
-            if (ImGui::DragFloat2(label, value, speed))
+            ImGui::TextUnformatted(label);
+            std::string widgetId = "##";
+            widgetId += label;
+            if (ImGui::DragFloat2(widgetId.c_str(), value, speed))
                 valueArray = json::array({value[0], value[1]});
         }
 
@@ -429,7 +435,10 @@ namespace Limitless::EditorAnimationTimelinePanel
                 valueArray[1].get<float>(),
                 valueArray[2].get<float>()
             };
-            if (ImGui::DragFloat3(label, value, speed))
+            ImGui::TextUnformatted(label);
+            std::string widgetId = "##";
+            widgetId += label;
+            if (ImGui::DragFloat3(widgetId.c_str(), value, speed))
                 valueArray = json::array({value[0], value[1], value[2]});
         }
 
@@ -454,7 +463,8 @@ namespace Limitless::EditorAnimationTimelinePanel
                 if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
                 {
                     float timeSeconds = keyframe.value("TimeSeconds", 0.0f);
-                    if (ImGui::DragFloat("Time (Seconds)", &timeSeconds, 0.01f))
+                    ImGui::TextUnformatted("Time (Seconds)");
+                    if (ImGui::DragFloat("##TimeSeconds", &timeSeconds, 0.01f))
                         keyframe["TimeSeconds"] = std::max(0.0f, timeSeconds);
 
                     DrawVec2Field("UV Min", keyframe["UvMin"], 0.001f);
@@ -556,7 +566,8 @@ namespace Limitless::EditorAnimationTimelinePanel
                 if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
                 {
                     float timeSeconds = keyframe.value("TimeSeconds", 0.0f);
-                    if (ImGui::DragFloat("Time (Seconds)", &timeSeconds, 0.01f))
+                    ImGui::TextUnformatted("Time (Seconds)");
+                    if (ImGui::DragFloat("##TimeSeconds", &timeSeconds, 0.01f))
                         keyframe["TimeSeconds"] = std::max(0.0f, timeSeconds);
 
                     if (!keyframe.contains("Texture") || !keyframe["Texture"].is_object())
@@ -570,8 +581,8 @@ namespace Limitless::EditorAnimationTimelinePanel
 
                     ImGui::AlignTextToFramePadding();
                     ImGui::Text("Texture");
-                    ImGui::SameLine(110.0f);
-                    ImGui::Button((textureLabel + "##TextureKeyframeSlot").c_str(), ImVec2(ImGui::GetContentRegionAvail().x - 120.0f, 0.0f));
+                    ImGui::Button((textureLabel + "##TextureKeyframeSlot").c_str(),
+                                  ImVec2(std::max(60.0f, ImGui::GetContentRegionAvail().x - 120.0f), 0.0f));
                     if (ImGui::BeginDragDropTarget())
                     {
                         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSubSpritePayloadId))
@@ -756,14 +767,16 @@ namespace Limitless::EditorAnimationTimelinePanel
                 if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
                 {
                     float timeSeconds = keyframe.value("TimeSeconds", 0.0f);
-                    if (ImGui::DragFloat("Time (Seconds)", &timeSeconds, 0.01f))
+                    ImGui::TextUnformatted("Time (Seconds)");
+                    if (ImGui::DragFloat("##TimeSeconds", &timeSeconds, 0.01f))
                         keyframe["TimeSeconds"] = std::max(0.0f, timeSeconds);
 
                     DrawVec3Field("Value", keyframe["Value"], 0.01f);
 
                     int interpolationIndex = InterpolationIndexFromJson(keyframe);
                     const char* interpolationNames[] = {"Step", "Linear"};
-                    if (ImGui::Combo("Interpolation", &interpolationIndex, interpolationNames, 2))
+                    ImGui::TextUnformatted("Interpolation");
+                    if (ImGui::Combo("##Interpolation", &interpolationIndex, interpolationNames, 2))
                         keyframe["Interpolation"] = JsonInterpolationName(interpolationIndex);
 
                     if (ImGui::Button("Remove Keyframe"))
@@ -799,16 +812,19 @@ namespace Limitless::EditorAnimationTimelinePanel
                 if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
                 {
                     float timeSeconds = keyframe.value("TimeSeconds", 0.0f);
-                    if (ImGui::DragFloat("Time (Seconds)", &timeSeconds, 0.01f))
+                    ImGui::TextUnformatted("Time (Seconds)");
+                    if (ImGui::DragFloat("##TimeSeconds", &timeSeconds, 0.01f))
                         keyframe["TimeSeconds"] = std::max(0.0f, timeSeconds);
 
                     float value = keyframe.value("Value", 0.0f);
-                    if (ImGui::DragFloat("Value", &value, 0.1f))
+                    ImGui::TextUnformatted("Value");
+                    if (ImGui::DragFloat("##Value", &value, 0.1f))
                         keyframe["Value"] = value;
 
                     int interpolationIndex = InterpolationIndexFromJson(keyframe);
                     const char* interpolationNames[] = {"Step", "Linear"};
-                    if (ImGui::Combo("Interpolation", &interpolationIndex, interpolationNames, 2))
+                    ImGui::TextUnformatted("Interpolation");
+                    if (ImGui::Combo("##Interpolation", &interpolationIndex, interpolationNames, 2))
                         keyframe["Interpolation"] = JsonInterpolationName(interpolationIndex);
 
                     if (ImGui::Button("Remove Keyframe"))
@@ -847,12 +863,14 @@ namespace Limitless::EditorAnimationTimelinePanel
                 if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
                 {
                     float timeSeconds = keyframe.value("TimeSeconds", 0.0f);
-                    if (ImGui::DragFloat("Time (Seconds)", &timeSeconds, 0.01f))
+                    ImGui::TextUnformatted("Time (Seconds)");
+                    if (ImGui::DragFloat("##TimeSeconds", &timeSeconds, 0.01f))
                         keyframe["TimeSeconds"] = std::max(0.0f, timeSeconds);
 
                     std::array<char, 128> nameBuffer{};
                     std::snprintf(nameBuffer.data(), nameBuffer.size(), "%s", keyframe.value("Name", std::string{}).c_str());
-                    if (ImGui::InputText("Event Name", nameBuffer.data(), nameBuffer.size()))
+                    ImGui::TextUnformatted("Event Name");
+                    if (ImGui::InputText("##EventName", nameBuffer.data(), nameBuffer.size()))
                         keyframe["Name"] = std::string(nameBuffer.data());
 
                     std::array<char, 256> stringPayloadBuffer{};
@@ -860,19 +878,23 @@ namespace Limitless::EditorAnimationTimelinePanel
                                   stringPayloadBuffer.size(),
                                   "%s",
                                   keyframe.value("StringPayload", std::string{}).c_str());
-                    if (ImGui::InputText("String Payload", stringPayloadBuffer.data(), stringPayloadBuffer.size()))
+                    ImGui::TextUnformatted("String Payload");
+                    if (ImGui::InputText("##StringPayload", stringPayloadBuffer.data(), stringPayloadBuffer.size()))
                         keyframe["StringPayload"] = std::string(stringPayloadBuffer.data());
 
                     float floatPayload = keyframe.value("FloatPayload", 0.0f);
-                    if (ImGui::DragFloat("Float Payload", &floatPayload, 0.01f))
+                    ImGui::TextUnformatted("Float Payload");
+                    if (ImGui::DragFloat("##FloatPayload", &floatPayload, 0.01f))
                         keyframe["FloatPayload"] = floatPayload;
 
                     int integerPayload = keyframe.value("IntegerPayload", 0);
-                    if (ImGui::DragInt("Integer Payload", &integerPayload))
+                    ImGui::TextUnformatted("Integer Payload");
+                    if (ImGui::DragInt("##IntegerPayload", &integerPayload))
                         keyframe["IntegerPayload"] = integerPayload;
 
                     bool booleanPayload = keyframe.value("BooleanPayload", false);
-                    if (ImGui::Checkbox("Boolean Payload", &booleanPayload))
+                    ImGui::TextUnformatted("Boolean Payload");
+                    if (ImGui::Checkbox("##BooleanPayload", &booleanPayload))
                         keyframe["BooleanPayload"] = booleanPayload;
 
                     if (ImGui::Button("Remove Keyframe"))
@@ -949,11 +971,13 @@ namespace Limitless::EditorAnimationTimelinePanel
 
         std::array<char, 256> clipNameBuffer{};
         std::snprintf(clipNameBuffer.data(), clipNameBuffer.size(), "%s", state.WorkingJson.value("Name", std::string{}).c_str());
-        if (ImGui::InputText("Name", clipNameBuffer.data(), clipNameBuffer.size()))
+        ImGui::TextUnformatted("Name");
+        if (ImGui::InputText("##TimelineClipName", clipNameBuffer.data(), clipNameBuffer.size()))
             state.WorkingJson["Name"] = std::string(clipNameBuffer.data());
 
         bool loop = state.WorkingJson.value("Loop", true);
-        if (ImGui::Checkbox("Loop", &loop))
+        ImGui::TextUnformatted("Loop");
+        if (ImGui::Checkbox("##TimelineLoop", &loop))
             state.WorkingJson["Loop"] = loop;
 
         float durationSeconds = state.WorkingJson.value("DurationSeconds", 1.0f);
@@ -966,7 +990,8 @@ namespace Limitless::EditorAnimationTimelinePanel
 
         const float maxPreviewTime = state.WorkingJson.value("DurationSeconds", 1.0f);
         ImGui::SeparatorText("Preview");
-        ImGui::SliderFloat("Preview Time", &state.PreviewTimeSeconds, 0.0f, std::max(0.0001f, maxPreviewTime));
+        ImGui::TextUnformatted("Preview Time");
+        ImGui::SliderFloat("##PreviewTime", &state.PreviewTimeSeconds, 0.0f, std::max(0.0001f, maxPreviewTime));
         if (const json* sampledTexture = SampleStepJsonKeyframe(state.WorkingJson["SpriteTextureTrack"], state.PreviewTimeSeconds))
         {
             const std::string previewTextureKey = sampledTexture->contains("Texture") && (*sampledTexture)["Texture"].is_object()

@@ -5,10 +5,13 @@
 #include "Undo/EditorUndoService.h"
 #include "imgui/imgui.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <unordered_set>
+#include <vector>
 
 namespace Limitless::EditorScenePanel
 {
@@ -74,6 +77,115 @@ namespace Limitless::EditorScenePanel
             selectedTilesetAssetKey.clear();
             selectedAudioMixerAssetKey.clear();
             selectedInputActionsAssetKey.clear();
+        }
+
+        bool ContainsEntity(const std::vector<entt::entity>& entities, entt::entity entity)
+        {
+            return std::find(entities.begin(), entities.end(), entity) != entities.end();
+        }
+
+        void AddEntityIfMissing(std::vector<entt::entity>& entities, entt::entity entity)
+        {
+            if (entity == entt::null)
+                return;
+            if (!ContainsEntity(entities, entity))
+                entities.push_back(entity);
+        }
+
+        void SelectSingleEntity(EditorScenePanelState& state, entt::entity& selectedEntity, entt::entity entity)
+        {
+            selectedEntity = entity;
+            state.MultiSelectedEntities.clear();
+            if (entity != entt::null)
+                state.MultiSelectedEntities.push_back(entity);
+            state.SelectionAnchorEntity = entity;
+        }
+
+        void ClearEntitySelectionState(EditorScenePanelState& state, entt::entity& selectedEntity)
+        {
+            selectedEntity = entt::null;
+            state.MultiSelectedEntities.clear();
+            state.SelectionAnchorEntity = entt::null;
+        }
+
+        void PruneInvalidEntitySelection(const Scene* scene, std::vector<entt::entity>& entities)
+        {
+            if (!scene)
+            {
+                entities.clear();
+                return;
+            }
+
+            entities.erase(
+                std::remove_if(
+                    entities.begin(),
+                    entities.end(),
+                    [&](entt::entity entity) { return !scene->IsValid(entity); }),
+                entities.end());
+        }
+
+        bool HasSelectedAncestor(const Scene& scene, entt::entity entity, const std::unordered_set<uint32_t>& selectedIds)
+        {
+            entt::entity parent = scene.GetParent(entity);
+            while (parent != entt::null && scene.IsValid(parent))
+            {
+                if (selectedIds.contains(static_cast<uint32_t>(parent)))
+                    return true;
+                parent = scene.GetParent(parent);
+            }
+            return false;
+        }
+
+        std::vector<entt::entity> BuildSelectionRoots(const Scene& scene,
+                                                      const std::vector<entt::entity>& selectedEntities,
+                                                      const std::vector<entt::entity>& drawOrderEntities)
+        {
+            std::unordered_set<uint32_t> selectedIds;
+            selectedIds.reserve(selectedEntities.size());
+            for (entt::entity entity : selectedEntities)
+            {
+                if (scene.IsValid(entity))
+                    selectedIds.insert(static_cast<uint32_t>(entity));
+            }
+
+            if (selectedIds.empty())
+                return {};
+
+            std::vector<entt::entity> orderedSelection;
+            orderedSelection.reserve(selectedIds.size());
+            for (entt::entity entity : drawOrderEntities)
+            {
+                if (selectedIds.contains(static_cast<uint32_t>(entity)))
+                    orderedSelection.push_back(entity);
+            }
+
+            for (entt::entity entity : selectedEntities)
+            {
+                if (!scene.IsValid(entity))
+                    continue;
+                if (!ContainsEntity(orderedSelection, entity))
+                    orderedSelection.push_back(entity);
+            }
+
+            std::vector<entt::entity> roots;
+            roots.reserve(orderedSelection.size());
+            for (entt::entity entity : orderedSelection)
+            {
+                if (!HasSelectedAncestor(scene, entity, selectedIds))
+                    roots.push_back(entity);
+            }
+            return roots;
+        }
+
+        std::vector<entt::entity> ResolveSelectionForSceneOperations(const Scene& scene,
+                                                                      const EditorScenePanelState& state,
+                                                                      entt::entity selectedEntity)
+        {
+            std::vector<entt::entity> selectedEntities = state.MultiSelectedEntities;
+            if (selectedEntities.empty() && scene.IsValid(selectedEntity))
+                selectedEntities.push_back(selectedEntity);
+
+            return BuildSelectionRoots(scene, selectedEntities, state.DrawOrderEntities);
         }
 
         void DrawHorizontalDropIndicator(float leftX, float rightX, float y)
@@ -153,6 +265,8 @@ namespace Limitless::EditorScenePanel
             if (!scene || !scene->IsValid(entity))
                 return false;
 
+            AddEntityIfMissing(state.DrawOrderEntities, entity);
+
             auto& registry = scene->GetRegistry();
             const auto* tag = registry.try_get<TagComponent>(entity);
             const std::string label = (tag && !tag->Tag.empty()) ? tag->Tag : "Entity";
@@ -166,7 +280,7 @@ namespace Limitless::EditorScenePanel
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
             if (children.empty())
                 flags |= ImGuiTreeNodeFlags_Leaf;
-            if (selectedEntity == entity)
+            if (selectedEntity == entity || ContainsEntity(state.MultiSelectedEntities, entity))
                 flags |= ImGuiTreeNodeFlags_Selected;
 
             const bool pushCustomTextColor = isDisabledEntity || isPrefabLinkedEntity;
@@ -184,7 +298,12 @@ namespace Limitless::EditorScenePanel
                 DrawPrefabBadgeForLastItem();
 
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+            {
                 state.PendingClickSelectionEntity = entity;
+                const ImGuiIO& io = ImGui::GetIO();
+                state.PendingClickCtrlModifier = io.KeyCtrl || io.KeySuper;
+                state.PendingClickShiftModifier = io.KeyShift;
+            }
 
             if (ImGui::BeginPopupContextItem())
             {
@@ -203,7 +322,7 @@ namespace Limitless::EditorScenePanel
                     if (!created)
                         child = entt::null;
 
-                    selectedEntity = child;
+                    SelectSingleEntity(state, selectedEntity, child);
                     selectedTextureAssetKey.clear();
                     cachedTextureAsset.reset();
                     selectedMaterialAssetKey.clear();
@@ -225,7 +344,18 @@ namespace Limitless::EditorScenePanel
 
                 if (ImGui::MenuItem("Delete"))
                 {
-                    state.PendingDeleteEntity = entity;
+                    std::vector<entt::entity> pendingDeleteSelection = { entity };
+                    const bool clickedEntityInMultiSelection =
+                        state.MultiSelectedEntities.size() > 1 &&
+                        ContainsEntity(state.MultiSelectedEntities, entity);
+                    if (clickedEntityInMultiSelection)
+                    {
+                        pendingDeleteSelection = BuildSelectionRoots(
+                            *scene,
+                            state.MultiSelectedEntities,
+                            state.DrawOrderEntities);
+                    }
+                    state.PendingDeleteEntities = std::move(pendingDeleteSelection);
                 }
 
                 const auto* prefabInstance = registry.try_get<PrefabInstanceComponent>(entity);
@@ -240,7 +370,7 @@ namespace Limitless::EditorScenePanel
                         const entt::entity revertedEntity = onRevertPrefabEntity(entity);
                         if (revertedEntity != entt::null)
                         {
-                            selectedEntity = revertedEntity;
+                            SelectSingleEntity(state, selectedEntity, revertedEntity);
                             selectedTextureAssetKey.clear();
                             cachedTextureAsset.reset();
                             selectedMaterialAssetKey.clear();
@@ -330,7 +460,7 @@ namespace Limitless::EditorScenePanel
                                 }
 
                                 // Make the drop feel like Unity: select the target object (not the asset).
-                                selectedEntity = entity;
+                                SelectSingleEntity(state, selectedEntity, entity);
                                 selectedTextureAssetKey.clear();
                                 cachedTextureAsset.reset();
                                 selectedMaterialAssetKey.clear();
@@ -354,7 +484,7 @@ namespace Limitless::EditorScenePanel
                             const entt::entity createdEntity = onInstantiatePrefabAtParent(prefabAssetKey, entity);
                             if (createdEntity != entt::null)
                             {
-                                selectedEntity = createdEntity;
+                                SelectSingleEntity(state, selectedEntity, createdEntity);
                                 selectedTextureAssetKey.clear();
                                 cachedTextureAsset.reset();
                                 selectedMaterialAssetKey.clear();
@@ -498,6 +628,26 @@ namespace Limitless::EditorScenePanel
     {
         ImGui::Begin("Scene");
 
+        state.DrawOrderEntities.clear();
+        PruneInvalidEntitySelection(scene, state.MultiSelectedEntities);
+        if (scene && !scene->IsValid(state.SelectionAnchorEntity))
+            state.SelectionAnchorEntity = entt::null;
+
+        if (scene && !scene->IsValid(selectedEntity))
+        {
+            if (!state.MultiSelectedEntities.empty())
+                selectedEntity = state.MultiSelectedEntities.back();
+            else
+                selectedEntity = entt::null;
+        }
+
+        if (scene && selectedEntity != entt::null && !ContainsEntity(state.MultiSelectedEntities, selectedEntity))
+        {
+            state.MultiSelectedEntities.clear();
+            state.MultiSelectedEntities.push_back(selectedEntity);
+            state.SelectionAnchorEntity = selectedEntity;
+        }
+
         bool deletedSelection = false;
         if (scene && ImGui::BeginPopupContextWindow("SceneContext", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
         {
@@ -515,7 +665,7 @@ namespace Limitless::EditorScenePanel
                 {
                     createdEntity = scene->CreateEntity("Entity");
                 }
-                selectedEntity = createdEntity;
+                SelectSingleEntity(state, selectedEntity, createdEntity);
                 selectedTextureAssetKey.clear();
                 cachedTextureAsset.reset();
                 selectedMaterialAssetKey.clear();
@@ -568,7 +718,7 @@ namespace Limitless::EditorScenePanel
                     createLayer("Collision",    0, true);
                     createLayer("Foreground",  20, false);
                 }
-                selectedEntity = gridEntity;
+                SelectSingleEntity(state, selectedEntity, gridEntity);
                 selectedTextureAssetKey.clear();
                 cachedTextureAsset.reset();
                 selectedMaterialAssetKey.clear();
@@ -587,7 +737,7 @@ namespace Limitless::EditorScenePanel
             !ImGui::IsAnyItemHovered())
         {
             state.PendingClickSelectionEntity = entt::null;
-            selectedEntity = entt::null;
+            ClearEntitySelectionState(state, selectedEntity);
             selectedTextureAssetKey.clear();
             cachedTextureAsset.reset();
             selectedMaterialAssetKey.clear();
@@ -620,7 +770,7 @@ namespace Limitless::EditorScenePanel
                         {
                             createdEntity = scene->CreateEntity("Entity");
                         }
-                        selectedEntity = createdEntity;
+                        SelectSingleEntity(state, selectedEntity, createdEntity);
                         selectedTextureAssetKey.clear();
                         cachedTextureAsset.reset();
                         selectedMaterialAssetKey.clear();
@@ -672,7 +822,7 @@ namespace Limitless::EditorScenePanel
                                 const entt::entity createdEntity = onInstantiatePrefabAtParent(prefabAssetKey, entt::null);
                                 if (createdEntity != entt::null)
                                 {
-                                    selectedEntity = createdEntity;
+                                    SelectSingleEntity(state, selectedEntity, createdEntity);
                                     selectedTextureAssetKey.clear();
                                     cachedTextureAsset.reset();
                                     selectedMaterialAssetKey.clear();
@@ -738,7 +888,7 @@ namespace Limitless::EditorScenePanel
                         {
                             createdEntity = scene->CreateEntity("Entity");
                         }
-                        selectedEntity = createdEntity;
+                        SelectSingleEntity(state, selectedEntity, createdEntity);
                         selectedTextureAssetKey.clear();
                         cachedTextureAsset.reset();
                         selectedMaterialAssetKey.clear();
@@ -788,7 +938,7 @@ namespace Limitless::EditorScenePanel
                                 const entt::entity createdEntity = onInstantiatePrefabAtParent(prefabAssetKey, entt::null);
                                 if (createdEntity != entt::null)
                                 {
-                                    selectedEntity = createdEntity;
+                                    SelectSingleEntity(state, selectedEntity, createdEntity);
                                     selectedTextureAssetKey.clear();
                                     cachedTextureAsset.reset();
                                     selectedMaterialAssetKey.clear();
@@ -811,58 +961,98 @@ namespace Limitless::EditorScenePanel
         }
 
         // Unity-like hierarchy shortcuts:
-        // - Ctrl/Cmd + C: copy selected entity subtree.
-        // - Ctrl/Cmd + V: paste copied subtree as sibling of selection (or root if nothing selected).
-        // - Ctrl/Cmd + D: duplicate selected entity subtree as next sibling.
+        // - Ctrl/Cmd + C: copy selected entity subtree(s).
+        // - Ctrl/Cmd + V: paste copied subtree(s) as siblings of selection (or root if nothing selected).
+        // - Ctrl/Cmd + D: duplicate selected entity subtree(s) as next siblings.
+        // - Delete: delete selected entity subtree(s).
         if (scene && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
         {
             const ImGuiIO& io = ImGui::GetIO();
             const bool commandDown = io.KeyCtrl || io.KeySuper;
-            const bool canHandleHierarchyShortcuts =
-                commandDown &&
+            const bool canHandleDeleteShortcut =
                 !io.WantTextInput &&
                 !ImGui::IsAnyItemActive() &&
                 !state.RenamePopupOpen;
+            const bool canHandleHierarchyShortcuts =
+                commandDown &&
+                canHandleDeleteShortcut;
 
             if (canHandleHierarchyShortcuts)
             {
                 if (ImGui::IsKeyPressed(ImGuiKey_C, false))
                 {
-                    if (scene->IsValid(selectedEntity))
+                    const std::vector<entt::entity> selectionRoots =
+                        ResolveSelectionForSceneOperations(*scene, state, selectedEntity);
+                    state.EntityClipboardScenes.clear();
+                    state.EntityClipboardScene.reset();
+
+                    for (entt::entity sourceEntity : selectionRoots)
                     {
-                        auto copiedSubtree = EditorPrefabSystem::CreateDetachedEntitySubtree(*scene, selectedEntity);
+                        auto copiedSubtree = EditorPrefabSystem::CreateDetachedEntitySubtree(*scene, sourceEntity);
                         if (copiedSubtree)
-                            state.EntityClipboardScene = std::move(copiedSubtree);
+                            state.EntityClipboardScenes.push_back(std::move(copiedSubtree));
                     }
+
+                    if (selectionRoots.size() == 1)
+                        state.EntityClipboardScene = EditorPrefabSystem::CreateDetachedEntitySubtree(*scene, selectionRoots.front());
                 }
 
                 if (ImGui::IsKeyPressed(ImGuiKey_V, false))
                 {
-                    if (state.EntityClipboardScene)
+                    std::vector<const Scene*> clipboardScenes;
+                    clipboardScenes.reserve(state.EntityClipboardScenes.size() + 1);
+                    for (const auto& clipboardScene : state.EntityClipboardScenes)
+                    {
+                        if (clipboardScene)
+                            clipboardScenes.push_back(clipboardScene.get());
+                    }
+                    if (clipboardScenes.empty() && state.EntityClipboardScene)
+                        clipboardScenes.push_back(state.EntityClipboardScene.get());
+
+                    if (!clipboardScenes.empty())
                     {
                         const entt::entity destinationParent =
                             scene->IsValid(selectedEntity) ? scene->GetParent(selectedEntity) : entt::null;
-                        entt::entity pastedEntity = entt::null;
+                        std::vector<entt::entity> pastedEntities;
+                        pastedEntities.reserve(clipboardScenes.size());
 
                         const bool pasted = undoService
                             ? undoService->ExecuteSceneMutation("Paste Entity", [&](Scene& mutableScene) {
-                                pastedEntity = EditorPrefabSystem::InstantiateDetachedEntitySubtree(
-                                    mutableScene,
-                                    *state.EntityClipboardScene,
-                                    destinationParent);
-                                return pastedEntity != entt::null;
+                                for (const Scene* clipboardScene : clipboardScenes)
+                                {
+                                    if (!clipboardScene)
+                                        continue;
+
+                                    const entt::entity pastedEntity = EditorPrefabSystem::InstantiateDetachedEntitySubtree(
+                                        mutableScene,
+                                        *clipboardScene,
+                                        destinationParent);
+                                    if (pastedEntity != entt::null)
+                                        pastedEntities.push_back(pastedEntity);
+                                }
+                                return !pastedEntities.empty();
                             })
                             : [&]() {
-                                pastedEntity = EditorPrefabSystem::InstantiateDetachedEntitySubtree(
-                                    *scene,
-                                    *state.EntityClipboardScene,
-                                    destinationParent);
-                                return pastedEntity != entt::null;
+                                for (const Scene* clipboardScene : clipboardScenes)
+                                {
+                                    if (!clipboardScene)
+                                        continue;
+
+                                    const entt::entity pastedEntity = EditorPrefabSystem::InstantiateDetachedEntitySubtree(
+                                        *scene,
+                                        *clipboardScene,
+                                        destinationParent);
+                                    if (pastedEntity != entt::null)
+                                        pastedEntities.push_back(pastedEntity);
+                                }
+                                return !pastedEntities.empty();
                             }();
 
                         if (pasted)
                         {
-                            selectedEntity = pastedEntity;
+                            selectedEntity = pastedEntities.back();
+                            state.MultiSelectedEntities = pastedEntities;
+                            state.SelectionAnchorEntity = selectedEntity;
                             ClearAssetSelectionState(
                                 selectedTextureAssetKey,
                                 cachedTextureAsset,
@@ -879,58 +1069,89 @@ namespace Limitless::EditorScenePanel
 
                 if (ImGui::IsKeyPressed(ImGuiKey_D, false))
                 {
-                    if (scene->IsValid(selectedEntity))
+                    const std::vector<entt::entity> sourceEntities =
+                        ResolveSelectionForSceneOperations(*scene, state, selectedEntity);
+                    if (!sourceEntities.empty())
                     {
-                        const entt::entity sourceEntity = selectedEntity;
-                        const entt::entity destinationParent = scene->GetParent(sourceEntity);
-                        auto copiedSubtree = EditorPrefabSystem::CreateDetachedEntitySubtree(*scene, sourceEntity);
-                        if (copiedSubtree)
-                        {
-                            entt::entity duplicatedEntity = entt::null;
-                            const bool duplicated = undoService
-                                ? undoService->ExecuteSceneMutation("Duplicate Entity", [&](Scene& mutableScene) {
-                                    if (!mutableScene.IsValid(sourceEntity))
-                                        return false;
+                        std::vector<std::unique_ptr<Scene>> copiedSubtrees;
+                        copiedSubtrees.reserve(sourceEntities.size());
+                        for (entt::entity sourceEntity : sourceEntities)
+                            copiedSubtrees.push_back(EditorPrefabSystem::CreateDetachedEntitySubtree(*scene, sourceEntity));
 
-                                    duplicatedEntity = EditorPrefabSystem::InstantiateDetachedEntitySubtree(
+                        std::vector<entt::entity> duplicatedEntities;
+                        duplicatedEntities.reserve(sourceEntities.size());
+                        const bool duplicated = undoService
+                            ? undoService->ExecuteSceneMutation("Duplicate Entity", [&](Scene& mutableScene) {
+                                for (size_t index = 0; index < sourceEntities.size(); ++index)
+                                {
+                                    const entt::entity sourceEntity = sourceEntities[index];
+                                    if (!mutableScene.IsValid(sourceEntity))
+                                        continue;
+                                    if (index >= copiedSubtrees.size() || !copiedSubtrees[index])
+                                        continue;
+
+                                    const entt::entity destinationParent = mutableScene.GetParent(sourceEntity);
+                                    const entt::entity duplicatedEntity = EditorPrefabSystem::InstantiateDetachedEntitySubtree(
                                         mutableScene,
-                                        *copiedSubtree,
+                                        *copiedSubtrees[index],
                                         destinationParent);
                                     if (duplicatedEntity == entt::null)
-                                        return false;
+                                        continue;
 
                                     (void)mutableScene.SetSiblingOrderAfter(duplicatedEntity, sourceEntity);
-                                    return true;
-                                })
-                                : [&]() {
-                                    duplicatedEntity = EditorPrefabSystem::InstantiateDetachedEntitySubtree(
+                                    duplicatedEntities.push_back(duplicatedEntity);
+                                }
+                                return !duplicatedEntities.empty();
+                            })
+                            : [&]() {
+                                for (size_t index = 0; index < sourceEntities.size(); ++index)
+                                {
+                                    const entt::entity sourceEntity = sourceEntities[index];
+                                    if (!scene->IsValid(sourceEntity))
+                                        continue;
+                                    if (index >= copiedSubtrees.size() || !copiedSubtrees[index])
+                                        continue;
+
+                                    const entt::entity destinationParent = scene->GetParent(sourceEntity);
+                                    const entt::entity duplicatedEntity = EditorPrefabSystem::InstantiateDetachedEntitySubtree(
                                         *scene,
-                                        *copiedSubtree,
+                                        *copiedSubtrees[index],
                                         destinationParent);
                                     if (duplicatedEntity == entt::null)
-                                        return false;
+                                        continue;
 
                                     (void)scene->SetSiblingOrderAfter(duplicatedEntity, sourceEntity);
-                                    return true;
-                                }();
+                                    duplicatedEntities.push_back(duplicatedEntity);
+                                }
+                                return !duplicatedEntities.empty();
+                            }();
 
-                            if (duplicated)
-                            {
-                                selectedEntity = duplicatedEntity;
-                                ClearAssetSelectionState(
-                                    selectedTextureAssetKey,
-                                    cachedTextureAsset,
-                                    selectedMaterialAssetKey,
-                                    cachedMaterialAsset,
-                                    selectedNativeScriptAssetKey,
-                                    selectedPrefabAssetKey,
-                                    selectedTilesetAssetKey,
-                                    selectedAudioMixerAssetKey,
-                                    selectedInputActionsAssetKey);
-                            }
+                        if (duplicated)
+                        {
+                            selectedEntity = duplicatedEntities.back();
+                            state.MultiSelectedEntities = duplicatedEntities;
+                            state.SelectionAnchorEntity = selectedEntity;
+                            ClearAssetSelectionState(
+                                selectedTextureAssetKey,
+                                cachedTextureAsset,
+                                selectedMaterialAssetKey,
+                                cachedMaterialAsset,
+                                selectedNativeScriptAssetKey,
+                                selectedPrefabAssetKey,
+                                selectedTilesetAssetKey,
+                                selectedAudioMixerAssetKey,
+                                selectedInputActionsAssetKey);
                         }
                     }
                 }
+            }
+
+            if (canHandleDeleteShortcut && ImGui::IsKeyPressed(ImGuiKey_Delete, false))
+            {
+                const std::vector<entt::entity> selectionRoots =
+                    ResolveSelectionForSceneOperations(*scene, state, selectedEntity);
+                if (!selectionRoots.empty())
+                    state.PendingDeleteEntities = selectionRoots;
             }
         }
 
@@ -938,19 +1159,89 @@ namespace Limitless::EditorScenePanel
         {
             if (state.PendingClickSelectionEntity != entt::null && ImGui::GetDragDropPayload() == nullptr)
             {
-                selectedEntity = state.PendingClickSelectionEntity;
-                selectedTextureAssetKey.clear();
-                cachedTextureAsset.reset();
-                selectedMaterialAssetKey.clear();
-                cachedMaterialAsset.reset();
-                selectedNativeScriptAssetKey.clear();
-                selectedPrefabAssetKey.clear();
-                selectedTilesetAssetKey.clear();
-                selectedAudioMixerAssetKey.clear();
-                selectedInputActionsAssetKey.clear();
+                const entt::entity clickedEntity = state.PendingClickSelectionEntity;
+                const bool ctrlModifier = state.PendingClickCtrlModifier;
+                const bool shiftModifier = state.PendingClickShiftModifier;
+
+                if (!scene || !scene->IsValid(clickedEntity))
+                {
+                    ClearEntitySelectionState(state, selectedEntity);
+                }
+                else if (shiftModifier)
+                {
+                    const entt::entity anchorEntity = scene->IsValid(state.SelectionAnchorEntity)
+                        ? state.SelectionAnchorEntity
+                        : clickedEntity;
+                    auto findDrawOrderIndex = [&](entt::entity entity) -> int32_t {
+                        for (size_t index = 0; index < state.DrawOrderEntities.size(); ++index)
+                        {
+                            if (state.DrawOrderEntities[index] == entity)
+                                return static_cast<int32_t>(index);
+                        }
+                        return -1;
+                    };
+
+                    const int32_t anchorIndex = findDrawOrderIndex(anchorEntity);
+                    const int32_t clickedIndex = findDrawOrderIndex(clickedEntity);
+                    if (!ctrlModifier)
+                        state.MultiSelectedEntities.clear();
+
+                    if (anchorIndex >= 0 && clickedIndex >= 0)
+                    {
+                        const int32_t minIndex = std::min(anchorIndex, clickedIndex);
+                        const int32_t maxIndex = std::max(anchorIndex, clickedIndex);
+                        for (int32_t index = minIndex; index <= maxIndex; ++index)
+                            AddEntityIfMissing(state.MultiSelectedEntities, state.DrawOrderEntities[static_cast<size_t>(index)]);
+                    }
+                    else
+                    {
+                        AddEntityIfMissing(state.MultiSelectedEntities, clickedEntity);
+                    }
+
+                    state.SelectionAnchorEntity = clickedEntity;
+                }
+                else if (ctrlModifier)
+                {
+                    const auto foundIt = std::find(state.MultiSelectedEntities.begin(), state.MultiSelectedEntities.end(), clickedEntity);
+                    if (foundIt != state.MultiSelectedEntities.end())
+                        state.MultiSelectedEntities.erase(foundIt);
+                    else
+                        state.MultiSelectedEntities.push_back(clickedEntity);
+
+                    state.SelectionAnchorEntity = clickedEntity;
+                }
+                else
+                {
+                    SelectSingleEntity(state, selectedEntity, clickedEntity);
+                }
+
+                if (!state.MultiSelectedEntities.empty())
+                {
+                    if (ContainsEntity(state.MultiSelectedEntities, clickedEntity))
+                        selectedEntity = clickedEntity;
+                    else
+                        selectedEntity = state.MultiSelectedEntities.back();
+                }
+                else
+                {
+                    selectedEntity = entt::null;
+                }
+
+                ClearAssetSelectionState(
+                    selectedTextureAssetKey,
+                    cachedTextureAsset,
+                    selectedMaterialAssetKey,
+                    cachedMaterialAsset,
+                    selectedNativeScriptAssetKey,
+                    selectedPrefabAssetKey,
+                    selectedTilesetAssetKey,
+                    selectedAudioMixerAssetKey,
+                    selectedInputActionsAssetKey);
             }
 
             state.PendingClickSelectionEntity = entt::null;
+            state.PendingClickCtrlModifier = false;
+            state.PendingClickShiftModifier = false;
         }
 
         if (state.RenamePopupOpen)
@@ -1001,30 +1292,45 @@ namespace Limitless::EditorScenePanel
             ImGui::EndPopup();
         }
 
-        if (scene && state.PendingDeleteEntity != entt::null && scene->IsValid(state.PendingDeleteEntity))
+        if (scene && !state.PendingDeleteEntities.empty())
         {
-            if (selectedEntity == state.PendingDeleteEntity || scene->IsDescendantOf(selectedEntity, state.PendingDeleteEntity))
-                deletedSelection = true;
+            const std::vector<entt::entity> entitiesToDelete =
+                BuildSelectionRoots(*scene, state.PendingDeleteEntities, state.DrawOrderEntities);
+            for (entt::entity entityToDelete : entitiesToDelete)
+            {
+                if (selectedEntity == entityToDelete || scene->IsDescendantOf(selectedEntity, entityToDelete))
+                    deletedSelection = true;
+            }
+
             if (undoService)
             {
-                const entt::entity entityToDelete = state.PendingDeleteEntity;
                 (void)undoService->ExecuteSceneMutation("Delete Entity", [&](Scene& mutableScene) {
-                    if (!mutableScene.IsValid(entityToDelete))
-                        return false;
-                    mutableScene.DestroyEntity(entityToDelete);
-                    return true;
+                    bool deletedAny = false;
+                    for (entt::entity entityToDelete : entitiesToDelete)
+                    {
+                        if (!mutableScene.IsValid(entityToDelete))
+                            continue;
+
+                        mutableScene.DestroyEntity(entityToDelete);
+                        deletedAny = true;
+                    }
+                    return deletedAny;
                 });
             }
             else
             {
-                scene->DestroyEntity(state.PendingDeleteEntity);
+                for (entt::entity entityToDelete : entitiesToDelete)
+                {
+                    if (scene->IsValid(entityToDelete))
+                        scene->DestroyEntity(entityToDelete);
+                }
             }
         }
-        state.PendingDeleteEntity = entt::null;
+        state.PendingDeleteEntities.clear();
 
         if (deletedSelection)
         {
-            selectedEntity = entt::null;
+            ClearEntitySelectionState(state, selectedEntity);
             selectedTextureAssetKey.clear();
             cachedTextureAsset.reset();
             selectedMaterialAssetKey.clear();
