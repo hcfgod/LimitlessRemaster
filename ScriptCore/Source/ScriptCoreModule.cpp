@@ -5,6 +5,11 @@
 #include "Scripting/InputActions.h"
 #include "Scripting/Physics2D.h"
 
+extern "C" LT_SCRIPTCORE_API uint32_t LT_GetScriptCoreAbiVersion()
+{
+    return Limitless::kScriptCoreAbiVersion;
+}
+
 extern "C" LT_SCRIPTCORE_API void LT_RegisterScriptCoreTypes(Limitless::NativeScriptRegistrationCallback registrationCallback)
 {
     if (!registrationCallback)

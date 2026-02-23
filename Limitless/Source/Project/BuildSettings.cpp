@@ -31,6 +31,16 @@ namespace Limitless::Project
                 return mode;
             return ScriptEditorMode::Internal;
         }
+
+        std::string SanitizeScriptCompileFailurePolicy(std::string policy)
+        {
+            if (policy == ScriptCompileFailurePolicy::SafeMode ||
+                policy == ScriptCompileFailurePolicy::BlockPlay)
+            {
+                return policy;
+            }
+            return ScriptCompileFailurePolicy::SafeMode;
+        }
     }
 
     std::filesystem::path GetBuildSettingsPath(const std::filesystem::path& projectRoot)
@@ -66,6 +76,8 @@ namespace Limitless::Project
             out.EngineRootOverride = root.value("engineRootOverride", std::string{});
             out.BuildBackend = SanitizeBuildBackend(root.value("buildBackend", out.BuildBackend));
             out.ScriptEditorMode = SanitizeScriptEditorMode(root.value("scriptEditorMode", out.ScriptEditorMode));
+            out.ScriptCompileFailurePolicy = SanitizeScriptCompileFailurePolicy(
+                root.value("scriptCompileFailurePolicy", out.ScriptCompileFailurePolicy));
 
             if (root.contains("buildScenes") && root["buildScenes"].is_array())
             {
@@ -107,6 +119,8 @@ namespace Limitless::Project
             root["engineRootOverride"] = settings.EngineRootOverride;
             root["buildBackend"] = SanitizeBuildBackend(settings.BuildBackend);
             root["scriptEditorMode"] = SanitizeScriptEditorMode(settings.ScriptEditorMode);
+            root["scriptCompileFailurePolicy"] =
+                SanitizeScriptCompileFailurePolicy(settings.ScriptCompileFailurePolicy);
 
             json scenesArray = json::array();
             for (const auto& entry : settings.BuildScenes)

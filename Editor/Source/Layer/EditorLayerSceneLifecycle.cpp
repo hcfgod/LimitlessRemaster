@@ -10,9 +10,12 @@
 #include "EditorAssetNaming.h"
 #include "EditorPlayMode.h"
 #include "Graphics/Camera/PerspectiveCamera3D.h"
+#include "Panels/EditorInspectorPanel.h"
+#include "Project/BuildSettings.h"
 #include "Project/ProjectManager.h"
 #include "Scene/Components.h"
 #include "Scene/Scene.h"
+#include "Scripting/NativeScriptRegistry.h"
 
 #include <algorithm>
 #include <cctype>
@@ -44,6 +47,28 @@ namespace Limitless
         std::string SceneDisplayNameFromFileName(const std::string& fileName)
         {
             return EditorAssetNaming::GetAssetDisplayNameFromFileName(fileName);
+        }
+
+        std::string NormalizeScriptCompileFailurePolicy(std::string policy)
+        {
+            if (policy == Project::ScriptCompileFailurePolicy::SafeMode ||
+                policy == Project::ScriptCompileFailurePolicy::BlockPlay)
+            {
+                return policy;
+            }
+            return Project::ScriptCompileFailurePolicy::SafeMode;
+        }
+
+        std::string ResolveScriptCompileFailurePolicy()
+        {
+            const auto& projectManager = Project::ProjectManager::GetInstance();
+            if (!projectManager.HasOpenProject())
+                return Project::ScriptCompileFailurePolicy::SafeMode;
+
+            const auto loadResult = Project::LoadBuildSettings(projectManager.GetProjectRoot());
+            if (!loadResult.IsSuccess())
+                return Project::ScriptCompileFailurePolicy::SafeMode;
+            return NormalizeScriptCompileFailurePolicy(loadResult.GetValue().ScriptCompileFailurePolicy);
         }
 
         void PopulateDefaultSceneTemplate(Scene& scene)
@@ -83,6 +108,9 @@ namespace Limitless
     {
         if (m_PlayModeState != EditorPlayModeState::Edit)
             return;
+        m_ScriptSafeModeActive = false;
+        m_ScriptSafeModeMessage.clear();
+        NativeScriptRegistry::SetExecutionBlocked(false);
         DestroyGameViewPreviewCamera();
 
         // Ensure Play Mode uses the latest animation authoring edits even if user did not click Apply.
@@ -95,6 +123,25 @@ namespace Limitless
         {
             LT_ERROR("Cannot enter Play Mode: failed to auto-apply pending Animator Controller edits.");
             return;
+        }
+
+        std::string scriptBuildFailureMessage;
+        if (EditorInspectorPanel::GetLastNativeScriptBuildFailure(&scriptBuildFailureMessage))
+        {
+            const std::string failurePolicy = ResolveScriptCompileFailurePolicy();
+            if (failurePolicy == Project::ScriptCompileFailurePolicy::BlockPlay)
+            {
+                LT_ERROR("Cannot enter Play Mode: {} Build scripts to continue.",
+                         scriptBuildFailureMessage.empty() ? "native script build previously failed." : scriptBuildFailureMessage);
+                return;
+            }
+
+            m_ScriptSafeModeActive = true;
+            m_ScriptSafeModeMessage = scriptBuildFailureMessage.empty()
+                ? std::string("Last native script build failed.")
+                : scriptBuildFailureMessage;
+            NativeScriptRegistry::SetExecutionBlocked(true);
+            LT_WARN("Play Mode Safe Mode enabled: scripts are disabled. {}", m_ScriptSafeModeMessage);
         }
 
         // Unity-style: Playing from Prefab Mode first returns to the previous scene.
@@ -141,6 +188,9 @@ namespace Limitless
     {
         if (m_PlayModeState != EditorPlayModeState::Edit)
             return;
+        m_ScriptSafeModeActive = false;
+        m_ScriptSafeModeMessage.clear();
+        NativeScriptRegistry::SetExecutionBlocked(false);
         DestroyGameViewPreviewCamera();
 
         // Keep Simulate Mode consistent with authored animation panel changes.
@@ -153,6 +203,25 @@ namespace Limitless
         {
             LT_ERROR("Cannot enter Simulate Mode: failed to auto-apply pending Animator Controller edits.");
             return;
+        }
+
+        std::string scriptBuildFailureMessage;
+        if (EditorInspectorPanel::GetLastNativeScriptBuildFailure(&scriptBuildFailureMessage))
+        {
+            const std::string failurePolicy = ResolveScriptCompileFailurePolicy();
+            if (failurePolicy == Project::ScriptCompileFailurePolicy::BlockPlay)
+            {
+                LT_ERROR("Cannot enter Simulate Mode: {} Build scripts to continue.",
+                         scriptBuildFailureMessage.empty() ? "native script build previously failed." : scriptBuildFailureMessage);
+                return;
+            }
+
+            m_ScriptSafeModeActive = true;
+            m_ScriptSafeModeMessage = scriptBuildFailureMessage.empty()
+                ? std::string("Last native script build failed.")
+                : scriptBuildFailureMessage;
+            NativeScriptRegistry::SetExecutionBlocked(true);
+            LT_WARN("Simulate Mode Safe Mode enabled: scripts are disabled. {}", m_ScriptSafeModeMessage);
         }
 
         StopAudioSourcesInScene(m_Scene.get());
@@ -178,6 +247,9 @@ namespace Limitless
 
     void EditorLayer::ExitPlayMode()
     {
+        NativeScriptRegistry::SetExecutionBlocked(false);
+        m_ScriptSafeModeActive = false;
+        m_ScriptSafeModeMessage.clear();
         StopAudioSourcesInScene(m_Scene.get());
         StopAudioSourcesInScene(m_EditSceneStored.get());
 

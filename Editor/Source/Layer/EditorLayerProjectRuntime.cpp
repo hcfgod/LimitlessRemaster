@@ -148,7 +148,10 @@ namespace Limitless
             return;
 
         for (const auto& group : mixerDefinition.Groups)
+        {
             audioEngine.SetMixerGroupVolume(group.Name, group.Volume);
+            audioEngine.SetMixerGroupReverbSend(group.Name, group.ReverbSend);
+        }
 
         m_ProjectAppliedAudioMixerAssetKey = m_ProjectAudioSettings.MixerAssetKey;
         m_ProjectAppliedAudioMixerLastWriteTimeTicks = lastWriteTicks;

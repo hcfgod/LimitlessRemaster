@@ -31,6 +31,8 @@ namespace Limitless
         static bool HasScript(const std::string& className);
         static std::unique_ptr<ScriptableEntity> CreateScript(const std::string& className);
         static std::vector<std::string> GetRegisteredScriptNames();
+        static void SetExecutionBlocked(bool blocked);
+        static bool IsExecutionBlocked();
         static void Clear();
     };
 }

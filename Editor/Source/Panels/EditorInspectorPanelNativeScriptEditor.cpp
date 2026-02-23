@@ -66,6 +66,10 @@ namespace Limitless::EditorInspectorPanel
             std::string StatusMessage;
             bool StatusIsError = false;
             bool AutoBuildAfterSave = true;
+            bool HasCompletedBuild = false;
+            bool LastBuildSucceeded = true;
+            int LastCompletedBuildExitCode = 0;
+            std::string LastBuildSummary;
             std::atomic<bool> BuildInProgress{ false };
             std::atomic<int> LastBuildExitCode{ -1 };
             std::unique_ptr<std::thread> BuildThread;
@@ -803,6 +807,10 @@ namespace Limitless::EditorInspectorPanel
 
             if (finishedBuildExitCode == 0)
             {
+                state.HasCompletedBuild = true;
+                state.LastBuildSucceeded = true;
+                state.LastCompletedBuildExitCode = 0;
+                state.LastBuildSummary = "Native script build succeeded.";
                 state.BuildToastVisible = true;
                 state.BuildToastIsError = false;
                 state.BuildToastMessage = "Native script build succeeded.";
@@ -819,6 +827,11 @@ namespace Limitless::EditorInspectorPanel
             }
             else
             {
+                state.HasCompletedBuild = true;
+                state.LastBuildSucceeded = false;
+                state.LastCompletedBuildExitCode = finishedBuildExitCode;
+                state.LastBuildSummary =
+                    "Native script build failed (exit code " + std::to_string(finishedBuildExitCode) + ").";
                 state.BuildToastVisible = true;
                 state.BuildToastIsError = true;
                 state.BuildToastMessage =
@@ -2045,6 +2058,22 @@ namespace Limitless::EditorInspectorPanel
                 *outStatusMessage = "Failed to start native script build.";
         }
         return started;
+    }
+
+    bool GetLastNativeScriptBuildFailure(std::string* outStatusMessage)
+    {
+        auto& state = GetNativeScriptAuthoringState();
+        if (!state.HasCompletedBuild || state.LastBuildSucceeded)
+            return false;
+
+        if (outStatusMessage)
+        {
+            if (!state.LastBuildSummary.empty())
+                *outStatusMessage = state.LastBuildSummary;
+            else
+                *outStatusMessage = "Native script build failed.";
+        }
+        return true;
     }
 
     void OnNativeScriptAssetRenamed(const std::string& oldAssetKey, const std::string& newAssetKey)

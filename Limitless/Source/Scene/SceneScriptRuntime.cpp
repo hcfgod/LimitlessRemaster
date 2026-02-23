@@ -32,6 +32,50 @@ namespace Limitless
             ProcessUiInteractionSystemForSceneRuntime(*this, 0, 0);
         }
         static uint64_t s_AnimationDispatchFrameCounter = 0;
+
+        if (NativeScriptRegistry::IsExecutionBlocked())
+        {
+            auto scriptView = m_Registry.view<NativeScriptComponent>();
+            for (entt::entity entity : scriptView)
+            {
+                auto& nativeScript = scriptView.get<NativeScriptComponent>(entity);
+                for (auto& scriptEntry : nativeScript.Scripts)
+                {
+                    if (scriptEntry.RuntimeInstance)
+                    {
+                        if (scriptEntry.RuntimeInitialized)
+                        {
+                            try
+                            {
+                                scriptEntry.RuntimeInstance->OnDestroy();
+                            }
+                            catch (...)
+                            {
+                            }
+                        }
+
+                        try
+                        {
+                            Coroutine::StopAll(*scriptEntry.RuntimeInstance);
+                        }
+                        catch (...)
+                        {
+                        }
+                        scriptEntry.RuntimeInstance.reset();
+                    }
+
+                    scriptEntry.RuntimeInitialized = false;
+                    scriptEntry.RuntimeUpdateCount = 0;
+                    scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                    scriptEntry.RuntimeWarnedMissingCompiledScript = false;
+                }
+            }
+
+            UpdateAnimation2DSystemForSceneRuntime(*this, deltaTime, ++s_AnimationDispatchFrameCounter);
+            UpdateParticleEmitterSystem(m_Registry, deltaTime);
+            return;
+        }
+
         std::vector<std::pair<entt::entity, size_t>> scriptSlots;
         {
             auto snapshotView = m_Registry.view<NativeScriptComponent>();
@@ -309,6 +353,9 @@ namespace Limitless
     void Scene::FixedUpdate(float fixedDeltaTime)
     {
         Physics2DQueries::SetActiveSceneForScriptQueries(this);
+        if (NativeScriptRegistry::IsExecutionBlocked())
+            return;
+
         std::vector<std::pair<entt::entity, size_t>> scriptSlots;
         {
             auto snapshotView = m_Registry.view<NativeScriptComponent>();

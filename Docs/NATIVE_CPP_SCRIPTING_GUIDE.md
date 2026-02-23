@@ -483,6 +483,10 @@ Important:
   - Linux/macOS: `Scripts/build-scriptcore-unix.sh`
 - Build configuration/platform are read from project build target settings when available.
 - Script classes are loaded from the platform-native ScriptCore module and hot-reloaded in Edit mode when its timestamp changes (`ScriptCore.dll` on Windows, `libScriptCore.so` on Linux, `libScriptCore.dylib` on macOS).
+- ScriptCore hot-reload validates `LT_GetScriptCoreAbiVersion` before registration; incompatible or stale modules are rejected and the previously loaded module is kept.
+- Build failure behavior when entering Play Mode is configurable in Build Settings:
+  - `Safe Mode`: enter play with native scripts disabled and a persistent warning banner.
+  - `Block Play Mode`: prevent entering play until native scripts build successfully.
 
 ## Stress Testing Large Entity Counts
 
@@ -522,3 +526,4 @@ Suggested workflow:
 - Script runtime instances are transient and are not serialized.
 - Script authoring source-of-truth is the opened project's `Assets` folder.
 - Script build inputs are generated mirrors under `Build/Generated/ScriptCore`.
+- In Safe Mode, script lifecycle callbacks are suppressed for the play session without changing authored script components.

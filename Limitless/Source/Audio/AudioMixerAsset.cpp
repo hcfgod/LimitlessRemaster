@@ -51,6 +51,7 @@ namespace Limitless::Audio
             AudioMixerGroupEntry normalizedGroup{};
             normalizedGroup.Name = name;
             normalizedGroup.Volume = std::max(0.0f, group.Volume);
+            normalizedGroup.ReverbSend = std::clamp(group.ReverbSend, 0.0f, 1.0f);
             normalized.push_back(std::move(normalizedGroup));
             seenNames.insert(name);
         }
@@ -102,6 +103,7 @@ namespace Limitless::Audio
                     AudioMixerGroupEntry group{};
                     group.Name = groupJson.value("Name", std::string{});
                     group.Volume = groupJson.value("Volume", 1.0f);
+                    group.ReverbSend = groupJson.value("ReverbSend", 0.0f);
                     definition.Groups.push_back(std::move(group));
                 }
             }
@@ -131,7 +133,8 @@ namespace Limitless::Audio
         {
             groupsJson.push_back({
                 { "Name", group.Name },
-                { "Volume", group.Volume }
+                { "Volume", group.Volume },
+                { "ReverbSend", group.ReverbSend }
             });
         }
 

@@ -1,6 +1,7 @@
 #include "Scripting/NativeScriptRegistry.h"
 
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 #include <unordered_map>
 
@@ -18,6 +19,12 @@ namespace Limitless
         {
             static std::mutex mutex;
             return mutex;
+        }
+
+        std::atomic<bool>& GetExecutionBlockedFlag()
+        {
+            static std::atomic<bool> blocked{ false };
+            return blocked;
         }
     }
 
@@ -71,6 +78,16 @@ namespace Limitless
         }
         std::sort(names.begin(), names.end());
         return names;
+    }
+
+    void NativeScriptRegistry::SetExecutionBlocked(bool blocked)
+    {
+        GetExecutionBlockedFlag().store(blocked, std::memory_order_release);
+    }
+
+    bool NativeScriptRegistry::IsExecutionBlocked()
+    {
+        return GetExecutionBlockedFlag().load(std::memory_order_acquire);
     }
 
     void NativeScriptRegistry::Clear()

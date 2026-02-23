@@ -32,6 +32,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace Limitless
 {
@@ -41,6 +42,7 @@ namespace Limitless
     namespace
     {
         using RegisterScriptCoreTypesFunction = void (*)(NativeScriptRegistrationCallback registrationCallback);
+        using GetScriptCoreAbiVersionFunction = uint32_t (*)();
         using SetSceneTransitionBridgeFunction = void (*)(SceneTransitionBridgeCallback callback);
         using SetInputActionAxis1DBridgeFunction = void (*)(InputActionAxis1DBridgeCallback callback);
         using SetInputActionAxis2DBridgeFunction = void (*)(InputActionAxis2DBridgeCallback callback);
@@ -212,6 +214,8 @@ namespace Limitless
             glm::vec2 Position = glm::vec2(0.0f);
         };
 
+        using AudioListenerPositions2D = std::vector<glm::vec2>;
+
         struct AudioSpatialMix2D
         {
             float Gain = 1.0f;
@@ -251,9 +255,9 @@ namespace Limitless
             return false;
         }
 
-        AudioListener2DRuntimeState ResolveAudioListener2DRuntimeState(const Scene& scene)
+        AudioListenerPositions2D CollectAudioListenerPositions2D(const Scene& scene)
         {
-            AudioListener2DRuntimeState listenerState{};
+            AudioListenerPositions2D listenerPositions;
             const auto& registry = scene.GetRegistry();
 
             auto listenerView = registry.view<AudioListener2DComponent>();
@@ -271,23 +275,44 @@ namespace Limitless
                     entt::entity cameraEntity = entt::null;
                     if (TryFindPrimaryCameraEntity(scene, cameraEntity))
                     {
-                        listenerState.HasListener = true;
-                        listenerState.Position = ComputeEntityWorldPosition2D(scene, cameraEntity);
-                        return listenerState;
+                        listenerPositions.push_back(ComputeEntityWorldPosition2D(scene, cameraEntity));
+                        continue;
                     }
                 }
 
-                listenerState.HasListener = true;
-                listenerState.Position = ComputeEntityWorldPosition2D(scene, entity);
-                return listenerState;
+                listenerPositions.push_back(ComputeEntityWorldPosition2D(scene, entity));
             }
 
-            // Fallback keeps authored scenes audible before a listener is explicitly added.
-            entt::entity fallbackCameraEntity = entt::null;
-            if (TryFindPrimaryCameraEntity(scene, fallbackCameraEntity))
+            // Fallback keeps authored scenes audible before listeners are explicitly added.
+            if (listenerPositions.empty())
             {
-                listenerState.HasListener = true;
-                listenerState.Position = ComputeEntityWorldPosition2D(scene, fallbackCameraEntity);
+                entt::entity fallbackCameraEntity = entt::null;
+                if (TryFindPrimaryCameraEntity(scene, fallbackCameraEntity))
+                    listenerPositions.push_back(ComputeEntityWorldPosition2D(scene, fallbackCameraEntity));
+            }
+
+            return listenerPositions;
+        }
+
+        AudioListener2DRuntimeState ResolveNearestAudioListener2DRuntimeState(const AudioListenerPositions2D& listeners,
+                                                                              const glm::vec2& sourcePosition)
+        {
+            AudioListener2DRuntimeState listenerState{};
+            if (listeners.empty())
+                return listenerState;
+
+            listenerState.HasListener = true;
+            listenerState.Position = listeners.front();
+            float bestDistanceSq = glm::dot(sourcePosition - listenerState.Position, sourcePosition - listenerState.Position);
+            for (size_t i = 1; i < listeners.size(); ++i)
+            {
+                const glm::vec2& listenerPosition = listeners[i];
+                const float distanceSq = glm::dot(sourcePosition - listenerPosition, sourcePosition - listenerPosition);
+                if (distanceSq < bestDistanceSq)
+                {
+                    bestDistanceSq = distanceSq;
+                    listenerState.Position = listenerPosition;
+                }
             }
 
             return listenerState;
@@ -295,11 +320,14 @@ namespace Limitless
 
         AudioSpatialMix2D ComputeAudioSpatialMix2D(const AudioSourceComponent& audioSource,
                                                    const glm::vec2& sourcePosition,
-                                                   const AudioListener2DRuntimeState& listenerState)
+                                                   const AudioListenerPositions2D& listeners)
         {
             AudioSpatialMix2D result{};
-            if (audioSource.Space != AudioSourceComponent::PlaybackSpace::Spatial2D || !listenerState.HasListener)
+            if (audioSource.Space != AudioSourceComponent::PlaybackSpace::Spatial2D || listeners.empty())
                 return result;
+
+            const AudioListener2DRuntimeState listenerState =
+                ResolveNearestAudioListener2DRuntimeState(listeners, sourcePosition);
 
             const float minDistance = std::max(0.001f, audioSource.SpatialMinDistance);
             const float maxDistance = std::max(minDistance, audioSource.SpatialMaxDistance);
@@ -350,7 +378,7 @@ namespace Limitless
                 return;
 
             auto& registry = scene->GetRegistry();
-            const AudioListener2DRuntimeState listenerState = ResolveAudioListener2DRuntimeState(*scene);
+            const AudioListenerPositions2D listenerPositions = CollectAudioListenerPositions2D(*scene);
             auto audioView = registry.view<AudioSourceComponent>();
             for (entt::entity entity : audioView)
             {
@@ -372,7 +400,7 @@ namespace Limitless
                 }
 
                 const glm::vec2 sourcePosition = ComputeEntityWorldPosition2D(*scene, entity);
-                const AudioSpatialMix2D spatialMix = ComputeAudioSpatialMix2D(audioSource, sourcePosition, listenerState);
+                const AudioSpatialMix2D spatialMix = ComputeAudioSpatialMix2D(audioSource, sourcePosition, listenerPositions);
                 const float authoredVolume = audioSource.Muted ? 0.0f : std::max(0.0f, audioSource.Volume);
                 const float runtimeVolume = authoredVolume * spatialMix.Gain;
                 const float runtimePan = spatialMix.Pan;
@@ -471,7 +499,10 @@ namespace Limitless
                         if (Audio::LoadAudioMixerDefinitionFromAssetKey(mixerAssetKey, mixerDefinition))
                         {
                             for (const auto& group : mixerDefinition.Groups)
+                            {
                                 audioEngine.SetMixerGroupVolume(group.Name, group.Volume);
+                                audioEngine.SetMixerGroupReverbSend(group.Name, group.ReverbSend);
+                            }
                         }
                     }
                 }
@@ -821,6 +852,27 @@ namespace Limitless
         if (!m_ScriptCoreLibraryHandle)
         {
             LT_ERROR("GameLayer: failed to load ScriptCore library.");
+            return;
+        }
+
+        const auto getAbiVersionFunction = reinterpret_cast<GetScriptCoreAbiVersionFunction>(
+            PlatformUtils::GetProcAddress(m_ScriptCoreLibraryHandle, "LT_GetScriptCoreAbiVersion"));
+        if (!getAbiVersionFunction)
+        {
+            LT_ERROR("GameLayer: ScriptCore missing LT_GetScriptCoreAbiVersion export.");
+            PlatformUtils::FreeLibrary(m_ScriptCoreLibraryHandle);
+            m_ScriptCoreLibraryHandle = nullptr;
+            return;
+        }
+
+        const uint32_t reportedAbiVersion = getAbiVersionFunction();
+        if (reportedAbiVersion != kScriptCoreAbiVersion)
+        {
+            LT_ERROR("GameLayer: ScriptCore ABI mismatch. expected={}, got={}.",
+                     kScriptCoreAbiVersion,
+                     reportedAbiVersion);
+            PlatformUtils::FreeLibrary(m_ScriptCoreLibraryHandle);
+            m_ScriptCoreLibraryHandle = nullptr;
             return;
         }
 

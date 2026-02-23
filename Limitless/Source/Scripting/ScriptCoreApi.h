@@ -2,10 +2,13 @@
 
 #include "Scripting/ScriptableEntity.h"
 
+#include <cstdint>
+
 namespace Limitless
 {
     using NativeScriptCreateFunction = ScriptableEntity* (*)();
     using NativeScriptRegistrationCallback = void (*)(const char* className, NativeScriptCreateFunction createFunction);
+    constexpr uint32_t kScriptCoreAbiVersion = 1u;
 }
 
 #if defined(_WIN32)
@@ -20,6 +23,7 @@ namespace Limitless
 
 extern "C"
 {
+    LT_SCRIPTCORE_API uint32_t LT_GetScriptCoreAbiVersion();
     LT_SCRIPTCORE_API void LT_RegisterScriptCoreTypes(Limitless::NativeScriptRegistrationCallback registrationCallback);
     LT_SCRIPTCORE_API void LT_SetScriptInstantiatePrefabBridge(Limitless::ScriptInstantiatePrefabBridgeCallback callback);
 }

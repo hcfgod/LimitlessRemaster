@@ -1520,6 +1520,12 @@ namespace Limitless::EditorInspectorPanel
                 modified = true;
             }
 
+            if (ImGui::SliderFloat("Reverb Send", &group.ReverbSend, 0.0f, 1.0f, "%.2f"))
+            {
+                group.ReverbSend = std::clamp(group.ReverbSend, 0.0f, 1.0f);
+                modified = true;
+            }
+
             if (ImGui::Button("Remove Group", ImVec2(120.0f, 0.0f)))
                 removeGroupIndex = groupIndex;
 

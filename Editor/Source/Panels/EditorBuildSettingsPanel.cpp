@@ -43,6 +43,16 @@ namespace Limitless::EditorBuildSettingsPanel
             return Project::ScriptEditorMode::Internal;
         }
 
+        std::string NormalizeScriptCompileFailurePolicy(std::string policy)
+        {
+            if (policy == Project::ScriptCompileFailurePolicy::SafeMode ||
+                policy == Project::ScriptCompileFailurePolicy::BlockPlay)
+            {
+                return policy;
+            }
+            return Project::ScriptCompileFailurePolicy::SafeMode;
+        }
+
         std::string TrimCopy(std::string value)
         {
             auto isWhitespace = [](unsigned char character) {
@@ -169,6 +179,8 @@ namespace Limitless::EditorBuildSettingsPanel
             state.Settings.BuildConfiguration = "Dist";
             state.Settings.BuildBackend = NormalizeBuildBackend(state.Settings.BuildBackend);
             state.Settings.ScriptEditorMode = NormalizeScriptEditorMode(state.Settings.ScriptEditorMode);
+            state.Settings.ScriptCompileFailurePolicy =
+                NormalizeScriptCompileFailurePolicy(state.Settings.ScriptCompileFailurePolicy);
 
             // Populate editable text buffers from saved settings.
             CopyStringToBuffer("", state.OutputDirectoryBuffer);
@@ -199,6 +211,8 @@ namespace Limitless::EditorBuildSettingsPanel
             state.Settings.BuildConfiguration = "Dist";
             state.Settings.BuildBackend = NormalizeBuildBackend(state.Settings.BuildBackend);
             state.Settings.ScriptEditorMode = NormalizeScriptEditorMode(state.Settings.ScriptEditorMode);
+            state.Settings.ScriptCompileFailurePolicy =
+                NormalizeScriptCompileFailurePolicy(state.Settings.ScriptCompileFailurePolicy);
 
             const auto projectRoot = projectManager.GetProjectRoot();
             const auto iconValidationResult = ValidateWindowIconPath(projectRoot, state.Settings.GameWindowIconPath);
@@ -692,6 +706,22 @@ namespace Limitless::EditorBuildSettingsPanel
             state.Settings.ScriptEditorMode = (currentScriptEditorIndex == 0)
                 ? Project::ScriptEditorMode::Internal
                 : Project::ScriptEditorMode::External;
+        }
+
+        const char* scriptFailurePolicyOptions[] = {
+            "Safe Mode (allow play, disable scripts)",
+            "Block Play Mode on failure"
+        };
+        int currentScriptFailurePolicyIndex =
+            (NormalizeScriptCompileFailurePolicy(state.Settings.ScriptCompileFailurePolicy) ==
+             Project::ScriptCompileFailurePolicy::BlockPlay)
+                ? 1
+                : 0;
+        if (ImGui::Combo("Script Build Failure", &currentScriptFailurePolicyIndex, scriptFailurePolicyOptions, 2))
+        {
+            state.Settings.ScriptCompileFailurePolicy = (currentScriptFailurePolicyIndex == 0)
+                ? Project::ScriptCompileFailurePolicy::SafeMode
+                : Project::ScriptCompileFailurePolicy::BlockPlay;
         }
 
         // -----------------------------------------------------------------

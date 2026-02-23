@@ -411,6 +411,8 @@ namespace Limitless
             glm::vec2 Position = glm::vec2(0.0f);
         };
 
+        using AudioListenerPositions2D = std::vector<glm::vec2>;
+
         struct AudioSpatialMix2D
         {
             float Gain = 1.0f;
@@ -449,9 +451,9 @@ namespace Limitless
             return false;
         }
 
-        AudioListener2DRuntimeState ResolveAudioListener2DRuntimeState(const Scene& scene)
+        AudioListenerPositions2D CollectAudioListenerPositions2D(const Scene& scene)
         {
-            AudioListener2DRuntimeState listenerState{};
+            AudioListenerPositions2D listenerPositions;
             const auto& registry = scene.GetRegistry();
 
             auto listenerView = registry.view<AudioListener2DComponent>();
@@ -468,35 +470,58 @@ namespace Limitless
                     entt::entity cameraEntity = entt::null;
                     if (TryFindPrimaryCameraEntity(scene, cameraEntity))
                     {
-                        listenerState.HasListener = true;
-                        listenerState.Position = ComputeEntityWorldPosition2D(scene, cameraEntity);
-                        return listenerState;
+                        listenerPositions.push_back(ComputeEntityWorldPosition2D(scene, cameraEntity));
+                        continue;
                     }
                 }
 
-                listenerState.HasListener = true;
-                listenerState.Position = ComputeEntityWorldPosition2D(scene, entity);
-                return listenerState;
+                listenerPositions.push_back(ComputeEntityWorldPosition2D(scene, entity));
             }
 
-            // Fallback behavior keeps authored scenes audible even before a listener is added.
-            entt::entity fallbackCameraEntity = entt::null;
-            if (TryFindPrimaryCameraEntity(scene, fallbackCameraEntity))
+            // Fallback behavior keeps authored scenes audible even before listeners are added.
+            if (listenerPositions.empty())
             {
-                listenerState.HasListener = true;
-                listenerState.Position = ComputeEntityWorldPosition2D(scene, fallbackCameraEntity);
+                entt::entity fallbackCameraEntity = entt::null;
+                if (TryFindPrimaryCameraEntity(scene, fallbackCameraEntity))
+                    listenerPositions.push_back(ComputeEntityWorldPosition2D(scene, fallbackCameraEntity));
             }
 
+            return listenerPositions;
+        }
+
+        AudioListener2DRuntimeState ResolveNearestAudioListener2DRuntimeState(const AudioListenerPositions2D& listeners,
+                                                                              const glm::vec2& sourcePosition)
+        {
+            AudioListener2DRuntimeState listenerState{};
+            if (listeners.empty())
+                return listenerState;
+
+            listenerState.HasListener = true;
+            listenerState.Position = listeners.front();
+            float bestDistanceSq = glm::dot(sourcePosition - listenerState.Position, sourcePosition - listenerState.Position);
+            for (size_t i = 1; i < listeners.size(); ++i)
+            {
+                const glm::vec2& listenerPosition = listeners[i];
+                const float distanceSq = glm::dot(sourcePosition - listenerPosition, sourcePosition - listenerPosition);
+                if (distanceSq < bestDistanceSq)
+                {
+                    bestDistanceSq = distanceSq;
+                    listenerState.Position = listenerPosition;
+                }
+            }
             return listenerState;
         }
 
         AudioSpatialMix2D ComputeAudioSpatialMix2D(const AudioSourceComponent& audioSource,
                                                    const glm::vec2& sourcePosition,
-                                                   const AudioListener2DRuntimeState& listenerState)
+                                                   const AudioListenerPositions2D& listeners)
         {
             AudioSpatialMix2D result{};
-            if (audioSource.Space != AudioSourceComponent::PlaybackSpace::Spatial2D || !listenerState.HasListener)
+            if (audioSource.Space != AudioSourceComponent::PlaybackSpace::Spatial2D || listeners.empty())
                 return result;
+
+            const AudioListener2DRuntimeState listenerState =
+                ResolveNearestAudioListener2DRuntimeState(listeners, sourcePosition);
 
             const float minDistance = std::max(0.001f, audioSource.SpatialMinDistance);
             const float maxDistance = std::max(minDistance, audioSource.SpatialMaxDistance);
@@ -535,7 +560,7 @@ namespace Limitless
                  playModeState == EditorPlayModeState::Pause);
 
             auto& registry = scene->GetRegistry();
-            const AudioListener2DRuntimeState listenerState = ResolveAudioListener2DRuntimeState(*scene);
+            const AudioListenerPositions2D listenerPositions = CollectAudioListenerPositions2D(*scene);
             auto audioView = registry.view<AudioSourceComponent>();
             for (entt::entity entity : audioView)
             {
@@ -561,7 +586,7 @@ namespace Limitless
                 }
 
                 const glm::vec2 sourcePosition = ComputeEntityWorldPosition2D(*scene, entity);
-                const AudioSpatialMix2D spatialMix = ComputeAudioSpatialMix2D(audioSource, sourcePosition, listenerState);
+                const AudioSpatialMix2D spatialMix = ComputeAudioSpatialMix2D(audioSource, sourcePosition, listenerPositions);
                 const float authoredVolume = audioSource.Muted ? 0.0f : std::max(0.0f, audioSource.Volume);
                 const float runtimeVolume = authoredVolume * spatialMix.Gain;
                 const float runtimePan = spatialMix.Pan;
@@ -987,6 +1012,40 @@ namespace Limitless
             }
             ImGui::End();
         }
+
+        if (m_ScriptSafeModeActive &&
+            (m_PlayModeState == EditorPlayModeState::Play ||
+             m_PlayModeState == EditorPlayModeState::Simulate ||
+             m_PlayModeState == EditorPlayModeState::Pause))
+        {
+            const std::string statusText = m_ScriptSafeModeMessage.empty()
+                ? std::string("Scripts are disabled because native script build failed.")
+                : m_ScriptSafeModeMessage;
+
+            ImGuiViewport* viewport = ImGui::GetMainViewport();
+            if (viewport)
+            {
+                const ImVec2 windowPos(
+                    viewport->Pos.x + viewport->Size.x - 12.0f,
+                    viewport->Pos.y + 58.0f);
+                ImGui::SetNextWindowPos(windowPos, ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+            }
+            ImGui::SetNextWindowBgAlpha(0.90f);
+            constexpr ImGuiWindowFlags safeModeFlags =
+                ImGuiWindowFlags_NoDecoration |
+                ImGuiWindowFlags_AlwaysAutoResize |
+                ImGuiWindowFlags_NoSavedSettings |
+                ImGuiWindowFlags_NoFocusOnAppearing |
+                ImGuiWindowFlags_NoNav;
+            if (ImGui::Begin("##ScriptSafeModeStatus", nullptr, safeModeFlags))
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Script Safe Mode Active");
+                ImGui::Separator();
+                ImGui::TextWrapped("%s", statusText.c_str());
+            }
+            ImGui::End();
+        }
+
         EditorProjectSettingsPanel::Draw(m_ShowProjectSettingsWindow, m_ProjectSettingsPanelState);
         EditorBuildSettingsPanel::Draw(m_ShowBuildSettingsWindow, m_BuildSettingsPanelState,
                                        m_CurrentSceneAssetKey, m_Scene.get(),

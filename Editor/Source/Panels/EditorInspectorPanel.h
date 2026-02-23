@@ -25,6 +25,7 @@ namespace Limitless
         void ApplyNativeScriptEditorSessionState(const NativeScriptEditorSessionState& state);
         bool OpenNativeScriptEditorForAssetKey(const std::string& assetKey);
         bool BuildProjectNativeScripts(std::string* outStatusMessage = nullptr);
+        bool GetLastNativeScriptBuildFailure(std::string* outStatusMessage = nullptr);
         void OnNativeScriptAssetRenamed(const std::string& oldAssetKey, const std::string& newAssetKey);
 
         void Draw(Scene* scene,

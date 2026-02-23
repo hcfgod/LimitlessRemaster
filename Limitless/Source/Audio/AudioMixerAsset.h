@@ -11,6 +11,7 @@ namespace Limitless::Audio
     {
         std::string Name;
         float Volume = 1.0f;
+        float ReverbSend = 0.0f;
     };
 
     struct AudioMixerDefinition

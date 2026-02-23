@@ -159,6 +159,8 @@ namespace Limitless
         std::unique_ptr<Scene> m_EditSceneStored;
         EditorPlayModeState m_PlayModeState = EditorPlayModeState::Edit;
         bool m_PlayModeMissingGameplayCamera = false;
+        bool m_ScriptSafeModeActive = false;
+        std::string m_ScriptSafeModeMessage;
         entt::entity m_SelectedEntity = entt::null;
 
         /// Selected texture asset key when user double-clicks a texture in the Project panel (e.g. "Assets/Textures/X.png").

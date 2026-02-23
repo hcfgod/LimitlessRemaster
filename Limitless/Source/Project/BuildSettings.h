@@ -21,6 +21,12 @@ namespace Limitless::Project
         inline constexpr const char* External = "External";
     }
 
+    namespace ScriptCompileFailurePolicy
+    {
+        inline constexpr const char* SafeMode = "SafeMode";
+        inline constexpr const char* BlockPlay = "BlockPlay";
+    }
+
     // -------------------------------------------------------------------------
     // Build Settings
     //
@@ -82,6 +88,11 @@ namespace Limitless::Project
         /// - Internal: built-in script editor window.
         /// - External: launch host editor integration (Visual Studio on Windows).
         std::string ScriptEditorMode = ScriptEditorMode::Internal;
+
+        /// Play mode behavior when native script compilation/build has failed.
+        /// - SafeMode: enter play with script execution disabled.
+        /// - BlockPlay: prevent entering play mode until scripts build successfully.
+        std::string ScriptCompileFailurePolicy = ScriptCompileFailurePolicy::SafeMode;
     };
 
     /// Returns the filesystem path for BuildSettings.json.

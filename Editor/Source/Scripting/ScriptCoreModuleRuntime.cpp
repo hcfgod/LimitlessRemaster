@@ -30,6 +30,7 @@ namespace Limitless::ScriptCoreModuleRuntime
     namespace
     {
         using RegisterScriptCoreTypesFunction = void (*)(NativeScriptRegistrationCallback registrationCallback);
+        using GetScriptCoreAbiVersionFunction = uint32_t (*)();
         using SetSceneTransitionBridgeFunction = void (*)(SceneTransitionBridgeCallback callback);
         using SetInputActionAxis1DBridgeFunction = void (*)(InputActionAxis1DBridgeCallback callback);
         using SetInputActionAxis2DBridgeFunction = void (*)(InputActionAxis2DBridgeCallback callback);
@@ -49,6 +50,8 @@ namespace Limitless::ScriptCoreModuleRuntime
             std::filesystem::path SourceLibraryPath;
             std::filesystem::path LoadedLibraryPath;
             std::filesystem::file_time_type LastWriteTime{};
+            std::filesystem::path LastRejectedSourcePath;
+            std::filesystem::file_time_type LastRejectedSourceWriteTime{};
             uint64_t ReloadCounter = 0;
             std::chrono::steady_clock::time_point LastPollTime{};
         };
@@ -479,22 +482,6 @@ namespace Limitless::ScriptCoreModuleRuntime
 
         bool ReloadScriptCoreModule(const std::filesystem::path& libraryPath)
         {
-            ResetRuntimeScriptRegistry();
-
-            if (s_RuntimeState.LibraryHandle != nullptr)
-            {
-                PlatformUtils::FreeLibrary(s_RuntimeState.LibraryHandle);
-                s_RuntimeState.LibraryHandle = nullptr;
-            }
-
-            if (!s_RuntimeState.LoadedLibraryPath.empty())
-            {
-                std::error_code removeError;
-                std::filesystem::remove(s_RuntimeState.LoadedLibraryPath, removeError);
-                (void)removeError;
-                s_RuntimeState.LoadedLibraryPath.clear();
-            }
-
             std::error_code errorCode;
             const auto sourceTimestamp = std::filesystem::last_write_time(libraryPath, errorCode);
             if (errorCode)
@@ -517,8 +504,8 @@ namespace Limitless::ScriptCoreModuleRuntime
                 return false;
             }
 
-            s_RuntimeState.LibraryHandle = PlatformUtils::LoadLibrary(stagedLibraryPath.string());
-            if (!s_RuntimeState.LibraryHandle)
+            void* loadedLibraryHandle = PlatformUtils::LoadLibrary(stagedLibraryPath.string());
+            if (!loadedLibraryHandle)
             {
                 LT_WARN("ScriptCore runtime: failed to load staged library '{}'.", stagedLibraryPath.string());
                 std::filesystem::remove(stagedLibraryPath, errorCode);
@@ -526,59 +513,84 @@ namespace Limitless::ScriptCoreModuleRuntime
                 return false;
             }
 
+            const auto getAbiVersionFunction = reinterpret_cast<GetScriptCoreAbiVersionFunction>(
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_GetScriptCoreAbiVersion"));
+            if (!getAbiVersionFunction)
+            {
+                LT_WARN("ScriptCore runtime: missing LT_GetScriptCoreAbiVersion export in '{}'.",
+                        libraryPath.string());
+                PlatformUtils::FreeLibrary(loadedLibraryHandle);
+                std::filesystem::remove(stagedLibraryPath, errorCode);
+                (void)errorCode;
+                return false;
+            }
+
+            const uint32_t reportedAbiVersion = getAbiVersionFunction();
+            if (reportedAbiVersion != kScriptCoreAbiVersion)
+            {
+                LT_WARN("ScriptCore runtime: ABI mismatch for '{}'. expected={}, got={}.",
+                        libraryPath.string(),
+                        kScriptCoreAbiVersion,
+                        reportedAbiVersion);
+                PlatformUtils::FreeLibrary(loadedLibraryHandle);
+                std::filesystem::remove(stagedLibraryPath, errorCode);
+                (void)errorCode;
+                return false;
+            }
+
             const auto registerFunction = reinterpret_cast<RegisterScriptCoreTypesFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_RegisterScriptCoreTypes"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_RegisterScriptCoreTypes"));
             if (!registerFunction)
             {
-                LT_WARN("ScriptCore runtime: missing LT_RegisterScriptCoreTypes export.");
-                PlatformUtils::FreeLibrary(s_RuntimeState.LibraryHandle);
-                s_RuntimeState.LibraryHandle = nullptr;
+                LT_WARN("ScriptCore runtime: missing LT_RegisterScriptCoreTypes export in '{}'.",
+                        libraryPath.string());
+                PlatformUtils::FreeLibrary(loadedLibraryHandle);
                 std::filesystem::remove(stagedLibraryPath, errorCode);
                 (void)errorCode;
                 return false;
             }
 
             const auto setSceneTransitionBridge = reinterpret_cast<SetSceneTransitionBridgeFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetSceneTransitionBridge"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetSceneTransitionBridge"));
             if (setSceneTransitionBridge)
             {
                 setSceneTransitionBridge(&ForwardSceneTransitionToHost);
             }
 
             const auto setInputActionAxis1DBridge = reinterpret_cast<SetInputActionAxis1DBridgeFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionAxis1DBridge"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionAxis1DBridge"));
             if (setInputActionAxis1DBridge)
             {
                 setInputActionAxis1DBridge(&ForwardInputActionAxis1DToHost);
             }
 
             const auto setInputActionAxis2DBridge = reinterpret_cast<SetInputActionAxis2DBridgeFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionAxis2DBridge"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionAxis2DBridge"));
             if (setInputActionAxis2DBridge)
             {
                 setInputActionAxis2DBridge(&ForwardInputActionAxis2DToHost);
             }
 
             const auto setInputActionPressedBridge = reinterpret_cast<SetInputActionPressedBridgeFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionPressedBridge"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionPressedBridge"));
             if (setInputActionPressedBridge)
             {
                 setInputActionPressedBridge(&ForwardInputActionPressedToHost);
             }
 
             const auto setInputActionExistsBridge = reinterpret_cast<SetInputActionExistsBridgeFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionExistsBridge"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionExistsBridge"));
             if (setInputActionExistsBridge)
             {
                 setInputActionExistsBridge(&ForwardInputActionExistsToHost);
             }
 
             auto setInputActionStartedBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionStartedBridge"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionStartedBridge"));
             if (!setInputActionStartedBridge)
             {
                 setInputActionStartedBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
-                    PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputButtonDownBridge"));
+                    PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputButtonDownBridge"));
             }
             if (setInputActionStartedBridge)
             {
@@ -586,25 +598,25 @@ namespace Limitless::ScriptCoreModuleRuntime
             }
 
             const auto setInputActionPerformedBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionPerformedBridge"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionPerformedBridge"));
             if (setInputActionPerformedBridge)
             {
                 setInputActionPerformedBridge(&ForwardInputActionPerformedToHost);
             }
 
             const auto setInputActionCanceledBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionCanceledBridge"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionCanceledBridge"));
             if (setInputActionCanceledBridge)
             {
                 setInputActionCanceledBridge(&ForwardInputActionCanceledToHost);
             }
 
             auto setInputActionButtonBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputActionButtonBridge"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionButtonBridge"));
             if (!setInputActionButtonBridge)
             {
                 setInputActionButtonBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
-                    PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetInputButtonBridge"));
+                    PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputButtonBridge"));
             }
             if (setInputActionButtonBridge)
             {
@@ -612,14 +624,14 @@ namespace Limitless::ScriptCoreModuleRuntime
             }
 
             const auto setPhysics2DRaycastBridge = reinterpret_cast<SetPhysics2DRaycastBridgeFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetPhysics2DRaycastBridge"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetPhysics2DRaycastBridge"));
             if (setPhysics2DRaycastBridge)
             {
                 setPhysics2DRaycastBridge(&ForwardPhysics2DRaycastToHost);
             }
 
             const auto setScriptLogBridge = reinterpret_cast<SetScriptLogBridgeFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetScriptLogBridge"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptLogBridge"));
             if (setScriptLogBridge)
             {
                 setScriptLogBridge(&ForwardScriptLogToHost);
@@ -631,29 +643,61 @@ namespace Limitless::ScriptCoreModuleRuntime
             }
 
             const auto setScriptCreateEntityBridge = reinterpret_cast<SetScriptCreateEntityBridgeFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetScriptCreateEntityBridge"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptCreateEntityBridge"));
             if (setScriptCreateEntityBridge)
                 setScriptCreateEntityBridge(&ForwardScriptCreateEntityToHost);
 
             const auto setScriptDestroyEntityBridge = reinterpret_cast<SetScriptDestroyEntityBridgeFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetScriptDestroyEntityBridge"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptDestroyEntityBridge"));
             if (setScriptDestroyEntityBridge)
                 setScriptDestroyEntityBridge(&ForwardScriptDestroyEntityToHost);
 
             const auto setScriptInstantiatePrefabBridge = reinterpret_cast<SetScriptInstantiatePrefabBridgeFunction>(
-                PlatformUtils::GetProcAddress(s_RuntimeState.LibraryHandle, "LT_SetScriptInstantiatePrefabBridge"));
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptInstantiatePrefabBridge"));
             if (setScriptInstantiatePrefabBridge)
                 setScriptInstantiatePrefabBridge(&ForwardScriptInstantiatePrefabToHost);
 
+            ResetRuntimeScriptRegistry();
             registerFunction(&RegisterScriptFromModule);
             const auto registeredScripts = NativeScriptRegistry::GetRegisteredScriptNames();
+
+            void* previousLibraryHandle = s_RuntimeState.LibraryHandle;
+            const std::filesystem::path previousLoadedLibraryPath = s_RuntimeState.LoadedLibraryPath;
+
+            s_RuntimeState.LibraryHandle = loadedLibraryHandle;
             s_RuntimeState.SourceLibraryPath = libraryPath;
             s_RuntimeState.LoadedLibraryPath = stagedLibraryPath;
             s_RuntimeState.LastWriteTime = sourceTimestamp;
+
+            if (previousLibraryHandle != nullptr)
+                PlatformUtils::FreeLibrary(previousLibraryHandle);
+            if (!previousLoadedLibraryPath.empty())
+            {
+                std::error_code removeError;
+                std::filesystem::remove(previousLoadedLibraryPath, removeError);
+                (void)removeError;
+            }
+
             LT_INFO("ScriptCore runtime: loaded scripts from '{}' (registered={} script(s)).",
                     libraryPath.string(),
                     registeredScripts.size());
             return true;
+        }
+
+        bool TryReloadScriptCoreFromCandidates(const std::vector<std::filesystem::path>& candidatePaths)
+        {
+            for (const auto& candidatePath : candidatePaths)
+            {
+                std::error_code existsError;
+                if (!std::filesystem::exists(candidatePath, existsError))
+                    continue;
+                if (existsError)
+                    continue;
+
+                if (ReloadScriptCoreModule(candidatePath))
+                    return true;
+            }
+            return false;
         }
     }
 
@@ -679,15 +723,8 @@ namespace Limitless::ScriptCoreModuleRuntime
 
         const auto candidatePaths = BuildScriptCoreLibraryCandidates();
         LogScriptCoreLibraryCandidates(candidatePaths);
-        for (const auto& candidatePath : candidatePaths)
-        {
-            std::error_code existsError;
-            if (std::filesystem::exists(candidatePath, existsError))
-            {
-                (void)ReloadScriptCoreModule(candidatePath);
-                return;
-            }
-        }
+        if (TryReloadScriptCoreFromCandidates(candidatePaths))
+            return;
 
         LT_INFO("ScriptCore runtime: ScriptCore module not found yet, using built-in scripts only.");
     }
@@ -713,6 +750,8 @@ namespace Limitless::ScriptCoreModuleRuntime
 
         s_RuntimeState.SourceLibraryPath.clear();
         s_RuntimeState.LastWriteTime = {};
+        s_RuntimeState.LastRejectedSourcePath.clear();
+        s_RuntimeState.LastRejectedSourceWriteTime = {};
         s_RuntimeState.Initialized = false;
     }
 
@@ -747,20 +786,58 @@ namespace Limitless::ScriptCoreModuleRuntime
         if (sourcePath.empty())
             return;
 
+        std::error_code timeError;
+        const auto writeTime = std::filesystem::last_write_time(sourcePath, timeError);
+        const bool hasWriteTime = !timeError;
+
+        auto markSourceRejected = [&](const std::filesystem::path& rejectedPath) {
+            if (!hasWriteTime)
+                return;
+            s_RuntimeState.LastRejectedSourcePath = rejectedPath;
+            s_RuntimeState.LastRejectedSourceWriteTime = writeTime;
+        };
+
+        auto clearRejectedSource = [&]() {
+            s_RuntimeState.LastRejectedSourcePath.clear();
+            s_RuntimeState.LastRejectedSourceWriteTime = {};
+        };
+
+        const bool sourceKnownRejected =
+            hasWriteTime &&
+            s_RuntimeState.LastRejectedSourcePath == sourcePath &&
+            s_RuntimeState.LastRejectedSourceWriteTime == writeTime;
+
         if (s_RuntimeState.SourceLibraryPath != sourcePath)
         {
-            (void)ReloadScriptCoreModule(sourcePath);
+            if (sourceKnownRejected)
+                return;
+
+            if (ReloadScriptCoreModule(sourcePath))
+                clearRejectedSource();
+            else
+                markSourceRejected(sourcePath);
             return;
         }
 
-        std::error_code timeError;
-        const auto writeTime = std::filesystem::last_write_time(sourcePath, timeError);
-        if (timeError)
+        if (s_RuntimeState.LibraryHandle == nullptr)
+        {
+            if (TryReloadScriptCoreFromCandidates(BuildScriptCoreLibraryCandidates()))
+                clearRejectedSource();
+            return;
+        }
+
+        if (!hasWriteTime)
             return;
 
-        if (s_RuntimeState.LibraryHandle == nullptr || writeTime != s_RuntimeState.LastWriteTime)
+        if (writeTime != s_RuntimeState.LastWriteTime)
         {
-            (void)ReloadScriptCoreModule(sourcePath);
+            if (sourceKnownRejected)
+                return;
+
+            if (ReloadScriptCoreModule(sourcePath))
+                clearRejectedSource();
+            else
+                markSourceRejected(sourcePath);
         }
     }
 }
