@@ -223,7 +223,7 @@ namespace Limitless::Project
 
             while (!message.empty() && (message.back() == '\r' || message.back() == '\n'))
                 message.pop_back();
-            return message;
+            return message + " (code " + std::to_string(errorCode) + ")";
         }
 
         bool HasIcoExtension(const std::filesystem::path& iconPath)
@@ -352,87 +352,138 @@ namespace Limitless::Project
                 }
             }
 
-            HANDLE updateHandle = BeginUpdateResourceW(executablePath.wstring().c_str(), FALSE);
-            if (!updateHandle)
+            auto applyIconResources = [&](const std::filesystem::path& targetExecutablePath) -> bool
             {
-                const DWORD winError = GetLastError();
-                errorMessage = "BeginUpdateResource failed for '" + executablePath.string() + "': " + FormatWindowsErrorMessage(winError);
-                return false;
-            }
-
-            auto failAndDiscard = [&](const std::string& message) -> bool
-            {
-                EndUpdateResourceW(updateHandle, TRUE);
-                errorMessage = message;
-                return false;
-            };
-
-            constexpr std::uint16_t languageId = MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL);
-            constexpr std::uint16_t firstIconResourceId = 1;
-
-            for (size_t index = 0; index < iconCount; ++index)
-            {
-                const auto& sourceEntry = iconEntries[index];
-                const std::uint8_t* imageData = iconBytes.data() + static_cast<size_t>(sourceEntry.ImageOffset);
-                const DWORD imageSize = static_cast<DWORD>(sourceEntry.BytesInRes);
-                const WORD iconResourceId = static_cast<WORD>(firstIconResourceId + index);
-                if (!UpdateResourceW(updateHandle,
-                                     RT_ICON,
-                                     MAKEINTRESOURCEW(iconResourceId),
-                                     languageId,
-                                     const_cast<std::uint8_t*>(imageData),
-                                     imageSize))
+                HANDLE updateHandle = BeginUpdateResourceW(targetExecutablePath.wstring().c_str(), FALSE);
+                if (!updateHandle)
                 {
                     const DWORD winError = GetLastError();
-                    return failAndDiscard("UpdateResource(RT_ICON) failed for '" + executablePath.string()
+                    errorMessage = "BeginUpdateResource failed for '" + targetExecutablePath.string()
+                        + "': " + FormatWindowsErrorMessage(winError);
+                    return false;
+                }
+
+                auto failAndDiscard = [&](const std::string& message) -> bool
+                {
+                    EndUpdateResourceW(updateHandle, TRUE);
+                    errorMessage = message;
+                    return false;
+                };
+
+                constexpr std::uint16_t languageId = MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL);
+                constexpr std::uint16_t firstIconResourceId = 1;
+
+                for (size_t index = 0; index < iconCount; ++index)
+                {
+                    const auto& sourceEntry = iconEntries[index];
+                    const std::uint8_t* imageData = iconBytes.data() + static_cast<size_t>(sourceEntry.ImageOffset);
+                    const DWORD imageSize = static_cast<DWORD>(sourceEntry.BytesInRes);
+                    const WORD iconResourceId = static_cast<WORD>(firstIconResourceId + index);
+                    if (!UpdateResourceW(updateHandle,
+                                         RT_ICON,
+                                         MAKEINTRESOURCEW(iconResourceId),
+                                         languageId,
+                                         const_cast<std::uint8_t*>(imageData),
+                                         imageSize))
+                    {
+                        const DWORD winError = GetLastError();
+                        return failAndDiscard("UpdateResource(RT_ICON) failed for '" + targetExecutablePath.string()
+                                              + "': " + FormatWindowsErrorMessage(winError));
+                    }
+                }
+
+                std::vector<std::uint8_t> groupData(
+                    sizeof(GroupIconDirectoryHeader) + iconCount * sizeof(GroupIconDirectoryEntry),
+                    0);
+                auto* groupHeader = reinterpret_cast<GroupIconDirectoryHeader*>(groupData.data());
+                groupHeader->Reserved = 0;
+                groupHeader->Type = 1;
+                groupHeader->Count = static_cast<std::uint16_t>(iconCount);
+
+                auto* groupEntries = reinterpret_cast<GroupIconDirectoryEntry*>(groupData.data() + sizeof(GroupIconDirectoryHeader));
+                for (size_t index = 0; index < iconCount; ++index)
+                {
+                    const auto& sourceEntry = iconEntries[index];
+                    auto& destinationEntry = groupEntries[index];
+                    destinationEntry.Width = sourceEntry.Width;
+                    destinationEntry.Height = sourceEntry.Height;
+                    destinationEntry.ColorCount = sourceEntry.ColorCount;
+                    destinationEntry.Reserved = sourceEntry.Reserved;
+                    destinationEntry.Planes = sourceEntry.Planes;
+                    destinationEntry.BitCount = sourceEntry.BitCount;
+                    destinationEntry.BytesInRes = sourceEntry.BytesInRes;
+                    destinationEntry.ResourceId = static_cast<std::uint16_t>(firstIconResourceId + index);
+                }
+
+                if (!UpdateResourceW(updateHandle,
+                                     RT_GROUP_ICON,
+                                     L"IDI_MAIN_ICON",
+                                     languageId,
+                                     groupData.data(),
+                                     static_cast<DWORD>(groupData.size())))
+                {
+                    const DWORD winError = GetLastError();
+                    return failAndDiscard("UpdateResource(RT_GROUP_ICON) failed for '" + targetExecutablePath.string()
                                           + "': " + FormatWindowsErrorMessage(winError));
                 }
+
+                if (!EndUpdateResourceW(updateHandle, FALSE))
+                {
+                    const DWORD winError = GetLastError();
+                    errorMessage = "EndUpdateResource failed for '" + targetExecutablePath.string()
+                        + "': " + FormatWindowsErrorMessage(winError);
+                    return false;
+                }
+
+                return true;
+            };
+
+            std::error_code fileError;
+            const std::filesystem::path tempDirectory = std::filesystem::temp_directory_path(fileError) / "LimitlessGameBuilder";
+            if (fileError)
+            {
+                errorMessage = "Failed to resolve temporary directory for icon embedding: " + fileError.message();
+                return false;
+            }
+            std::filesystem::create_directories(tempDirectory, fileError);
+            if (fileError)
+            {
+                errorMessage = "Failed to create temporary directory for icon embedding '" + tempDirectory.string()
+                    + "': " + fileError.message();
+                return false;
             }
 
-            std::vector<std::uint8_t> groupData(
-                sizeof(GroupIconDirectoryHeader) + iconCount * sizeof(GroupIconDirectoryEntry),
-                0);
-            auto* groupHeader = reinterpret_cast<GroupIconDirectoryHeader*>(groupData.data());
-            groupHeader->Reserved = 0;
-            groupHeader->Type = 1;
-            groupHeader->Count = static_cast<std::uint16_t>(iconCount);
+            const auto processId = static_cast<unsigned long>(GetCurrentProcessId());
+            const std::filesystem::path tempExecutablePath = tempDirectory
+                / (executablePath.stem().string() + ".icon-embed-tmp-" + std::to_string(processId)
+                   + executablePath.extension().string());
 
-            auto* groupEntries = reinterpret_cast<GroupIconDirectoryEntry*>(groupData.data() + sizeof(GroupIconDirectoryHeader));
-            for (size_t index = 0; index < iconCount; ++index)
+            std::filesystem::copy_file(executablePath, tempExecutablePath, std::filesystem::copy_options::overwrite_existing, fileError);
+            if (fileError)
             {
-                const auto& sourceEntry = iconEntries[index];
-                auto& destinationEntry = groupEntries[index];
-                destinationEntry.Width = sourceEntry.Width;
-                destinationEntry.Height = sourceEntry.Height;
-                destinationEntry.ColorCount = sourceEntry.ColorCount;
-                destinationEntry.Reserved = sourceEntry.Reserved;
-                destinationEntry.Planes = sourceEntry.Planes;
-                destinationEntry.BitCount = sourceEntry.BitCount;
-                destinationEntry.BytesInRes = sourceEntry.BytesInRes;
-                destinationEntry.ResourceId = static_cast<std::uint16_t>(firstIconResourceId + index);
+                errorMessage = "Failed to stage executable for icon embedding from '" + executablePath.string()
+                    + "' to '" + tempExecutablePath.string() + "': " + fileError.message();
+                return false;
             }
 
-            if (!UpdateResourceW(updateHandle,
-                                 RT_GROUP_ICON,
-                                 L"IDI_MAIN_ICON",
-                                 languageId,
-                                 groupData.data(),
-                                 static_cast<DWORD>(groupData.size())))
+            if (!applyIconResources(tempExecutablePath))
             {
-                const DWORD winError = GetLastError();
-                return failAndDiscard("UpdateResource(RT_GROUP_ICON) failed for '" + executablePath.string()
-                                      + "': " + FormatWindowsErrorMessage(winError));
+                std::error_code ignoreError;
+                std::filesystem::remove(tempExecutablePath, ignoreError);
+                return false;
             }
 
-            if (!EndUpdateResourceW(updateHandle, FALSE))
+            std::filesystem::copy_file(tempExecutablePath, executablePath, std::filesystem::copy_options::overwrite_existing, fileError);
+            std::error_code ignoreError;
+            std::filesystem::remove(tempExecutablePath, ignoreError);
+            if (fileError)
             {
-                const DWORD winError = GetLastError();
-                errorMessage = "EndUpdateResource failed for '" + executablePath.string() + "': " + FormatWindowsErrorMessage(winError);
+                errorMessage = "Failed to copy embedded icon executable back to output path '" + executablePath.string()
+                    + "': " + fileError.message();
                 return false;
             }
 
             NotifyWindowsShellFileChanged(executablePath);
-
             return true;
         }
 #endif
@@ -455,20 +506,45 @@ namespace Limitless::Project
         }
 
         /// Copy all files matching a pattern from a directory.
-        void CopyDllsFromDirectory(const std::filesystem::path& sourceDirectory,
-                                   const std::filesystem::path& destinationDirectory,
-                                   const std::string& extension,
-                                   GameBuildResult& result)
+        size_t CopyDllsFromDirectory(const std::filesystem::path& sourceDirectory,
+                                     const std::filesystem::path& destinationDirectory,
+                                     const std::string& extension,
+                                     GameBuildResult& result)
         {
+            if (!std::filesystem::is_directory(sourceDirectory))
+                return 0;
+
+            auto normalizeLower = [](std::string value) -> std::string
+            {
+                std::transform(value.begin(), value.end(), value.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                return value;
+            };
+
+            const std::string expectedExtension = normalizeLower(extension);
+            size_t copiedCount = 0;
             std::error_code iterateError;
             for (const auto& entry : std::filesystem::directory_iterator(sourceDirectory, iterateError))
             {
-                if (entry.is_regular_file() && entry.path().extension().string() == extension)
+                if (entry.is_regular_file())
                 {
+                    const std::string fileExtension = normalizeLower(entry.path().extension().string());
+                    if (fileExtension != expectedExtension)
+                        continue;
+
                     const auto destPath = destinationDirectory / entry.path().filename();
-                    CopySingleFile(entry.path(), destPath, result);
+                    if (CopySingleFile(entry.path(), destPath, result))
+                        ++copiedCount;
                 }
             }
+
+            if (iterateError)
+            {
+                result.StepLog.push_back("Warning: failed while scanning dynamic library directory '"
+                    + sourceDirectory.string() + "': " + iterateError.message());
+            }
+
+            return copiedCount;
         }
 
         int RunCommand(const std::string& command)
@@ -968,13 +1044,33 @@ namespace Limitless::Project
             result.StepLog.push_back("Warning: ScriptCore library not found at " + scriptCorePath.string());
         }
 
-        // 4. Copy runtime DLLs (shaderc, ffmpeg, etc.) from the Runtime build directory.
+        // 4. Copy runtime dynamic libraries (shaderc, ffmpeg, etc.).
 #if defined(LT_PLATFORM_WINDOWS)
-        if (std::filesystem::is_directory(runtimeDir))
-            CopyDllsFromDirectory(runtimeDir, request.OutputDirectory, ".dll", result);
+        std::vector<std::filesystem::path> dynamicLibrarySourceDirectories;
+        dynamicLibrarySourceDirectories.push_back(runtimeDir);
+        if (useInternalBackend)
+        {
+            // Internal toolchain packages may keep vendored runtime DLLs under SDK/vendor.
+            dynamicLibrarySourceDirectories.push_back(request.EngineRoot / "SDK" / "vendor" / "shaderc" / "dlls");
+            dynamicLibrarySourceDirectories.push_back(request.EngineRoot / "SDK" / "vendor" / "ffmpeg" / "dlls");
+        }
+        else
+        {
+            // Workspace/legacy backend keeps vendored runtime DLLs under engine vendor roots.
+            dynamicLibrarySourceDirectories.push_back(request.EngineRoot / "Limitless" / "Vendor" / "shaderc" / "dlls");
+            dynamicLibrarySourceDirectories.push_back(request.EngineRoot / "Limitless" / "Vendor" / "ffmpeg" / "dlls");
+        }
+
+        size_t totalDynamicLibrariesCopied = 0;
+        for (const auto& sourceDirectory : dynamicLibrarySourceDirectories)
+        {
+            totalDynamicLibrariesCopied += CopyDllsFromDirectory(sourceDirectory, request.OutputDirectory, ".dll", result);
+        }
+        result.StepLog.push_back("Copied " + std::to_string(totalDynamicLibrariesCopied) + " runtime .dll file(s).");
 #elif defined(LT_PLATFORM_LINUX)
-        if (std::filesystem::is_directory(runtimeDir))
-            CopyDllsFromDirectory(runtimeDir, request.OutputDirectory, ".so", result);
+        size_t totalDynamicLibrariesCopied = 0;
+        totalDynamicLibrariesCopied += CopyDllsFromDirectory(runtimeDir, request.OutputDirectory, ".so", result);
+        result.StepLog.push_back("Copied " + std::to_string(totalDynamicLibrariesCopied) + " runtime .so file(s).");
 #endif
 
         result.StepLog.push_back("Runtime files copied.");
