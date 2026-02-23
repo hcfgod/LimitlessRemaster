@@ -731,7 +731,19 @@ namespace Limitless::EditorProjectPanel
 
                 if (isDirectory)
                 {
-                    const bool nodeOpen = ImGui::TreeNodeEx(fileName.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+                    const std::string folderStateKey = entryRelativePath.generic_string();
+                    bool folderExpanded = true;
+                    if (const auto expandedStateIt = state.ExpandedFolderState.find(folderStateKey);
+                        expandedStateIt != state.ExpandedFolderState.end())
+                    {
+                        folderExpanded = expandedStateIt->second;
+                    }
+                    const bool previousFolderExpanded = folderExpanded;
+                    ImGui::SetNextItemOpen(folderExpanded, ImGuiCond_Always);
+                    const bool nodeOpen = ImGui::TreeNodeEx(fileName.c_str(), ImGuiTreeNodeFlags_None);
+                    state.ExpandedFolderState[folderStateKey] = nodeOpen;
+                    if (nodeOpen != previousFolderExpanded)
+                        state.TreeExpansionStateChanged = true;
                     if (ImGui::IsItemHovered(ImGuiHoveredFlags_RectOnly))
                     {
                         state.HoveredFolderRelativePathForExternalDrop = entryRelativePath;
@@ -2047,6 +2059,7 @@ namespace Limitless::EditorProjectPanel
               const std::function<void(const std::string&)>& onNativeScriptAssetActivated)
     {
         ImGui::Begin("Project");
+        state.TreeExpansionStateChanged = false;
         state.HoveredFolderRelativePathForExternalDrop.clear();
 
         const auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
@@ -2140,7 +2153,13 @@ namespace Limitless::EditorProjectPanel
             ImGui::EndPopup();
         }
 
-        if (ImGui::TreeNodeEx("Assets", ImGuiTreeNodeFlags_DefaultOpen))
+        const bool previousAssetsRootExpanded = state.AssetsRootExpanded;
+        ImGui::SetNextItemOpen(state.AssetsRootExpanded, ImGuiCond_Always);
+        const bool assetsRootOpen = ImGui::TreeNodeEx("Assets", ImGuiTreeNodeFlags_None);
+        state.AssetsRootExpanded = assetsRootOpen;
+        if (state.AssetsRootExpanded != previousAssetsRootExpanded)
+            state.TreeExpansionStateChanged = true;
+        if (assetsRootOpen)
         {
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_RectOnly))
             {

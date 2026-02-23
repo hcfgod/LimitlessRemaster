@@ -71,6 +71,10 @@ namespace Limitless::EditorInspectorPanel
             std::unique_ptr<std::thread> BuildThread;
             std::mutex LastBuildOutputMutex;
             std::string LastBuildOutput;
+            bool BuildToastVisible = false;
+            bool BuildToastIsError = false;
+            std::string BuildToastMessage;
+            std::chrono::steady_clock::time_point BuildToastShownAt{};
 
             ~NativeScriptAuthoringState()
             {
@@ -733,6 +737,107 @@ namespace Limitless::EditorInspectorPanel
             });
 
             return true;
+        }
+
+        void DrawNativeScriptBuildToast(NativeScriptAuthoringState& state)
+        {
+            if (!state.BuildToastVisible)
+                return;
+
+            constexpr float kToastLifetimeSeconds = 4.0f;
+            constexpr float kToastFadeOutSeconds = 0.4f;
+            const auto now = std::chrono::steady_clock::now();
+            const float elapsedSeconds = std::chrono::duration<float>(now - state.BuildToastShownAt).count();
+            if (elapsedSeconds >= kToastLifetimeSeconds)
+            {
+                state.BuildToastVisible = false;
+                return;
+            }
+
+            float alpha = 0.95f;
+            if (elapsedSeconds > (kToastLifetimeSeconds - kToastFadeOutSeconds))
+            {
+                const float fadeProgress =
+                    (elapsedSeconds - (kToastLifetimeSeconds - kToastFadeOutSeconds)) / kToastFadeOutSeconds;
+                alpha = std::clamp(0.95f * (1.0f - fadeProgress), 0.0f, 0.95f);
+            }
+
+            ImGuiViewport* viewport = ImGui::GetMainViewport();
+            if (viewport)
+            {
+                const ImVec2 windowPos(
+                    viewport->Pos.x + viewport->Size.x - 14.0f,
+                    viewport->Pos.y + 60.0f);
+                ImGui::SetNextWindowPos(windowPos, ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+            }
+            ImGui::SetNextWindowBgAlpha(alpha);
+            constexpr ImGuiWindowFlags toastFlags =
+                ImGuiWindowFlags_NoDecoration |
+                ImGuiWindowFlags_AlwaysAutoResize |
+                ImGuiWindowFlags_NoSavedSettings |
+                ImGuiWindowFlags_NoFocusOnAppearing |
+                ImGuiWindowFlags_NoNav;
+            if (ImGui::Begin("##NativeScriptBuildToast", nullptr, toastFlags))
+            {
+                ImGui::TextUnformatted("Native Script Build");
+                ImGui::Separator();
+                const ImVec4 toastColor = state.BuildToastIsError
+                    ? ImVec4(1.0f, 0.35f, 0.35f, 1.0f)
+                    : ImVec4(0.35f, 1.0f, 0.45f, 1.0f);
+                ImGui::TextColored(toastColor, "%s", state.BuildToastMessage.c_str());
+            }
+            ImGui::End();
+        }
+
+        void ConsumeFinishedNativeScriptBuildResult(NativeScriptAuthoringState& state, bool updateStatusMessage)
+        {
+            const int finishedBuildExitCode = state.LastBuildExitCode.exchange(-1, std::memory_order_relaxed);
+            if (finishedBuildExitCode < 0)
+                return;
+
+            std::string finishedBuildOutput;
+            {
+                std::lock_guard<std::mutex> lock(state.LastBuildOutputMutex);
+                finishedBuildOutput = state.LastBuildOutput;
+            }
+
+            if (finishedBuildExitCode == 0)
+            {
+                state.BuildToastVisible = true;
+                state.BuildToastIsError = false;
+                state.BuildToastMessage = "Native script build succeeded.";
+                state.BuildToastShownAt = std::chrono::steady_clock::now();
+                if (updateStatusMessage)
+                {
+                    state.StatusMessage = "Native script build succeeded.";
+                    state.StatusIsError = false;
+                }
+
+                LT_INFO("Native scripts: build succeeded.");
+                if (!finishedBuildOutput.empty())
+                    LT_INFO("Native script build output:\n{}", finishedBuildOutput);
+            }
+            else
+            {
+                state.BuildToastVisible = true;
+                state.BuildToastIsError = true;
+                state.BuildToastMessage =
+                    "Native script build failed (exit code " + std::to_string(finishedBuildExitCode) + ").";
+                state.BuildToastShownAt = std::chrono::steady_clock::now();
+                if (updateStatusMessage)
+                {
+                    state.StatusMessage =
+                        "Native script build failed (exit code "
+                        + std::to_string(finishedBuildExitCode)
+                        + "). Check console or build output section below.";
+                    state.StatusIsError = true;
+                }
+
+                if (!finishedBuildOutput.empty())
+                    LT_ERROR("Native script build failed (exit code {}). Output:\n{}", finishedBuildExitCode, finishedBuildOutput);
+                else
+                    LT_ERROR("Native script build failed (exit code {}) with no build output captured.", finishedBuildExitCode);
+            }
         }
 
         bool HasAnyProjectNativeScriptSources()
@@ -1491,6 +1596,8 @@ namespace Limitless::EditorInspectorPanel
 
         void DrawNativeScriptEditorWindowImpl(NativeScriptAuthoringState& state)
         {
+            ConsumeFinishedNativeScriptBuildResult(state, state.EditorWindowOpen);
+            DrawNativeScriptBuildToast(state);
             if (!state.EditorWindowOpen)
                 return;
 
@@ -1622,36 +1729,6 @@ namespace Limitless::EditorInspectorPanel
                 (void)reloadEditorFiles();
             if (!state.BuildInProgress.load(std::memory_order_relaxed) && buildShortcutPressed)
                 (void)saveEditorFiles(true);
-
-            const int finishedBuildExitCode = state.LastBuildExitCode.exchange(-1, std::memory_order_relaxed);
-            if (finishedBuildExitCode >= 0)
-            {
-                std::string finishedBuildOutput;
-                {
-                    std::lock_guard<std::mutex> lock(state.LastBuildOutputMutex);
-                    finishedBuildOutput = state.LastBuildOutput;
-                }
-
-                if (finishedBuildExitCode == 0)
-                {
-                    state.StatusMessage = "Native script build succeeded.";
-                    state.StatusIsError = false;
-                    if (!finishedBuildOutput.empty())
-                        LT_INFO("Native script build output:\n{}", finishedBuildOutput);
-                }
-                else
-                {
-                    state.StatusMessage =
-                        "Native script build failed (exit code "
-                        + std::to_string(finishedBuildExitCode)
-                        + "). Check console or build output section below.";
-                    state.StatusIsError = true;
-                    if (!finishedBuildOutput.empty())
-                        LT_ERROR("Native script build failed (exit code {}). Output:\n{}", finishedBuildExitCode, finishedBuildOutput);
-                    else
-                        LT_ERROR("Native script build failed (exit code {}) with no build output captured.", finishedBuildExitCode);
-                }
-            }
 
             if (!state.StatusMessage.empty())
             {

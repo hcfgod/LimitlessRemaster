@@ -23,7 +23,7 @@ namespace Limitless
     {
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 3;
+        constexpr uint32_t kEditorSessionStateVersion = 4;
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
         struct EditorSessionStateData final
@@ -32,6 +32,8 @@ namespace Limitless
             EditorInspectorPanel::NativeScriptEditorSessionState NativeScriptEditorState;
             bool ShowProjectSettingsWindow = false;
             bool ShowAssetDiagnosticsWindow = false;
+            bool ProjectAssetsRootExpanded = true;
+            std::unordered_map<std::string, bool> ProjectFolderExpansionState;
         };
 
         std::string NormalizeSlashes(std::string pathText)
@@ -219,6 +221,12 @@ namespace Limitless
                 root["nativeScriptEditorShowDebugInfo"] = state.NativeScriptEditorState.ShowDebugInfo;
                 root["showProjectSettingsWindow"] = state.ShowProjectSettingsWindow;
                 root["showAssetDiagnosticsWindow"] = state.ShowAssetDiagnosticsWindow;
+                root["projectAssetsRootExpanded"] = state.ProjectAssetsRootExpanded;
+
+                nlohmann::json folderExpansionRoot = nlohmann::json::object();
+                for (const auto& [folderPath, expanded] : state.ProjectFolderExpansionState)
+                    folderExpansionRoot[folderPath] = expanded;
+                root["projectFolderExpansionState"] = std::move(folderExpansionRoot);
 
                 const std::filesystem::path tmpPath = statePath.string() + ".tmp";
                 {
@@ -433,6 +441,8 @@ namespace Limitless
         EditorInspectorPanel::GetNativeScriptEditorSessionState(state.NativeScriptEditorState);
         state.ShowProjectSettingsWindow = m_ShowProjectSettingsWindow;
         state.ShowAssetDiagnosticsWindow = m_ShowAssetDiagnosticsWindow;
+        state.ProjectAssetsRootExpanded = m_ProjectPanelState.AssetsRootExpanded;
+        state.ProjectFolderExpansionState = m_ProjectPanelState.ExpandedFolderState;
         WriteProjectSessionState(projectManager.GetProjectRoot(), state);
     }
 

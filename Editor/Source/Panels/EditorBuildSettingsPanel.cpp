@@ -65,6 +65,34 @@ namespace Limitless::EditorBuildSettingsPanel
             state.StatusIsError = isError;
         }
 
+        std::string BuildStepLogText(const std::vector<std::string>& stepLog)
+        {
+            std::string output;
+            for (const std::string& line : stepLog)
+            {
+                if (!output.empty())
+                    output.push_back('\n');
+                output += line;
+            }
+            return output;
+        }
+
+        void PublishBuildResultToEditorConsole(const Project::GameBuildResult& result)
+        {
+            if (result.Success)
+                LT_INFO("Game build succeeded in {:.2f}s.", result.ElapsedSeconds);
+            else
+                LT_ERROR("Game build failed: {}", result.ErrorMessage.empty() ? "unknown error" : result.ErrorMessage);
+
+            for (const std::string& line : result.StepLog)
+            {
+                if (result.Success)
+                    LT_INFO("[Game Build] {}", line);
+                else
+                    LT_WARN("[Game Build] {}", line);
+            }
+        }
+
         void CopyStringToBuffer(const std::string& source, std::array<char, 512>& destination)
         {
             std::memset(destination.data(), 0, destination.size());
@@ -389,6 +417,7 @@ namespace Limitless::EditorBuildSettingsPanel
                 SetStatus(state, "Build succeeded (" + std::to_string(state.LastBuildResult.ElapsedSeconds) + "s).", false);
             else
                 SetStatus(state, "Build failed: " + state.LastBuildResult.ErrorMessage, true);
+            PublishBuildResultToEditorConsole(state.LastBuildResult);
         }
 
         /// Start a build in a background thread.
@@ -513,11 +542,11 @@ namespace Limitless::EditorBuildSettingsPanel
               Scene* currentScene,
               const std::function<bool()>& saveActiveSceneBeforeBuild)
     {
+        ConsumeCompletedBuildResult(state);
         if (!showWindow)
             return;
 
         EnsureSettingsLoaded(state);
-        ConsumeCompletedBuildResult(state);
 
         ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_FirstUseEver);
         if (!ImGui::Begin("Build Settings", &showWindow))
@@ -803,6 +832,10 @@ namespace Limitless::EditorBuildSettingsPanel
         {
             if (ImGui::CollapsingHeader("Build Log", ImGuiTreeNodeFlags_DefaultOpen))
             {
+                const std::string buildLogText = BuildStepLogText(state.LastBuildResult.StepLog);
+                if (ImGui::Button("Copy Build Log"))
+                    ImGui::SetClipboardText(buildLogText.c_str());
+
                 ImGui::BeginChild("BuildLog", ImVec2(0, 150), true);
                 for (const auto& line : state.LastBuildResult.StepLog)
                     ImGui::TextWrapped("%s", line.c_str());

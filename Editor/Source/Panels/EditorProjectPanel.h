@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace Limitless
@@ -95,6 +96,11 @@ namespace Limitless
         // Multi-select state for texture sub-sprites (virtual keys: "Texture.png#idx").
         std::vector<std::string> MultiSelectedSubSpriteKeys;
         std::string SubSpriteSelectionAnchorKey;
+
+        // Persisted expansion state for the Project tree.
+        bool AssetsRootExpanded = true;
+        std::unordered_map<std::string, bool> ExpandedFolderState;
+        bool TreeExpansionStateChanged = false;
     };
 
     namespace EditorProjectPanel

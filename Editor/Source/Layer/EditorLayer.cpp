@@ -66,7 +66,7 @@ namespace Limitless
         constexpr const char* kDefaultSceneFileName = "SampleScene.scene.json";
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 3;
+        constexpr uint32_t kEditorSessionStateVersion = 4;
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
         struct EditorSessionStateData final
@@ -75,6 +75,8 @@ namespace Limitless
             EditorInspectorPanel::NativeScriptEditorSessionState NativeScriptEditorState;
             bool ShowProjectSettingsWindow = false;
             bool ShowAssetDiagnosticsWindow = false;
+            bool ProjectAssetsRootExpanded = true;
+            std::unordered_map<std::string, bool> ProjectFolderExpansionState;
         };
 
         std::string NormalizeSlashes(std::string pathText)
@@ -251,7 +253,7 @@ namespace Limitless
                     return state;
                 }
 
-                if (version != kEditorSessionStateVersion)
+                if (version != 3 && version != kEditorSessionStateVersion)
                 {
                     return {};
                 }
@@ -263,6 +265,20 @@ namespace Limitless
                 state.NativeScriptEditorState.ShowDebugInfo = root.value("nativeScriptEditorShowDebugInfo", false);
                 state.ShowProjectSettingsWindow = root.value("showProjectSettingsWindow", false);
                 state.ShowAssetDiagnosticsWindow = root.value("showAssetDiagnosticsWindow", false);
+                if (version >= 4)
+                {
+                    state.ProjectAssetsRootExpanded = root.value("projectAssetsRootExpanded", true);
+                    if (const auto expansionStateIt = root.find("projectFolderExpansionState");
+                        expansionStateIt != root.end() && expansionStateIt->is_object())
+                    {
+                        for (auto stateIt = expansionStateIt->begin(); stateIt != expansionStateIt->end(); ++stateIt)
+                        {
+                            if (!stateIt.value().is_boolean())
+                                continue;
+                            state.ProjectFolderExpansionState[stateIt.key()] = stateIt.value().get<bool>();
+                        }
+                    }
+                }
                 return state;
             }
             catch (...)
@@ -302,6 +318,12 @@ namespace Limitless
                 root["nativeScriptEditorShowDebugInfo"] = state.NativeScriptEditorState.ShowDebugInfo;
                 root["showProjectSettingsWindow"] = state.ShowProjectSettingsWindow;
                 root["showAssetDiagnosticsWindow"] = state.ShowAssetDiagnosticsWindow;
+                root["projectAssetsRootExpanded"] = state.ProjectAssetsRootExpanded;
+
+                nlohmann::json folderExpansionRoot = nlohmann::json::object();
+                for (const auto& [folderPath, expanded] : state.ProjectFolderExpansionState)
+                    folderExpansionRoot[folderPath] = expanded;
+                root["projectFolderExpansionState"] = std::move(folderExpansionRoot);
 
                 const std::filesystem::path tmpPath = statePath.string() + ".tmp";
                 {
@@ -897,6 +919,8 @@ namespace Limitless
             EditorInspectorPanel::ApplyNativeScriptEditorSessionState(sessionState.NativeScriptEditorState);
             m_ShowProjectSettingsWindow = sessionState.ShowProjectSettingsWindow;
             m_ShowAssetDiagnosticsWindow = sessionState.ShowAssetDiagnosticsWindow;
+            m_ProjectPanelState.AssetsRootExpanded = sessionState.ProjectAssetsRootExpanded;
+            m_ProjectPanelState.ExpandedFolderState = sessionState.ProjectFolderExpansionState;
             const std::string lastOpenedSceneAssetKey = sessionState.LastOpenedSceneAssetKey;
             if (!lastOpenedSceneAssetKey.empty())
             {
@@ -1831,6 +1855,9 @@ namespace Limitless
             [this](const std::string& scriptAssetKey) {
                 (void)EditorInspectorPanel::OpenNativeScriptEditorForAssetKey(scriptAssetKey);
             });
+
+        if (m_ProjectPanelState.TreeExpansionStateChanged)
+            PersistProjectSessionState();
     }
 
     void EditorLayer::DrawAnimationTimelinePanel()
