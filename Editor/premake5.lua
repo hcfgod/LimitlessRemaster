@@ -71,7 +71,9 @@ project "Editor"
     postbuildcommands
     {
         "{COPY} \"%{wks.location}/Editor/config.json\" \"%{cfg.targetdir}\"",
-        "{COPY} \"%{wks.location}/Resources/LimitlessLogo.ico\" \"%{cfg.targetdir}\""
+        "{COPY} \"%{wks.location}/Resources/LimitlessLogo.ico\" \"%{cfg.targetdir}\"",
+        "{COPY} \"%{wks.location}/Editor/imgui-default.ini\" \"%{cfg.targetdir}\"",
+        "{COPY} \"%{wks.location}/Editor/imgui.ini\" \"%{cfg.targetdir}\""
     }
 
     filter "system:windows"

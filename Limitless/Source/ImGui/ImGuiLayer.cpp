@@ -3,10 +3,12 @@
 #include "Core/Debug/Log.h"
 #include "Platform/Window.h"
 #include "Platform/SDL/SDLWindow.h"
+#include "Platform/Platform.h"
 #include "Graphics/GraphicsContext.h"
 #include "Graphics/OpenGL/OpenGLContext.h"
 #include <glad/glad.h>
 #include <SDL3/SDL.h>
+#include <filesystem>
 
 // ImGui headers (backend expects imgui before their includes)
 #include "imgui/imgui.h"
@@ -20,6 +22,66 @@ namespace Limitless
 {
     namespace
     {
+        std::filesystem::path ResolveImGuiLayoutDirectory()
+        {
+            const std::filesystem::path executablePath = PlatformDetection::GetExecutablePath();
+            if (!executablePath.empty() && executablePath.has_parent_path())
+                return executablePath.parent_path();
+
+            std::error_code errorCode;
+            const std::filesystem::path workingDirectory = std::filesystem::current_path(errorCode);
+            if (!errorCode)
+                return workingDirectory;
+
+            return {};
+        }
+
+        std::filesystem::path ResolveDefaultLayoutPath(const std::filesystem::path& layoutDirectory)
+        {
+            std::error_code errorCode;
+            const std::filesystem::path directDefaultPath = layoutDirectory / "imgui-default.ini";
+            if (std::filesystem::exists(directDefaultPath, errorCode))
+                return directDefaultPath;
+
+            // Dev fallback: walk parents and probe "<parent>/Editor/imgui-default.ini".
+            std::filesystem::path probe = layoutDirectory;
+            for (int depth = 0; depth < 8 && !probe.empty(); ++depth)
+            {
+                errorCode.clear();
+                const std::filesystem::path candidate = probe / "Editor" / "imgui-default.ini";
+                if (std::filesystem::exists(candidate, errorCode))
+                    return candidate;
+
+                const std::filesystem::path parent = probe.parent_path();
+                if (parent == probe)
+                    break;
+                probe = parent;
+            }
+
+            return {};
+        }
+
+        void EnsureActiveLayoutExists(const std::filesystem::path& activeLayoutPath,
+                                      const std::filesystem::path& defaultLayoutPath)
+        {
+            std::error_code errorCode;
+            if (defaultLayoutPath.empty() || !std::filesystem::exists(defaultLayoutPath, errorCode))
+                return;
+
+            // Always seed active layout from default so launches are deterministic
+            // across VS, build output, and shipped editor entry points.
+            std::filesystem::create_directories(activeLayoutPath.parent_path(), errorCode);
+            errorCode.clear();
+            std::filesystem::copy_file(
+                defaultLayoutPath,
+                activeLayoutPath,
+                std::filesystem::copy_options::overwrite_existing,
+                errorCode);
+
+            if (!errorCode)
+                LT_CORE_INFO("ImGui layout loaded from '{}'.", defaultLayoutPath.string());
+        }
+
         void ApplyModernEditorImGuiTheme()
         {
             ImGuiStyle& style = ImGui::GetStyle();
@@ -170,8 +232,14 @@ namespace Limitless
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;  // Docking enabled by default
-        // Persist layout (docking, window positions) to imgui.ini in working directory.
-        io.IniFilename = "imgui.ini";
+        // Persist layout alongside the running editor executable so startup layout
+        // is stable regardless of current working directory.
+        const std::filesystem::path layoutDirectory = ResolveImGuiLayoutDirectory();
+        const std::filesystem::path activeLayoutPath = layoutDirectory / "imgui.ini";
+        const std::filesystem::path defaultLayoutPath = ResolveDefaultLayoutPath(layoutDirectory);
+        EnsureActiveLayoutExists(activeLayoutPath, defaultLayoutPath);
+        m_LayoutIniPath = activeLayoutPath.string();
+        io.IniFilename = m_LayoutIniPath.c_str();
 
         ApplyModernEditorImGuiTheme();
 

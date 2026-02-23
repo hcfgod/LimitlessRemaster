@@ -1127,10 +1127,30 @@ namespace Limitless
 
     void EditorLayer::ResetLayoutToDefault()
     {
-        const std::filesystem::path defaultLayoutPath = "imgui-default.ini";
-        const std::filesystem::path activeLayoutPath = "imgui.ini";
+        std::filesystem::path activeLayoutPath = "imgui.ini";
+        if (const ImGuiIO& io = ImGui::GetIO(); io.IniFilename && io.IniFilename[0] != '\0')
+            activeLayoutPath = io.IniFilename;
 
+        std::filesystem::path defaultLayoutPath = activeLayoutPath.parent_path() / "imgui-default.ini";
         std::error_code errorCode;
+        if (!std::filesystem::exists(defaultLayoutPath, errorCode))
+        {
+            // Dev fallback when the default layout wasn't copied beside the output binary.
+            std::filesystem::path probe = activeLayoutPath.parent_path();
+            for (int depth = 0; depth < 8 && !probe.empty(); ++depth)
+            {
+                defaultLayoutPath = probe / "Editor" / "imgui-default.ini";
+                errorCode.clear();
+                if (std::filesystem::exists(defaultLayoutPath, errorCode))
+                    break;
+
+                const std::filesystem::path parent = probe.parent_path();
+                if (parent == probe)
+                    break;
+                probe = parent;
+            }
+        }
+
         if (!std::filesystem::exists(defaultLayoutPath, errorCode))
         {
             LT_WARN("Reset Layout failed: '{}' was not found.", defaultLayoutPath.string());

@@ -3,6 +3,8 @@
 #include "Core/Layer.h"
 #include "Graphics/GraphicsContext.h"
 
+#include <string>
+
 namespace Limitless
 {
     /**
@@ -36,6 +38,7 @@ namespace Limitless
         GraphicsAPI m_GraphicsAPI = GraphicsAPI::OpenGL;  ///< Active backend (set at attach).
         bool m_ShowDemoWindow = false;  ///< Toggle ImGui demo window (EditorLayer provides its own via menu).
         bool m_ShowDockspace = true;  ///< Toggle default dockspace (enabled by default).
+        std::string m_LayoutIniPath;  ///< Stable storage for ImGuiIO::IniFilename.
     };
 
 }  // namespace Limitless
