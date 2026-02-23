@@ -16,6 +16,34 @@
 
 namespace Limitless::Audio
 {
+    struct VoiceActivityState
+    {
+        std::atomic<bool> Active{ false };
+    };
+
+    enum class AudioCommandType : uint8_t
+    {
+        PlayVoice = 0,
+        StopVoice,
+        SetVoiceMixParameters,
+        SetMixerGroupVolume,
+        SetMixerGroupReverbSend,
+        StopAll
+    };
+
+    struct AudioCommand
+    {
+        AudioCommandType Type = AudioCommandType::StopVoice;
+        uint32_t VoiceId = 0;
+        std::shared_ptr<const AudioClip> Clip;
+        std::shared_ptr<VoiceActivityState> ActivityState;
+        float Volume = 1.0f;
+        float Pan = 0.0f;
+        float Pitch = 1.0f;
+        bool Loop = false;
+        std::string MixerGroup = "Master";
+    };
+
     // -----------------------------------------------------------------------------
     // AudioEngine
     // Unity-style runtime mixer:
@@ -78,34 +106,6 @@ namespace Limitless::Audio
 
         AudioEngine(const AudioEngine&) = delete;
         AudioEngine& operator=(const AudioEngine&) = delete;
-
-        struct VoiceActivityState
-        {
-            std::atomic<bool> Active{ false };
-        };
-
-        enum class AudioCommandType : uint8_t
-        {
-            PlayVoice = 0,
-            StopVoice,
-            SetVoiceMixParameters,
-            SetMixerGroupVolume,
-            SetMixerGroupReverbSend,
-            StopAll
-        };
-
-        struct AudioCommand
-        {
-            AudioCommandType Type = AudioCommandType::StopVoice;
-            uint32_t VoiceId = 0;
-            std::shared_ptr<const AudioClip> Clip;
-            std::shared_ptr<VoiceActivityState> ActivityState;
-            float Volume = 1.0f;
-            float Pan = 0.0f;
-            float Pitch = 1.0f;
-            bool Loop = false;
-            std::string MixerGroup = "Master";
-        };
 
         struct Voice
         {
