@@ -21,22 +21,6 @@ The Limitless Engine uses **Premake5** as its build system generator, providing:
 - **C++20 coroutine support** with platform-specific flags
 - **Automated project generation** with proper dependencies
 
-### Project Structure
-```
-LimitlessRemaster/
-├── premake5.lua              # Main workspace (start project: Editor)
-├── Limitless/premake5.lua    # Core engine library
-├── Editor/premake5.lua      # Unity-style editor (default start project)
-├── Runtime/premake5.lua      # Example runtime application
-├── ScriptCore/premake5.lua   # Native C++ script DLL (loaded by Editor)
-├── Test/premake5.lua         # Unit tests
-└── Scripts/                  # Build scripts
-    ├── build-windows.bat     # Windows: bootstrap Premake, generate solution, build, run tests
-    ├── build-unix.sh         # Unix/Linux/macOS: dependencies, Premake, make, tests
-    ├── BootstrapPremake.bat  # Download Premake5 into Vendor/Premake (Windows)
-    ├── build-scriptcore-windows.bat  # Windows ScriptCore-only build
-    └── build-scriptcore-unix.sh      # Linux/macOS ScriptCore-only build
-```
 Output directory: `Build/<Config>-<system>-<platform>/` (e.g. `Build/Debug-windows-x64/`).
 
 ## Platform-Specific Build Options

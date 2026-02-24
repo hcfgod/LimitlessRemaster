@@ -6,15 +6,15 @@ This document describes the engine's **graphics API selection framework**, and i
 
 ### Status Legend (read this first)
 
-- ✅ **Implemented**: The engine has working code paths used by the runtime today.
-- ⚠️ **Partially Implemented**: The framework exists, but behavior is conservative / placeholder in places.
-- 🚧 **Future**: The API is present as a planned surface area, but the implementation is not complete yet.
+- **Implemented**: The engine has working code paths used by the runtime today.
+- **Partially Implemented**: The framework exists, but behavior is conservative / placeholder in places.
+- **Future**: The API is present as a planned surface area, but the implementation is not complete yet.
 
 ### Current Reality (today)
 
-- ✅ **Rendering / context creation is OpenGL-only** (via SDL + `OpenGLContext`).
-- 🚧 **Vulkan / DirectX / Metal contexts are not implemented yet**. Selection can name them, but context creation will fall back to OpenGL.
-- ⚠️ **Non-OpenGL “detection” is not implemented yet** (the detector currently reports them as unsupported with an explicit message).
+- **Implemented:** Rendering and context creation are OpenGL-only (via SDL + `OpenGLContext`).
+- **Future:** Vulkan / DirectX / Metal contexts are not implemented yet. Selection can name them, but context creation will fall back to OpenGL.
+- **Partially Implemented:** Non-OpenGL detection is not implemented yet (the detector currently reports them as unsupported with an explicit message).
 
 **Key Design Principles:**
 - **Lightweight Detection**: The detector doesn't require SDL video subsystem or window creation
@@ -24,7 +24,7 @@ This document describes the engine's **graphics API selection framework**, and i
 
 ## Features
 
-### ✅ Implemented Today
+### Implemented Today
 
 - **OpenGL context creation**: Robust OpenGL context creation with fallback versions.
 - **Progressive enhancement for OpenGL details**: Vendor/renderer/version are updated after a real OpenGL context is created.
@@ -33,12 +33,12 @@ This document describes the engine's **graphics API selection framework**, and i
 - **Thread-safe initialization and preference**: `Initialize()` and preferred API control are thread-safe and idempotent.
 - **Debugging support**: You can generate a detailed detection report for troubleshooting.
 
-### ⚠️ Partially Implemented Today
+### Partially Implemented Today
 
 - **“Lightweight detection” for OpenGL**: The detector currently assumes OpenGL is supported and uses conservative defaults until a real context is created (context creation is the real verification step).
 - **“Smart selection” criteria**: The selection API exists, but criteria-based selection and comparison output are placeholders.
 
-### 🚧 Future (Not Implemented Yet)
+### Future (Not Implemented Yet)
 
 - **Vulkan detection** (real loader/device probing)
 - **DirectX detection** (DXGI / feature level probing)
@@ -50,10 +50,10 @@ This document describes the engine's **graphics API selection framework**, and i
 
 | API | Platform Support | Minimum Version | Status |
 |-----|-----------------|-----------------|---------|
-| OpenGL | All Platforms | 3.3+ | ✅ Implemented (context creation) / ⚠️ detection is conservative until a real context exists |
-| Vulkan | Windows, Linux | 1.0+ | 🚧 Future (Detection + Context not implemented yet) |
-| DirectX | Windows | 12+ | 🚧 Future (Detection + Context not implemented yet) |
-| Metal | macOS | 2.0+ | 🚧 Future (Detection + Context not implemented yet) |
+| OpenGL | All Platforms | 3.3+ | Implemented (context creation) / Partial (detection is conservative until a real context exists) |
+| Vulkan | Windows, Linux | 1.0+ | Future (detection + context not implemented yet) |
+| DirectX | Windows | 12+ | Future (detection + context not implemented yet) |
+| Metal | macOS | 2.0+ | Future (detection + context not implemented yet) |
 
 ## Quick Start
 
@@ -215,7 +215,7 @@ if (!GraphicsAPIDetector::IsAPISupported(GraphicsAPI::Vulkan)) {
 
 ## Production Readiness
 
-### ✅ Production Ready Features
+### Production Ready Features
 
 1. **Thread Safety**: All operations are thread-safe.
 2. **Error Recovery**: Robust fallback logic for context creation.
@@ -224,7 +224,7 @@ if (!GraphicsAPIDetector::IsAPISupported(GraphicsAPI::Vulkan)) {
 5. **OpenGL Support**: Production-ready OpenGL **context creation** (capability details are finalized after context creation).
 6. **Initialization**: Proper initialization at application startup.
 
-### 🚧 Future Enhancements
+### Future Enhancements
 
 1. **Real Vulkan Detection**: Vulkan loader/device probing and capability enumeration
 2. **Real DirectX Detection**: Adapter enumeration and feature-level probing (DX12)
