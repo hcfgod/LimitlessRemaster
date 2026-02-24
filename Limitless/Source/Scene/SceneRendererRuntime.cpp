@@ -30,16 +30,25 @@ namespace Limitless
 {
     namespace
     {
-        std::unordered_map<std::string, Async::Task<Assets::TextureAsset::Ptr>> g_PendingTextureLoads;
-        std::unordered_map<std::string, Async::Task<Assets::MaterialAsset::Ptr>> g_PendingMaterialLoads;
-        glm::vec4 g_ViewportClearColor = glm::vec4(0.08f, 0.08f, 0.10f, 1.0f);
         struct UiInputViewportRect
         {
             bool Enabled = false;
             glm::vec2 MinPixels = glm::vec2(0.0f);
             glm::vec2 SizePixels = glm::vec2(0.0f);
         };
-        UiInputViewportRect g_UiInputViewportRect{};
+        struct SceneRendererRuntimeState
+        {
+            std::unordered_map<std::string, Async::Task<Assets::TextureAsset::Ptr>> PendingTextureLoads;
+            std::unordered_map<std::string, Async::Task<Assets::MaterialAsset::Ptr>> PendingMaterialLoads;
+            glm::vec4 ViewportClearColor = glm::vec4(0.08f, 0.08f, 0.10f, 1.0f);
+            UiInputViewportRect UiInputViewportRectPixels{};
+        };
+
+        SceneRendererRuntimeState& GetSceneRendererRuntimeState()
+        {
+            static SceneRendererRuntimeState state{};
+            return state;
+        }
 
         bool TryGetOwningCanvasEntity(const entt::registry& registry, entt::entity entity, entt::entity& outCanvasEntity)
         {
@@ -254,8 +263,8 @@ namespace Limitless
             {
                 sprite.CachedTexture = std::dynamic_pointer_cast<Assets::TextureAsset>(
                     Assets::AssetManager::GetCachedByKey(sprite.TextureKey));
-                if (!sprite.CachedTexture && !g_PendingTextureLoads.contains(sprite.TextureKey))
-                    g_PendingTextureLoads.emplace(sprite.TextureKey, Assets::TextureAsset::LoadAsync(sprite.TextureKey));
+                if (!sprite.CachedTexture && !GetSceneRendererRuntimeState().PendingTextureLoads.contains(sprite.TextureKey))
+                    GetSceneRendererRuntimeState().PendingTextureLoads.emplace(sprite.TextureKey, Assets::TextureAsset::LoadAsync(sprite.TextureKey));
                 sprite.TextureLoadAttempted = true;
             }
             else if (!sprite.CachedTexture)
@@ -264,11 +273,11 @@ namespace Limitless
                     Assets::AssetManager::GetCachedByKey(sprite.TextureKey));
                 if (!sprite.CachedTexture)
                 {
-                    const auto pendingLoad = g_PendingTextureLoads.find(sprite.TextureKey);
-                    if (pendingLoad != g_PendingTextureLoads.end() && pendingLoad->second.IsDone())
+                    const auto pendingLoad = GetSceneRendererRuntimeState().PendingTextureLoads.find(sprite.TextureKey);
+                    if (pendingLoad != GetSceneRendererRuntimeState().PendingTextureLoads.end() && pendingLoad->second.IsDone())
                     {
                         sprite.CachedTexture = pendingLoad->second.Get();
-                        g_PendingTextureLoads.erase(pendingLoad);
+                        GetSceneRendererRuntimeState().PendingTextureLoads.erase(pendingLoad);
                     }
                 }
             }
@@ -371,11 +380,11 @@ namespace Limitless
             const InputSystem& input = GetInputSystem();
             interactionMousePixels = input.GetMousePosition();
 
-            if (g_UiInputViewportRect.Enabled)
+            if (GetSceneRendererRuntimeState().UiInputViewportRectPixels.Enabled)
             {
-                interactionViewportWidthPixels = static_cast<uint32_t>(std::max(0.0f, g_UiInputViewportRect.SizePixels.x));
-                interactionViewportHeightPixels = static_cast<uint32_t>(std::max(0.0f, g_UiInputViewportRect.SizePixels.y));
-                interactionMousePixels -= g_UiInputViewportRect.MinPixels;
+                interactionViewportWidthPixels = static_cast<uint32_t>(std::max(0.0f, GetSceneRendererRuntimeState().UiInputViewportRectPixels.SizePixels.x));
+                interactionViewportHeightPixels = static_cast<uint32_t>(std::max(0.0f, GetSceneRendererRuntimeState().UiInputViewportRectPixels.SizePixels.y));
+                interactionMousePixels -= GetSceneRendererRuntimeState().UiInputViewportRectPixels.MinPixels;
             }
 
             if (interactionViewportWidthPixels == 0 || interactionViewportHeightPixels == 0)
@@ -965,8 +974,8 @@ namespace Limitless
                                 Assets::AssetManager::GetCachedByKey(tileData.SpriteTextureKey));
                             if (!cached.Texture)
                             {
-                                if (!g_PendingTextureLoads.contains(tileData.SpriteTextureKey))
-                                    g_PendingTextureLoads.emplace(tileData.SpriteTextureKey,
+                                if (!GetSceneRendererRuntimeState().PendingTextureLoads.contains(tileData.SpriteTextureKey))
+                                    GetSceneRendererRuntimeState().PendingTextureLoads.emplace(tileData.SpriteTextureKey,
                                         Assets::TextureAsset::LoadAsync(tileData.SpriteTextureKey));
                                 allResolved = false;
                                 continue;
@@ -1020,16 +1029,16 @@ namespace Limitless
                             {
                                 // Re-check pending texture loads without re-reading tile JSON.
                                 // Mark dirty so the full rebuild runs once textures become available.
-                                auto pendingIt = g_PendingTextureLoads.begin();
+                                auto pendingIt = GetSceneRendererRuntimeState().PendingTextureLoads.begin();
                                 bool anyNewlyAvailable = false;
-                                while (pendingIt != g_PendingTextureLoads.end())
+                                while (pendingIt != GetSceneRendererRuntimeState().PendingTextureLoads.end())
                                 {
                                     auto loaded = std::dynamic_pointer_cast<Assets::TextureAsset>(
                                         Assets::AssetManager::GetCachedByKey(pendingIt->first));
                                     if (loaded && loaded->GetTexture())
                                     {
                                         anyNewlyAvailable = true;
-                                        pendingIt = g_PendingTextureLoads.erase(pendingIt);
+                                        pendingIt = GetSceneRendererRuntimeState().PendingTextureLoads.erase(pendingIt);
                                     }
                                     else
                                     {
@@ -1132,8 +1141,8 @@ namespace Limitless
                         Assets::AssetManager::GetCachedByKey(animatedTextureKey));
                     if (!animator->RuntimeCachedSpriteTextureOverride)
                     {
-                        if (!g_PendingTextureLoads.contains(animatedTextureKey))
-                            g_PendingTextureLoads.emplace(animatedTextureKey, Assets::TextureAsset::LoadAsync(animatedTextureKey));
+                        if (!GetSceneRendererRuntimeState().PendingTextureLoads.contains(animatedTextureKey))
+                            GetSceneRendererRuntimeState().PendingTextureLoads.emplace(animatedTextureKey, Assets::TextureAsset::LoadAsync(animatedTextureKey));
                     }
                     animator->RuntimeSpriteTextureOverrideLoadAttempted = true;
                 }
@@ -1143,11 +1152,11 @@ namespace Limitless
                         Assets::AssetManager::GetCachedByKey(animatedTextureKey));
                     if (!animator->RuntimeCachedSpriteTextureOverride)
                     {
-                        const auto pendingIt = g_PendingTextureLoads.find(animatedTextureKey);
-                        if (pendingIt != g_PendingTextureLoads.end() && pendingIt->second.IsDone())
+                        const auto pendingIt = GetSceneRendererRuntimeState().PendingTextureLoads.find(animatedTextureKey);
+                        if (pendingIt != GetSceneRendererRuntimeState().PendingTextureLoads.end() && pendingIt->second.IsDone())
                         {
                             animator->RuntimeCachedSpriteTextureOverride = pendingIt->second.Get();
-                            g_PendingTextureLoads.erase(pendingIt);
+                            GetSceneRendererRuntimeState().PendingTextureLoads.erase(pendingIt);
                         }
                     }
                 }
@@ -1168,8 +1177,8 @@ namespace Limitless
                             Assets::AssetManager::GetCachedByKey(material->MaterialKey));
                         if (!material->CachedMaterial)
                         {
-                            if (!g_PendingMaterialLoads.contains(material->MaterialKey))
-                                g_PendingMaterialLoads.emplace(material->MaterialKey, Assets::AssetManager::LoadAsync<Assets::MaterialAsset>(material->MaterialKey));
+                            if (!GetSceneRendererRuntimeState().PendingMaterialLoads.contains(material->MaterialKey))
+                                GetSceneRendererRuntimeState().PendingMaterialLoads.emplace(material->MaterialKey, Assets::AssetManager::LoadAsync<Assets::MaterialAsset>(material->MaterialKey));
                         }
                         material->MaterialLoadAttempted = true;
                     }
@@ -1179,11 +1188,11 @@ namespace Limitless
                             Assets::AssetManager::GetCachedByKey(material->MaterialKey));
                         if (!material->CachedMaterial)
                         {
-                            const auto pendingIt = g_PendingMaterialLoads.find(material->MaterialKey);
-                            if (pendingIt != g_PendingMaterialLoads.end() && pendingIt->second.IsDone())
+                            const auto pendingIt = GetSceneRendererRuntimeState().PendingMaterialLoads.find(material->MaterialKey);
+                            if (pendingIt != GetSceneRendererRuntimeState().PendingMaterialLoads.end() && pendingIt->second.IsDone())
                             {
                                 material->CachedMaterial = pendingIt->second.Get();
-                                g_PendingMaterialLoads.erase(pendingIt);
+                                GetSceneRendererRuntimeState().PendingMaterialLoads.erase(pendingIt);
                             }
                         }
                     }
@@ -1220,8 +1229,8 @@ namespace Limitless
                         Assets::AssetManager::GetCachedByKey(sprite.TextureKey));
                     if (!tex)
                     {
-                        if (!g_PendingTextureLoads.contains(sprite.TextureKey))
-                            g_PendingTextureLoads.emplace(sprite.TextureKey, Assets::TextureAsset::LoadAsync(sprite.TextureKey));
+                        if (!GetSceneRendererRuntimeState().PendingTextureLoads.contains(sprite.TextureKey))
+                            GetSceneRendererRuntimeState().PendingTextureLoads.emplace(sprite.TextureKey, Assets::TextureAsset::LoadAsync(sprite.TextureKey));
                     }
                     sprite.CachedTexture = tex;
                     sprite.TextureLoadAttempted = true;
@@ -1232,11 +1241,11 @@ namespace Limitless
                         Assets::AssetManager::GetCachedByKey(sprite.TextureKey));
                     if (!sprite.CachedTexture)
                     {
-                        const auto pendingIt = g_PendingTextureLoads.find(sprite.TextureKey);
-                        if (pendingIt != g_PendingTextureLoads.end() && pendingIt->second.IsDone())
+                        const auto pendingIt = GetSceneRendererRuntimeState().PendingTextureLoads.find(sprite.TextureKey);
+                        if (pendingIt != GetSceneRendererRuntimeState().PendingTextureLoads.end() && pendingIt->second.IsDone())
                         {
                             sprite.CachedTexture = pendingIt->second.Get();
-                            g_PendingTextureLoads.erase(pendingIt);
+                            GetSceneRendererRuntimeState().PendingTextureLoads.erase(pendingIt);
                         }
                     }
                 }
@@ -1279,8 +1288,8 @@ namespace Limitless
                         Assets::AssetManager::GetCachedByKey(emitter.TextureKey));
                     if (!emitter.CachedTexture)
                     {
-                        if (!g_PendingTextureLoads.contains(emitter.TextureKey))
-                            g_PendingTextureLoads.emplace(emitter.TextureKey, Assets::TextureAsset::LoadAsync(emitter.TextureKey));
+                        if (!GetSceneRendererRuntimeState().PendingTextureLoads.contains(emitter.TextureKey))
+                            GetSceneRendererRuntimeState().PendingTextureLoads.emplace(emitter.TextureKey, Assets::TextureAsset::LoadAsync(emitter.TextureKey));
                     }
                     emitter.TextureLoadAttempted = true;
                 }
@@ -1290,11 +1299,11 @@ namespace Limitless
                         Assets::AssetManager::GetCachedByKey(emitter.TextureKey));
                     if (!emitter.CachedTexture)
                     {
-                        const auto pendingIt = g_PendingTextureLoads.find(emitter.TextureKey);
-                        if (pendingIt != g_PendingTextureLoads.end() && pendingIt->second.IsDone())
+                        const auto pendingIt = GetSceneRendererRuntimeState().PendingTextureLoads.find(emitter.TextureKey);
+                        if (pendingIt != GetSceneRendererRuntimeState().PendingTextureLoads.end() && pendingIt->second.IsDone())
                         {
                             emitter.CachedTexture = pendingIt->second.Get();
-                            g_PendingTextureLoads.erase(pendingIt);
+                            GetSceneRendererRuntimeState().PendingTextureLoads.erase(pendingIt);
                         }
                     }
                 }
@@ -1405,7 +1414,7 @@ namespace Limitless
 
     void SceneRenderer::SetViewportClearColor(const glm::vec4& clearColor)
     {
-        g_ViewportClearColor = glm::vec4(
+        GetSceneRendererRuntimeState().ViewportClearColor = glm::vec4(
             std::clamp(clearColor.r, 0.0f, 1.0f),
             std::clamp(clearColor.g, 0.0f, 1.0f),
             std::clamp(clearColor.b, 0.0f, 1.0f),
@@ -1414,14 +1423,14 @@ namespace Limitless
 
     glm::vec4 SceneRenderer::GetViewportClearColor()
     {
-        return g_ViewportClearColor;
+        return GetSceneRendererRuntimeState().ViewportClearColor;
     }
 
     void SceneRenderer::SetUiInputViewportRectPixels(float minX, float minY, float width, float height, bool enabled)
     {
-        g_UiInputViewportRect.Enabled = enabled;
-        g_UiInputViewportRect.MinPixels = glm::vec2(minX, minY);
-        g_UiInputViewportRect.SizePixels = glm::vec2(std::max(0.0f, width), std::max(0.0f, height));
+        GetSceneRendererRuntimeState().UiInputViewportRectPixels.Enabled = enabled;
+        GetSceneRendererRuntimeState().UiInputViewportRectPixels.MinPixels = glm::vec2(minX, minY);
+        GetSceneRendererRuntimeState().UiInputViewportRectPixels.SizePixels = glm::vec2(std::max(0.0f, width), std::max(0.0f, height));
     }
 
     void SceneRenderer::RenderToViewport(Scene& scene, const Camera& camera,

@@ -482,7 +482,6 @@ namespace Limitless
         float GravityScale = 1.0f;
         float LinearDamping = 0.0f;
         float AngularDamping = 0.01f;
-
         // Unity-style script API. Scripts call Set*/Get* helpers on this component.
         // Physics2DWorld consumes pending writes each fixed step.
         glm::vec2 RuntimePendingLinearVelocity = glm::vec2(0.0f);
@@ -544,6 +543,10 @@ namespace Limitless
         float RuntimeRenderPreviousAngleRadians = 0.0f;
         glm::vec2 RuntimeRenderCurrentPosition = glm::vec2(0.0f);
         float RuntimeRenderCurrentAngleRadians = 0.0f;
+        // Authoring/runtime world-slot fields are appended to preserve offsets
+        // for existing ScriptCore builds that still reference older layouts.
+        uint16_t PhysicsWorldSlot = 0;
+        uint16_t RuntimeWorldSlot = 0;
     };
 
     struct BoxCollider2DComponent
@@ -602,6 +605,7 @@ namespace Limitless
 
         Physics2DJointHandle RuntimeJointId = kNullPhysics2DJoint;
         bool RuntimeJointCreated = false;
+        uint16_t RuntimeWorldSlot = 0;
     };
 
     /// Single native C++ behavior script entry attached to an entity.

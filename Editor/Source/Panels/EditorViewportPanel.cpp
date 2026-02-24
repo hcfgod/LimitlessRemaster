@@ -1,6 +1,7 @@
 #include "EditorViewportPanel.h"
 
 #include "Assets/AssetLoadProgress.h"
+#include "Assets/LoadingScreen.h"
 #include "Editor/EditorCameraController.h"
 #include "Graphics/Camera/Camera.h"
 #include "Graphics/Camera/OrthographicCamera2D.h"
@@ -1349,87 +1350,18 @@ namespace Limitless::EditorViewportPanel
         };
 
         auto drawLoadingOverlay = [scene](const ImVec2& minPos, const ImVec2& maxPos) {
+            const LoadingScreen::Context ctx = LoadingScreen::BuildContext(
+                scene, Renderer2D::IsShaderReady(), Renderer2D::GetDefaultShaderKey());
+            const LoadingScreen::State state = LoadingScreen::GetState(ctx);
+            if (!state.IsLoading)
+                return;
+
             const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
             ImDrawList* drawList = ImGui::GetWindowDrawList();
             drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 255));
 
-            bool sceneObjectsReady = scene ? scene->IsSceneObjectsInitialized() : false;
-            bool physicsReady = scene ? scene->IsPhysicsWorldInitializedForLoading() : false;
-            const bool shaderReady = Renderer2D::IsShaderReady();
-
-            float assetProgressAverage = 1.0f;
-            std::string assetStatusText;
-            const std::vector<std::string> activeProgressKeys = Assets::AssetLoadProgress::GetActiveKeys();
-            if (!activeProgressKeys.empty())
-            {
-                float accumulatedProgress = 0.0f;
-                for (const std::string& key : activeProgressKeys)
-                {
-                    const auto info = Assets::AssetLoadProgress::GetProgress(key);
-                    if (!info.has_value())
-                    {
-                        accumulatedProgress += 1.0f;
-                        continue;
-                    }
-
-                    accumulatedProgress += std::clamp(info->Progress, 0.0f, 1.0f);
-                    if (assetStatusText.empty() && !info->Status.empty())
-                        assetStatusText = info->Status;
-                }
-                assetProgressAverage = accumulatedProgress / static_cast<float>(activeProgressKeys.size());
-            }
-
-            std::string loadingText = "Loading scene...";
-            if (!sceneObjectsReady)
-                loadingText = "Initializing scene objects...";
-            else if (!physicsReady)
-                loadingText = "Initializing physics world...";
-            else if (!shaderReady)
-                loadingText = "Compiling shaders...";
-            else if (!assetStatusText.empty())
-                loadingText = assetStatusText;
-            else
-                loadingText = "Loading assets...";
-
-            const float sceneObjectsProgress = sceneObjectsReady ? 1.0f : 0.0f;
-            const float physicsProgress = physicsReady ? 1.0f : 0.0f;
-            const float shaderProgress = shaderReady ? 1.0f : 0.0f;
-            const float progressValue = std::clamp(
-                (sceneObjectsProgress + physicsProgress + shaderProgress + assetProgressAverage) * 0.25f,
-                0.0f,
-                1.0f);
-
-            const ImVec2 textSize = ImGui::CalcTextSize(loadingText.c_str());
-            drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f - 24.0f),
-                              IM_COL32(255, 255, 255, 255),
-                              loadingText.c_str());
-
-            const float barWidth = 200.0f;
-            const float barHeight = 8.0f;
-            const ImVec2 barMin(center.x - barWidth * 0.5f, center.y - barHeight * 0.5f + 8.0f);
-            const ImVec2 barMax(center.x + barWidth * 0.5f, center.y + barHeight * 0.5f + 8.0f);
-            drawList->AddRectFilled(barMin, barMax, IM_COL32(50, 50, 55, 255));
-            const ImVec2 fillMax(barMin.x + barWidth * progressValue, barMax.y);
-            drawList->AddRectFilled(barMin, fillMax, IM_COL32(80, 140, 220, 255));
-        };
-
-        auto drawShaderCompileOverlay = [](const ImVec2& minPos, const ImVec2& maxPos) {
-            const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
-            drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 255));
-
-            const char* loadingText = "Compiling shaders...";
-            float progressValue = 0.0f;
-            const auto progressInfo = Assets::AssetLoadProgress::GetProgress(Renderer2D::GetDefaultShaderKey());
-            if (progressInfo.has_value())
-            {
-                loadingText = progressInfo->Status.empty() ? "Compiling shaders..." : progressInfo->Status.c_str();
-                progressValue = progressInfo->Progress;
-            }
-            else
-            {
-                progressValue = std::fmod(static_cast<float>(ImGui::GetTime() * 0.8), 1.0f);
-            }
+            const char* loadingText = state.StatusText.empty() ? "Loading..." : state.StatusText.c_str();
+            const float progressValue = std::clamp(state.Progress, 0.0f, 1.0f);
 
             const ImVec2 textSize = ImGui::CalcTextSize(loadingText);
             drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f - 24.0f),
@@ -1641,13 +1573,9 @@ namespace Limitless::EditorViewportPanel
                     ImGui::EndDragDropTarget();
                 }
 
-                if (isSceneLoading)
+                if (LoadingScreen::GetState(LoadingScreen::BuildContext(scene, Renderer2D::IsShaderReady(), Renderer2D::GetDefaultShaderKey())).IsLoading)
                 {
                     drawLoadingOverlay(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
-                }
-                else if (!Renderer2D::IsShaderReady())
-                {
-                    drawShaderCompileOverlay(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
                 }
                 else if (!sceneViewCamera)
                 {
@@ -1826,13 +1754,9 @@ namespace Limitless::EditorViewportPanel
                     maxPos.x - minPos.x,
                     maxPos.y - minPos.y,
                     true);
-                if (isSceneLoading)
+                if (LoadingScreen::GetState(LoadingScreen::BuildContext(scene, Renderer2D::IsShaderReady(), Renderer2D::GetDefaultShaderKey())).IsLoading)
                 {
                     drawLoadingOverlay(minPos, maxPos);
-                }
-                else if (!Renderer2D::IsShaderReady())
-                {
-                    drawShaderCompileOverlay(minPos, maxPos);
                 }
                 else if (showMissingGameplayCameraOverlay)
                 {

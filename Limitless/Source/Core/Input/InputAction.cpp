@@ -306,8 +306,8 @@ namespace Limitless
                     else if (const auto* pad = std::get_if<GamepadButtonBinding>(&b))
                     {
                         down = down ||
-                            input.IsGamepadButtonDown(pad->Button) ||
-                            input.WasGamepadButtonPressedThisFrame(pad->Button);
+                            input.IsGamepadButtonDown(pad->PlayerIndex, pad->Button) ||
+                            input.WasGamepadButtonPressedThisFrame(pad->PlayerIndex, pad->Button);
                     }
                 }
                 return InputActionValue::Button(down);
@@ -324,7 +324,7 @@ namespace Limitless
                     }
                     else if (const auto* pad = std::get_if<GamepadAxis1DBinding>(&b))
                     {
-                        const float raw = input.GetGamepadAxis(pad->Axis);
+                        const float raw = input.GetGamepadAxis(pad->PlayerIndex, pad->Axis);
                         v += ApplyDeadzone1D(raw, pad->Deadzone) * pad->Scale;
                     }
                 }
@@ -357,7 +357,7 @@ namespace Limitless
                     }
                     else if (const auto* pad = std::get_if<GamepadAxis2DBinding>(&b))
                     {
-                        glm::vec2 stick(input.GetGamepadAxis(pad->XAxis), input.GetGamepadAxis(pad->YAxis));
+                        glm::vec2 stick(input.GetGamepadAxis(pad->PlayerIndex, pad->XAxis), input.GetGamepadAxis(pad->PlayerIndex, pad->YAxis));
                         if (pad->InvertY)
                         {
                             stick.y = -stick.y;
@@ -427,11 +427,15 @@ namespace Limitless
             }
             else if (const auto* gb = std::get_if<GamepadButtonBinding>(&b))
             {
-                ss << "GamepadButton(" << GamepadButtonToString(gb->Button) << ")";
+                ss << "GamepadButton(" << GamepadButtonToString(gb->Button);
+                if (gb->PlayerIndex != 0) ss << ",player=" << gb->PlayerIndex;
+                ss << ")";
             }
             else if (const auto* g1 = std::get_if<GamepadAxis1DBinding>(&b))
             {
-                ss << "GamepadAxis1D(axis=" << GamepadAxisToString(g1->Axis) << ",deadzone=" << g1->Deadzone << ",scale=" << g1->Scale << ")";
+                ss << "GamepadAxis1D(axis=" << GamepadAxisToString(g1->Axis) << ",deadzone=" << g1->Deadzone << ",scale=" << g1->Scale;
+                if (g1->PlayerIndex != 0) ss << ",player=" << g1->PlayerIndex;
+                ss << ")";
             }
             else if (const auto* g2 = std::get_if<GamepadAxis2DBinding>(&b))
             {
@@ -439,7 +443,9 @@ namespace Limitless
                    << ",y=" << GamepadAxisToString(g2->YAxis)
                    << ",deadzone=" << g2->Deadzone
                    << ",scale=" << g2->Scale
-                   << ",invertY=" << (g2->InvertY ? "true" : "false") << ")";
+                   << ",invertY=" << (g2->InvertY ? "true" : "false");
+                if (g2->PlayerIndex != 0) ss << ",player=" << g2->PlayerIndex;
+                ss << ")";
             }
             else
             {

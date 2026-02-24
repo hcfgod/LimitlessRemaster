@@ -203,21 +203,26 @@ namespace Limitless
         if (!m_ProjectPhysics2DSettingsLoaded)
             return;
 
-        Physics2DWorldSettings runtimeSettings{};
-        runtimeSettings.Gravity = glm::vec2(m_ProjectPhysics2DSettings.GravityX, m_ProjectPhysics2DSettings.GravityY);
-        runtimeSettings.VelocitySubSteps = std::max(1, m_ProjectPhysics2DSettings.VelocitySubSteps);
-        runtimeSettings.EnableSleep = m_ProjectPhysics2DSettings.EnableSleep;
-        runtimeSettings.EnableContinuousCollision = m_ProjectPhysics2DSettings.EnableContinuousCollision;
-        runtimeSettings.HighContactQualityMode = m_ProjectPhysics2DSettings.HighContactQualityMode;
-        runtimeSettings.HighContactQualityExtraSubSteps = std::max(0, m_ProjectPhysics2DSettings.HighContactQualityExtraSubSteps);
-        runtimeSettings.ContactHertz = m_ProjectPhysics2DSettings.ContactHertz;
-        runtimeSettings.ContactDampingRatio = m_ProjectPhysics2DSettings.ContactDampingRatio;
-        runtimeSettings.ContactPushSpeed = m_ProjectPhysics2DSettings.ContactPushSpeed;
+        auto applyProjectSettings = [this](Scene* targetScene)
+        {
+            if (!targetScene)
+                return;
 
-        if (m_Scene)
-            m_Scene->SetPhysics2DSettings(runtimeSettings);
-        if (m_EditSceneStored)
-            m_EditSceneStored->SetPhysics2DSettings(runtimeSettings);
+            Physics2DWorldSettings runtimeSettings = targetScene->GetPhysics2DSettings();
+            runtimeSettings.Gravity = glm::vec2(m_ProjectPhysics2DSettings.GravityX, m_ProjectPhysics2DSettings.GravityY);
+            runtimeSettings.VelocitySubSteps = std::max(1, m_ProjectPhysics2DSettings.VelocitySubSteps);
+            runtimeSettings.EnableSleep = m_ProjectPhysics2DSettings.EnableSleep;
+            runtimeSettings.EnableContinuousCollision = m_ProjectPhysics2DSettings.EnableContinuousCollision;
+            runtimeSettings.HighContactQualityMode = m_ProjectPhysics2DSettings.HighContactQualityMode;
+            runtimeSettings.HighContactQualityExtraSubSteps = std::max(0, m_ProjectPhysics2DSettings.HighContactQualityExtraSubSteps);
+            runtimeSettings.ContactHertz = m_ProjectPhysics2DSettings.ContactHertz;
+            runtimeSettings.ContactDampingRatio = m_ProjectPhysics2DSettings.ContactDampingRatio;
+            runtimeSettings.ContactPushSpeed = m_ProjectPhysics2DSettings.ContactPushSpeed;
+            targetScene->SetPhysics2DSettings(runtimeSettings);
+        };
+
+        applyProjectSettings(m_Scene.get());
+        applyProjectSettings(m_EditSceneStored.get());
     }
 
     void EditorLayer::ApplyProjectLighting2DSettings()

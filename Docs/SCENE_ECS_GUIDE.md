@@ -71,6 +71,12 @@ for (entt::entity entity : view)
 3. If the component should be cloned when entering Play Mode, add copying logic in `Scene::Clone()` (`Limitless/Source/Scene/Scene.cpp`).
 4. Add Inspector UI in `EditorInspectorPanel::Draw` (or a helper used by it) so the component can be edited in the editor.
 
+## Scene model and loading
+
+- **One active scene per context.** The editor has a single open scene (optionally with an edit-time copy for Play Mode). The runtime (e.g. `GameLayer`) has a single active scene. There is no first-class **scene streaming** or **additive loading**: you cannot load a second scene “on top of” the current one or stream in chunks while keeping multiple scenes live.
+- **Transitions** are **replace**: `SceneManager::LoadScene(sceneIdentifier)` queues a request to replace the current scene with the requested one; the host consumes the request and loads the new scene (see `SceneManager.h` and `Docs/NATIVE_CPP_SCRIPTING_GUIDE.md`). `ReloadCurrentScene()` replaces the current scene with a fresh load of the same asset.
+- **Future: additive loading and streaming.** A possible extension would be to support multiple loaded scenes (e.g. a “main” scene plus additively loaded sub-scenes) or streaming (load/unload scene chunks or sectors while one logical level is active). That would require defining how entities from multiple scenes are merged or kept separate, how physics worlds and cameras are assigned, and how scripts refer to “the other” scene. Not implemented today.
+
 ## Extending
 
 - **Hierarchy**: Use `HierarchyComponent` with a parent `entt::entity`. Recursively build world matrices for child transforms.

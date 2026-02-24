@@ -46,6 +46,8 @@ namespace Limitless {
         double gpuUsage;            // GPU usage percentage
         double gpuMemoryUsage;      // GPU memory usage percentage
         double gpuTemperature;      // GPU temperature in Celsius
+        uint64_t gpuMemoryUsedBytes;  // VRAM used (bytes)
+        uint64_t gpuMemoryTotalBytes; // VRAM total (bytes)
         
         // Performance counters
         std::unordered_map<std::string, double> counters;

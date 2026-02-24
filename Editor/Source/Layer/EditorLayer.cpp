@@ -27,6 +27,7 @@
 #include "Scene/ParticleEmitterSystem.h"
 #include "Scripting/ScriptCoreModuleRuntime.h"
 #include "Core/Input/InputSystem.h"
+#include "Core/PerformanceMonitor.h"
 #include "Graphics/Camera/Camera.h"
 #include "Graphics/Camera/OrthographicCamera2D.h"
 #include "Graphics/Camera/PerspectiveCamera3D.h"
@@ -66,7 +67,7 @@ namespace Limitless
         constexpr const char* kDefaultSceneFileName = "SampleScene.scene.json";
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 4;
+        constexpr uint32_t kEditorSessionStateVersion = 5;
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
         struct EditorSessionStateData final
@@ -75,6 +76,8 @@ namespace Limitless
             EditorInspectorPanel::NativeScriptEditorSessionState NativeScriptEditorState;
             bool ShowProjectSettingsWindow = false;
             bool ShowAssetDiagnosticsWindow = false;
+            bool ShowPerformancePanel = false;
+            bool ShowConsoleWindow = true;
             bool ProjectAssetsRootExpanded = true;
             std::unordered_map<std::string, bool> ProjectFolderExpansionState;
         };
@@ -253,7 +256,7 @@ namespace Limitless
                     return state;
                 }
 
-                if (version != 3 && version != kEditorSessionStateVersion)
+                if (version != 3 && version != 4 && version != kEditorSessionStateVersion)
                 {
                     return {};
                 }
@@ -265,6 +268,11 @@ namespace Limitless
                 state.NativeScriptEditorState.ShowDebugInfo = root.value("nativeScriptEditorShowDebugInfo", false);
                 state.ShowProjectSettingsWindow = root.value("showProjectSettingsWindow", false);
                 state.ShowAssetDiagnosticsWindow = root.value("showAssetDiagnosticsWindow", false);
+                if (version >= 5)
+                {
+                    state.ShowPerformancePanel = root.value("showPerformancePanel", false);
+                    state.ShowConsoleWindow = root.value("showConsoleWindow", true);
+                }
                 if (version >= 4)
                 {
                     state.ProjectAssetsRootExpanded = root.value("projectAssetsRootExpanded", true);
@@ -318,6 +326,8 @@ namespace Limitless
                 root["nativeScriptEditorShowDebugInfo"] = state.NativeScriptEditorState.ShowDebugInfo;
                 root["showProjectSettingsWindow"] = state.ShowProjectSettingsWindow;
                 root["showAssetDiagnosticsWindow"] = state.ShowAssetDiagnosticsWindow;
+                root["showPerformancePanel"] = state.ShowPerformancePanel;
+                root["showConsoleWindow"] = state.ShowConsoleWindow;
                 root["projectAssetsRootExpanded"] = state.ProjectAssetsRootExpanded;
 
                 nlohmann::json folderExpansionRoot = nlohmann::json::object();
@@ -858,9 +868,13 @@ namespace Limitless
         {
             // Only collect expensive per-body diagnostics when the diagnostics
             // panel is actually visible, saving O(N*C) contact queries per step.
-            Physics2DWorld* physicsWorld = m_Scene->GetPhysics2DWorld();
-            if (physicsWorld)
-                physicsWorld->SetDiagnosticsEnabled(m_ShowPhysicsDiagnosticsWindow);
+            const uint16_t worldCount = std::max<uint16_t>(1, m_Scene->GetPhysics2DWorldCount());
+            for (uint16_t worldSlot = 0; worldSlot < worldCount; ++worldSlot)
+            {
+                Physics2DWorld* physicsWorld = m_Scene->GetPhysics2DWorld(worldSlot);
+                if (physicsWorld)
+                    physicsWorld->SetDiagnosticsEnabled(m_ShowPhysicsDiagnosticsWindow);
+            }
 
             m_Scene->FixedUpdate(fixedDeltaTime);
             m_Scene->StepPhysics2D(fixedDeltaTime);
@@ -944,6 +958,8 @@ namespace Limitless
             EditorInspectorPanel::ApplyNativeScriptEditorSessionState(sessionState.NativeScriptEditorState);
             m_ShowProjectSettingsWindow = sessionState.ShowProjectSettingsWindow;
             m_ShowAssetDiagnosticsWindow = sessionState.ShowAssetDiagnosticsWindow;
+            m_ShowPerformancePanel = sessionState.ShowPerformancePanel;
+            m_ShowConsoleWindow = sessionState.ShowConsoleWindow;
             m_ProjectPanelState.AssetsRootExpanded = sessionState.ProjectAssetsRootExpanded;
             m_ProjectPanelState.ExpandedFolderState = sessionState.ProjectFolderExpansionState;
             const std::string lastOpenedSceneAssetKey = sessionState.LastOpenedSceneAssetKey;
@@ -1065,6 +1081,7 @@ namespace Limitless
         DrawAnimationTimelinePanel();
         DrawAnimatorGraphPanel();
         DrawPhysicsDiagnosticsPanel();
+        DrawPerformancePanel();
         DrawConsolePanel();
         DrawSaveScenePopup();
         DrawSceneSwitchConfirmationPopup();
@@ -1107,6 +1124,7 @@ namespace Limitless
             m_ShowPhysicsDiagnosticsWindow,
             m_ShowConsoleWindow,
             m_ShowEditorFpsOverlay,
+            m_ShowPerformancePanel,
             m_ShowAnimationTimelinePanel,
             m_ShowAnimatorGraphPanel,
             m_TilePaletteState.PanelOpen,
@@ -1249,10 +1267,45 @@ namespace Limitless
             return;
         }
 
-        const Physics2DWorld* physicsWorld = m_Scene->GetPhysics2DWorld();
-        if (physicsWorld)
         {
-            const Physics2DDiagnostics& diagnostics = physicsWorld->GetDiagnostics();
+            Physics2DWorldSettings scenePhysicsSettings = m_Scene->GetPhysics2DSettings();
+            int worldCount = std::clamp<int>(scenePhysicsSettings.WorldCount, 1, 16);
+            ImGui::TextDisabled("Scene Physics");
+            if (ImGui::SliderInt("World Count", &worldCount, 1, 16))
+            {
+                scenePhysicsSettings.WorldCount = static_cast<uint16_t>(worldCount);
+                m_Scene->SetPhysics2DSettings(scenePhysicsSettings);
+                if (m_EditSceneStored && m_EditSceneStored.get() != m_Scene.get())
+                {
+                    Physics2DWorldSettings editSceneSettings = m_EditSceneStored->GetPhysics2DSettings();
+                    editSceneSettings.WorldCount = scenePhysicsSettings.WorldCount;
+                    m_EditSceneStored->SetPhysics2DSettings(editSceneSettings);
+                }
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                ImGui::SetTooltip("Allocates independent Box2D worlds for this scene. Rigidbody2D Physics World Slot selects the world per body.");
+            ImGui::Separator();
+        }
+
+        const uint16_t worldCount = std::max<uint16_t>(1, m_Scene->GetPhysics2DWorldCount());
+        Physics2DDiagnostics diagnostics{};
+        bool hasAnyWorld = false;
+        for (uint16_t worldSlot = 0; worldSlot < worldCount; ++worldSlot)
+        {
+            const Physics2DWorld* physicsWorld = m_Scene->GetPhysics2DWorld(worldSlot);
+            if (!physicsWorld)
+                continue;
+            hasAnyWorld = true;
+            const Physics2DDiagnostics& worldDiagnostics = physicsWorld->GetDiagnostics();
+            diagnostics.BodyCount += worldDiagnostics.BodyCount;
+            diagnostics.AwakeBodyCount += worldDiagnostics.AwakeBodyCount;
+            diagnostics.SleepingBodyCount += worldDiagnostics.SleepingBodyCount;
+            diagnostics.ContactPairCount += worldDiagnostics.ContactPairCount;
+            diagnostics.PenetratingContactPointCount += worldDiagnostics.PenetratingContactPointCount;
+            diagnostics.MaxPenetrationDepth = std::max(diagnostics.MaxPenetrationDepth, worldDiagnostics.MaxPenetrationDepth);
+        }
+        if (hasAnyWorld)
+        {
             constexpr float kRecentPeakHoldDurationSeconds = 0.35f;
             const float frameDeltaSeconds = std::max(0.0f, ImGui::GetIO().DeltaTime);
 
@@ -1292,7 +1345,7 @@ namespace Limitless
             if (m_SelectedEntity != entt::null)
             {
                 Physics2DBodyDiagnostics bodyDiagnostics{};
-                if (physicsWorld->TryGetBodyDiagnostics(m_SelectedEntity, bodyDiagnostics))
+                if (m_Scene->TryGetPhysics2DBodyDiagnostics(m_SelectedEntity, bodyDiagnostics))
                 {
                     ImGui::TextDisabled("Selected Body");
                     ImGui::Text("Awake: %s", bodyDiagnostics.IsAwake ? "Yes" : "No");
@@ -1329,6 +1382,66 @@ namespace Limitless
         ImGui::Text("CPU Build: %.3f ms | Submit: %.3f ms",
                     lightingDiagnostics.CpuBuildTimeMs,
                     lightingDiagnostics.CpuSubmitTimeMs);
+        ImGui::End();
+    }
+
+    void EditorLayer::DrawPerformancePanel()
+    {
+        if (!m_ShowPerformancePanel)
+            return;
+
+        if (!ImGui::Begin("Performance", &m_ShowPerformancePanel))
+        {
+            ImGui::End();
+            return;
+        }
+
+        auto& monitor = PerformanceMonitor::GetInstance();
+        if (!monitor.IsInitialized())
+        {
+            ImGui::TextDisabled("Performance monitor not initialized.");
+            ImGui::End();
+            return;
+        }
+
+        const PerformanceMetrics metrics = monitor.CollectMetrics();
+
+        ImGui::TextDisabled("Frame");
+        ImGui::Text("Frame time: %.2f ms (avg %.2f ms)", metrics.frameTime, metrics.frameTimeAvg);
+        ImGui::Text("FPS: %.1f (avg %.1f)", metrics.fps, metrics.fpsAvg);
+        ImGui::Text("Frame count: %u", metrics.frameCount);
+        ImGui::Separator();
+
+        ImGui::TextDisabled("CPU");
+        ImGui::Text("Usage: %.1f%% (avg %.1f%%)", metrics.cpuUsage, metrics.cpuUsageAvg);
+        ImGui::Text("Cores: %u", metrics.cpuCoreCount);
+        ImGui::Separator();
+
+        ImGui::TextDisabled("GPU");
+        ImGui::Text("Memory: %.1f%%", metrics.gpuMemoryUsage);
+        if (metrics.gpuMemoryTotalBytes > 0)
+        {
+            const double usedMB = static_cast<double>(metrics.gpuMemoryUsedBytes) / (1024.0 * 1024.0);
+            const double totalMB = static_cast<double>(metrics.gpuMemoryTotalBytes) / (1024.0 * 1024.0);
+            ImGui::Text("VRAM: %.1f MB / %.1f MB", usedMB, totalMB);
+        }
+        else
+        {
+            ImGui::TextDisabled("VRAM: (OpenGL driver did not report)");
+        }
+        if (metrics.gpuUsage > 0.0)
+            ImGui::Text("Usage: %.1f%%", metrics.gpuUsage);
+        if (metrics.gpuTemperature > 0.0)
+            ImGui::Text("Temperature: %.0f C", metrics.gpuTemperature);
+        ImGui::Separator();
+
+        ImGui::TextDisabled("Process memory");
+        const double currentMB = static_cast<double>(metrics.currentMemory) / (1024.0 * 1024.0);
+        const double peakMB = static_cast<double>(metrics.peakMemory) / (1024.0 * 1024.0);
+        ImGui::Text("Current: %.1f MB", currentMB);
+        ImGui::Text("Peak: %.1f MB", peakMB);
+        ImGui::Text("Allocations: %u", metrics.allocationCount);
+
         ImGui::End();
     }
 

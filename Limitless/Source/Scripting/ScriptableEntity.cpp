@@ -549,7 +549,7 @@ namespace Limitless
 #else
         if (!m_Scene)
             return false;
-        const Physics2DContactListener* contacts = m_Scene->GetPhysics2DContactEvents();
+        const Physics2DContactListener* contacts = m_Scene->GetPhysics2DContactEventsForEntity(m_EntityHandle);
         if (!contacts)
             return false;
 
@@ -576,7 +576,7 @@ namespace Limitless
 #else
         if (!m_Scene)
             return 0;
-        const Physics2DContactListener* contacts = m_Scene->GetPhysics2DContactEvents();
+        const Physics2DContactListener* contacts = m_Scene->GetPhysics2DContactEventsForEntity(m_EntityHandle);
         if (!contacts)
             return 0;
 

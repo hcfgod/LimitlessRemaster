@@ -12,6 +12,7 @@ namespace Limitless
 
     struct Physics2DWorldSettings
     {
+        uint16_t WorldCount = 1;
         glm::vec2 Gravity = glm::vec2(0.0f, -9.81f);
         int VelocitySubSteps = 8;
         bool EnableSleep = true;
@@ -54,7 +55,7 @@ namespace Limitless
     class Physics2DWorld
     {
     public:
-        Physics2DWorld() = default;
+        explicit Physics2DWorld(uint16_t sceneWorldSlot = 0) : m_SceneWorldSlot(sceneWorldSlot) {}
         ~Physics2DWorld();
 
         void Initialize(const Physics2DWorldSettings& settings);
@@ -72,6 +73,7 @@ namespace Limitless
         const Physics2DContactListener& GetContactListener() const { return m_ContactListener; }
         const Physics2DDiagnostics& GetDiagnostics() const { return m_Diagnostics; }
         bool TryGetBodyDiagnostics(entt::entity entity, Physics2DBodyDiagnostics& outDiagnostics) const;
+        uint16_t GetSceneWorldSlot() const { return m_SceneWorldSlot; }
 
         /// Controls whether the expensive per-body diagnostics collection runs
         /// each step. Disable when the diagnostics panel is not visible to save
@@ -102,6 +104,7 @@ namespace Limitless
         std::unordered_map<entt::entity, Physics2DBodyDiagnostics> m_BodyDiagnostics;
         bool m_RuntimeBuilt = false;
         bool m_DiagnosticsEnabled = true;
+        uint16_t m_SceneWorldSlot = 0;
 
         // Cached effective substep count. Recomputed only when settings or bodies change.
         int m_CachedEffectiveSubSteps = -1;

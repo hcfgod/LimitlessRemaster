@@ -59,6 +59,7 @@ namespace Limitless
                 };
             }
             root["Physics2DSettings"] = {
+                { "WorldCount", physicsSettings.WorldCount },
                 { "Gravity", { physicsSettings.Gravity.x, physicsSettings.Gravity.y } },
                 { "VelocitySubSteps", physicsSettings.VelocitySubSteps },
                 { "EnableSleep", physicsSettings.EnableSleep },
@@ -413,6 +414,7 @@ namespace Limitless
                 };
                 entry["Rigidbody2D"] = {
                     { "BodyType", toBodyTypeString(rigidbody2D->Type) },
+                    { "PhysicsWorldSlot", rigidbody2D->PhysicsWorldSlot },
                     { "FreezePositionX", rigidbody2D->FreezePositionX },
                     { "FreezePositionY", rigidbody2D->FreezePositionY },
                     { "FreezeRotation", rigidbody2D->IsRotationLocked() },

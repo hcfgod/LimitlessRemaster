@@ -67,9 +67,11 @@ namespace Limitless
             std::error_code errorCode;
             if (defaultLayoutPath.empty() || !std::filesystem::exists(defaultLayoutPath, errorCode))
                 return;
+            // Only seed from default when active layout does not exist, so user docking/position
+            // and panel visibility (e.g. Project, Performance) are preserved across sessions.
+            if (std::filesystem::exists(activeLayoutPath, errorCode) && !errorCode)
+                return;
 
-            // Always seed active layout from default so launches are deterministic
-            // across VS, build output, and shipped editor entry points.
             std::filesystem::create_directories(activeLayoutPath.parent_path(), errorCode);
             errorCode.clear();
             std::filesystem::copy_file(

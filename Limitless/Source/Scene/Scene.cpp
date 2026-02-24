@@ -630,8 +630,11 @@ namespace Limitless
 
     Scene::~Scene()
     {
-        if (m_Physics2DWorld)
-            m_Physics2DWorld->Shutdown(*this);
+        for (auto& physicsWorld : m_Physics2DWorlds)
+        {
+            if (physicsWorld)
+                physicsWorld->Shutdown(*this);
+        }
 
         auto view = m_Registry.view<NativeScriptComponent>();
         for (entt::entity entity : view)

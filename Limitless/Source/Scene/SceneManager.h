@@ -22,6 +22,9 @@ namespace Limitless
     /**
      * @brief Unity-style scene transition API for gameplay scripts.
      *
+     * One active scene per context; transitions are replace-only (no additive loading
+     * or streaming). See Docs/SCENE_ECS_GUIDE.md#scene-model-and-loading.
+     *
      * `LoadScene` and `ReloadCurrentScene` queue a transition request. The host
      * application is expected to consume and apply the request at a safe point
      * (typically after scene/script update for the current frame).

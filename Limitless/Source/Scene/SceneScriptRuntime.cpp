@@ -31,8 +31,6 @@ namespace Limitless
         {
             ProcessUiInteractionSystemForSceneRuntime(*this, 0, 0);
         }
-        static uint64_t s_AnimationDispatchFrameCounter = 0;
-
         if (NativeScriptRegistry::IsExecutionBlocked())
         {
             auto scriptView = m_Registry.view<NativeScriptComponent>();
@@ -71,7 +69,7 @@ namespace Limitless
                 }
             }
 
-            UpdateAnimation2DSystemForSceneRuntime(*this, deltaTime, ++s_AnimationDispatchFrameCounter);
+            UpdateAnimation2DSystemForSceneRuntime(*this, deltaTime, ++m_AnimationDispatchFrameCounter);
             UpdateParticleEmitterSystem(m_Registry, deltaTime);
             return;
         }
@@ -346,7 +344,7 @@ namespace Limitless
             }
         }
 
-        UpdateAnimation2DSystemForSceneRuntime(*this, deltaTime, ++s_AnimationDispatchFrameCounter);
+        UpdateAnimation2DSystemForSceneRuntime(*this, deltaTime, ++m_AnimationDispatchFrameCounter);
         UpdateParticleEmitterSystem(m_Registry, deltaTime);
     }
 

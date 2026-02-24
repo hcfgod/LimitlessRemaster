@@ -3,8 +3,28 @@
 #include "Physics/Physics2DQueries.h"
 #include "Physics/Physics2DWorld.h"
 
+#include <algorithm>
+
 namespace Limitless
 {
+    namespace
+    {
+        constexpr uint16_t kMinPhysicsWorldCount = 1;
+        constexpr uint16_t kMaxPhysicsWorldCount = 16;
+
+        uint16_t SanitizeWorldCount(uint16_t requestedCount)
+        {
+            return static_cast<uint16_t>(std::clamp<int>(requestedCount, kMinPhysicsWorldCount, kMaxPhysicsWorldCount));
+        }
+
+        uint16_t ClampWorldSlot(uint16_t requestedSlot, uint16_t worldCount)
+        {
+            if (worldCount == 0)
+                return 0;
+            return std::min<uint16_t>(requestedSlot, static_cast<uint16_t>(worldCount - 1));
+        }
+    }
+
     void Scene::BeginLoadingState()
     {
         m_LoadState = LoadState::Loading;
@@ -22,14 +42,16 @@ namespace Limitless
         if (m_PhysicsWorldInitializedForLoading)
             return true;
 
-        if (!m_Physics2DWorld)
-            m_Physics2DWorld = std::make_unique<Physics2DWorld>();
-
-        if (!m_Physics2DWorld->IsInitialized())
-            m_Physics2DWorld->Initialize(m_Physics2DSettings);
-
-        m_Physics2DWorld->SetSettings(m_Physics2DSettings);
-        m_Physics2DWorld->RebuildScene(*this);
+        EnsurePhysics2DWorldCount(m_Physics2DSettings.WorldCount);
+        for (auto& physicsWorld : m_Physics2DWorlds)
+        {
+            if (!physicsWorld)
+                continue;
+            if (!physicsWorld->IsInitialized())
+                physicsWorld->Initialize(m_Physics2DSettings);
+            physicsWorld->SetSettings(m_Physics2DSettings);
+            physicsWorld->RebuildScene(*this);
+        }
         m_PhysicsWorldInitializedForLoading = true;
         return true;
     }
@@ -44,42 +66,165 @@ namespace Limitless
     void Scene::StepPhysics2D(float fixedDeltaTime)
     {
         Physics2DQueries::SetActiveSceneForScriptQueries(this);
-        if (!m_Physics2DWorld)
-            m_Physics2DWorld = std::make_unique<Physics2DWorld>();
-        if (!m_Physics2DWorld->IsInitialized())
-            m_Physics2DWorld->Initialize(m_Physics2DSettings);
-        m_Physics2DWorld->SetSettings(m_Physics2DSettings);
-        m_Physics2DWorld->Step(*this, fixedDeltaTime);
+        EnsurePhysics2DWorldCount(m_Physics2DSettings.WorldCount);
+        for (auto& physicsWorld : m_Physics2DWorlds)
+        {
+            if (!physicsWorld)
+                continue;
+            if (!physicsWorld->IsInitialized())
+                physicsWorld->Initialize(m_Physics2DSettings);
+            physicsWorld->SetSettings(m_Physics2DSettings);
+            physicsWorld->Step(*this, fixedDeltaTime);
+        }
         m_PhysicsWorldInitializedForLoading = true;
     }
 
     void Scene::SetPhysics2DSettings(const Physics2DWorldSettings& settings)
     {
         m_Physics2DSettings = settings;
-        if (m_Physics2DWorld)
-            m_Physics2DWorld->SetSettings(m_Physics2DSettings);
+        m_Physics2DSettings.WorldCount = SanitizeWorldCount(m_Physics2DSettings.WorldCount);
+        EnsurePhysics2DWorldCount(m_Physics2DSettings.WorldCount);
+        for (auto& physicsWorld : m_Physics2DWorlds)
+        {
+            if (physicsWorld)
+                physicsWorld->SetSettings(m_Physics2DSettings);
+        }
     }
 
-    Physics2DWorld* Scene::GetPhysics2DWorld()
+    Physics2DWorld* Scene::GetPhysics2DWorld(uint16_t worldSlot)
     {
-        return m_Physics2DWorld.get();
+        if (m_Physics2DWorlds.empty())
+            return nullptr;
+        const uint16_t clampedSlot = ClampWorldSlot(worldSlot, static_cast<uint16_t>(m_Physics2DWorlds.size()));
+        return m_Physics2DWorlds[clampedSlot].get();
     }
 
-    const Physics2DWorld* Scene::GetPhysics2DWorld() const
+    const Physics2DWorld* Scene::GetPhysics2DWorld(uint16_t worldSlot) const
     {
-        return m_Physics2DWorld.get();
+        if (m_Physics2DWorlds.empty())
+            return nullptr;
+        const uint16_t clampedSlot = ClampWorldSlot(worldSlot, static_cast<uint16_t>(m_Physics2DWorlds.size()));
+        return m_Physics2DWorlds[clampedSlot].get();
+    }
+
+    uint16_t Scene::GetPhysics2DWorldCount() const
+    {
+        if (!m_Physics2DWorlds.empty())
+            return static_cast<uint16_t>(m_Physics2DWorlds.size());
+        return SanitizeWorldCount(m_Physics2DSettings.WorldCount);
     }
 
     const Physics2DContactListener* Scene::GetPhysics2DContactEvents() const
     {
-        if (!m_Physics2DWorld)
+        const Physics2DWorld* world = GetPhysics2DWorld(0);
+        if (!world)
             return nullptr;
-        return &m_Physics2DWorld->GetContactListener();
+        return &world->GetContactListener();
+    }
+
+    const Physics2DContactListener* Scene::GetPhysics2DContactEventsForEntity(entt::entity entity) const
+    {
+        if (entity == entt::null)
+            return GetPhysics2DContactEvents();
+
+        const auto& registry = GetRegistry();
+        const auto* rigidbody = registry.try_get<Rigidbody2DComponent>(entity);
+        if (!rigidbody)
+            return GetPhysics2DContactEvents();
+
+        const uint16_t worldCount = GetPhysics2DWorldCount();
+        const uint16_t worldSlot = ClampWorldSlot(rigidbody->PhysicsWorldSlot, worldCount);
+        const Physics2DWorld* world = GetPhysics2DWorld(worldSlot);
+        if (!world)
+            return nullptr;
+        return &world->GetContactListener();
+    }
+
+    bool Scene::TryGetPhysics2DBodyDiagnostics(entt::entity entity, Physics2DBodyDiagnostics& outDiagnostics) const
+    {
+        outDiagnostics = Physics2DBodyDiagnostics{};
+        const auto& registry = GetRegistry();
+        if (const auto* rigidbody = registry.try_get<Rigidbody2DComponent>(entity))
+        {
+            const uint16_t worldCount = GetPhysics2DWorldCount();
+            const uint16_t worldSlot = ClampWorldSlot(rigidbody->PhysicsWorldSlot, worldCount);
+            if (const Physics2DWorld* world = GetPhysics2DWorld(worldSlot))
+                return world->TryGetBodyDiagnostics(entity, outDiagnostics);
+            return false;
+        }
+
+        for (const auto& world : m_Physics2DWorlds)
+        {
+            if (world && world->TryGetBodyDiagnostics(entity, outDiagnostics))
+                return true;
+        }
+        return false;
+    }
+
+    Physics2DRaycastHit Scene::RaycastClosestAcrossPhysicsWorlds(const glm::vec2& origin,
+                                                                 const glm::vec2& direction,
+                                                                 float maxDistance,
+                                                                 uint64_t collisionMask) const
+    {
+        Physics2DRaycastHit bestHit{};
+        float bestFraction = 1.0f;
+        for (const auto& world : m_Physics2DWorlds)
+        {
+            if (!world)
+                continue;
+            const Physics2DRaycastHit hit = world->RaycastClosest(origin, direction, maxDistance, collisionMask);
+            if (!hit.HasHit)
+                continue;
+            if (!bestHit.HasHit || hit.Fraction < bestFraction)
+            {
+                bestHit = hit;
+                bestFraction = hit.Fraction;
+            }
+        }
+        return bestHit;
     }
 
     void Scene::ResetPhysicsRuntimeState()
     {
-        if (m_Physics2DWorld)
-            m_Physics2DWorld->Shutdown(*this);
+        for (auto& physicsWorld : m_Physics2DWorlds)
+        {
+            if (physicsWorld)
+                physicsWorld->Shutdown(*this);
+        }
+    }
+
+    void Scene::EnsurePhysics2DWorldCount(uint16_t worldCount)
+    {
+        const uint16_t sanitizedWorldCount = SanitizeWorldCount(worldCount);
+        m_Physics2DSettings.WorldCount = sanitizedWorldCount;
+
+        const size_t existingCount = m_Physics2DWorlds.size();
+        if (existingCount > sanitizedWorldCount)
+        {
+            for (size_t worldIndex = sanitizedWorldCount; worldIndex < existingCount; ++worldIndex)
+            {
+                if (m_Physics2DWorlds[worldIndex])
+                    m_Physics2DWorlds[worldIndex]->Shutdown(*this);
+            }
+            m_Physics2DWorlds.resize(sanitizedWorldCount);
+        }
+        else if (existingCount < sanitizedWorldCount)
+        {
+            m_Physics2DWorlds.resize(sanitizedWorldCount);
+        }
+
+        for (uint16_t worldIndex = 0; worldIndex < sanitizedWorldCount; ++worldIndex)
+        {
+            if (!m_Physics2DWorlds[worldIndex])
+                m_Physics2DWorlds[worldIndex] = std::make_unique<Physics2DWorld>(worldIndex);
+        }
+
+        auto bodyView = m_Registry.view<Rigidbody2DComponent>();
+        const uint16_t maxSlot = static_cast<uint16_t>(sanitizedWorldCount - 1);
+        for (entt::entity entity : bodyView)
+        {
+            auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
+            rigidbody.PhysicsWorldSlot = std::min<uint16_t>(rigidbody.PhysicsWorldSlot, maxSlot);
+        }
     }
 }

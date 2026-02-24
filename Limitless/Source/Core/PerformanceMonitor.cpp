@@ -1,4 +1,5 @@
 #include "PerformanceMonitor.h"
+#include "GPUMetricsProvider.h"
 #include "Debug/Log.h"
 #include "Platform/Platform.h"
 #include "Platform/PerformancePlatform.h"
@@ -541,6 +542,12 @@ namespace Limitless {
             m_CurrentMetrics.gpuUsage = 0.0;
             m_CurrentMetrics.gpuMemoryUsage = 0.0;
             m_CurrentMetrics.gpuTemperature = 0.0;
+        }
+        {
+            uint64_t usedB = 0, totalB = 0;
+            GPUMetricsProvider::GetVram(usedB, totalB);
+            m_CurrentMetrics.gpuMemoryUsedBytes = usedB;
+            m_CurrentMetrics.gpuMemoryTotalBytes = totalB;
         }
         
         // Collect performance counter data

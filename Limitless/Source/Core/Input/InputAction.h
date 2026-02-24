@@ -98,6 +98,7 @@ namespace Limitless
     struct GamepadButtonBinding
     {
         SDL_GamepadButton Button = SDL_GAMEPAD_BUTTON_INVALID;
+        int PlayerIndex = 0;
     };
 
     struct GamepadAxis1DBinding
@@ -105,6 +106,7 @@ namespace Limitless
         SDL_GamepadAxis Axis = SDL_GAMEPAD_AXIS_INVALID;
         float Scale = 1.0f;
         float Deadzone = 0.15f;
+        int PlayerIndex = 0;
     };
 
     struct GamepadAxis2DBinding
@@ -114,6 +116,7 @@ namespace Limitless
         float Scale = 1.0f;
         float Deadzone = 0.15f;
         bool InvertY = false;
+        int PlayerIndex = 0;
     };
 
     using InputBinding = std::variant<

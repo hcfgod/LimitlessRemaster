@@ -86,6 +86,23 @@ namespace Limitless
             return value;
         }
 
+        bool IsEntityAssignedToWorld(const Scene& scene,
+                                     entt::entity entity,
+                                     uint16_t worldSlot,
+                                     const Rigidbody2DComponent* cachedRigidbody = nullptr)
+        {
+            const auto& registry = scene.GetRegistry();
+            const Rigidbody2DComponent* rigidbody = cachedRigidbody;
+            if (!rigidbody)
+                rigidbody = registry.try_get<Rigidbody2DComponent>(entity);
+            if (!rigidbody)
+                return worldSlot == 0;
+
+            const uint16_t worldCount = std::max<uint16_t>(1, scene.GetPhysics2DWorldCount());
+            const uint16_t clampedSlot = std::min<uint16_t>(rigidbody->PhysicsWorldSlot, static_cast<uint16_t>(worldCount - 1));
+            return clampedSlot == worldSlot;
+        }
+
         uint64_t HashCombine64(uint64_t seed, uint64_t value)
         {
             // 64-bit hash-combine variant suitable for incremental content hashes.
@@ -244,18 +261,23 @@ namespace Limitless
         for (auto [entity, joint] : jointView.each())
         {
             (void)entity;
+            if (joint.RuntimeWorldSlot != m_SceneWorldSlot)
+                continue;
 #ifdef LT_ENABLE_PHYSICS2D
             if (joint.RuntimeJointCreated && b2Joint_IsValid(joint.RuntimeJointId))
                 b2DestroyJoint(joint.RuntimeJointId);
             joint.RuntimeJointId = kNullPhysics2DJoint;
 #endif
             joint.RuntimeJointCreated = false;
+            joint.RuntimeWorldSlot = 0;
         }
 
         auto boxColliderView = registry.view<BoxCollider2DComponent>();
         for (auto [entity, collider] : boxColliderView.each())
         {
-            (void)entity;
+            const auto* rigidbody = registry.try_get<Rigidbody2DComponent>(entity);
+            if (!rigidbody || rigidbody->RuntimeWorldSlot != m_SceneWorldSlot)
+                continue;
 #ifdef LT_ENABLE_PHYSICS2D
             collider.RuntimeShapeId = kNullPhysics2DShape;
 #endif
@@ -265,7 +287,9 @@ namespace Limitless
         auto circleColliderView = registry.view<CircleCollider2DComponent>();
         for (auto [entity, collider] : circleColliderView.each())
         {
-            (void)entity;
+            const auto* rigidbody = registry.try_get<Rigidbody2DComponent>(entity);
+            if (!rigidbody || rigidbody->RuntimeWorldSlot != m_SceneWorldSlot)
+                continue;
 #ifdef LT_ENABLE_PHYSICS2D
             collider.RuntimeShapeId = kNullPhysics2DShape;
 #endif
@@ -276,12 +300,15 @@ namespace Limitless
         for (auto [entity, rigidbody] : bodyView.each())
         {
             (void)entity;
+            if (rigidbody.RuntimeWorldSlot != m_SceneWorldSlot)
+                continue;
 #ifdef LT_ENABLE_PHYSICS2D
             if (rigidbody.RuntimeBodyCreated && b2Body_IsValid(rigidbody.RuntimeBodyId))
                 b2DestroyBody(rigidbody.RuntimeBodyId);
             rigidbody.RuntimeBodyId = kNullPhysics2DBody;
 #endif
             rigidbody.RuntimeBodyCreated = false;
+            rigidbody.RuntimeWorldSlot = 0;
             rigidbody.RuntimePreviousPosition = glm::vec2(0.0f);
             rigidbody.RuntimePreviousAngleRadians = 0.0f;
             rigidbody.RuntimeRenderPreviousPosition = glm::vec2(0.0f);
@@ -314,12 +341,43 @@ namespace Limitless
         for (entt::entity entity : bodyView)
         {
             auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
+            const bool assignedToThisWorld = IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &rigidbody);
+            if (!assignedToThisWorld)
+            {
+                if (rigidbody.RuntimeWorldSlot == m_SceneWorldSlot)
+                {
+                    if (rigidbody.RuntimeBodyCreated && b2Body_IsValid(rigidbody.RuntimeBodyId))
+                        b2DestroyBody(rigidbody.RuntimeBodyId);
+                    rigidbody.RuntimeBodyId = kNullPhysics2DBody;
+                    rigidbody.RuntimeBodyCreated = false;
+                    rigidbody.RuntimeWorldSlot = 0;
+                    rigidbody.RuntimeContactCount = 0;
+                    rigidbody.RuntimeContactCountExcludingSensors = 0;
+                    if (auto* boxCollider = registry.try_get<BoxCollider2DComponent>(entity))
+                    {
+                        boxCollider->RuntimeShapeId = kNullPhysics2DShape;
+                        boxCollider->RuntimeShapeCreated = false;
+                    }
+                    if (auto* circleCollider = registry.try_get<CircleCollider2DComponent>(entity))
+                    {
+                        circleCollider->RuntimeShapeId = kNullPhysics2DShape;
+                        circleCollider->RuntimeShapeCreated = false;
+                    }
+                }
+                continue;
+            }
+
             if (!scene.IsEntityEnabledInHierarchy(entity))
             {
-                if (rigidbody.RuntimeBodyCreated && b2Body_IsValid(rigidbody.RuntimeBodyId))
+                if (rigidbody.RuntimeWorldSlot == m_SceneWorldSlot &&
+                    rigidbody.RuntimeBodyCreated &&
+                    b2Body_IsValid(rigidbody.RuntimeBodyId))
+                {
                     b2DestroyBody(rigidbody.RuntimeBodyId);
+                }
                 rigidbody.RuntimeBodyId = kNullPhysics2DBody;
                 rigidbody.RuntimeBodyCreated = false;
+                rigidbody.RuntimeWorldSlot = 0;
                 rigidbody.RuntimeContactCount = 0;
                 rigidbody.RuntimeContactCountExcludingSensors = 0;
                 if (auto* boxCollider = registry.try_get<BoxCollider2DComponent>(entity))
@@ -395,6 +453,7 @@ namespace Limitless
 
             rigidbody.RuntimeBodyId = b2CreateBody(m_WorldId, &bodyDefinition);
             rigidbody.RuntimeBodyCreated = b2Body_IsValid(rigidbody.RuntimeBodyId);
+            rigidbody.RuntimeWorldSlot = rigidbody.RuntimeBodyCreated ? m_SceneWorldSlot : 0;
             ++newBodiesCreatedThisStep;
             rigidbody.RuntimePreviousPosition = glm::vec2(transform.Position.x, transform.Position.y);
             rigidbody.RuntimePreviousAngleRadians = glm::radians(transform.Rotation.z);
@@ -593,6 +652,10 @@ namespace Limitless
                 continue;
             auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
             auto& transform = bodyView.get<TransformComponent>(entity);
+            if (!IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &rigidbody))
+                continue;
+            if (rigidbody.RuntimeWorldSlot != m_SceneWorldSlot)
+                continue;
 
             if (!rigidbody.RuntimeBodyCreated || !b2Body_IsValid(rigidbody.RuntimeBodyId))
                 continue;
@@ -805,17 +868,39 @@ namespace Limitless
         auto jointView = registry.view<Joint2DComponent, Rigidbody2DComponent>();
         for (entt::entity entity : jointView)
         {
+            auto& joint = jointView.get<Joint2DComponent>(entity);
+            auto& bodyAComponent = jointView.get<Rigidbody2DComponent>(entity);
+            if (!IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &bodyAComponent))
+            {
+                if (joint.RuntimeJointCreated &&
+                    joint.RuntimeWorldSlot == m_SceneWorldSlot &&
+                    b2Joint_IsValid(joint.RuntimeJointId))
+                {
+                    b2DestroyJoint(joint.RuntimeJointId);
+                    joint.RuntimeJointId = kNullPhysics2DJoint;
+                    joint.RuntimeJointCreated = false;
+                    joint.RuntimeWorldSlot = 0;
+                }
+                continue;
+            }
+
             if (!scene.IsEntityEnabledInHierarchy(entity))
                 continue;
-            auto& joint = jointView.get<Joint2DComponent>(entity);
 
             // Incremental guard: skip joints that are already built and valid.
-            if (joint.RuntimeJointCreated && b2Joint_IsValid(joint.RuntimeJointId))
+            if (joint.RuntimeJointCreated &&
+                joint.RuntimeWorldSlot == m_SceneWorldSlot &&
+                b2Joint_IsValid(joint.RuntimeJointId))
+            {
                 continue;
+            }
 
-            auto& bodyAComponent = jointView.get<Rigidbody2DComponent>(entity);
-            if (!bodyAComponent.RuntimeBodyCreated || !b2Body_IsValid(bodyAComponent.RuntimeBodyId))
+            if (!bodyAComponent.RuntimeBodyCreated ||
+                bodyAComponent.RuntimeWorldSlot != m_SceneWorldSlot ||
+                !b2Body_IsValid(bodyAComponent.RuntimeBodyId))
+            {
                 continue;
+            }
 
             if (joint.ConnectedEntity == entt::null || !scene.IsValid(joint.ConnectedEntity))
                 continue;
@@ -823,8 +908,14 @@ namespace Limitless
                 continue;
 
             auto* bodyBComponent = registry.try_get<Rigidbody2DComponent>(joint.ConnectedEntity);
-            if (!bodyBComponent || !bodyBComponent->RuntimeBodyCreated || !b2Body_IsValid(bodyBComponent->RuntimeBodyId))
+            if (!bodyBComponent ||
+                !IsEntityAssignedToWorld(scene, joint.ConnectedEntity, m_SceneWorldSlot, bodyBComponent) ||
+                !bodyBComponent->RuntimeBodyCreated ||
+                bodyBComponent->RuntimeWorldSlot != m_SceneWorldSlot ||
+                !b2Body_IsValid(bodyBComponent->RuntimeBodyId))
+            {
                 continue;
+            }
 
             if (joint.Type == Joint2DComponent::JointType::Distance)
             {
@@ -886,6 +977,7 @@ namespace Limitless
             }
 
             joint.RuntimeJointCreated = b2Joint_IsValid(joint.RuntimeJointId);
+            joint.RuntimeWorldSlot = joint.RuntimeJointCreated ? m_SceneWorldSlot : 0;
         }
 #else
         (void)scene;
@@ -909,6 +1001,10 @@ namespace Limitless
             auto* transform = registry.try_get<TransformComponent>(entity);
             auto* rigidbody = registry.try_get<Rigidbody2DComponent>(entity);
             if (!transform || !rigidbody)
+                continue;
+            if (!IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, rigidbody))
+                continue;
+            if (rigidbody->RuntimeWorldSlot != m_SceneWorldSlot)
                 continue;
 
             const bool freezePositionX = rigidbody->FreezePositionX;
@@ -981,6 +1077,11 @@ namespace Limitless
         for (entt::entity entity : bodyView)
         {
             auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
+            if (!IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &rigidbody) ||
+                rigidbody.RuntimeWorldSlot != m_SceneWorldSlot)
+            {
+                continue;
+            }
             if (!scene.IsEntityEnabledInHierarchy(entity))
             {
                 rigidbody.RuntimeContactCount = 0;
@@ -1080,6 +1181,8 @@ namespace Limitless
         for (entt::entity entity : bodyView)
         {
             const auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
+            if (!IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &rigidbody))
+                continue;
             if (!rigidbody.HighContactQuality)
                 continue;
             maxBodyExtraSubSteps = std::max(maxBodyExtraSubSteps, std::max(0, rigidbody.ExtraSolverSubSteps));
@@ -1103,7 +1206,11 @@ namespace Limitless
         for (entt::entity entity : bodyView)
         {
             const auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
-            if (!rigidbody.RuntimeBodyCreated || !b2Body_IsValid(rigidbody.RuntimeBodyId))
+            if (!IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &rigidbody))
+                continue;
+            if (!rigidbody.RuntimeBodyCreated ||
+                rigidbody.RuntimeWorldSlot != m_SceneWorldSlot ||
+                !b2Body_IsValid(rigidbody.RuntimeBodyId))
                 continue;
 
             ++m_Diagnostics.BodyCount;
@@ -1146,7 +1253,11 @@ namespace Limitless
         for (entt::entity entity : bodyView)
         {
             const auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
-            if (!rigidbody.RuntimeBodyCreated || !b2Body_IsValid(rigidbody.RuntimeBodyId))
+            if (!IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &rigidbody))
+                continue;
+            if (!rigidbody.RuntimeBodyCreated ||
+                rigidbody.RuntimeWorldSlot != m_SceneWorldSlot ||
+                !b2Body_IsValid(rigidbody.RuntimeBodyId))
                 continue;
 
             const int contactCapacity = std::max(0, b2Body_GetContactCapacity(rigidbody.RuntimeBodyId));

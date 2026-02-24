@@ -35,29 +35,39 @@ namespace {
     using PFNGLPOPDEBUGGROUPPROC = void (*)();
     using PFNGLINSERTDEBUGMARKERPROC = void (*)(GLenum source, GLuint id, GLsizei length, const GLchar* message);
 
-    static PFNGLPUSHDEBUGGROUPPROC s_glPushDebugGroup = nullptr;
-    static PFNGLPOPDEBUGGROUPPROC s_glPopDebugGroup = nullptr;
-    static PFNGLINSERTDEBUGMARKERPROC s_glInsertDebugMarker = nullptr;
-    static bool s_DebugFunctionsLoaded = false;
+    struct OpenGLDebugFunctionState
+    {
+        PFNGLPUSHDEBUGGROUPPROC PushDebugGroup = nullptr;
+        PFNGLPOPDEBUGGROUPPROC PopDebugGroup = nullptr;
+        PFNGLINSERTDEBUGMARKERPROC InsertDebugMarker = nullptr;
+        bool DebugFunctionsLoaded = false;
+    };
+
+    OpenGLDebugFunctionState& GetOpenGLDebugFunctionState()
+    {
+        static OpenGLDebugFunctionState state{};
+        return state;
+    }
 
     // GL_KHR_debug constants (may not be in GLAD 3.3 headers)
     static constexpr GLenum kGLDebugSourceApplication = 0x824A;
 
     static void LoadDebugFunctions()
     {
-        if (s_DebugFunctionsLoaded)
+        auto& debugState = GetOpenGLDebugFunctionState();
+        if (debugState.DebugFunctionsLoaded)
             return;
-        s_DebugFunctionsLoaded = true;
+        debugState.DebugFunctionsLoaded = true;
 
-        s_glPushDebugGroup = reinterpret_cast<PFNGLPUSHDEBUGGROUPPROC>(SDL_GL_GetProcAddress("glPushDebugGroup"));
-        if (!s_glPushDebugGroup)
-            s_glPushDebugGroup = reinterpret_cast<PFNGLPUSHDEBUGGROUPPROC>(SDL_GL_GetProcAddress("glPushDebugGroupKHR"));
-        s_glPopDebugGroup = reinterpret_cast<PFNGLPOPDEBUGGROUPPROC>(SDL_GL_GetProcAddress("glPopDebugGroup"));
-        if (!s_glPopDebugGroup)
-            s_glPopDebugGroup = reinterpret_cast<PFNGLPOPDEBUGGROUPPROC>(SDL_GL_GetProcAddress("glPopDebugGroupKHR"));
-        s_glInsertDebugMarker = reinterpret_cast<PFNGLINSERTDEBUGMARKERPROC>(SDL_GL_GetProcAddress("glInsertDebugMarker"));
-        if (!s_glInsertDebugMarker)
-            s_glInsertDebugMarker = reinterpret_cast<PFNGLINSERTDEBUGMARKERPROC>(SDL_GL_GetProcAddress("glInsertDebugMarkerKHR"));
+        debugState.PushDebugGroup = reinterpret_cast<PFNGLPUSHDEBUGGROUPPROC>(SDL_GL_GetProcAddress("glPushDebugGroup"));
+        if (!debugState.PushDebugGroup)
+            debugState.PushDebugGroup = reinterpret_cast<PFNGLPUSHDEBUGGROUPPROC>(SDL_GL_GetProcAddress("glPushDebugGroupKHR"));
+        debugState.PopDebugGroup = reinterpret_cast<PFNGLPOPDEBUGGROUPPROC>(SDL_GL_GetProcAddress("glPopDebugGroup"));
+        if (!debugState.PopDebugGroup)
+            debugState.PopDebugGroup = reinterpret_cast<PFNGLPOPDEBUGGROUPPROC>(SDL_GL_GetProcAddress("glPopDebugGroupKHR"));
+        debugState.InsertDebugMarker = reinterpret_cast<PFNGLINSERTDEBUGMARKERPROC>(SDL_GL_GetProcAddress("glInsertDebugMarker"));
+        if (!debugState.InsertDebugMarker)
+            debugState.InsertDebugMarker = reinterpret_cast<PFNGLINSERTDEBUGMARKERPROC>(SDL_GL_GetProcAddress("glInsertDebugMarkerKHR"));
     }
 }
 
@@ -140,9 +150,6 @@ namespace Limitless
             }
         };
 
-        // Render thread only.
-        static OpenGLStateCache s_GLState;
-
         struct Renderer2DUniformCache
         {
             GLuint Program = 0;
@@ -164,7 +171,17 @@ namespace Limitless
             }
         };
 
-        static Renderer2DUniformCache s_Renderer2DUniforms;
+        struct OpenGLRenderCommandRuntimeState
+        {
+            OpenGLStateCache GLState;
+            Renderer2DUniformCache Renderer2DUniforms;
+        };
+
+        OpenGLRenderCommandRuntimeState& GetOpenGLRenderCommandRuntimeState()
+        {
+            static OpenGLRenderCommandRuntimeState state{};
+            return state;
+        }
     }
 
     // ClearCommand Execute implementation
@@ -245,12 +262,12 @@ namespace Limitless
         {
             if (auto* glShader = dynamic_cast<OpenGLShader*>(m_Shader.get()))
             {
-                s_GLState.UseProgram(glShader->GetRendererID());
+                GetOpenGLRenderCommandRuntimeState().GLState.UseProgram(glShader->GetRendererID());
             }
             else
             {
                 m_Shader->Bind();
-                s_GLState.Program = 0;
+                GetOpenGLRenderCommandRuntimeState().GLState.Program = 0;
             }
         }
         else
@@ -275,7 +292,7 @@ namespace Limitless
         if (auto* glShader = dynamic_cast<OpenGLShader*>(m_Shader.get()))
         {
             const GLuint program = glShader->GetRendererID();
-            s_GLState.UseProgram(program);
+            GetOpenGLRenderCommandRuntimeState().GLState.UseProgram(program);
 
             const GLint loc = glGetUniformLocation(program, m_UniformName.c_str());
             if (loc != -1)
@@ -300,12 +317,12 @@ namespace Limitless
         {
             if (auto* glVAO = dynamic_cast<OpenGLVertexArray*>(m_VertexArray.get()))
             {
-                s_GLState.BindVertexArray(glVAO->GetRendererID());
+                GetOpenGLRenderCommandRuntimeState().GLState.BindVertexArray(glVAO->GetRendererID());
             }
             else
             {
                 m_VertexArray->Bind();
-                s_GLState.VertexArray = 0;
+                GetOpenGLRenderCommandRuntimeState().GLState.VertexArray = 0;
             }
 
             // Defensive: ensure the VAO's index buffer is bound for indexed draws.
@@ -408,34 +425,35 @@ namespace Limitless
         if (auto* glShader = dynamic_cast<OpenGLShader*>(m_KeepAlive.ShaderProgramHandle.get()))
         {
             const GLuint program = glShader->GetRendererID();
-            s_GLState.UseProgram(program);
-            s_Renderer2DUniforms.OnProgramBound(program);
+            GetOpenGLRenderCommandRuntimeState().GLState.UseProgram(program);
+            auto& renderer2DUniforms = GetOpenGLRenderCommandRuntimeState().Renderer2DUniforms;
+            renderer2DUniforms.OnProgramBound(program);
 
-            if (s_Renderer2DUniforms.ViewProjectionLocation == -2)
+            if (renderer2DUniforms.ViewProjectionLocation == -2)
             {
-                s_Renderer2DUniforms.ViewProjectionLocation = glGetUniformLocation(program, "u_ViewProjection");
+                renderer2DUniforms.ViewProjectionLocation = glGetUniformLocation(program, "u_ViewProjection");
             }
 
-            if (s_Renderer2DUniforms.ViewProjectionLocation != -1)
+            if (renderer2DUniforms.ViewProjectionLocation != -1)
             {
-                if (!s_Renderer2DUniforms.HasViewProjection ||
-                    std::memcmp(&s_Renderer2DUniforms.LastViewProjection[0][0], &m_ViewProjection[0][0], sizeof(glm::mat4)) != 0)
+                if (!renderer2DUniforms.HasViewProjection ||
+                    std::memcmp(&renderer2DUniforms.LastViewProjection[0][0], &m_ViewProjection[0][0], sizeof(glm::mat4)) != 0)
                 {
-                    glUniformMatrix4fv(s_Renderer2DUniforms.ViewProjectionLocation, 1, GL_FALSE, &m_ViewProjection[0][0]);
-                    s_Renderer2DUniforms.LastViewProjection = m_ViewProjection;
-                    s_Renderer2DUniforms.HasViewProjection = true;
+                    glUniformMatrix4fv(renderer2DUniforms.ViewProjectionLocation, 1, GL_FALSE, &m_ViewProjection[0][0]);
+                    renderer2DUniforms.LastViewProjection = m_ViewProjection;
+                    renderer2DUniforms.HasViewProjection = true;
                 }
             }
 
-            if (s_Renderer2DUniforms.ModelLocation == -2)
+            if (renderer2DUniforms.ModelLocation == -2)
             {
-                s_Renderer2DUniforms.ModelLocation = glGetUniformLocation(program, "u_Model");
+                renderer2DUniforms.ModelLocation = glGetUniformLocation(program, "u_Model");
             }
 
-            if (s_Renderer2DUniforms.ModelLocation != -1)
+            if (renderer2DUniforms.ModelLocation != -1)
             {
                 static constexpr glm::mat4 kIdentity(1.0f);
-                glUniformMatrix4fv(s_Renderer2DUniforms.ModelLocation, 1, GL_FALSE, &kIdentity[0][0]);
+                glUniformMatrix4fv(renderer2DUniforms.ModelLocation, 1, GL_FALSE, &kIdentity[0][0]);
             }
         }
         else
@@ -443,8 +461,8 @@ namespace Limitless
             m_KeepAlive.ShaderProgramHandle->Bind();
             m_KeepAlive.ShaderProgramHandle->SetMat4("u_ViewProjection", m_ViewProjection);
             m_KeepAlive.ShaderProgramHandle->SetMat4("u_Model", glm::mat4(1.0f));
-            s_GLState.Program = 0;
-            s_Renderer2DUniforms.OnProgramBound(0);
+            GetOpenGLRenderCommandRuntimeState().GLState.Program = 0;
+            GetOpenGLRenderCommandRuntimeState().Renderer2DUniforms.OnProgramBound(0);
         }
 
         // Bind textures (multi-texture batching) using cached renderer IDs.
@@ -452,22 +470,22 @@ namespace Limitless
         // to texture unit 0, leaving our cache stale. Skipping the bind would cause color-only
         // quads to sample the wrong texture (glyph artifacts).
         const uint32_t count = (m_TextureCount > kMaxTextureSlots) ? kMaxTextureSlots : m_TextureCount;
-        s_GLState.InvalidateTextureSlots(count);
+        GetOpenGLRenderCommandRuntimeState().GLState.InvalidateTextureSlots(count);
         for (uint32_t slot = 0; slot < count; ++slot)
         {
-            s_GLState.BindTexture2D(slot, static_cast<GLuint>(m_TextureRendererIds[slot]));
+            GetOpenGLRenderCommandRuntimeState().GLState.BindTexture2D(slot, static_cast<GLuint>(m_TextureRendererIds[slot]));
         }
 
         // Bind geometry and issue draw.
         if (auto* glVAO = dynamic_cast<OpenGLVertexArray*>(m_KeepAlive.VertexArrayHandle.get()))
         {
             const GLuint vao = glVAO->GetRendererID();
-            s_GLState.BindVertexArray(vao);
+            GetOpenGLRenderCommandRuntimeState().GLState.BindVertexArray(vao);
         }
         else
         {
             m_KeepAlive.VertexArrayHandle->Bind();
-            s_GLState.VertexArray = 0;
+            GetOpenGLRenderCommandRuntimeState().GLState.VertexArray = 0;
         }
 
         // Safety: in core profile, indexed drawing requires VAO + EBO.
@@ -496,7 +514,7 @@ namespace Limitless
         }
 
         const GLuint id = m_Texture ? static_cast<GLuint>(m_Texture->GetRendererID()) : 0;
-        s_GLState.BindTexture2D(m_Slot, id);
+        GetOpenGLRenderCommandRuntimeState().GLState.BindTexture2D(m_Slot, id);
     }
 
     void SetTextureSpecificationCommand::Execute(GraphicsContext* context)
@@ -611,8 +629,18 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // This should be implemented by the specific render API implementation
-        // TODO: Implement actual OpenGL draw instanced command
+        // Safety: OpenGL core profile requires a VAO to be bound for vertex specification.
+        GLint boundVAO = 0;
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &boundVAO);
+        if (boundVAO == 0)
+        {
+            LT_CORE_ERROR("DrawInstancedCommand: no VAO bound (skipping draw)");
+            return;
+        }
+
+        glDrawArraysInstanced(static_cast<GLenum>(m_Mode), m_First, static_cast<GLsizei>(m_Count),
+                              static_cast<GLsizei>(m_InstanceCount));
+        CheckOpenGLError("glDrawArraysInstanced");
     }
 
     // DrawIndexedInstancedCommand Execute implementation
@@ -623,8 +651,40 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // This should be implemented by the specific render API implementation
-        // TODO: Implement actual OpenGL draw indexed instanced command
+        // Safety: In core profile, indexed drawing requires a VAO and an element array buffer
+        // unless the caller provides a valid client pointer (which we do not support here).
+        GLint boundVAO = 0;
+        glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &boundVAO);
+
+        GLint boundEBO = 0;
+        glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING, &boundEBO);
+
+        if (boundVAO == 0)
+        {
+            LT_CORE_ERROR("DrawIndexedInstancedCommand: no VAO bound (skipping draw)");
+            return;
+        }
+
+        // If m_Indices is null, we expect an index buffer to be bound via the VAO state.
+        if (m_Indices == nullptr && boundEBO == 0)
+        {
+            LT_CORE_ERROR("DrawIndexedInstancedCommand: no index buffer bound and indices pointer is null (skipping draw)");
+            return;
+        }
+
+        if (m_BaseVertex != 0)
+        {
+            glDrawElementsInstancedBaseVertex(static_cast<GLenum>(m_Mode), static_cast<GLsizei>(m_Count),
+                                              static_cast<GLenum>(m_IndexType), m_Indices,
+                                              static_cast<GLsizei>(m_InstanceCount), m_BaseVertex);
+            CheckOpenGLError("glDrawElementsInstancedBaseVertex");
+        }
+        else
+        {
+            glDrawElementsInstanced(static_cast<GLenum>(m_Mode), static_cast<GLsizei>(m_Count),
+                                    static_cast<GLenum>(m_IndexType), m_Indices, static_cast<GLsizei>(m_InstanceCount));
+            CheckOpenGLError("glDrawElementsInstanced");
+        }
     }
 
     // SetBlendModeCommand Execute implementation
@@ -732,9 +792,10 @@ namespace Limitless
         }
 
         LoadDebugFunctions();
-        if (s_glPushDebugGroup)
+        const auto& debugState = GetOpenGLDebugFunctionState();
+        if (debugState.PushDebugGroup)
         {
-            s_glPushDebugGroup(kGLDebugSourceApplication, 0, static_cast<GLsizei>(m_GroupName.size()), m_GroupName.c_str());
+            debugState.PushDebugGroup(kGLDebugSourceApplication, 0, static_cast<GLsizei>(m_GroupName.size()), m_GroupName.c_str());
         }
     }
 
@@ -747,9 +808,10 @@ namespace Limitless
         }
 
         LoadDebugFunctions();
-        if (s_glPopDebugGroup)
+        const auto& debugState = GetOpenGLDebugFunctionState();
+        if (debugState.PopDebugGroup)
         {
-            s_glPopDebugGroup();
+            debugState.PopDebugGroup();
         }
     }
 
@@ -762,9 +824,10 @@ namespace Limitless
         }
 
         LoadDebugFunctions();
-        if (s_glInsertDebugMarker)
+        const auto& debugState = GetOpenGLDebugFunctionState();
+        if (debugState.InsertDebugMarker)
         {
-            s_glInsertDebugMarker(kGLDebugSourceApplication, 0, static_cast<GLsizei>(m_MarkerName.size()), m_MarkerName.c_str());
+            debugState.InsertDebugMarker(kGLDebugSourceApplication, 0, static_cast<GLsizei>(m_MarkerName.size()), m_MarkerName.c_str());
         }
     }
 
@@ -782,8 +845,8 @@ namespace Limitless
         }
 
         // Custom code can mutate any OpenGL state. Invalidate cached state for correctness.
-        s_GLState.InvalidateAll();
-        s_Renderer2DUniforms.OnProgramBound(0);
+        GetOpenGLRenderCommandRuntimeState().GLState.InvalidateAll();
+        GetOpenGLRenderCommandRuntimeState().Renderer2DUniforms.OnProgramBound(0);
         
         LT_CORE_DEBUG("CustomCommand: {}", m_Name);
     }

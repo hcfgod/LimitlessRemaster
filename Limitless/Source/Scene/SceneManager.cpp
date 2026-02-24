@@ -10,9 +10,18 @@ namespace Limitless
     namespace
     {
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
-        std::mutex s_SceneTransitionMutex;
-        std::optional<SceneTransitionRequest> s_PendingSceneTransition;
-        SceneTransitionBridgeCallback s_TransitionBridgeCallback = nullptr;
+        struct SceneManagerRuntimeState
+        {
+            std::mutex SceneTransitionMutex;
+            std::optional<SceneTransitionRequest> PendingSceneTransition;
+            SceneTransitionBridgeCallback TransitionBridgeCallback = nullptr;
+        };
+
+        SceneManagerRuntimeState& GetSceneManagerRuntimeState()
+        {
+            static SceneManagerRuntimeState state{};
+            return state;
+        }
 
         std::string NormalizeSlashes(std::string pathText)
         {
@@ -46,54 +55,60 @@ namespace Limitless
         if (sceneIdentifier.empty())
             return false;
 
-        std::scoped_lock<std::mutex> lock(s_SceneTransitionMutex);
-        if (s_TransitionBridgeCallback != nullptr)
-            return s_TransitionBridgeCallback(SceneTransitionType::LoadByAssetKey, sceneIdentifier.c_str());
+        auto& state = GetSceneManagerRuntimeState();
+        std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
+        if (state.TransitionBridgeCallback != nullptr)
+            return state.TransitionBridgeCallback(SceneTransitionType::LoadByAssetKey, sceneIdentifier.c_str());
 
         const auto normalizedSceneIdentifier = NormalizeSceneAssetKey(sceneIdentifier);
         if (!normalizedSceneIdentifier.has_value())
             return false;
 
-        s_PendingSceneTransition = SceneTransitionRequest{ SceneTransitionType::LoadByAssetKey, *normalizedSceneIdentifier };
+        state.PendingSceneTransition = SceneTransitionRequest{ SceneTransitionType::LoadByAssetKey, *normalizedSceneIdentifier };
         return true;
     }
 
     bool SceneManager::ReloadCurrentScene()
     {
-        std::scoped_lock<std::mutex> lock(s_SceneTransitionMutex);
-        if (s_TransitionBridgeCallback != nullptr)
-            return s_TransitionBridgeCallback(SceneTransitionType::ReloadCurrentScene, "");
+        auto& state = GetSceneManagerRuntimeState();
+        std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
+        if (state.TransitionBridgeCallback != nullptr)
+            return state.TransitionBridgeCallback(SceneTransitionType::ReloadCurrentScene, "");
 
-        s_PendingSceneTransition = SceneTransitionRequest{ SceneTransitionType::ReloadCurrentScene, {} };
+        state.PendingSceneTransition = SceneTransitionRequest{ SceneTransitionType::ReloadCurrentScene, {} };
         return true;
     }
 
     void SceneManager::SetTransitionBridgeCallback(SceneTransitionBridgeCallback callback)
     {
-        std::scoped_lock<std::mutex> lock(s_SceneTransitionMutex);
-        s_TransitionBridgeCallback = callback;
+        auto& state = GetSceneManagerRuntimeState();
+        std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
+        state.TransitionBridgeCallback = callback;
     }
 
     bool SceneManager::HasPendingSceneTransition()
     {
-        std::scoped_lock<std::mutex> lock(s_SceneTransitionMutex);
-        return s_PendingSceneTransition.has_value();
+        auto& state = GetSceneManagerRuntimeState();
+        std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
+        return state.PendingSceneTransition.has_value();
     }
 
     std::optional<SceneTransitionRequest> SceneManager::ConsumePendingSceneTransition()
     {
-        std::scoped_lock<std::mutex> lock(s_SceneTransitionMutex);
-        if (!s_PendingSceneTransition.has_value())
+        auto& state = GetSceneManagerRuntimeState();
+        std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
+        if (!state.PendingSceneTransition.has_value())
             return std::nullopt;
 
-        std::optional<SceneTransitionRequest> transition = std::move(s_PendingSceneTransition);
-        s_PendingSceneTransition.reset();
+        std::optional<SceneTransitionRequest> transition = std::move(state.PendingSceneTransition);
+        state.PendingSceneTransition.reset();
         return transition;
     }
 
     void SceneManager::ClearPendingSceneTransition()
     {
-        std::scoped_lock<std::mutex> lock(s_SceneTransitionMutex);
-        s_PendingSceneTransition.reset();
+        auto& state = GetSceneManagerRuntimeState();
+        std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
+        state.PendingSceneTransition.reset();
     }
 }

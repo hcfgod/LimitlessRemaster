@@ -225,6 +225,7 @@ namespace Limitless
                     {
                         GamepadButtonBinding b{};
                         b.Button = ParseGamepadButton(bindingJson, "button_id", "button");
+                        b.PlayerIndex = bindingJson.value("player_index", 0);
                         action.AddBinding(b);
                     }
                     else if (bindingType == "GamepadAxis1D")
@@ -233,6 +234,7 @@ namespace Limitless
                         b.Axis = ParseGamepadAxis(bindingJson, "axis_id", "axis");
                         b.Scale = bindingJson.value("scale", 1.0f);
                         b.Deadzone = bindingJson.value("deadzone", 0.15f);
+                        b.PlayerIndex = bindingJson.value("player_index", 0);
                         action.AddBinding(b);
                     }
                     else if (bindingType == "GamepadAxis2D")
@@ -243,6 +245,7 @@ namespace Limitless
                         b.Scale = bindingJson.value("scale", 1.0f);
                         b.Deadzone = bindingJson.value("deadzone", 0.15f);
                         b.InvertY = bindingJson.value("invert_y", false);
+                        b.PlayerIndex = bindingJson.value("player_index", 0);
                         action.AddBinding(b);
                     }
                     else
@@ -334,6 +337,8 @@ namespace Limitless
                         b["binding"] = "GamepadButton";
                         b["button"] = std::string(SDL_GetGamepadStringForButton(gb->Button));
                         b["button_id"] = static_cast<int>(gb->Button);
+                        if (gb->PlayerIndex != 0)
+                            b["player_index"] = gb->PlayerIndex;
                     }
                     else if (const auto* g1 = std::get_if<GamepadAxis1DBinding>(&binding))
                     {
@@ -342,6 +347,8 @@ namespace Limitless
                         b["axis_id"] = static_cast<int>(g1->Axis);
                         b["scale"] = g1->Scale;
                         b["deadzone"] = g1->Deadzone;
+                        if (g1->PlayerIndex != 0)
+                            b["player_index"] = g1->PlayerIndex;
                     }
                     else if (const auto* g2 = std::get_if<GamepadAxis2DBinding>(&binding))
                     {
@@ -353,6 +360,8 @@ namespace Limitless
                         b["scale"] = g2->Scale;
                         b["deadzone"] = g2->Deadzone;
                         b["invert_y"] = g2->InvertY;
+                        if (g2->PlayerIndex != 0)
+                            b["player_index"] = g2->PlayerIndex;
                     }
 
                     if (!b.empty())

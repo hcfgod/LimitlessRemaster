@@ -73,7 +73,18 @@ namespace Limitless
             Renderer2D::Statistics Stats{};
         };
 
-        Renderer2DData g_Data;
+        struct Renderer2DRuntimeState
+        {
+            Renderer2DData Data{};
+        };
+
+        Renderer2DRuntimeState& GetRenderer2DRuntimeState()
+        {
+            static Renderer2DRuntimeState state{};
+            return state;
+        }
+
+        Renderer2DData& g_Data = GetRenderer2DRuntimeState().Data;
 
         static glm::mat4 MakeQuadTransform2D(const glm::vec2& position, const glm::vec2& size)
         {

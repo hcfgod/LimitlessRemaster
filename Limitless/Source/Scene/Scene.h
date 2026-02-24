@@ -18,7 +18,7 @@ namespace Limitless
     class Camera;
     class Framebuffer;
     class Physics2DWorld;
-    inline constexpr int kSceneSerializationVersion = 18;
+    inline constexpr int kSceneSerializationVersion = 19;
 
     // -----------------------------------------------------------------------------
     // Scene
@@ -106,9 +106,17 @@ namespace Limitless
 
         void SetPhysics2DSettings(const Physics2DWorldSettings& settings);
         const Physics2DWorldSettings& GetPhysics2DSettings() const { return m_Physics2DSettings; }
-        Physics2DWorld* GetPhysics2DWorld();
-        const Physics2DWorld* GetPhysics2DWorld() const;
+        /// Returns the physics world by slot (0 by default).
+        Physics2DWorld* GetPhysics2DWorld(uint16_t worldSlot = 0);
+        const Physics2DWorld* GetPhysics2DWorld(uint16_t worldSlot = 0) const;
+        uint16_t GetPhysics2DWorldCount() const;
         const Physics2DContactListener* GetPhysics2DContactEvents() const;
+        const Physics2DContactListener* GetPhysics2DContactEventsForEntity(entt::entity entity) const;
+        bool TryGetPhysics2DBodyDiagnostics(entt::entity entity, Physics2DBodyDiagnostics& outDiagnostics) const;
+        Physics2DRaycastHit RaycastClosestAcrossPhysicsWorlds(const glm::vec2& origin,
+                                                              const glm::vec2& direction,
+                                                              float maxDistance,
+                                                              uint64_t collisionMask) const;
 
         /// Get the EnTT registry for custom queries (views, groups, etc.).
         entt::registry& GetRegistry() { return m_Registry; }
@@ -131,16 +139,18 @@ namespace Limitless
 
     private:
         void ResetPhysicsRuntimeState();
+        void EnsurePhysics2DWorldCount(uint16_t worldCount);
 
     private:
         entt::registry m_Registry;
         std::optional<EditorCameraBookmark> m_EditorCameraBookmark;
         Physics2DWorldSettings m_Physics2DSettings{};
-        std::unique_ptr<Physics2DWorld> m_Physics2DWorld;
+        std::vector<std::unique_ptr<Physics2DWorld>> m_Physics2DWorlds;
         LoadState m_LoadState = LoadState::Ready;
         bool m_SceneObjectsInitialized = true;
         bool m_PhysicsWorldInitializedForLoading = true;
         bool m_RuntimeUiPointerOverInteractiveElement = false;
+        uint64_t m_AnimationDispatchFrameCounter = 0;
     };
 
     // -----------------------------------------------------------------------------

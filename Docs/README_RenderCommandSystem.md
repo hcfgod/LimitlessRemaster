@@ -1,6 +1,6 @@
 # Render Command System
 
-The Render Command System is a **command submission + execution framework** intended to make rendering work explicit and schedulable. The OpenGL backend implements the majority of commands: clear, viewport, scissor, shader/VAO/buffer/texture bind, draw (arrays/indexed), framebuffer bind, blend/depth/cull/polygon/line/point, and debug groups. Only `DrawInstanced` and `DrawIndexedInstanced` are not implemented. See **`Docs/RENDERING_ROADMAP.md`** for the full command status table.
+The Render Command System is a **command submission + execution framework** intended to make rendering work explicit and schedulable. The OpenGL backend implements all currently defined command types: clear, viewport, scissor, shader/VAO/buffer/texture bind, draw (arrays/indexed/instanced), framebuffer bind, blend/depth/cull/polygon/line/point, and debug groups. See **`Docs/RENDERING_ROADMAP.md`** for the full command status table.
 
 ## Features
 
@@ -79,7 +79,7 @@ if (textureFuture.wait_for(std::chrono::milliseconds(0)) == std::future_status::
 
 ### Current limitations (important)
 
-- Some commands (especially framebuffer, instanced drawing, and debug marker commands) are still **placeholders**: they log intent instead of issuing real graphics API calls.
+- Debug group/marker commands are capability-dependent: they execute when the GL debug entry points are available (`glPushDebugGroup` / `KHR` variants), otherwise they safely no-op.
 - The “multi-threaded executor” type exists but is currently **disabled** for the OpenGL-first backend. True multi-threaded GPU execution requires an explicit context ownership/sharing model that is not implemented yet.
 
 ## Guarantees (Current Behavior)
@@ -98,7 +98,7 @@ This table describes what the system **guarantees today** (not future intent).
 
 ## Implementation Status (OpenGL backend)
 
-The OpenGL backend currently implements only a subset of commands “for real”. The rest are scaffolding and generally only log intent.
+The OpenGL backend currently implements all defined commands “for real” (with extension-gated behavior for debug marker/group operations).
 
 - **Implemented (real OpenGL calls)**:
   - `ClearCommand` (`glClearColor`, `glClear`)
@@ -112,20 +112,19 @@ The OpenGL backend currently implements only a subset of commands “for real”
   - `SetVertexBufferDataCommand` (`glBufferSubData` via `VertexBuffer::SetData()`; dynamic streaming uploads)
   - `BindTextureCommand` (`glActiveTexture`, `glBindTexture` via `Texture::Bind(slot)`)
   - `SetTextureSpecificationCommand` (sampler-like state via `Texture::ApplySpecification()`)
+  - `BindFramebufferCommand` (`glBindFramebuffer` / `Framebuffer::Bind()`)
   - `DrawArraysCommand` (`glDrawArrays`)
   - `DrawIndexedCommand` (`glDrawElements` / `glDrawElementsBaseVertex`)
+  - `DrawInstancedCommand` (`glDrawArraysInstanced`)
+  - `DrawIndexedInstancedCommand` (`glDrawElementsInstanced` / `glDrawElementsInstancedBaseVertex`)
   - `SetBlendModeCommand` (`glEnable/Disable(GL_BLEND)`, `glBlendFunc`)
   - `SetDepthTestCommand` (`glEnable/Disable(GL_DEPTH_TEST)`, `glDepthFunc`)
   - `SetCullFaceCommand` (`glEnable/Disable(GL_CULL_FACE)`, `glCullFace`)
   - `SetPolygonModeCommand` (`glPolygonMode`)
   - `SetLineWidthCommand` (`glLineWidth`)
   - `SetPointSizeCommand` (`glPointSize`)
+  - `PushDebugGroupCommand`, `PopDebugGroupCommand`, `InsertDebugMarkerCommand` (`gl*DebugGroup*` / `gl*DebugMarker*` where available)
   - `CustomCommand` (invokes user function; still requires non-null context)
-- **Stubbed (logs intent, no actual GL state change yet)**:
-  - `BindFramebufferCommand`
-  - `PushDebugGroupCommand`, `PopDebugGroupCommand`, `InsertDebugMarkerCommand`
-- **Not implemented yet (TODO / no behavior)**:
-  - `DrawInstancedCommand`, `DrawIndexedInstancedCommand`
 
 For a milestone-by-milestone plan, see `Docs/RENDERING_ROADMAP.md`.
 

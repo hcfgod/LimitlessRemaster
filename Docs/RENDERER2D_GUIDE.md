@@ -23,7 +23,7 @@ Core calls:
 Readiness and assets:
 
 - `Renderer2D::IsShaderReady()` — true when the default material is loaded; otherwise `DrawQuad` is dropped.
-- `Renderer2D::GetDefaultShaderKey()` — asset key for the default shader (e.g. for `AssetLoadProgress`).
+- `Renderer2D::GetDefaultShaderKey()` — asset key for the default shader (for `AssetLoadProgress` and `LoadingScreen::BuildContext`).
 
 Statistics:
 

@@ -2,6 +2,7 @@
 #include "Core/Debug/Log.h"
 #include "Core/ConfigManager.h"
 #include "Graphics/OpenGL/OpenGLContext.h"
+#include "Graphics/OpenGL/OpenGLGPUMetrics.h"
 #include "Graphics/OpenGL/OpenGLSharedContext.h"
 
 #if __has_include(<glad/glad.h>)
@@ -334,11 +335,13 @@ namespace Limitless
         {
             OpenGLContext::ScopedCurrentContext scope(*glContext);
             m_RenderQueue->ProcessCommands(m_GraphicsContext);
+            UpdateGPUMetricsFromOpenGL();
             return;
         }
 
         m_GraphicsContext->MakeCurrent();
         m_RenderQueue->ProcessCommands(m_GraphicsContext);
+        UpdateGPUMetricsFromOpenGL();
     }
 
     void Renderer::BeginFrame()
@@ -584,6 +587,7 @@ namespace Limitless
                 if (frameIdToComplete != 0)
                 {
                 m_RenderQueue->ProcessCommands(m_GraphicsContext);
+                UpdateGPUMetricsFromOpenGL();
                 m_GraphicsContext->SwapBuffers();
                 }
 

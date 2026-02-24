@@ -99,6 +99,7 @@ namespace Limitless
             {
                 rigidbody2D->RuntimeBodyId = kNullPhysics2DBody;
                 rigidbody2D->RuntimeBodyCreated = false;
+                rigidbody2D->RuntimeWorldSlot = 0;
                 rigidbody2D->RuntimePreviousPosition = glm::vec2(0.0f);
                 rigidbody2D->RuntimePreviousAngleRadians = 0.0f;
                 rigidbody2D->RuntimeRenderPreviousPosition = glm::vec2(0.0f);
@@ -132,6 +133,7 @@ namespace Limitless
             {
                 joint2D->RuntimeJointId = kNullPhysics2DJoint;
                 joint2D->RuntimeJointCreated = false;
+                joint2D->RuntimeWorldSlot = 0;
             }
 
             if (auto* animator = registry.try_get<AnimatorComponent>(entity))
@@ -286,6 +288,7 @@ namespace Limitless
             {
                 const auto& physicsSettingsJson = root["Physics2DSettings"];
                 Physics2DWorldSettings settings{};
+                settings.WorldCount = static_cast<uint16_t>(std::clamp(physicsSettingsJson.value("WorldCount", 1), 1, 16));
                 auto gravity = physicsSettingsJson.value("Gravity", std::vector<float>{ 0.0f, -9.81f });
                 if (gravity.size() >= 2)
                     settings.Gravity = glm::vec2(gravity[0], gravity[1]);
@@ -793,6 +796,7 @@ namespace Limitless
                     rigidbody2D.Type = Rigidbody2DComponent::BodyType::Kinematic;
                 else
                     rigidbody2D.Type = Rigidbody2DComponent::BodyType::Dynamic;
+                rigidbody2D.PhysicsWorldSlot = static_cast<uint16_t>(std::clamp(rigidbody2DJson.value("PhysicsWorldSlot", 0), 0, 15));
                 rigidbody2D.FreezePositionX = rigidbody2DJson.value("FreezePositionX", false);
                 rigidbody2D.FreezePositionY = rigidbody2DJson.value("FreezePositionY", false);
                 const bool freezeRotation = rigidbody2DJson.value("FreezeRotation", rigidbody2DJson.value("FixedRotation", false));
@@ -808,6 +812,7 @@ namespace Limitless
                 rigidbody2D.AngularDamping = rigidbody2DJson.value("AngularDamping", 0.01f);
                 rigidbody2D.RuntimeBodyId = kNullPhysics2DBody;
                 rigidbody2D.RuntimeBodyCreated = false;
+                rigidbody2D.RuntimeWorldSlot = 0;
                 rigidbody2D.RuntimePreviousPosition = glm::vec2(0.0f);
                 rigidbody2D.RuntimePreviousAngleRadians = 0.0f;
                 rigidbody2D.RuntimeRenderPreviousPosition = glm::vec2(0.0f);
@@ -889,6 +894,7 @@ namespace Limitless
                 joint2D.ConnectedEntity = entt::null;
                 joint2D.RuntimeJointId = kNullPhysics2DJoint;
                 joint2D.RuntimeJointCreated = false;
+                joint2D.RuntimeWorldSlot = 0;
             }
         }
 
@@ -1153,6 +1159,8 @@ namespace Limitless
             return Result<std::unique_ptr<Scene>>(jsonResult.GetError());
         nlohmann::json root = std::move(jsonResult.GetValue());
 
+        const int loadedVersion = root.value("Version", 0);
+
         auto scene = std::make_unique<Scene>();
         ApplySceneMetadataFromJson(root, scene.get());
 
@@ -1175,7 +1183,9 @@ namespace Limitless
         }
 
         RestoreHierarchyAndJointReferences(scene->GetRegistry(), createdEntities, parentIndices, siblingOrders, jointConnectedEntityIndices);
-        RunPostLoadSliderMigration(scene.get());
+
+        if (loadedVersion < kSceneSerializationVersion)
+            RunPostLoadSliderMigration(scene.get());
 
         return Result<std::unique_ptr<Scene>>(std::move(scene));
     }

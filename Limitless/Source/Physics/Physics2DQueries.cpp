@@ -27,9 +27,6 @@ namespace Limitless::Physics2DQueries
     {
         if (!scene)
             return {};
-        Physics2DWorld* world = scene->GetPhysics2DWorld();
-        if (!world)
-            return {};
-        return world->RaycastClosest(origin, direction, maxDistance, collisionMask);
+        return scene->RaycastClosestAcrossPhysicsWorlds(origin, direction, maxDistance, collisionMask);
     }
 }

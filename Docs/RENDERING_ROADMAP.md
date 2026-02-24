@@ -8,7 +8,7 @@ This document is a short, practical roadmap for turning the current render-comma
 - **Stubbed**: validates inputs and/or logs intent, but does not issue meaningful OpenGL work yet.
 - **Not implemented**: placeholder with TODO/no behavior.
 
-**Summary**: All commands in the table below are either **Implemented** (real OpenGL work) or **Not implemented** (DrawInstanced / DrawIndexedInstanced only). There are no stubbed commands in the current OpenGL backend.
+**Summary**: All commands in the table below are **Implemented** (real OpenGL work). There are currently no stubbed or not-implemented commands in the OpenGL backend.
 
 ## Current Command Implementation Status (OpenGL)
 
@@ -31,8 +31,8 @@ Source of truth: `Limitless/Source/Graphics/OpenGL/OpenGLRenderCommand.cpp`
 | `BindFramebufferCommand` | Implemented | `glBindFramebuffer`, `Framebuffer::Bind()` |
 | `DrawArraysCommand` | Implemented | `glDrawArrays` |
 | `DrawIndexedCommand` | Implemented | `glDrawElements` / `glDrawElementsBaseVertex` |
-| `DrawInstancedCommand` | Not implemented | TODO |
-| `DrawIndexedInstancedCommand` | Not implemented | TODO |
+| `DrawInstancedCommand` | Implemented | `glDrawArraysInstanced` |
+| `DrawIndexedInstancedCommand` | Implemented | `glDrawElementsInstanced` / `glDrawElementsInstancedBaseVertex` |
 | `SetBlendModeCommand` | Implemented | `glEnable/Disable(GL_BLEND)`, `glBlendFunc` |
 | `SetDepthTestCommand` | Implemented | `glEnable/Disable(GL_DEPTH_TEST)`, `glDepthFunc` |
 | `SetCullFaceCommand` | Implemented | `glEnable/Disable(GL_CULL_FACE)`, `glCullFace` |
@@ -102,7 +102,7 @@ Deliverables:
 
 - **Milestone 3 — Batching that matters**: Reduce per-frame overhead (batch key, command pool, renderer stats). Renderer2D already batches by texture; this milestone is about command-level batching and stats.
 - **Milestone 4 — Remaining**: Ownership rules for queued commands; multi-thread GPU execution policy.
-- **Not yet on roadmap**: 2D lighting, 3D mesh pipeline, instanced drawing (DrawInstanced / DrawIndexedInstanced).
+- **Not yet on roadmap**: 2D lighting, 3D mesh pipeline.
 
 ## Notes on multi-threading
 

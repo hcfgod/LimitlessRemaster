@@ -1612,6 +1612,13 @@ namespace Limitless::EditorInspectorPanel
                         "Note: Box2D kinematic bodies do not generate physical collision response against static/kinematic bodies "
                         "(including static tilemap colliders). Use Dynamic + Gravity Scale 0 for moving collidable platforms.");
                 }
+                const uint16_t sceneWorldCount = scene ? std::max<uint16_t>(1, scene->GetPhysics2DWorldCount()) : 1;
+                int physicsWorldSlot = std::min<int>(rigidbody2D->PhysicsWorldSlot, static_cast<int>(sceneWorldCount - 1));
+                ImGui::TextUnformatted("Physics World Slot");
+                ImGui::DragInt("##Rigidbody2DPhysicsWorldSlot", &physicsWorldSlot, 1.0f, 0, static_cast<int>(sceneWorldCount - 1));
+                physicsWorldSlot = std::clamp(physicsWorldSlot, 0, static_cast<int>(sceneWorldCount - 1));
+                rigidbody2D->PhysicsWorldSlot = static_cast<uint16_t>(physicsWorldSlot);
+                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Physics World Slot");
 
                 bool freezeRotation = rigidbody2D->IsRotationLocked();
                 ImGui::TextDisabled("Constraints");
@@ -1668,13 +1675,15 @@ namespace Limitless::EditorInspectorPanel
                 }
                 else
                 {
-                    const Physics2DWorld* physicsWorld = scene->GetPhysics2DWorld();
+                    const uint16_t worldSlot = std::min<uint16_t>(rigidbody2D->PhysicsWorldSlot, static_cast<uint16_t>(scene->GetPhysics2DWorldCount() - 1));
+                    const Physics2DWorld* physicsWorld = scene->GetPhysics2DWorld(worldSlot);
                     if (!physicsWorld)
                     {
                         ImGui::TextDisabled("Physics world is not initialized.");
                     }
                     else
                     {
+                        ImGui::Text("World Slot: %u", static_cast<unsigned>(worldSlot));
                         const Physics2DDiagnostics& worldDiagnostics = physicsWorld->GetDiagnostics();
                         ImGui::Text("Bodies: %d (Awake: %d, Sleeping: %d)",
                                     worldDiagnostics.BodyCount,

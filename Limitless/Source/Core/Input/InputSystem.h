@@ -82,12 +82,19 @@ namespace Limitless
         glm::vec2 GetMouseDelta() const { return m_MouseDelta; }
         glm::vec2 GetMouseWheelDelta() const { return m_MouseWheelDelta; }
 
-        // Gamepad (single "primary" gamepad for now; extend to player indexing later).
-        bool HasGamepad() const { return m_Gamepad != nullptr; }
-        bool IsGamepadButtonDown(SDL_GamepadButton button) const;
-        bool WasGamepadButtonPressedThisFrame(SDL_GamepadButton button) const;
-        bool WasGamepadButtonReleasedThisFrame(SDL_GamepadButton button) const;
-        float GetGamepadAxis(SDL_GamepadAxis axis) const;
+        // Gamepad: explicit player/device indexing for multi-player support.
+        static constexpr int kMaxGamepads = 4;
+
+        int GetGamepadCount() const;
+        bool HasGamepad(int playerIndex = 0) const;
+        bool IsGamepadButtonDown(SDL_GamepadButton button) const { return IsGamepadButtonDown(0, button); }
+        bool IsGamepadButtonDown(int playerIndex, SDL_GamepadButton button) const;
+        bool WasGamepadButtonPressedThisFrame(SDL_GamepadButton button) const { return WasGamepadButtonPressedThisFrame(0, button); }
+        bool WasGamepadButtonPressedThisFrame(int playerIndex, SDL_GamepadButton button) const;
+        bool WasGamepadButtonReleasedThisFrame(SDL_GamepadButton button) const { return WasGamepadButtonReleasedThisFrame(0, button); }
+        bool WasGamepadButtonReleasedThisFrame(int playerIndex, SDL_GamepadButton button) const;
+        float GetGamepadAxis(SDL_GamepadAxis axis) const { return GetGamepadAxis(0, axis); }
+        float GetGamepadAxis(int playerIndex, SDL_GamepadAxis axis) const;
 
         // Runtime rebinding support (optional).
         void SetRebindingSession(std::shared_ptr<InputRebinding> session) { m_RebindingSession = std::move(session); }
@@ -118,6 +125,18 @@ namespace Limitless
         const InputAction* FindAction(std::string_view mapName, std::string_view actionName, bool warnIfMissing) const;
         void WarnMissingActionOnce(std::string_view mapName, std::string_view actionName) const;
 
+        struct PerGamepadState
+        {
+            SDL_JoystickID Id = 0;
+            SDL_Gamepad* Gamepad = nullptr;
+            std::array<int16_t, SDL_GAMEPAD_AXIS_COUNT> Axis{};
+            std::array<uint8_t, SDL_GAMEPAD_BUTTON_COUNT> ButtonDown{};
+            std::array<uint8_t, SDL_GAMEPAD_BUTTON_COUNT> ButtonPressedThisFrame{};
+            std::array<uint8_t, SDL_GAMEPAD_BUTTON_COUNT> ButtonReleasedThisFrame{};
+        };
+        static size_t FindSlotByGamepadId(std::array<PerGamepadState, kMaxGamepads>& gamepads, SDL_JoystickID id);
+        static size_t FindFreeGamepadSlot(std::array<PerGamepadState, kMaxGamepads>& gamepads);
+
         std::array<uint8_t, SDL_SCANCODE_COUNT> m_KeyDown{};
         std::array<uint8_t, SDL_SCANCODE_COUNT> m_KeyPressedThisFrame{};
         std::array<uint8_t, SDL_SCANCODE_COUNT> m_KeyReleasedThisFrame{};
@@ -130,12 +149,7 @@ namespace Limitless
         glm::vec2 m_MouseDelta{0.0f, 0.0f};
         glm::vec2 m_MouseWheelDelta{0.0f, 0.0f};
 
-        SDL_JoystickID m_GamepadId = 0;
-        SDL_Gamepad* m_Gamepad = nullptr;
-        std::array<int16_t, SDL_GAMEPAD_AXIS_COUNT> m_GamepadAxis{};
-        std::array<uint8_t, SDL_GAMEPAD_BUTTON_COUNT> m_GamepadButtonDown{};
-        std::array<uint8_t, SDL_GAMEPAD_BUTTON_COUNT> m_GamepadButtonPressedThisFrame{};
-        std::array<uint8_t, SDL_GAMEPAD_BUTTON_COUNT> m_GamepadButtonReleasedThisFrame{};
+        std::array<PerGamepadState, kMaxGamepads> m_Gamepads{};
 
         std::shared_ptr<InputActionAsset> m_ProjectActionAsset;
         std::vector<std::shared_ptr<InputActionAsset>> m_ActionAssetOverrideStack;

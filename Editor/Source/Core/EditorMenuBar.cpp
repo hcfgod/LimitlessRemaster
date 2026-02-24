@@ -11,6 +11,7 @@ namespace Limitless::EditorMenuBar
               bool& showPhysicsDiagnosticsWindow,
               bool& showConsoleWindow,
               bool& showEditorFpsOverlay,
+              bool& showPerformancePanel,
               bool& showAnimationTimelinePanel,
               bool& showAnimatorGraphPanel,
               bool& showTilePalettePanel,
@@ -125,6 +126,7 @@ namespace Limitless::EditorMenuBar
             ImGui::MenuItem("Physics 2D Diagnostics", nullptr, &showPhysicsDiagnosticsWindow);
             ImGui::MenuItem("Console", nullptr, &showConsoleWindow);
             ImGui::MenuItem("FPS Overlay", nullptr, &showEditorFpsOverlay);
+            ImGui::MenuItem("Performance", nullptr, &showPerformancePanel);
             ImGui::MenuItem("Animation Timeline", nullptr, &showAnimationTimelinePanel);
             ImGui::MenuItem("Animator Graph", nullptr, &showAnimatorGraphPanel);
             ImGui::MenuItem("Tile Palette", nullptr, &showTilePalettePanel);

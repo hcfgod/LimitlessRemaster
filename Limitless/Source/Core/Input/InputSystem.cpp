@@ -8,6 +8,7 @@
 #include "Core/Input/InputRebinding.h"
 
 #include <algorithm>
+#include <optional>
 
 namespace Limitless
 {
@@ -25,8 +26,14 @@ namespace Limitless
         m_MousePressedThisFrame.fill(0);
         m_MouseReleasedThisFrame.fill(0);
 
-        m_GamepadButtonPressedThisFrame.fill(0);
-        m_GamepadButtonReleasedThisFrame.fill(0);
+        for (PerGamepadState& pad : m_Gamepads)
+        {
+            if (pad.Gamepad)
+            {
+                pad.ButtonPressedThisFrame.fill(0);
+                pad.ButtonReleasedThisFrame.fill(0);
+            }
+        }
 
         m_MouseDelta = glm::vec2(0.0f);
         m_MouseWheelDelta = glm::vec2(0.0f);
@@ -246,60 +253,97 @@ namespace Limitless
         return m_MouseReleasedThisFrame[button] != 0;
     }
 
-    bool InputSystem::IsGamepadButtonDown(SDL_GamepadButton button) const
+    int InputSystem::GetGamepadCount() const
     {
-        if (button < 0 || button >= SDL_GAMEPAD_BUTTON_COUNT)
+        int n = 0;
+        for (const PerGamepadState& pad : m_Gamepads)
         {
-            return false;
+            if (pad.Gamepad != nullptr)
+                ++n;
         }
-        return m_GamepadButtonDown[static_cast<size_t>(button)] != 0;
+        return n;
     }
 
-    bool InputSystem::WasGamepadButtonPressedThisFrame(SDL_GamepadButton button) const
+    bool InputSystem::HasGamepad(int playerIndex) const
     {
-        if (button < 0 || button >= SDL_GAMEPAD_BUTTON_COUNT)
-        {
+        if (playerIndex < 0 || playerIndex >= kMaxGamepads)
             return false;
-        }
-        return m_GamepadButtonPressedThisFrame[static_cast<size_t>(button)] != 0;
+        return m_Gamepads[static_cast<size_t>(playerIndex)].Gamepad != nullptr;
     }
 
-    bool InputSystem::WasGamepadButtonReleasedThisFrame(SDL_GamepadButton button) const
+    bool InputSystem::IsGamepadButtonDown(int playerIndex, SDL_GamepadButton button) const
     {
-        if (button < 0 || button >= SDL_GAMEPAD_BUTTON_COUNT)
-        {
+        if (playerIndex < 0 || playerIndex >= kMaxGamepads || button < 0 || button >= SDL_GAMEPAD_BUTTON_COUNT)
             return false;
-        }
-        return m_GamepadButtonReleasedThisFrame[static_cast<size_t>(button)] != 0;
+        const PerGamepadState& pad = m_Gamepads[static_cast<size_t>(playerIndex)];
+        return pad.Gamepad != nullptr && pad.ButtonDown[static_cast<size_t>(button)] != 0;
     }
 
-    float InputSystem::GetGamepadAxis(SDL_GamepadAxis axis) const
+    bool InputSystem::WasGamepadButtonPressedThisFrame(int playerIndex, SDL_GamepadButton button) const
     {
-        if (axis < 0 || axis >= SDL_GAMEPAD_AXIS_COUNT)
-        {
+        if (playerIndex < 0 || playerIndex >= kMaxGamepads || button < 0 || button >= SDL_GAMEPAD_BUTTON_COUNT)
+            return false;
+        const PerGamepadState& pad = m_Gamepads[static_cast<size_t>(playerIndex)];
+        return pad.Gamepad != nullptr && pad.ButtonPressedThisFrame[static_cast<size_t>(button)] != 0;
+    }
+
+    bool InputSystem::WasGamepadButtonReleasedThisFrame(int playerIndex, SDL_GamepadButton button) const
+    {
+        if (playerIndex < 0 || playerIndex >= kMaxGamepads || button < 0 || button >= SDL_GAMEPAD_BUTTON_COUNT)
+            return false;
+        const PerGamepadState& pad = m_Gamepads[static_cast<size_t>(playerIndex)];
+        return pad.Gamepad != nullptr && pad.ButtonReleasedThisFrame[static_cast<size_t>(button)] != 0;
+    }
+
+    float InputSystem::GetGamepadAxis(int playerIndex, SDL_GamepadAxis axis) const
+    {
+        if (playerIndex < 0 || playerIndex >= kMaxGamepads || axis < 0 || axis >= SDL_GAMEPAD_AXIS_COUNT)
             return 0.0f;
-        }
-
-        const int16_t v = m_GamepadAxis[static_cast<size_t>(axis)];
-
-        // Triggers are typically [0..32767], sticks are [-32768..32767].
+        const PerGamepadState& pad = m_Gamepads[static_cast<size_t>(playerIndex)];
+        if (pad.Gamepad == nullptr)
+            return 0.0f;
+        const int16_t v = pad.Axis[static_cast<size_t>(axis)];
         if (axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)
-        {
             return std::clamp(static_cast<float>(v) / 32767.0f, 0.0f, 1.0f);
-        }
         return std::clamp(static_cast<float>(v) / 32767.0f, -1.0f, 1.0f);
+    }
+
+    size_t InputSystem::FindSlotByGamepadId(std::array<PerGamepadState, kMaxGamepads>& gamepads, SDL_JoystickID id)
+    {
+        for (size_t i = 0; i < gamepads.size(); ++i)
+        {
+            if (gamepads[i].Gamepad != nullptr && gamepads[i].Id == id)
+            {
+                return i;
+            }
+        }
+        return static_cast<size_t>(-1);
+    }
+
+    size_t InputSystem::FindFreeGamepadSlot(std::array<PerGamepadState, kMaxGamepads>& gamepads)
+    {
+        for (size_t i = 0; i < gamepads.size(); ++i)
+        {
+            if (gamepads[i].Gamepad == nullptr)
+            {
+                return i;
+            }
+        }
+        return static_cast<size_t>(-1);
     }
 
     void InputSystem::OnGamepadAdded(SDL_JoystickID which)
     {
-        if (m_Gamepad != nullptr)
-        {
-            // Keep current primary gamepad.
-            return;
-        }
+        if (FindSlotByGamepadId(m_Gamepads, which) != static_cast<size_t>(-1))
+            return; // already tracked
 
         if (!SDL_IsGamepad(which))
+            return;
+
+        const size_t slot = FindFreeGamepadSlot(m_Gamepads);
+        if (slot == static_cast<size_t>(-1))
         {
+            LT_CORE_WARN("InputSystem: no free gamepad slot (max={})", kMaxGamepads);
             return;
         }
 
@@ -310,74 +354,58 @@ namespace Limitless
             return;
         }
 
-        m_GamepadId = which;
-        m_Gamepad = opened;
-        m_GamepadAxis.fill(0);
-        m_GamepadButtonDown.fill(0);
-        m_GamepadButtonPressedThisFrame.fill(0);
-        m_GamepadButtonReleasedThisFrame.fill(0);
+        PerGamepadState& pad = m_Gamepads[slot];
+        pad.Id = which;
+        pad.Gamepad = opened;
+        pad.Axis.fill(0);
+        pad.ButtonDown.fill(0);
+        pad.ButtonPressedThisFrame.fill(0);
+        pad.ButtonReleasedThisFrame.fill(0);
 
-        const char* name = SDL_GetGamepadName(m_Gamepad);
-        LT_INFO("InputSystem: gamepad connected (id={}, name='{}')", static_cast<int>(which), (name ? name : "Unknown"));
+        const char* name = SDL_GetGamepadName(pad.Gamepad);
+        LT_INFO("InputSystem: gamepad connected (playerIndex={}, id={}, name='{}')", static_cast<int>(slot), static_cast<int>(which), (name ? name : "Unknown"));
     }
 
     void InputSystem::OnGamepadRemoved(SDL_JoystickID which)
     {
-        if (m_Gamepad == nullptr || which != m_GamepadId)
-        {
+        const size_t slot = FindSlotByGamepadId(m_Gamepads, which);
+        if (slot == static_cast<size_t>(-1))
             return;
-        }
 
-        SDL_CloseGamepad(m_Gamepad);
-        m_Gamepad = nullptr;
-        m_GamepadId = 0;
-        m_GamepadAxis.fill(0);
-        m_GamepadButtonDown.fill(0);
-        m_GamepadButtonPressedThisFrame.fill(0);
-        m_GamepadButtonReleasedThisFrame.fill(0);
+        PerGamepadState& pad = m_Gamepads[slot];
+        SDL_CloseGamepad(pad.Gamepad);
+        pad.Id = 0;
+        pad.Gamepad = nullptr;
+        pad.Axis.fill(0);
+        pad.ButtonDown.fill(0);
+        pad.ButtonPressedThisFrame.fill(0);
+        pad.ButtonReleasedThisFrame.fill(0);
 
-        LT_INFO("InputSystem: gamepad disconnected (id={})", static_cast<int>(which));
+        LT_INFO("InputSystem: gamepad disconnected (playerIndex={}, id={})", static_cast<int>(slot), static_cast<int>(which));
     }
 
     void InputSystem::OnGamepadAxis(SDL_JoystickID which, SDL_GamepadAxis axis, int16_t value)
     {
-        if (m_Gamepad == nullptr || which != m_GamepadId)
-        {
+        const size_t slot = FindSlotByGamepadId(m_Gamepads, which);
+        if (slot == static_cast<size_t>(-1) || axis < 0 || axis >= SDL_GAMEPAD_AXIS_COUNT)
             return;
-        }
-
-        if (axis < 0 || axis >= SDL_GAMEPAD_AXIS_COUNT)
-        {
-            return;
-        }
-
-        m_GamepadAxis[static_cast<size_t>(axis)] = value;
+        m_Gamepads[slot].Axis[static_cast<size_t>(axis)] = value;
     }
 
     void InputSystem::OnGamepadButton(SDL_JoystickID which, SDL_GamepadButton button, bool down)
     {
-        if (m_Gamepad == nullptr || which != m_GamepadId)
-        {
+        const size_t slot = FindSlotByGamepadId(m_Gamepads, which);
+        if (slot == static_cast<size_t>(-1) || button < 0 || button >= SDL_GAMEPAD_BUTTON_COUNT)
             return;
-        }
 
-        if (button < 0 || button >= SDL_GAMEPAD_BUTTON_COUNT)
-        {
-            return;
-        }
-
+        PerGamepadState& pad = m_Gamepads[slot];
         const size_t idx = static_cast<size_t>(button);
-        const bool wasDown = (m_GamepadButtonDown[idx] != 0);
-        m_GamepadButtonDown[idx] = down ? 1 : 0;
-
+        const bool wasDown = (pad.ButtonDown[idx] != 0);
+        pad.ButtonDown[idx] = down ? 1 : 0;
         if (!wasDown && down)
-        {
-            m_GamepadButtonPressedThisFrame[idx] = 1;
-        }
+            pad.ButtonPressedThisFrame[idx] = 1;
         else if (wasDown && !down)
-        {
-            m_GamepadButtonReleasedThisFrame[idx] = 1;
-        }
+            pad.ButtonReleasedThisFrame[idx] = 1;
     }
 
     void InputSystem::OnKey(SDL_Scancode scancode, bool down, bool repeat)

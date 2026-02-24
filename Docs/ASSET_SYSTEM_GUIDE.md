@@ -98,6 +98,8 @@ The database also stores an **import fingerprint** per record to support increme
 - `importerSettingsHash64`
 - `importerVersion`
 
+For **asset format versioning and migration** (scene version, migrations, and extending to other JSON assets), see [Asset Versioning and Migration](ASSET_VERSIONING_AND_MIGRATION.md). For a **centralized loading screen API** that aggregates async load progress and scene/shader state, see the same doc (LoadingScreen and AssetLoadProgress).
+
 ## Asset Hot Reload (Unity-style)
 
 Assets support hot reload for **source file changes** under `Assets/`.

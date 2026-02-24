@@ -20,6 +20,7 @@
 #include "Project/ProjectSettings.h"
 #include "Core/Time.h"
 #include "Core/Input/InputSystem.h"
+#include "Core/PerformanceMonitor.h"
 #include <chrono>
 
 namespace Limitless
@@ -116,6 +117,8 @@ namespace Limitless
 			const float deltaTime = Time::GetDeltaTimeSeconds();
 			const float fixedDeltaTime = Time::GetFixedDeltaTimeSeconds();
 
+            PerformanceMonitor::GetInstance().BeginFrame();
+
             // Begin input frame: clears per-frame deltas (mouse, wheel) and pressed/released flags.
             GetInputSystem().BeginFrame();
 
@@ -160,6 +163,8 @@ namespace Limitless
 			// End frame and swap buffers
 			Renderer::GetInstance().EndFrame();
 			Renderer::GetInstance().SwapBuffers();
+
+			PerformanceMonitor::GetInstance().EndFrame();
 		}
 
 		LT_CORE_INFO("Main loop ended, beginning shutdown...");
@@ -289,6 +294,8 @@ namespace Limitless
 			return false;
 		}
 
+		PerformanceMonitor::GetInstance().Initialize();
+
 		// Register window with hot reload manager
 		auto& hotReloadManager = HotReloadManager::GetInstance();
 		hotReloadManager.SetWindow(m_Window.get());
@@ -317,6 +324,8 @@ namespace Limitless
 		LT_CORE_INFO("Application::InternalShutdown() starting...");
 		
 		Shutdown();
+
+		PerformanceMonitor::GetInstance().Shutdown();
 		
 		// Clear LayerStack (this will detach all layers)
 		m_LayerStack.Clear();

@@ -1,4 +1,5 @@
 #include "WindowsPerformancePlatform.h"
+#include "Core/GPUMetricsProvider.h"
 #include "Core/Debug/Log.h"
 #include "Core/Error.h"
 #include <chrono>
@@ -157,11 +158,8 @@ namespace Limitless {
     }
 
     bool WindowsGPUPlatform::Initialize() {
-        // GPU monitoring requires additional libraries like NVML or AMD ADL
-        // For now, we'll mark it as unavailable
-        m_Available = false;
-        LT_CORE_WARN("Windows GPU Platform not available - requires NVML or AMD ADL libraries");
-        return false;
+        m_Available = true;
+        return true;
     }
 
     void WindowsGPUPlatform::Shutdown() {
@@ -175,14 +173,20 @@ namespace Limitless {
 
         auto now = std::chrono::high_resolution_clock::now();
         auto elapsed = std::chrono::duration<double>(now - m_LastUpdate).count();
-        
         if (elapsed < m_UpdateInterval) {
             return;
         }
 
-        // GPU monitoring implementation would go here
-        // This requires platform-specific GPU monitoring libraries
-        
+        uint64_t usedBytes = 0;
+        uint64_t totalBytes = 0;
+        GPUMetricsProvider::GetVram(usedBytes, totalBytes);
+        if (totalBytes > 0) {
+            m_MemoryUsage = 100.0 * static_cast<double>(usedBytes) / static_cast<double>(totalBytes);
+        } else {
+            m_MemoryUsage = 0.0;
+        }
+        m_Usage = 0.0;
+        m_Temperature = 0.0;
         m_LastUpdate = now;
     }
 

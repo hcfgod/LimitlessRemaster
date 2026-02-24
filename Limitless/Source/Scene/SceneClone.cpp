@@ -324,6 +324,7 @@ namespace Limitless
                 auto& destinationRigidbody2D = destinationRegistry.emplace<Rigidbody2DComponent>(destinationEntity, *rigidbody2D);
                 destinationRigidbody2D.RuntimeBodyId = kNullPhysics2DBody;
                 destinationRigidbody2D.RuntimeBodyCreated = false;
+                destinationRigidbody2D.RuntimeWorldSlot = 0;
                 destinationRigidbody2D.RuntimePreviousPosition = glm::vec2(0.0f);
                 destinationRigidbody2D.RuntimePreviousAngleRadians = 0.0f;
                 destinationRigidbody2D.RuntimeRenderPreviousPosition = glm::vec2(0.0f);
@@ -360,6 +361,7 @@ namespace Limitless
                 auto& destinationJoint2D = destinationRegistry.emplace<Joint2DComponent>(destinationEntity, *joint2D);
                 destinationJoint2D.RuntimeJointId = kNullPhysics2DJoint;
                 destinationJoint2D.RuntimeJointCreated = false;
+                destinationJoint2D.RuntimeWorldSlot = 0;
             }
 
             if (const auto* audioSource = sourceRegistry.try_get<AudioSourceComponent>(sourceEntity))

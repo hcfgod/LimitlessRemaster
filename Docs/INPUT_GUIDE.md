@@ -96,7 +96,13 @@ The `InputBinding` variant currently supports:
 - `GamepadAxis1DBinding`
 - `GamepadAxis2DBinding`
 
-Gamepad support is currently “single primary gamepad” (first connected gamepad wins). This is intentionally minimal and can be extended later to support player indices.
+Gamepad support uses **explicit player/device indexing** for multi-player:
+
+- Up to **`InputSystem::kMaxGamepads`** (4) gamepads are tracked; the first connected uses player index 0, the next 1, and so on.
+- **Polling API**: `HasGamepad(playerIndex)`, `IsGamepadButtonDown(playerIndex, button)`, `WasGamepadButtonPressedThisFrame(playerIndex, button)`, `WasGamepadButtonReleasedThisFrame(playerIndex, button)`, `GetGamepadAxis(playerIndex, axis)`. Overloads without `playerIndex` default to player 0 (primary).
+- **Count**: `GetGamepadCount()` returns how many gamepads are currently connected.
+- **Bindings**: Each gamepad binding has an optional **`PlayerIndex`** (default 0). Use it in action assets or JSON (`"player_index": 1`) to bind actions to a specific player's gamepad.
+- Existing single-player code and assets remain valid; player index 0 is the default everywhere.
 
 ## Action Value Types
 
@@ -154,7 +160,11 @@ Current implementation:
 - Overrides are stored under `PlatformDetection::GetUserDataPath()/InputActionsOverrides/<AssetKey>`.
 - If an override file exists, `InputActionsAssetResource` will load it **instead of** the bundled/source asset for that key.
 
-This is a low-level API intended for editor/UI code to build on top (no UI is provided by the engine).
+This is a low-level API intended for editor/UI code to build on top (no UI is provided by the engine). Rebinding currently captures input from the **primary gamepad (player 0)** only.
+
+## Touch and gestures (future)
+
+Touch and gesture input are **not implemented** in the current input API. SDL3 supports touch via `SDL_touch.h` (touch device IDs, finger IDs, normalized coordinates) and can be integrated later for mobile and touch-capable platforms. Gestures (e.g. pinch, rotate) would build on top of touch or platform-specific APIs.
 
 ## Files
 
