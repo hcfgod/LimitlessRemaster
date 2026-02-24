@@ -36,6 +36,9 @@ namespace Limitless::Project
 
         /// Project name used for the output executable.
         std::string ProjectName = "Game";
+
+        /// Optional resolved artifact staging root used by provider flows.
+        std::filesystem::path ArtifactStagingRoot;
     };
 
     struct GameBuildResult final
@@ -51,6 +54,13 @@ namespace Limitless::Project
 
     class GameBuilder final
     {
+        struct BuildArtifactLayout final
+        {
+            std::filesystem::path RuntimeDirectory;
+            std::filesystem::path ScriptCoreLibraryPath;
+            std::vector<std::filesystem::path> DynamicLibrarySourceDirectories;
+        };
+
     public:
         /// Build the game to the output directory. Blocking call.
         static GameBuildResult BuildGame(const GameBuildRequest& request);
@@ -63,7 +73,10 @@ namespace Limitless::Project
         static bool ValidateRequest(const GameBuildRequest& request, GameBuildResult& result);
         static bool BuildAssetBundle(const GameBuildRequest& request, GameBuildResult& result);
         static bool BuildScriptCore(const GameBuildRequest& request, GameBuildResult& result);
-        static bool CopyRuntimeFiles(const GameBuildRequest& request, GameBuildResult& result);
+        static bool PrepareLocalArtifacts(const GameBuildRequest& request, BuildArtifactLayout& layout, GameBuildResult& result);
+        static bool PrepareRemoteArtifacts(const GameBuildRequest& request, BuildArtifactLayout& layout, GameBuildResult& result);
+        static bool PrepareBuildArtifacts(const GameBuildRequest& request, BuildArtifactLayout& layout, GameBuildResult& result);
+        static bool CopyRuntimeFiles(const GameBuildRequest& request, const BuildArtifactLayout& layout, GameBuildResult& result);
         static bool WriteGameBootstrap(const GameBuildRequest& request, GameBuildResult& result);
         static bool FinalizePlatformArtifacts(const GameBuildRequest& request, GameBuildResult& result);
         static void LaunchExecutable(const std::filesystem::path& executablePath);

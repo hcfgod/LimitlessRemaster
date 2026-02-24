@@ -3,6 +3,7 @@
 #include "Assets/AssetBundleBuilder.h"
 #include "Core/Debug/Log.h"
 #include "Project/ProjectDefinition.h"
+#include "Project/RemoteBuildProvider.h"
 
 #include <nlohmann/json.hpp>
 
@@ -37,102 +38,127 @@ namespace Limitless::Project
 
     namespace
     {
-        std::string GetScriptCoreLibraryName();
+        std::string GetScriptCoreLibraryName(const std::string& targetOS);
 
         /// Converts a user-facing configuration name (e.g. "Release") to the
         /// premake cfg.shortname token (e.g. "release_x64").
         /// Premake shortname format: lowercase(config)_lowercase(platform).
-        std::string ToPremakeShortname(const std::string& configuration)
+        std::string ToPremakeShortname(const std::string& configuration, const std::string& targetArchitecture)
         {
             std::string lower = configuration;
             std::transform(lower.begin(), lower.end(), lower.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-#if defined(LT_ARCHITECTURE_ARM64)
-            return lower + "_arm64";
-#else
-            return lower + "_x64";
-#endif
+            std::string architectureLower = targetArchitecture;
+            std::transform(architectureLower.begin(), architectureLower.end(), architectureLower.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            return lower + "_" + architectureLower;
+        }
+
+        std::string ResolveTargetOS(const GameBuildRequest& request)
+        {
+            if (request.Settings.TargetOS.empty())
+                return GetHostBuildTargetOS();
+            return request.Settings.TargetOS;
+        }
+
+        std::string ResolveTargetArchitecture(const GameBuildRequest& request)
+        {
+            if (request.Settings.TargetArchitecture.empty())
+                return GetHostBuildTargetArchitecture();
+            return request.Settings.TargetArchitecture;
+        }
+
+        std::string GetTargetPlatformToken(const std::string& targetOS)
+        {
+            if (targetOS == BuildTargetOS::Windows)
+                return "windows";
+            if (targetOS == BuildTargetOS::MacOS)
+                return "macosx";
+            return "linux";
         }
 
         /// Returns the Runtime build output directory for a given config.
         /// Example: <EngineRoot>/Build/release_x64-windows-x64/Runtime/
-        std::filesystem::path GetConfigPlatformBuildFolder(const std::filesystem::path& engineRoot, const std::string& configuration)
+        std::filesystem::path GetConfigPlatformBuildFolder(const std::filesystem::path& engineRoot,
+                                                           const std::string& configuration,
+                                                           const std::string& targetOS,
+                                                           const std::string& targetArchitecture)
         {
-#if defined(LT_PLATFORM_WINDOWS)
-            const std::string platformToken = "windows";
-#elif defined(LT_PLATFORM_MACOS)
-            const std::string platformToken = "macosx";
-#else
-            const std::string platformToken = "linux";
-#endif
-
-#if defined(LT_ARCHITECTURE_ARM64)
-            const std::string architectureToken = "ARM64";
-#else
-            const std::string architectureToken = "x64";
-#endif
-
-            const std::string shortname = ToPremakeShortname(configuration);
+            const std::string platformToken = GetTargetPlatformToken(targetOS);
+            const std::string architectureToken = targetArchitecture;
+            const std::string shortname = ToPremakeShortname(configuration, architectureToken);
             const std::string folderName = shortname + "-" + platformToken + "-" + architectureToken;
             return engineRoot / "Build" / folderName;
         }
 
-        std::filesystem::path GetRuntimeBuildDirectory(const std::filesystem::path& engineRoot, const std::string& configuration)
+        std::filesystem::path GetRuntimeBuildDirectory(const std::filesystem::path& engineRoot,
+                                                       const std::string& configuration,
+                                                       const std::string& targetOS,
+                                                       const std::string& targetArchitecture)
         {
-            return GetConfigPlatformBuildFolder(engineRoot, configuration) / "Runtime";
+            return GetConfigPlatformBuildFolder(engineRoot, configuration, targetOS, targetArchitecture) / "Runtime";
         }
 
         /// Returns the ScriptCore build output directory for a given config.
-        std::filesystem::path GetScriptCoreBuildDirectory(const std::filesystem::path& engineRoot, const std::string& configuration)
+        std::filesystem::path GetScriptCoreBuildDirectory(const std::filesystem::path& engineRoot,
+                                                          const std::string& configuration,
+                                                          const std::string& targetOS,
+                                                          const std::string& targetArchitecture)
         {
-            return GetConfigPlatformBuildFolder(engineRoot, configuration) / "Editor";
+            return GetConfigPlatformBuildFolder(engineRoot, configuration, targetOS, targetArchitecture) / "Editor";
         }
 
-        std::filesystem::path GetInternalRuntimeTemplateDirectory(const std::filesystem::path& toolchainRoot, const std::string& configuration)
+        std::filesystem::path GetInternalRuntimeTemplateDirectory(const std::filesystem::path& toolchainRoot,
+                                                                  const std::string& configuration,
+                                                                  const std::string& targetOS,
+                                                                  const std::string& targetArchitecture)
         {
-            const std::string folderName = GetConfigPlatformBuildFolder(std::filesystem::path(), configuration).filename().string();
+            const std::string folderName =
+                GetConfigPlatformBuildFolder(std::filesystem::path(), configuration, targetOS, targetArchitecture)
+                    .filename()
+                    .string();
             return toolchainRoot / "RuntimeTemplates" / folderName;
         }
 
         std::filesystem::path GetProjectScriptCoreOutputDirectory(const GameBuildRequest& request)
         {
-            const std::string folderName = GetConfigPlatformBuildFolder(std::filesystem::path(), request.Settings.BuildConfiguration).filename().string();
+            const std::string folderName =
+                GetConfigPlatformBuildFolder(std::filesystem::path(),
+                                             request.Settings.BuildConfiguration,
+                                             ResolveTargetOS(request),
+                                             ResolveTargetArchitecture(request))
+                    .filename()
+                    .string();
             return request.ProjectRoot / "Build" / "ScriptCore" / folderName;
         }
 
         std::filesystem::path GetProjectScriptCoreLibraryPath(const GameBuildRequest& request)
         {
-            return GetProjectScriptCoreOutputDirectory(request) / GetScriptCoreLibraryName();
+            return GetProjectScriptCoreOutputDirectory(request) / GetScriptCoreLibraryName(ResolveTargetOS(request));
         }
 
-        std::string GetRuntimeExecutableName()
+        std::string GetRuntimeExecutableName(const std::string& targetOS)
         {
-#if defined(LT_PLATFORM_WINDOWS)
-            return "Runtime.exe";
-#else
+            if (targetOS == BuildTargetOS::Windows)
+                return "Runtime.exe";
             return "Runtime";
-#endif
         }
 
-        std::string GetGameExecutableName(const std::string& projectName)
+        std::string GetGameExecutableName(const std::string& projectName, const std::string& targetOS)
         {
-#if defined(LT_PLATFORM_WINDOWS)
-            return projectName + ".exe";
-#else
+            if (targetOS == BuildTargetOS::Windows)
+                return projectName + ".exe";
             return projectName;
-#endif
         }
 
-        std::string GetScriptCoreLibraryName()
+        std::string GetScriptCoreLibraryName(const std::string& targetOS)
         {
-#if defined(LT_PLATFORM_WINDOWS)
-            return "ScriptCore.dll";
-#elif defined(LT_PLATFORM_MACOS)
-            return "libScriptCore.dylib";
-#else
+            if (targetOS == BuildTargetOS::Windows)
+                return "ScriptCore.dll";
+            if (targetOS == BuildTargetOS::MacOS)
+                return "libScriptCore.dylib";
             return "libScriptCore.so";
-#endif
         }
 
         std::string GetBuildScriptName(bool internalBackend)
@@ -148,13 +174,103 @@ namespace Limitless::Project
 #endif
         }
 
-        std::string GetBuildPlatformArg()
+        std::string GetBuildPlatformArg(const GameBuildRequest& request)
         {
-#if defined(LT_ARCHITECTURE_ARM64)
-            return "ARM64";
+            return ResolveTargetArchitecture(request);
+        }
+
+        bool IsHostTargetPair(const GameBuildRequest& request)
+        {
+            return ResolveTargetOS(request) == GetHostBuildTargetOS();
+        }
+
+        bool IsWindowsHostLinuxTarget(const GameBuildRequest& request)
+        {
+#if defined(LT_PLATFORM_WINDOWS)
+            return ResolveTargetOS(request) == BuildTargetOS::Linux;
 #else
-            return "x64";
+            (void)request;
+            return false;
 #endif
+        }
+
+        bool IsWslAvailable()
+        {
+#if defined(LT_PLATFORM_WINDOWS)
+            // Local Linux cross-build requires at least one installed WSL distro.
+            return std::system("wsl.exe -l -q | findstr /R . >nul 2>&1") == 0;
+#else
+            return false;
+#endif
+        }
+
+        std::string ResolveExecutionMode(const GameBuildRequest& request)
+        {
+            if (request.Settings.ExecutionMode == BuildExecutionMode::Local ||
+                request.Settings.ExecutionMode == BuildExecutionMode::Remote)
+            {
+                return request.Settings.ExecutionMode;
+            }
+
+            if (IsHostTargetPair(request))
+                return BuildExecutionMode::Local;
+
+#if defined(LT_PLATFORM_WINDOWS)
+            if (IsWindowsHostLinuxTarget(request) && IsWslAvailable())
+                return BuildExecutionMode::Local;
+#endif
+
+            return BuildExecutionMode::Remote;
+        }
+
+#if defined(LT_PLATFORM_WINDOWS)
+        std::string ConvertWindowsPathToWslPath(const std::filesystem::path& path)
+        {
+            std::string value = path.string();
+            if (value.size() >= 2 && value[1] == ':')
+            {
+                const char driveLetter = static_cast<char>(std::tolower(static_cast<unsigned char>(value[0])));
+                std::string converted = "/mnt/";
+                converted.push_back(driveLetter);
+                converted.push_back('/');
+                converted += value.substr(2);
+                std::replace(converted.begin(), converted.end(), '\\', '/');
+                return converted;
+            }
+
+            std::replace(value.begin(), value.end(), '\\', '/');
+            return value;
+        }
+
+        std::string EscapeBashSingleQuoted(std::string value)
+        {
+            size_t index = 0;
+            while ((index = value.find('\'', index)) != std::string::npos)
+            {
+                value.replace(index, 1, "'\\''");
+                index += 4;
+            }
+            return value;
+        }
+
+        std::string BuildWslBashScriptCommand(const std::filesystem::path& engineRoot,
+                                              const std::filesystem::path& scriptPath,
+                                              const std::vector<std::string>& args)
+        {
+            const std::string engineRootWsl = EscapeBashSingleQuoted(ConvertWindowsPathToWslPath(engineRoot));
+            const std::string scriptWsl = EscapeBashSingleQuoted(ConvertWindowsPathToWslPath(scriptPath));
+
+            std::string bashScript = "cd '" + engineRootWsl + "' && bash '" + scriptWsl + "'";
+            for (const std::string& arg : args)
+                bashScript += " '" + EscapeBashSingleQuoted(arg) + "'";
+
+            return "wsl.exe bash -lc \"" + bashScript + "\"";
+        }
+#endif
+
+        bool IsRemoteExecutionEnabled(const GameBuildRequest& request)
+        {
+            return ResolveExecutionMode(request) == BuildExecutionMode::Remote;
         }
 
         bool ResolveConfiguredWindowIconPath(const GameBuildRequest& request,
@@ -667,6 +783,39 @@ namespace Limitless::Project
 
     bool GameBuilder::ValidateRequest(const GameBuildRequest& request, GameBuildResult& result)
     {
+        const std::string targetOS = ResolveTargetOS(request);
+        const std::string targetArchitecture = ResolveTargetArchitecture(request);
+        const std::string executionMode = ResolveExecutionMode(request);
+        const bool remoteExecution = (executionMode == BuildExecutionMode::Remote);
+        const bool localLinuxCrossViaWsl = IsWindowsHostLinuxTarget(request);
+
+        if (targetOS != BuildTargetOS::Windows &&
+            targetOS != BuildTargetOS::MacOS &&
+            targetOS != BuildTargetOS::Linux)
+        {
+            result.ErrorMessage = "Unsupported target OS: " + targetOS;
+            return false;
+        }
+
+        if (targetArchitecture != BuildTargetArchitecture::X64 &&
+            targetArchitecture != BuildTargetArchitecture::ARM64)
+        {
+            result.ErrorMessage = "Unsupported target architecture: " + targetArchitecture;
+            return false;
+        }
+
+        if (!remoteExecution && !IsHostTargetPair(request) && !localLinuxCrossViaWsl)
+        {
+            result.ErrorMessage = "Local execution only supports host platform builds. Switch to Remote mode for cross-platform builds.";
+            return false;
+        }
+
+        if (!remoteExecution && localLinuxCrossViaWsl && !IsWslAvailable())
+        {
+            result.ErrorMessage = "WSL is required for local Windows->Linux cross-builds. Install WSL or use Remote mode.";
+            return false;
+        }
+
         // Check project root exists.
         if (request.ProjectRoot.empty() || !std::filesystem::is_directory(request.ProjectRoot))
         {
@@ -684,7 +833,7 @@ namespace Limitless::Project
             return false;
         }
 
-        if (IsInternalBackend(request))
+        if (IsInternalBackend(request) && !remoteExecution && !localLinuxCrossViaWsl)
         {
 #if defined(LT_PLATFORM_WINDOWS)
             const std::filesystem::path scriptCoreBuildScript = request.EngineRoot / "Scripts" / "build-project-scriptcore-windows.bat";
@@ -700,6 +849,22 @@ namespace Limitless::Project
             if (!std::filesystem::is_directory(runtimeTemplateRoot))
             {
                 result.ErrorMessage = "Internal runtime template directory missing: " + runtimeTemplateRoot.string();
+                return false;
+            }
+        }
+
+        if (remoteExecution)
+        {
+            const std::filesystem::path remoteClientScript = request.EngineRoot / "Scripts" / "remote_build_client.py";
+            if (!std::filesystem::exists(remoteClientScript))
+            {
+                result.ErrorMessage = "Remote build client script missing: " + remoteClientScript.string();
+                return false;
+            }
+            const std::string remoteEndpoint = ResolveRemoteBuildEndpoint(request.Settings, targetOS);
+            if (remoteEndpoint.empty())
+            {
+                result.ErrorMessage = "Remote build endpoint is not configured for target OS '" + targetOS + "'.";
                 return false;
             }
         }
@@ -736,6 +901,8 @@ namespace Limitless::Project
         }
 
         result.StepLog.push_back("Validation passed: " + std::to_string(enabledScenes.size()) + " scene(s) enabled.");
+        result.StepLog.push_back("Target: " + targetOS + " " + targetArchitecture
+                                 + " via " + executionMode + " execution.");
         return true;
     }
 
@@ -771,7 +938,16 @@ namespace Limitless::Project
             return false;
 
         const bool internalBackend = IsInternalBackend(request);
-        const auto scriptPath = request.EngineRoot / "Scripts" / GetBuildScriptName(internalBackend);
+        std::filesystem::path scriptPath;
+        const bool windowsLinuxCross = IsWindowsHostLinuxTarget(request);
+#if defined(LT_PLATFORM_WINDOWS)
+        if (windowsLinuxCross)
+            scriptPath = request.EngineRoot / "Scripts" / (internalBackend ? "build-project-scriptcore-unix.sh" : "build-scriptcore-unix.sh");
+        else
+            scriptPath = request.EngineRoot / "Scripts" / GetBuildScriptName(internalBackend);
+#else
+        scriptPath = request.EngineRoot / "Scripts" / GetBuildScriptName(internalBackend);
+#endif
         if (!std::filesystem::exists(scriptPath))
         {
             result.ErrorMessage = "Build script not found: " + scriptPath.string();
@@ -779,13 +955,30 @@ namespace Limitless::Project
         }
 
         const std::string configArg = request.Settings.BuildConfiguration;
-        const std::string platformArg = GetBuildPlatformArg();
+        const std::string platformArg = GetBuildPlatformArg(request);
 
 #if defined(LT_PLATFORM_WINDOWS)
-        std::string command = "cd /d \"" + request.EngineRoot.string() + "\" && call \""
-            + scriptPath.string() + "\" " + configArg + " " + platformArg;
-        if (internalBackend)
-            command += " \"" + request.ProjectRoot.string() + "\"";
+        std::string command;
+        if (windowsLinuxCross)
+        {
+            std::vector<std::string> args = {
+                "--config", configArg,
+                "--platform", platformArg
+            };
+            if (internalBackend)
+            {
+                args.push_back("--project-root");
+                args.push_back(ConvertWindowsPathToWslPath(request.ProjectRoot));
+            }
+            command = BuildWslBashScriptCommand(request.EngineRoot, scriptPath, args);
+        }
+        else
+        {
+            command = "cd /d \"" + request.EngineRoot.string() + "\" && call \""
+                + scriptPath.string() + "\" " + configArg + " " + platformArg;
+            if (internalBackend)
+                command += " \"" + request.ProjectRoot.string() + "\"";
+        }
 #else
         std::string command = "cd \"" + request.EngineRoot.string() + "\" && bash \""
             + scriptPath.string() + "\" --config " + configArg + " --platform " + platformArg;
@@ -803,8 +996,11 @@ namespace Limitless::Project
         if (IsInternalBackend(request))
         {
             const std::filesystem::path builtScriptCorePath =
-                GetScriptCoreBuildDirectory(request.EngineRoot, request.Settings.BuildConfiguration)
-                / GetScriptCoreLibraryName();
+                GetScriptCoreBuildDirectory(request.EngineRoot,
+                                            request.Settings.BuildConfiguration,
+                                            ResolveTargetOS(request),
+                                            ResolveTargetArchitecture(request))
+                / GetScriptCoreLibraryName(ResolveTargetOS(request));
             if (!std::filesystem::exists(builtScriptCorePath))
             {
                 result.ErrorMessage = "Built ScriptCore library not found at " + builtScriptCorePath.string();
@@ -832,46 +1028,76 @@ namespace Limitless::Project
         return true;
     }
 
-    bool GameBuilder::CopyRuntimeFiles(const GameBuildRequest& request, GameBuildResult& result)
+    bool GameBuilder::PrepareLocalArtifacts(const GameBuildRequest& request, BuildArtifactLayout& layout, GameBuildResult& result)
     {
-        result.StepLog.push_back("Copying runtime files...");
+        if (!BuildScriptCore(request, result))
+            return false;
 
         const std::string config = request.Settings.BuildConfiguration;
-        const std::string projectName = request.ProjectName.empty() ? "Game" : request.ProjectName;
+        const std::string targetOS = ResolveTargetOS(request);
         const bool useInternalBackend = IsInternalBackend(request);
-        const std::filesystem::path runtimeDir = useInternalBackend
-            ? GetInternalRuntimeTemplateDirectory(request.EngineRoot, config)
-            : GetRuntimeBuildDirectory(request.EngineRoot, config);
+        const bool windowsLinuxCross = IsWindowsHostLinuxTarget(request);
 
         if (useInternalBackend)
         {
-            if (!std::filesystem::is_directory(runtimeDir))
+            layout.RuntimeDirectory = GetInternalRuntimeTemplateDirectory(request.EngineRoot,
+                                                                          config,
+                                                                          targetOS,
+                                                                          ResolveTargetArchitecture(request));
+            if (!std::filesystem::is_directory(layout.RuntimeDirectory))
             {
-                result.ErrorMessage = "Internal runtime template directory not found: " + runtimeDir.string();
+                result.ErrorMessage = "Internal runtime template directory not found: " + layout.RuntimeDirectory.string();
                 return false;
             }
-            result.StepLog.push_back("Using internal runtime templates: " + runtimeDir.string());
+            result.StepLog.push_back("Using internal runtime templates: " + layout.RuntimeDirectory.string());
         }
         else
         {
-            // Always build the runtime executable for the selected configuration before copying.
-            // This prevents shipping stale binaries (e.g. old Runtime.exe still booting TestLayer).
 #if defined(LT_PLATFORM_WINDOWS)
-            const auto runtimeBuildScript = request.EngineRoot / "Scripts" / "build-runtime-windows.bat";
-            const auto fallbackBuildScript = request.EngineRoot / "Scripts" / "build-windows.bat";
-            const auto mainBuildScript = std::filesystem::exists(runtimeBuildScript)
-                ? runtimeBuildScript
-                : fallbackBuildScript;
-            if (std::filesystem::exists(mainBuildScript))
+            if (windowsLinuxCross)
             {
-                result.StepLog.push_back("Building Runtime (" + config + ")...");
-                const std::string buildCommand = "cd /d \"" + request.EngineRoot.string()
-                    + "\" && call \"" + mainBuildScript.string() + "\" " + config + " " + GetBuildPlatformArg();
-                const int buildExitCode = RunCommand(buildCommand);
-                if (buildExitCode != 0)
+                const auto runtimeBuildScript = request.EngineRoot / "Scripts" / "build-runtime-unix.sh";
+                const auto fallbackBuildScript = request.EngineRoot / "Scripts" / "build-unix.sh";
+                const auto mainBuildScript = std::filesystem::exists(runtimeBuildScript)
+                    ? runtimeBuildScript
+                    : fallbackBuildScript;
+                if (std::filesystem::exists(mainBuildScript))
                 {
-                    result.ErrorMessage = "Failed to build Runtime (exit code " + std::to_string(buildExitCode) + ").";
-                    return false;
+                    result.StepLog.push_back("Building Runtime (" + config + ") via WSL...");
+                    std::vector<std::string> args = { "--config", config };
+                    if (mainBuildScript.filename() == "build-runtime-unix.sh")
+                    {
+                        args.push_back("--platform");
+                        args.push_back(GetBuildPlatformArg(request));
+                    }
+
+                    const std::string buildCommand = BuildWslBashScriptCommand(request.EngineRoot, mainBuildScript, args);
+                    const int buildExitCode = RunCommand(buildCommand);
+                    if (buildExitCode != 0)
+                    {
+                        result.ErrorMessage = "Failed to build Runtime via WSL (exit code " + std::to_string(buildExitCode) + ").";
+                        return false;
+                    }
+                }
+            }
+            else
+            {
+                const auto runtimeBuildScript = request.EngineRoot / "Scripts" / "build-runtime-windows.bat";
+                const auto fallbackBuildScript = request.EngineRoot / "Scripts" / "build-windows.bat";
+                const auto mainBuildScript = std::filesystem::exists(runtimeBuildScript)
+                    ? runtimeBuildScript
+                    : fallbackBuildScript;
+                if (std::filesystem::exists(mainBuildScript))
+                {
+                    result.StepLog.push_back("Building Runtime (" + config + ")...");
+                    const std::string buildCommand = "cd /d \"" + request.EngineRoot.string()
+                        + "\" && call \"" + mainBuildScript.string() + "\" " + config + " " + GetBuildPlatformArg(request);
+                    const int buildExitCode = RunCommand(buildCommand);
+                    if (buildExitCode != 0)
+                    {
+                        result.ErrorMessage = "Failed to build Runtime (exit code " + std::to_string(buildExitCode) + ").";
+                        return false;
+                    }
                 }
             }
 #else
@@ -886,7 +1112,7 @@ namespace Limitless::Project
                 std::string buildCommand = "cd \"" + request.EngineRoot.string()
                     + "\" && bash \"" + mainBuildScript.string() + "\" --config " + config;
                 if (mainBuildScript.filename() == "build-runtime-unix.sh")
-                    buildCommand += " --platform " + GetBuildPlatformArg();
+                    buildCommand += " --platform " + GetBuildPlatformArg(request);
                 const int buildExitCode = RunCommand(buildCommand);
                 if (buildExitCode != 0)
                 {
@@ -895,11 +1121,100 @@ namespace Limitless::Project
                 }
             }
 #endif
+            layout.RuntimeDirectory = GetRuntimeBuildDirectory(request.EngineRoot,
+                                                               config,
+                                                               targetOS,
+                                                               ResolveTargetArchitecture(request));
+        }
+
+        layout.ScriptCoreLibraryPath = GetScriptCoreBuildDirectory(request.EngineRoot,
+                                                                   config,
+                                                                   targetOS,
+                                                                   ResolveTargetArchitecture(request))
+            / GetScriptCoreLibraryName(targetOS);
+        if (useInternalBackend)
+        {
+            const std::filesystem::path projectLocalScriptCore = GetProjectScriptCoreLibraryPath(request);
+            if (std::filesystem::exists(projectLocalScriptCore))
+                layout.ScriptCoreLibraryPath = projectLocalScriptCore;
+        }
+
+        layout.DynamicLibrarySourceDirectories.clear();
+        layout.DynamicLibrarySourceDirectories.push_back(layout.RuntimeDirectory);
+        if (targetOS == BuildTargetOS::Windows)
+        {
+            if (useInternalBackend)
+            {
+                layout.DynamicLibrarySourceDirectories.push_back(request.EngineRoot / "SDK" / "vendor" / "shaderc" / "dlls");
+                layout.DynamicLibrarySourceDirectories.push_back(request.EngineRoot / "SDK" / "vendor" / "ffmpeg" / "dlls");
+            }
+            else
+            {
+                layout.DynamicLibrarySourceDirectories.push_back(request.EngineRoot / "Limitless" / "Vendor" / "shaderc" / "dlls");
+                layout.DynamicLibrarySourceDirectories.push_back(request.EngineRoot / "Limitless" / "Vendor" / "ffmpeg" / "dlls");
+            }
+        }
+
+        return true;
+    }
+
+    bool GameBuilder::PrepareRemoteArtifacts(const GameBuildRequest& request, BuildArtifactLayout& layout, GameBuildResult& result)
+    {
+        if (!MirrorProjectNativeScriptsToGeneratedDirectory(request, result))
+            return false;
+
+        const std::filesystem::path generatedScriptsDirectory = request.ProjectRoot / "Build" / "Generated" / "ScriptCore";
+        RemoteBuildArtifactManifest remoteManifest;
+        if (!FetchRemoteBuildArtifacts(request, generatedScriptsDirectory, remoteManifest, result))
+            return false;
+
+        layout.RuntimeDirectory = remoteManifest.RuntimeDirectory;
+        layout.ScriptCoreLibraryPath = remoteManifest.ScriptCoreLibraryPath;
+        layout.DynamicLibrarySourceDirectories = remoteManifest.DynamicLibraryDirectories;
+        if (layout.DynamicLibrarySourceDirectories.empty())
+            layout.DynamicLibrarySourceDirectories.push_back(layout.RuntimeDirectory);
+
+        return true;
+    }
+
+    bool GameBuilder::PrepareBuildArtifacts(const GameBuildRequest& request, BuildArtifactLayout& layout, GameBuildResult& result)
+    {
+        if (IsRemoteExecutionEnabled(request))
+        {
+            if (PrepareRemoteArtifacts(request, layout, result))
+                return true;
+
+            if (request.Settings.AllowLocalBuildFallback &&
+                (IsHostTargetPair(request) ||
+                 (IsWindowsHostLinuxTarget(request) && IsWslAvailable())))
+            {
+                result.StepLog.push_back("Remote build failed, attempting local fallback.");
+                result.StepLog.push_back("Remote failure reason: " + result.ErrorMessage);
+                result.ErrorMessage.clear();
+                return PrepareLocalArtifacts(request, layout, result);
+            }
+
+            return false;
+        }
+        return PrepareLocalArtifacts(request, layout, result);
+    }
+
+    bool GameBuilder::CopyRuntimeFiles(const GameBuildRequest& request, const BuildArtifactLayout& layout, GameBuildResult& result)
+    {
+        result.StepLog.push_back("Copying runtime files...");
+
+        const std::string projectName = request.ProjectName.empty() ? "Game" : request.ProjectName;
+        const std::string targetOS = ResolveTargetOS(request);
+        const std::filesystem::path runtimeDir = layout.RuntimeDirectory;
+        if (!std::filesystem::is_directory(runtimeDir))
+        {
+            result.ErrorMessage = "Runtime artifact directory is missing: " + runtimeDir.string();
+            return false;
         }
 
         // 1. Copy Runtime executable (renamed to project name).
-        const auto runtimeExePath = runtimeDir / GetRuntimeExecutableName();
-        const auto gameExePath = request.OutputDirectory / GetGameExecutableName(projectName);
+        const auto runtimeExePath = runtimeDir / GetRuntimeExecutableName(targetOS);
+        const auto gameExePath = request.OutputDirectory / GetGameExecutableName(projectName, targetOS);
         if (!std::filesystem::exists(runtimeExePath))
         {
             result.ErrorMessage = "Runtime executable not found after build: " + runtimeExePath.string();
@@ -988,7 +1303,7 @@ namespace Limitless::Project
         }
 
 #if defined(LT_PLATFORM_WINDOWS)
-        if (hasConfiguredWindowIcon)
+        if (hasConfiguredWindowIcon && targetOS == BuildTargetOS::Windows)
         {
             std::filesystem::path executableIconPath = shippedWindowIconPath;
             if (!HasIcoExtension(executableIconPath))
@@ -1027,16 +1342,12 @@ namespace Limitless::Project
 #endif
 
         // 3. Copy ScriptCore DLL (prefer project-local staging in internal mode).
-        std::filesystem::path scriptCorePath = GetScriptCoreBuildDirectory(request.EngineRoot, config) / GetScriptCoreLibraryName();
-        if (useInternalBackend)
-        {
-            const std::filesystem::path projectLocalScriptCore = GetProjectScriptCoreLibraryPath(request);
-            if (std::filesystem::exists(projectLocalScriptCore))
-                scriptCorePath = projectLocalScriptCore;
-        }
+        const std::filesystem::path scriptCorePath = layout.ScriptCoreLibraryPath;
         if (std::filesystem::exists(scriptCorePath))
         {
-            CopySingleFile(scriptCorePath, request.OutputDirectory / GetScriptCoreLibraryName(), result);
+            CopySingleFile(scriptCorePath,
+                           request.OutputDirectory / GetScriptCoreLibraryName(targetOS),
+                           result);
             result.StepLog.push_back("Copied ScriptCore library.");
         }
         else
@@ -1045,33 +1356,19 @@ namespace Limitless::Project
         }
 
         // 4. Copy runtime dynamic libraries (shaderc, ffmpeg, etc.).
-#if defined(LT_PLATFORM_WINDOWS)
-        std::vector<std::filesystem::path> dynamicLibrarySourceDirectories;
-        dynamicLibrarySourceDirectories.push_back(runtimeDir);
-        if (useInternalBackend)
-        {
-            // Internal toolchain packages may keep vendored runtime DLLs under SDK/vendor.
-            dynamicLibrarySourceDirectories.push_back(request.EngineRoot / "SDK" / "vendor" / "shaderc" / "dlls");
-            dynamicLibrarySourceDirectories.push_back(request.EngineRoot / "SDK" / "vendor" / "ffmpeg" / "dlls");
-        }
+        std::string dynamicLibraryExtension;
+        if (targetOS == BuildTargetOS::Windows)
+            dynamicLibraryExtension = ".dll";
+        else if (targetOS == BuildTargetOS::Linux)
+            dynamicLibraryExtension = ".so";
         else
-        {
-            // Workspace/legacy backend keeps vendored runtime DLLs under engine vendor roots.
-            dynamicLibrarySourceDirectories.push_back(request.EngineRoot / "Limitless" / "Vendor" / "shaderc" / "dlls");
-            dynamicLibrarySourceDirectories.push_back(request.EngineRoot / "Limitless" / "Vendor" / "ffmpeg" / "dlls");
-        }
+            dynamicLibraryExtension = ".dylib";
 
         size_t totalDynamicLibrariesCopied = 0;
-        for (const auto& sourceDirectory : dynamicLibrarySourceDirectories)
-        {
-            totalDynamicLibrariesCopied += CopyDllsFromDirectory(sourceDirectory, request.OutputDirectory, ".dll", result);
-        }
-        result.StepLog.push_back("Copied " + std::to_string(totalDynamicLibrariesCopied) + " runtime .dll file(s).");
-#elif defined(LT_PLATFORM_LINUX)
-        size_t totalDynamicLibrariesCopied = 0;
-        totalDynamicLibrariesCopied += CopyDllsFromDirectory(runtimeDir, request.OutputDirectory, ".so", result);
-        result.StepLog.push_back("Copied " + std::to_string(totalDynamicLibrariesCopied) + " runtime .so file(s).");
-#endif
+        for (const auto& sourceDirectory : layout.DynamicLibrarySourceDirectories)
+            totalDynamicLibrariesCopied += CopyDllsFromDirectory(sourceDirectory, request.OutputDirectory, dynamicLibraryExtension, result);
+        result.StepLog.push_back("Copied " + std::to_string(totalDynamicLibrariesCopied)
+                                 + " runtime '" + dynamicLibraryExtension + "' file(s).");
 
         result.StepLog.push_back("Runtime files copied.");
         return true;
@@ -1117,234 +1414,238 @@ namespace Limitless::Project
     bool GameBuilder::FinalizePlatformArtifacts(const GameBuildRequest& request, GameBuildResult& result)
     {
         const std::string projectName = request.ProjectName.empty() ? "Game" : request.ProjectName;
+        const std::string targetOS = ResolveTargetOS(request);
 
-#if defined(LT_PLATFORM_MACOS)
+        if (targetOS == BuildTargetOS::Windows)
+        {
+            // Windows layout already finalized during copy stage.
+            return true;
+        }
+
         if (result.OutputExecutablePath.empty() || !std::filesystem::exists(result.OutputExecutablePath))
         {
-            result.ErrorMessage = "Cannot create macOS app bundle: output executable not found.";
+            result.ErrorMessage = "Cannot finalize platform artifacts: output executable not found.";
             return false;
         }
 
-        const std::filesystem::path appBundlePath = request.OutputDirectory / (projectName + ".app");
-        const std::filesystem::path contentsPath = appBundlePath / "Contents";
-        const std::filesystem::path macosPath = contentsPath / "MacOS";
-        const std::filesystem::path resourcesPath = contentsPath / "Resources";
-
-        std::error_code ec;
-        std::filesystem::remove_all(appBundlePath, ec);
-        ec.clear();
-        std::filesystem::create_directories(macosPath, ec);
-        if (ec)
+        if (targetOS == BuildTargetOS::MacOS)
         {
-            result.ErrorMessage = "Failed to create macOS bundle directory '" + macosPath.string() + "': " + ec.message();
-            return false;
-        }
-        ec.clear();
-        std::filesystem::create_directories(resourcesPath, ec);
-        if (ec)
-        {
-            result.ErrorMessage = "Failed to create macOS bundle resources directory '" + resourcesPath.string() + "': " + ec.message();
-            return false;
-        }
+            const std::filesystem::path appBundlePath = request.OutputDirectory / (projectName + ".app");
+            const std::filesystem::path contentsPath = appBundlePath / "Contents";
+            const std::filesystem::path macosPath = contentsPath / "MacOS";
+            const std::filesystem::path resourcesPath = contentsPath / "Resources";
 
-        for (const auto& entry : std::filesystem::directory_iterator(request.OutputDirectory))
-        {
-            const std::filesystem::path sourcePath = entry.path();
-            if (sourcePath == appBundlePath)
-                continue;
-
-            const std::filesystem::path destinationPath = macosPath / sourcePath.filename();
+            std::error_code ec;
+            std::filesystem::remove_all(appBundlePath, ec);
             ec.clear();
-            if (entry.is_directory())
-            {
-                std::filesystem::copy(sourcePath,
-                                      destinationPath,
-                                      std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing,
-                                      ec);
-            }
-            else if (entry.is_regular_file())
-            {
-                std::filesystem::copy_file(sourcePath, destinationPath, std::filesystem::copy_options::overwrite_existing, ec);
-            }
-
+            std::filesystem::create_directories(macosPath, ec);
             if (ec)
             {
-                result.ErrorMessage = "Failed to stage file into macOS app bundle ('" + sourcePath.string() + "'): " + ec.message();
+                result.ErrorMessage = "Failed to create macOS bundle directory '" + macosPath.string() + "': " + ec.message();
                 return false;
             }
-        }
-
-        const std::filesystem::path bundledExecutablePath = macosPath / result.OutputExecutablePath.filename();
-        ec.clear();
-        std::filesystem::permissions(
-            bundledExecutablePath,
-            std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
-            std::filesystem::perm_options::add,
-            ec);
-        if (ec)
-        {
-            result.ErrorMessage = "Failed to mark bundled executable as executable: " + ec.message();
-            return false;
-        }
-
-        const std::filesystem::path shippedIconPath = request.OutputDirectory /
-            (request.Settings.GameWindowIconPath.empty()
-                 ? std::string("LimitlessLogo.ico")
-                 : std::filesystem::path(request.Settings.GameWindowIconPath).filename().string());
-
-        std::string iconPlistValue;
-        if (std::filesystem::exists(shippedIconPath))
-        {
-            std::string extension = shippedIconPath.extension().string();
-            std::transform(extension.begin(), extension.end(), extension.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (extension == ".icns")
+            ec.clear();
+            std::filesystem::create_directories(resourcesPath, ec);
+            if (ec)
             {
-                const std::filesystem::path iconDestination = resourcesPath / shippedIconPath.filename();
+                result.ErrorMessage = "Failed to create macOS bundle resources directory '" + resourcesPath.string() + "': " + ec.message();
+                return false;
+            }
+
+            for (const auto& entry : std::filesystem::directory_iterator(request.OutputDirectory))
+            {
+                const std::filesystem::path sourcePath = entry.path();
+                if (sourcePath == appBundlePath)
+                    continue;
+
+                const std::filesystem::path destinationPath = macosPath / sourcePath.filename();
                 ec.clear();
-                std::filesystem::copy_file(shippedIconPath, iconDestination, std::filesystem::copy_options::overwrite_existing, ec);
+                if (entry.is_directory())
+                {
+                    std::filesystem::copy(sourcePath,
+                                          destinationPath,
+                                          std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing,
+                                          ec);
+                }
+                else if (entry.is_regular_file())
+                {
+                    std::filesystem::copy_file(sourcePath, destinationPath, std::filesystem::copy_options::overwrite_existing, ec);
+                }
+
                 if (ec)
                 {
-                    result.ErrorMessage = "Failed to copy .icns into app bundle resources: " + ec.message();
+                    result.ErrorMessage = "Failed to stage file into macOS app bundle ('" + sourcePath.string() + "'): " + ec.message();
                     return false;
                 }
-                iconPlistValue = shippedIconPath.filename().string();
             }
-            else if (!request.Settings.GameWindowIconPath.empty())
+
+            const std::filesystem::path bundledExecutablePath = macosPath / result.OutputExecutablePath.filename();
+            ec.clear();
+            std::filesystem::permissions(
+                bundledExecutablePath,
+                std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
+                std::filesystem::perm_options::add,
+                ec);
+            if (ec)
             {
-                result.StepLog.push_back("Warning: macOS app icon embedding requires a .icns file; using window icon only.");
+                result.ErrorMessage = "Failed to mark bundled executable as executable: " + ec.message();
+                return false;
             }
-        }
 
-        auto sanitizeIdentifierPart = [](std::string value)
-        {
-            for (char& c : value)
+            const std::filesystem::path shippedIconPath = request.OutputDirectory /
+                (request.Settings.GameWindowIconPath.empty()
+                     ? std::string("LimitlessLogo.ico")
+                     : std::filesystem::path(request.Settings.GameWindowIconPath).filename().string());
+
+            std::string iconPlistValue;
+            if (std::filesystem::exists(shippedIconPath))
             {
-                const bool isAlnum = std::isalnum(static_cast<unsigned char>(c)) != 0;
-                if (!isAlnum && c != '-' && c != '.')
-                    c = '-';
+                std::string extension = shippedIconPath.extension().string();
+                std::transform(extension.begin(), extension.end(), extension.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                if (extension == ".icns")
+                {
+                    const std::filesystem::path iconDestination = resourcesPath / shippedIconPath.filename();
+                    ec.clear();
+                    std::filesystem::copy_file(shippedIconPath, iconDestination, std::filesystem::copy_options::overwrite_existing, ec);
+                    if (ec)
+                    {
+                        result.ErrorMessage = "Failed to copy .icns into app bundle resources: " + ec.message();
+                        return false;
+                    }
+                    iconPlistValue = shippedIconPath.filename().string();
+                }
+                else if (!request.Settings.GameWindowIconPath.empty())
+                {
+                    result.StepLog.push_back("Warning: macOS app icon embedding requires a .icns file; using window icon only.");
+                }
             }
-            if (value.empty())
-                value = "game";
-            return value;
-        };
-        const std::string bundleIdentifier = "com.limitless." + sanitizeIdentifierPart(projectName);
 
-        const std::filesystem::path infoPlistPath = contentsPath / "Info.plist";
-        std::ofstream infoPlist(infoPlistPath, std::ios::out | std::ios::trunc);
-        if (!infoPlist.is_open())
-        {
-            result.ErrorMessage = "Failed to write Info.plist for macOS app bundle.";
-            return false;
-        }
+            auto sanitizeIdentifierPart = [](std::string value)
+            {
+                for (char& c : value)
+                {
+                    const bool isAlnum = std::isalnum(static_cast<unsigned char>(c)) != 0;
+                    if (!isAlnum && c != '-' && c != '.')
+                        c = '-';
+                }
+                if (value.empty())
+                    value = "game";
+                return value;
+            };
+            const std::string bundleIdentifier = "com.limitless." + sanitizeIdentifierPart(projectName);
 
-        infoPlist
-            << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-            << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
-            << "<plist version=\"1.0\">\n"
-            << "<dict>\n"
-            << "    <key>CFBundleName</key>\n"
-            << "    <string>" << projectName << "</string>\n"
-            << "    <key>CFBundleDisplayName</key>\n"
-            << "    <string>" << projectName << "</string>\n"
-            << "    <key>CFBundleExecutable</key>\n"
-            << "    <string>" << result.OutputExecutablePath.filename().string() << "</string>\n"
-            << "    <key>CFBundleIdentifier</key>\n"
-            << "    <string>" << bundleIdentifier << "</string>\n"
-            << "    <key>CFBundlePackageType</key>\n"
-            << "    <string>APPL</string>\n"
-            << "    <key>CFBundleVersion</key>\n"
-            << "    <string>1.0</string>\n"
-            << "    <key>CFBundleShortVersionString</key>\n"
-            << "    <string>1.0</string>\n";
-        if (!iconPlistValue.empty())
-        {
+            const std::filesystem::path infoPlistPath = contentsPath / "Info.plist";
+            std::ofstream infoPlist(infoPlistPath, std::ios::out | std::ios::trunc);
+            if (!infoPlist.is_open())
+            {
+                result.ErrorMessage = "Failed to write Info.plist for macOS app bundle.";
+                return false;
+            }
+
             infoPlist
-                << "    <key>CFBundleIconFile</key>\n"
-                << "    <string>" << iconPlistValue << "</string>\n";
-        }
-        infoPlist
-            << "</dict>\n"
-            << "</plist>\n";
-        infoPlist.close();
-
-        if (!infoPlist.good())
-        {
-            result.ErrorMessage = "Failed writing Info.plist content for macOS app bundle.";
-            return false;
-        }
-
-        result.OutputExecutablePath = appBundlePath;
-        result.StepLog.push_back("Created macOS app bundle: " + appBundlePath.string());
-        return true;
-#elif defined(LT_PLATFORM_LINUX)
-        if (result.OutputExecutablePath.empty() || !std::filesystem::exists(result.OutputExecutablePath))
-        {
-            result.ErrorMessage = "Cannot create Linux desktop launcher: output executable not found.";
-            return false;
-        }
-
-        const std::filesystem::path shippedIconPath = request.OutputDirectory /
-            (request.Settings.GameWindowIconPath.empty()
-                 ? std::string("LimitlessLogo.ico")
-                 : std::filesystem::path(request.Settings.GameWindowIconPath).filename().string());
-        const std::filesystem::path desktopPath = request.OutputDirectory / (projectName + ".desktop");
-
-        auto escapeDesktopValue = [](std::string value)
-        {
-            std::string escaped;
-            escaped.reserve(value.size() + 8);
-            for (char c : value)
+                << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+                << "<plist version=\"1.0\">\n"
+                << "<dict>\n"
+                << "    <key>CFBundleName</key>\n"
+                << "    <string>" << projectName << "</string>\n"
+                << "    <key>CFBundleDisplayName</key>\n"
+                << "    <string>" << projectName << "</string>\n"
+                << "    <key>CFBundleExecutable</key>\n"
+                << "    <string>" << result.OutputExecutablePath.filename().string() << "</string>\n"
+                << "    <key>CFBundleIdentifier</key>\n"
+                << "    <string>" << bundleIdentifier << "</string>\n"
+                << "    <key>CFBundlePackageType</key>\n"
+                << "    <string>APPL</string>\n"
+                << "    <key>CFBundleVersion</key>\n"
+                << "    <string>1.0</string>\n"
+                << "    <key>CFBundleShortVersionString</key>\n"
+                << "    <string>1.0</string>\n";
+            if (!iconPlistValue.empty())
             {
-                if (c == '\\' || c == ' ')
-                    escaped.push_back('\\');
-                escaped.push_back(c);
+                infoPlist
+                    << "    <key>CFBundleIconFile</key>\n"
+                    << "    <string>" << iconPlistValue << "</string>\n";
             }
-            return escaped;
-        };
+            infoPlist
+                << "</dict>\n"
+                << "</plist>\n";
+            infoPlist.close();
 
-        std::ofstream desktopFile(desktopPath, std::ios::out | std::ios::trunc);
-        if (!desktopFile.is_open())
-        {
-            result.ErrorMessage = "Failed to write Linux desktop entry: " + desktopPath.string();
-            return false;
+            if (!infoPlist.good())
+            {
+                result.ErrorMessage = "Failed writing Info.plist content for macOS app bundle.";
+                return false;
+            }
+
+            result.OutputExecutablePath = appBundlePath;
+            result.StepLog.push_back("Created macOS app bundle: " + appBundlePath.string());
+            return true;
         }
 
-        desktopFile
-            << "[Desktop Entry]\n"
-            << "Version=1.0\n"
-            << "Type=Application\n"
-            << "Name=" << projectName << "\n"
-            << "Exec=" << escapeDesktopValue(result.OutputExecutablePath.string()) << "\n"
-            << "Terminal=false\n"
-            << "Categories=Game;\n";
-        if (std::filesystem::exists(shippedIconPath))
-            desktopFile << "Icon=" << escapeDesktopValue(shippedIconPath.string()) << "\n";
-        desktopFile.close();
-
-        if (!desktopFile.good())
+        if (targetOS == BuildTargetOS::Linux)
         {
-            result.ErrorMessage = "Failed writing Linux desktop entry content.";
-            return false;
+            const std::filesystem::path shippedIconPath = request.OutputDirectory /
+                (request.Settings.GameWindowIconPath.empty()
+                     ? std::string("LimitlessLogo.ico")
+                     : std::filesystem::path(request.Settings.GameWindowIconPath).filename().string());
+            const std::filesystem::path desktopPath = request.OutputDirectory / (projectName + ".desktop");
+
+            auto escapeDesktopValue = [](std::string value)
+            {
+                std::string escaped;
+                escaped.reserve(value.size() + 8);
+                for (char c : value)
+                {
+                    if (c == '\\' || c == ' ')
+                        escaped.push_back('\\');
+                    escaped.push_back(c);
+                }
+                return escaped;
+            };
+
+            std::ofstream desktopFile(desktopPath, std::ios::out | std::ios::trunc);
+            if (!desktopFile.is_open())
+            {
+                result.ErrorMessage = "Failed to write Linux desktop entry: " + desktopPath.string();
+                return false;
+            }
+
+            desktopFile
+                << "[Desktop Entry]\n"
+                << "Version=1.0\n"
+                << "Type=Application\n"
+                << "Name=" << projectName << "\n"
+                << "Exec=" << escapeDesktopValue(result.OutputExecutablePath.string()) << "\n"
+                << "Terminal=false\n"
+                << "Categories=Game;\n";
+            if (std::filesystem::exists(shippedIconPath))
+                desktopFile << "Icon=" << escapeDesktopValue(shippedIconPath.string()) << "\n";
+            desktopFile.close();
+
+            if (!desktopFile.good())
+            {
+                result.ErrorMessage = "Failed writing Linux desktop entry content.";
+                return false;
+            }
+
+            std::error_code ec;
+            std::filesystem::permissions(
+                desktopPath,
+                std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
+                std::filesystem::perm_options::add,
+                ec);
+            if (ec)
+                result.StepLog.push_back("Warning: could not mark desktop entry executable: " + ec.message());
+
+            result.StepLog.push_back("Generated Linux desktop launcher: " + desktopPath.string());
+            result.StepLog.push_back("Note: Linux executable files do not support embedded icon metadata; launcher icon is provided via .desktop file.");
+            return true;
         }
 
-        std::error_code ec;
-        std::filesystem::permissions(
-            desktopPath,
-            std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
-            std::filesystem::perm_options::add,
-            ec);
-        if (ec)
-            result.StepLog.push_back("Warning: could not mark desktop entry executable: " + ec.message());
-
-        result.StepLog.push_back("Generated Linux desktop launcher: " + desktopPath.string());
-        result.StepLog.push_back("Note: Linux executable files do not support embedded icon metadata; launcher icon is provided via .desktop file.");
-        return true;
-#else
-        (void)request;
-        (void)result;
-        return true;
-#endif
+        result.ErrorMessage = "Unsupported target OS for finalization: " + targetOS;
+        return false;
     }
 
     void GameBuilder::LaunchExecutable(const std::filesystem::path& executablePath)
@@ -1373,6 +1674,7 @@ namespace Limitless::Project
     {
         GameBuildResult result;
         const auto startTime = std::chrono::steady_clock::now();
+        BuildArtifactLayout artifactLayout;
 
         LT_CORE_INFO("GameBuilder: Starting build -> {}", request.OutputDirectory.string());
 
@@ -1388,13 +1690,13 @@ namespace Limitless::Project
             return result;
         }
 
-        if (!BuildScriptCore(request, result))
+        if (!PrepareBuildArtifacts(request, artifactLayout, result))
         {
             result.StepLog.push_back("Build failed: " + result.ErrorMessage);
             return result;
         }
 
-        if (!CopyRuntimeFiles(request, result))
+        if (!CopyRuntimeFiles(request, artifactLayout, result))
         {
             result.StepLog.push_back("Build failed: " + result.ErrorMessage);
             return result;
@@ -1426,8 +1728,15 @@ namespace Limitless::Project
         auto result = BuildGame(request);
         if (result.Success && !result.OutputExecutablePath.empty())
         {
-            result.StepLog.push_back("Launching game...");
-            LaunchExecutable(result.OutputExecutablePath);
+            if (ResolveTargetOS(request) != GetHostBuildTargetOS())
+            {
+                result.StepLog.push_back("Skipped launch: target platform differs from host platform.");
+            }
+            else
+            {
+                result.StepLog.push_back("Launching game...");
+                LaunchExecutable(result.OutputExecutablePath);
+            }
         }
         return result;
     }

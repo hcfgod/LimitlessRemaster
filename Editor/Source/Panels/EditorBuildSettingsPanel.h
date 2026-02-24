@@ -42,6 +42,20 @@ namespace Limitless::EditorBuildSettingsPanel
         /// Optional shipped game window icon path buffer.
         std::array<char, 512> WindowIconPathBuffer{};
 
+        /// Remote build endpoint buffer.
+        std::array<char, 512> RemoteBuildEndpointBuffer{};
+
+        /// Target-routed remote endpoint buffers.
+        std::array<char, 512> RemoteBuildEndpointWindowsBuffer{};
+        std::array<char, 512> RemoteBuildEndpointMacOSBuffer{};
+        std::array<char, 512> RemoteBuildEndpointLinuxBuffer{};
+
+        /// Remote build worker pool buffer.
+        std::array<char, 128> RemoteBuildPoolBuffer{};
+
+        /// Remote build auth token buffer.
+        std::array<char, 512> RemoteBuildAuthTokenBuffer{};
+
         /// Build in progress flag (set by build thread, read by UI thread).
         std::atomic<bool> BuildInProgress{false};
 

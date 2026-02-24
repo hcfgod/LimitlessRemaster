@@ -22,6 +22,21 @@ When using the engine’s entry point (`Limitless/Source/Core/EntryPoint.h`), th
 | Async I/O | Async load/save use the AsyncIO worker pool | Async operations return `Async::Task<void>`. |
 | Hot reload | File watcher callbacks run on a background thread; application of sensitive changes is main-threaded | Example: `HotReloadManager` applies window/logging changes on the main thread. |
 
+## Editor Build Settings (Separate File)
+
+Game export/build preferences are not stored in `config.json`.
+
+- File: `Project/Settings/BuildSettings.json`
+- Owner: editor build workflow (`EditorBuildSettingsPanel`)
+- Typical keys:
+  - `targetOS`, `targetArchitecture`, `executionMode` (`Auto`/`Local`/`Remote`)
+  - `remoteBuildEndpoint`, `remoteBuildEndpointWindows`, `remoteBuildEndpointMacOS`, `remoteBuildEndpointLinux`
+  - `useTargetEndpointRouting`, `remoteBuildPool`, `remoteBuildAuthToken`
+  - `remoteBuildTimeoutSeconds`, `remoteBuildPollIntervalSeconds`, `remoteBuildMaxRetries`
+  - `allowLocalBuildFallback`
+
+This split keeps runtime configuration (`ConfigManager`) separate from per-project build orchestration.
+
 ## Quick Start
 
 ### Initialize

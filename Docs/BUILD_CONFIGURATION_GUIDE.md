@@ -10,7 +10,8 @@ This guide covers the build system configuration, platform-specific settings, an
 4. [Build Configurations](#build-configurations)
 5. [Cross-Platform Building](#cross-platform-building)
 6. [Application Icon Setup](#application-icon-setup)
-7. [Best Practices](#best-practices)
+7. [Remote Desktop Build Pipeline](#remote-desktop-build-pipeline)
+8. [Best Practices](#best-practices)
 
 ## Build System Overview
 
@@ -222,6 +223,30 @@ The workspace uses a shared logo file at `Resources/LimitlessLogo.ico`.
 
 ## Cross-Platform Building
 
+### Editor Build Modes
+
+The editor now supports two execution modes for desktop builds:
+
+- `Auto`: chooses the best route for the selected target
+- `Local`: builds on the current host machine
+- `Remote`: dispatches to a native worker on the selected target OS
+
+Current `Auto` behavior:
+
+- Host target match -> local build
+- Windows host + Linux target + WSL installed -> local Linux cross-build through WSL
+- Otherwise -> remote build (using target-routed endpoint if configured)
+
+Target settings are persisted in `Project/Settings/BuildSettings.json`:
+
+- `targetOS`: `Windows` | `macOS` | `Linux`
+- `targetArchitecture`: `x64` | `ARM64`
+- `executionMode`: `Auto` | `Local` | `Remote`
+- `remoteBuildEndpoint`, `remoteBuildEndpointWindows`, `remoteBuildEndpointMacOS`, `remoteBuildEndpointLinux`
+- `useTargetEndpointRouting`, `remoteBuildPool`, `remoteBuildAuthToken`
+- `remoteBuildTimeoutSeconds`, `remoteBuildPollIntervalSeconds`, `remoteBuildMaxRetries`
+- `allowLocalBuildFallback`
+
 ### Windows Building
 
 **Using Build Script:**
@@ -290,6 +315,37 @@ Vendor/Premake/premake5 gmake2
 # Build with make
 make -j$(nproc) config=Debug_x64
 ```
+
+## Remote Desktop Build Pipeline
+
+Use this when building desktop targets from a different host OS.
+
+### 1) Run a native worker per target OS
+
+```bash
+python Scripts/remote_build_worker.py --host 0.0.0.0 --port 8080 --engine-root /path/to/LimitlessRemaster
+```
+
+### 2) Configure editor Build Settings
+
+- Set `Execution Mode` to `Auto` (recommended) or `Remote`
+- Set `Target OS` and `Target Architecture`
+- Set `Remote Endpoint` fallback and optionally per-target endpoints:
+  - `Remote Endpoint (Windows)`
+  - `Remote Endpoint (macOS)`
+  - `Remote Endpoint (Linux)`
+- Optionally set auth token and retry/timeout values
+
+### 3) Build from editor
+
+The editor will:
+
+- Build asset bundles locally
+- Build ScriptCore + Runtime either locally (host or WSL Linux cross) or via remote worker
+- Download/verify artifact bundle (SHA-256)
+- Reuse existing packaging flow (`config.json`, `GameBootstrap.json`, platform finalization)
+
+For full API payloads and contract details see `Docs/REMOTE_BUILD_API_GUIDE.md`.
 
 ## Best Practices
 

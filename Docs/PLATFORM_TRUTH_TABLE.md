@@ -27,6 +27,8 @@ Anything not marked as implemented should be treated as **future work**, even if
 |------|---------|-------|-------|------|
 | Build generation (Premake) | Implemented | Implemented | Implemented | `premake5.lua` targets Windows / macOS / Linux. |
 | Build scripts | Implemented | Implemented | Implemented | Windows: `Scripts/build-windows.bat`. Unix: `Scripts/build-unix.sh`. |
+| Editor local Linux cross-build from Windows (WSL) | Implemented | Not Supported | Not Supported | Uses WSL + Unix build scripts when target is Linux from Windows host. |
+| Editor desktop cross-build (remote native workers) | Implemented | Implemented | Implemented | Editor can dispatch desktop builds to native workers via `Scripts/remote_build_worker.py`. |
 | Continuous Integration workflows | Implemented | Implemented | Implemented | Workflows exist for Windows/Linux/macOS. |
 | Core systems (logging, configuration, events, error handling) | Implemented | Implemented | Implemented | Core systems are platform-agnostic C++20. |
 | Concurrency (Async I/O thread pool, tasks) | Implemented | Implemented | Implemented | Uses `std::thread`, `std::future`, `std::filesystem`. |

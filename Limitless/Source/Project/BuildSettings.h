@@ -15,6 +15,26 @@ namespace Limitless::Project
         inline constexpr const char* InternalToolchain = "InternalToolchain";
     }
 
+    namespace BuildTargetOS
+    {
+        inline constexpr const char* Windows = "Windows";
+        inline constexpr const char* MacOS = "macOS";
+        inline constexpr const char* Linux = "Linux";
+    }
+
+    namespace BuildTargetArchitecture
+    {
+        inline constexpr const char* X64 = "x64";
+        inline constexpr const char* ARM64 = "ARM64";
+    }
+
+    namespace BuildExecutionMode
+    {
+        inline constexpr const char* Auto = "Auto";
+        inline constexpr const char* Local = "Local";
+        inline constexpr const char* Remote = "Remote";
+    }
+
     namespace ScriptEditorMode
     {
         inline constexpr const char* Internal = "Internal";
@@ -84,6 +104,47 @@ namespace Limitless::Project
         /// - InternalToolchain: install-relative bundled toolchain layout.
         std::string BuildBackend = BuildBackend::LegacySdk;
 
+        /// Target operating system for game exports.
+        std::string TargetOS = BuildTargetOS::Windows;
+
+        /// Target architecture for game exports.
+        std::string TargetArchitecture = BuildTargetArchitecture::X64;
+
+        /// Build execution mode:
+        /// - Auto: choose local/remote based on host-target pairing.
+        /// - Local: build on the editor host.
+        /// - Remote: dispatch to remote native build worker.
+        std::string ExecutionMode = BuildExecutionMode::Auto;
+
+        /// Default remote build API endpoint fallback (example: http://10.0.0.12:8080).
+        std::string RemoteBuildEndpoint;
+
+        /// Route remote requests to target-specific endpoints when available.
+        bool UseTargetEndpointRouting = true;
+
+        /// Optional target-specific endpoints used when routing is enabled.
+        std::string RemoteBuildEndpointWindows;
+        std::string RemoteBuildEndpointMacOS;
+        std::string RemoteBuildEndpointLinux;
+
+        /// Optional worker pool label for routing.
+        std::string RemoteBuildPool = "default";
+
+        /// Optional auth token used by remote build API.
+        std::string RemoteBuildAuthToken;
+
+        /// If remote dispatch fails, optionally attempt a local build fallback.
+        bool AllowLocalBuildFallback = true;
+
+        /// Remote orchestration timeout in seconds.
+        int RemoteBuildTimeoutSeconds = 1200;
+
+        /// Poll interval for remote job status checks in seconds.
+        int RemoteBuildPollIntervalSeconds = 2;
+
+        /// Max request retries for remote orchestration.
+        int RemoteBuildMaxRetries = 3;
+
         /// Native script editor mode used by authoring UI.
         /// - Internal: built-in script editor window.
         /// - External: launch host editor integration (Visual Studio on Windows).
@@ -109,4 +170,13 @@ namespace Limitless::Project
 
     /// Returns the list of enabled scene keys in build order.
     [[nodiscard]] std::vector<std::string> GetEnabledBuildSceneKeys(const BuildSettings& settings);
+
+    /// Returns the normalized host platform label for build targeting.
+    [[nodiscard]] std::string GetHostBuildTargetOS();
+
+    /// Returns the normalized host architecture label for build targeting.
+    [[nodiscard]] std::string GetHostBuildTargetArchitecture();
+
+    /// Resolves remote endpoint with target-specific routing + fallback endpoint.
+    [[nodiscard]] std::string ResolveRemoteBuildEndpoint(const BuildSettings& settings, const std::string& targetOS);
 }
