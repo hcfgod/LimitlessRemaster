@@ -70,6 +70,71 @@ has_linkable_library() {
     return 1
 }
 
+rebuild_sdl3_from_source_linux() {
+    local temp_dir="/tmp/sdl3_build_$$"
+    mkdir -p "$temp_dir"
+    pushd "$temp_dir" >/dev/null
+
+    if ! command -v git >/dev/null 2>&1; then
+        if can_use_sudo && command -v apt-get >/dev/null 2>&1; then
+            run_privileged apt-get install -y git
+        elif can_use_sudo && command -v pacman >/dev/null 2>&1; then
+            run_privileged pacman -S --needed git
+        elif can_use_sudo && command -v dnf >/dev/null 2>&1; then
+            run_privileged dnf install -y git
+        else
+            echo "Error: git is required to build SDL3 from source."
+            popd >/dev/null
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    fi
+
+    if ! command -v cmake >/dev/null 2>&1; then
+        if can_use_sudo && command -v apt-get >/dev/null 2>&1; then
+            run_privileged apt-get install -y cmake
+        elif can_use_sudo && command -v pacman >/dev/null 2>&1; then
+            run_privileged pacman -S --needed cmake
+        elif can_use_sudo && command -v dnf >/dev/null 2>&1; then
+            run_privileged dnf install -y cmake
+        else
+            echo "Error: cmake is required to build SDL3 from source."
+            popd >/dev/null
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    fi
+
+    rm -rf SDL
+    git clone --depth 1 --branch release-3.2.18 https://github.com/libsdl-org/SDL.git
+    cmake -S SDL -B SDL/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DSDL_STATIC=OFF \
+        -DSDL_SHARED=ON \
+        -DSDL_TEST=OFF \
+        -DSDL_OPENGL=ON \
+        -DSDL_OPENGLES=ON \
+        -DSDL_X11=ON \
+        -DSDL_WAYLAND=ON
+    cmake --build SDL/build --parallel "$(get_job_count)"
+
+    if ! can_use_sudo; then
+        echo "Error: Administrative privileges are required to install SDL3 system-wide."
+        popd >/dev/null
+        rm -rf "$temp_dir"
+        return 1
+    fi
+    run_privileged cmake --install SDL/build
+    if command -v ldconfig >/dev/null 2>&1; then
+        run_privileged ldconfig
+    fi
+
+    popd >/dev/null
+    rm -rf "$temp_dir"
+    echo "SDL3 built and installed successfully from source."
+    return 0
+}
+
 # Function to check and install dependencies
 check_dependencies() {
     echo "Checking for required dependencies..."
@@ -152,6 +217,25 @@ check_dependencies() {
             missing_deps+=("libxss-dev")
         fi
 
+        # OpenGL/GLX development headers and libs (required for SDL3 OpenGL backend).
+        local missing_opengl_link_libs=()
+        if ! pkg-config --exists gl 2>/dev/null && ! has_linkable_library "GL"; then
+            missing_opengl_link_libs+=("GL")
+        fi
+        if ! has_linkable_library "GLX"; then
+            missing_opengl_link_libs+=("GLX")
+        fi
+        if [[ ${#missing_opengl_link_libs[@]} -gt 0 ]]; then
+            echo "Missing OpenGL/GLX development libraries detected: ${missing_opengl_link_libs[*]}"
+            if command -v apt-get >/dev/null 2>&1; then
+                missing_deps+=("libgl1-mesa-dev" "libglu1-mesa-dev")
+            elif command -v pacman >/dev/null 2>&1; then
+                missing_deps+=("mesa" "glu")
+            elif command -v dnf >/dev/null 2>&1; then
+                missing_deps+=("mesa-libGL-devel" "mesa-libGLU-devel")
+            fi
+        fi
+
         # Check for audio and runtime libraries
         if ! pkg-config --exists alsa 2>/dev/null; then
             missing_deps+=("libasound2-dev")
@@ -219,6 +303,36 @@ check_dependencies() {
             fi
         fi
 
+        # If OpenGL/GLX prerequisites were missing at script start, proactively
+        # reinstall SDL3 so stale source installs (built without GLX) are replaced.
+        if [[ ${#missing_opengl_link_libs[@]} -gt 0 ]] && pkg-config --exists sdl3 2>/dev/null; then
+            echo "Reinstalling SDL3 after OpenGL dependency installation..."
+            if can_use_sudo && command -v apt-get >/dev/null 2>&1; then
+                if ! run_privileged apt-get install -y --reinstall libsdl3-dev libsdl3-0 >/dev/null 2>&1; then
+                    run_privileged apt-get install -y --reinstall libsdl3-dev
+                fi
+            elif can_use_sudo && command -v pacman >/dev/null 2>&1; then
+                run_privileged pacman -S --needed sdl3
+            elif can_use_sudo && command -v dnf >/dev/null 2>&1; then
+                if ! run_privileged dnf reinstall -y SDL3-devel SDL3 >/dev/null 2>&1; then
+                    run_privileged dnf install -y SDL3-devel SDL3
+                fi
+            fi
+        fi
+
+        # If SDL3 resolves to /usr/local, it is likely a prior source install.
+        # Rebuild it now with explicit X11/OpenGL enabled to avoid GLX runtime failures.
+        if pkg-config --exists sdl3 2>/dev/null; then
+            local sdl3_libdir
+            sdl3_libdir="$(pkg-config --variable=libdir sdl3 2>/dev/null || true)"
+            if [[ "$sdl3_libdir" == /usr/local/* ]]; then
+                echo "Detected SDL3 in $sdl3_libdir. Rebuilding SDL3 with X11/OpenGL support..."
+                if ! rebuild_sdl3_from_source_linux; then
+                    return 1
+                fi
+            fi
+        fi
+
         if ! install_box2d_v3_linux; then
             return 1
         fi
@@ -232,56 +346,9 @@ check_dependencies() {
                 echo "SDL3 installed from pacman."
             else
                 echo "SDL3 package unavailable. Building SDL3 from source..."
-                local temp_dir="/tmp/sdl3_build_$$"
-                mkdir -p "$temp_dir"
-                pushd "$temp_dir" >/dev/null
-
-                if ! command -v git >/dev/null 2>&1; then
-                    if can_use_sudo && command -v apt-get >/dev/null 2>&1; then
-                        run_privileged apt-get install -y git
-                    elif can_use_sudo && command -v pacman >/dev/null 2>&1; then
-                        run_privileged pacman -S --needed git
-                    else
-                        echo "Error: git is required to build SDL3 from source."
-                        popd >/dev/null
-                        rm -rf "$temp_dir"
-                        return 1
-                    fi
-                fi
-
-                if ! command -v cmake >/dev/null 2>&1; then
-                    if can_use_sudo && command -v apt-get >/dev/null 2>&1; then
-                        run_privileged apt-get install -y cmake
-                    elif can_use_sudo && command -v pacman >/dev/null 2>&1; then
-                        run_privileged pacman -S --needed cmake
-                    else
-                        echo "Error: cmake is required to build SDL3 from source."
-                        popd >/dev/null
-                        rm -rf "$temp_dir"
-                        return 1
-                    fi
-                fi
-
-                git clone https://github.com/libsdl-org/SDL.git
-                cd SDL
-                git checkout release-3.2.18
-                mkdir build && cd build
-                cmake .. -DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_TEST=OFF -DSDL_OPENGL=ON -DSDL_OPENGLES=ON
-                make -j"$(get_job_count)"
-                if ! can_use_sudo; then
-                    echo "Error: Administrative privileges are required to install SDL3 system-wide."
-                    popd >/dev/null
-                    rm -rf "$temp_dir"
+                if ! rebuild_sdl3_from_source_linux; then
                     return 1
                 fi
-                run_privileged make install
-                if command -v ldconfig >/dev/null 2>&1; then
-                    run_privileged ldconfig
-                fi
-
-                popd >/dev/null
-                rm -rf "$temp_dir"
-                echo "SDL3 built and installed successfully from source."
             fi
         fi
     fi
