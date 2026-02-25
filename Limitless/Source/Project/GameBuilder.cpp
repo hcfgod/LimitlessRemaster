@@ -26,6 +26,8 @@
 #endif
 #include <windows.h>
 #include <shlobj_core.h>
+#else
+#include <sys/wait.h>
 #endif
 
 namespace Limitless::Project
@@ -265,6 +267,383 @@ namespace Limitless::Project
                 bashScript += " '" + EscapeBashSingleQuoted(arg) + "'";
 
             return "wsl.exe bash -lc \"" + bashScript + "\"";
+        }
+
+        std::string TrimAsciiWhitespace(std::string value)
+        {
+            auto isWhitespace = [](unsigned char character) {
+                return std::isspace(character) != 0;
+            };
+
+            value.erase(value.begin(), std::find_if(value.begin(), value.end(), [&](char character) {
+                            return !isWhitespace(static_cast<unsigned char>(character));
+                        }));
+            value.erase(std::find_if(value.rbegin(), value.rend(), [&](char character) {
+                            return !isWhitespace(static_cast<unsigned char>(character));
+                        }).base(),
+                        value.end());
+            return value;
+        }
+
+        std::string NormalizeWslCapturedText(std::string text)
+        {
+            text.erase(std::remove(text.begin(), text.end(), '\0'), text.end());
+            if (text.size() >= 3 &&
+                static_cast<unsigned char>(text[0]) == 0xEF &&
+                static_cast<unsigned char>(text[1]) == 0xBB &&
+                static_cast<unsigned char>(text[2]) == 0xBF)
+            {
+                text.erase(0, 3);
+            }
+            return text;
+        }
+
+        std::string SanitizeWslDistributionName(std::string value)
+        {
+            value = NormalizeWslCapturedText(std::move(value));
+            std::string sanitized;
+            sanitized.reserve(value.size());
+            for (const unsigned char character : value)
+            {
+                if (character < 32 || character == 127)
+                    continue;
+                if (character == '"' || character == '\'')
+                    continue;
+                sanitized.push_back(static_cast<char>(character));
+            }
+            return TrimAsciiWhitespace(std::move(sanitized));
+        }
+
+        std::vector<std::string> SplitNonEmptyLines(const std::string& text)
+        {
+            // Some Windows console processes (including wsl.exe in hidden pipe mode)
+            // can emit UTF-16LE-like byte streams with interleaved NUL bytes.
+            // Strip NULs so downstream line parsing sees intact ASCII/UTF-8 text.
+            const std::string normalizedText = NormalizeWslCapturedText(text);
+
+            std::vector<std::string> lines;
+            std::stringstream stream(normalizedText);
+            std::string line;
+            while (std::getline(stream, line))
+            {
+                line = TrimAsciiWhitespace(line);
+                if (!line.empty())
+                    lines.push_back(line);
+            }
+            return lines;
+        }
+
+        bool RunHiddenCommandCapture(const std::string& commandLine,
+                                     DWORD timeoutMilliseconds,
+                                     DWORD& exitCode,
+                                     std::string& stdoutOutput,
+                                     const std::function<void(const std::string&)>& outputCallback = {})
+        {
+            exitCode = 1;
+            stdoutOutput.clear();
+
+            SECURITY_ATTRIBUTES securityAttributes{};
+            securityAttributes.nLength = sizeof(securityAttributes);
+            securityAttributes.bInheritHandle = TRUE;
+
+            HANDLE readPipe = nullptr;
+            HANDLE writePipe = nullptr;
+            if (!CreatePipe(&readPipe, &writePipe, &securityAttributes, 0))
+                return false;
+
+            if (!SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0))
+            {
+                CloseHandle(readPipe);
+                CloseHandle(writePipe);
+                return false;
+            }
+
+            STARTUPINFOA startupInfo{};
+            startupInfo.cb = sizeof(startupInfo);
+            startupInfo.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+            startupInfo.wShowWindow = SW_HIDE;
+            startupInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+            startupInfo.hStdOutput = writePipe;
+            startupInfo.hStdError = writePipe;
+
+            PROCESS_INFORMATION processInformation{};
+            std::string mutableCommandLine = commandLine;
+            const BOOL created = CreateProcessA(
+                nullptr,
+                mutableCommandLine.data(),
+                nullptr,
+                nullptr,
+                TRUE,
+                CREATE_NO_WINDOW,
+                nullptr,
+                nullptr,
+                &startupInfo,
+                &processInformation);
+            CloseHandle(writePipe);
+            if (!created)
+            {
+                CloseHandle(readPipe);
+                return false;
+            }
+
+            const ULONGLONG startTick = GetTickCount64();
+            bool timedOut = false;
+            std::array<char, 4096> buffer{};
+            std::string pendingOutputLine;
+            auto flushChunk = [&](const char* chunk, const size_t size)
+            {
+                if (size == 0)
+                    return;
+
+                stdoutOutput.append(chunk, size);
+                if (!outputCallback)
+                    return;
+
+                pendingOutputLine.append(chunk, size);
+                size_t newlineIndex = std::string::npos;
+                while ((newlineIndex = pendingOutputLine.find('\n')) != std::string::npos)
+                {
+                    std::string line = pendingOutputLine.substr(0, newlineIndex);
+                    if (!line.empty() && line.back() == '\r')
+                        line.pop_back();
+                    line.erase(std::remove(line.begin(), line.end(), '\0'), line.end());
+                    line = TrimAsciiWhitespace(line);
+                    if (!line.empty())
+                        outputCallback(line);
+                    pendingOutputLine.erase(0, newlineIndex + 1);
+                }
+            };
+
+            while (true)
+            {
+                DWORD bytesAvailable = 0;
+                if (PeekNamedPipe(readPipe, nullptr, 0, nullptr, &bytesAvailable, nullptr) && bytesAvailable > 0)
+                {
+                    const DWORD bytesToRead = std::min<DWORD>(bytesAvailable, static_cast<DWORD>(buffer.size()));
+                    DWORD bytesRead = 0;
+                    if (ReadFile(readPipe, buffer.data(), bytesToRead, &bytesRead, nullptr) && bytesRead > 0)
+                        flushChunk(buffer.data(), bytesRead);
+                }
+
+                const DWORD waitResult = WaitForSingleObject(processInformation.hProcess, 25);
+                if (waitResult == WAIT_OBJECT_0)
+                    break;
+
+                if (waitResult == WAIT_FAILED)
+                    break;
+
+                const ULONGLONG elapsed = GetTickCount64() - startTick;
+                if (elapsed >= timeoutMilliseconds)
+                {
+                    timedOut = true;
+                    TerminateProcess(processInformation.hProcess, WAIT_TIMEOUT);
+                    break;
+                }
+            }
+
+            DWORD bytesRead = 0;
+            while (ReadFile(readPipe, buffer.data(), static_cast<DWORD>(buffer.size()), &bytesRead, nullptr) && bytesRead > 0)
+                flushChunk(buffer.data(), bytesRead);
+            CloseHandle(readPipe);
+
+            if (!pendingOutputLine.empty() && outputCallback)
+            {
+                pendingOutputLine.erase(std::remove(pendingOutputLine.begin(), pendingOutputLine.end(), '\0'),
+                                        pendingOutputLine.end());
+                std::string line = TrimAsciiWhitespace(pendingOutputLine);
+                if (!line.empty())
+                    outputCallback(line);
+            }
+
+            (void)GetExitCodeProcess(processInformation.hProcess, &exitCode);
+            CloseHandle(processInformation.hThread);
+            CloseHandle(processInformation.hProcess);
+
+            if (timedOut)
+                exitCode = WAIT_TIMEOUT;
+
+            return true;
+        }
+
+        bool EnsureWslLinuxBuildTools(GameBuildResult& result,
+                                      const std::function<void(const std::string&)>& progressCallback)
+        {
+            auto outputIndicatesDistroNotFound = [](const std::string& output) -> bool
+            {
+                std::string normalized = NormalizeWslCapturedText(output);
+                std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                return normalized.find("wsl_e_distro_not_found") != std::string::npos ||
+                       normalized.find("there is no distribution with the supplied name.") != std::string::npos;
+            };
+
+            DWORD distroExitCode = 1;
+            std::string distroListOutput;
+            if (!RunHiddenCommandCapture("wsl.exe -l -q", 10000, distroExitCode, distroListOutput) ||
+                distroExitCode != 0)
+            {
+                result.ErrorMessage = "Failed to query WSL distributions. Ensure WSL is installed and try again.";
+                return false;
+            }
+
+            const auto distributions = SplitNonEmptyLines(distroListOutput);
+            if (distributions.empty())
+            {
+                result.ErrorMessage = "No WSL Linux distribution is installed. Install one (for example Ubuntu) and retry.";
+                return false;
+            }
+
+            std::string selectedDistribution;
+            for (const std::string& candidate : distributions)
+            {
+                selectedDistribution = SanitizeWslDistributionName(candidate);
+                if (!selectedDistribution.empty())
+                    break;
+            }
+            if (selectedDistribution.empty())
+            {
+                result.ErrorMessage = "Failed to parse an installed WSL distribution name.";
+                return false;
+            }
+            if (progressCallback)
+                progressCallback("Using WSL distribution: " + selectedDistribution);
+
+            bool useExplicitDistribution = true;
+            auto buildCheckCommand = [&](const bool explicitDistribution)
+            {
+                const std::string dependencyProbe =
+                    "export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-} && "
+                    "command -v make >/dev/null 2>&1 && "
+                    "command -v gcc >/dev/null 2>&1 && "
+                    "command -v g++ >/dev/null 2>&1 && "
+                    "command -v pkg-config >/dev/null 2>&1 && "
+                    "pkg-config --exists sdl3 x11 xext xcursor xinerama xi xrandr xss xxf86vm alsa dbus-1 ibus-1.0 libudev gl glx libpulse libavcodec libavformat libavutil libswresample && "
+                    "( [ ! -f /usr/local/lib/libSDL3.so ] || ldd /usr/local/lib/libSDL3.so 2>/dev/null | grep -qE 'libGL|libGLX|libEGL|libpulse' )";
+                if (explicitDistribution)
+                {
+                    return "wsl.exe -d \"" + selectedDistribution
+                        + "\" bash -lc \"" + dependencyProbe + "\"";
+                }
+                return std::string("wsl.exe bash -lc \"" + dependencyProbe + "\"");
+            };
+
+            DWORD checkExitCode = 1;
+            std::string checkOutput;
+            std::string checkCommand = buildCheckCommand(useExplicitDistribution);
+            if (RunHiddenCommandCapture(checkCommand, 20000, checkExitCode, checkOutput) && checkExitCode == 0)
+                return true;
+            if (useExplicitDistribution && outputIndicatesDistroNotFound(checkOutput))
+            {
+                useExplicitDistribution = false;
+                if (progressCallback)
+                    progressCallback("WSL reported selected distro was not found; retrying with default WSL distro.");
+
+                checkExitCode = 1;
+                checkOutput.clear();
+                checkCommand = buildCheckCommand(useExplicitDistribution);
+                if (RunHiddenCommandCapture(checkCommand, 20000, checkExitCode, checkOutput) && checkExitCode == 0)
+                    return true;
+            }
+
+            result.StepLog.push_back("WSL dependencies missing. Installing Linux build/runtime dependencies automatically...");
+            LT_CORE_INFO("GameBuilder: WSL dependencies missing, attempting automatic install as root.");
+            if (progressCallback)
+                progressCallback("WSL dependencies missing. Installing Linux build/runtime dependencies automatically...");
+
+            auto buildInstallCommand = [&](const bool explicitDistribution)
+            {
+                const std::string prefix = explicitDistribution
+                    ? "wsl.exe -d \"" + selectedDistribution + "\" -u root bash -lc \""
+                    : "wsl.exe -u root bash -lc \"";
+                return prefix +
+                    "if command -v apt-get >/dev/null 2>&1; then "
+                    "export DEBIAN_FRONTEND=noninteractive; "
+                    "export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:${PKG_CONFIG_PATH:-}; "
+                    "apt-get -o Dpkg::Use-Pty=0 update && "
+                    "apt-get -o Dpkg::Use-Pty=0 install -y "
+                    "build-essential pkg-config zlib1g-dev curl wget ca-certificates git cmake ninja-build "
+                    "libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev libxxf86vm-dev libxss-dev "
+                    "libasound2-dev libdbus-1-dev libudev-dev libibus-1.0-dev libpulse-dev "
+                    "libavcodec-dev libavformat-dev libavutil-dev libswresample-dev "
+                    "libgl1-mesa-dev libglx-dev libegl1-mesa-dev libopengl-dev libglu1-mesa-dev; "
+                    "if ! pkg-config --exists sdl3 || { [ -f /usr/local/lib/libSDL3.so ] && ! ldd /usr/local/lib/libSDL3.so 2>/dev/null | grep -qE 'libGL|libGLX|libEGL|libpulse'; }; then "
+                    "rm -rf /tmp/limitless_sdl3_build; "
+                    "mkdir -p /tmp/limitless_sdl3_build; "
+                    "git clone --depth 1 --branch release-3.2.18 https://github.com/libsdl-org/SDL.git /tmp/limitless_sdl3_build/SDL && "
+                    "cmake -S /tmp/limitless_sdl3_build/SDL -B /tmp/limitless_sdl3_build/SDL/build -DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_TEST=OFF -DSDL_INSTALL=ON -DSDL_OPENGL=ON -DSDL_OPENGL_GLX=ON -DSDL_OPENGLES=ON -DSDL_PULSEAUDIO=ON && "
+                    "cmake --build /tmp/limitless_sdl3_build/SDL/build --parallel $(nproc) && "
+                    "cmake --install /tmp/limitless_sdl3_build/SDL/build && "
+                    "if command -v ldconfig >/dev/null 2>&1; then ldconfig; fi; "
+                    "rm -rf /tmp/limitless_sdl3_build || true; "
+                    "fi; "
+                    "elif command -v pacman >/dev/null 2>&1; then "
+                    "pacman -Syu --noconfirm --needed "
+                    "base-devel pkgconf zlib sdl3 curl wget ca-certificates "
+                    "libx11 libxext libxrandr libxcursor libxi libxinerama libxxf86vm libxss mesa "
+                    "alsa-lib dbus ibus systemd libpulse ffmpeg; "
+                    "else "
+                    "echo 'Unsupported Linux package manager in WSL distro.'; "
+                    "exit 1; "
+                    "fi\"";
+            };
+
+            DWORD installExitCode = 1;
+            std::string installOutput;
+            std::string installCommand = buildInstallCommand(useExplicitDistribution);
+            if (!RunHiddenCommandCapture(installCommand, 900000, installExitCode, installOutput, progressCallback))
+            {
+                result.ErrorMessage = "Failed to start WSL dependency install command.";
+                return false;
+            }
+            if (installExitCode != 0 && useExplicitDistribution && outputIndicatesDistroNotFound(installOutput))
+            {
+                useExplicitDistribution = false;
+                if (progressCallback)
+                    progressCallback("WSL reported selected distro was not found during install; retrying with default WSL distro.");
+
+                installExitCode = 1;
+                installOutput.clear();
+                installCommand = buildInstallCommand(useExplicitDistribution);
+                if (!RunHiddenCommandCapture(installCommand, 900000, installExitCode, installOutput, progressCallback))
+                {
+                    result.ErrorMessage = "Failed to start WSL dependency install command.";
+                    return false;
+                }
+            }
+            if (installExitCode != 0)
+            {
+                result.ErrorMessage =
+                    "WSL auto-install failed while installing Linux build/runtime dependencies. "
+                    "Open your WSL distro and run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev libxxf86vm-dev libxss-dev libasound2-dev libdbus-1-dev libudev-dev libibus-1.0-dev libpulse-dev libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libgl1-mesa-dev libglx-dev libegl1-mesa-dev libopengl-dev";
+                if (installExitCode == WAIT_TIMEOUT)
+                    result.ErrorMessage += " (operation timed out)";
+                else
+                    result.ErrorMessage += " (exit code " + std::to_string(installExitCode) + ")";
+                return false;
+            }
+
+            checkExitCode = 1;
+            checkOutput.clear();
+            checkCommand = buildCheckCommand(useExplicitDistribution);
+            if (!RunHiddenCommandCapture(checkCommand, 20000, checkExitCode, checkOutput, progressCallback) || checkExitCode != 0)
+            {
+                const std::string warning =
+                    "WSL dependency probe did not validate after auto-install; continuing and letting Runtime build report concrete missing libs if any.";
+                result.StepLog.push_back("Warning: " + warning);
+                if (progressCallback)
+                {
+                    progressCallback(warning);
+                    progressCallback("WSL post-install probe output:");
+                    const auto probeLines = SplitNonEmptyLines(checkOutput);
+                    for (const std::string& line : probeLines)
+                        progressCallback(line);
+                }
+            }
+
+            result.StepLog.push_back("WSL build/runtime dependencies installed successfully.");
+            if (progressCallback)
+                progressCallback("WSL build/runtime dependencies installed successfully.");
+            return true;
         }
 #endif
 
@@ -663,10 +1042,42 @@ namespace Limitless::Project
             return copiedCount;
         }
 
-        int RunCommand(const std::string& command)
+        int RunCommand(const std::string& command,
+                       const std::function<void(const std::string&)>& outputCallback = {})
         {
             LT_CORE_INFO("GameBuilder: executing: {}", command);
-            return std::system(command.c_str());
+            if (!outputCallback)
+                return std::system(command.c_str());
+
+            const std::string redirectedCommand = command + " 2>&1";
+#if defined(LT_PLATFORM_WINDOWS)
+            FILE* pipe = _popen(redirectedCommand.c_str(), "r");
+#else
+            FILE* pipe = popen(redirectedCommand.c_str(), "r");
+#endif
+            if (!pipe)
+                return std::system(command.c_str());
+
+            std::array<char, 2048> buffer{};
+            while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr)
+            {
+                std::string line(buffer.data());
+                while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+                    line.pop_back();
+                if (!line.empty())
+                    outputCallback(line);
+            }
+
+#if defined(LT_PLATFORM_WINDOWS)
+            return _pclose(pipe);
+#else
+            const int status = pclose(pipe);
+            if (status == -1)
+                return status;
+            if (WIFEXITED(status))
+                return WEXITSTATUS(status);
+            return status;
+#endif
         }
 
         bool MirrorProjectNativeScriptsToGeneratedDirectory(const GameBuildRequest& request, GameBuildResult& result)
@@ -961,6 +1372,9 @@ namespace Limitless::Project
         std::string command;
         if (windowsLinuxCross)
         {
+            if (!EnsureWslLinuxBuildTools(result, request.ProgressCallback))
+                return false;
+
             std::vector<std::string> args = {
                 "--config", configArg,
                 "--platform", platformArg
@@ -986,7 +1400,7 @@ namespace Limitless::Project
             command += " --project-root \"" + request.ProjectRoot.string() + "\"";
 #endif
 
-        const int exitCode = RunCommand(command);
+        const int exitCode = RunCommand(command, request.ProgressCallback);
         if (exitCode != 0)
         {
             result.ErrorMessage = "ScriptCore build failed (exit code " + std::to_string(exitCode) + ").";
@@ -1072,7 +1486,7 @@ namespace Limitless::Project
                     }
 
                     const std::string buildCommand = BuildWslBashScriptCommand(request.EngineRoot, mainBuildScript, args);
-                    const int buildExitCode = RunCommand(buildCommand);
+                    const int buildExitCode = RunCommand(buildCommand, request.ProgressCallback);
                     if (buildExitCode != 0)
                     {
                         result.ErrorMessage = "Failed to build Runtime via WSL (exit code " + std::to_string(buildExitCode) + ").";
@@ -1092,7 +1506,7 @@ namespace Limitless::Project
                     result.StepLog.push_back("Building Runtime (" + config + ")...");
                     const std::string buildCommand = "cd /d \"" + request.EngineRoot.string()
                         + "\" && call \"" + mainBuildScript.string() + "\" " + config + " " + GetBuildPlatformArg(request);
-                    const int buildExitCode = RunCommand(buildCommand);
+                    const int buildExitCode = RunCommand(buildCommand, request.ProgressCallback);
                     if (buildExitCode != 0)
                     {
                         result.ErrorMessage = "Failed to build Runtime (exit code " + std::to_string(buildExitCode) + ").";
@@ -1113,7 +1527,7 @@ namespace Limitless::Project
                     + "\" && bash \"" + mainBuildScript.string() + "\" --config " + config;
                 if (mainBuildScript.filename() == "build-runtime-unix.sh")
                     buildCommand += " --platform " + GetBuildPlatformArg(request);
-                const int buildExitCode = RunCommand(buildCommand);
+                const int buildExitCode = RunCommand(buildCommand, request.ProgressCallback);
                 if (buildExitCode != 0)
                 {
                     result.ErrorMessage = "Failed to build Runtime (exit code " + std::to_string(buildExitCode) + ").";

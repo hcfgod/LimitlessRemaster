@@ -32,13 +32,13 @@ namespace Limitless::Audio::Decoders
             auto* r = static_cast<MemoryReader*>(opaque);
             if (!r || !r->Data || r->Size == 0)
             {
-                return AVERROR_EOF;
+                return 0; // FFmpeg AVIO read callback expects 0 for EOF.
             }
 
             const size_t remaining = (r->Offset < r->Size) ? (r->Size - r->Offset) : 0;
             if (remaining == 0)
             {
-                return AVERROR_EOF;
+                return 0;
             }
 
             const size_t toCopy = std::min<size_t>(static_cast<size_t>(buf_size), remaining);
@@ -55,13 +55,14 @@ namespace Limitless::Audio::Decoders
                 return AVERROR(EINVAL);
             }
 
-            if (whence == AVSEEK_SIZE)
+            if ((whence & AVSEEK_SIZE) == AVSEEK_SIZE)
             {
                 return static_cast<int64_t>(r->Size);
             }
 
+            const int normalizedWhence = whence & ~AVSEEK_FORCE;
             size_t newOffset = r->Offset;
-            if (whence == SEEK_SET)
+            if (normalizedWhence == SEEK_SET)
             {
                 if (offset < 0)
                 {
@@ -69,7 +70,7 @@ namespace Limitless::Audio::Decoders
                 }
                 newOffset = static_cast<size_t>(offset);
             }
-            else if (whence == SEEK_CUR)
+            else if (normalizedWhence == SEEK_CUR)
             {
                 const int64_t cur = static_cast<int64_t>(r->Offset);
                 const int64_t next = cur + offset;
@@ -79,7 +80,7 @@ namespace Limitless::Audio::Decoders
                 }
                 newOffset = static_cast<size_t>(next);
             }
-            else if (whence == SEEK_END)
+            else if (normalizedWhence == SEEK_END)
             {
                 const int64_t end = static_cast<int64_t>(r->Size);
                 const int64_t next = end + offset;
@@ -170,53 +171,92 @@ namespace Limitless::Audio::Decoders
                 av_frame_free(&frame);
             };
 
-            // Setup resampler to float32 stereo @ target rate.
-            SwrContext* swr = swr_alloc();
-            if (!swr)
-            {
-                cleanupPktFrame();
-                cleanupCodecCtx();
-                return Result<std::shared_ptr<AudioClip>>(ErrorCode::OutOfMemory, "FFmpeg: swr_alloc failed");
-            }
-
+            // Configure the resampler lazily from the first decoded frame.
+            // Some containers/codecs may not have a valid sample rate in codec parameters.
+            SwrContext* swr = nullptr;
             auto cleanupSwr = [&]() {
-                swr_free(&swr);
+                if (swr)
+                {
+                    swr_free(&swr);
+                }
             };
 
             const AVChannelLayout outLayout = AV_CHANNEL_LAYOUT_STEREO;
             const int outRate = static_cast<int>(settings.TargetSampleRateHz);
             const AVSampleFormat outFmt = AV_SAMPLE_FMT_FLT;
 
-            AVChannelLayout inLayout = codecCtx->ch_layout;
-            if (inLayout.nb_channels == 0)
+            auto ensureResamplerConfigured = [&](const AVFrame* sourceFrame) -> std::string
             {
-                // Some files omit layout; derive from channel count.
-                const int channels = (stream->codecpar && stream->codecpar->ch_layout.nb_channels > 0)
-                    ? stream->codecpar->ch_layout.nb_channels
-                    : (codecCtx->ch_layout.nb_channels > 0 ? codecCtx->ch_layout.nb_channels : 2);
-                av_channel_layout_default(&inLayout, channels);
-            }
+                if (swr)
+                {
+                    return {};
+                }
 
-            err = swr_alloc_set_opts2(&swr,
-                                     &outLayout, outFmt, outRate,
-                                     &inLayout, codecCtx->sample_fmt, codecCtx->sample_rate,
-                                     0, nullptr);
-            if (err < 0)
-            {
-                cleanupSwr();
-                cleanupPktFrame();
-                cleanupCodecCtx();
-                return Result<std::shared_ptr<AudioClip>>(ErrorCode::FileCorrupted, "FFmpeg: swr_alloc_set_opts2 failed: " + AvErr(err));
-            }
+                AVChannelLayout inLayout{};
+                const int inChannels = (sourceFrame && sourceFrame->ch_layout.nb_channels > 0)
+                    ? sourceFrame->ch_layout.nb_channels
+                    : (codecCtx->ch_layout.nb_channels > 0
+                        ? codecCtx->ch_layout.nb_channels
+                        : (stream->codecpar && stream->codecpar->ch_layout.nb_channels > 0
+                            ? stream->codecpar->ch_layout.nb_channels
+                            : 2));
+                // Always synthesize a canonical layout from channel count.
+                // Some codecs/container combos report layouts that are technically present
+                // but not usable by swresample on Linux (e.g. empty/unspecified layout).
+                av_channel_layout_default(&inLayout, inChannels > 0 ? inChannels : 2);
 
-            err = swr_init(swr);
-            if (err < 0)
-            {
-                cleanupSwr();
-                cleanupPktFrame();
-                cleanupCodecCtx();
-                return Result<std::shared_ptr<AudioClip>>(ErrorCode::FileCorrupted, "FFmpeg: swr_init failed: " + AvErr(err));
-            }
+                const AVSampleFormat inFmt = (sourceFrame && sourceFrame->format != AV_SAMPLE_FMT_NONE)
+                    ? static_cast<AVSampleFormat>(sourceFrame->format)
+                    : codecCtx->sample_fmt;
+                if (inFmt == AV_SAMPLE_FMT_NONE)
+                {
+                    av_channel_layout_uninit(&inLayout);
+                    return "FFmpeg: invalid input sample format";
+                }
+
+                const int frameRate = sourceFrame ? sourceFrame->sample_rate : 0;
+                const int codecRate = codecCtx->sample_rate;
+                const int streamRate = (stream->codecpar ? stream->codecpar->sample_rate : 0);
+
+                // Guard against corrupted/invalid metadata (e.g. stream sample rate = 4),
+                // which causes extreme time stretching and static after resampling.
+                const auto isPlausibleSampleRate = [](const int rate) -> bool
+                {
+                    return rate >= 1000 && rate <= 384000;
+                };
+
+                int inRate = outRate;
+                if (isPlausibleSampleRate(frameRate))
+                {
+                    inRate = frameRate;
+                }
+                else if (isPlausibleSampleRate(codecRate))
+                {
+                    inRate = codecRate;
+                }
+                else if (isPlausibleSampleRate(streamRate))
+                {
+                    inRate = streamRate;
+                }
+
+                int resampleErr = swr_alloc_set_opts2(&swr,
+                                                      &outLayout, outFmt, outRate,
+                                                      &inLayout, inFmt, inRate,
+                                                      0, nullptr);
+                av_channel_layout_uninit(&inLayout);
+                if (resampleErr < 0)
+                {
+                    return "FFmpeg: swr_alloc_set_opts2 failed: " + AvErr(resampleErr);
+                }
+
+                resampleErr = swr_init(swr);
+                if (resampleErr < 0)
+                {
+                    return "FFmpeg: swr_init failed: " + AvErr(resampleErr);
+                }
+
+                return {};
+            };
 
             auto clip = std::make_shared<AudioClip>();
             clip->SampleRateHz = settings.TargetSampleRateHz;
@@ -243,6 +283,15 @@ namespace Limitless::Audio::Decoders
 
                 while ((err = avcodec_receive_frame(codecCtx, frame)) >= 0)
                 {
+                    const std::string resamplerError = ensureResamplerConfigured(frame);
+                    if (!resamplerError.empty())
+                    {
+                        cleanupSwr();
+                        cleanupPktFrame();
+                        cleanupCodecCtx();
+                        return Result<std::shared_ptr<AudioClip>>(ErrorCode::FileCorrupted, resamplerError);
+                    }
+
                     // Convert this frame to float stereo.
                     const int inSamples = frame->nb_samples;
                     const int outSamplesMax = swr_get_out_samples(swr, inSamples);
@@ -289,6 +338,15 @@ namespace Limitless::Audio::Decoders
             {
                 while ((err = avcodec_receive_frame(codecCtx, frame)) >= 0)
                 {
+                    const std::string resamplerError = ensureResamplerConfigured(frame);
+                    if (!resamplerError.empty())
+                    {
+                        cleanupSwr();
+                        cleanupPktFrame();
+                        cleanupCodecCtx();
+                        return Result<std::shared_ptr<AudioClip>>(ErrorCode::FileCorrupted, resamplerError);
+                    }
+
                     const int inSamples = frame->nb_samples;
                     const int outSamplesMax = swr_get_out_samples(swr, inSamples);
                     if (outSamplesMax > 0)

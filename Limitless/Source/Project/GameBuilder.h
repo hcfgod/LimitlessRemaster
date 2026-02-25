@@ -3,6 +3,7 @@
 #include "Project/BuildSettings.h"
 
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -39,6 +40,9 @@ namespace Limitless::Project
 
         /// Optional resolved artifact staging root used by provider flows.
         std::filesystem::path ArtifactStagingRoot;
+
+        /// Optional callback for streaming build output/status lines.
+        std::function<void(const std::string&)> ProgressCallback;
     };
 
     struct GameBuildResult final

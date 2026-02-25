@@ -179,6 +179,16 @@ project "Runtime"
             "LT_ENABLE_PHYSICS2D"
         }
 
+        -- Enable FFmpeg decode on macOS when Homebrew FFmpeg is available.
+        local macFfmpegLibs = os.matchfiles("/opt/homebrew/lib/libavcodec*.dylib")
+        if #macFfmpegLibs == 0 then
+            macFfmpegLibs = os.matchfiles("/usr/local/lib/libavcodec*.dylib")
+        end
+        if #macFfmpegLibs > 0 then
+            defines { "LT_ENABLE_FFMPEG" }
+            links { "avcodec", "avformat", "avutil", "swresample" }
+        end
+
         libdirs
         {
             "/opt/homebrew/lib"
@@ -222,7 +232,8 @@ project "Runtime"
         defines
         {
             "LT_PLATFORM_LINUX",
-            "LT_ENABLE_PHYSICS2D"
+            "LT_ENABLE_PHYSICS2D",
+            "LT_ENABLE_FFMPEG"
         }
 
         libdirs
@@ -235,6 +246,10 @@ project "Runtime"
         {
             "box2d",
             "SDL3",
+            "avcodec",
+            "avformat",
+            "avutil",
+            "swresample",
             "z",
             "X11",
             "Xext",

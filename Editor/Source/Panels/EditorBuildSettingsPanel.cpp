@@ -757,6 +757,7 @@ namespace Limitless::EditorBuildSettingsPanel
 
             state.ActiveBuildJob.reset();
             state.BuildInProgress.store(false, std::memory_order_release);
+            state.BuildTimerActive = false;
             state.LastBuildResult = std::move(completedResult);
             if (state.LastBuildResult.Success)
                 SetStatus(state, "Build succeeded (" + std::to_string(state.LastBuildResult.ElapsedSeconds) + "s).", false);
@@ -899,6 +900,8 @@ namespace Limitless::EditorBuildSettingsPanel
             }
 
             state.BuildInProgress.store(true, std::memory_order_release);
+            state.BuildTimerActive = true;
+            state.BuildStartTime = std::chrono::steady_clock::now();
             SetStatus(state, "Building...", false);
 
             // Launch build on a managed background thread.
@@ -906,6 +909,14 @@ namespace Limitless::EditorBuildSettingsPanel
                 state.BuildThread.join();
             state.ActiveBuildJob = std::make_shared<EditorBuildSettingsPanelState::BuildJobState>();
             const std::shared_ptr<EditorBuildSettingsPanelState::BuildJobState> buildJob = state.ActiveBuildJob;
+            request.ProgressCallback = [buildJob](const std::string& line)
+            {
+                std::lock_guard<std::mutex> lock(buildJob->Mutex);
+                constexpr size_t kMaxLiveLogLines = 4000;
+                if (buildJob->LiveLog.size() >= kMaxLiveLogLines)
+                    buildJob->LiveLog.erase(buildJob->LiveLog.begin());
+                buildJob->LiveLog.push_back(line);
+            };
 
             state.BuildThread = std::thread([buildJob, request, runAfterBuild]()
             {
@@ -917,6 +928,11 @@ namespace Limitless::EditorBuildSettingsPanel
 
                 {
                     std::lock_guard<std::mutex> lock(buildJob->Mutex);
+                    if (!buildJob->LiveLog.empty())
+                    {
+                        result.StepLog.push_back("-------- Live Build Output --------");
+                        result.StepLog.insert(result.StepLog.end(), buildJob->LiveLog.begin(), buildJob->LiveLog.end());
+                    }
                     buildJob->Result = std::move(result);
                     buildJob->Completed = true;
                 }
@@ -1358,13 +1374,58 @@ namespace Limitless::EditorBuildSettingsPanel
         ImGui::Spacing();
 
         if (buildInProgress)
-            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Building...");
+        {
+            if (state.BuildTimerActive)
+            {
+                const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::steady_clock::now() - state.BuildStartTime).count();
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f),
+                                   "Building... (%llds elapsed)",
+                                   static_cast<long long>(elapsed));
+            }
+            else
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Building...");
+            }
+        }
         else if (!state.StatusMessage.empty())
         {
             if (!state.StatusIsError)
                 ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "%s", state.StatusMessage.c_str());
             else
                 ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", state.StatusMessage.c_str());
+        }
+
+        if (buildInProgress && state.ActiveBuildJob)
+        {
+            std::vector<std::string> liveLogSnapshot;
+            {
+                std::lock_guard<std::mutex> lock(state.ActiveBuildJob->Mutex);
+                liveLogSnapshot = state.ActiveBuildJob->LiveLog;
+            }
+
+            if (ImGui::CollapsingHeader("Live Build Output", ImGuiTreeNodeFlags_DefaultOpen))
+            {
+                const std::string liveLogText = BuildStepLogText(liveLogSnapshot);
+                if (ImGui::Button("Copy Live Output"))
+                    ImGui::SetClipboardText(liveLogText.c_str());
+
+                ImGui::BeginChild("LiveBuildLog", ImVec2(0, 180), true);
+                if (liveLogSnapshot.empty())
+                {
+                    ImGui::TextDisabled("Waiting for build output...");
+                }
+                else
+                {
+                    const size_t maxVisibleLines = 300;
+                    const size_t firstVisibleLine =
+                        (liveLogSnapshot.size() > maxVisibleLines) ? (liveLogSnapshot.size() - maxVisibleLines) : 0;
+                    for (size_t index = firstVisibleLine; index < liveLogSnapshot.size(); ++index)
+                        ImGui::TextWrapped("%s", liveLogSnapshot[index].c_str());
+                    ImGui::SetScrollHereY(1.0f);
+                }
+                ImGui::EndChild();
+            }
         }
 
         // Show step log from last build.
@@ -1410,5 +1471,6 @@ namespace Limitless::EditorBuildSettingsPanel
         state.BuildThread.detach();
         state.ActiveBuildJob.reset();
         state.BuildInProgress.store(false, std::memory_order_release);
+        state.BuildTimerActive = false;
     }
 }

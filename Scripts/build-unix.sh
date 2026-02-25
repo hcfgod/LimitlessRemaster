@@ -250,15 +250,22 @@ check_dependencies() {
 }
 
 get_job_count() {
+    local jobs
     if command -v nproc >/dev/null 2>&1; then
-        nproc
-        return
+        jobs="$(nproc)"
+    elif command -v sysctl >/dev/null 2>&1; then
+        jobs="$(sysctl -n hw.logicalcpu)"
+    else
+        jobs="4"
     fi
-    if command -v sysctl >/dev/null 2>&1; then
-        sysctl -n hw.logicalcpu
-        return
+
+    # WSL builds against /mnt/<drive> are significantly slower with very high
+    # parallelism and may appear "stuck" due long compiler stalls.
+    if [[ -n "${WSL_INTEROP:-}" && "$(pwd)" == /mnt/* && "$jobs" -gt 8 ]]; then
+        jobs=8
     fi
-    echo "4"
+
+    echo "$jobs"
 }
 
 has_box2d_v3_linux() {

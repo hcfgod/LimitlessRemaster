@@ -77,6 +77,87 @@ SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
 cd "$PROJECT_ROOT"
 
+can_use_sudo() {
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        return 0
+    fi
+    command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1
+}
+
+run_with_privileges() {
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        "$@"
+        return $?
+    fi
+    sudo "$@"
+}
+
+ensure_linux_build_tools() {
+    local missing_tools=()
+    if ! command -v make >/dev/null 2>&1; then
+        missing_tools+=("make")
+    fi
+
+    if [[ "$COMPILER" == "clang" ]]; then
+        if ! command -v clang >/dev/null 2>&1; then
+            missing_tools+=("clang")
+        fi
+    else
+        if ! command -v gcc >/dev/null 2>&1; then
+            missing_tools+=("gcc")
+        fi
+        if ! command -v g++ >/dev/null 2>&1; then
+            missing_tools+=("g++")
+        fi
+    fi
+
+    if [[ ${#missing_tools[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    echo "Missing Linux build tools: ${missing_tools[*]}"
+    if command -v apt-get >/dev/null 2>&1 && can_use_sudo; then
+        echo "Installing missing tools with apt..."
+        run_with_privileges apt-get update
+        run_with_privileges apt-get install -y "${missing_tools[@]}"
+        return 0
+    fi
+
+    if command -v pacman >/dev/null 2>&1 && can_use_sudo; then
+        echo "Installing missing tools with pacman..."
+        local pacman_packages=("make")
+        if [[ "$COMPILER" == "clang" ]]; then
+            pacman_packages+=("clang")
+        else
+            pacman_packages+=("gcc")
+        fi
+        run_with_privileges pacman -Syu --needed "${pacman_packages[@]}"
+        return 0
+    fi
+
+    echo "Error: Build tools are missing and auto-install is unavailable."
+    echo "Install required tools manually and retry."
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "Example (Ubuntu/Debian): sudo apt-get update && sudo apt-get install -y build-essential"
+        if [[ "$COMPILER" == "clang" ]]; then
+            echo "If using clang: sudo apt-get install -y clang"
+        fi
+    elif command -v pacman >/dev/null 2>&1; then
+        echo "Example (Arch): sudo pacman -Syu --needed base-devel"
+        if [[ "$COMPILER" == "clang" ]]; then
+            echo "If using clang: sudo pacman -S --needed clang"
+        fi
+    fi
+
+    return 1
+}
+
+if [[ "$SYSTEM_NAME" != "macosx" ]]; then
+    if ! ensure_linux_build_tools; then
+        exit 1
+    fi
+fi
+
 setup_premake() {
     local premake_dir="Vendor/Premake"
     local premake_path="$premake_dir/premake5"
@@ -142,15 +223,22 @@ PLATFORM_LOWER="$(echo "$PLATFORM" | tr '[:upper:]' '[:lower:]')"
 CFG_SHORTNAME="${CONFIG_LOWER}_${PLATFORM_LOWER}"
 
 get_job_count() {
+    local jobs
     if command -v nproc >/dev/null 2>&1; then
-        nproc
-        return
+        jobs="$(nproc)"
+    elif command -v sysctl >/dev/null 2>&1; then
+        jobs="$(sysctl -n hw.logicalcpu)"
+    else
+        jobs="4"
     fi
-    if command -v sysctl >/dev/null 2>&1; then
-        sysctl -n hw.logicalcpu
-        return
+
+    # WSL builds against /mnt/<drive> are significantly slower with very high
+    # parallelism and may appear "stuck" due long compiler stalls.
+    if [[ -n "${WSL_INTEROP:-}" && "$PROJECT_ROOT" == /mnt/* && "$jobs" -gt 8 ]]; then
+        jobs=8
     fi
-    echo "4"
+
+    echo "$jobs"
 }
 
 JOBS="$(get_job_count)"

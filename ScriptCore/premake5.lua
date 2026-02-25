@@ -66,7 +66,8 @@ project "ScriptCore"
         symbols "off"
 
     -- Keep static script registrar constructors alive in optimized builds.
-    filter "configurations:Release or Dist"
+    -- These are MSVC linker flags and must not be emitted for Linux/macOS.
+    filter { "system:windows", "configurations:Release or Dist" }
         linkoptions
         {
             "/OPT:NOREF",

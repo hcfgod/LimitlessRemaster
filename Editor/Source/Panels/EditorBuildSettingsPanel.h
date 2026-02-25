@@ -5,6 +5,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -67,6 +68,7 @@ namespace Limitless::EditorBuildSettingsPanel
             std::mutex Mutex;
             bool Completed = false;
             Project::GameBuildResult Result;
+            std::vector<std::string> LiveLog;
         };
 
         /// Build worker thread.
@@ -78,6 +80,10 @@ namespace Limitless::EditorBuildSettingsPanel
         /// Status message shown in the panel (UI thread only).
         std::string StatusMessage;
         bool StatusIsError = false;
+
+        /// Build timer metadata (UI thread only).
+        bool BuildTimerActive = false;
+        std::chrono::steady_clock::time_point BuildStartTime{};
 
         /// Scene list helper status shown near the "Add Current Scene" action.
         std::string SceneListStatusMessage;
