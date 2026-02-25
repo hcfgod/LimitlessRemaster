@@ -2102,8 +2102,8 @@ namespace Limitless::Project
             const std::string escapedExecutableName =
                 escapeShellDoubleQuoted(result.OutputExecutablePath.filename().string());
             const std::string desktopExecLine =
-                "sh -c \"cd \\\"$(dirname \\\"$1\\\")\\\" && if [ -x \\\"./install-linux-desktop-entry.sh\\\" ]; "
-                "then ./install-linux-desktop-entry.sh >/dev/null 2>&1 || true; fi && exec \\\"./"
+                "sh -c \"cd \\\"$(dirname \\\"$1\\\")\\\" && if [ -f \\\"./install-linux-desktop-entry.sh\\\" ]; "
+                "then sh ./install-linux-desktop-entry.sh >/dev/null 2>&1 || true; fi && exec \\\"./"
                 + escapedExecutableName + "\\\"\" sh \"%k\"";
 
             std::ofstream desktopFile(desktopPath, std::ios::out | std::ios::trunc);
@@ -2166,7 +2166,7 @@ namespace Limitless::Project
                 << "APP_NAME=\"" << escapeShellDoubleQuoted(projectName) << "\"\n"
                 << "APP_ID=\"" << escapeShellDoubleQuoted(desktopAppId) << "\"\n"
                 << "ICON_NAME=\"" << (hasLauncherIcon ? escapeShellDoubleQuoted(launcherIconPath.filename().string()) : std::string()) << "\"\n\n"
-                << "escape_desktop_value() {\n"
+                << "escape_exec_value() {\n"
                 << "  local value=\"$1\"\n"
                 << "  value=\"${value//\\\\/\\\\\\\\}\"\n"
                 << "  value=\"${value// /\\\\ }\"\n"
@@ -2180,22 +2180,20 @@ namespace Limitless::Project
                 << "  echo \"Missing executable: $EXEC_PATH\" >&2\n"
                 << "  exit 1\n"
                 << "fi\n\n"
-                << "ESCAPED_EXEC_PATH=\"$(escape_desktop_value \"$EXEC_PATH\")\"\n"
-                << "ESCAPED_WORK_DIR=\"$(escape_desktop_value \"$SCRIPT_DIR\")\"\n\n"
+                << "ESCAPED_EXEC_PATH=\"$(escape_exec_value \"$EXEC_PATH\")\"\n\n"
                 << "{\n"
                 << "  echo \"[Desktop Entry]\"\n"
                 << "  echo \"Version=1.0\"\n"
                 << "  echo \"Type=Application\"\n"
                 << "  echo \"Name=$APP_NAME\"\n"
                 << "  echo \"Exec=$ESCAPED_EXEC_PATH\"\n"
-                << "  echo \"Path=$ESCAPED_WORK_DIR\"\n"
+                << "  echo \"Path=$SCRIPT_DIR\"\n"
                 << "  echo \"Terminal=false\"\n"
                 << "  echo \"Categories=Game;\"\n"
                 << "  if [[ -n \"$ICON_NAME\" ]]; then\n"
                 << "    ICON_PATH=\"$SCRIPT_DIR/$ICON_NAME\"\n"
                 << "    if [[ -f \"$ICON_PATH\" ]]; then\n"
-                << "      ESCAPED_ICON_PATH=\"$(escape_desktop_value \"$ICON_PATH\")\"\n"
-                << "      echo \"Icon=$ESCAPED_ICON_PATH\"\n"
+                << "      echo \"Icon=$ICON_PATH\"\n"
                 << "    fi\n"
                 << "  fi\n"
                 << "} > \"$TARGET_DESKTOP_PATH\"\n\n"
