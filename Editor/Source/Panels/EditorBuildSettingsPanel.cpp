@@ -850,7 +850,7 @@ namespace Limitless::EditorBuildSettingsPanel
 
             const std::string effectiveExecutionMode = ResolveEffectiveExecutionMode(request.Settings);
             if (effectiveExecutionMode == Project::BuildExecutionMode::Local &&
-                request.Settings.TargetOS == Project::BuildTargetOS::Linux &&
+                IsWindowsHostLinuxTarget(request.Settings) &&
                 !IsWslAvailable())
             {
 #if defined(LT_PLATFORM_WINDOWS)

@@ -471,6 +471,89 @@ install_box2d_v3_linux() {
     return 0
 }
 
+install_editor_desktop_entry_linux() {
+    local output_dir="$1"
+    local editor_binary_rel="${output_dir}/Editor/Editor"
+    if [[ ! -f "$editor_binary_rel" ]]; then
+        echo "Warning: Editor binary not found at ${editor_binary_rel}; skipping desktop entry install."
+        return 0
+    fi
+
+    local editor_binary_abs
+    editor_binary_abs="$(cd "$(dirname "$editor_binary_rel")" && pwd)/$(basename "$editor_binary_rel")"
+    local editor_dir_abs
+    editor_dir_abs="$(dirname "$editor_binary_abs")"
+
+    chmod +x "$editor_binary_abs" >/dev/null 2>&1 || true
+
+    local icon_path="${editor_dir_abs}/LimitlessLogo.png"
+    local workspace_icon_png="$(pwd)/Resources/LimitlessLogo.png"
+    local workspace_icon_ico="$(pwd)/Resources/LimitlessLogo.ico"
+
+    if [[ ! -f "$icon_path" && -f "$workspace_icon_png" ]]; then
+        cp "$workspace_icon_png" "$icon_path" >/dev/null 2>&1 || true
+    fi
+
+    if [[ ! -f "$icon_path" ]]; then
+        if [[ -f "${editor_dir_abs}/LimitlessLogo.ico" ]]; then
+            icon_path="${editor_dir_abs}/LimitlessLogo.ico"
+            echo "Warning: Falling back to .ico editor launcher icon; some Linux desktops may ignore it."
+        elif [[ -f "$workspace_icon_ico" ]]; then
+            icon_path="$workspace_icon_ico"
+            echo "Warning: Falling back to .ico editor launcher icon; some Linux desktops may ignore it."
+        else
+            icon_path=""
+            echo "Warning: No editor launcher icon found (.png/.ico)."
+        fi
+    fi
+
+    escape_desktop_value() {
+        local value="$1"
+        value="${value//\\/\\\\}"
+        value="${value// /\\ }"
+        printf '%s' "$value"
+    }
+
+    local desktop_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+    local desktop_path="${desktop_dir}/limitless-editor.desktop"
+    mkdir -p "$desktop_dir"
+
+    local escaped_exec
+    escaped_exec="$(escape_desktop_value "$editor_binary_abs")"
+    local escaped_workdir
+    escaped_workdir="$(escape_desktop_value "$editor_dir_abs")"
+
+    {
+        echo "[Desktop Entry]"
+        echo "Version=1.0"
+        echo "Type=Application"
+        echo "Name=Limitless Editor"
+        echo "Exec=${escaped_exec}"
+        echo "Path=${escaped_workdir}"
+        echo "Terminal=false"
+        echo "Categories=Development;Game;"
+        if [[ -n "$icon_path" && -f "$icon_path" ]]; then
+            local escaped_icon
+            escaped_icon="$(escape_desktop_value "$icon_path")"
+            echo "Icon=${escaped_icon}"
+        fi
+    } > "$desktop_path"
+
+    chmod +x "$desktop_path" >/dev/null 2>&1 || true
+
+    if [[ -d "$HOME/Desktop" ]]; then
+        cp "$desktop_path" "$HOME/Desktop/limitless-editor.desktop" >/dev/null 2>&1 || true
+        chmod +x "$HOME/Desktop/limitless-editor.desktop" >/dev/null 2>&1 || true
+    fi
+
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "$desktop_dir" >/dev/null 2>&1 || true
+    fi
+
+    echo "Installed Linux desktop entry: ${desktop_path}"
+    return 0
+}
+
 # Function to download and setup premake5
 setup_premake() {
     local premake_dir="Vendor/Premake"
@@ -597,6 +680,10 @@ fi
 echo "Build completed successfully!"
 OUTPUT_DIR="Build/${CFG_SHORTNAME}-${SYSTEM_NAME}-${PLATFORM_NAME}"
 echo "Output directory: ${OUTPUT_DIR}/"
+
+if [[ "$SYSTEM_NAME" == "linux" ]]; then
+    install_editor_desktop_entry_linux "$OUTPUT_DIR"
+fi
 
 # Run tests if they exist
 if [[ -f "${OUTPUT_DIR}/Test/Test" ]]; then
