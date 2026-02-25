@@ -41,7 +41,15 @@ if [[ "$COMPILER" != "gcc" && "$COMPILER" != "clang" ]]; then
 fi
 
 can_use_sudo() {
-    command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1
+    [[ "${EUID:-$(id -u)}" -eq 0 ]] || command -v sudo >/dev/null 2>&1
+}
+
+run_privileged() {
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
 }
 
 has_linkable_library() {
@@ -158,20 +166,53 @@ check_dependencies() {
             missing_deps+=("libibus-1.0-dev")
         fi
 
+        # Check FFmpeg development libraries required by Limitless/Runtime/Editor on Linux.
+        local missing_ffmpeg_link_libs=()
+        if ! pkg-config --exists libavcodec 2>/dev/null && ! has_linkable_library "avcodec"; then
+            missing_ffmpeg_link_libs+=("avcodec")
+        fi
+        if ! pkg-config --exists libavformat 2>/dev/null && ! has_linkable_library "avformat"; then
+            missing_ffmpeg_link_libs+=("avformat")
+        fi
+        if ! pkg-config --exists libavutil 2>/dev/null && ! has_linkable_library "avutil"; then
+            missing_ffmpeg_link_libs+=("avutil")
+        fi
+        if ! pkg-config --exists libswresample 2>/dev/null && ! has_linkable_library "swresample"; then
+            missing_ffmpeg_link_libs+=("swresample")
+        fi
+        if [[ ${#missing_ffmpeg_link_libs[@]} -gt 0 ]]; then
+            echo "Missing FFmpeg link libraries detected: ${missing_ffmpeg_link_libs[*]}"
+            if command -v apt-get >/dev/null 2>&1; then
+                missing_deps+=("libavcodec-dev" "libavformat-dev" "libavutil-dev" "libswresample-dev")
+            elif command -v pacman >/dev/null 2>&1; then
+                # Pacman ships headers/libs in the ffmpeg package.
+                missing_deps+=("ffmpeg")
+            elif command -v dnf >/dev/null 2>&1; then
+                # Fedora/RHEL package names vary by distro repo; try both during install.
+                missing_deps+=("ffmpeg-devel")
+            fi
+        fi
+
         if [[ ${#missing_deps[@]} -gt 0 ]]; then
             echo "Missing Linux dependencies detected: ${missing_deps[*]}"
 
             if ! can_use_sudo; then
-                echo "Warning: sudo is unavailable. Continuing without package installation."
+                echo "Warning: Administrative privileges are unavailable. Continuing without package installation."
                 echo "Warning: install these packages manually if the build fails."
             elif command -v apt-get >/dev/null 2>&1; then
                 echo "Installing missing Linux dependencies with apt..."
-                sudo apt-get update
-                sudo apt-get install -y "${missing_deps[@]}"
+                run_privileged apt-get update
+                run_privileged apt-get install -y "${missing_deps[@]}"
             elif command -v pacman >/dev/null 2>&1; then
                 # Map Debian package names to Arch equivalents where needed.
-                local arch_deps=("base-devel" "pkgconf" "libx11" "libxext" "libxrandr" "libxcursor" "libxi" "libxinerama" "libxxf86vm" "libxss" "alsa-lib" "dbus" "ibus" "systemd")
-                sudo pacman -Syu --needed "${arch_deps[@]}"
+                local arch_deps=("base-devel" "pkgconf" "libx11" "libxext" "libxrandr" "libxcursor" "libxi" "libxinerama" "libxxf86vm" "libxss" "alsa-lib" "dbus" "ibus" "systemd" "ffmpeg")
+                run_privileged pacman -Syu --needed "${arch_deps[@]}"
+            elif command -v dnf >/dev/null 2>&1; then
+                echo "Installing missing Linux dependencies with dnf..."
+                # Prefer ffmpeg-devel when available; fall back to ffmpeg-free-devel.
+                if ! run_privileged dnf install -y "${missing_deps[@]}" >/dev/null 2>&1; then
+                    run_privileged dnf install -y ffmpeg-free-devel
+                fi
             else
                 echo "Error: Unsupported Linux package manager. Install dependencies manually and retry."
                 return 1
@@ -185,9 +226,9 @@ check_dependencies() {
         # Check for SDL3 and install from package manager / source as fallback
         if ! pkg-config --exists sdl3 2>/dev/null; then
             echo "SDL3 not found. Attempting package manager install first..."
-            if can_use_sudo && command -v apt-get >/dev/null 2>&1 && sudo apt-get install -y libsdl3-dev 2>/dev/null; then
+            if can_use_sudo && command -v apt-get >/dev/null 2>&1 && run_privileged apt-get install -y libsdl3-dev 2>/dev/null; then
                 echo "SDL3 installed from apt."
-            elif can_use_sudo && command -v pacman >/dev/null 2>&1 && sudo pacman -S --needed sdl3 >/dev/null 2>&1; then
+            elif can_use_sudo && command -v pacman >/dev/null 2>&1 && run_privileged pacman -S --needed sdl3 >/dev/null 2>&1; then
                 echo "SDL3 installed from pacman."
             else
                 echo "SDL3 package unavailable. Building SDL3 from source..."
@@ -197,9 +238,9 @@ check_dependencies() {
 
                 if ! command -v git >/dev/null 2>&1; then
                     if can_use_sudo && command -v apt-get >/dev/null 2>&1; then
-                        sudo apt-get install -y git
+                        run_privileged apt-get install -y git
                     elif can_use_sudo && command -v pacman >/dev/null 2>&1; then
-                        sudo pacman -S --needed git
+                        run_privileged pacman -S --needed git
                     else
                         echo "Error: git is required to build SDL3 from source."
                         popd >/dev/null
@@ -210,9 +251,9 @@ check_dependencies() {
 
                 if ! command -v cmake >/dev/null 2>&1; then
                     if can_use_sudo && command -v apt-get >/dev/null 2>&1; then
-                        sudo apt-get install -y cmake
+                        run_privileged apt-get install -y cmake
                     elif can_use_sudo && command -v pacman >/dev/null 2>&1; then
-                        sudo pacman -S --needed cmake
+                        run_privileged pacman -S --needed cmake
                     else
                         echo "Error: cmake is required to build SDL3 from source."
                         popd >/dev/null
@@ -228,14 +269,14 @@ check_dependencies() {
                 cmake .. -DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_TEST=OFF -DSDL_OPENGL=ON -DSDL_OPENGLES=ON
                 make -j"$(get_job_count)"
                 if ! can_use_sudo; then
-                    echo "Error: sudo is required to install SDL3 system-wide."
+                    echo "Error: Administrative privileges are required to install SDL3 system-wide."
                     popd >/dev/null
                     rm -rf "$temp_dir"
                     return 1
                 fi
-                sudo make install
+                run_privileged make install
                 if command -v ldconfig >/dev/null 2>&1; then
-                    sudo ldconfig
+                    run_privileged ldconfig
                 fi
 
                 popd >/dev/null
@@ -314,9 +355,9 @@ install_box2d_v3_linux() {
 
     if ! command -v git >/dev/null 2>&1; then
         if can_use_sudo && command -v apt-get >/dev/null 2>&1; then
-            sudo apt-get install -y git
+            run_privileged apt-get install -y git
         elif can_use_sudo && command -v pacman >/dev/null 2>&1; then
-            sudo pacman -S --needed git
+            run_privileged pacman -S --needed git
         else
             echo "Error: git is required to install Box2D from source."
             popd >/dev/null
@@ -327,9 +368,9 @@ install_box2d_v3_linux() {
 
     if ! command -v cmake >/dev/null 2>&1; then
         if can_use_sudo && command -v apt-get >/dev/null 2>&1; then
-            sudo apt-get install -y cmake
+            run_privileged apt-get install -y cmake
         elif can_use_sudo && command -v pacman >/dev/null 2>&1; then
-            sudo pacman -S --needed cmake
+            run_privileged pacman -S --needed cmake
         else
             echo "Error: cmake is required to install Box2D from source."
             popd >/dev/null
