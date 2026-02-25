@@ -2006,6 +2006,33 @@ namespace Limitless::Project
                      : std::filesystem::path(request.Settings.GameWindowIconPath).filename().string());
             const std::filesystem::path desktopPath = request.OutputDirectory / (projectName + ".desktop");
 
+            std::error_code ec;
+            std::filesystem::permissions(
+                result.OutputExecutablePath,
+                std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
+                std::filesystem::perm_options::add,
+                ec);
+            if (ec)
+                result.StepLog.push_back("Warning: could not mark Linux executable as executable: " + ec.message());
+
+            auto toLowerCopy = [](std::string value)
+            {
+                std::transform(value.begin(), value.end(), value.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                return value;
+            };
+            auto escapeShellDoubleQuoted = [](const std::string& value)
+            {
+                std::string escaped;
+                escaped.reserve(value.size() + 8);
+                for (char c : value)
+                {
+                    if (c == '\\' || c == '"' || c == '$' || c == '`')
+                        escaped.push_back('\\');
+                    escaped.push_back(c);
+                }
+                return escaped;
+            };
             auto escapeDesktopValue = [](std::string value)
             {
                 std::string escaped;
@@ -2019,6 +2046,40 @@ namespace Limitless::Project
                 return escaped;
             };
 
+            std::filesystem::path launcherIconPath = shippedIconPath;
+            if (std::filesystem::exists(launcherIconPath))
+            {
+                const std::string extension = toLowerCopy(launcherIconPath.extension().string());
+                if (extension == ".ico")
+                {
+                    std::filesystem::path companionPngPath = launcherIconPath;
+                    companionPngPath.replace_extension(".png");
+                    if (std::filesystem::exists(companionPngPath))
+                    {
+                        launcherIconPath = companionPngPath;
+                        result.StepLog.push_back("Linux launcher icon switched to companion .png: " + companionPngPath.string());
+                    }
+                    else if (request.Settings.GameWindowIconPath.empty())
+                    {
+                        const std::filesystem::path defaultLogoPngSource = request.EngineRoot / "Resources" / "LimitlessLogo.png";
+                        const std::filesystem::path defaultLogoPngDestination = request.OutputDirectory / "LimitlessLogo.png";
+                        if (std::filesystem::exists(defaultLogoPngSource))
+                        {
+                            if (CopySingleFile(defaultLogoPngSource, defaultLogoPngDestination, result))
+                            {
+                                launcherIconPath = defaultLogoPngDestination;
+                                result.StepLog.push_back("Copied Linux launcher icon fallback (.png): " + defaultLogoPngSource.string());
+                            }
+                        }
+                    }
+                }
+            }
+
+            const std::string escapedExecutableName =
+                escapeShellDoubleQuoted(result.OutputExecutablePath.filename().string());
+            const std::string desktopExecLine =
+                "sh -c \"cd \\\"$(dirname \\\"$1\\\")\\\" && exec \\\"./" + escapedExecutableName + "\\\"\" sh \"%k\"";
+
             std::ofstream desktopFile(desktopPath, std::ios::out | std::ios::trunc);
             if (!desktopFile.is_open())
             {
@@ -2031,11 +2092,20 @@ namespace Limitless::Project
                 << "Version=1.0\n"
                 << "Type=Application\n"
                 << "Name=" << projectName << "\n"
-                << "Exec=" << escapeDesktopValue(result.OutputExecutablePath.string()) << "\n"
+                << "Exec=" << desktopExecLine << "\n"
                 << "Terminal=false\n"
                 << "Categories=Game;\n";
-            if (std::filesystem::exists(shippedIconPath))
-                desktopFile << "Icon=" << escapeDesktopValue(shippedIconPath.string()) << "\n";
+            if (std::filesystem::exists(launcherIconPath))
+            {
+                const std::string iconValue = "./" + launcherIconPath.filename().string();
+                desktopFile << "Icon=" << escapeDesktopValue(iconValue) << "\n";
+
+                if (toLowerCopy(launcherIconPath.extension().string()) == ".ico")
+                {
+                    result.StepLog.push_back(
+                        "Warning: Linux desktop launchers often ignore .ico icon files. Prefer a .png icon path in Build Settings.");
+                }
+            }
             desktopFile.close();
 
             if (!desktopFile.good())
@@ -2044,7 +2114,7 @@ namespace Limitless::Project
                 return false;
             }
 
-            std::error_code ec;
+            ec.clear();
             std::filesystem::permissions(
                 desktopPath,
                 std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
@@ -2054,6 +2124,7 @@ namespace Limitless::Project
                 result.StepLog.push_back("Warning: could not mark desktop entry executable: " + ec.message());
 
             result.StepLog.push_back("Generated Linux desktop launcher: " + desktopPath.string());
+            result.StepLog.push_back("Generated portable Linux launcher command (relative to .desktop location).");
             result.StepLog.push_back("Note: Linux executable files do not support embedded icon metadata; launcher icon is provided via .desktop file.");
             return true;
         }
