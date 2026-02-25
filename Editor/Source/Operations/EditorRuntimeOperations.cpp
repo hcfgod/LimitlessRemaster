@@ -156,12 +156,17 @@ namespace Limitless::EditorRuntimeOperations
         {
             auto& window = Application::GetInstance().GetWindow();
             const bool shouldLockCursor = sceneLookCaptureActive || gameLookCaptureActive;
+            const bool wasLocked = window.IsCursorLocked();
 
-            if (window.IsCursorLocked() != shouldLockCursor)
+            if (wasLocked != shouldLockCursor)
                 window.SetCursorLocked(shouldLockCursor);
+            const bool lockApplied = window.IsCursorLocked();
             window.SetCursorVisible(!shouldLockCursor);
 
-            if (shouldLockCursor)
+            // When SDL relative mode lock is active, mouse deltas are already unbounded.
+            // Warping each frame can produce synthetic/incorrect deltas on some VM stacks.
+            // Keep warping only as a fallback if lock could not be applied.
+            if (shouldLockCursor && !lockApplied)
             {
                 const bool useSceneCenter = (s_CaptureOwner == ViewportCaptureOwner::Scene);
                 const glm::vec2 center = useSceneCenter
