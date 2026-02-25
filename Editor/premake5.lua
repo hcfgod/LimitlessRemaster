@@ -216,7 +216,8 @@ project "Editor"
         defines
         {
             "LT_PLATFORM_LINUX",
-            "LT_ENABLE_PHYSICS2D"
+            "LT_ENABLE_PHYSICS2D",
+            "LT_ENABLE_FFMPEG"
         }
 
         libdirs
@@ -229,6 +230,10 @@ project "Editor"
         {
             "box2d",
             "SDL3",
+            "avcodec",
+            "avformat",
+            "avutil",
+            "swresample",
             "z",
             "X11",
             "Xext",

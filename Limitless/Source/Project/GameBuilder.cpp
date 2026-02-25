@@ -2045,6 +2045,29 @@ namespace Limitless::Project
                 }
                 return escaped;
             };
+            auto sanitizeDesktopId = [](std::string value)
+            {
+                std::string sanitized;
+                sanitized.reserve(value.size());
+                for (char c : value)
+                {
+                    if (std::isalnum(static_cast<unsigned char>(c)) != 0)
+                        sanitized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+                    else if (c == '.' || c == '-' || c == '_')
+                        sanitized.push_back(c == '_' ? '-' : c);
+                    else
+                        sanitized.push_back('-');
+                }
+
+                while (!sanitized.empty() && sanitized.front() == '-')
+                    sanitized.erase(sanitized.begin());
+                while (!sanitized.empty() && sanitized.back() == '-')
+                    sanitized.pop_back();
+
+                if (sanitized.empty())
+                    sanitized = "game";
+                return sanitized;
+            };
 
             std::filesystem::path launcherIconPath = shippedIconPath;
             if (std::filesystem::exists(launcherIconPath))
@@ -2074,11 +2097,14 @@ namespace Limitless::Project
                     }
                 }
             }
+            const bool hasLauncherIcon = std::filesystem::exists(launcherIconPath);
 
             const std::string escapedExecutableName =
                 escapeShellDoubleQuoted(result.OutputExecutablePath.filename().string());
             const std::string desktopExecLine =
-                "sh -c \"cd \\\"$(dirname \\\"$1\\\")\\\" && exec \\\"./" + escapedExecutableName + "\\\"\" sh \"%k\"";
+                "sh -c \"cd \\\"$(dirname \\\"$1\\\")\\\" && if [ -x \\\"./install-linux-desktop-entry.sh\\\" ]; "
+                "then ./install-linux-desktop-entry.sh >/dev/null 2>&1 || true; fi && exec \\\"./"
+                + escapedExecutableName + "\\\"\" sh \"%k\"";
 
             std::ofstream desktopFile(desktopPath, std::ios::out | std::ios::trunc);
             if (!desktopFile.is_open())
@@ -2095,7 +2121,7 @@ namespace Limitless::Project
                 << "Exec=" << desktopExecLine << "\n"
                 << "Terminal=false\n"
                 << "Categories=Game;\n";
-            if (std::filesystem::exists(launcherIconPath))
+            if (hasLauncherIcon)
             {
                 const std::string iconValue = "./" + launcherIconPath.filename().string();
                 desktopFile << "Icon=" << escapeDesktopValue(iconValue) << "\n";
@@ -2123,8 +2149,90 @@ namespace Limitless::Project
             if (ec)
                 result.StepLog.push_back("Warning: could not mark desktop entry executable: " + ec.message());
 
+            const std::filesystem::path installScriptPath = request.OutputDirectory / "install-linux-desktop-entry.sh";
+            std::ofstream installScript(installScriptPath, std::ios::out | std::ios::binary | std::ios::trunc);
+            if (!installScript.is_open())
+            {
+                result.ErrorMessage = "Failed to write Linux desktop install script: " + installScriptPath.string();
+                return false;
+            }
+
+            const std::string desktopAppId = sanitizeDesktopId(projectName);
+            installScript
+                << "#!/usr/bin/env bash\n"
+                << "set -euo pipefail\n\n"
+                << "SCRIPT_DIR=\"$(cd -- \"$(dirname -- \"${BASH_SOURCE[0]}\")\" && pwd)\"\n"
+                << "EXECUTABLE_NAME=\"" << escapeShellDoubleQuoted(result.OutputExecutablePath.filename().string()) << "\"\n"
+                << "APP_NAME=\"" << escapeShellDoubleQuoted(projectName) << "\"\n"
+                << "APP_ID=\"" << escapeShellDoubleQuoted(desktopAppId) << "\"\n"
+                << "ICON_NAME=\"" << (hasLauncherIcon ? escapeShellDoubleQuoted(launcherIconPath.filename().string()) : std::string()) << "\"\n\n"
+                << "escape_desktop_value() {\n"
+                << "  local value=\"$1\"\n"
+                << "  value=\"${value//\\\\/\\\\\\\\}\"\n"
+                << "  value=\"${value// /\\\\ }\"\n"
+                << "  printf '%s' \"$value\"\n"
+                << "}\n\n"
+                << "TARGET_DESKTOP_DIR=\"${XDG_DATA_HOME:-$HOME/.local/share}/applications\"\n"
+                << "TARGET_DESKTOP_PATH=\"$TARGET_DESKTOP_DIR/${APP_ID}.desktop\"\n"
+                << "mkdir -p \"$TARGET_DESKTOP_DIR\"\n\n"
+                << "EXEC_PATH=\"$SCRIPT_DIR/$EXECUTABLE_NAME\"\n"
+                << "if [[ ! -f \"$EXEC_PATH\" ]]; then\n"
+                << "  echo \"Missing executable: $EXEC_PATH\" >&2\n"
+                << "  exit 1\n"
+                << "fi\n\n"
+                << "ESCAPED_EXEC_PATH=\"$(escape_desktop_value \"$EXEC_PATH\")\"\n"
+                << "ESCAPED_WORK_DIR=\"$(escape_desktop_value \"$SCRIPT_DIR\")\"\n\n"
+                << "{\n"
+                << "  echo \"[Desktop Entry]\"\n"
+                << "  echo \"Version=1.0\"\n"
+                << "  echo \"Type=Application\"\n"
+                << "  echo \"Name=$APP_NAME\"\n"
+                << "  echo \"Exec=$ESCAPED_EXEC_PATH\"\n"
+                << "  echo \"Path=$ESCAPED_WORK_DIR\"\n"
+                << "  echo \"Terminal=false\"\n"
+                << "  echo \"Categories=Game;\"\n"
+                << "  if [[ -n \"$ICON_NAME\" ]]; then\n"
+                << "    ICON_PATH=\"$SCRIPT_DIR/$ICON_NAME\"\n"
+                << "    if [[ -f \"$ICON_PATH\" ]]; then\n"
+                << "      ESCAPED_ICON_PATH=\"$(escape_desktop_value \"$ICON_PATH\")\"\n"
+                << "      echo \"Icon=$ESCAPED_ICON_PATH\"\n"
+                << "    fi\n"
+                << "  fi\n"
+                << "} > \"$TARGET_DESKTOP_PATH\"\n\n"
+                << "chmod +x \"$EXEC_PATH\" \"$TARGET_DESKTOP_PATH\"\n\n"
+                << "DESKTOP_SHORTCUT_PATH=\"$HOME/Desktop/${APP_ID}.desktop\"\n"
+                << "if [[ -d \"$HOME/Desktop\" ]]; then\n"
+                << "  cp \"$TARGET_DESKTOP_PATH\" \"$DESKTOP_SHORTCUT_PATH\" 2>/dev/null || true\n"
+                << "  chmod +x \"$DESKTOP_SHORTCUT_PATH\" 2>/dev/null || true\n"
+                << "fi\n\n"
+                << "if command -v update-desktop-database >/dev/null 2>&1; then\n"
+                << "  update-desktop-database \"$TARGET_DESKTOP_DIR\" >/dev/null 2>&1 || true\n"
+                << "fi\n\n"
+                << "echo \"Installed launcher: $TARGET_DESKTOP_PATH\"\n"
+                << "if [[ -f \"$DESKTOP_SHORTCUT_PATH\" ]]; then\n"
+                << "  echo \"Desktop shortcut: $DESKTOP_SHORTCUT_PATH\"\n"
+                << "fi\n"
+                << "echo \"If icon cache is stale, log out/in or restart the desktop shell.\"\n";
+            installScript.close();
+            if (!installScript.good())
+            {
+                result.ErrorMessage = "Failed writing Linux desktop install script content.";
+                return false;
+            }
+
+            ec.clear();
+            std::filesystem::permissions(
+                installScriptPath,
+                std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
+                std::filesystem::perm_options::add,
+                ec);
+            if (ec)
+                result.StepLog.push_back("Warning: could not mark desktop install script executable: " + ec.message());
+
             result.StepLog.push_back("Generated Linux desktop launcher: " + desktopPath.string());
             result.StepLog.push_back("Generated portable Linux launcher command (relative to .desktop location).");
+            result.StepLog.push_back("Generated Linux launcher installer script: " + installScriptPath.string());
+            result.StepLog.push_back("Linux launcher auto-runs 'install-linux-desktop-entry.sh' on launch (best-effort).");
             result.StepLog.push_back("Note: Linux executable files do not support embedded icon metadata; launcher icon is provided via .desktop file.");
             return true;
         }
