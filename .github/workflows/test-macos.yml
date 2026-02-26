@@ -23,13 +23,19 @@ jobs:
       
     - name: Install macOS dependencies
       run: |
-        brew install pkg-config sdl3 box2d
+        brew install pkg-config sdl3 box2d ffmpeg
         echo "SDL3 installation info:"
         brew list sdl3
         echo "Box2D installation info:"
         brew list box2d
+        echo "FFmpeg installation info:"
+        brew list ffmpeg
         echo "pkg-config probes:"
         pkg-config --modversion sdl3
+        pkg-config --modversion libavcodec
+        pkg-config --modversion libavformat
+        pkg-config --modversion libavutil
+        pkg-config --modversion libswresample
         BOX2D_PREFIX=$(brew --prefix box2d)
         echo "Box2D prefix: ${BOX2D_PREFIX}"
         ls -la "${BOX2D_PREFIX}/lib/libbox2d.dylib"

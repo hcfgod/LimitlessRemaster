@@ -180,18 +180,32 @@ project "Runtime"
         }
 
         -- Enable FFmpeg decode on macOS when Homebrew FFmpeg is available.
-        local macFfmpegLibs = os.matchfiles("/opt/homebrew/lib/libavcodec*.dylib")
-        if #macFfmpegLibs == 0 then
-            macFfmpegLibs = os.matchfiles("/usr/local/lib/libavcodec*.dylib")
+        local macFfmpegLibDir = nil
+        local macFfmpegProbeDirs =
+        {
+            "/opt/homebrew/lib",
+            "/usr/local/lib",
+            "/opt/homebrew/opt/ffmpeg/lib",
+            "/usr/local/opt/ffmpeg/lib"
+        }
+        for _, candidate in ipairs(macFfmpegProbeDirs) do
+            if #os.matchfiles(candidate .. "/libavcodec*.dylib") > 0 then
+                macFfmpegLibDir = candidate
+                break
+            end
         end
-        if #macFfmpegLibs > 0 then
+        if macFfmpegLibDir ~= nil then
             defines { "LT_ENABLE_FFMPEG" }
+            libdirs { macFfmpegLibDir }
             links { "avcodec", "avformat", "avutil", "swresample" }
         end
 
         libdirs
         {
-            "/opt/homebrew/lib"
+            "/opt/homebrew/lib",
+            "/usr/local/lib",
+            "/opt/homebrew/opt/ffmpeg/lib",
+            "/usr/local/opt/ffmpeg/lib"
         }
 
         links

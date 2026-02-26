@@ -173,9 +173,33 @@ project "Editor"
             "LT_ENABLE_PHYSICS2D"
         }
 
+        -- Enable FFmpeg decode on macOS when Homebrew FFmpeg is available.
+        local macFfmpegLibDir = nil
+        local macFfmpegProbeDirs =
+        {
+            "/opt/homebrew/lib",
+            "/usr/local/lib",
+            "/opt/homebrew/opt/ffmpeg/lib",
+            "/usr/local/opt/ffmpeg/lib"
+        }
+        for _, candidate in ipairs(macFfmpegProbeDirs) do
+            if #os.matchfiles(candidate .. "/libavcodec*.dylib") > 0 then
+                macFfmpegLibDir = candidate
+                break
+            end
+        end
+        if macFfmpegLibDir ~= nil then
+            defines { "LT_ENABLE_FFMPEG" }
+            libdirs { macFfmpegLibDir }
+            links { "avcodec", "avformat", "avutil", "swresample" }
+        end
+
         libdirs
         {
-            "/opt/homebrew/lib"
+            "/opt/homebrew/lib",
+            "/usr/local/lib",
+            "/opt/homebrew/opt/ffmpeg/lib",
+            "/usr/local/opt/ffmpeg/lib"
         }
 
         links

@@ -150,7 +150,7 @@ check_dependencies() {
         fi
 
         local missing_brew_deps=()
-        local brew_deps=("pkg-config" "box2d" "sdl3")
+        local brew_deps=("pkg-config" "box2d" "sdl3" "ffmpeg")
         for dep in "${brew_deps[@]}"; do
             if ! brew list --versions "$dep" >/dev/null 2>&1; then
                 missing_brew_deps+=("$dep")
@@ -172,6 +172,12 @@ check_dependencies() {
         fi
         if ! pkg-config --exists sdl3 2>/dev/null; then
             echo "Error: sdl3 still not discoverable by pkg-config after Homebrew install."
+            echo "Try: export PKG_CONFIG_PATH=\"$(brew --prefix)/lib/pkgconfig:${PKG_CONFIG_PATH:-}\""
+            return 1
+        fi
+        if ! pkg-config --exists libavcodec libavformat libavutil libswresample 2>/dev/null; then
+            echo "Error: FFmpeg development libraries are not discoverable by pkg-config after Homebrew install."
+            echo "Expected modules: libavcodec, libavformat, libavutil, libswresample"
             echo "Try: export PKG_CONFIG_PATH=\"$(brew --prefix)/lib/pkgconfig:${PKG_CONFIG_PATH:-}\""
             return 1
         fi
