@@ -455,6 +455,8 @@ namespace Limitless
                 : entt::null;
         }
 
+        clone->m_TransformsDirty = true;
+
         clone->m_EditorCameraBookmark = m_EditorCameraBookmark;
         clone->m_Physics2DSettings = m_Physics2DSettings;
         return clone;

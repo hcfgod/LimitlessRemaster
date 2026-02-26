@@ -577,12 +577,24 @@ namespace Limitless
             {
                 if (auto* transform = registry.try_get<TransformComponent>(entity))
                 {
+                    bool transformChanged = false;
                     if (animator->RuntimeHasPosition)
+                    {
                         transform->Position = animator->RuntimePosition;
+                        transformChanged = true;
+                    }
                     if (animator->RuntimeHasScale)
+                    {
                         transform->Scale = animator->RuntimeScale;
+                        transformChanged = true;
+                    }
                     if (animator->RuntimeHasRotationZ)
+                    {
                         transform->Rotation.z = animator->RuntimeRotationZDegrees;
+                        transformChanged = true;
+                    }
+                    if (transformChanged)
+                        scene.MarkTransformDirty(entity);
                 }
             }
 

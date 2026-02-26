@@ -927,7 +927,10 @@ namespace Limitless::EditorViewportPanel
                             if (directionalLight->UseEntityRotation)
                             {
                                 if (auto* mutableTransform = registry.try_get<TransformComponent>(selectedEntity))
+                                {
                                     mutableTransform->Rotation.z = glm::degrees(std::atan2(direction.y, direction.x));
+                                    scene.MarkTransformDirty(selectedEntity);
+                                }
                             }
                             else
                             {

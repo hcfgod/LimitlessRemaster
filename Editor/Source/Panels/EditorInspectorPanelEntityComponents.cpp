@@ -348,13 +348,19 @@ namespace Limitless::EditorInspectorPanel
             if (transformOpen)
             {
                 ImGui::TextUnformatted("Position");
-                ImGui::DragFloat3("##TransformPosition", &transform->Position.x, 0.1f);
+                const bool positionChanged = ImGui::DragFloat3("##TransformPosition", &transform->Position.x, 0.1f);
+                if (positionChanged && scene)
+                    scene->MarkTransformDirty(selectedEntity);
                 TrackInteractiveMutation(undoService, "Edit Transform Position");
                 ImGui::TextUnformatted("Rotation");
-                ImGui::DragFloat3("##TransformRotation", &transform->Rotation.x, 1.0f);
+                const bool rotationChanged = ImGui::DragFloat3("##TransformRotation", &transform->Rotation.x, 1.0f);
+                if (rotationChanged && scene)
+                    scene->MarkTransformDirty(selectedEntity);
                 TrackInteractiveMutation(undoService, "Edit Transform Rotation");
                 ImGui::TextUnformatted("Scale");
-                ImGui::DragFloat3("##TransformScale", &transform->Scale.x, 0.1f);
+                const bool scaleChanged = ImGui::DragFloat3("##TransformScale", &transform->Scale.x, 0.1f);
+                if (scaleChanged && scene)
+                    scene->MarkTransformDirty(selectedEntity);
                 TrackInteractiveMutation(undoService, "Edit Transform Scale");
                 ImGui::TreePop();
             }

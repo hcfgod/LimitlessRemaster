@@ -394,6 +394,7 @@ namespace Limitless
                             destinationTransform->Position = translation;
                             destinationTransform->Rotation = glm::degrees(glm::eulerAngles(orientation));
                             destinationTransform->Scale = scale;
+                            destinationScene.MarkTransformDirty(destinationEntity);
                         }
                     }
                 }
@@ -428,6 +429,8 @@ namespace Limitless
             const auto mappedRoot = entityMap.find(sourceRootEntity);
             if (mappedRoot == entityMap.end())
                 return false;
+
+            destinationScene.MarkTransformDirty(mappedRoot->second);
 
             if (outDestinationRootEntity)
                 *outDestinationRootEntity = mappedRoot->second;

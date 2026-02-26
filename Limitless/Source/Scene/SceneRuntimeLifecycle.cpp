@@ -77,6 +77,7 @@ namespace Limitless
             physicsWorld->Step(*this, fixedDeltaTime);
         }
         m_PhysicsWorldInitializedForLoading = true;
+        UpdateTransforms();
     }
 
     void Scene::SetPhysics2DSettings(const Physics2DWorldSettings& settings)

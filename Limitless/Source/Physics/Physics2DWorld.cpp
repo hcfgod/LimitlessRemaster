@@ -739,26 +739,43 @@ namespace Limitless
             const b2Transform runtimeTransform = b2Body_GetTransform(rigidbody.RuntimeBodyId);
             const glm::vec2 runtimePosition(runtimeTransform.p.x, runtimeTransform.p.y);
             const float runtimeAngleRadians = b2Rot_GetAngle(runtimeTransform.q);
+            const float runtimeAngleDegrees = glm::degrees(runtimeAngleRadians);
             glm::vec2 authoringPosition(transform.Position.x, transform.Position.y);
             float authoringAngleRadians = glm::radians(transform.Rotation.z);
+            bool snappedTransformToRuntime = false;
 
             // Constraints are authoritative during simulation.
             // If scripts/editor mutate constrained axes directly, snap back to the body.
             if (freezePositionX)
             {
                 authoringPosition.x = runtimePosition.x;
-                transform.Position.x = runtimePosition.x;
+                if (std::abs(transform.Position.x - runtimePosition.x) > kTransformSnapEpsilon)
+                {
+                    transform.Position.x = runtimePosition.x;
+                    snappedTransformToRuntime = true;
+                }
             }
             if (freezePositionY)
             {
                 authoringPosition.y = runtimePosition.y;
-                transform.Position.y = runtimePosition.y;
+                if (std::abs(transform.Position.y - runtimePosition.y) > kTransformSnapEpsilon)
+                {
+                    transform.Position.y = runtimePosition.y;
+                    snappedTransformToRuntime = true;
+                }
             }
             if (freezeRotation)
             {
                 authoringAngleRadians = runtimeAngleRadians;
-                transform.Rotation.z = glm::degrees(runtimeAngleRadians);
+                if (std::abs(WrapAngleRadians(glm::radians(transform.Rotation.z) - runtimeAngleRadians)) > kTransformSnapEpsilon)
+                {
+                    transform.Rotation.z = runtimeAngleDegrees;
+                    snappedTransformToRuntime = true;
+                }
             }
+
+            if (snappedTransformToRuntime)
+                scene.MarkTransformDirty(entity);
 
             if (expectedType == b2_kinematicBody)
             {
@@ -1059,9 +1076,18 @@ namespace Limitless
             rigidbody->RuntimePreviousPosition = glm::vec2(transform->Position.x, transform->Position.y);
             rigidbody->RuntimePreviousAngleRadians = glm::radians(transform->Rotation.z);
 
+            const float newRotationDegrees = glm::degrees(bodyAngleRadians);
+            const bool transformChanged =
+                std::abs(transform->Position.x - bodyPosition.x) > kTransformSnapEpsilon ||
+                std::abs(transform->Position.y - bodyPosition.y) > kTransformSnapEpsilon ||
+                std::abs(WrapAngleRadians(glm::radians(transform->Rotation.z) - bodyAngleRadians)) > kTransformSnapEpsilon;
+
             transform->Position.x = bodyPosition.x;
             transform->Position.y = bodyPosition.y;
-            transform->Rotation.z = glm::degrees(bodyAngleRadians);
+            transform->Rotation.z = newRotationDegrees;
+
+            if (transformChanged)
+                scene.MarkTransformDirty(entity);
         }
 #else
         (void)scene;

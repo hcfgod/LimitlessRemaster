@@ -9,6 +9,7 @@
 #include "Graphics/Buffer.h"
 #include "Graphics/Camera/Camera.h"
 #include "Graphics/Framebuffer.h"
+#include "Graphics/GraphicsAPIDetector.h"
 #include "Graphics/OpenGL/OpenGLShader.h"
 #include "Graphics/OpenGL/OpenGLTexture.h"
 #include "Graphics/OpenGL/OpenGLVertexArray.h"
@@ -17,6 +18,7 @@
 #include "Graphics/Shader.h"
 #include "Graphics/Texture.h"
 #include "Graphics/VertexArray.h"
+#include "Platform/Platform.h"
 #include "Scene/Components.h"
 #include "Scene/Scene.h"
 
@@ -30,8 +32,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cmath>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -134,6 +138,54 @@ namespace Limitless
         };
 
         Lighting2DRendererState g_State{};
+
+        std::string ToLowerCopy(std::string value)
+        {
+            std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            return value;
+        }
+
+        bool ShouldBypassDeferredLightingForDriver()
+        {
+            static bool s_Cached = false;
+            static bool s_Bypass = false;
+            static bool s_Logged = false;
+            if (s_Cached)
+                return s_Bypass;
+
+            s_Cached = true;
+            s_Bypass = false;
+
+            if (!PlatformDetection::IsLinux())
+                return false;
+
+            std::string rendererName;
+            std::string vendorName;
+            if (auto api = GraphicsAPIDetector::GetAPI(GraphicsAPI::OpenGL); api.has_value())
+            {
+                rendererName = api->version.renderer;
+                vendorName = api->version.vendor;
+            }
+
+            const std::string rendererLower = ToLowerCopy(rendererName);
+            const std::string vendorLower = ToLowerCopy(vendorName);
+            s_Bypass = rendererLower.find("svga3d") != std::string::npos ||
+                       rendererLower.find("llvmpipe") != std::string::npos ||
+                       vendorLower.find("vmware") != std::string::npos;
+
+            if (s_Bypass && !s_Logged)
+            {
+                LT_CORE_WARN(
+                    "Lighting2DRenderer: deferred lighting disabled for Linux OpenGL renderer '{}' (vendor '{}'); using fallback path",
+                    rendererName.empty() ? "Unknown" : rendererName,
+                    vendorName.empty() ? "Unknown" : vendorName);
+                s_Logged = true;
+            }
+
+            return s_Bypass;
+        }
 
         uint64_t MakeFramebufferSetKey(uint32_t width, uint32_t height)
         {
@@ -1733,6 +1785,9 @@ namespace Limitless
 
             auto& renderer = Renderer::GetInstance();
             if (!renderer.IsInitialized())
+                return false;
+
+            if (ShouldBypassDeferredLightingForDriver())
                 return false;
 
             const auto buildStart = std::chrono::high_resolution_clock::now();

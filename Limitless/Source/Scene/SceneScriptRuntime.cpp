@@ -71,6 +71,7 @@ namespace Limitless
 
             UpdateAnimation2DSystemForSceneRuntime(*this, deltaTime, ++m_AnimationDispatchFrameCounter);
             UpdateParticleEmitterSystem(m_Registry, deltaTime);
+            UpdateTransforms();
             return;
         }
 
@@ -290,10 +291,12 @@ namespace Limitless
             }
 
             TransformComponent transformBeforeUpdate{};
+            bool hadTransformBeforeUpdate = false;
             bool trackTransformMutation = false;
             if (auto* transform = m_Registry.try_get<TransformComponent>(entity))
             {
                 transformBeforeUpdate = *transform;
+                hadTransformBeforeUpdate = true;
                 if (const auto* rigidbody2D = m_Registry.try_get<Rigidbody2DComponent>(entity))
                 {
                     trackTransformMutation = rigidbody2D->Type == Rigidbody2DComponent::BodyType::Dynamic ||
@@ -323,15 +326,28 @@ namespace Limitless
                 continue;
             ++scriptEntry->RuntimeUpdateCount;
 
+            constexpr float kTransformDirtyEpsilon = 0.0001f;
+            const auto* transformAfterUpdate = m_Registry.try_get<TransformComponent>(entity);
+            if (hadTransformBeforeUpdate && transformAfterUpdate)
+            {
+                const bool positionChanged = glm::length(transformAfterUpdate->Position - transformBeforeUpdate.Position) > kTransformDirtyEpsilon;
+                const bool rotationChanged = glm::length(transformAfterUpdate->Rotation - transformBeforeUpdate.Rotation) > kTransformDirtyEpsilon;
+                const bool scaleChanged = glm::length(transformAfterUpdate->Scale - transformBeforeUpdate.Scale) > kTransformDirtyEpsilon;
+                if (positionChanged || rotationChanged || scaleChanged)
+                    MarkTransformDirty(entity);
+            }
+            else if (!hadTransformBeforeUpdate && transformAfterUpdate)
+            {
+                MarkTransformDirty(entity);
+            }
+
             if (trackTransformMutation && !scriptEntry->RuntimeWarnedOnUpdateTransformMutation)
             {
-                const auto* transformAfterUpdate = m_Registry.try_get<TransformComponent>(entity);
                 if (transformAfterUpdate)
                 {
-                    constexpr float kGuardrailEpsilon = 0.0001f;
-                    const bool positionChanged = glm::length(transformAfterUpdate->Position - transformBeforeUpdate.Position) > kGuardrailEpsilon;
-                    const bool rotationChanged = glm::length(transformAfterUpdate->Rotation - transformBeforeUpdate.Rotation) > kGuardrailEpsilon;
-                    const bool scaleChanged = glm::length(transformAfterUpdate->Scale - transformBeforeUpdate.Scale) > kGuardrailEpsilon;
+                    const bool positionChanged = glm::length(transformAfterUpdate->Position - transformBeforeUpdate.Position) > kTransformDirtyEpsilon;
+                    const bool rotationChanged = glm::length(transformAfterUpdate->Rotation - transformBeforeUpdate.Rotation) > kTransformDirtyEpsilon;
+                    const bool scaleChanged = glm::length(transformAfterUpdate->Scale - transformBeforeUpdate.Scale) > kTransformDirtyEpsilon;
                     if (positionChanged || rotationChanged || scaleChanged)
                     {
                         const auto* tag = m_Registry.try_get<TagComponent>(entity);
@@ -346,6 +362,7 @@ namespace Limitless
 
         UpdateAnimation2DSystemForSceneRuntime(*this, deltaTime, ++m_AnimationDispatchFrameCounter);
         UpdateParticleEmitterSystem(m_Registry, deltaTime);
+        UpdateTransforms();
     }
 
     void Scene::FixedUpdate(float fixedDeltaTime)
@@ -563,6 +580,14 @@ namespace Limitless
                 scriptEntry->RuntimeInitialized = true;
             }
 
+            TransformComponent transformBeforeFixedUpdate{};
+            bool hadTransformBeforeFixedUpdate = false;
+            if (auto* transform = m_Registry.try_get<TransformComponent>(entity))
+            {
+                transformBeforeFixedUpdate = *transform;
+                hadTransformBeforeFixedUpdate = true;
+            }
+
             try
             {
                 scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
@@ -578,6 +603,23 @@ namespace Limitless
                 handleScriptCallbackFailure(entity, scriptIndex, "OnFixedUpdate", "non-standard exception");
                 continue;
             }
+
+            constexpr float kTransformDirtyEpsilon = 0.0001f;
+            const auto* transformAfterFixedUpdate = m_Registry.try_get<TransformComponent>(entity);
+            if (hadTransformBeforeFixedUpdate && transformAfterFixedUpdate)
+            {
+                const bool positionChanged = glm::length(transformAfterFixedUpdate->Position - transformBeforeFixedUpdate.Position) > kTransformDirtyEpsilon;
+                const bool rotationChanged = glm::length(transformAfterFixedUpdate->Rotation - transformBeforeFixedUpdate.Rotation) > kTransformDirtyEpsilon;
+                const bool scaleChanged = glm::length(transformAfterFixedUpdate->Scale - transformBeforeFixedUpdate.Scale) > kTransformDirtyEpsilon;
+                if (positionChanged || rotationChanged || scaleChanged)
+                    MarkTransformDirty(entity);
+            }
+            else if (!hadTransformBeforeFixedUpdate && transformAfterFixedUpdate)
+            {
+                MarkTransformDirty(entity);
+            }
         }
+
+        UpdateTransforms();
     }
 }

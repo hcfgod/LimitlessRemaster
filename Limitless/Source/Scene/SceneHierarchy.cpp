@@ -24,6 +24,7 @@ namespace Limitless
         m_Registry.emplace<TagComponent>(entity, std::move(tag));
         m_Registry.emplace<TransformComponent>(entity);
         auto& hierarchy = m_Registry.emplace<HierarchyComponent>(entity);
+        m_TransformsDirty = true;
 
         int32_t maxSiblingOrder = -kSiblingOrderStep;
         auto hierarchyView = m_Registry.view<HierarchyComponent>();
@@ -72,6 +73,7 @@ namespace Limitless
 
         m_Registry.destroy(entity);
         ResetPhysicsRuntimeState();
+        m_TransformsDirty = true;
     }
 
     bool Scene::IsValid(entt::entity entity) const
@@ -149,6 +151,8 @@ namespace Limitless
                 childTransform->Scale = scale;
             }
         }
+
+        MarkTransformDirty(child);
 
         return true;
     }

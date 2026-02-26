@@ -27,10 +27,6 @@ namespace Limitless::EditorRuntimeOperations
                    point.y >= rectMin.y && point.y <= rectMax.y;
         }
 
-        glm::vec2 ComputeRectCenter(const glm::vec2& rectMin, const glm::vec2& rectMax)
-        {
-            return glm::vec2((rectMin.x + rectMax.x) * 0.5f, (rectMin.y + rectMax.y) * 0.5f);
-        }
     }
 
     void Attach(uint32_t viewportWidthPixels,
@@ -163,16 +159,16 @@ namespace Limitless::EditorRuntimeOperations
             const bool lockApplied = window.IsCursorLocked();
             window.SetCursorVisible(!shouldLockCursor);
 
-            // When SDL relative mode lock is active, mouse deltas are already unbounded.
-            // Warping each frame can produce synthetic/incorrect deltas on some VM stacks.
-            // Keep warping only as a fallback if lock could not be applied.
+            // Avoid cursor warping fallback when relative lock fails.
+            // Some Linux VM stacks emit unstable synthetic deltas after warp, which can invert look input.
             if (shouldLockCursor && !lockApplied)
             {
-                const bool useSceneCenter = (s_CaptureOwner == ViewportCaptureOwner::Scene);
-                const glm::vec2 center = useSceneCenter
-                    ? ComputeRectCenter(sceneViewRectMinPixels, sceneViewRectMaxPixels)
-                    : ComputeRectCenter(gameViewRectMinPixels, gameViewRectMaxPixels);
-                window.SetCursorPosition(static_cast<int>(center.x), static_cast<int>(center.y));
+                static bool s_LoggedRelativeMouseWarning = false;
+                if (!s_LoggedRelativeMouseWarning)
+                {
+                    LT_CORE_WARN("EditorRuntime: relative mouse lock unavailable; disabling warp fallback to keep look input stable");
+                    s_LoggedRelativeMouseWarning = true;
+                }
             }
         }
 

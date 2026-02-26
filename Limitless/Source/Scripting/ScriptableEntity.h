@@ -90,7 +90,10 @@ namespace Limitless
                 throw std::runtime_error("ScriptableEntity referenced invalid entity");
             if (!m_Registry->all_of<ComponentType>(entity))
                 throw std::runtime_error("ScriptableEntity missing requested component");
-            return m_Registry->get<ComponentType>(entity);
+            ComponentType& component = m_Registry->get<ComponentType>(entity);
+            if constexpr (detail::HasTransformDirtyFields<ComponentType>::value)
+                component.Dirty = true;
+            return component;
         }
 
         template<typename ComponentType, typename... ConstructorArgs>

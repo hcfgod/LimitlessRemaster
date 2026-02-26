@@ -8,7 +8,7 @@ namespace Limitless
 {
     using NativeScriptCreateFunction = ScriptableEntity* (*)();
     using NativeScriptRegistrationCallback = void (*)(const char* className, NativeScriptCreateFunction createFunction);
-    constexpr uint32_t kScriptCoreAbiVersion = 1u;
+    constexpr uint32_t kScriptCoreAbiVersion = 2u;
 }
 
 #if defined(_WIN32)

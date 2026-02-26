@@ -245,6 +245,7 @@ namespace Limitless::EditorPrefabSystem
                             destinationTransform->Position = translation;
                             destinationTransform->Rotation = glm::degrees(glm::eulerAngles(orientation));
                             destinationTransform->Scale = scale;
+                            destinationScene.MarkTransformDirty(destinationEntity);
                         }
                     }
                 }
@@ -259,6 +260,8 @@ namespace Limitless::EditorPrefabSystem
                 auto& prefabInstance = destinationRegistry.emplace_or_replace<PrefabInstanceComponent>(mappedRoot->second);
                 prefabInstance.PrefabAssetKey = prefabAssetKey;
             }
+
+            destinationScene.MarkTransformDirty(mappedRoot->second);
 
             if (outDestinationRootEntity)
                 *outDestinationRootEntity = mappedRoot->second;

@@ -1183,6 +1183,12 @@ namespace Limitless
         }
 
         RestoreHierarchyAndJointReferences(scene->GetRegistry(), createdEntities, parentIndices, siblingOrders, jointConnectedEntityIndices);
+        for (size_t index = 0; index < createdEntities.size(); ++index)
+        {
+            if (parentIndices[index] >= 0)
+                continue;
+            scene->MarkTransformDirty(createdEntities[index]);
+        }
 
         if (loadedVersion < kSceneSerializationVersion)
             RunPostLoadSliderMigration(scene.get());

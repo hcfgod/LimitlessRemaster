@@ -868,6 +868,7 @@ namespace Limitless
 
     void SceneRenderer::Render(Scene& scene, const Camera& camera)
     {
+        scene.UpdateTransforms();
         Renderer2D::BeginScene(camera.GetViewProjectionMatrix(), false);
         const float fixedDelta = Time::GetFixedDeltaTimeSeconds();
         const float interpolationAlpha = (fixedDelta > 0.0f)

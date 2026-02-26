@@ -823,7 +823,10 @@ namespace Limitless
                 return false;
 
             if (auto* transform = mutableScene.GetRegistry().try_get<TransformComponent>(createdEntity))
+            {
                 transform->Position = worldPosition;
+                mutableScene.MarkTransformDirty(createdEntity);
+            }
             return true;
         });
         if (!success)

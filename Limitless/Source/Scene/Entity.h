@@ -4,10 +4,24 @@
 
 #include <string>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 namespace Limitless
 {
+    namespace detail
+    {
+        template<typename T, typename = void>
+        struct HasTransformDirtyFields : std::false_type
+        {
+        };
+
+        template<typename T>
+        struct HasTransformDirtyFields<T, std::void_t<decltype(std::declval<T&>().Dirty), decltype(std::declval<T&>().WorldTransform)>> : std::true_type
+        {
+        };
+    }
+
     // -------------------------------------------------------------------------
     // Engine-level entity wrapper (Unity-style).
     //
@@ -86,7 +100,10 @@ namespace Limitless
                 throw std::runtime_error("Entity referenced invalid handle");
             if (!m_Registry->all_of<ComponentType>(m_EntityHandle))
                 throw std::runtime_error("Entity missing requested component");
-            return m_Registry->get<ComponentType>(m_EntityHandle);
+            ComponentType& component = m_Registry->get<ComponentType>(m_EntityHandle);
+            if constexpr (detail::HasTransformDirtyFields<ComponentType>::value)
+                component.Dirty = true;
+            return component;
         }
 
         /// Returns a pointer to the component, or nullptr if the entity is
@@ -97,7 +114,13 @@ namespace Limitless
         {
             if (m_Registry == nullptr || !m_Registry->valid(m_EntityHandle))
                 return nullptr;
-            return m_Registry->try_get<ComponentType>(m_EntityHandle);
+            ComponentType* component = m_Registry->try_get<ComponentType>(m_EntityHandle);
+            if constexpr (detail::HasTransformDirtyFields<ComponentType>::value)
+            {
+                if (component)
+                    component->Dirty = true;
+            }
+            return component;
         }
 
         /// Adds a component (or returns the existing one if already present).

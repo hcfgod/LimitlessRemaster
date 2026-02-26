@@ -86,6 +86,8 @@ namespace Limitless
         /// Get world transform matrix with hierarchy applied.
         glm::mat4 GetWorldTransformMatrix(entt::entity entity) const;
         glm::mat4 GetWorldTransformMatrixForRendering(entt::entity entity, float interpolationAlpha) const;
+        void MarkTransformDirty(entt::entity entity);
+        void UpdateTransforms();
 
         /// Runtime update for script-driven entity behavior.
         void Update(float deltaTime);
@@ -151,6 +153,7 @@ namespace Limitless
         bool m_PhysicsWorldInitializedForLoading = true;
         bool m_RuntimeUiPointerOverInteractiveElement = false;
         uint64_t m_AnimationDispatchFrameCounter = 0;
+        bool m_TransformsDirty = true;
     };
 
     // -----------------------------------------------------------------------------
