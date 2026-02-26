@@ -78,6 +78,7 @@ namespace Limitless
         glm::mat4 WorldTransform = glm::mat4(1.0f);
         bool LocalDirty = true;
         bool Dirty = true;
+        bool RuntimeWorldUpdatedThisFrame = false;
         glm::vec3 CachedLocalPosition = glm::vec3(0.0f);
         glm::vec3 CachedLocalRotation = glm::vec3(0.0f);
         glm::vec3 CachedLocalScale = glm::vec3(1.0f);
@@ -93,6 +94,9 @@ namespace Limitless
 
         /// Relative sibling order under the current parent (lower renders/appears first).
         int32_t SiblingOrder = 0;
+
+        /// Cached hierarchy depth used by depth-batched transform updates.
+        uint16_t HierarchyDepth = 0;
     };
 
     /// Marks an entity as a UI canvas root.
@@ -615,12 +619,21 @@ namespace Limitless
         uint16_t RuntimeWorldSlot = 0;
     };
 
+    enum class ScriptExecutionPolicy : uint8_t
+    {
+        MainThread = 0,
+        ParallelSafe = 1
+    };
+
     /// Single native C++ behavior script entry attached to an entity.
     struct NativeScriptEntry
     {
         std::string ScriptClassName;
         std::string ScriptAssetRelativePath; ///< Relative to project Assets root without extension (example: "Gameplay/Player/PlayerController")
         bool Enabled = true;
+        ScriptExecutionPolicy ExecutionPolicy = ScriptExecutionPolicy::MainThread;
+        uint64_t DeclaredReadAccessMask = 0;
+        uint64_t DeclaredWriteAccessMask = 0;
         std::unordered_map<std::string, ScriptPropertyValue> ExposedProperties;
 
         // Runtime-only state (not serialized).
@@ -629,6 +642,7 @@ namespace Limitless
         uint64_t RuntimeUpdateCount = 0;
         bool RuntimeWarnedOnUpdateTransformMutation = false;
         bool RuntimeWarnedMissingCompiledScript = false;
+        bool RuntimeWarnedMissingAccessDeclaration = false;
 
         NativeScriptEntry() = default;
 
@@ -636,12 +650,16 @@ namespace Limitless
             : ScriptClassName(other.ScriptClassName),
               ScriptAssetRelativePath(other.ScriptAssetRelativePath),
               Enabled(other.Enabled),
+              ExecutionPolicy(other.ExecutionPolicy),
+              DeclaredReadAccessMask(other.DeclaredReadAccessMask),
+              DeclaredWriteAccessMask(other.DeclaredWriteAccessMask),
               ExposedProperties(other.ExposedProperties),
               RuntimeInstance(nullptr),
               RuntimeInitialized(false),
               RuntimeUpdateCount(0),
               RuntimeWarnedOnUpdateTransformMutation(false),
-              RuntimeWarnedMissingCompiledScript(false)
+              RuntimeWarnedMissingCompiledScript(false),
+              RuntimeWarnedMissingAccessDeclaration(false)
         {
         }
 
@@ -652,12 +670,16 @@ namespace Limitless
             ScriptClassName = other.ScriptClassName;
             ScriptAssetRelativePath = other.ScriptAssetRelativePath;
             Enabled = other.Enabled;
+            ExecutionPolicy = other.ExecutionPolicy;
+            DeclaredReadAccessMask = other.DeclaredReadAccessMask;
+            DeclaredWriteAccessMask = other.DeclaredWriteAccessMask;
             ExposedProperties = other.ExposedProperties;
             RuntimeInstance.reset();
             RuntimeInitialized = false;
             RuntimeUpdateCount = 0;
             RuntimeWarnedOnUpdateTransformMutation = false;
             RuntimeWarnedMissingCompiledScript = false;
+            RuntimeWarnedMissingAccessDeclaration = false;
             return *this;
         }
 

@@ -1,8 +1,10 @@
 #include <doctest/doctest.h>
 
+#include "Core/ConfigManager.h"
 #include "Project/ProjectSettings.h"
 #include "Scene/Scene.h"
 #include "Scene/SceneManager.h"
+#include "Scene/SceneSystemScheduler.h"
 #include "Scripting/NativeScriptRegistry.h"
 
 #include <filesystem>
@@ -54,6 +56,43 @@ namespace
         }
     };
 
+    class ParallelSpawnScript final : public Limitless::ScriptableEntity
+    {
+    public:
+        bool Spawned = false;
+
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            if (Spawned)
+                return;
+
+            CreateEntity("ParallelSpawned");
+            Spawned = true;
+        }
+    };
+
+    class ParallelDestroyScript final : public Limitless::ScriptableEntity
+    {
+    public:
+        Limitless::Entity TargetEntity;
+        bool Destroyed = false;
+
+    protected:
+        LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()
+            LT_AUTO_EXPOSED_FIELD(TargetEntity)
+        LT_END_AUTO_EXPOSED_FIELD_SYNC()
+
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            if (Destroyed || !TargetEntity)
+                return;
+
+            DestroyEntity(TargetEntity);
+            Destroyed = true;
+        }
+    };
+
     bool IsNullEntity(entt::entity entity)
     {
         return entity == entt::null;
@@ -79,6 +118,11 @@ namespace
     std::filesystem::path MakeTempProjectRoot(const std::string& folderName)
     {
         return std::filesystem::temp_directory_path() / "LimitlessRemasterTests" / folderName;
+    }
+
+    glm::vec3 ExtractWorldPosition(const Limitless::TransformComponent& transform)
+    {
+        return glm::vec3(transform.WorldTransform[3]);
     }
 }
 
@@ -212,6 +256,164 @@ TEST_SUITE("Scene And Editor Flows")
         REQUIRE(targetSecondary != nullptr);
         CHECK(selfSecondary->ReceivedPing);
         CHECK(targetSecondary->ReceivedPing);
+    }
+
+    TEST_CASE("Depth-batched transform updates keep hierarchy depth and world transforms deterministic")
+    {
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+
+        const entt::entity root = scene.CreateEntity("RootDepth");
+        const entt::entity childA = scene.CreateEntity("ChildA");
+        const entt::entity childB = scene.CreateEntity("ChildB");
+        const entt::entity childC = scene.CreateEntity("ChildC");
+
+        REQUIRE(scene.SetParent(childA, root));
+        REQUIRE(scene.SetParent(childB, childA));
+        REQUIRE(scene.SetParent(childC, childB));
+
+        registry.get<Limitless::TransformComponent>(root).Position = { 1.0f, 0.0f, 0.0f };
+        registry.get<Limitless::TransformComponent>(childA).Position = { 2.0f, 0.0f, 0.0f };
+        registry.get<Limitless::TransformComponent>(childB).Position = { 3.0f, 0.0f, 0.0f };
+        registry.get<Limitless::TransformComponent>(childC).Position = { -1.0f, 0.0f, 0.0f };
+
+        scene.UpdateTransforms();
+
+        const auto& rootHierarchy = registry.get<Limitless::HierarchyComponent>(root);
+        const auto& childAHierarchy = registry.get<Limitless::HierarchyComponent>(childA);
+        const auto& childBHierarchy = registry.get<Limitless::HierarchyComponent>(childB);
+        const auto& childCHierarchy = registry.get<Limitless::HierarchyComponent>(childC);
+        CHECK(rootHierarchy.HierarchyDepth == 0);
+        CHECK(childAHierarchy.HierarchyDepth == 1);
+        CHECK(childBHierarchy.HierarchyDepth == 2);
+        CHECK(childCHierarchy.HierarchyDepth == 3);
+
+        CHECK(ExtractWorldPosition(registry.get<Limitless::TransformComponent>(root)).x == doctest::Approx(1.0f));
+        CHECK(ExtractWorldPosition(registry.get<Limitless::TransformComponent>(childA)).x == doctest::Approx(3.0f));
+        CHECK(ExtractWorldPosition(registry.get<Limitless::TransformComponent>(childB)).x == doctest::Approx(6.0f));
+        CHECK(ExtractWorldPosition(registry.get<Limitless::TransformComponent>(childC)).x == doctest::Approx(5.0f));
+
+        for (int iteration = 0; iteration < 3; ++iteration)
+        {
+            scene.UpdateTransforms();
+            CHECK(ExtractWorldPosition(registry.get<Limitless::TransformComponent>(childC)).x == doctest::Approx(5.0f));
+        }
+
+        auto& rootTransform = registry.get<Limitless::TransformComponent>(root);
+        rootTransform.Position.x = 10.0f;
+        scene.MarkTransformDirty(root);
+        scene.UpdateTransforms();
+
+        CHECK(ExtractWorldPosition(registry.get<Limitless::TransformComponent>(root)).x == doctest::Approx(10.0f));
+        CHECK(ExtractWorldPosition(registry.get<Limitless::TransformComponent>(childA)).x == doctest::Approx(12.0f));
+        CHECK(ExtractWorldPosition(registry.get<Limitless::TransformComponent>(childB)).x == doctest::Approx(15.0f));
+        CHECK(ExtractWorldPosition(registry.get<Limitless::TransformComponent>(childC)).x == doctest::Approx(14.0f));
+    }
+
+    TEST_CASE("Parent dirty propagation updates child world transform in same pass")
+    {
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+
+        const entt::entity parent = scene.CreateEntity("PropagationParent");
+        const entt::entity child = scene.CreateEntity("PropagationChild");
+        REQUIRE(scene.SetParent(child, parent));
+
+        auto& parentTransform = registry.get<Limitless::TransformComponent>(parent);
+        auto& childTransform = registry.get<Limitless::TransformComponent>(child);
+        parentTransform.Position = { 2.0f, 0.0f, 0.0f };
+        childTransform.Position = { 3.0f, 0.0f, 0.0f };
+
+        scene.UpdateTransforms();
+        CHECK(ExtractWorldPosition(childTransform).x == doctest::Approx(5.0f));
+
+        parentTransform.Position.x = 7.0f;
+        scene.MarkTransformDirty(parent);
+        childTransform.LocalDirty = false;
+        childTransform.Dirty = false;
+        childTransform.RuntimeWorldUpdatedThisFrame = false;
+
+        scene.UpdateTransforms();
+
+        CHECK(ExtractWorldPosition(childTransform).x == doctest::Approx(10.0f));
+        CHECK(childTransform.RuntimeWorldUpdatedThisFrame == true);
+    }
+
+    TEST_CASE("Parallel-safe scripts defer structural mutations and apply them in structural phase")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousDeferStructuralMutations = config.GetValue<bool>("ecs.mt.defer_structural_mutations", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool DeferStructuralMutations;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.defer_structural_mutations", DeferStructuralMutations);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousDeferStructuralMutations,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.defer_structural_mutations", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelSpawnScript>("ParallelSpawnScript");
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelDestroyScript>("ParallelDestroyScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+
+        const entt::entity scriptHost = scene.CreateEntity("ScriptHost");
+        const entt::entity victim = scene.CreateEntity("Victim");
+
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        scripts.Scripts[0].ScriptClassName = "ParallelSpawnScript";
+        scripts.Scripts[0].ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scripts.Scripts[0].DeclaredWriteAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+
+        scripts.Scripts.emplace_back();
+        scripts.Scripts[1].ScriptClassName = "ParallelDestroyScript";
+        scripts.Scripts[1].ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scripts.Scripts[1].DeclaredWriteAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scripts.Scripts[1].ExposedProperties["TargetEntity"] = Limitless::ScriptEntityReference{ "Victim" };
+
+        scene.Update(1.0f / 60.0f);
+
+        CHECK_FALSE(IsNullEntity(FindEntityByTag(scene, "ParallelSpawned")));
+        CHECK(scene.IsValid(victim) == false);
+        REQUIRE(scripts.Scripts[0].RuntimeInstance != nullptr);
+        REQUIRE(scripts.Scripts[1].RuntimeInstance != nullptr);
+        CHECK(scripts.Scripts[0].RuntimeUpdateCount >= 1);
+        CHECK(scripts.Scripts[1].RuntimeUpdateCount >= 1);
     }
 
     TEST_CASE("Scene clone preserves authored data and resets runtime state")

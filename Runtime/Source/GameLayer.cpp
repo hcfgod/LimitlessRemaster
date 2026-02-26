@@ -191,6 +191,11 @@ namespace Limitless
             return s_ActiveScene->InstantiatePrefab(prefabAssetKey, parentEntity);
         }
 
+        bool ForwardScriptParallelExecutionStateToHost()
+        {
+            return Scene::IsCurrentThreadParallelScriptExecution();
+        }
+
         void RegisterScriptFromModule(const char* className, NativeScriptCreateFunction createFunction)
         {
             if (className && createFunction)
@@ -922,6 +927,7 @@ namespace Limitless
         ScriptableEntity::SetCreateEntityBridgeCallback(&ForwardScriptCreateEntityToHost);
         ScriptableEntity::SetDestroyEntityBridgeCallback(&ForwardScriptDestroyEntityToHost);
         ScriptableEntity::SetInstantiatePrefabBridgeCallback(&ForwardScriptInstantiatePrefabToHost);
+        ScriptableEntity::SetParallelScriptExecutionBridgeCallback(&ForwardScriptParallelExecutionStateToHost);
 
         LT_INFO("GameLayer: ScriptCore loaded with {} script(s).",
                  NativeScriptRegistry::GetRegisteredScriptNames().size());

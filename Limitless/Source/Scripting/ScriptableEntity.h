@@ -23,6 +23,7 @@ namespace Limitless
     using ScriptCreateEntityBridgeCallback = entt::entity (*)(const char* name);
     using ScriptDestroyEntityBridgeCallback = void (*)(entt::entity entity);
     using ScriptInstantiatePrefabBridgeCallback = entt::entity (*)(const char* prefabAssetKey, entt::entity parentEntity);
+    using ScriptParallelExecutionBridgeCallback = bool (*)();
 
     // Base type for native C++ entity scripts.
     // Derive from this, register in NativeScriptRegistry, then assign in NativeScriptComponent.
@@ -109,6 +110,8 @@ namespace Limitless
                 throw std::runtime_error("ScriptableEntity has no registry binding");
             if (!m_Registry->valid(entity))
                 throw std::runtime_error("ScriptableEntity referenced invalid entity");
+            if (IsParallelScriptExecutionContext() && !m_Registry->all_of<ComponentType>(entity))
+                throw std::runtime_error("ScriptableEntity::AddComponent is not supported during parallel script execution");
             if (m_Registry->all_of<ComponentType>(entity))
                 return m_Registry->get<ComponentType>(entity);
             return m_Registry->emplace<ComponentType>(entity, std::forward<ConstructorArgs>(args)...);
@@ -127,6 +130,8 @@ namespace Limitless
                 throw std::runtime_error("ScriptableEntity has no registry binding");
             if (!m_Registry->valid(entity))
                 return;
+            if (IsParallelScriptExecutionContext() && m_Registry->all_of<ComponentType>(entity))
+                throw std::runtime_error("ScriptableEntity::RemoveComponent is not supported during parallel script execution");
             if (m_Registry->all_of<ComponentType>(entity))
                 m_Registry->remove<ComponentType>(entity);
         }
@@ -186,6 +191,7 @@ namespace Limitless
         static void SetCreateEntityBridgeCallback(ScriptCreateEntityBridgeCallback callback);
         static void SetDestroyEntityBridgeCallback(ScriptDestroyEntityBridgeCallback callback);
         static void SetInstantiatePrefabBridgeCallback(ScriptInstantiatePrefabBridgeCallback callback);
+        static void SetParallelScriptExecutionBridgeCallback(ScriptParallelExecutionBridgeCallback callback);
 
     protected:
         float GetExposedFloat(const std::string& name, float fallbackValue = 0.0f) const;
@@ -279,6 +285,7 @@ namespace Limitless
         uint64_t m_NextCoroutineIdentifier = 1;
         bool m_IsAdvancingCoroutines = false;
 
+        static bool IsParallelScriptExecutionContext();
         std::vector<ScriptableEntity*> GetRuntimeScripts(entt::entity entity) const;
     };
 }

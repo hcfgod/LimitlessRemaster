@@ -1,5 +1,7 @@
 #include "Scene/Scene.h"
 
+#include "Core/ConfigManager.h"
+#include "Core/Debug/Log.h"
 #include "Scripting/Coroutine.h"
 
 #include <algorithm>
@@ -13,10 +15,47 @@ namespace Limitless
     namespace
     {
         constexpr int32_t kSiblingOrderStep = 10;
+
+        bool IsStructuralPhaseValidationEnabled()
+        {
+            return ConfigManager::GetInstance().GetValue<bool>("ecs.mt.validate_structural_phase", true);
+        }
+
+        void ValidateImmediateStructuralMutationPhase(const Scene& scene, const char* operationName)
+        {
+            if (!IsStructuralPhaseValidationEnabled())
+                return;
+
+            // Main-thread script code can legitimately perform structural mutations today.
+            // The high-risk path is parallel script execution without deferral.
+            if (!Scene::IsCurrentThreadParallelScriptExecution())
+                return;
+
+            const Scene::RuntimePhase phase = scene.GetRuntimePhase();
+            if (phase == Scene::RuntimePhase::Idle || phase == Scene::RuntimePhase::Structural)
+                return;
+
+            if (scene.ShouldDeferStructuralMutations())
+                return;
+
+            LT_WARN("Scene structural operation '{}' executed during runtime phase {} (expected Structural phase).",
+                    operationName ? operationName : "Unknown",
+                    static_cast<uint32_t>(phase));
+        }
     }
 
     entt::entity Scene::CreateEntity(const std::string& name)
     {
+        if (ShouldDeferStructuralMutations())
+        {
+            const std::string deferredName = name;
+            EnqueueDeferredStructuralMutation([deferredName](Scene& scene) {
+                scene.CreateEntity(deferredName);
+            }, "CreateEntity");
+            return entt::null;
+        }
+        ValidateImmediateStructuralMutationPhase(*this, "CreateEntity");
+
         entt::entity entity = m_Registry.create();
         TagComponent tag{};
         tag.Tag = name;
@@ -25,6 +64,7 @@ namespace Limitless
         m_Registry.emplace<TransformComponent>(entity);
         auto& hierarchy = m_Registry.emplace<HierarchyComponent>(entity);
         m_TransformsDirty = true;
+        m_HierarchyDepthDirty = true;
 
         int32_t maxSiblingOrder = -kSiblingOrderStep;
         auto hierarchyView = m_Registry.view<HierarchyComponent>();
@@ -47,6 +87,15 @@ namespace Limitless
 
     void Scene::DestroyEntity(entt::entity entity)
     {
+        if (ShouldDeferStructuralMutations())
+        {
+            EnqueueDeferredStructuralMutation([entity](Scene& scene) {
+                scene.DestroyEntity(entity);
+            }, "DestroyEntity");
+            return;
+        }
+        ValidateImmediateStructuralMutationPhase(*this, "DestroyEntity");
+
         if (!IsValid(entity))
             return;
 
@@ -68,12 +117,14 @@ namespace Limitless
                 scriptEntry.RuntimeInitialized = false;
                 scriptEntry.RuntimeUpdateCount = 0;
                 scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
             }
         }
 
         m_Registry.destroy(entity);
         ResetPhysicsRuntimeState();
         m_TransformsDirty = true;
+        m_HierarchyDepthDirty = true;
     }
 
     bool Scene::IsValid(entt::entity entity) const
@@ -99,6 +150,15 @@ namespace Limitless
 
     bool Scene::SetParent(entt::entity child, entt::entity parent)
     {
+        if (ShouldDeferStructuralMutations())
+        {
+            EnqueueDeferredStructuralMutation([child, parent](Scene& scene) {
+                (void)scene.SetParent(child, parent);
+            }, "SetParent");
+            return true;
+        }
+        ValidateImmediateStructuralMutationPhase(*this, "SetParent");
+
         if (!IsValid(child))
             return false;
 
@@ -153,12 +213,22 @@ namespace Limitless
         }
 
         MarkTransformDirty(child);
+        m_HierarchyDepthDirty = true;
 
         return true;
     }
 
     bool Scene::SetSiblingOrderBefore(entt::entity entity, entt::entity targetSibling)
     {
+        if (ShouldDeferStructuralMutations())
+        {
+            EnqueueDeferredStructuralMutation([entity, targetSibling](Scene& scene) {
+                (void)scene.SetSiblingOrderBefore(entity, targetSibling);
+            }, "SetSiblingOrderBefore");
+            return true;
+        }
+        ValidateImmediateStructuralMutationPhase(*this, "SetSiblingOrderBefore");
+
         if (!IsValid(entity) || !IsValid(targetSibling) || entity == targetSibling)
             return false;
 
@@ -179,11 +249,21 @@ namespace Limitless
             if (hierarchy)
                 hierarchy->SiblingOrder = static_cast<int32_t>(index * kSiblingOrderStep);
         }
+        m_HierarchyDepthDirty = true;
         return true;
     }
 
     bool Scene::SetSiblingOrderAfter(entt::entity entity, entt::entity targetSibling)
     {
+        if (ShouldDeferStructuralMutations())
+        {
+            EnqueueDeferredStructuralMutation([entity, targetSibling](Scene& scene) {
+                (void)scene.SetSiblingOrderAfter(entity, targetSibling);
+            }, "SetSiblingOrderAfter");
+            return true;
+        }
+        ValidateImmediateStructuralMutationPhase(*this, "SetSiblingOrderAfter");
+
         if (!IsValid(entity) || !IsValid(targetSibling) || entity == targetSibling)
             return false;
 
@@ -204,6 +284,7 @@ namespace Limitless
             if (hierarchy)
                 hierarchy->SiblingOrder = static_cast<int32_t>(index * kSiblingOrderStep);
         }
+        m_HierarchyDepthDirty = true;
         return true;
     }
 

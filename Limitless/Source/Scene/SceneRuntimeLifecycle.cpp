@@ -65,8 +65,12 @@ namespace Limitless
 
     void Scene::StepPhysics2D(float fixedDeltaTime)
     {
+        SetRuntimePhase(RuntimePhase::Structural);
+        FlushDeferredStructuralMutations();
+
         Physics2DQueries::SetActiveSceneForScriptQueries(this);
         EnsurePhysics2DWorldCount(m_Physics2DSettings.WorldCount);
+        SetRuntimePhase(RuntimePhase::Simulation);
         for (auto& physicsWorld : m_Physics2DWorlds)
         {
             if (!physicsWorld)
@@ -77,7 +81,9 @@ namespace Limitless
             physicsWorld->Step(*this, fixedDeltaTime);
         }
         m_PhysicsWorldInitializedForLoading = true;
+        SetRuntimePhase(RuntimePhase::Transform);
         UpdateTransforms();
+        SetRuntimePhase(RuntimePhase::Idle);
     }
 
     void Scene::SetPhysics2DSettings(const Physics2DWorldSettings& settings)

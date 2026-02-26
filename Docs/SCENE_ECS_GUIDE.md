@@ -21,7 +21,72 @@ The Limitless engine uses the [EnTT](https://github.com/skypjack/entt) library f
 | `UITextComponent` | Canvas UI text payload (text, font path, size, color, raycast target) |
 | `CameraComponent` | Gameplay camera (orthographic 2D or perspective 3D; primary flag for active camera) |
 | `AudioSourceComponent` | Plays an AudioClip asset (volume, pitch, play-on-start, loop, mute) |
-| `NativeScriptComponent` | List of native C++ script entries (class, asset path, exposed properties); see `Docs/NATIVE_CPP_SCRIPTING_GUIDE.md` |
+| `NativeScriptComponent` | List of native C++ script entries (class, asset path, exposed properties, parallel execution policy/access masks); see `Docs/NATIVE_CPP_SCRIPTING_GUIDE.md` |
+
+## Runtime Phases (Jobified Frame Model)
+
+Scene runtime work is staged into explicit phases to keep structural operations deterministic while still allowing worker parallelism:
+
+- `Structural`
+- `ScriptMainThread`
+- `ScriptParallel`
+- `Simulation`
+- `Transform`
+- `RenderBuild`
+- `Idle`
+
+High-level flow during runtime:
+
+1. Flush deferred structural mutations in `Structural`.
+2. Run scripts (main-thread first, then compatible `ParallelSafe` batches in `ScriptParallel`).
+3. Run simulation systems (scheduler-compatible barriers).
+4. Solve transforms in depth batches.
+5. Build render commands.
+
+## Structural Mutation Safety
+
+Structural operations include create/destroy entity, component add/remove, and hierarchy edits (`SetParent`, sibling order changes).
+
+In parallel/runtime-sensitive contexts these are deferred through a thread-safe queue and applied in the single-threaded structural phase. This avoids registry structural races while preserving authored script ergonomics.
+
+See config rollout keys in `Docs/CONFIGURATION_GUIDE.md`:
+
+- `ecs.mt.defer_structural_mutations`
+- `ecs.mt.validate_structural_phase`
+
+## Parallel Script Compatibility
+
+`NativeScriptEntry` supports opt-in parallel execution and compatibility metadata:
+
+- `ExecutionPolicy` (`MainThread` or `ParallelSafe`)
+- `DeclaredReadAccessMask`
+- `DeclaredWriteAccessMask`
+
+Parallel script slots are batched by access compatibility (read/write hazards force barriers). Missing declarations can be configured to either:
+
+- fall back to main-thread execution (strict mode), or
+- run with conservative barriers.
+
+See:
+
+- `ecs.mt.enable_parallel_scripts`
+- `ecs.mt.require_parallel_script_access_declarations`
+- `ecs.mt.warn_implicit_parallel_script_access`
+- `ecs.mt.enable_system_scheduler`
+
+## Depth-Batched Transform Solve
+
+Hierarchy updates are solved using cached depth values (`HierarchyComponent::HierarchyDepth`) and depth barriers:
+
+- Roots at depth 0 are solved first.
+- Children at depth `n+1` run only after depth `n` completes.
+- Within a depth, transform updates can run in parallel.
+
+This preserves parent-before-child correctness while scaling wide hierarchies.
+
+See:
+
+- `ecs.mt.enable_parallel_transforms`
 
 ## Usage
 
@@ -68,7 +133,7 @@ for (entt::entity entity : view)
 
 1. Define a struct in `Limitless/Source/Scene/Components.h`.
 2. Register usage in `SceneRenderer::Render` (or custom systems) so the component is drawn or updated.
-3. If the component should be cloned when entering Play Mode, add copying logic in `Scene::Clone()` (`Limitless/Source/Scene/Scene.cpp`).
+3. If the component should be cloned when entering Play Mode, add copying logic in `Scene::Clone()` (`Limitless/Source/Scene/SceneClone.cpp`).
 4. Add Inspector UI in `EditorInspectorPanel::Draw` (or a helper used by it) so the component can be edited in the editor.
 
 ## Scene model and loading

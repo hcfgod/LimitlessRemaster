@@ -18,6 +18,7 @@ namespace Limitless
         ScriptCreateEntityBridgeCallback s_CreateEntityBridgeCallback = nullptr;
         ScriptDestroyEntityBridgeCallback s_DestroyEntityBridgeCallback = nullptr;
         ScriptInstantiatePrefabBridgeCallback s_InstantiatePrefabBridgeCallback = nullptr;
+        ScriptParallelExecutionBridgeCallback s_ParallelExecutionBridgeCallback = nullptr;
 
         std::string GetUnqualifiedClassName(const std::string& className)
         {
@@ -48,6 +49,22 @@ namespace Limitless
     void ScriptableEntity::SetInstantiatePrefabBridgeCallback(ScriptInstantiatePrefabBridgeCallback callback)
     {
         s_InstantiatePrefabBridgeCallback = callback;
+    }
+
+    void ScriptableEntity::SetParallelScriptExecutionBridgeCallback(ScriptParallelExecutionBridgeCallback callback)
+    {
+        s_ParallelExecutionBridgeCallback = callback;
+    }
+
+    bool ScriptableEntity::IsParallelScriptExecutionContext()
+    {
+        if (s_ParallelExecutionBridgeCallback)
+            return s_ParallelExecutionBridgeCallback();
+#ifndef SCRIPTCORE_EXPORTS
+        return Scene::IsCurrentThreadParallelScriptExecution();
+#else
+        return false;
+#endif
     }
 
     Entity ScriptableEntity::CreateEntity(const std::string& name)

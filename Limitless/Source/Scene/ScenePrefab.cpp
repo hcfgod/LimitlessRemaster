@@ -173,6 +173,7 @@ namespace Limitless
                     scriptEntry.RuntimeInstance.reset();
                     scriptEntry.RuntimeUpdateCount = 0;
                     scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                    scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
                 }
             }
         }
@@ -331,9 +332,13 @@ namespace Limitless
                         destinationScriptEntry.ScriptClassName = sourceScriptEntry.ScriptClassName;
                         destinationScriptEntry.ScriptAssetRelativePath = sourceScriptEntry.ScriptAssetRelativePath;
                         destinationScriptEntry.Enabled = sourceScriptEntry.Enabled;
+                        destinationScriptEntry.ExecutionPolicy = sourceScriptEntry.ExecutionPolicy;
+                        destinationScriptEntry.DeclaredReadAccessMask = sourceScriptEntry.DeclaredReadAccessMask;
+                        destinationScriptEntry.DeclaredWriteAccessMask = sourceScriptEntry.DeclaredWriteAccessMask;
                         destinationScriptEntry.ExposedProperties = sourceScriptEntry.ExposedProperties;
                         destinationScriptEntry.RuntimeInitialized = false;
                         destinationScriptEntry.RuntimeInstance.reset();
+                        destinationScriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
                     }
                 }
 
@@ -442,6 +447,15 @@ namespace Limitless
     {
         if (prefabAssetKey.empty())
             return entt::null;
+
+        if (ShouldDeferStructuralMutations())
+        {
+            const std::string deferredPrefabAssetKey = prefabAssetKey;
+            EnqueueDeferredStructuralMutation([deferredPrefabAssetKey, parentEntity](Scene& scene) {
+                (void)scene.InstantiatePrefab(deferredPrefabAssetKey, parentEntity);
+            }, "InstantiatePrefab");
+            return entt::null;
+        }
 
         auto loadedPrefabSceneResult = Scene::LoadFromFile(prefabAssetKey);
         if (const auto resolvedPath = Assets::ResolveAssetKeyToPath(prefabAssetKey); resolvedPath.IsSuccess())

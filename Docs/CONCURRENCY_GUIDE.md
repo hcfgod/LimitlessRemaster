@@ -4,6 +4,48 @@
 
 The Limitless Engine provides a comprehensive concurrency system with AsyncIO capabilities for efficient file operations. This guide covers how to use the AsyncIO system throughout the codebase.
 
+## Concurrency Domains (Important)
+
+The engine now uses two distinct worker backends with different responsibilities:
+
+- **AsyncIO pool** (`Limitless::Async::GetAsyncIO()`) for asynchronous file/config/path operations.
+- **Simulation JobSystem** (`Limitless::Concurrency::GetJobSystem()`) for ECS/runtime simulation jobs.
+
+Do not route simulation tasks through AsyncIO. Keep gameplay/frame jobs on the dedicated JobSystem so I/O pressure cannot starve frame work.
+
+## Simulation JobSystem (ECS Runtime)
+
+### Initialization
+
+When using `Limitless::Application`, the simulation job pool is initialized using `system.simulation_threads`:
+
+```cpp
+auto& jobSystem = Limitless::Concurrency::GetJobSystem();
+const size_t simulationThreadCount = configManager.GetValue<size_t>("system.simulation_threads", 0);
+jobSystem.Initialize(simulationThreadCount);
+```
+
+`0` means "engine-selected default" (hardware-aware fallback).
+
+### Usage
+
+`JobSystem` supports fire-and-forget tasks (`Submit`) and structured waits (`WaitGroup`, `ParallelFor`):
+
+```cpp
+auto& jobSystem = Limitless::Concurrency::GetJobSystem();
+Limitless::Concurrency::WaitGroup wg;
+
+wg.Add(1);
+jobSystem.Submit([&wg]() {
+    // simulation work
+    wg.Done();
+});
+
+wg.Wait();
+```
+
+This backend is used by scene runtime scheduling (parallel script batches, depth-batched transform solve, and scheduler-compatible simulation systems).
+
 ## AsyncIO System
 
 ### Initialization
@@ -481,7 +523,9 @@ TEST_CASE("AsyncIO Performance")
 ## Integration Checklist
 
 - [ ] AsyncIO initialized in main entry point
+- [ ] Simulation JobSystem initialized in main entry point
 - [ ] ConfigManager using AsyncIO for file operations
+- [ ] ECS runtime using JobSystem for simulation work (not AsyncIO)
 - [ ] FileWatcher using AsyncIO for file system operations
 - [ ] Logging system configured for AsyncIO
 - [ ] Error handling implemented for async operations

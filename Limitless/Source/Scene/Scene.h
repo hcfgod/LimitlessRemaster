@@ -6,8 +6,12 @@
 #include "Scene/Entity.h"
 
 #include <glm/glm.hpp>
+#include <atomic>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
+#include <functional>
+#include <mutex>
 #include <memory>
 #include <optional>
 #include <string>
@@ -18,7 +22,7 @@ namespace Limitless
     class Camera;
     class Framebuffer;
     class Physics2DWorld;
-    inline constexpr int kSceneSerializationVersion = 19;
+    inline constexpr int kSceneSerializationVersion = 20;
 
     // -----------------------------------------------------------------------------
     // Scene
@@ -29,6 +33,17 @@ namespace Limitless
     class Scene
     {
     public:
+        enum class RuntimePhase : uint8_t
+        {
+            Idle = 0,
+            Structural = 1,
+            ScriptMainThread = 2,
+            ScriptParallel = 3,
+            Simulation = 4,
+            Transform = 5,
+            RenderBuild = 6
+        };
+
         enum class LoadState : uint8_t
         {
             Loading = 0,
@@ -88,6 +103,16 @@ namespace Limitless
         glm::mat4 GetWorldTransformMatrixForRendering(entt::entity entity, float interpolationAlpha) const;
         void MarkTransformDirty(entt::entity entity);
         void UpdateTransforms();
+        void FlushDeferredStructuralMutations();
+        bool EnqueueDeferredStructuralMutation(std::function<void(Scene&)> mutation, const char* debugName = nullptr);
+
+        RuntimePhase GetRuntimePhase() const { return m_RuntimePhase; }
+        void SetRuntimePhase(RuntimePhase phase) { m_RuntimePhase = phase; }
+        bool IsApplyingDeferredStructuralMutations() const { return m_IsApplyingDeferredStructuralMutations; }
+        bool ShouldDeferStructuralMutations() const;
+
+        static bool IsCurrentThreadParallelScriptExecution();
+        static void SetCurrentThreadParallelScriptExecution(bool enabled);
 
         /// Runtime update for script-driven entity behavior.
         void Update(float deltaTime);
@@ -154,6 +179,18 @@ namespace Limitless
         bool m_RuntimeUiPointerOverInteractiveElement = false;
         uint64_t m_AnimationDispatchFrameCounter = 0;
         bool m_TransformsDirty = true;
+        bool m_HierarchyDepthDirty = true;
+        uint16_t m_MaxHierarchyDepth = 0;
+        RuntimePhase m_RuntimePhase = RuntimePhase::Idle;
+        bool m_IsApplyingDeferredStructuralMutations = false;
+
+        struct DeferredStructuralMutation
+        {
+            std::function<void(Scene&)> Apply;
+            std::string DebugName;
+        };
+        mutable std::mutex m_DeferredStructuralMutationsMutex;
+        std::deque<DeferredStructuralMutation> m_DeferredStructuralMutations;
     };
 
     // -----------------------------------------------------------------------------

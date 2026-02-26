@@ -868,6 +868,7 @@ namespace Limitless
 
     void SceneRenderer::Render(Scene& scene, const Camera& camera)
     {
+        scene.SetRuntimePhase(Scene::RuntimePhase::RenderBuild);
         scene.UpdateTransforms();
         Renderer2D::BeginScene(camera.GetViewProjectionMatrix(), false);
         const float fixedDelta = Time::GetFixedDeltaTimeSeconds();
@@ -1411,6 +1412,7 @@ namespace Limitless
             drawParticleEmitters();
 
         Renderer2D::EndScene();
+        scene.SetRuntimePhase(Scene::RuntimePhase::Idle);
     }
 
     void SceneRenderer::SetViewportClearColor(const glm::vec4& clearColor)

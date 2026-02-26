@@ -19,6 +19,28 @@ Derive from `ScriptableEntity` and override any of:
 - `OnUpdate(float deltaTime)` called each runtime frame in Play Mode.
 - `OnDestroy()` called when the entity is destroyed, script is disabled/removed, or scene shuts down.
 
+## Script Execution Policy and Parallelism
+
+Each native script entry has an execution policy:
+
+- `MainThread` (default-safe behavior)
+- `ParallelSafe` (eligible for worker execution)
+
+For `ParallelSafe`, declare component access masks:
+
+- `DeclaredReadAccessMask`
+- `DeclaredWriteAccessMask`
+
+The runtime builds compatible parallel batches from these masks. Read/write hazards become barriers, preserving determinism.
+
+Rollout controls (see `Docs/CONFIGURATION_GUIDE.md`):
+
+- `ecs.mt.enable_parallel_scripts`
+- `ecs.mt.require_parallel_script_access_declarations`
+- `ecs.mt.warn_implicit_parallel_script_access`
+
+If strict declarations are enabled and a `ParallelSafe` script has no access declarations, it falls back to main-thread execution for that frame and logs a warning (once per script slot).
+
 ## Entity and Component API (Unity-Style)
 
 `Limitless::Entity` is an engine-level wrapper that holds an `entt::registry*` and `entt::entity` handle. It is used from scripts, editor code, and engine code alike. It does not require a `ScriptableEntity` owner -- it is self-contained.
@@ -51,6 +73,12 @@ Behavior:
 - `RemoveComponent<T>` is safe to call even if the component is missing.
 - `TryGetComponent<T>` is the preferred null-safe accessor. Use it to avoid exceptions when a component may not exist.
 - Advanced users can still work with raw handles through `entity.GetHandle()` and low-level overloads.
+
+Parallel script safety notes:
+
+- In `ParallelSafe` execution context, `AddComponent<T>` and `RemoveComponent<T>` throw to prevent unsafe structural mutation.
+- Structural scene operations (`CreateEntity`, `DestroyEntity`, prefab instantiate, hierarchy edits) are deferred to the structural phase when `ecs.mt.defer_structural_mutations=true`.
+- Prefer data writes to already-owned components and declare those writes explicitly in `DeclaredWriteAccessMask`.
 
 ### GetComponent vs TryGetComponent
 
@@ -522,7 +550,7 @@ Suggested workflow:
 ## Current Scope
 
 - Runtime execution is active in Play Mode.
-- Scene save/load and clone preserve `NativeScriptComponent` class name and enabled state.
+- Scene save/load and clone preserve `NativeScriptComponent` authored metadata (class name, asset path, enabled state, execution policy, declared access masks, exposed properties).
 - Script runtime instances are transient and are not serialized.
 - Script authoring source-of-truth is the opened project's `Assets` folder.
 - Script build inputs are generated mirrors under `Build/Generated/ScriptCore`.

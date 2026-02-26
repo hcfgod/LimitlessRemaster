@@ -72,7 +72,19 @@ Example `config.json`:
 {
   "system": {
     "max_threads": 0,
+    "simulation_threads": 0,
     "working_directory": "."
+  },
+  "ecs": {
+    "mt": {
+      "defer_structural_mutations": true,
+      "validate_structural_phase": true,
+      "enable_system_scheduler": true,
+      "enable_parallel_scripts": true,
+      "require_parallel_script_access_declarations": true,
+      "warn_implicit_parallel_script_access": true,
+      "enable_parallel_transforms": true
+    }
   },
   "window": {
     "title": "Limitless Engine",
@@ -175,6 +187,29 @@ Common keys exposed as constants in `Limitless::Config`:
 - `Limitless::Config::System::MAX_THREADS` (`system.max_threads`)
 - `Limitless::Config::Window::WIDTH` / `HEIGHT` / `TITLE`
 - `Limitless::Config::Logging::LEVEL` and file/console toggles
+
+## ECS Multithreading Rollout Keys
+
+The ECS runtime now has dedicated multithreading rollout switches. These keys are read directly by scene/runtime systems and are designed for staged enablement and debugging.
+
+| Key | Type | Default | Purpose |
+|-----|------|---------|---------|
+| `system.simulation_threads` | integer | `0` | Worker count for the dedicated simulation `JobSystem` (`0` = engine-selected default). |
+| `ecs.mt.defer_structural_mutations` | bool | `true` | Defers structural changes (create/destroy/add/remove/set-parent) into the structural phase when called from parallel contexts. |
+| `ecs.mt.validate_structural_phase` | bool | `true` | Emits warnings when structural operations happen outside the expected structural phase in runtime/parallel contexts. |
+| `ecs.mt.enable_system_scheduler` | bool | `true` | Enables compatibility-based scene system scheduling barriers for runtime simulation systems. |
+| `ecs.mt.enable_parallel_scripts` | bool | `true` | Enables execution of `ParallelSafe` native scripts in worker jobs. |
+| `ecs.mt.require_parallel_script_access_declarations` | bool | `true` | Requires explicit script read/write masks before a `ParallelSafe` script can run in parallel; otherwise it falls back to main-thread execution. |
+| `ecs.mt.warn_implicit_parallel_script_access` | bool | `true` | Warns once per script slot when `ParallelSafe` is selected but access masks are missing. |
+| `ecs.mt.enable_parallel_transforms` | bool | `true` | Enables depth-batched parallel transform solve (with depth barriers). |
+
+Suggested rollout order:
+
+1. Enable `defer_structural_mutations` + `validate_structural_phase`.
+2. Enable `enable_system_scheduler`.
+3. Enable `enable_parallel_scripts` while keeping `require_parallel_script_access_declarations=true`.
+4. Enable `enable_parallel_transforms`.
+5. Tune `system.simulation_threads` for target CPU topology.
 
 ## Troubleshooting
 

@@ -30,7 +30,7 @@ When stopping, the editor restores the stored edit-scene instance.
 
 ### Scene Cloning Coverage
 
-Play Mode uses `Scene::Clone()` (see `Limitless/Source/Scene/Scene.cpp`). The clone copies all of the following so that the runtime scene matches the edit scene:
+Play Mode uses `Scene::Clone()` (see `Limitless/Source/Scene/SceneClone.cpp`). The clone copies all of the following so that the runtime scene matches the edit scene:
 
 **Components copied (per entity):**
 
@@ -41,7 +41,7 @@ Play Mode uses `Scene::Clone()` (see `Limitless/Source/Scene/Scene.cpp`). The cl
 - **UITextComponent** — text, font path, size, color, raycast target; font cache cleared
 - **CameraComponent** — projection type, primary flag, zoom, planes, FOV (full copy)
 - **AudioSourceComponent** — clip key, volume, pitch, play-on-start, loop, muted; runtime voice state reset
-- **NativeScriptComponent** — all script entries (class name, asset path, enabled, exposed properties); runtime instances are not copied (scripts are re-instantiated when the clone runs)
+- **NativeScriptComponent** — all script entries (class name, asset path, enabled, exposed properties, execution policy, declared read/write access masks); runtime instances and runtime warning counters are reset (scripts are re-instantiated when the clone runs)
 
 **Hierarchy:**
 

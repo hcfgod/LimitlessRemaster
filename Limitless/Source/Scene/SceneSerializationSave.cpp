@@ -515,7 +515,10 @@ namespace Limitless
                         { "Class", scriptEntry.ScriptClassName },
                         { "AssetPath", scriptEntry.ScriptAssetRelativePath },
                         { "ExposedProperties", std::move(exposedProperties) },
-                        { "Enabled", scriptEntry.Enabled }
+                        { "Enabled", scriptEntry.Enabled },
+                        { "ExecutionPolicy", scriptEntry.ExecutionPolicy == ScriptExecutionPolicy::ParallelSafe ? "ParallelSafe" : "MainThread" },
+                        { "DeclaredReadAccessMask", scriptEntry.DeclaredReadAccessMask },
+                        { "DeclaredWriteAccessMask", scriptEntry.DeclaredWriteAccessMask }
                     });
                 }
                 entry["NativeScripts"] = std::move(scriptEntries);

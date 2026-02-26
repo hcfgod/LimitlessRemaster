@@ -1,6 +1,11 @@
 #include "Scene/Scene.h"
+#include "Core/Concurrency/JobSystem.h"
+#include "Core/ConfigManager.h"
 
 #include <algorithm>
+#include <deque>
+#include <limits>
+#include <unordered_map>
 #include <vector>
 
 #include <glm/gtc/constants.hpp>
@@ -78,52 +83,133 @@ namespace Limitless
             m_TransformsDirty = true;
         }
 
-        std::vector<entt::entity> roots;
-        for (entt::entity entity : transformView)
+        if (m_HierarchyDepthDirty)
         {
-            const auto* hierarchy = m_Registry.try_get<HierarchyComponent>(entity);
-            if (!hierarchy ||
-                hierarchy->Parent == entt::null ||
-                !IsValid(hierarchy->Parent) ||
-                !m_Registry.all_of<TransformComponent>(hierarchy->Parent))
-                roots.push_back(entity);
+            const size_t transformCountEstimate = m_Registry.storage<TransformComponent>().size();
+            std::vector<entt::entity> roots;
+            roots.reserve(transformCountEstimate);
+
+            // Build a deterministic adjacency map for entities with transforms.
+            std::unordered_map<uint32_t, std::vector<entt::entity>> childrenByParent;
+            childrenByParent.reserve(transformCountEstimate);
+            for (entt::entity entity : transformView)
+            {
+                auto* hierarchy = m_Registry.try_get<HierarchyComponent>(entity);
+                if (!hierarchy)
+                    hierarchy = &m_Registry.emplace<HierarchyComponent>(entity);
+                hierarchy->HierarchyDepth = 0;
+
+                if (hierarchy->Parent == entt::null ||
+                    !IsValid(hierarchy->Parent) ||
+                    !m_Registry.all_of<TransformComponent>(hierarchy->Parent))
+                {
+                    roots.push_back(entity);
+                    continue;
+                }
+
+                childrenByParent[static_cast<uint32_t>(hierarchy->Parent)].push_back(entity);
+            }
+
+            auto sortBySiblingOrder = [this](std::vector<entt::entity>& entities) {
+                std::sort(entities.begin(), entities.end(), [this](entt::entity left, entt::entity right) {
+                    const auto* leftHierarchy = m_Registry.try_get<HierarchyComponent>(left);
+                    const auto* rightHierarchy = m_Registry.try_get<HierarchyComponent>(right);
+                    const int32_t leftOrder = leftHierarchy ? leftHierarchy->SiblingOrder : 0;
+                    const int32_t rightOrder = rightHierarchy ? rightHierarchy->SiblingOrder : 0;
+                    if (leftOrder != rightOrder)
+                        return leftOrder < rightOrder;
+                    return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
+                });
+            };
+
+            sortBySiblingOrder(roots);
+            for (auto& [parent, children] : childrenByParent)
+            {
+                (void)parent;
+                sortBySiblingOrder(children);
+            }
+
+            m_MaxHierarchyDepth = 0;
+            std::deque<entt::entity> queue;
+            queue.insert(queue.end(), roots.begin(), roots.end());
+            while (!queue.empty())
+            {
+                const entt::entity current = queue.front();
+                queue.pop_front();
+                const auto* currentHierarchy = m_Registry.try_get<HierarchyComponent>(current);
+                const uint16_t parentDepth = currentHierarchy ? currentHierarchy->HierarchyDepth : 0;
+
+                const auto foundChildren = childrenByParent.find(static_cast<uint32_t>(current));
+                if (foundChildren == childrenByParent.end())
+                    continue;
+
+                const uint16_t childDepth = parentDepth >= std::numeric_limits<uint16_t>::max()
+                    ? std::numeric_limits<uint16_t>::max()
+                    : static_cast<uint16_t>(parentDepth + 1);
+                for (entt::entity child : foundChildren->second)
+                {
+                    auto* childHierarchy = m_Registry.try_get<HierarchyComponent>(child);
+                    if (!childHierarchy)
+                        continue;
+                    childHierarchy->HierarchyDepth = childDepth;
+                    m_MaxHierarchyDepth = std::max(m_MaxHierarchyDepth, childDepth);
+                    queue.push_back(child);
+                }
+            }
+
+            m_HierarchyDepthDirty = false;
         }
 
-        std::sort(roots.begin(), roots.end(), [this](entt::entity left, entt::entity right) {
-            const auto* leftHierarchy = m_Registry.try_get<HierarchyComponent>(left);
-            const auto* rightHierarchy = m_Registry.try_get<HierarchyComponent>(right);
-            const int32_t leftOrder = leftHierarchy ? leftHierarchy->SiblingOrder : 0;
-            const int32_t rightOrder = rightHierarchy ? rightHierarchy->SiblingOrder : 0;
-            if (leftOrder != rightOrder)
-                return leftOrder < rightOrder;
-            return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
-        });
-
-        struct TraversalNode final
+        std::vector<std::vector<entt::entity>> depthBuckets(static_cast<size_t>(m_MaxHierarchyDepth) + 1);
+        for (entt::entity entity : transformView)
         {
-            entt::entity Entity = entt::null;
-            glm::mat4 ParentWorld = glm::mat4(1.0f);
-            bool ParentDirty = false;
-        };
+            auto* hierarchy = m_Registry.try_get<HierarchyComponent>(entity);
+            if (!hierarchy)
+                hierarchy = &m_Registry.emplace<HierarchyComponent>(entity);
+            const uint16_t depth = hierarchy->HierarchyDepth;
+            if (depth >= depthBuckets.size())
+                depthBuckets.resize(static_cast<size_t>(depth) + 1);
+            depthBuckets[depth].push_back(entity);
+        }
 
-        std::vector<TraversalNode> stack;
-        stack.reserve(roots.size());
-        for (auto rootIt = roots.rbegin(); rootIt != roots.rend(); ++rootIt)
-            stack.push_back({ *rootIt, glm::mat4(1.0f), false });
-
-        while (!stack.empty())
+        for (entt::entity entity : transformView)
         {
-            const TraversalNode node = stack.back();
-            stack.pop_back();
+            auto& transform = transformView.get<TransformComponent>(entity);
+            transform.RuntimeWorldUpdatedThisFrame = false;
+        }
 
-            if (!IsValid(node.Entity))
+        auto& jobSystem = Concurrency::GetJobSystem();
+        const bool enableParallelTransforms = ConfigManager::GetInstance().GetValue<bool>("ecs.mt.enable_parallel_transforms", true);
+        constexpr size_t kDepthBatchGrain = 64;
+        for (size_t depthIndex = 0; depthIndex < depthBuckets.size(); ++depthIndex)
+        {
+            auto& depthEntities = depthBuckets[depthIndex];
+            if (depthEntities.empty())
                 continue;
 
-            glm::mat4 entityWorldTransform = node.ParentWorld;
-            bool propagateDirty = node.ParentDirty;
+            auto solveTransformAtIndex = [this, &depthEntities](size_t index) {
+                const entt::entity entity = depthEntities[index];
+                if (!IsValid(entity))
+                    return;
 
-            if (auto* transform = m_Registry.try_get<TransformComponent>(node.Entity))
-            {
+                auto* transform = m_Registry.try_get<TransformComponent>(entity);
+                if (!transform)
+                    return;
+
+                glm::mat4 parentWorld = glm::mat4(1.0f);
+                bool parentUpdatedThisFrame = false;
+                if (const auto* hierarchy = m_Registry.try_get<HierarchyComponent>(entity))
+                {
+                    if (hierarchy->Parent != entt::null &&
+                        IsValid(hierarchy->Parent) &&
+                        m_Registry.all_of<TransformComponent>(hierarchy->Parent))
+                    {
+                        const auto& parentTransform = m_Registry.get<TransformComponent>(hierarchy->Parent);
+                        parentWorld = parentTransform.WorldTransform;
+                        parentUpdatedThisFrame = parentTransform.RuntimeWorldUpdatedThisFrame;
+                    }
+                }
+
                 const bool localStateChanged = transform->Position != transform->CachedLocalPosition ||
                                                transform->Rotation != transform->CachedLocalRotation ||
                                                transform->Scale != transform->CachedLocalScale;
@@ -137,20 +223,22 @@ namespace Limitless
                     transform->CachedLocalScale = transform->Scale;
                 }
 
-                const bool isDirty = node.ParentDirty || transform->Dirty || localWasDirty;
-                if (isDirty)
+                const bool shouldUpdateWorld = parentUpdatedThisFrame || transform->Dirty || localWasDirty;
+                if (shouldUpdateWorld)
                 {
-                    transform->WorldTransform = node.ParentWorld * transform->LocalTransform;
+                    transform->WorldTransform = parentWorld * transform->LocalTransform;
                     transform->Dirty = false;
                 }
+                transform->RuntimeWorldUpdatedThisFrame = shouldUpdateWorld;
+            };
 
-                entityWorldTransform = transform->WorldTransform;
-                propagateDirty = isDirty;
+            if (enableParallelTransforms && jobSystem.IsInitialized() && depthEntities.size() > 1)
+                jobSystem.ParallelFor(0, depthEntities.size(), kDepthBatchGrain, solveTransformAtIndex);
+            else
+            {
+                for (size_t entityIndex = 0; entityIndex < depthEntities.size(); ++entityIndex)
+                    solveTransformAtIndex(entityIndex);
             }
-
-            const auto children = GetChildren(node.Entity);
-            for (auto childIt = children.rbegin(); childIt != children.rend(); ++childIt)
-                stack.push_back({ *childIt, entityWorldTransform, propagateDirty });
         }
 
         m_TransformsDirty = false;

@@ -903,6 +903,12 @@ namespace Limitless
             outScriptEntry.ScriptClassName = nativeScriptJson.value("Class", std::string{});
             outScriptEntry.ScriptAssetRelativePath = nativeScriptJson.value("AssetPath", std::string{});
             outScriptEntry.Enabled = nativeScriptJson.value("Enabled", true);
+            const std::string executionPolicy = nativeScriptJson.value("ExecutionPolicy", std::string("MainThread"));
+            outScriptEntry.ExecutionPolicy = executionPolicy == "ParallelSafe"
+                ? ScriptExecutionPolicy::ParallelSafe
+                : ScriptExecutionPolicy::MainThread;
+            outScriptEntry.DeclaredReadAccessMask = nativeScriptJson.value("DeclaredReadAccessMask", 0ull);
+            outScriptEntry.DeclaredWriteAccessMask = nativeScriptJson.value("DeclaredWriteAccessMask", 0ull);
             if (nativeScriptJson.contains("ExposedProperties") && nativeScriptJson["ExposedProperties"].is_object())
             {
                 for (auto it = nativeScriptJson["ExposedProperties"].begin(); it != nativeScriptJson["ExposedProperties"].end(); ++it)
@@ -916,6 +922,8 @@ namespace Limitless
             outScriptEntry.RuntimeInstance.reset();
             outScriptEntry.RuntimeUpdateCount = 0;
             outScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+            outScriptEntry.RuntimeWarnedMissingCompiledScript = false;
+            outScriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
         }
 
         void DeserializeScriptAndPrefabComponents(const nlohmann::json& entry, Scene* scene, entt::entity entity)

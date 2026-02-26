@@ -168,6 +168,7 @@ namespace Limitless
                     scriptEntry.RuntimeInstance.reset();
                     scriptEntry.RuntimeUpdateCount = 0;
                     scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                    scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
                 }
             }
         }
@@ -395,9 +396,13 @@ namespace Limitless
                     destinationScriptEntry.ScriptAssetRelativePath = sourceScriptEntry.ScriptAssetRelativePath;
                     destinationScriptEntry.Enabled = sourceScriptEntry.Enabled;
                     destinationScriptEntry.ExposedProperties = sourceScriptEntry.ExposedProperties;
+                    destinationScriptEntry.ExecutionPolicy = sourceScriptEntry.ExecutionPolicy;
+                    destinationScriptEntry.DeclaredReadAccessMask = sourceScriptEntry.DeclaredReadAccessMask;
+                    destinationScriptEntry.DeclaredWriteAccessMask = sourceScriptEntry.DeclaredWriteAccessMask;
                     destinationScriptEntry.RuntimeInitialized = false;
                     destinationScriptEntry.RuntimeInstance.reset();
                     destinationScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                    destinationScriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
                 }
             }
 
@@ -456,6 +461,7 @@ namespace Limitless
         }
 
         clone->m_TransformsDirty = true;
+        clone->m_HierarchyDepthDirty = true;
 
         clone->m_EditorCameraBookmark = m_EditorCameraBookmark;
         clone->m_Physics2DSettings = m_Physics2DSettings;

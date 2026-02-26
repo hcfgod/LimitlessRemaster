@@ -665,6 +665,7 @@ namespace Limitless
                 scriptEntry.RuntimeInitialized = false;
                 scriptEntry.RuntimeUpdateCount = 0;
                 scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
             }
         }
     }

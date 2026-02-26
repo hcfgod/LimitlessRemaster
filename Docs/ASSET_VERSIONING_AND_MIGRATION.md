@@ -17,6 +17,19 @@ Adding a new migration when you change the scene format:
 2. In `SceneSerializationLoad.cpp`, add a migration function (e.g. `RunPostLoadXxxMigration(Scene* scene)`) that fixes data for older versions.
 3. In `Scene::LoadFromFile`, call the new migration when `loadedVersion < kSceneSerializationVersion` (or gate it by version range if the migration applies only to a specific old version).
 
+### Current version notes (v20)
+
+Scene serialization version `20` adds native-script multithreading metadata to each script entry:
+
+- `ExecutionPolicy`
+- `DeclaredReadAccessMask`
+- `DeclaredWriteAccessMask`
+
+Compatibility behavior for older scenes:
+
+- Missing fields default to safe values (`MainThread` policy and zeroed access masks).
+- Runtime-only fields remain non-serialized and are reset on load (runtime instances, counters, warning flags).
+
 ## Other JSON assets (manual pattern)
 
 There is no global asset-version registry. For **other JSON-backed assets** (prefabs, input actions, materials, etc.) you can follow the same pattern:

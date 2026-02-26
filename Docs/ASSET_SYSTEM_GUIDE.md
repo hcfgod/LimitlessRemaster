@@ -171,7 +171,8 @@ Scene serialization has been upgraded so material/texture references survive mov
 
 Implementation:
 
-- `Limitless/Source/Scene/Scene.cpp`
+- `Limitless/Source/Scene/SceneSerializationSave.cpp`
+- `Limitless/Source/Scene/SceneSerializationLoad.cpp`
 
 ## Async Loading Model (Correctness Contract)
 

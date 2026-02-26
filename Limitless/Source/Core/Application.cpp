@@ -10,6 +10,7 @@
 #include "Core/HotReloadManager.h"
 #include "Core/EventSystem.h"
 #include "Core/Concurrency/AsyncIO.h"
+#include "Core/Concurrency/JobSystem.h"
 #include "Assets/AssetHotReloadManager.h"
 #include "Assets/AssetLoadCoordinator.h"
 #include "Assets/AssetBundle.h"
@@ -51,6 +52,11 @@ namespace Limitless
 		size_t threadCount = configManager.GetValue<size_t>("system.max_threads", 0);
 		asyncIO.Initialize(threadCount);
 
+        // Dedicated simulation worker pool (separate from AsyncIO workers).
+        auto& jobSystem = Limitless::Concurrency::GetJobSystem();
+        const size_t simulationThreadCount = configManager.GetValue<size_t>("system.simulation_threads", 0);
+        jobSystem.Initialize(simulationThreadCount);
+
 		// Initialize hot reload manager
 		auto& hotReloadManager = Limitless::HotReloadManager::GetInstance();
 		hotReloadManager.Initialize();
@@ -86,6 +92,10 @@ namespace Limitless
         // Shutdown AsyncIO system
         auto& asyncIO = Limitless::Async::GetAsyncIO();
         asyncIO.Shutdown();
+
+        // Shutdown simulation job system after user/layer teardown.
+        auto& jobSystem = Limitless::Concurrency::GetJobSystem();
+        jobSystem.Shutdown();
         
 		LT_CORE_INFO("Application destructor completed");
 
