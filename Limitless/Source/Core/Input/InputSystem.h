@@ -81,6 +81,9 @@ namespace Limitless
         glm::vec2 GetMousePosition() const { return m_MousePosition; }
         glm::vec2 GetMouseDelta() const { return m_MouseDelta; }
         glm::vec2 GetMouseWheelDelta() const { return m_MouseWheelDelta; }
+        // Called by platform window code when the cursor is programmatically warped.
+        // The next SDL mouse motion event(s) are synthetic and should not affect look input.
+        void NotifyMouseWarped();
 
         // Gamepad: explicit player/device indexing for multi-player support.
         static constexpr int kMaxGamepads = 4;
@@ -148,6 +151,7 @@ namespace Limitless
         glm::vec2 m_MousePosition{0.0f, 0.0f};
         glm::vec2 m_MouseDelta{0.0f, 0.0f};
         glm::vec2 m_MouseWheelDelta{0.0f, 0.0f};
+        uint8_t m_PendingSyntheticMouseMotionEvents = 0;
 
         std::array<PerGamepadState, kMaxGamepads> m_Gamepads{};
 

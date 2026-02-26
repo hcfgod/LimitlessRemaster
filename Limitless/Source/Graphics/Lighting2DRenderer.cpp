@@ -4,6 +4,7 @@
 #include "Assets/MaterialAssetImporter.h"
 #include "Assets/ShaderAssetImporter.h"
 #include "Assets/TextureAssetImporter.h"
+#include "Core/Debug/Log.h"
 #include "Core/Time.h"
 #include "Graphics/Buffer.h"
 #include "Graphics/Camera/Camera.h"
@@ -627,44 +628,101 @@ namespace Limitless
             return drawList;
         }
 
+        void SubmitSelectDrawBuffers(const std::array<GLenum, 3>& drawBuffers, GLsizei count, const char* commandName)
+        {
+            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([drawBuffers, count, commandName](GraphicsContext*) {
+                // Keep diagnostics local to this custom command so stale errors
+                // don't leak into later OpenGL command error checks.
+                while (glGetError() != GL_NO_ERROR)
+                    ;
+
+                GLint drawFramebuffer = 0;
+                glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFramebuffer);
+                if (drawFramebuffer == 0)
+                {
+                    glDrawBuffer(GL_BACK);
+                }
+                else
+                {
+                    glDrawBuffers(count, drawBuffers.data());
+                }
+
+                GLenum error = glGetError();
+                if (error != GL_NO_ERROR)
+                {
+                    LT_CORE_ERROR("Lighting2DRenderer: {} failed (fbo={}, error=0x{:x}); applying fallback draw buffer",
+                                  commandName,
+                                  drawFramebuffer,
+                                  static_cast<uint32_t>(error));
+                    while (glGetError() != GL_NO_ERROR)
+                        ;
+
+                    if (drawFramebuffer == 0)
+                    {
+                        glDrawBuffer(GL_BACK);
+                    }
+                    else
+                    {
+                        const GLenum fallbackBuffers[] = { GL_COLOR_ATTACHMENT0 };
+                        glDrawBuffers(1, fallbackBuffers);
+                    }
+                }
+            }, commandName));
+        }
+
         void SubmitSelectGBufferDrawBuffers()
         {
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([](GraphicsContext*) {
-                const GLenum drawBuffers[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
-                glDrawBuffers(3, drawBuffers);
-            }, "Lighting2D/SetGBufferDrawBuffers"));
+            SubmitSelectDrawBuffers(
+                { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 },
+                3,
+                "Lighting2D/SetGBufferDrawBuffers");
         }
 
         void SubmitSelectAlbedoAttachmentOnly()
         {
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([](GraphicsContext*) {
-                glDrawBuffer(GL_COLOR_ATTACHMENT0);
-            }, "Lighting2D/SetAlbedoAttachmentOnly"));
+            SubmitSelectDrawBuffers(
+                { GL_COLOR_ATTACHMENT0, GL_NONE, GL_NONE },
+                1,
+                "Lighting2D/SetAlbedoAttachmentOnly");
         }
 
         void SubmitSelectNormalAndEntityAttachments()
         {
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([](GraphicsContext*) {
-                const GLenum drawBuffers[] = { GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 };
-                glDrawBuffers(2, drawBuffers);
-            }, "Lighting2D/SetNormalAndEntityAttachments"));
+            SubmitSelectDrawBuffers(
+                { GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_NONE },
+                2,
+                "Lighting2D/SetNormalAndEntityAttachments");
         }
 
         void SubmitClearNormalAttachment()
         {
             Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([](GraphicsContext*) {
+                while (glGetError() != GL_NO_ERROR)
+                    ;
                 // Alpha is the receive-shadows mask.
                 // Default to 1 so scene pixels receive shadows unless explicitly opted out.
                 const GLfloat flatNormal[4] = { 0.5f, 0.5f, 1.0f, 1.0f };
                 glClearBufferfv(GL_COLOR, 1, flatNormal);
+                if (const GLenum error = glGetError(); error != GL_NO_ERROR)
+                {
+                    LT_CORE_ERROR("Lighting2DRenderer: clearing normal attachment failed (error=0x{:x})",
+                                  static_cast<uint32_t>(error));
+                }
             }, "Lighting2D/ClearNormalAttachment"));
         }
 
         void SubmitClearEntityIdAttachment()
         {
             Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([](GraphicsContext*) {
+                while (glGetError() != GL_NO_ERROR)
+                    ;
                 const GLfloat emptyEntityId[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
                 glClearBufferfv(GL_COLOR, 2, emptyEntityId);
+                if (const GLenum error = glGetError(); error != GL_NO_ERROR)
+                {
+                    LT_CORE_ERROR("Lighting2DRenderer: clearing entity-id attachment failed (error=0x{:x})",
+                                  static_cast<uint32_t>(error));
+                }
             }, "Lighting2D/ClearEntityIdAttachment"));
         }
 

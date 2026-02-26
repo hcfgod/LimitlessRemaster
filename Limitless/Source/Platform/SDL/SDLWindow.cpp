@@ -1440,6 +1440,7 @@ namespace Limitless
     {
         LT_VERIFY(m_Window, "Window not initialized");
         SDL_WarpMouseInWindow(m_Window, static_cast<float>(x), static_cast<float>(y));
+        GetInputSystem().NotifyMouseWarped();
     }
 
     void SDLWindow::GetCursorPosition(int& x, int& y) const

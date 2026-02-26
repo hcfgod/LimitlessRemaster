@@ -18,6 +18,14 @@ namespace Limitless
         return instance;
     }
 
+    void InputSystem::NotifyMouseWarped()
+    {
+        // Some backends emit one synthetic motion event after a warp.
+        // Keep a tiny counter in case multiple warps happen before polling.
+        if (m_PendingSyntheticMouseMotionEvents < 8)
+            ++m_PendingSyntheticMouseMotionEvents;
+    }
+
     void InputSystem::BeginFrame()
     {
         m_KeyPressedThisFrame.fill(0);
@@ -434,6 +442,11 @@ namespace Limitless
     void InputSystem::OnMouseMotion(float x, float y, float dx, float dy)
     {
         m_MousePosition = glm::vec2(x, y);
+        if (m_PendingSyntheticMouseMotionEvents > 0)
+        {
+            --m_PendingSyntheticMouseMotionEvents;
+            return;
+        }
         m_MouseDelta += glm::vec2(dx, dy);
     }
 
