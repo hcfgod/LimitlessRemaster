@@ -21,7 +21,36 @@ namespace Limitless
 
     void Scene::MarkTransformDirty(entt::entity entity)
     {
-        (void)entity;
+        if (!IsValid(entity))
+            return;
+
+        std::vector<entt::entity> stack;
+        stack.push_back(entity);
+        while (!stack.empty())
+        {
+            const entt::entity current = stack.back();
+            stack.pop_back();
+
+            if (!IsValid(current))
+                continue;
+
+            bool alreadyDirty = false;
+            if (auto* transform = m_Registry.try_get<TransformComponent>(current))
+            {
+                alreadyDirty = transform->Dirty;
+                transform->Dirty = true;
+                if (current == entity)
+                    transform->LocalDirty = true;
+            }
+
+            // Avoid repeatedly re-propagating unchanged dirty subtrees.
+            if (alreadyDirty)
+                continue;
+
+            const auto children = GetChildren(current);
+            stack.insert(stack.end(), children.begin(), children.end());
+        }
+
         m_TransformsDirty = true;
     }
 
@@ -33,7 +62,11 @@ namespace Limitless
             bool hasDirtyTransform = false;
             for (entt::entity entity : transformView)
             {
-                if (transformView.get<TransformComponent>(entity).Dirty)
+                const auto& transform = transformView.get<TransformComponent>(entity);
+                const bool localStateChanged = transform.Position != transform.CachedLocalPosition ||
+                                               transform.Rotation != transform.CachedLocalRotation ||
+                                               transform.Scale != transform.CachedLocalScale;
+                if (transform.Dirty || transform.LocalDirty || localStateChanged)
                 {
                     hasDirtyTransform = true;
                     break;
@@ -66,25 +99,59 @@ namespace Limitless
             return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
         });
 
-        auto updateSubtree = [&](auto&& self, entt::entity entity, const glm::mat4& parentWorldTransform) -> void {
-            if (!IsValid(entity))
-                return;
-
-            glm::mat4 entityWorldTransform = parentWorldTransform;
-            if (auto* transform = m_Registry.try_get<TransformComponent>(entity))
-            {
-                transform->WorldTransform = parentWorldTransform * transform->GetLocalMatrix();
-                transform->Dirty = false;
-                entityWorldTransform = transform->WorldTransform;
-            }
-
-            const auto children = GetChildren(entity);
-            for (entt::entity child : children)
-                self(self, child, entityWorldTransform);
+        struct TraversalNode final
+        {
+            entt::entity Entity = entt::null;
+            glm::mat4 ParentWorld = glm::mat4(1.0f);
+            bool ParentDirty = false;
         };
 
-        for (entt::entity root : roots)
-            updateSubtree(updateSubtree, root, glm::mat4(1.0f));
+        std::vector<TraversalNode> stack;
+        stack.reserve(roots.size());
+        for (auto rootIt = roots.rbegin(); rootIt != roots.rend(); ++rootIt)
+            stack.push_back({ *rootIt, glm::mat4(1.0f), false });
+
+        while (!stack.empty())
+        {
+            const TraversalNode node = stack.back();
+            stack.pop_back();
+
+            if (!IsValid(node.Entity))
+                continue;
+
+            glm::mat4 entityWorldTransform = node.ParentWorld;
+            bool propagateDirty = node.ParentDirty;
+
+            if (auto* transform = m_Registry.try_get<TransformComponent>(node.Entity))
+            {
+                const bool localStateChanged = transform->Position != transform->CachedLocalPosition ||
+                                               transform->Rotation != transform->CachedLocalRotation ||
+                                               transform->Scale != transform->CachedLocalScale;
+                const bool localWasDirty = transform->LocalDirty || localStateChanged;
+                if (localWasDirty)
+                {
+                    transform->LocalTransform = transform->GetLocalMatrix();
+                    transform->LocalDirty = false;
+                    transform->CachedLocalPosition = transform->Position;
+                    transform->CachedLocalRotation = transform->Rotation;
+                    transform->CachedLocalScale = transform->Scale;
+                }
+
+                const bool isDirty = node.ParentDirty || transform->Dirty || localWasDirty;
+                if (isDirty)
+                {
+                    transform->WorldTransform = node.ParentWorld * transform->LocalTransform;
+                    transform->Dirty = false;
+                }
+
+                entityWorldTransform = transform->WorldTransform;
+                propagateDirty = isDirty;
+            }
+
+            const auto children = GetChildren(node.Entity);
+            for (auto childIt = children.rbegin(); childIt != children.rend(); ++childIt)
+                stack.push_back({ *childIt, entityWorldTransform, propagateDirty });
+        }
 
         m_TransformsDirty = false;
     }

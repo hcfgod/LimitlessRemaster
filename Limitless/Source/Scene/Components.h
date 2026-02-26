@@ -74,8 +74,13 @@ namespace Limitless
         glm::vec3 Position = glm::vec3(0.0f);
         glm::vec3 Rotation = glm::vec3(0.0f); ///< Euler angles in degrees (X=pitch, Y=yaw, Z=roll)
         glm::vec3 Scale = glm::vec3(1.0f);
+        glm::mat4 LocalTransform = glm::mat4(1.0f);
         glm::mat4 WorldTransform = glm::mat4(1.0f);
+        bool LocalDirty = true;
         bool Dirty = true;
+        glm::vec3 CachedLocalPosition = glm::vec3(0.0f);
+        glm::vec3 CachedLocalRotation = glm::vec3(0.0f);
+        glm::vec3 CachedLocalScale = glm::vec3(1.0f);
 
         glm::mat4 GetLocalMatrix() const;
     };

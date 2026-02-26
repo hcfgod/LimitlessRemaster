@@ -20,6 +20,7 @@ namespace Limitless
         struct HasTransformDirtyFields<T, std::void_t<decltype(std::declval<T&>().Dirty), decltype(std::declval<T&>().WorldTransform)>> : std::true_type
         {
         };
+
     }
 
     // -------------------------------------------------------------------------
@@ -118,7 +119,9 @@ namespace Limitless
             if constexpr (detail::HasTransformDirtyFields<ComponentType>::value)
             {
                 if (component)
+                {
                     component->Dirty = true;
+                }
             }
             return component;
         }
