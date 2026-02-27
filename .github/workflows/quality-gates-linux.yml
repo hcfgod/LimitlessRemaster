@@ -183,8 +183,10 @@ jobs:
             exit 1
           fi
 
-          for source_file in "${source_files[@]}"; do
-            clang-tidy "$source_file" -p . \
-              -checks='-*,clang-analyzer-*' \
-              -warnings-as-errors='*'
-          done
+          printf '%s\n' "${source_files[@]}" > clang-tidy-files.txt
+
+          # Run in batches to reduce process startup overhead and keep logs concise.
+          xargs -r -a clang-tidy-files.txt -n 40 \
+            clang-tidy -p . -quiet \
+            -checks='-*,clang-analyzer-*' \
+            -warnings-as-errors='*'

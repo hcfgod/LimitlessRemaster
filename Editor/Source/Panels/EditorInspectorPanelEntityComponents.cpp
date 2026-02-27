@@ -3062,12 +3062,12 @@ namespace Limitless::EditorInspectorPanel
                     }
 
                     ImGui::SameLine();
-                    if (!isPaused)
+                    if (isPlaying)
                     {
                         if (ImGui::Button("Pause##ParticleEmitter"))
                             ParticleEmitterPause(*particleEmitter);
                     }
-                    else
+                    else if (isPaused)
                     {
                         if (ImGui::Button("Resume##ParticleEmitter"))
                             ParticleEmitterResume(*particleEmitter);

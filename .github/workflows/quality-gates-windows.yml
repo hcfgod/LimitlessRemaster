@@ -191,9 +191,12 @@ jobs:
             exit 1
           }
 
+          $chunkSize = 40
           $hadFailure = $false
-          foreach ($sourceFile in $sourceFiles) {
-            clang-tidy $sourceFile -p . -checks='-*,clang-analyzer-*' -warnings-as-errors='*'
+          for ($i = 0; $i -lt $sourceFiles.Count; $i += $chunkSize) {
+            $end = [Math]::Min($i + $chunkSize - 1, $sourceFiles.Count - 1)
+            $batch = $sourceFiles[$i..$end]
+            & clang-tidy @batch -p . -quiet -checks='-*,clang-analyzer-*' -warnings-as-errors='*'
             if ($LASTEXITCODE -ne 0) {
               $hadFailure = $true
             }

@@ -107,11 +107,49 @@ jobs:
 
       - name: Run clang-tidy (hard fail on warnings)
         run: |
-          CLANG_TIDY_BIN="$(brew --prefix llvm)/bin/clang-tidy"
+          CLANG_TIDY_BIN="$(xcrun --find clang-tidy 2>/dev/null || true)"
+          if [ -z "$CLANG_TIDY_BIN" ]; then
+            CLANG_TIDY_BIN="$(brew --prefix llvm)/bin/clang-tidy"
+          fi
           if [ ! -x "$CLANG_TIDY_BIN" ]; then
             echo "clang-tidy not found at $CLANG_TIDY_BIN"
             exit 1
           fi
+
+          # Homebrew clang-tidy can fail on Apple-clang generated PCH artifacts.
+          # Strip -include-pch flags from compile_commands to keep analysis portable.
+          python3 - <<'PY'
+          import json
+          import shlex
+
+          with open("compile_commands.json", "r", encoding="utf-8") as f:
+              database = json.load(f)
+
+          for entry in database:
+              args = entry.get("arguments")
+              if args is None:
+                  args = shlex.split(entry.get("command", ""))
+                  entry["arguments"] = args
+                  entry.pop("command", None)
+
+              cleaned = []
+              i = 0
+              while i < len(args):
+                  arg = args[i]
+                  if arg == "-include-pch":
+                      i += 2
+                      continue
+                  if arg.startswith("-include-pch="):
+                      i += 1
+                      continue
+                  cleaned.append(arg)
+                  i += 1
+
+              entry["arguments"] = cleaned
+
+          with open("compile_commands.json", "w", encoding="utf-8") as f:
+              json.dump(database, f, indent=2)
+          PY
 
           git ls-files | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt
           if [ ! -s clang-tidy-files.txt ]; then
@@ -119,9 +157,7 @@ jobs:
             exit 1
           fi
 
-          while IFS= read -r source_file; do
-            [ -n "$source_file" ] || continue
-            "$CLANG_TIDY_BIN" "$source_file" -p . \
-              -checks='-*,clang-analyzer-*' \
-              -warnings-as-errors='*'
-          done < clang-tidy-files.txt
+          # Batch files per invocation to reduce startup cost and log volume.
+          xargs -n 40 "$CLANG_TIDY_BIN" -p . -quiet \
+            -checks='-*,clang-analyzer-*' \
+            -warnings-as-errors='*' < clang-tidy-files.txt
