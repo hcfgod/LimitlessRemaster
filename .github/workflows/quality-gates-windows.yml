@@ -41,13 +41,28 @@ jobs:
             exit $LASTEXITCODE
           }
 
-      - name: Build with MSVC code analysis (hard gate)
+      - name: Build solution dependencies
         run: |
           msbuild LimitlessRemaster.sln `
             /p:Configuration=Debug `
             /p:Platform=x64 `
             /m `
             /p:BuildProjectReferences=true `
+            /p:RunCodeAnalysis=false `
+            /v:minimal
+
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Build with MSVC code analysis (first-party hard gate)
+        run: |
+          msbuild LimitlessRemaster.sln `
+            "/t:Limitless;Runtime;Editor;Test" `
+            /p:Configuration=Debug `
+            /p:Platform=x64 `
+            /m `
+            /p:BuildProjectReferences=false `
             /p:RunCodeAnalysis=true `
             /p:CodeAnalysisTreatWarningsAsErrors=true `
             /p:TreatWarningsAsErrors=true `
@@ -96,7 +111,10 @@ jobs:
       - name: Install ms2cc
         run: |
           $release = Invoke-RestMethod -Uri "https://api.github.com/repos/freddiehaddad/ms2cc/releases/latest"
-          $asset = $release.assets | Where-Object { $_.name -match 'windows' -or $_.name -match '\.zip$' } | Select-Object -First 1
+          $asset = $release.assets | Where-Object { $_.name -match '(?i)(windows|win).*\.zip$' } | Select-Object -First 1
+          if ($null -eq $asset) {
+            $asset = $release.assets | Where-Object { $_.name -match '\.zip$' } | Select-Object -First 1
+          }
           if ($null -eq $asset) {
             Write-Error "Unable to locate a downloadable ms2cc release asset."
             exit 1
@@ -147,7 +165,7 @@ jobs:
             /p:BuildProjectReferences=true `
             /v:detailed `
             /fl `
-            /flp:logfile=msbuild.log;verbosity=detailed
+            "/flp:logfile=msbuild.log;verbosity=detailed"
 
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE

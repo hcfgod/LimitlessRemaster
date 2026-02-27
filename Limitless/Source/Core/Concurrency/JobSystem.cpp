@@ -11,27 +11,27 @@ namespace Limitless::Concurrency
     {
         if (count == 0)
             return;
-        m_Remaining.fetch_add(count, std::memory_order_relaxed);
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        m_Remaining += count;
     }
 
     void WaitGroup::Done()
     {
-        const uint32_t previous = m_Remaining.fetch_sub(1, std::memory_order_acq_rel);
-        if (previous == 1)
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        if (m_Remaining == 0)
+            return;
+        --m_Remaining;
+        if (m_Remaining == 0)
         {
-            std::lock_guard<std::mutex> lock(m_Mutex);
             m_Condition.notify_all();
         }
     }
 
     void WaitGroup::Wait()
     {
-        if (m_Remaining.load(std::memory_order_acquire) == 0)
-            return;
-
         std::unique_lock<std::mutex> lock(m_Mutex);
         m_Condition.wait(lock, [this]() {
-            return m_Remaining.load(std::memory_order_acquire) == 0;
+            return m_Remaining == 0;
         });
     }
 

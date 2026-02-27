@@ -22,7 +22,7 @@ namespace Limitless::Concurrency
         void Wait();
 
     private:
-        std::atomic<uint32_t> m_Remaining{ 0 };
+        uint32_t m_Remaining = 0;
         std::mutex m_Mutex;
         std::condition_variable m_Condition;
     };

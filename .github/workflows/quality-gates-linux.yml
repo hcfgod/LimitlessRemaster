@@ -183,7 +183,8 @@ jobs:
             exit 1
           fi
 
-          printf '%s\n' "${source_files[@]}" | xargs -r -n 1 -P "$(nproc)" \
-            clang-tidy -p . \
-            -checks='-*,clang-analyzer-*' \
-            -warnings-as-errors='*'
+          for source_file in "${source_files[@]}"; do
+            clang-tidy "$source_file" -p . \
+              -checks='-*,clang-analyzer-*' \
+              -warnings-as-errors='*'
+          done
