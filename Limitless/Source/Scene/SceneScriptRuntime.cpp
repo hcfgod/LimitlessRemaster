@@ -26,6 +26,26 @@ namespace Limitless
 
         constexpr float kScriptTransformDirtyEpsilon = 0.0001f;
 
+        size_t ResolveParallelScriptMinSlots(const Concurrency::JobSystem& jobSystem)
+        {
+            auto& config = ConfigManager::GetInstance();
+            const size_t configuredMinSlots = config.GetValue<size_t>("ecs.mt.parallel_script_min_slots", 0);
+            if (configuredMinSlots > 0)
+                return std::max<size_t>(1, configuredMinSlots);
+
+            const size_t configuredSlotsPerWorker =
+                std::max<size_t>(1, config.GetValue<size_t>("ecs.mt.parallel_script_min_slots_per_worker", 2));
+            const size_t workerCount = std::max<size_t>(1, jobSystem.GetWorkerCount());
+            return std::max<size_t>(2, workerCount * configuredSlotsPerWorker);
+        }
+
+        size_t ResolveParallelScriptMinBatchSize()
+        {
+            const size_t configuredMinBatchSize =
+                ConfigManager::GetInstance().GetValue<size_t>("ecs.mt.parallel_script_min_batch_size", 2);
+            return std::max<size_t>(2, configuredMinBatchSize);
+        }
+
         bool HasTransformChangedForAccessValidation(const TransformComponent& before, const TransformComponent& after)
         {
             const bool positionChanged = glm::length(after.Position - before.Position) > kScriptTransformDirtyEpsilon;
@@ -537,6 +557,21 @@ namespace Limitless
             if (!nativeScript || scriptIndex >= nativeScript->Scripts.size())
                 return nullptr;
             return &nativeScript->Scripts[scriptIndex];
+        };
+
+        auto applyScriptDeclaredAccessDefaults = [&](NativeScriptEntry& scriptEntry) {
+            if (!scriptEntry.RuntimeInstance)
+                return;
+            if (scriptEntry.DeclaredReadAccessMask != 0 || scriptEntry.DeclaredWriteAccessMask != 0)
+                return;
+
+            const uint64_t defaultReadMask = scriptEntry.RuntimeInstance->GetDeclaredReadAccessMask();
+            const uint64_t defaultWriteMask = scriptEntry.RuntimeInstance->GetDeclaredWriteAccessMask();
+            if (defaultReadMask != 0 || defaultWriteMask != 0)
+            {
+                scriptEntry.DeclaredReadAccessMask = defaultReadMask;
+                scriptEntry.DeclaredWriteAccessMask = defaultWriteMask;
+            }
         };
 
         auto handleScriptCallbackFailure = [&](entt::entity scriptEntity,
@@ -1325,6 +1360,7 @@ namespace Limitless
                 scriptEntry->RuntimeInitialized = true;
             }
 
+            applyScriptDeclaredAccessDefaults(*scriptEntry);
             if (tryQueueParallelScriptSlot(entity, scriptIndex, *scriptEntry))
             {
                 continue;
@@ -1335,8 +1371,11 @@ namespace Limitless
 
         if (!parallelScriptSlots.empty())
         {
-            SetRuntimePhase(RuntimePhase::ScriptParallel);
             auto& jobSystem = Concurrency::GetJobSystem();
+            const size_t parallelScriptMinSlots = ResolveParallelScriptMinSlots(jobSystem);
+            const size_t parallelScriptMinBatchSize = ResolveParallelScriptMinBatchSize();
+            const bool shouldUseParallelJobs = jobSystem.IsInitialized() &&
+                                               parallelScriptSlots.size() >= parallelScriptMinSlots;
             auto runParallelSlotAtIndex = [&](size_t slotIndex) {
                 struct ScopedParallelScriptThreadFlag final
                 {
@@ -1347,6 +1386,8 @@ namespace Limitless
                 const auto& slot = parallelScriptSlots[slotIndex];
                 executeScriptUpdateSlot(slot.first, slot.second);
             };
+            if (shouldUseParallelJobs)
+                SetRuntimePhase(RuntimePhase::ScriptParallel);
 
             auto hasAccessHazard = [](const SceneSystemAccess& left, const SceneSystemAccess& right) {
                 return (left.Writes & right.Writes) != 0 ||
@@ -1405,7 +1446,7 @@ namespace Limitless
                     nextPendingIndices.erase(std::remove(nextPendingIndices.begin(), nextPendingIndices.end(), pendingIndices.front()), nextPendingIndices.end());
                 }
 
-                if (jobSystem.IsInitialized() && batchIndices.size() > 1)
+                if (shouldUseParallelJobs && batchIndices.size() >= parallelScriptMinBatchSize)
                 {
                     Concurrency::WaitGroup waitGroup;
                     for (size_t batchIndex : batchIndices)
@@ -1465,6 +1506,21 @@ namespace Limitless
             if (!nativeScript || scriptIndex >= nativeScript->Scripts.size())
                 return nullptr;
             return &nativeScript->Scripts[scriptIndex];
+        };
+
+        auto applyScriptDeclaredAccessDefaults = [&](NativeScriptEntry& scriptEntry) {
+            if (!scriptEntry.RuntimeInstance)
+                return;
+            if (scriptEntry.DeclaredReadAccessMask != 0 || scriptEntry.DeclaredWriteAccessMask != 0)
+                return;
+
+            const uint64_t defaultReadMask = scriptEntry.RuntimeInstance->GetDeclaredReadAccessMask();
+            const uint64_t defaultWriteMask = scriptEntry.RuntimeInstance->GetDeclaredWriteAccessMask();
+            if (defaultReadMask != 0 || defaultWriteMask != 0)
+            {
+                scriptEntry.DeclaredReadAccessMask = defaultReadMask;
+                scriptEntry.DeclaredWriteAccessMask = defaultWriteMask;
+            }
         };
 
         auto handleScriptCallbackFailure = [&](entt::entity scriptEntity,
@@ -2224,6 +2280,7 @@ namespace Limitless
                 scriptEntry->RuntimeInitialized = true;
             }
 
+            applyScriptDeclaredAccessDefaults(*scriptEntry);
             if (tryQueueParallelScriptSlot(entity, scriptIndex, *scriptEntry))
             {
                 continue;
@@ -2234,8 +2291,11 @@ namespace Limitless
 
         if (!parallelScriptSlots.empty())
         {
-            SetRuntimePhase(RuntimePhase::ScriptParallel);
             auto& jobSystem = Concurrency::GetJobSystem();
+            const size_t parallelScriptMinSlots = ResolveParallelScriptMinSlots(jobSystem);
+            const size_t parallelScriptMinBatchSize = ResolveParallelScriptMinBatchSize();
+            const bool shouldUseParallelJobs = jobSystem.IsInitialized() &&
+                                               parallelScriptSlots.size() >= parallelScriptMinSlots;
             auto runParallelSlotAtIndex = [&](size_t slotIndex) {
                 struct ScopedParallelScriptThreadFlag final
                 {
@@ -2246,6 +2306,8 @@ namespace Limitless
                 const auto& slot = parallelScriptSlots[slotIndex];
                 executeScriptFixedUpdateSlot(slot.first, slot.second);
             };
+            if (shouldUseParallelJobs)
+                SetRuntimePhase(RuntimePhase::ScriptParallel);
 
             auto hasAccessHazard = [](const SceneSystemAccess& left, const SceneSystemAccess& right) {
                 return (left.Writes & right.Writes) != 0 ||
@@ -2304,7 +2366,7 @@ namespace Limitless
                     nextPendingIndices.erase(std::remove(nextPendingIndices.begin(), nextPendingIndices.end(), pendingIndices.front()), nextPendingIndices.end());
                 }
 
-                if (jobSystem.IsInitialized() && batchIndices.size() > 1)
+                if (shouldUseParallelJobs && batchIndices.size() >= parallelScriptMinBatchSize)
                 {
                     Concurrency::WaitGroup waitGroup;
                     for (size_t batchIndex : batchIndices)

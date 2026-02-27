@@ -3,6 +3,7 @@
 #include "Core/Error.h"
 #include "EnTT/entt.hpp"
 #include "Scene/Entity.h"
+#include "Scene/SceneSystemScheduler.h"
 #include "Scripting/CoroutineTypes.h"
 #include "Scripting/ScriptProperty.h"
 
@@ -16,6 +17,35 @@
 
 namespace Limitless
 {
+    struct ScriptAccess
+    {
+        static constexpr uint64_t None = 0ull;
+
+        static constexpr uint64_t Transform = ToAccessMask(SceneSystemAccessComponent::Transform);
+        static constexpr uint64_t Hierarchy = ToAccessMask(SceneSystemAccessComponent::Hierarchy);
+        static constexpr uint64_t Rigidbody2D = ToAccessMask(SceneSystemAccessComponent::Rigidbody2D);
+        static constexpr uint64_t BoxCollider2D = ToAccessMask(SceneSystemAccessComponent::BoxCollider2D);
+        static constexpr uint64_t CircleCollider2D = ToAccessMask(SceneSystemAccessComponent::CircleCollider2D);
+        static constexpr uint64_t Joint2D = ToAccessMask(SceneSystemAccessComponent::Joint2D);
+        static constexpr uint64_t Animator = ToAccessMask(SceneSystemAccessComponent::Animator);
+        static constexpr uint64_t ParticleEmitter = ToAccessMask(SceneSystemAccessComponent::ParticleEmitter);
+        static constexpr uint64_t NativeScript = ToAccessMask(SceneSystemAccessComponent::NativeScript);
+
+        static constexpr uint64_t Rendering2D = ToAccessMask(SceneSystemAccessComponent::Rendering2D);
+        static constexpr uint64_t Lighting2D = ToAccessMask(SceneSystemAccessComponent::Lighting2D);
+        static constexpr uint64_t UI = ToAccessMask(SceneSystemAccessComponent::UI);
+        static constexpr uint64_t Audio = ToAccessMask(SceneSystemAccessComponent::Audio);
+        static constexpr uint64_t Camera = ToAccessMask(SceneSystemAccessComponent::Camera);
+        static constexpr uint64_t Tilemap = ToAccessMask(SceneSystemAccessComponent::Tilemap);
+        static constexpr uint64_t Metadata = ToAccessMask(SceneSystemAccessComponent::Metadata);
+
+        template<typename... Masks>
+        static constexpr uint64_t Combine(Masks... masks)
+        {
+            return (0ull | ... | static_cast<uint64_t>(masks));
+        }
+    };
+
     class Scene;
     class Coroutine;
     class ScriptableEntity;
@@ -193,6 +223,11 @@ namespace Limitless
         static void SetInstantiatePrefabBridgeCallback(ScriptInstantiatePrefabBridgeCallback callback);
         static void SetParallelScriptExecutionBridgeCallback(ScriptParallelExecutionBridgeCallback callback);
 
+        // Optional class-level declaration for parallel compatibility scheduling.
+        // If a NativeScriptEntry has no authored masks, runtime will use these defaults.
+        virtual uint64_t GetDeclaredReadAccessMask() const { return ScriptAccess::None; }
+        virtual uint64_t GetDeclaredWriteAccessMask() const { return ScriptAccess::None; }
+
     protected:
         float GetExposedFloat(const std::string& name, float fallbackValue = 0.0f) const;
         int32_t GetExposedInteger(const std::string& name, int32_t fallbackValue = 0) const;
@@ -298,3 +333,7 @@ namespace Limitless
         LT_SYNC_EXPOSED_FIELD(FieldName);
 #define LT_END_AUTO_EXPOSED_FIELD_SYNC() \
     }
+#define LT_SCRIPT_ACCESS_MASK(...) ::Limitless::ScriptAccess::Combine(__VA_ARGS__)
+#define LT_DECLARE_SCRIPT_ACCESS(ReadMaskExpr, WriteMaskExpr) \
+    uint64_t GetDeclaredReadAccessMask() const override { return static_cast<uint64_t>(ReadMaskExpr); } \
+    uint64_t GetDeclaredWriteAccessMask() const override { return static_cast<uint64_t>(WriteMaskExpr); }

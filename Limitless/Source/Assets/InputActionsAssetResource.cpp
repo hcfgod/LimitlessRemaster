@@ -193,6 +193,9 @@ namespace Limitless::Assets
                 return created;
             });
 
+            // Ensure transient loading UI state is cleared even when the asset came from cache
+            // and the creation lambda did not execute.
+            AssetLoadProgress::ClearProgress(key);
             promise.set_value(std::move(asset));
         });
 

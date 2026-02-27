@@ -1,6 +1,6 @@
 {
     "deps": [],
-    "guid": "57f72296-44e1-4dbd-b34f-e901b3c1e0db",
+    "guid": "cca2f193-5672-4ba5-8dd8-607a92891ec8",
     "key": "Assets/Shaders/Renderer2D_TexturedQuad.glsl",
     "type": "Shader"
 }

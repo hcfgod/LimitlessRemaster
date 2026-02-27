@@ -209,6 +209,21 @@ namespace
         }
     };
 
+    class ParallelHelperDeclaredAccessScript final : public Limitless::ScriptableEntity
+    {
+    public:
+        LT_DECLARE_SCRIPT_ACCESS(
+            LT_SCRIPT_ACCESS_MASK(Limitless::ScriptAccess::Transform),
+            LT_SCRIPT_ACCESS_MASK(Limitless::ScriptAccess::Transform))
+
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            auto& transform = GetComponent<Limitless::TransformComponent>();
+            transform.Position.x += 2.0f;
+        }
+    };
+
     bool IsNullEntity(entt::entity entity)
     {
         return entity == entt::null;
@@ -1329,6 +1344,82 @@ TEST_SUITE("Scene And Editor Flows")
 
         CHECK(registry.get<Limitless::ParticleEmitterComponent>(scriptHost).SpawnRate == doctest::Approx(15.0f));
         CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == true);
+        CHECK(scriptEntry.RuntimeUpdateCount >= 1);
+    }
+
+    TEST_CASE("Parallel-safe scripts can declare access masks with helper macros")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateAccessMasks = config.GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+        const bool previousWarnAccessMaskMismatch = config.GetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateAccessMasks;
+            bool WarnAccessMaskMismatch;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_parallel_script_access_masks", ValidateAccessMasks);
+                Config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", WarnAccessMaskMismatch);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateAccessMasks,
+            previousWarnAccessMaskMismatch
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", true);
+        config.SetValue("ecs.mt.validate_parallel_script_access_masks", true);
+        config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelHelperDeclaredAccessScript>("ParallelHelperDeclaredAccessScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelHelperDeclaredAccessHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelHelperDeclaredAccessScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = 0;
+        scriptEntry.DeclaredWriteAccessMask = 0;
+
+        auto& transform = registry.get<Limitless::TransformComponent>(scriptHost);
+        const float initialX = transform.Position.x;
+        scene.Update(1.0f / 60.0f);
+
+        CHECK(transform.Position.x == doctest::Approx(initialX + 2.0f));
+        CHECK(scriptEntry.DeclaredReadAccessMask == Limitless::ScriptAccess::Transform);
+        CHECK(scriptEntry.DeclaredWriteAccessMask == Limitless::ScriptAccess::Transform);
+        CHECK(scriptEntry.RuntimeWarnedMissingAccessDeclaration == false);
+        CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == false);
         CHECK(scriptEntry.RuntimeUpdateCount >= 1);
     }
 

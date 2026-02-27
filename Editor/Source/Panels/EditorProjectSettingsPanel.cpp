@@ -3,6 +3,8 @@
 #include "EditorAssetNaming.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetTypes.h"
+#include "Core/Concurrency/JobSystem.h"
+#include "Core/ConfigManager.h"
 #include "Core/Input/InputSystem.h"
 #include "Project/ProjectManager.h"
 
@@ -230,6 +232,106 @@ namespace Limitless::EditorProjectSettingsPanel
         {
             state.StatusIsError = isError;
             state.StatusMessage = msg;
+        }
+
+        void DrawEcsMultithreadingRuntimeEditor(EditorProjectSettingsPanelState& state)
+        {
+            auto& config = ConfigManager::GetInstance();
+            auto& jobSystem = Concurrency::GetJobSystem();
+
+            auto drawToggle = [&](const char* label, const char* widgetId, const char* configKey, bool defaultValue, const char* tooltip = nullptr) {
+                bool enabled = config.GetValue<bool>(configKey, defaultValue);
+                ImGui::TextUnformatted(label);
+                if (ImGui::Checkbox(widgetId, &enabled))
+                    config.SetValue<bool>(configKey, enabled);
+                if (tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                    ImGui::SetTooltip("%s", tooltip);
+            };
+
+            drawToggle("Enable System Scheduler",
+                       "##EcsMtEnableSystemScheduler",
+                       "ecs.mt.enable_system_scheduler",
+                       true,
+                       "Compatibility-based simulation barrier scheduling.");
+            drawToggle("Enable Parallel Scripts",
+                       "##EcsMtEnableParallelScripts",
+                       "ecs.mt.enable_parallel_scripts",
+                       true,
+                       "Allows ParallelSafe scripts to run on workers.");
+            drawToggle("Require Parallel Script Access Declarations",
+                       "##EcsMtRequireParallelScriptAccessDeclarations",
+                       "ecs.mt.require_parallel_script_access_declarations",
+                       true,
+                       "If enabled, undeclared ParallelSafe scripts stay on the main thread.");
+            drawToggle("Warn Implicit Parallel Script Access",
+                       "##EcsMtWarnImplicitParallelScriptAccess",
+                       "ecs.mt.warn_implicit_parallel_script_access",
+                       true);
+            drawToggle("Validate Parallel Script Access Masks",
+                       "##EcsMtValidateParallelScriptAccessMasks",
+                       "ecs.mt.validate_parallel_script_access_masks",
+                       true);
+            drawToggle("Warn Parallel Script Access Mismatch",
+                       "##EcsMtWarnParallelScriptAccessMismatch",
+                       "ecs.mt.warn_parallel_script_access_mismatch",
+                       true);
+            drawToggle("Enable Parallel Physics World Step",
+                       "##EcsMtEnableParallelPhysicsWorldStep",
+                       "ecs.mt.enable_parallel_physics_world_step",
+                       true);
+            drawToggle("Enable Parallel Transforms",
+                       "##EcsMtEnableParallelTransforms",
+                       "ecs.mt.enable_parallel_transforms",
+                       true);
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Parallel script job heuristics");
+
+            int minSlots = static_cast<int>(config.GetValue<size_t>("ecs.mt.parallel_script_min_slots", 0));
+            ImGui::TextUnformatted("Parallel Script Min Slots (0 = auto)");
+            if (ImGui::DragInt("##EcsMtParallelScriptMinSlots", &minSlots, 1.0f, 0, 4096))
+                config.SetValue<size_t>("ecs.mt.parallel_script_min_slots", static_cast<size_t>(std::max(0, minSlots)));
+
+            int minSlotsPerWorker = static_cast<int>(config.GetValue<size_t>("ecs.mt.parallel_script_min_slots_per_worker", 2));
+            ImGui::TextUnformatted("Parallel Script Min Slots Per Worker");
+            if (ImGui::DragInt("##EcsMtParallelScriptMinSlotsPerWorker", &minSlotsPerWorker, 1.0f, 1, 64))
+                config.SetValue<size_t>("ecs.mt.parallel_script_min_slots_per_worker", static_cast<size_t>(std::max(1, minSlotsPerWorker)));
+
+            int minBatchSize = static_cast<int>(config.GetValue<size_t>("ecs.mt.parallel_script_min_batch_size", 2));
+            ImGui::TextUnformatted("Parallel Script Min Batch Size");
+            if (ImGui::DragInt("##EcsMtParallelScriptMinBatchSize", &minBatchSize, 1.0f, 2, 256))
+                config.SetValue<size_t>("ecs.mt.parallel_script_min_batch_size", static_cast<size_t>(std::max(2, minBatchSize)));
+
+            const size_t autoSlotsPerWorker =
+                std::max<size_t>(1, config.GetValue<size_t>("ecs.mt.parallel_script_min_slots_per_worker", 2));
+            const size_t workerCount = std::max<size_t>(1, jobSystem.GetWorkerCount());
+            const size_t autoThreshold = std::max<size_t>(2, workerCount * autoSlotsPerWorker);
+            if (minSlots <= 0)
+                ImGui::TextDisabled("Auto threshold: %zu slots (%zu workers x %zu per worker)", autoThreshold, workerCount, autoSlotsPerWorker);
+
+            if (ImGui::Button("Reset ECS MT Defaults", ImVec2(200, 0)))
+            {
+                config.SetValue<bool>("ecs.mt.enable_system_scheduler", true);
+                config.SetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+                config.SetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+                config.SetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+                config.SetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+                config.SetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+                config.SetValue<bool>("ecs.mt.enable_parallel_physics_world_step", true);
+                config.SetValue<bool>("ecs.mt.enable_parallel_transforms", true);
+                config.SetValue<size_t>("ecs.mt.parallel_script_min_slots", 0);
+                config.SetValue<size_t>("ecs.mt.parallel_script_min_slots_per_worker", 2);
+                config.SetValue<size_t>("ecs.mt.parallel_script_min_batch_size", 2);
+                SetStatus(state, false, "Reset ECS MT runtime settings to defaults.");
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Save Runtime Config", ImVec2(170, 0)))
+            {
+                if (config.SaveToFile())
+                    SetStatus(state, false, "Saved runtime config to config.json.");
+                else
+                    SetStatus(state, true, "Failed to save runtime config.");
+            }
         }
 
         bool EnsureLoaded(EditorProjectSettingsPanelState& state, const std::filesystem::path& projectRoot)
@@ -662,6 +764,12 @@ namespace Limitless::EditorProjectSettingsPanel
                 state.Lighting2D.AmbientIntensity = std::max(0.0f, state.Lighting2D.AmbientIntensity);
 
                 ImGui::TextDisabled("Quality 0=Low, 1=Medium, 2=High.");
+                ImGui::EndTabItem();
+            }
+
+            if (ImGui::BeginTabItem("ECS MT (Runtime)"))
+            {
+                DrawEcsMultithreadingRuntimeEditor(state);
                 ImGui::EndTabItem();
             }
 

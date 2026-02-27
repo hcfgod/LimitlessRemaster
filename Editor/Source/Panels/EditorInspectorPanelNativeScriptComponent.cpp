@@ -7,6 +7,7 @@
 #include "Assets/AssetPaths.h"
 #include "Project/ProjectManager.h"
 #include "Scene/Scene.h"
+#include "Scene/SceneSystemScheduler.h"
 #include "Scripting/NativeScriptRegistry.h"
 #include "imgui/imgui.h"
 
@@ -21,6 +22,62 @@ namespace Limitless::EditorInspectorPanel
     namespace
     {
         constexpr const char* kSceneEntityPayload = "SCENE_ENTITY";
+
+        struct AccessMaskUiEntry
+        {
+            const char* Label;
+            SceneSystemAccessComponent Component;
+            const char* Tooltip;
+        };
+
+        constexpr std::array<AccessMaskUiEntry, 16> kAccessMaskEntries = {
+            AccessMaskUiEntry{ "Transform", SceneSystemAccessComponent::Transform, "TransformComponent" },
+            AccessMaskUiEntry{ "Hierarchy", SceneSystemAccessComponent::Hierarchy, "HierarchyComponent" },
+            AccessMaskUiEntry{ "Rigidbody2D", SceneSystemAccessComponent::Rigidbody2D, "Rigidbody2DComponent" },
+            AccessMaskUiEntry{ "Animator", SceneSystemAccessComponent::Animator, "AnimatorComponent and animation event receiver data" },
+            AccessMaskUiEntry{ "ParticleEmitter", SceneSystemAccessComponent::ParticleEmitter, "ParticleEmitterComponent" },
+            AccessMaskUiEntry{ "NativeScript", SceneSystemAccessComponent::NativeScript, "NativeScriptComponent and script entry state" },
+            AccessMaskUiEntry{ "BoxCollider2D", SceneSystemAccessComponent::BoxCollider2D, "BoxCollider2DComponent" },
+            AccessMaskUiEntry{ "CircleCollider2D", SceneSystemAccessComponent::CircleCollider2D, "CircleCollider2DComponent" },
+            AccessMaskUiEntry{ "Joint2D", SceneSystemAccessComponent::Joint2D, "Joint2DComponent" },
+            AccessMaskUiEntry{ "Rendering2D", SceneSystemAccessComponent::Rendering2D, "Sprite/Material and render-facing 2D data" },
+            AccessMaskUiEntry{ "Lighting2D", SceneSystemAccessComponent::Lighting2D, "DirectionalLight2D/PointLight2D/ShadowOccluder2D" },
+            AccessMaskUiEntry{ "UI", SceneSystemAccessComponent::UI, "Canvas/RectTransform/UI components" },
+            AccessMaskUiEntry{ "Audio", SceneSystemAccessComponent::Audio, "AudioListener2D/AudioSource" },
+            AccessMaskUiEntry{ "Camera", SceneSystemAccessComponent::Camera, "CameraComponent" },
+            AccessMaskUiEntry{ "Tilemap", SceneSystemAccessComponent::Tilemap, "Grid2D/TilemapLayer components" },
+            AccessMaskUiEntry{ "Metadata", SceneSystemAccessComponent::Metadata, "Tag/prefab metadata and related bookkeeping" }
+        };
+
+        void DrawAccessMaskEditor(const char* idSuffix, uint64_t& maskValue)
+        {
+            ImGui::PushID(idSuffix);
+            if (ImGui::Button("All"))
+            {
+                maskValue = 0;
+                for (const auto& entry : kAccessMaskEntries)
+                    maskValue |= ToAccessMask(entry.Component);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("None"))
+                maskValue = 0;
+
+            for (const auto& entry : kAccessMaskEntries)
+            {
+                const uint64_t bit = ToAccessMask(entry.Component);
+                bool enabled = (maskValue & bit) != 0;
+                if (ImGui::Checkbox(entry.Label, &enabled))
+                {
+                    if (enabled)
+                        maskValue |= bit;
+                    else
+                        maskValue &= ~bit;
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                    ImGui::SetTooltip("%s", entry.Tooltip);
+            }
+            ImGui::PopID();
+        }
 
         entt::entity FindFirstEntityByTag(const Scene* scene, const std::string& tag)
         {
@@ -341,6 +398,57 @@ namespace Limitless::EditorInspectorPanel
                                            "Selected script is discovered in Assets but not compiled yet.");
                         if (ImGui::Button("Build ScriptCore From Project Scripts"))
                             (void)TriggerNativeScriptBuildFromInspector();
+                    }
+
+                    const bool executionAndAccessOpen = ImGui::TreeNodeEx("Execution & Access", ImGuiTreeNodeFlags_DefaultOpen);
+                    if (executionAndAccessOpen)
+                    {
+                        ImGui::TextUnformatted("Execution Policy");
+                        int executionPolicyIndex = (scriptEntry.ExecutionPolicy == ScriptExecutionPolicy::ParallelSafe) ? 1 : 0;
+                        constexpr const char* executionPolicyOptions[] = { "MainThread", "ParallelSafe" };
+                        if (ImGui::Combo("##NativeScriptExecutionPolicy", &executionPolicyIndex, executionPolicyOptions, IM_ARRAYSIZE(executionPolicyOptions)))
+                        {
+                            scriptEntry.ExecutionPolicy =
+                                (executionPolicyIndex == 1) ? ScriptExecutionPolicy::ParallelSafe : ScriptExecutionPolicy::MainThread;
+                        }
+                        ImGui::TextDisabled("ParallelSafe scripts should declare accurate read/write access masks.");
+
+                        const bool readAccessOpen = ImGui::TreeNodeEx("Declared Read Access", ImGuiTreeNodeFlags_DefaultOpen);
+                        if (readAccessOpen)
+                        {
+                            DrawAccessMaskEditor("NativeScriptDeclaredReadAccessMask", scriptEntry.DeclaredReadAccessMask);
+                            ImGui::TreePop();
+                        }
+
+                        const bool writeAccessOpen = ImGui::TreeNodeEx("Declared Write Access", ImGuiTreeNodeFlags_DefaultOpen);
+                        if (writeAccessOpen)
+                        {
+                            DrawAccessMaskEditor("NativeScriptDeclaredWriteAccessMask", scriptEntry.DeclaredWriteAccessMask);
+                            ImGui::TreePop();
+                        }
+
+                        ImGui::TextDisabled("Tip: masks of 0 use script defaults from LT_DECLARE_SCRIPT_ACCESS at runtime.");
+
+                        const bool hasCompiledClass = !scriptEntry.ScriptClassName.empty() &&
+                                                      NativeScriptRegistry::HasScript(scriptEntry.ScriptClassName);
+                        ImGui::BeginDisabled(!hasCompiledClass);
+                        if (ImGui::Button("Apply Script Declared Defaults"))
+                        {
+                            if (auto scriptDefaults = NativeScriptRegistry::CreateScript(scriptEntry.ScriptClassName))
+                            {
+                                scriptEntry.DeclaredReadAccessMask = scriptDefaults->GetDeclaredReadAccessMask();
+                                scriptEntry.DeclaredWriteAccessMask = scriptDefaults->GetDeclaredWriteAccessMask();
+                            }
+                        }
+                        ImGui::EndDisabled();
+                        ImGui::SameLine();
+                        if (ImGui::Button("Clear Access Masks"))
+                        {
+                            scriptEntry.DeclaredReadAccessMask = 0;
+                            scriptEntry.DeclaredWriteAccessMask = 0;
+                        }
+
+                        ImGui::TreePop();
                     }
 
                     if (!scriptEntry.ScriptAssetRelativePath.empty())

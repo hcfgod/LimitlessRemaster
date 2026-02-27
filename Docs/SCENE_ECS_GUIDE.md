@@ -67,6 +67,8 @@ Parallel script slots are batched by access compatibility (read/write hazards fo
 - fall back to main-thread execution (strict mode), or
 - run with conservative barriers.
 
+When `DeclaredReadAccessMask`/`DeclaredWriteAccessMask` are zero on a script entry, runtime can source defaults from script code declarations (`LT_DECLARE_SCRIPT_ACCESS(...)` in `ScriptableEntity`-derived classes).
+
 See:
 
 - `ecs.mt.enable_parallel_scripts`
@@ -75,6 +77,11 @@ See:
 - `ecs.mt.validate_parallel_script_access_masks`
 - `ecs.mt.warn_parallel_script_access_mismatch`
 - `ecs.mt.enable_system_scheduler`
+- `ecs.mt.parallel_script_min_slots`
+- `ecs.mt.parallel_script_min_slots_per_worker`
+- `ecs.mt.parallel_script_min_batch_size`
+
+`ParallelSafe` scripts are now jobified adaptively: for small slot counts/batches runtime executes inline on the main script phase to avoid job dispatch overhead; it switches to worker jobs once thresholds are met.
 
 When `ecs.mt.validate_parallel_script_access_masks` is enabled, runtime validation currently tracks observed writes for:
 

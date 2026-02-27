@@ -41,6 +41,45 @@ Rollout controls (see `Docs/CONFIGURATION_GUIDE.md`):
 
 If strict declarations are enabled and a `ParallelSafe` script has no access declarations, it falls back to main-thread execution for that frame and logs a warning (once per script slot).
 
+### Script-side access declaration helpers
+
+You can now declare access masks directly in script code (no manual bit math):
+
+- `Limitless::ScriptAccess::<Name>` constants for component/domain masks
+- `LT_SCRIPT_ACCESS_MASK(...)` to combine masks
+- `LT_DECLARE_SCRIPT_ACCESS(ReadMask, WriteMask)` to override script defaults
+
+When a `NativeScriptEntry` has zero authored masks, runtime uses the script's declared defaults.
+
+```cpp
+class PatrolScript final : public Limitless::ScriptableEntity
+{
+public:
+    LT_DECLARE_SCRIPT_ACCESS(
+        LT_SCRIPT_ACCESS_MASK(
+            Limitless::ScriptAccess::Transform),
+        LT_SCRIPT_ACCESS_MASK(
+            Limitless::ScriptAccess::Transform))
+
+protected:
+    void OnUpdate(float deltaTime) override
+    {
+        auto& transform = GetComponent<Limitless::TransformComponent>();
+        transform.Position.x += 2.0f * deltaTime;
+    }
+};
+```
+
+Common domain helpers include:
+
+- `Rendering2D`
+- `Lighting2D`
+- `UI`
+- `Audio`
+- `Camera`
+- `Tilemap`
+- `Metadata`
+
 ## Entity and Component API (Unity-Style)
 
 `Limitless::Entity` is an engine-level wrapper that holds an `entt::registry*` and `entt::entity` handle. It is used from scripts, editor code, and engine code alike. It does not require a `ScriptableEntity` owner -- it is self-contained.

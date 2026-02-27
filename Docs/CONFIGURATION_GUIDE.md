@@ -206,6 +206,9 @@ The ECS runtime now has dedicated multithreading rollout switches. These keys ar
 | `ecs.mt.warn_implicit_parallel_script_access` | bool | `true` | Warns once per script slot when `ParallelSafe` is selected but access masks are missing. |
 | `ecs.mt.validate_parallel_script_access_masks` | bool | `true` | Validates observed parallel script writes against declared write masks for core bits (`Transform`, `Hierarchy`, `Rigidbody2D`, collider/joint, `Animator`, `ParticleEmitter`) and broader domains (`Rendering2D`, `Lighting2D`, `UI`, `Audio`, `Camera`, `Tilemap`, `Metadata`). |
 | `ecs.mt.warn_parallel_script_access_mismatch` | bool | `true` | Warns once per script slot when a parallel script mutates a component without declaring write access. |
+| `ecs.mt.parallel_script_min_slots` | integer | `0` | Minimum eligible `ParallelSafe` script slots required before worker-job parallel script execution is used (`0` = auto threshold). |
+| `ecs.mt.parallel_script_min_slots_per_worker` | integer | `2` | Auto-threshold multiplier used when `parallel_script_min_slots=0` (`auto = max(2, workerCount * slotsPerWorker)`). |
+| `ecs.mt.parallel_script_min_batch_size` | integer | `2` | Minimum compatibility-batch size required before dispatching that batch to worker jobs (smaller batches run inline). |
 | `ecs.mt.enable_parallel_physics_world_step` | bool | `true` | Enables parallel `b2World_Step` across independent scene physics worlds, while keeping prepare/sync registry work sequential. |
 | `ecs.mt.enable_parallel_transforms` | bool | `true` | Enables depth-batched parallel transform solve (with depth barriers). |
 
