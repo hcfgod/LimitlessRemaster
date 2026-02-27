@@ -50,7 +50,7 @@ namespace Limitless
         else
             deferred.DebugName = "DeferredStructuralMutation";
 
-        if (m_DeferredStructuralMutationQueue.TryPush(std::move(deferred)))
+        if (m_DeferredStructuralMutationQueue && m_DeferredStructuralMutationQueue->TryPush(std::move(deferred)))
             return true;
 
         {
@@ -71,8 +71,11 @@ namespace Limitless
         auto drainPendingMutations = [this](std::vector<DeferredStructuralMutation>& pending) {
             pending.clear();
 
-            while (auto queued = m_DeferredStructuralMutationQueue.TryPop())
-                pending.emplace_back(std::move(*queued));
+            if (m_DeferredStructuralMutationQueue)
+            {
+                while (auto queued = m_DeferredStructuralMutationQueue->TryPop())
+                    pending.emplace_back(std::move(*queued));
+            }
 
             {
                 std::lock_guard<std::mutex> lock(m_DeferredStructuralMutationsOverflowMutex);

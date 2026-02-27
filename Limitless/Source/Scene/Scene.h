@@ -193,7 +193,7 @@ namespace Limitless
         bool m_IsApplyingDeferredStructuralMutations = false;
 
         static constexpr size_t kDeferredStructuralMutationQueueSize = 8192;
-        mutable Concurrency::LockFreeMPMCQueue<DeferredStructuralMutation, kDeferredStructuralMutationQueueSize> m_DeferredStructuralMutationQueue;
+        mutable std::unique_ptr<Concurrency::LockFreeMPMCQueue<DeferredStructuralMutation, kDeferredStructuralMutationQueueSize>> m_DeferredStructuralMutationQueue;
         mutable std::mutex m_DeferredStructuralMutationsOverflowMutex;
         std::deque<DeferredStructuralMutation> m_DeferredStructuralMutationsOverflow;
         std::atomic<uint64_t> m_NextDeferredStructuralMutationSequence{ 1 };

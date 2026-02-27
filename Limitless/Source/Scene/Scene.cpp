@@ -638,7 +638,10 @@ namespace Limitless
 
     }
 
-    Scene::Scene() = default;
+    Scene::Scene()
+        : m_DeferredStructuralMutationQueue(std::make_unique<Concurrency::LockFreeMPMCQueue<DeferredStructuralMutation, kDeferredStructuralMutationQueueSize>>())
+    {
+    }
 
     Scene::~Scene()
     {
