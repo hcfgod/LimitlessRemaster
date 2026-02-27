@@ -118,7 +118,7 @@ jobs:
         TEST_EXE=$(find Build/ -name "Test" -type f 2>/dev/null | head -1)
         if [ -n "$TEST_EXE" ]; then
           echo "Running tests..."
-          "$TEST_EXE" --success
+          "$TEST_EXE" --no-success --abort-after=1
           test_exit=$?
           if [ $test_exit -ne 0 ]; then
             echo "Error: Some tests failed"
