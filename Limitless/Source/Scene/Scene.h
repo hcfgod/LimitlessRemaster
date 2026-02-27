@@ -25,6 +25,13 @@ namespace Limitless
     class Physics2DWorld;
     inline constexpr int kSceneSerializationVersion = 20;
 
+    struct DeferredStructuralMutation
+    {
+        uint64_t Sequence = 0;
+        std::function<void()> Apply;
+        std::string DebugName;
+    };
+
     // -----------------------------------------------------------------------------
     // Scene
     // Unity-style scene: owns a registry of entities and components.
@@ -185,12 +192,6 @@ namespace Limitless
         RuntimePhase m_RuntimePhase = RuntimePhase::Idle;
         bool m_IsApplyingDeferredStructuralMutations = false;
 
-        struct DeferredStructuralMutation
-        {
-            uint64_t Sequence = 0;
-            std::function<void()> Apply;
-            std::string DebugName;
-        };
         static constexpr size_t kDeferredStructuralMutationQueueSize = 8192;
         mutable Concurrency::LockFreeMPMCQueue<DeferredStructuralMutation, kDeferredStructuralMutationQueueSize> m_DeferredStructuralMutationQueue;
         mutable std::mutex m_DeferredStructuralMutationsOverflowMutex;
