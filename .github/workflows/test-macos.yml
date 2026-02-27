@@ -103,13 +103,16 @@ jobs:
         if [ -n "$TEST_EXE" ]; then
           echo "Running ARM64 tests..."
           "$TEST_EXE" --success
-          if [ $? -ne 0 ]; then
-            echo "Warning: Some ARM64 tests failed"
+          test_exit=$?
+          if [ $test_exit -ne 0 ]; then
+            echo "Error: Some ARM64 tests failed"
+            exit $test_exit
           else
             echo "All ARM64 tests passed!"
           fi
         else
           echo "ARM64 test executable not found"
+          exit 1
         fi
         
     - name: Run x64 tests
@@ -118,13 +121,16 @@ jobs:
         if [ -n "$TEST_EXE" ]; then
           echo "Running x64 tests..."
           "$TEST_EXE" --success
-          if [ $? -ne 0 ]; then
-            echo "Warning: Some x64 tests failed"
+          test_exit=$?
+          if [ $test_exit -ne 0 ]; then
+            echo "Error: Some x64 tests failed"
+            exit $test_exit
           else
             echo "All x64 tests passed!"
           fi
         else
           echo "x64 test executable not found"
+          exit 1
         fi
         
     - name: Upload build artifacts

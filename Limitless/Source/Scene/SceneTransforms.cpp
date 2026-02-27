@@ -250,7 +250,28 @@ namespace Limitless
             return glm::mat4(1.0f);
 
         if (m_TransformsDirty)
-            const_cast<Scene*>(this)->UpdateTransforms();
+        {
+            thread_local std::vector<entt::entity> chain;
+            chain.clear();
+            entt::entity current = entity;
+            while (current != entt::null && IsValid(current))
+            {
+                chain.push_back(current);
+                current = GetParent(current);
+            }
+
+            glm::mat4 worldMatrix(1.0f);
+            bool hasTransformInChain = false;
+            for (auto chainIt = chain.rbegin(); chainIt != chain.rend(); ++chainIt)
+            {
+                const auto* transform = m_Registry.try_get<TransformComponent>(*chainIt);
+                if (!transform)
+                    continue;
+                worldMatrix *= transform->GetLocalMatrix();
+                hasTransformInChain = true;
+            }
+            return hasTransformInChain ? worldMatrix : glm::mat4(1.0f);
+        }
 
         const auto* transform = m_Registry.try_get<TransformComponent>(entity);
         if (transform)
@@ -272,17 +293,17 @@ namespace Limitless
         if (!IsValid(entity))
             return glm::mat4(1.0f);
 
-        if (m_TransformsDirty)
-            const_cast<Scene*>(this)->UpdateTransforms();
-
         const float alpha = std::clamp(interpolationAlpha, 0.0f, 1.0f);
-        std::vector<entt::entity> chain;
+        thread_local std::vector<entt::entity> chain;
+        chain.clear();
         entt::entity current = entity;
         while (current != entt::null && IsValid(current))
         {
             chain.push_back(current);
             current = GetParent(current);
         }
+        if (chain.empty())
+            return glm::mat4(1.0f);
 
         bool needsKinematicInterpolation = false;
         for (entt::entity chainedEntity : chain)
@@ -300,19 +321,33 @@ namespace Limitless
 
         if (!needsKinematicInterpolation)
         {
-            const auto* transform = m_Registry.try_get<TransformComponent>(entity);
-            if (transform)
-                return transform->WorldTransform;
-
-            entt::entity parent = GetParent(entity);
-            while (parent != entt::null)
+            if (!m_TransformsDirty)
             {
-                const auto* parentTransform = m_Registry.try_get<TransformComponent>(parent);
-                if (parentTransform)
-                    return parentTransform->WorldTransform;
-                parent = GetParent(parent);
+                const auto* transform = m_Registry.try_get<TransformComponent>(entity);
+                if (transform)
+                    return transform->WorldTransform;
+
+                entt::entity parent = GetParent(entity);
+                while (parent != entt::null)
+                {
+                    const auto* parentTransform = m_Registry.try_get<TransformComponent>(parent);
+                    if (parentTransform)
+                        return parentTransform->WorldTransform;
+                    parent = GetParent(parent);
+                }
             }
-            return glm::mat4(1.0f);
+
+            glm::mat4 worldMatrix(1.0f);
+            bool hasTransformInChain = false;
+            for (auto chainIt = chain.rbegin(); chainIt != chain.rend(); ++chainIt)
+            {
+                const auto* transform = m_Registry.try_get<TransformComponent>(*chainIt);
+                if (!transform)
+                    continue;
+                worldMatrix *= transform->GetLocalMatrix();
+                hasTransformInChain = true;
+            }
+            return hasTransformInChain ? worldMatrix : glm::mat4(1.0f);
         }
 
         glm::mat4 worldMatrix(1.0f);

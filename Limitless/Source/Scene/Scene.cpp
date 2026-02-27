@@ -43,6 +43,7 @@
 #include <exception>
 #include <fstream>
 #include <limits>
+#include <mutex>
 #include <set>
 #include <string_view>
 #include <unordered_map>
@@ -135,11 +136,43 @@ namespace Limitless
             if (animator.CachedController && animator.CachedController->GetKey() == animator.ControllerKey)
                 return true;
 
+            static std::mutex s_PendingAnimatorControllerLoadsMutex;
+            static std::unordered_map<std::string, Async::Task<Assets::AnimatorControllerAsset::Ptr>> s_PendingAnimatorControllerLoads;
+
             animator.CachedController = std::dynamic_pointer_cast<Assets::AnimatorControllerAsset>(
                 Assets::AssetManager::GetCachedByKey(animator.ControllerKey));
             if (!animator.CachedController)
             {
-                animator.CachedController = Assets::AssetManager::LoadBlocking<Assets::AnimatorControllerAsset>(animator.ControllerKey);
+                std::lock_guard<std::mutex> lock(s_PendingAnimatorControllerLoadsMutex);
+                auto pendingLoad = s_PendingAnimatorControllerLoads.find(animator.ControllerKey);
+                if (pendingLoad == s_PendingAnimatorControllerLoads.end())
+                {
+                    s_PendingAnimatorControllerLoads.emplace(
+                        animator.ControllerKey,
+                        Assets::AssetManager::LoadAsync<Assets::AnimatorControllerAsset>(animator.ControllerKey));
+                }
+                else if (pendingLoad->second.IsDone())
+                {
+                    try
+                    {
+                        animator.CachedController = pendingLoad->second.Get();
+                    }
+                    catch (const std::exception& exception)
+                    {
+                        LT_WARN("Animator controller async load failed for '{}': {}",
+                                animator.ControllerKey,
+                                exception.what());
+                        animator.CachedController.reset();
+                    }
+                    catch (...)
+                    {
+                        LT_WARN("Animator controller async load failed for '{}' with unknown error",
+                                animator.ControllerKey);
+                        animator.CachedController.reset();
+                    }
+
+                    s_PendingAnimatorControllerLoads.erase(pendingLoad);
+                }
             }
 
             animator.ControllerLoadAttempted = true;
@@ -640,6 +673,7 @@ namespace Limitless
 
     Scene::Scene()
         : m_DeferredStructuralMutationQueue(std::make_unique<Concurrency::LockFreeMPMCQueue<DeferredStructuralMutation, kDeferredStructuralMutationQueueSize>>())
+        , m_DeferredStructuralMutationOverflowQueue(std::make_unique<Concurrency::LockFreeMPMCQueue<DeferredStructuralMutation, kDeferredStructuralMutationOverflowQueueSize>>())
     {
     }
 

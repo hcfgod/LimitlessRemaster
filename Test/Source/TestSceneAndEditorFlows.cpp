@@ -77,6 +77,25 @@ namespace
         }
     };
 
+    class ParallelSpawnThenDestroyScript final : public Limitless::ScriptableEntity
+    {
+    public:
+        bool ReceivedNonNullDeferredHandle = false;
+        bool Executed = false;
+
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            if (Executed)
+                return;
+
+            const entt::entity spawnedEntity = CreateEntityHandle("ParallelSpawnedThenDestroyed");
+            ReceivedNonNullDeferredHandle = (spawnedEntity != entt::null);
+            DestroyEntity(spawnedEntity);
+            Executed = true;
+        }
+    };
+
     class ParallelDestroyScript final : public Limitless::ScriptableEntity
     {
     public:
@@ -518,6 +537,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::NativeScriptRegistry::Clear();
         Limitless::NativeScriptRegistry::RegisterScript<ParallelSpawnScript>("ParallelSpawnScript");
         Limitless::NativeScriptRegistry::RegisterScript<ParallelDestroyScript>("ParallelDestroyScript");
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelSpawnThenDestroyScript>("ParallelSpawnThenDestroyScript");
 
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
@@ -537,14 +557,25 @@ TEST_SUITE("Scene And Editor Flows")
         scripts.Scripts[1].DeclaredWriteAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
         scripts.Scripts[1].ExposedProperties["TargetEntity"] = Limitless::ScriptEntityReference{ "Victim" };
 
+        scripts.Scripts.emplace_back();
+        scripts.Scripts[2].ScriptClassName = "ParallelSpawnThenDestroyScript";
+        scripts.Scripts[2].ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scripts.Scripts[2].DeclaredWriteAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+
         scene.Update(1.0f / 60.0f);
 
         CHECK_FALSE(IsNullEntity(FindEntityByTag(scene, "ParallelSpawned")));
+        CHECK(IsNullEntity(FindEntityByTag(scene, "ParallelSpawnedThenDestroyed")));
         CHECK(scene.IsValid(victim) == false);
         REQUIRE(scripts.Scripts[0].RuntimeInstance != nullptr);
         REQUIRE(scripts.Scripts[1].RuntimeInstance != nullptr);
+        REQUIRE(scripts.Scripts[2].RuntimeInstance != nullptr);
+        auto* spawnThenDestroyScript = dynamic_cast<ParallelSpawnThenDestroyScript*>(scripts.Scripts[2].RuntimeInstance.get());
+        REQUIRE(spawnThenDestroyScript != nullptr);
+        CHECK(spawnThenDestroyScript->ReceivedNonNullDeferredHandle);
         CHECK(scripts.Scripts[0].RuntimeUpdateCount >= 1);
         CHECK(scripts.Scripts[1].RuntimeUpdateCount >= 1);
+        CHECK(scripts.Scripts[2].RuntimeUpdateCount >= 1);
     }
 
     TEST_CASE("Parallel-safe transform writes without declared write mask are flagged")

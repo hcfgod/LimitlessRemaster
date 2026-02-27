@@ -5,6 +5,7 @@
 #include "Scripting/Coroutine.h"
 
 #include <algorithm>
+#include <type_traits>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/matrix_decompose.hpp>
@@ -49,10 +50,17 @@ namespace Limitless
         if (ShouldDeferStructuralMutations())
         {
             const std::string deferredName = name;
-            EnqueueDeferredStructuralMutation([deferredName](Scene& scene) {
-                scene.CreateEntity(deferredName);
+            const entt::entity deferredEntity = AllocateDeferredEntityReference();
+            const bool enqueued = EnqueueDeferredStructuralMutation([deferredName, deferredEntity](Scene& scene) {
+                const entt::entity createdEntity = scene.CreateEntity(deferredName);
+                scene.BindDeferredEntityReference(deferredEntity, createdEntity);
             }, "CreateEntity");
-            return entt::null;
+            if (!enqueued)
+            {
+                ForgetDeferredEntityReference(deferredEntity);
+                return entt::null;
+            }
+            return deferredEntity;
         }
         ValidateImmediateStructuralMutationPhase(*this, "CreateEntity");
 
@@ -96,41 +104,67 @@ namespace Limitless
         }
         ValidateImmediateStructuralMutationPhase(*this, "DestroyEntity");
 
+        entity = ResolveEntityReference(entity);
         if (!IsValid(entity))
             return;
 
-        const auto children = GetChildren(entity);
-        for (entt::entity child : children)
-            DestroyEntity(child);
+        const uint16_t physicsWorldCount = std::max<uint16_t>(GetPhysics2DWorldCount(), 1);
+        std::vector<bool> affectedPhysicsWorldSlots(static_cast<size_t>(physicsWorldCount), false);
 
-        if (auto* nativeScript = m_Registry.try_get<NativeScriptComponent>(entity))
+        auto destroyRecursive = [&](auto&& self, entt::entity target) -> void
         {
-            for (auto& scriptEntry : nativeScript->Scripts)
+            if (!IsValid(target))
+                return;
+
+            const auto children = GetChildren(target);
+            for (entt::entity child : children)
+                self(self, child);
+
+            if (const auto* rigidbody = m_Registry.try_get<Rigidbody2DComponent>(target))
             {
-                if (scriptEntry.RuntimeInstance)
-                {
-                    if (scriptEntry.RuntimeInitialized)
-                        scriptEntry.RuntimeInstance->OnDestroy();
-                    Coroutine::StopAll(*scriptEntry.RuntimeInstance);
-                    scriptEntry.RuntimeInstance.reset();
-                }
-                scriptEntry.RuntimeInitialized = false;
-                scriptEntry.RuntimeUpdateCount = 0;
-                scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-                scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
-                scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
+                const uint16_t clampedWorldSlot =
+                    std::min<uint16_t>(rigidbody->PhysicsWorldSlot, static_cast<uint16_t>(physicsWorldCount - 1));
+                affectedPhysicsWorldSlots[clampedWorldSlot] = true;
             }
+
+            if (auto* nativeScript = m_Registry.try_get<NativeScriptComponent>(target))
+            {
+                for (auto& scriptEntry : nativeScript->Scripts)
+                {
+                    if (scriptEntry.RuntimeInstance)
+                    {
+                        if (scriptEntry.RuntimeInitialized)
+                            scriptEntry.RuntimeInstance->OnDestroy();
+                        Coroutine::StopAll(*scriptEntry.RuntimeInstance);
+                        scriptEntry.RuntimeInstance.reset();
+                    }
+                    scriptEntry.RuntimeInitialized = false;
+                    scriptEntry.RuntimeUpdateCount = 0;
+                    scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                    scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
+                    scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
+                }
+            }
+
+            m_Registry.destroy(target);
+            RemoveDeferredEntityReferencesFor(target);
+        };
+        destroyRecursive(destroyRecursive, entity);
+
+        for (uint16_t worldSlot = 0; worldSlot < physicsWorldCount; ++worldSlot)
+        {
+            if (affectedPhysicsWorldSlots[worldSlot])
+                ResetPhysicsRuntimeState(worldSlot);
         }
 
-        m_Registry.destroy(entity);
-        ResetPhysicsRuntimeState();
         m_TransformsDirty = true;
         m_HierarchyDepthDirty = true;
     }
 
     bool Scene::IsValid(entt::entity entity) const
     {
-        return m_Registry.valid(entity);
+        const entt::entity resolvedEntity = ResolveEntityReference(entity);
+        return m_Registry.valid(resolvedEntity);
     }
 
     bool Scene::IsEntityEnabledInHierarchy(entt::entity entity) const
@@ -159,6 +193,9 @@ namespace Limitless
             return true;
         }
         ValidateImmediateStructuralMutationPhase(*this, "SetParent");
+
+        child = ResolveEntityReference(child);
+        parent = ResolveEntityReference(parent);
 
         if (!IsValid(child))
             return false;
@@ -230,6 +267,9 @@ namespace Limitless
         }
         ValidateImmediateStructuralMutationPhase(*this, "SetSiblingOrderBefore");
 
+        entity = ResolveEntityReference(entity);
+        targetSibling = ResolveEntityReference(targetSibling);
+
         if (!IsValid(entity) || !IsValid(targetSibling) || entity == targetSibling)
             return false;
 
@@ -265,6 +305,9 @@ namespace Limitless
         }
         ValidateImmediateStructuralMutationPhase(*this, "SetSiblingOrderAfter");
 
+        entity = ResolveEntityReference(entity);
+        targetSibling = ResolveEntityReference(targetSibling);
+
         if (!IsValid(entity) || !IsValid(targetSibling) || entity == targetSibling)
             return false;
 
@@ -291,6 +334,7 @@ namespace Limitless
 
     entt::entity Scene::GetParent(entt::entity entity) const
     {
+        entity = ResolveEntityReference(entity);
         if (!IsValid(entity))
             return entt::null;
 
@@ -306,6 +350,8 @@ namespace Limitless
 
     bool Scene::IsDescendantOf(entt::entity entity, entt::entity potentialAncestor) const
     {
+        entity = ResolveEntityReference(entity);
+        potentialAncestor = ResolveEntityReference(potentialAncestor);
         if (!IsValid(entity) || !IsValid(potentialAncestor))
             return false;
 
@@ -322,6 +368,7 @@ namespace Limitless
 
     std::vector<entt::entity> Scene::GetChildren(entt::entity parent) const
     {
+        parent = ResolveEntityReference(parent);
         std::vector<entt::entity> children;
         if (parent != entt::null && !IsValid(parent))
             return children;
@@ -345,5 +392,92 @@ namespace Limitless
         });
 
         return children;
+    }
+
+    entt::entity Scene::ResolveEntityReference(entt::entity entity) const
+    {
+        if (entity == entt::null)
+            return entt::null;
+
+        std::lock_guard<std::mutex> lock(m_DeferredEntityReferencesMutex);
+        const auto found = m_DeferredEntityReferences.find(entity);
+        if (found == m_DeferredEntityReferences.end() || found->second == entt::null)
+            return entity;
+        return found->second;
+    }
+
+    entt::entity Scene::AllocateDeferredEntityReference()
+    {
+        using EntityValueType = std::underlying_type_t<entt::entity>;
+        constexpr EntityValueType kDeferredEntityMask = static_cast<EntityValueType>(1)
+            << (sizeof(EntityValueType) * 8 - 1);
+        constexpr EntityValueType kDeferredEntityValueMask = ~kDeferredEntityMask;
+        constexpr EntityValueType kNullEntityValue = static_cast<EntityValueType>(entt::null);
+
+        while (true)
+        {
+            const uint64_t sequence = m_NextDeferredEntityReferenceSequence.fetch_add(1, std::memory_order_relaxed);
+            const EntityValueType rawValue = kDeferredEntityMask
+                | (static_cast<EntityValueType>(sequence) & kDeferredEntityValueMask);
+            if (rawValue == kNullEntityValue)
+                continue;
+
+            const entt::entity deferredEntity = static_cast<entt::entity>(rawValue);
+
+            std::lock_guard<std::mutex> lock(m_DeferredEntityReferencesMutex);
+            if (m_DeferredEntityReferences.contains(deferredEntity))
+                continue;
+
+            m_DeferredEntityReferences.emplace(deferredEntity, entt::null);
+            return deferredEntity;
+        }
+    }
+
+    void Scene::BindDeferredEntityReference(entt::entity deferredEntity, entt::entity resolvedEntity)
+    {
+        if (deferredEntity == entt::null)
+            return;
+
+        std::lock_guard<std::mutex> lock(m_DeferredEntityReferencesMutex);
+        const auto found = m_DeferredEntityReferences.find(deferredEntity);
+        if (found == m_DeferredEntityReferences.end())
+        {
+            m_DeferredEntityReferences.emplace(deferredEntity, resolvedEntity);
+            return;
+        }
+
+        if (resolvedEntity == entt::null || resolvedEntity == deferredEntity)
+        {
+            m_DeferredEntityReferences.erase(found);
+            return;
+        }
+
+        found->second = resolvedEntity;
+    }
+
+    void Scene::ForgetDeferredEntityReference(entt::entity deferredEntity)
+    {
+        if (deferredEntity == entt::null)
+            return;
+
+        std::lock_guard<std::mutex> lock(m_DeferredEntityReferencesMutex);
+        m_DeferredEntityReferences.erase(deferredEntity);
+    }
+
+    void Scene::RemoveDeferredEntityReferencesFor(entt::entity resolvedEntity)
+    {
+        if (resolvedEntity == entt::null)
+            return;
+
+        std::lock_guard<std::mutex> lock(m_DeferredEntityReferencesMutex);
+        for (auto iterator = m_DeferredEntityReferences.begin(); iterator != m_DeferredEntityReferences.end();)
+        {
+            if (iterator->first == resolvedEntity || iterator->second == resolvedEntity)
+            {
+                iterator = m_DeferredEntityReferences.erase(iterator);
+                continue;
+            }
+            ++iterator;
+        }
     }
 }

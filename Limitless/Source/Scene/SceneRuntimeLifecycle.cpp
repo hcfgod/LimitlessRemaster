@@ -225,6 +225,17 @@ namespace Limitless
         }
     }
 
+    void Scene::ResetPhysicsRuntimeState(uint16_t worldSlot)
+    {
+        if (m_Physics2DWorlds.empty())
+            return;
+
+        const uint16_t clampedSlot = ClampWorldSlot(worldSlot, static_cast<uint16_t>(m_Physics2DWorlds.size()));
+        auto& physicsWorld = m_Physics2DWorlds[clampedSlot];
+        if (physicsWorld)
+            physicsWorld->Shutdown(*this);
+    }
+
     void Scene::EnsurePhysics2DWorldCount(uint16_t worldCount)
     {
         const uint16_t sanitizedWorldCount = SanitizeWorldCount(worldCount);

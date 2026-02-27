@@ -16,6 +16,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace Limitless
@@ -152,6 +153,7 @@ namespace Limitless
                                                               const glm::vec2& direction,
                                                               float maxDistance,
                                                               uint64_t collisionMask) const;
+        entt::entity ResolveEntityReference(entt::entity entity) const;
 
         /// Get the EnTT registry for custom queries (views, groups, etc.).
         entt::registry& GetRegistry() { return m_Registry; }
@@ -174,7 +176,12 @@ namespace Limitless
 
     private:
         void ResetPhysicsRuntimeState();
+        void ResetPhysicsRuntimeState(uint16_t worldSlot);
         void EnsurePhysics2DWorldCount(uint16_t worldCount);
+        entt::entity AllocateDeferredEntityReference();
+        void BindDeferredEntityReference(entt::entity deferredEntity, entt::entity resolvedEntity);
+        void ForgetDeferredEntityReference(entt::entity deferredEntity);
+        void RemoveDeferredEntityReferencesFor(entt::entity resolvedEntity);
 
     private:
         entt::registry m_Registry;
@@ -193,11 +200,16 @@ namespace Limitless
         bool m_IsApplyingDeferredStructuralMutations = false;
 
         static constexpr size_t kDeferredStructuralMutationQueueSize = 8192;
+        static constexpr size_t kDeferredStructuralMutationOverflowQueueSize = 65536;
         mutable std::unique_ptr<Concurrency::LockFreeMPMCQueue<DeferredStructuralMutation, kDeferredStructuralMutationQueueSize>> m_DeferredStructuralMutationQueue;
+        mutable std::unique_ptr<Concurrency::LockFreeMPMCQueue<DeferredStructuralMutation, kDeferredStructuralMutationOverflowQueueSize>> m_DeferredStructuralMutationOverflowQueue;
         mutable std::mutex m_DeferredStructuralMutationsOverflowMutex;
         std::deque<DeferredStructuralMutation> m_DeferredStructuralMutationsOverflow;
         std::atomic<uint64_t> m_NextDeferredStructuralMutationSequence{ 1 };
         std::atomic<bool> m_WarnedDeferredStructuralMutationQueueOverflow{ false };
+        mutable std::mutex m_DeferredEntityReferencesMutex;
+        std::unordered_map<entt::entity, entt::entity> m_DeferredEntityReferences;
+        std::atomic<uint64_t> m_NextDeferredEntityReferenceSequence{ 1 };
     };
 
     // -----------------------------------------------------------------------------

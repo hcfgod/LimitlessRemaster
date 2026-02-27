@@ -53,6 +53,9 @@ namespace Limitless
         if (m_DeferredStructuralMutationQueue && m_DeferredStructuralMutationQueue->TryPush(std::move(deferred)))
             return true;
 
+        if (m_DeferredStructuralMutationOverflowQueue && m_DeferredStructuralMutationOverflowQueue->TryPush(std::move(deferred)))
+            return true;
+
         {
             std::lock_guard<std::mutex> lock(m_DeferredStructuralMutationsOverflowMutex);
             m_DeferredStructuralMutationsOverflow.emplace_back(std::move(deferred));
@@ -61,7 +64,7 @@ namespace Limitless
         bool expectedWarnState = false;
         if (m_WarnedDeferredStructuralMutationQueueOverflow.compare_exchange_strong(expectedWarnState, true, std::memory_order_relaxed))
         {
-            LT_WARN("Scene deferred structural mutation queue overflowed; falling back to overflow buffer. Consider increasing queue size.");
+            LT_WARN("Scene deferred structural mutation queue overflowed; falling back to tertiary overflow buffer guarded by a mutex. Consider increasing queue size.");
         }
         return true;
     }
@@ -75,6 +78,12 @@ namespace Limitless
             {
                 while (auto queued = m_DeferredStructuralMutationQueue->TryPop())
                     pending.emplace_back(std::move(*queued));
+            }
+
+            if (m_DeferredStructuralMutationOverflowQueue)
+            {
+                while (auto overflowQueued = m_DeferredStructuralMutationOverflowQueue->TryPop())
+                    pending.emplace_back(std::move(*overflowQueued));
             }
 
             {

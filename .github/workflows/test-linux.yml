@@ -119,14 +119,17 @@ jobs:
         if [ -n "$TEST_EXE" ]; then
           echo "Running tests..."
           "$TEST_EXE" --success
-          if [ $? -ne 0 ]; then
-            echo "Warning: Some tests failed"
+          test_exit=$?
+          if [ $test_exit -ne 0 ]; then
+            echo "Error: Some tests failed"
+            exit $test_exit
           else
             echo "All tests passed!"
           fi
         else
           echo "Test executable not found"
           find Build/ -name "*Test*" -type f 2>/dev/null || echo "No test files found"
+          exit 1
         fi
         
     - name: Upload build artifacts

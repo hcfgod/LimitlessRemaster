@@ -96,7 +96,8 @@ jobs:
           echo "Running tests: $testExe"
           & $testExe --success
           if ($LASTEXITCODE -ne 0) {
-            echo "Warning: Some tests failed"
+            echo "Error: Some tests failed"
+            exit $LASTEXITCODE
           } else {
             echo "All tests passed!"
           }

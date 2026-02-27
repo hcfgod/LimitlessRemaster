@@ -166,6 +166,10 @@ namespace Limitless
     {
         if (entity == entt::null)
             return false;
+#ifndef SCRIPTCORE_EXPORTS
+        if (m_Scene)
+            return m_Scene->IsValid(entity);
+#endif
         if (m_Registry == nullptr)
             return false;
         return m_Registry->valid(entity);
@@ -173,6 +177,10 @@ namespace Limitless
 
     Entity ScriptableEntity::GetEntity(entt::entity entity) const
     {
+#ifndef SCRIPTCORE_EXPORTS
+        if (m_Scene)
+            entity = m_Scene->ResolveEntityReference(entity);
+#endif
         if (!IsEntityValid(entity))
             return Entity{};
         return Entity(m_Registry, entity);
@@ -201,6 +209,10 @@ namespace Limitless
 
     Entity ScriptableEntity::GetParent(entt::entity entity) const
     {
+#ifndef SCRIPTCORE_EXPORTS
+        if (m_Scene)
+            entity = m_Scene->ResolveEntityReference(entity);
+#endif
         if (!IsEntityValid(entity))
             return Entity{};
 
@@ -218,6 +230,10 @@ namespace Limitless
 
     std::vector<Entity> ScriptableEntity::GetChildren(entt::entity parent) const
     {
+#ifndef SCRIPTCORE_EXPORTS
+        if (m_Scene)
+            parent = m_Scene->ResolveEntityReference(parent);
+#endif
         std::vector<std::pair<int32_t, entt::entity>> orderedChildren;
         if (m_Registry == nullptr)
             return {};
@@ -255,6 +271,10 @@ namespace Limitless
 
     std::vector<Entity> ScriptableEntity::GetHierarchy(entt::entity root, bool includeRoot) const
     {
+#ifndef SCRIPTCORE_EXPORTS
+        if (m_Scene)
+            root = m_Scene->ResolveEntityReference(root);
+#endif
         if (!IsEntityValid(root))
             return {};
 
@@ -306,6 +326,10 @@ namespace Limitless
 
     std::vector<ScriptableEntity*> ScriptableEntity::GetRuntimeScripts(entt::entity entity) const
     {
+#ifndef SCRIPTCORE_EXPORTS
+        if (m_Scene)
+            entity = m_Scene->ResolveEntityReference(entity);
+#endif
         if (m_Registry == nullptr || entity == entt::null || !m_Registry->valid(entity))
             return {};
 
@@ -336,6 +360,10 @@ namespace Limitless
 
     ScriptableEntity* ScriptableEntity::GetScript(entt::entity entity, const std::string& className)
     {
+#ifndef SCRIPTCORE_EXPORTS
+        if (m_Scene)
+            entity = m_Scene->ResolveEntityReference(entity);
+#endif
         if (className.empty() || m_Registry == nullptr || entity == entt::null || !m_Registry->valid(entity))
             return nullptr;
 

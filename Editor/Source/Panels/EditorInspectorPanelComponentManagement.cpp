@@ -11,6 +11,12 @@ namespace Limitless::EditorInspectorPanel
 {
     namespace
     {
+        template<typename ComponentType>
+        bool HasComponent(const entt::registry& registry, entt::entity entity)
+        {
+            return registry.all_of<ComponentType>(entity);
+        }
+
         void ClearPrimaryFlagFromOtherCameras(entt::registry& registry, entt::entity currentEntity)
         {
             auto view = registry.view<CameraComponent>();
@@ -36,32 +42,7 @@ namespace Limitless::EditorInspectorPanel
         if (!ImGui::BeginPopup("AddComponentPopup"))
             return;
 
-        const bool hasSpriteComponent = registry.all_of<SpriteComponent>(selectedEntity);
-        const bool hasCameraComponent = registry.all_of<CameraComponent>(selectedEntity);
-        const bool hasAudioListener2DComponent = registry.all_of<AudioListener2DComponent>(selectedEntity);
-        const bool hasAudioSourceComponent = registry.all_of<AudioSourceComponent>(selectedEntity);
-        const bool hasNativeScriptComponent = registry.all_of<NativeScriptComponent>(selectedEntity);
-        const bool hasAnimatorComponent = registry.all_of<AnimatorComponent>(selectedEntity);
-        const bool hasAnimationEventReceiverComponent = registry.all_of<AnimationEventReceiverComponent>(selectedEntity);
-        const bool hasRigidbody2DComponent = registry.all_of<Rigidbody2DComponent>(selectedEntity);
-        const bool hasBoxCollider2DComponent = registry.all_of<BoxCollider2DComponent>(selectedEntity);
-        const bool hasCircleCollider2DComponent = registry.all_of<CircleCollider2DComponent>(selectedEntity);
-        const bool hasJoint2DComponent = registry.all_of<Joint2DComponent>(selectedEntity);
-        const bool hasDirectionalLight2DComponent = registry.all_of<DirectionalLight2DComponent>(selectedEntity);
-        const bool hasPointLight2DComponent = registry.all_of<PointLight2DComponent>(selectedEntity);
-        const bool hasShadowOccluder2DComponent = registry.all_of<ShadowOccluder2DComponent>(selectedEntity);
-        const bool hasGrid2DComponent = registry.all_of<Grid2DComponent>(selectedEntity);
-        const bool hasTilemapLayerComponent = registry.all_of<TilemapLayerComponent>(selectedEntity);
-        const bool hasParticleEmitterComponent = registry.all_of<ParticleEmitterComponent>(selectedEntity);
-        const bool hasCanvasComponent = registry.all_of<CanvasComponent>(selectedEntity);
-        const bool hasRectTransformComponent = registry.all_of<RectTransformComponent>(selectedEntity);
-        const bool hasUIImageComponent = registry.all_of<UIImageComponent>(selectedEntity);
-        const bool hasUIPanelComponent = registry.all_of<UIPanelComponent>(selectedEntity);
-        const bool hasUITextComponent = registry.all_of<UITextComponent>(selectedEntity);
-        const bool hasUIButtonComponent = registry.all_of<UIButtonComponent>(selectedEntity);
-        const bool hasUISliderComponent = registry.all_of<UISliderComponent>(selectedEntity);
-
-        if (hasCanvasComponent)
+        if (HasComponent<CanvasComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Canvas"))
@@ -81,10 +62,10 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (hasCanvasComponent)
+        if (HasComponent<CanvasComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasRectTransformComponent)
+        if (HasComponent<RectTransformComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("RectTransform"))
@@ -98,10 +79,10 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<RectTransformComponent>(selectedEntity);
         }
 
-        if (hasRectTransformComponent)
+        if (HasComponent<RectTransformComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasUIImageComponent)
+        if (HasComponent<UIImageComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("UI Image"))
@@ -125,10 +106,10 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (hasUIImageComponent)
+        if (HasComponent<UIImageComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasUIPanelComponent)
+        if (HasComponent<UIPanelComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("UI Panel"))
@@ -159,10 +140,10 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (hasUIPanelComponent)
+        if (HasComponent<UIPanelComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasUITextComponent)
+        if (HasComponent<UITextComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("UI Text"))
@@ -185,10 +166,10 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (hasUITextComponent)
+        if (HasComponent<UITextComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasUIButtonComponent)
+        if (HasComponent<UIButtonComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("UI Button"))
@@ -236,10 +217,10 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (hasUIButtonComponent)
+        if (HasComponent<UIButtonComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasUISliderComponent)
+        if (HasComponent<UISliderComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("UI Slider"))
@@ -405,10 +386,10 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (hasUISliderComponent)
+        if (HasComponent<UISliderComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasSpriteComponent)
+        if (HasComponent<SpriteComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Sprite Component"))
@@ -422,10 +403,10 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<SpriteComponent>(selectedEntity);
         }
 
-        if (hasSpriteComponent)
+        if (HasComponent<SpriteComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasCameraComponent)
+        if (HasComponent<CameraComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Camera Component"))
@@ -448,10 +429,10 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (hasCameraComponent)
+        if (HasComponent<CameraComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasAudioListener2DComponent)
+        if (HasComponent<AudioListener2DComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Audio Listener 2D"))
@@ -465,10 +446,10 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<AudioListener2DComponent>(selectedEntity);
         }
 
-        if (hasAudioListener2DComponent)
+        if (HasComponent<AudioListener2DComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasAudioSourceComponent)
+        if (HasComponent<AudioSourceComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Audio Source"))
@@ -482,10 +463,10 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<AudioSourceComponent>(selectedEntity);
         }
 
-        if (hasAudioSourceComponent)
+        if (HasComponent<AudioSourceComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasNativeScriptComponent)
+        if (HasComponent<NativeScriptComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Native Script"))
@@ -499,10 +480,10 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<NativeScriptComponent>(selectedEntity);
         }
 
-        if (hasNativeScriptComponent)
+        if (HasComponent<NativeScriptComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasAnimatorComponent)
+        if (HasComponent<AnimatorComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Animator"))
@@ -516,10 +497,10 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<AnimatorComponent>(selectedEntity);
         }
 
-        if (hasAnimatorComponent)
+        if (HasComponent<AnimatorComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasAnimationEventReceiverComponent)
+        if (HasComponent<AnimationEventReceiverComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Animation Event Receiver"))
@@ -533,10 +514,10 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<AnimationEventReceiverComponent>(selectedEntity);
         }
 
-        if (hasAnimationEventReceiverComponent)
+        if (HasComponent<AnimationEventReceiverComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasRigidbody2DComponent)
+        if (HasComponent<Rigidbody2DComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Rigidbody 2D"))
@@ -550,10 +531,10 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<Rigidbody2DComponent>(selectedEntity);
         }
 
-        if (hasRigidbody2DComponent)
+        if (HasComponent<Rigidbody2DComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasBoxCollider2DComponent)
+        if (HasComponent<BoxCollider2DComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Box Collider 2D"))
@@ -567,10 +548,10 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<BoxCollider2DComponent>(selectedEntity);
         }
 
-        if (hasBoxCollider2DComponent)
+        if (HasComponent<BoxCollider2DComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasCircleCollider2DComponent)
+        if (HasComponent<CircleCollider2DComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Circle Collider 2D"))
@@ -584,10 +565,10 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<CircleCollider2DComponent>(selectedEntity);
         }
 
-        if (hasCircleCollider2DComponent)
+        if (HasComponent<CircleCollider2DComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasJoint2DComponent)
+        if (HasComponent<Joint2DComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Joint 2D"))
@@ -601,10 +582,10 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<Joint2DComponent>(selectedEntity);
         }
 
-        if (hasJoint2DComponent)
+        if (HasComponent<Joint2DComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasDirectionalLight2DComponent)
+        if (HasComponent<DirectionalLight2DComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Directional Light 2D"))
@@ -618,10 +599,10 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<DirectionalLight2DComponent>(selectedEntity);
         }
 
-        if (hasDirectionalLight2DComponent)
+        if (HasComponent<DirectionalLight2DComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasPointLight2DComponent)
+        if (HasComponent<PointLight2DComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Point Light 2D"))
@@ -635,10 +616,10 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<PointLight2DComponent>(selectedEntity);
         }
 
-        if (hasPointLight2DComponent)
+        if (HasComponent<PointLight2DComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasShadowOccluder2DComponent)
+        if (HasComponent<ShadowOccluder2DComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Shadow Occluder 2D"))
@@ -652,10 +633,10 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<ShadowOccluder2DComponent>(selectedEntity);
         }
 
-        if (hasShadowOccluder2DComponent)
+        if (HasComponent<ShadowOccluder2DComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasGrid2DComponent)
+        if (HasComponent<Grid2DComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Grid 2D"))
@@ -673,10 +654,10 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (hasGrid2DComponent)
+        if (HasComponent<Grid2DComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasTilemapLayerComponent)
+        if (HasComponent<TilemapLayerComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Tilemap Layer"))
@@ -696,10 +677,10 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (hasTilemapLayerComponent)
+        if (HasComponent<TilemapLayerComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (hasParticleEmitterComponent)
+        if (HasComponent<ParticleEmitterComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("Particle Emitter"))
@@ -713,7 +694,7 @@ namespace Limitless::EditorInspectorPanel
                 registry.emplace<ParticleEmitterComponent>(selectedEntity);
         }
 
-        if (hasParticleEmitterComponent)
+        if (HasComponent<ParticleEmitterComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
         ImGui::EndPopup();

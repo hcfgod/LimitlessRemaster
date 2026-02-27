@@ -510,8 +510,20 @@ namespace Limitless
                             {
                                 scriptEntry.RuntimeInstance->OnDestroy();
                             }
+                            catch (const std::exception& exception)
+                            {
+                                const auto* tag = m_Registry.try_get<TagComponent>(entity);
+                                LT_ERROR("Script '{}' on entity '{}' threw during OnDestroy while script execution is blocked: {}",
+                                         scriptEntry.ScriptClassName,
+                                         tag ? tag->Tag : "Entity",
+                                         exception.what());
+                            }
                             catch (...)
                             {
+                                const auto* tag = m_Registry.try_get<TagComponent>(entity);
+                                LT_ERROR("Script '{}' on entity '{}' threw a non-standard exception during OnDestroy while script execution is blocked",
+                                         scriptEntry.ScriptClassName,
+                                         tag ? tag->Tag : "Entity");
                             }
                         }
 
@@ -519,8 +531,20 @@ namespace Limitless
                         {
                             Coroutine::StopAll(*scriptEntry.RuntimeInstance);
                         }
+                        catch (const std::exception& exception)
+                        {
+                            const auto* tag = m_Registry.try_get<TagComponent>(entity);
+                            LT_WARN("Script '{}' on entity '{}' threw during coroutine cleanup while script execution is blocked: {}",
+                                    scriptEntry.ScriptClassName,
+                                    tag ? tag->Tag : "Entity",
+                                    exception.what());
+                        }
                         catch (...)
                         {
+                            const auto* tag = m_Registry.try_get<TagComponent>(entity);
+                            LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during coroutine cleanup while script execution is blocked",
+                                    scriptEntry.ScriptClassName,
+                                    tag ? tag->Tag : "Entity");
                         }
                         scriptEntry.RuntimeInstance.reset();
                     }
@@ -595,8 +619,20 @@ namespace Limitless
                 {
                     Coroutine::StopAll(*scriptEntry->RuntimeInstance);
                 }
+                catch (const std::exception& exception)
+                {
+                    LT_WARN("Script '{}' on entity '{}' threw during coroutine cleanup after {} failure: {}",
+                            scriptEntry->ScriptClassName,
+                            tag ? tag->Tag : "Entity",
+                            callbackName,
+                            exception.what());
+                }
                 catch (...)
                 {
+                    LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during coroutine cleanup after {} failure",
+                            scriptEntry->ScriptClassName,
+                            tag ? tag->Tag : "Entity",
+                            callbackName);
                 }
             }
             scriptEntry->RuntimeInstance.reset();
@@ -1544,8 +1580,20 @@ namespace Limitless
                 {
                     Coroutine::StopAll(*scriptEntry->RuntimeInstance);
                 }
+                catch (const std::exception& exception)
+                {
+                    LT_WARN("Script '{}' on entity '{}' threw during coroutine cleanup after {} failure: {}",
+                            scriptEntry->ScriptClassName,
+                            tag ? tag->Tag : "Entity",
+                            callbackName,
+                            exception.what());
+                }
                 catch (...)
                 {
+                    LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during coroutine cleanup after {} failure",
+                            scriptEntry->ScriptClassName,
+                            tag ? tag->Tag : "Entity",
+                            callbackName);
                 }
             }
             scriptEntry->RuntimeInstance.reset();
