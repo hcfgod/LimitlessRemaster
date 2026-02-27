@@ -188,7 +188,7 @@ namespace Limitless
         struct DeferredStructuralMutation
         {
             uint64_t Sequence = 0;
-            std::function<void(Scene&)> Apply;
+            std::function<void()> Apply;
             std::string DebugName;
         };
         static constexpr size_t kDeferredStructuralMutationQueueSize = 8192;

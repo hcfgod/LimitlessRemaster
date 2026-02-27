@@ -132,7 +132,8 @@ project "Test"
         buildoptions
         {
             "/utf-8",
-            "/FS" -- Prevent PDB contention in parallel builds
+            "/FS",    -- Prevent PDB contention in parallel builds
+            "/bigobj" -- Required for very large test translation units
         }
 
         -- Copy shaderc runtime DLLs next to the built executable.

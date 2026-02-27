@@ -42,7 +42,9 @@ namespace Limitless
 
         DeferredStructuralMutation deferred{};
         deferred.Sequence = m_NextDeferredStructuralMutationSequence.fetch_add(1, std::memory_order_relaxed);
-        deferred.Apply = std::move(mutation);
+        deferred.Apply = [this, mutation = std::move(mutation)]() mutable {
+            mutation(*this);
+        };
         if (debugName && debugName[0] != '\0')
             deferred.DebugName = debugName;
         else
@@ -109,7 +111,7 @@ namespace Limitless
             {
                 try
                 {
-                    deferred.Apply(*this);
+                    deferred.Apply();
                     appliedStructuralMutation = true;
                 }
                 catch (const std::exception& exception)
