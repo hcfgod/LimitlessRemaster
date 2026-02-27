@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <type_traits>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -61,12 +62,17 @@ namespace Limitless::Concurrency
                 safeGrain = std::max<size_t>(1, itemCount / suggestedChunks);
             }
 
+            using FunctionType = std::decay_t<Func>;
+            static_assert(std::is_copy_constructible_v<FunctionType>,
+                "JobSystem::ParallelFor requires a copy-constructible callable");
+            FunctionType functionCopy = std::forward<Func>(function);
+
             WaitGroup waitGroup;
             for (size_t chunkBegin = beginIndex; chunkBegin < endIndex; chunkBegin += safeGrain)
             {
                 const size_t chunkEnd = std::min(endIndex, chunkBegin + safeGrain);
                 waitGroup.Add(1);
-                Submit([chunkBegin, chunkEnd, fn = std::forward<Func>(function), &waitGroup]() mutable {
+                Submit([chunkBegin, chunkEnd, fn = functionCopy, &waitGroup]() mutable {
                     for (size_t index = chunkBegin; index < chunkEnd; ++index)
                         fn(index);
                     waitGroup.Done();
