@@ -9,6 +9,7 @@
 #include "Scripting/NativeScriptRegistry.h"
 
 #include <atomic>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -268,6 +269,14 @@ namespace
     std::filesystem::path MakeTempProjectRoot(const std::string& folderName)
     {
         return std::filesystem::temp_directory_path() / "LimitlessRemasterTests" / folderName;
+    }
+
+    uint32_t FindTileIdByAssetKey(const Limitless::TilemapLayerComponent& layer, const std::string& assetKey)
+    {
+        const auto it = std::find(layer.TileTable.begin(), layer.TileTable.end(), assetKey);
+        if (it == layer.TileTable.end())
+            return 0u;
+        return static_cast<uint32_t>(std::distance(layer.TileTable.begin(), it));
     }
 
     glm::vec3 ExtractWorldPosition(const Limitless::TransformComponent& transform)
@@ -1774,10 +1783,13 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(clonedTilemapLayer.GridSize.x == 4);
         CHECK(clonedTilemapLayer.GridSize.y == 3);
         REQUIRE(clonedTilemapLayer.TileTable.size() >= 3);
-        CHECK(clonedTilemapLayer.TileTable[1] == "Assets/Tiles/Grass.tile.json");
-        CHECK(clonedTilemapLayer.TileTable[2] == "Assets/Tiles/Stone.tile.json");
-        CHECK(clonedTilemapLayer.Tiles[0] == 1);
-        CHECK(clonedTilemapLayer.Tiles[1] == 2);
+        const uint32_t clonedGrassTileId = FindTileIdByAssetKey(clonedTilemapLayer, "Assets/Tiles/Grass.tile.json");
+        const uint32_t clonedStoneTileId = FindTileIdByAssetKey(clonedTilemapLayer, "Assets/Tiles/Stone.tile.json");
+        REQUIRE(clonedGrassTileId != 0u);
+        REQUIRE(clonedStoneTileId != 0u);
+        CHECK(clonedGrassTileId != clonedStoneTileId);
+        CHECK(clonedTilemapLayer.Tiles[0] == clonedGrassTileId);
+        CHECK(clonedTilemapLayer.Tiles[1] == clonedStoneTileId);
 
         const auto& clonedAudio = cloneRegistry.get<Limitless::AudioSourceComponent>(clonedChild);
         CHECK(clonedAudio.AudioClipKey == audio.AudioClipKey);
@@ -1989,11 +2001,14 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(loadedTilemapLayer.GridSize.y == 2);
         CHECK(loadedTilemapLayer.CollisionEnabled == true);
         REQUIRE(loadedTilemapLayer.TileTable.size() >= 3);
-        CHECK(loadedTilemapLayer.TileTable[1] == "Assets/Tiles/CityTiles_0.tile.json");
-        CHECK(loadedTilemapLayer.TileTable[2] == "Assets/Tiles/CityTiles_1.tile.json");
-        CHECK(loadedTilemapLayer.Tiles[0] == 1);
-        CHECK(loadedTilemapLayer.Tiles[1] == 2);
-        CHECK(loadedTilemapLayer.Tiles[3] == 2);
+        const uint32_t loadedCityTileAId = FindTileIdByAssetKey(loadedTilemapLayer, "Assets/Tiles/CityTiles_0.tile.json");
+        const uint32_t loadedCityTileBId = FindTileIdByAssetKey(loadedTilemapLayer, "Assets/Tiles/CityTiles_1.tile.json");
+        REQUIRE(loadedCityTileAId != 0u);
+        REQUIRE(loadedCityTileBId != 0u);
+        CHECK(loadedCityTileAId != loadedCityTileBId);
+        CHECK(loadedTilemapLayer.Tiles[0] == loadedCityTileAId);
+        CHECK(loadedTilemapLayer.Tiles[1] == loadedCityTileBId);
+        CHECK(loadedTilemapLayer.Tiles[3] == loadedCityTileBId);
 
         REQUIRE(loadedRegistry.all_of<Limitless::DirectionalLight2DComponent>(loadedRoot));
         const auto& loadedDirectionalLight = loadedRegistry.get<Limitless::DirectionalLight2DComponent>(loadedRoot);
