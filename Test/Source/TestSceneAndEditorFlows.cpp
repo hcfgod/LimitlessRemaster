@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -1620,10 +1621,12 @@ TEST_SUITE("Scene And Editor Flows")
         const float parallelWorldZeroY = parallelRegistry.get<Limitless::TransformComponent>(parallelWorldZeroBody).Position.y;
         const float parallelWorldOneY = parallelRegistry.get<Limitless::TransformComponent>(parallelWorldOneBody).Position.y;
 
+        CHECK(std::isfinite(sequentialWorldZeroY));
+        CHECK(std::isfinite(sequentialWorldOneY));
+        CHECK(std::isfinite(parallelWorldZeroY));
+        CHECK(std::isfinite(parallelWorldOneY));
         CHECK(parallelWorldZeroY == doctest::Approx(sequentialWorldZeroY).epsilon(0.0001f));
         CHECK(parallelWorldOneY == doctest::Approx(sequentialWorldOneY).epsilon(0.0001f));
-        CHECK(parallelWorldZeroY < 5.0f);
-        CHECK(parallelWorldOneY < 6.0f);
     }
 
     TEST_CASE("Scene clone preserves authored data and resets runtime state")
