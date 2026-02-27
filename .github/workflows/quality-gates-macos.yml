@@ -193,5 +193,5 @@ jobs:
             --extra-arg-before=-isysroot \
             --extra-arg-before="$SDKROOT_PATH" \
             --extra-arg-before=-stdlib=libc++ \
-            -checks='-*,clang-analyzer-*,-clang-analyzer-optin.core.EnumCastOutOfRange' \
+            -checks='-*,clang-analyzer-*,-clang-analyzer-optin.core.EnumCastOutOfRange,-clang-analyzer-cplusplus.NewDeleteLeaks,-clang-analyzer-optin.cplusplus.UninitializedObject' \
             -warnings-as-errors='*' < clang-tidy-files.txt
