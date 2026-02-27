@@ -9,6 +9,9 @@
 
 namespace Limitless
 {
+    using EntityDestroyBridgeCallback = void (*)(entt::entity entity);
+    using EntityParallelExecutionBridgeCallback = bool (*)();
+
     namespace detail
     {
         template<typename T, typename = void>
@@ -77,6 +80,16 @@ namespace Limitless
         /// Returns prefab asset key when IsPrefabReference() is true.
         const std::string& GetPrefabAssetKey() const { return m_PrefabAssetKey; }
 
+        static void SetDestroyBridgeCallback(EntityDestroyBridgeCallback callback)
+        {
+            s_DestroyBridgeCallback = callback;
+        }
+
+        static void SetParallelExecutionBridgeCallback(EntityParallelExecutionBridgeCallback callback)
+        {
+            s_ParallelExecutionBridgeCallback = callback;
+        }
+
         // -----------------------------------------------------------------
         // Component access (mirrors Unity GetComponent / TryGetComponent)
         // -----------------------------------------------------------------
@@ -135,6 +148,8 @@ namespace Limitless
                 throw std::runtime_error("Entity has no registry binding");
             if (!m_Registry->valid(m_EntityHandle))
                 throw std::runtime_error("Entity referenced invalid handle");
+            if (IsParallelExecutionContext() && !m_Registry->all_of<ComponentType>(m_EntityHandle))
+                throw std::runtime_error("Entity::AddComponent is not supported during parallel script execution");
             if (m_Registry->all_of<ComponentType>(m_EntityHandle))
                 return m_Registry->get<ComponentType>(m_EntityHandle);
             return m_Registry->emplace<ComponentType>(m_EntityHandle, std::forward<ConstructorArgs>(args)...);
@@ -146,6 +161,8 @@ namespace Limitless
         {
             if (m_Registry == nullptr || !m_Registry->valid(m_EntityHandle))
                 return;
+            if (IsParallelExecutionContext() && m_Registry->all_of<ComponentType>(m_EntityHandle))
+                throw std::runtime_error("Entity::RemoveComponent is not supported during parallel script execution");
             if (m_Registry->all_of<ComponentType>(m_EntityHandle))
                 m_Registry->remove<ComponentType>(m_EntityHandle);
         }
@@ -153,12 +170,30 @@ namespace Limitless
         /// Destroy this entity (removes it from the registry entirely).
         void Destroy()
         {
-            if (m_Registry != nullptr && m_Registry->valid(m_EntityHandle))
+            if (m_EntityHandle == entt::null)
+                return;
+
+            if (IsParallelExecutionContext())
+                throw std::runtime_error("Entity::Destroy is not supported during parallel script execution");
+
+            if (s_DestroyBridgeCallback)
+                s_DestroyBridgeCallback(m_EntityHandle);
+            else if (m_Registry != nullptr && m_Registry->valid(m_EntityHandle))
                 m_Registry->destroy(m_EntityHandle);
             m_EntityHandle = entt::null;
         }
 
     private:
+        static bool IsParallelExecutionContext()
+        {
+            if (s_ParallelExecutionBridgeCallback)
+                return s_ParallelExecutionBridgeCallback();
+            return false;
+        }
+
+    private:
+        static inline EntityDestroyBridgeCallback s_DestroyBridgeCallback = nullptr;
+        static inline EntityParallelExecutionBridgeCallback s_ParallelExecutionBridgeCallback = nullptr;
         entt::registry* m_Registry = nullptr;
         entt::entity m_EntityHandle = entt::null;
         std::string m_PrefabAssetKey;

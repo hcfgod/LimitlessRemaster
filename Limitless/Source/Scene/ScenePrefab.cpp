@@ -174,6 +174,7 @@ namespace Limitless
                     scriptEntry.RuntimeUpdateCount = 0;
                     scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
                     scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
+                    scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
                 }
             }
         }
@@ -339,6 +340,7 @@ namespace Limitless
                         destinationScriptEntry.RuntimeInitialized = false;
                         destinationScriptEntry.RuntimeInstance.reset();
                         destinationScriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
+                        destinationScriptEntry.RuntimeWarnedAccessMaskMismatch = false;
                     }
                 }
 

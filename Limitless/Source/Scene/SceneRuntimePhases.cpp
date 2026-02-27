@@ -3,6 +3,7 @@
 #include "Core/ConfigManager.h"
 #include "Core/Debug/Log.h"
 
+#include <algorithm>
 #include <exception>
 
 namespace Limitless
@@ -39,56 +40,91 @@ namespace Limitless
         if (!mutation)
             return false;
 
-        std::lock_guard<std::mutex> lock(m_DeferredStructuralMutationsMutex);
         DeferredStructuralMutation deferred{};
+        deferred.Sequence = m_NextDeferredStructuralMutationSequence.fetch_add(1, std::memory_order_relaxed);
         deferred.Apply = std::move(mutation);
         if (debugName && debugName[0] != '\0')
             deferred.DebugName = debugName;
         else
             deferred.DebugName = "DeferredStructuralMutation";
-        m_DeferredStructuralMutations.emplace_back(std::move(deferred));
+
+        if (m_DeferredStructuralMutationQueue.TryPush(std::move(deferred)))
+            return true;
+
+        {
+            std::lock_guard<std::mutex> lock(m_DeferredStructuralMutationsOverflowMutex);
+            m_DeferredStructuralMutationsOverflow.emplace_back(std::move(deferred));
+        }
+
+        bool expectedWarnState = false;
+        if (m_WarnedDeferredStructuralMutationQueueOverflow.compare_exchange_strong(expectedWarnState, true, std::memory_order_relaxed))
+        {
+            LT_WARN("Scene deferred structural mutation queue overflowed; falling back to overflow buffer. Consider increasing queue size.");
+        }
         return true;
     }
 
     void Scene::FlushDeferredStructuralMutations()
     {
-        std::deque<DeferredStructuralMutation> pending;
-        {
-            std::lock_guard<std::mutex> lock(m_DeferredStructuralMutationsMutex);
-            if (m_DeferredStructuralMutations.empty())
-                return;
-            pending.swap(m_DeferredStructuralMutations);
-        }
+        auto drainPendingMutations = [this](std::vector<DeferredStructuralMutation>& pending) {
+            pending.clear();
+
+            while (auto queued = m_DeferredStructuralMutationQueue.TryPop())
+                pending.emplace_back(std::move(*queued));
+
+            {
+                std::lock_guard<std::mutex> lock(m_DeferredStructuralMutationsOverflowMutex);
+                if (!m_DeferredStructuralMutationsOverflow.empty())
+                {
+                    pending.reserve(pending.size() + m_DeferredStructuralMutationsOverflow.size());
+                    while (!m_DeferredStructuralMutationsOverflow.empty())
+                    {
+                        pending.emplace_back(std::move(m_DeferredStructuralMutationsOverflow.front()));
+                        m_DeferredStructuralMutationsOverflow.pop_front();
+                    }
+                }
+            }
+
+            if (!pending.empty())
+            {
+                std::sort(pending.begin(), pending.end(), [](const DeferredStructuralMutation& left, const DeferredStructuralMutation& right) {
+                    return left.Sequence < right.Sequence;
+                });
+            }
+        };
+
+        std::vector<DeferredStructuralMutation> pending;
+        drainPendingMutations(pending);
+        if (pending.empty())
+            return;
 
         const RuntimePhase previousPhase = m_RuntimePhase;
         m_RuntimePhase = RuntimePhase::Structural;
         m_IsApplyingDeferredStructuralMutations = true;
         bool appliedStructuralMutation = false;
 
-        while (!pending.empty())
+        while (true)
         {
-            DeferredStructuralMutation deferred = std::move(pending.front());
-            pending.pop_front();
-            try
+            for (DeferredStructuralMutation& deferred : pending)
             {
-                deferred.Apply(*this);
-                appliedStructuralMutation = true;
-            }
-            catch (const std::exception& exception)
-            {
-                LT_ERROR("Scene deferred structural mutation '{}' failed: {}", deferred.DebugName, exception.what());
-            }
-            catch (...)
-            {
-                LT_ERROR("Scene deferred structural mutation '{}' failed with unknown exception", deferred.DebugName);
+                try
+                {
+                    deferred.Apply(*this);
+                    appliedStructuralMutation = true;
+                }
+                catch (const std::exception& exception)
+                {
+                    LT_ERROR("Scene deferred structural mutation '{}' failed: {}", deferred.DebugName, exception.what());
+                }
+                catch (...)
+                {
+                    LT_ERROR("Scene deferred structural mutation '{}' failed with unknown exception", deferred.DebugName);
+                }
             }
 
+            drainPendingMutations(pending);
             if (pending.empty())
-            {
-                std::lock_guard<std::mutex> lock(m_DeferredStructuralMutationsMutex);
-                if (!m_DeferredStructuralMutations.empty())
-                    pending.swap(m_DeferredStructuralMutations);
-            }
+                break;
         }
 
         m_IsApplyingDeferredStructuralMutations = false;

@@ -63,7 +63,7 @@ namespace Limitless::Concurrency
 
         m_ShutdownRequested.store(false, std::memory_order_relaxed);
         m_AcceptingJobs.store(true, std::memory_order_relaxed);
-        m_PendingJobs.store(0, std::memory_order_relaxed);
+        m_PendingJobs.Value.store(0, std::memory_order_relaxed);
 
         m_Queue.reserve(2048);
         m_Workers.reserve(threadCount);
@@ -111,7 +111,7 @@ namespace Limitless::Concurrency
             return;
         }
 
-        m_PendingJobs.fetch_add(1, std::memory_order_relaxed);
+        m_PendingJobs.Value.fetch_add(1, std::memory_order_relaxed);
         {
             std::lock_guard<std::mutex> lock(m_QueueMutex);
             m_Queue.emplace_back(std::move(job));
@@ -126,7 +126,7 @@ namespace Limitless::Concurrency
 
         std::unique_lock<std::mutex> lock(m_QueueMutex);
         m_IdleCondition.wait(lock, [this]() {
-            return m_PendingJobs.load(std::memory_order_acquire) == 0 && m_Queue.empty();
+            return m_PendingJobs.Value.load(std::memory_order_acquire) == 0 && m_Queue.empty();
         });
     }
 
@@ -161,7 +161,7 @@ namespace Limitless::Concurrency
                 LT_CORE_ERROR("JobSystem worker exception: unknown error");
             }
 
-            const uint64_t remaining = m_PendingJobs.fetch_sub(1, std::memory_order_acq_rel) - 1;
+            const uint64_t remaining = m_PendingJobs.Value.fetch_sub(1, std::memory_order_acq_rel) - 1;
             if (remaining == 0)
             {
                 std::lock_guard<std::mutex> lock(m_QueueMutex);

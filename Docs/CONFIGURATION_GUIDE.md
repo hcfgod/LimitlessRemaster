@@ -83,6 +83,9 @@ Example `config.json`:
       "enable_parallel_scripts": true,
       "require_parallel_script_access_declarations": true,
       "warn_implicit_parallel_script_access": true,
+      "validate_parallel_script_access_masks": true,
+      "warn_parallel_script_access_mismatch": true,
+      "enable_parallel_physics_world_step": true,
       "enable_parallel_transforms": true
     }
   },
@@ -201,6 +204,9 @@ The ECS runtime now has dedicated multithreading rollout switches. These keys ar
 | `ecs.mt.enable_parallel_scripts` | bool | `true` | Enables execution of `ParallelSafe` native scripts in worker jobs. |
 | `ecs.mt.require_parallel_script_access_declarations` | bool | `true` | Requires explicit script read/write masks before a `ParallelSafe` script can run in parallel; otherwise it falls back to main-thread execution. |
 | `ecs.mt.warn_implicit_parallel_script_access` | bool | `true` | Warns once per script slot when `ParallelSafe` is selected but access masks are missing. |
+| `ecs.mt.validate_parallel_script_access_masks` | bool | `true` | Validates observed parallel script writes against declared write masks for core bits (`Transform`, `Hierarchy`, `Rigidbody2D`, collider/joint, `Animator`, `ParticleEmitter`) and broader domains (`Rendering2D`, `Lighting2D`, `UI`, `Audio`, `Camera`, `Tilemap`, `Metadata`). |
+| `ecs.mt.warn_parallel_script_access_mismatch` | bool | `true` | Warns once per script slot when a parallel script mutates a component without declaring write access. |
+| `ecs.mt.enable_parallel_physics_world_step` | bool | `true` | Enables parallel `b2World_Step` across independent scene physics worlds, while keeping prepare/sync registry work sequential. |
 | `ecs.mt.enable_parallel_transforms` | bool | `true` | Enables depth-batched parallel transform solve (with depth barriers). |
 
 Suggested rollout order:
@@ -208,8 +214,9 @@ Suggested rollout order:
 1. Enable `defer_structural_mutations` + `validate_structural_phase`.
 2. Enable `enable_system_scheduler`.
 3. Enable `enable_parallel_scripts` while keeping `require_parallel_script_access_declarations=true`.
-4. Enable `enable_parallel_transforms`.
-5. Tune `system.simulation_threads` for target CPU topology.
+4. Enable `enable_parallel_physics_world_step`.
+5. Enable `enable_parallel_transforms`.
+6. Tune `system.simulation_threads` for target CPU topology.
 
 ## Troubleshooting
 

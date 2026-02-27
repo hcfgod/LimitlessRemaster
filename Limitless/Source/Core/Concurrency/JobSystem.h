@@ -84,6 +84,11 @@ namespace Limitless::Concurrency
         void WorkerMain();
 
     private:
+        struct alignas(64) PaddedAtomicU64
+        {
+            std::atomic<uint64_t> Value{ 0 };
+        };
+
         std::vector<std::thread> m_Workers;
         std::vector<std::function<void()>> m_Queue;
         std::mutex m_QueueMutex;
@@ -92,7 +97,7 @@ namespace Limitless::Concurrency
         std::atomic<bool> m_Initialized{ false };
         std::atomic<bool> m_ShutdownRequested{ false };
         std::atomic<bool> m_AcceptingJobs{ false };
-        std::atomic<uint64_t> m_PendingJobs{ 0 };
+        PaddedAtomicU64 m_PendingJobs;
     };
 
     inline JobSystem& GetJobSystem()

@@ -12,6 +12,28 @@ This document describes the **physics architecture** and **design choices** for 
 
 This keeps the default simple (`WorldCount = 1`, `PhysicsWorldSlot = 0`) while enabling isolated parallel simulations when needed.
 
+## World step concurrency model
+
+Physics stepping is intentionally split into three stages:
+
+1. `PrepareForStep(Scene&, dt)` — sequential, may create bodies/joints and sync authored transforms.
+2. `StepWorldOnly(dt)` — parallel-safe world stepping (`b2World_Step`) per independent world.
+3. `SyncAfterStep(Scene&)` — sequential sync of moved bodies, contacts, and diagnostics back into ECS components.
+
+Runtime toggle:
+
+- `ecs.mt.enable_parallel_physics_world_step` (default `true`)
+
+Fallback behavior:
+
+- Automatically falls back to sequential stepping if only one world is active or the simulation job system is unavailable.
+
+## Explicit non-goals
+
+- No concurrent mutation against the same Box2D world while it is stepping.
+- No concurrent ECS registry writes during parallel world-step stage.
+- No lock-per-component transform synchronization.
+
 ## Physics handle types and layout stability
 
 - **Rigidbody2DComponent**, **BoxCollider2DComponent**, **CircleCollider2DComponent**, and joint components store **runtime handles** (`Physics2DBodyHandle`, `Physics2DShapeHandle`, `Physics2DJointHandle`) that refer to Box2D objects when `LT_ENABLE_PHYSICS2D` is defined.

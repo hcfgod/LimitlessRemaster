@@ -63,6 +63,9 @@ namespace Limitless
         bool IsInitialized() const;
 
         void RebuildScene(Scene& scene);
+        void PrepareForStep(Scene& scene, float fixedDeltaTime);
+        void StepWorldOnly(float fixedDeltaTime);
+        void SyncAfterStep(Scene& scene);
         void Step(Scene& scene, float fixedDeltaTime);
 
         void SetSettings(const Physics2DWorldSettings& settings);

@@ -1,15 +1,20 @@
 #include <doctest/doctest.h>
 
 #include "Core/ConfigManager.h"
+#include "Core/Concurrency/JobSystem.h"
 #include "Project/ProjectSettings.h"
 #include "Scene/Scene.h"
 #include "Scene/SceneManager.h"
 #include "Scene/SceneSystemScheduler.h"
 #include "Scripting/NativeScriptRegistry.h"
 
+#include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <string>
+#include <thread>
+#include <unordered_set>
 
 #include <nlohmann/json.hpp>
 
@@ -90,6 +95,117 @@ namespace
 
             DestroyEntity(TargetEntity);
             Destroyed = true;
+        }
+    };
+
+    class ParallelTransformMutateScript final : public Limitless::ScriptableEntity
+    {
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            auto& transform = GetComponent<Limitless::TransformComponent>();
+            transform.Position.x += 1.0f;
+        }
+    };
+
+    class ParallelRigidbodyMutateScript final : public Limitless::ScriptableEntity
+    {
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            auto& rigidbody = GetComponent<Limitless::Rigidbody2DComponent>();
+            rigidbody.SetLinearVelocityX(3.5f);
+        }
+    };
+
+    class ParallelHierarchyMutateScript final : public Limitless::ScriptableEntity
+    {
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            auto& hierarchy = GetComponent<Limitless::HierarchyComponent>();
+            hierarchy.SiblingOrder += 1;
+        }
+    };
+
+    class ParallelBoxColliderMutateScript final : public Limitless::ScriptableEntity
+    {
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            auto& boxCollider = GetComponent<Limitless::BoxCollider2DComponent>();
+            boxCollider.Friction = 0.42f;
+        }
+    };
+
+    class ParallelCircleColliderMutateScript final : public Limitless::ScriptableEntity
+    {
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            auto& circleCollider = GetComponent<Limitless::CircleCollider2DComponent>();
+            circleCollider.Radius = 1.25f;
+        }
+    };
+
+    class ParallelJointMutateScript final : public Limitless::ScriptableEntity
+    {
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            auto& joint = GetComponent<Limitless::Joint2DComponent>();
+            joint.EnableMotor = true;
+            joint.MotorSpeed = 2.0f;
+        }
+    };
+
+    class ParallelSpriteMutateScript final : public Limitless::ScriptableEntity
+    {
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            auto& sprite = GetComponent<Limitless::SpriteComponent>();
+            sprite.RenderOrder += 1;
+        }
+    };
+
+    class ParallelAudioMutateScript final : public Limitless::ScriptableEntity
+    {
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            auto& audioSource = GetComponent<Limitless::AudioSourceComponent>();
+            audioSource.Volume = 0.33f;
+        }
+    };
+
+    class ParallelTagMutateScript final : public Limitless::ScriptableEntity
+    {
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            auto& tag = GetComponent<Limitless::TagComponent>();
+            tag.Tag = "RetaggedByParallelScript";
+        }
+    };
+
+    class ParallelAnimatorMutateScript final : public Limitless::ScriptableEntity
+    {
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            auto& animator = GetComponent<Limitless::AnimatorComponent>();
+            animator.PlaybackSpeed += 0.5f;
+        }
+    };
+
+    class ParallelParticleEmitterMutateScript final : public Limitless::ScriptableEntity
+    {
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            auto& particleEmitter = GetComponent<Limitless::ParticleEmitterComponent>();
+            particleEmitter.SpawnRate += 5.0f;
         }
     };
 
@@ -414,6 +530,969 @@ TEST_SUITE("Scene And Editor Flows")
         REQUIRE(scripts.Scripts[1].RuntimeInstance != nullptr);
         CHECK(scripts.Scripts[0].RuntimeUpdateCount >= 1);
         CHECK(scripts.Scripts[1].RuntimeUpdateCount >= 1);
+    }
+
+    TEST_CASE("Parallel-safe transform writes without declared write mask are flagged")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateAccessMasks = config.GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+        const bool previousWarnAccessMaskMismatch = config.GetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateAccessMasks;
+            bool WarnAccessMaskMismatch;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_parallel_script_access_masks", ValidateAccessMasks);
+                Config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", WarnAccessMaskMismatch);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateAccessMasks,
+            previousWarnAccessMaskMismatch
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+        config.SetValue("ecs.mt.validate_parallel_script_access_masks", true);
+        config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelTransformMutateScript>("ParallelTransformMutateScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelMaskMismatchHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelTransformMutateScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scriptEntry.DeclaredWriteAccessMask = 0;
+
+        auto& transform = registry.get<Limitless::TransformComponent>(scriptHost);
+        const float initialX = transform.Position.x;
+
+        scene.Update(1.0f / 60.0f);
+
+        CHECK(transform.Position.x > initialX);
+        CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == true);
+        CHECK(scriptEntry.RuntimeUpdateCount >= 1);
+    }
+
+    TEST_CASE("Parallel-safe rigidbody writes without declared write mask are flagged")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateAccessMasks = config.GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+        const bool previousWarnAccessMaskMismatch = config.GetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateAccessMasks;
+            bool WarnAccessMaskMismatch;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_parallel_script_access_masks", ValidateAccessMasks);
+                Config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", WarnAccessMaskMismatch);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateAccessMasks,
+            previousWarnAccessMaskMismatch
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+        config.SetValue("ecs.mt.validate_parallel_script_access_masks", true);
+        config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelRigidbodyMutateScript>("ParallelRigidbodyMutateScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelRigidbodyMaskMismatchHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelRigidbodyMutateScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scriptEntry.DeclaredWriteAccessMask = 0;
+        registry.emplace<Limitless::Rigidbody2DComponent>(scriptHost);
+
+        scene.Update(1.0f / 60.0f);
+
+        const auto& rigidbody = registry.get<Limitless::Rigidbody2DComponent>(scriptHost);
+        CHECK(rigidbody.RuntimeHasPendingLinearVelocityX == true);
+        CHECK(rigidbody.RuntimePendingLinearVelocityX == doctest::Approx(3.5f));
+        CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == true);
+        CHECK(scriptEntry.RuntimeUpdateCount >= 1);
+    }
+
+    TEST_CASE("Parallel-safe hierarchy writes without declared write mask are flagged")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateAccessMasks = config.GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+        const bool previousWarnAccessMaskMismatch = config.GetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateAccessMasks;
+            bool WarnAccessMaskMismatch;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_parallel_script_access_masks", ValidateAccessMasks);
+                Config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", WarnAccessMaskMismatch);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateAccessMasks,
+            previousWarnAccessMaskMismatch
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+        config.SetValue("ecs.mt.validate_parallel_script_access_masks", true);
+        config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelHierarchyMutateScript>("ParallelHierarchyMutateScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelHierarchyMaskMismatchHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelHierarchyMutateScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scriptEntry.DeclaredWriteAccessMask = 0;
+
+        const int32_t initialSiblingOrder = registry.get<Limitless::HierarchyComponent>(scriptHost).SiblingOrder;
+        scene.Update(1.0f / 60.0f);
+
+        CHECK(registry.get<Limitless::HierarchyComponent>(scriptHost).SiblingOrder == initialSiblingOrder + 1);
+        CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == true);
+        CHECK(scriptEntry.RuntimeUpdateCount >= 1);
+    }
+
+    TEST_CASE("Parallel-safe BoxCollider2D writes without declared write mask are flagged")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateAccessMasks = config.GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+        const bool previousWarnAccessMaskMismatch = config.GetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateAccessMasks;
+            bool WarnAccessMaskMismatch;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_parallel_script_access_masks", ValidateAccessMasks);
+                Config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", WarnAccessMaskMismatch);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateAccessMasks,
+            previousWarnAccessMaskMismatch
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+        config.SetValue("ecs.mt.validate_parallel_script_access_masks", true);
+        config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelBoxColliderMutateScript>("ParallelBoxColliderMutateScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelBoxColliderMaskMismatchHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelBoxColliderMutateScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scriptEntry.DeclaredWriteAccessMask = 0;
+        registry.emplace<Limitless::BoxCollider2DComponent>(scriptHost);
+
+        scene.Update(1.0f / 60.0f);
+
+        const auto& boxCollider = registry.get<Limitless::BoxCollider2DComponent>(scriptHost);
+        CHECK(boxCollider.Friction == doctest::Approx(0.42f));
+        CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == true);
+        CHECK(scriptEntry.RuntimeUpdateCount >= 1);
+    }
+
+    TEST_CASE("Parallel-safe CircleCollider2D writes without declared write mask are flagged")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateAccessMasks = config.GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+        const bool previousWarnAccessMaskMismatch = config.GetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateAccessMasks;
+            bool WarnAccessMaskMismatch;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_parallel_script_access_masks", ValidateAccessMasks);
+                Config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", WarnAccessMaskMismatch);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateAccessMasks,
+            previousWarnAccessMaskMismatch
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+        config.SetValue("ecs.mt.validate_parallel_script_access_masks", true);
+        config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelCircleColliderMutateScript>("ParallelCircleColliderMutateScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelCircleColliderMaskMismatchHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelCircleColliderMutateScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scriptEntry.DeclaredWriteAccessMask = 0;
+        registry.emplace<Limitless::CircleCollider2DComponent>(scriptHost);
+
+        scene.Update(1.0f / 60.0f);
+
+        const auto& circleCollider = registry.get<Limitless::CircleCollider2DComponent>(scriptHost);
+        CHECK(circleCollider.Radius == doctest::Approx(1.25f));
+        CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == true);
+        CHECK(scriptEntry.RuntimeUpdateCount >= 1);
+    }
+
+    TEST_CASE("Parallel-safe Joint2D writes without declared write mask are flagged")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateAccessMasks = config.GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+        const bool previousWarnAccessMaskMismatch = config.GetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateAccessMasks;
+            bool WarnAccessMaskMismatch;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_parallel_script_access_masks", ValidateAccessMasks);
+                Config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", WarnAccessMaskMismatch);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateAccessMasks,
+            previousWarnAccessMaskMismatch
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+        config.SetValue("ecs.mt.validate_parallel_script_access_masks", true);
+        config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelJointMutateScript>("ParallelJointMutateScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelJointMaskMismatchHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelJointMutateScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scriptEntry.DeclaredWriteAccessMask = 0;
+        registry.emplace<Limitless::Joint2DComponent>(scriptHost);
+
+        scene.Update(1.0f / 60.0f);
+
+        const auto& joint = registry.get<Limitless::Joint2DComponent>(scriptHost);
+        CHECK(joint.EnableMotor == true);
+        CHECK(joint.MotorSpeed == doctest::Approx(2.0f));
+        CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == true);
+        CHECK(scriptEntry.RuntimeUpdateCount >= 1);
+    }
+
+    TEST_CASE("Parallel-safe Rendering2D writes without declared write mask are flagged")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateAccessMasks = config.GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+        const bool previousWarnAccessMaskMismatch = config.GetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateAccessMasks;
+            bool WarnAccessMaskMismatch;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_parallel_script_access_masks", ValidateAccessMasks);
+                Config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", WarnAccessMaskMismatch);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateAccessMasks,
+            previousWarnAccessMaskMismatch
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+        config.SetValue("ecs.mt.validate_parallel_script_access_masks", true);
+        config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelSpriteMutateScript>("ParallelSpriteMutateScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelRenderingMaskMismatchHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelSpriteMutateScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scriptEntry.DeclaredWriteAccessMask = 0;
+        registry.emplace<Limitless::SpriteComponent>(scriptHost);
+
+        const int32_t initialRenderOrder = registry.get<Limitless::SpriteComponent>(scriptHost).RenderOrder;
+        scene.Update(1.0f / 60.0f);
+
+        CHECK(registry.get<Limitless::SpriteComponent>(scriptHost).RenderOrder == initialRenderOrder + 1);
+        CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == true);
+        CHECK(scriptEntry.RuntimeUpdateCount >= 1);
+    }
+
+    TEST_CASE("Parallel-safe Audio writes without declared write mask are flagged")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateAccessMasks = config.GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+        const bool previousWarnAccessMaskMismatch = config.GetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateAccessMasks;
+            bool WarnAccessMaskMismatch;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_parallel_script_access_masks", ValidateAccessMasks);
+                Config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", WarnAccessMaskMismatch);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateAccessMasks,
+            previousWarnAccessMaskMismatch
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+        config.SetValue("ecs.mt.validate_parallel_script_access_masks", true);
+        config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelAudioMutateScript>("ParallelAudioMutateScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelAudioMaskMismatchHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelAudioMutateScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scriptEntry.DeclaredWriteAccessMask = 0;
+        registry.emplace<Limitless::AudioSourceComponent>(scriptHost);
+
+        scene.Update(1.0f / 60.0f);
+
+        CHECK(registry.get<Limitless::AudioSourceComponent>(scriptHost).Volume == doctest::Approx(0.33f));
+        CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == true);
+        CHECK(scriptEntry.RuntimeUpdateCount >= 1);
+    }
+
+    TEST_CASE("Parallel-safe Metadata writes without declared write mask are flagged")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateAccessMasks = config.GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+        const bool previousWarnAccessMaskMismatch = config.GetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateAccessMasks;
+            bool WarnAccessMaskMismatch;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_parallel_script_access_masks", ValidateAccessMasks);
+                Config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", WarnAccessMaskMismatch);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateAccessMasks,
+            previousWarnAccessMaskMismatch
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+        config.SetValue("ecs.mt.validate_parallel_script_access_masks", true);
+        config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelTagMutateScript>("ParallelTagMutateScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelMetadataMaskMismatchHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelTagMutateScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scriptEntry.DeclaredWriteAccessMask = 0;
+
+        scene.Update(1.0f / 60.0f);
+
+        CHECK(registry.get<Limitless::TagComponent>(scriptHost).Tag == "RetaggedByParallelScript");
+        CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == true);
+        CHECK(scriptEntry.RuntimeUpdateCount >= 1);
+    }
+
+    TEST_CASE("Parallel-safe Animator writes without declared write mask are flagged")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateAccessMasks = config.GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+        const bool previousWarnAccessMaskMismatch = config.GetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateAccessMasks;
+            bool WarnAccessMaskMismatch;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_parallel_script_access_masks", ValidateAccessMasks);
+                Config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", WarnAccessMaskMismatch);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateAccessMasks,
+            previousWarnAccessMaskMismatch
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+        config.SetValue("ecs.mt.validate_parallel_script_access_masks", true);
+        config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelAnimatorMutateScript>("ParallelAnimatorMutateScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelAnimatorMaskMismatchHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelAnimatorMutateScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scriptEntry.DeclaredWriteAccessMask = 0;
+        registry.emplace<Limitless::AnimatorComponent>(scriptHost);
+
+        scene.Update(1.0f / 60.0f);
+
+        CHECK(registry.get<Limitless::AnimatorComponent>(scriptHost).PlaybackSpeed == doctest::Approx(1.5f));
+        CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == true);
+        CHECK(scriptEntry.RuntimeUpdateCount >= 1);
+    }
+
+    TEST_CASE("Parallel-safe ParticleEmitter writes without declared write mask are flagged")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateAccessMasks = config.GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+        const bool previousWarnAccessMaskMismatch = config.GetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateAccessMasks;
+            bool WarnAccessMaskMismatch;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_parallel_script_access_masks", ValidateAccessMasks);
+                Config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", WarnAccessMaskMismatch);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateAccessMasks,
+            previousWarnAccessMaskMismatch
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+        config.SetValue("ecs.mt.validate_parallel_script_access_masks", true);
+        config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelParticleEmitterMutateScript>("ParallelParticleEmitterMutateScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelParticleEmitterMaskMismatchHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelParticleEmitterMutateScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scriptEntry.DeclaredWriteAccessMask = 0;
+        registry.emplace<Limitless::ParticleEmitterComponent>(scriptHost);
+
+        scene.Update(1.0f / 60.0f);
+
+        CHECK(registry.get<Limitless::ParticleEmitterComponent>(scriptHost).SpawnRate == doctest::Approx(15.0f));
+        CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == true);
+        CHECK(scriptEntry.RuntimeUpdateCount >= 1);
+    }
+
+    TEST_CASE("Deferred structural mutation queue preserves all commands under concurrent enqueue")
+    {
+        Limitless::Scene scene;
+
+        constexpr size_t kProducerCount = 4;
+        constexpr size_t kCommandsPerProducer = 128;
+        constexpr size_t kTotalCommands = kProducerCount * kCommandsPerProducer;
+
+        std::mutex appliedOrderMutex;
+        std::vector<uint64_t> appliedOrder;
+        appliedOrder.reserve(kTotalCommands);
+        std::atomic<uint64_t> commandToken{ 0 };
+        std::atomic<bool> enqueueFailed{ false };
+
+        std::vector<std::thread> producers;
+        producers.reserve(kProducerCount);
+        for (size_t producerIndex = 0; producerIndex < kProducerCount; ++producerIndex)
+        {
+            (void)producerIndex;
+            producers.emplace_back([&]() {
+                for (size_t commandIndex = 0; commandIndex < kCommandsPerProducer; ++commandIndex)
+                {
+                    (void)commandIndex;
+                    const uint64_t token = commandToken.fetch_add(1, std::memory_order_relaxed);
+                    const bool enqueued = scene.EnqueueDeferredStructuralMutation(
+                        [&appliedOrder, &appliedOrderMutex, token](Limitless::Scene&) {
+                            std::lock_guard<std::mutex> lock(appliedOrderMutex);
+                            appliedOrder.push_back(token);
+                        },
+                        "TestConcurrentDeferredMutation");
+                    if (!enqueued)
+                        enqueueFailed.store(true, std::memory_order_relaxed);
+                }
+            });
+        }
+
+        for (auto& producer : producers)
+            producer.join();
+
+        CHECK(enqueueFailed.load(std::memory_order_relaxed) == false);
+        scene.FlushDeferredStructuralMutations();
+
+        REQUIRE(appliedOrder.size() == kTotalCommands);
+        std::unordered_set<uint64_t> uniqueTokens(appliedOrder.begin(), appliedOrder.end());
+        CHECK(uniqueTokens.size() == kTotalCommands);
+        for (uint64_t token = 0; token < static_cast<uint64_t>(kTotalCommands); ++token)
+            CHECK(uniqueTokens.contains(token));
+    }
+
+    TEST_CASE("Deferred structural mutation flush preserves enqueue order for single producer")
+    {
+        Limitless::Scene scene;
+
+        std::vector<int> appliedOrder;
+        constexpr int kCommandCount = 32;
+        for (int command = 0; command < kCommandCount; ++command)
+        {
+            const bool enqueued = scene.EnqueueDeferredStructuralMutation(
+                [&appliedOrder, command](Limitless::Scene&) {
+                    appliedOrder.push_back(command);
+                },
+                "TestSingleProducerDeferredMutation");
+            REQUIRE(enqueued);
+        }
+
+        scene.FlushDeferredStructuralMutations();
+        REQUIRE(appliedOrder.size() == static_cast<size_t>(kCommandCount));
+        for (int command = 0; command < kCommandCount; ++command)
+            CHECK(appliedOrder[static_cast<size_t>(command)] == command);
+    }
+
+    TEST_CASE("Parallel physics world stepping matches sequential stepping for isolated worlds")
+    {
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousParallelWorldStepping = config.GetValue<bool>("ecs.mt.enable_parallel_physics_world_step", true);
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool PreviousParallelWorldStepping;
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_physics_world_step", PreviousParallelWorldStepping);
+            }
+        } configRestore{ config, previousParallelWorldStepping };
+
+        auto& jobSystem = Limitless::Concurrency::GetJobSystem();
+        const bool wasJobSystemInitialized = jobSystem.IsInitialized();
+        if (!wasJobSystemInitialized)
+            jobSystem.Initialize(2);
+        struct JobSystemRestore final
+        {
+            Limitless::Concurrency::JobSystem& JobSystem;
+            bool WasInitialized;
+            ~JobSystemRestore()
+            {
+                if (!WasInitialized && JobSystem.IsInitialized())
+                    JobSystem.Shutdown();
+            }
+        } jobSystemRestore{ jobSystem, wasJobSystemInitialized };
+
+        Limitless::Scene baseScene;
+        auto& baseRegistry = baseScene.GetRegistry();
+
+        Limitless::Physics2DWorldSettings settings = baseScene.GetPhysics2DSettings();
+        settings.WorldCount = 2;
+        settings.Gravity = { 0.0f, -9.81f };
+        settings.VelocitySubSteps = 8;
+        baseScene.SetPhysics2DSettings(settings);
+
+        const entt::entity worldZeroBody = baseScene.CreateEntity("WorldZeroBody");
+        auto& worldZeroTransform = baseRegistry.get<Limitless::TransformComponent>(worldZeroBody);
+        worldZeroTransform.Position = { -1.0f, 5.0f, 0.0f };
+        auto& worldZeroRigidbody = baseRegistry.emplace<Limitless::Rigidbody2DComponent>(worldZeroBody);
+        worldZeroRigidbody.Type = Limitless::Rigidbody2DComponent::BodyType::Dynamic;
+        worldZeroRigidbody.PhysicsWorldSlot = 0;
+        baseRegistry.emplace<Limitless::BoxCollider2DComponent>(worldZeroBody);
+
+        const entt::entity worldOneBody = baseScene.CreateEntity("WorldOneBody");
+        auto& worldOneTransform = baseRegistry.get<Limitless::TransformComponent>(worldOneBody);
+        worldOneTransform.Position = { 1.0f, 6.0f, 0.0f };
+        auto& worldOneRigidbody = baseRegistry.emplace<Limitless::Rigidbody2DComponent>(worldOneBody);
+        worldOneRigidbody.Type = Limitless::Rigidbody2DComponent::BodyType::Dynamic;
+        worldOneRigidbody.PhysicsWorldSlot = 1;
+        baseRegistry.emplace<Limitless::BoxCollider2DComponent>(worldOneBody);
+
+        auto sequentialScene = baseScene.Clone();
+        auto parallelScene = baseScene.Clone();
+        REQUIRE(sequentialScene != nullptr);
+        REQUIRE(parallelScene != nullptr);
+
+        constexpr float kFixedStep = 1.0f / 60.0f;
+        constexpr int kStepCount = 24;
+
+        config.SetValue("ecs.mt.enable_parallel_physics_world_step", false);
+        for (int stepIndex = 0; stepIndex < kStepCount; ++stepIndex)
+            sequentialScene->StepPhysics2D(kFixedStep);
+
+        config.SetValue("ecs.mt.enable_parallel_physics_world_step", true);
+        for (int stepIndex = 0; stepIndex < kStepCount; ++stepIndex)
+            parallelScene->StepPhysics2D(kFixedStep);
+
+        const entt::entity sequentialWorldZeroBody = FindEntityByTag(*sequentialScene, "WorldZeroBody");
+        const entt::entity sequentialWorldOneBody = FindEntityByTag(*sequentialScene, "WorldOneBody");
+        const entt::entity parallelWorldZeroBody = FindEntityByTag(*parallelScene, "WorldZeroBody");
+        const entt::entity parallelWorldOneBody = FindEntityByTag(*parallelScene, "WorldOneBody");
+        REQUIRE_FALSE(IsNullEntity(sequentialWorldZeroBody));
+        REQUIRE_FALSE(IsNullEntity(sequentialWorldOneBody));
+        REQUIRE_FALSE(IsNullEntity(parallelWorldZeroBody));
+        REQUIRE_FALSE(IsNullEntity(parallelWorldOneBody));
+
+        const auto& sequentialRegistry = sequentialScene->GetRegistry();
+        const auto& parallelRegistry = parallelScene->GetRegistry();
+        const float sequentialWorldZeroY = sequentialRegistry.get<Limitless::TransformComponent>(sequentialWorldZeroBody).Position.y;
+        const float sequentialWorldOneY = sequentialRegistry.get<Limitless::TransformComponent>(sequentialWorldOneBody).Position.y;
+        const float parallelWorldZeroY = parallelRegistry.get<Limitless::TransformComponent>(parallelWorldZeroBody).Position.y;
+        const float parallelWorldOneY = parallelRegistry.get<Limitless::TransformComponent>(parallelWorldOneBody).Position.y;
+
+        CHECK(parallelWorldZeroY == doctest::Approx(sequentialWorldZeroY).epsilon(0.0001f));
+        CHECK(parallelWorldOneY == doctest::Approx(sequentialWorldOneY).epsilon(0.0001f));
+        CHECK(parallelWorldZeroY < 5.0f);
+        CHECK(parallelWorldOneY < 6.0f);
     }
 
     TEST_CASE("Scene clone preserves authored data and resets runtime state")

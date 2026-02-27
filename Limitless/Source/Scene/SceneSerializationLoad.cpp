@@ -178,6 +178,8 @@ namespace Limitless
                     scriptEntry.RuntimeInstance.reset();
                     scriptEntry.RuntimeUpdateCount = 0;
                     scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                    scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
+                    scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
                 }
             }
         }
@@ -924,6 +926,7 @@ namespace Limitless
             outScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
             outScriptEntry.RuntimeWarnedMissingCompiledScript = false;
             outScriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
+            outScriptEntry.RuntimeWarnedAccessMaskMismatch = false;
         }
 
         void DeserializeScriptAndPrefabComponents(const nlohmann::json& entry, Scene* scene, entt::entity entity)

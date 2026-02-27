@@ -19,7 +19,17 @@ namespace Limitless
         Rigidbody2D = 1ull << 2,
         Animator = 1ull << 3,
         ParticleEmitter = 1ull << 4,
-        NativeScript = 1ull << 5
+        NativeScript = 1ull << 5,
+        BoxCollider2D = 1ull << 6,
+        CircleCollider2D = 1ull << 7,
+        Joint2D = 1ull << 8,
+        Rendering2D = 1ull << 9,
+        Lighting2D = 1ull << 10,
+        UI = 1ull << 11,
+        Audio = 1ull << 12,
+        Camera = 1ull << 13,
+        Tilemap = 1ull << 14,
+        Metadata = 1ull << 15
     };
 
     constexpr uint64_t ToAccessMask(SceneSystemAccessComponent component)

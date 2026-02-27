@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Error.h"
+#include "Core/Concurrency/LockFreeQueue.h"
 #include "Physics/Physics2DWorld.h"
 #include "Scene/Components.h"
 #include "Scene/Entity.h"
@@ -186,11 +187,16 @@ namespace Limitless
 
         struct DeferredStructuralMutation
         {
+            uint64_t Sequence = 0;
             std::function<void(Scene&)> Apply;
             std::string DebugName;
         };
-        mutable std::mutex m_DeferredStructuralMutationsMutex;
-        std::deque<DeferredStructuralMutation> m_DeferredStructuralMutations;
+        static constexpr size_t kDeferredStructuralMutationQueueSize = 8192;
+        mutable Concurrency::LockFreeMPMCQueue<DeferredStructuralMutation, kDeferredStructuralMutationQueueSize> m_DeferredStructuralMutationQueue;
+        mutable std::mutex m_DeferredStructuralMutationsOverflowMutex;
+        std::deque<DeferredStructuralMutation> m_DeferredStructuralMutationsOverflow;
+        std::atomic<uint64_t> m_NextDeferredStructuralMutationSequence{ 1 };
+        std::atomic<bool> m_WarnedDeferredStructuralMutationQueueOverflow{ false };
     };
 
     // -----------------------------------------------------------------------------

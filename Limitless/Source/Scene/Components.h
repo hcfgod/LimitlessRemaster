@@ -643,6 +643,7 @@ namespace Limitless
         bool RuntimeWarnedOnUpdateTransformMutation = false;
         bool RuntimeWarnedMissingCompiledScript = false;
         bool RuntimeWarnedMissingAccessDeclaration = false;
+        bool RuntimeWarnedAccessMaskMismatch = false;
 
         NativeScriptEntry() = default;
 
@@ -659,7 +660,8 @@ namespace Limitless
               RuntimeUpdateCount(0),
               RuntimeWarnedOnUpdateTransformMutation(false),
               RuntimeWarnedMissingCompiledScript(false),
-              RuntimeWarnedMissingAccessDeclaration(false)
+              RuntimeWarnedMissingAccessDeclaration(false),
+              RuntimeWarnedAccessMaskMismatch(false)
         {
         }
 
@@ -680,6 +682,7 @@ namespace Limitless
             RuntimeWarnedOnUpdateTransformMutation = false;
             RuntimeWarnedMissingCompiledScript = false;
             RuntimeWarnedMissingAccessDeclaration = false;
+            RuntimeWarnedAccessMaskMismatch = false;
             return *this;
         }
 

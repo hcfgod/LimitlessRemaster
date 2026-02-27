@@ -201,7 +201,7 @@ namespace Limitless
         m_RuntimeBuilt = true;
     }
 
-    void Physics2DWorld::Step(Scene& scene, float fixedDeltaTime)
+    void Physics2DWorld::PrepareForStep(Scene& scene, float fixedDeltaTime)
     {
 #ifdef LT_ENABLE_PHYSICS2D
         if (!b2World_IsValid(m_WorldId))
@@ -236,7 +236,31 @@ namespace Limitless
             m_CachedEffectiveSubSteps = ComputeEffectiveSubSteps(scene);
             m_SubStepsCacheDirty = false;
         }
-        b2World_Step(m_WorldId, step, m_CachedEffectiveSubSteps);
+#else
+        (void)scene;
+        (void)fixedDeltaTime;
+#endif
+    }
+
+    void Physics2DWorld::StepWorldOnly(float fixedDeltaTime)
+    {
+#ifdef LT_ENABLE_PHYSICS2D
+        if (!b2World_IsValid(m_WorldId))
+            return;
+
+        const float step = std::max(fixedDeltaTime, kMinimumStepDelta);
+        const int effectiveSubSteps = (m_CachedEffectiveSubSteps > 0)
+            ? m_CachedEffectiveSubSteps
+            : std::max(1, m_Settings.VelocitySubSteps);
+        b2World_Step(m_WorldId, step, effectiveSubSteps);
+#else
+        (void)fixedDeltaTime;
+#endif
+    }
+
+    void Physics2DWorld::SyncAfterStep(Scene& scene)
+    {
+#ifdef LT_ENABLE_PHYSICS2D
 
         SyncMovedBodiesToTransforms(scene);
         SyncBodyContactCounts(scene);
@@ -249,8 +273,14 @@ namespace Limitless
             CollectDiagnostics(scene);
 #else
         (void)scene;
-        (void)fixedDeltaTime;
 #endif
+    }
+
+    void Physics2DWorld::Step(Scene& scene, float fixedDeltaTime)
+    {
+        PrepareForStep(scene, fixedDeltaTime);
+        StepWorldOnly(fixedDeltaTime);
+        SyncAfterStep(scene);
     }
 
     void Physics2DWorld::DestroyRuntimeState(Scene& scene)

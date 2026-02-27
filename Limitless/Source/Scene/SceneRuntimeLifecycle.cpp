@@ -1,5 +1,7 @@
 #include "Scene/Scene.h"
 
+#include "Core/Concurrency/JobSystem.h"
+#include "Core/ConfigManager.h"
 #include "Physics/Physics2DQueries.h"
 #include "Physics/Physics2DWorld.h"
 
@@ -71,6 +73,8 @@ namespace Limitless
         Physics2DQueries::SetActiveSceneForScriptQueries(this);
         EnsurePhysics2DWorldCount(m_Physics2DSettings.WorldCount);
         SetRuntimePhase(RuntimePhase::Simulation);
+        std::vector<Physics2DWorld*> activeWorlds;
+        activeWorlds.reserve(m_Physics2DWorlds.size());
         for (auto& physicsWorld : m_Physics2DWorlds)
         {
             if (!physicsWorld)
@@ -78,7 +82,28 @@ namespace Limitless
             if (!physicsWorld->IsInitialized())
                 physicsWorld->Initialize(m_Physics2DSettings);
             physicsWorld->SetSettings(m_Physics2DSettings);
-            physicsWorld->Step(*this, fixedDeltaTime);
+            physicsWorld->PrepareForStep(*this, fixedDeltaTime);
+            activeWorlds.push_back(physicsWorld.get());
+        }
+
+        const bool enableParallelPhysicsWorldStep =
+            ConfigManager::GetInstance().GetValue<bool>("ecs.mt.enable_parallel_physics_world_step", true);
+        auto& jobSystem = Concurrency::GetJobSystem();
+        if (enableParallelPhysicsWorldStep && jobSystem.IsInitialized() && activeWorlds.size() > 1)
+        {
+            jobSystem.ParallelFor(0, activeWorlds.size(), 1, [&activeWorlds, fixedDeltaTime](size_t worldIndex) {
+                activeWorlds[worldIndex]->StepWorldOnly(fixedDeltaTime);
+            });
+        }
+        else
+        {
+            for (Physics2DWorld* physicsWorld : activeWorlds)
+                physicsWorld->StepWorldOnly(fixedDeltaTime);
+        }
+
+        for (Physics2DWorld* physicsWorld : activeWorlds)
+        {
+            physicsWorld->SyncAfterStep(*this);
         }
         m_PhysicsWorldInitializedForLoading = true;
         SetRuntimePhase(RuntimePhase::Transform);

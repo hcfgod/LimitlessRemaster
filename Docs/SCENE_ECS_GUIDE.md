@@ -47,7 +47,7 @@ High-level flow during runtime:
 
 Structural operations include create/destroy entity, component add/remove, and hierarchy edits (`SetParent`, sibling order changes).
 
-In parallel/runtime-sensitive contexts these are deferred through a thread-safe queue and applied in the single-threaded structural phase. This avoids registry structural races while preserving authored script ergonomics.
+In parallel/runtime-sensitive contexts these are deferred through a lock-free MPMC enqueue path and applied in the single-threaded structural phase. This avoids registry structural races while preserving authored script ergonomics.
 
 See config rollout keys in `Docs/CONFIGURATION_GUIDE.md`:
 
@@ -72,7 +72,39 @@ See:
 - `ecs.mt.enable_parallel_scripts`
 - `ecs.mt.require_parallel_script_access_declarations`
 - `ecs.mt.warn_implicit_parallel_script_access`
+- `ecs.mt.validate_parallel_script_access_masks`
+- `ecs.mt.warn_parallel_script_access_mismatch`
 - `ecs.mt.enable_system_scheduler`
+
+When `ecs.mt.validate_parallel_script_access_masks` is enabled, runtime validation currently tracks observed writes for:
+
+- `Transform`
+- `Hierarchy`
+- `Rigidbody2D`
+- `BoxCollider2D`
+- `CircleCollider2D`
+- `Joint2D`
+- `Animator` (including `AnimationEventReceiver`)
+- `ParticleEmitter`
+- `Rendering2D` domain (`Sprite`, `Material`)
+- `Lighting2D` domain (`DirectionalLight2D`, `PointLight2D`, `ShadowOccluder2D`)
+- `UI` domain (`Canvas`, `RectTransform`, `UIImage`, `UIPanel`, `UIText`, `UIButton`, `UISlider`)
+- `Audio` domain (`AudioListener2D`, `AudioSource`)
+- `Camera` domain (`Camera`)
+- `Tilemap` domain (`Grid2D`, `TilemapLayer`)
+- `Metadata` domain (`Tag`, `PrefabInstance`)
+
+## Parallel Physics World Stepping
+
+Physics stepping uses split phases:
+
+1. `PrepareForStep` (sequential, may touch ECS registry)
+2. `StepWorldOnly` (`b2World_Step`, parallel across independent worlds)
+3. `SyncAfterStep` (sequential ECS sync)
+
+See:
+
+- `ecs.mt.enable_parallel_physics_world_step`
 
 ## Depth-Batched Transform Solve
 
@@ -87,6 +119,12 @@ This preserves parent-before-child correctness while scaling wide hierarchies.
 See:
 
 - `ecs.mt.enable_parallel_transforms`
+
+## Explicit Non-Goals (Current Milestone)
+
+- No arbitrary concurrent EnTT structural mutation.
+- No concurrent in-step mutation within the same Box2D world.
+- No per-component transform mutexes or atomic matrix writes.
 
 ## Usage
 

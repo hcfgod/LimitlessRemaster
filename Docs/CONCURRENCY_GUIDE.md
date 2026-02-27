@@ -46,6 +46,21 @@ wg.Wait();
 
 This backend is used by scene runtime scheduling (parallel script batches, depth-batched transform solve, and scheduler-compatible simulation systems).
 
+### Physics stepping model
+
+When `ecs.mt.enable_parallel_physics_world_step` is enabled and multiple worlds are active:
+
+- Physics world **prepare** stage is sequential (`PrepareForStep`).
+- `b2World_Step` runs in parallel across independent worlds (`StepWorldOnly`).
+- ECS synchronization back to components is sequential (`SyncAfterStep`).
+
+This keeps Box2D compute parallel while avoiding concurrent registry writes.
+
+### Non-goals in current implementation
+
+- No arbitrary concurrent EnTT structural mutation.
+- No concurrent mutation APIs against the same Box2D world while it is stepping.
+
 ## AsyncIO System
 
 ### Initialization

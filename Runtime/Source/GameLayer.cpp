@@ -928,6 +928,8 @@ namespace Limitless
         ScriptableEntity::SetDestroyEntityBridgeCallback(&ForwardScriptDestroyEntityToHost);
         ScriptableEntity::SetInstantiatePrefabBridgeCallback(&ForwardScriptInstantiatePrefabToHost);
         ScriptableEntity::SetParallelScriptExecutionBridgeCallback(&ForwardScriptParallelExecutionStateToHost);
+        Entity::SetDestroyBridgeCallback(&ForwardScriptDestroyEntityToHost);
+        Entity::SetParallelExecutionBridgeCallback(&ForwardScriptParallelExecutionStateToHost);
 
         LT_INFO("GameLayer: ScriptCore loaded with {} script(s).",
                  NativeScriptRegistry::GetRegisteredScriptNames().size());
