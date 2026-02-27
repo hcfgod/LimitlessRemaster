@@ -1063,6 +1063,28 @@ namespace Limitless
             float bodyAngleRadians = b2Rot_GetAngle(moveEvent.transform.q);
             b2Vec2 bodyVelocity = b2Body_GetLinearVelocity(rigidbody->RuntimeBodyId);
 
+            // Defensive runtime guard: on some platforms/driver/library combos,
+            // upstream physics can occasionally report non-finite values.
+            // Never propagate NaN/Inf into authored transforms.
+            if (!std::isfinite(bodyPosition.x) ||
+                !std::isfinite(bodyPosition.y) ||
+                !std::isfinite(bodyAngleRadians) ||
+                !std::isfinite(bodyVelocity.x) ||
+                !std::isfinite(bodyVelocity.y))
+            {
+                const float safeX = glm::clamp(SanitizeFinite(transform->Position.x, 0.0f), -kMaximumWorldPosition, kMaximumWorldPosition);
+                const float safeY = glm::clamp(SanitizeFinite(transform->Position.y, 0.0f), -kMaximumWorldPosition, kMaximumWorldPosition);
+                const float safeAngleRadians = SanitizeFinite(glm::radians(transform->Rotation.z), 0.0f);
+
+                b2Body_SetTransform(rigidbody->RuntimeBodyId, { safeX, safeY }, b2MakeRot(safeAngleRadians));
+                b2Body_SetLinearVelocity(rigidbody->RuntimeBodyId, { 0.0f, 0.0f });
+                b2Body_SetAngularVelocity(rigidbody->RuntimeBodyId, 0.0f);
+
+                bodyPosition = glm::vec2(safeX, safeY);
+                bodyAngleRadians = safeAngleRadians;
+                bodyVelocity = { 0.0f, 0.0f };
+            }
+
             if (freezePositionX || freezePositionY || freezeRotation)
             {
                 glm::vec2 constrainedPosition = bodyPosition;
