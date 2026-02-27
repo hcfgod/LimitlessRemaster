@@ -18,7 +18,10 @@
 #include <cstdio>
 #include <filesystem>
 #include <string_view>
+#include <type_traits>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace Limitless::EditorInspectorPanel
@@ -38,14 +41,63 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        void TrackInteractiveMutation(EditorUndoService* undoService, const char* label)
+        template<typename TValue, typename TApply>
+        void TrackInteractiveValueMutation(EditorUndoService* undoService,
+                                           const char* label,
+                                           const TValue& currentValue,
+                                           TApply&& applyValue)
         {
             if (!undoService || !label)
                 return;
+
+            const ImGuiID itemId = ImGui::GetItemID();
+            if (itemId == 0)
+                return;
+
+            using DecayedValueType = std::decay_t<TValue>;
+            static std::unordered_map<ImGuiID, DecayedValueType> beforeValues;
             if (ImGui::IsItemActivated())
-                undoService->BeginInteractiveSceneMutation();
-            if (ImGui::IsItemDeactivatedAfterEdit())
-                (void)undoService->CommitInteractiveSceneMutation(label);
+                beforeValues[itemId] = currentValue;
+
+            if (!ImGui::IsItemDeactivatedAfterEdit())
+                return;
+
+            const auto beforeIt = beforeValues.find(itemId);
+            if (beforeIt == beforeValues.end())
+                return;
+
+            const DecayedValueType beforeValue = beforeIt->second;
+            beforeValues.erase(beforeIt);
+
+            const DecayedValueType afterValue = currentValue;
+            std::function<bool(const DecayedValueType&)> applyCallback = std::forward<TApply>(applyValue);
+            (void)undoService->ExecuteValueMutation(label, beforeValue, afterValue, std::move(applyCallback));
+        }
+
+        template<typename TComponent, typename TValue>
+        void TrackInteractiveMemberMutation(EditorUndoService* undoService,
+                                            const char* label,
+                                            entt::entity entity,
+                                            TValue TComponent::* member,
+                                            const TValue& currentValue,
+                                            const std::function<void(Scene&, TComponent&)>& onApply = {})
+        {
+            TrackInteractiveValueMutation(undoService, label, currentValue, [undoService, entity, member, onApply](const TValue& value) {
+                if (!undoService)
+                    return false;
+                Scene* activeScene = undoService->GetActiveScene();
+                if (!activeScene || !activeScene->IsValid(entity))
+                    return false;
+
+                auto* component = activeScene->GetRegistry().try_get<TComponent>(entity);
+                if (!component)
+                    return false;
+
+                component->*member = value;
+                if (onApply)
+                    onApply(*activeScene, *component);
+                return true;
+            });
         }
 
         constexpr const char* kSubSpritePayloadId = "SUB_SPRITE_KEY";
@@ -56,6 +108,16 @@ namespace Limitless::EditorInspectorPanel
             int32_t SubSpriteIndex = -1;
             glm::vec2 UvMin = glm::vec2(0.0f);
             glm::vec2 UvMax = glm::vec2(1.0f);
+        };
+
+        struct AnimatorParametersSnapshot
+        {
+            std::unordered_map<std::string, bool> BoolParameters;
+            std::unordered_map<std::string, float> FloatParameters;
+            std::unordered_map<std::string, int32_t> IntegerParameters;
+            std::unordered_map<std::string, bool> TriggerParameters;
+
+            bool operator==(const AnimatorParametersSnapshot& other) const = default;
         };
 
         bool ResolveSpriteDropAssignment(const std::string& droppedKey, SpriteDropAssignment& outAssignment)
@@ -320,7 +382,8 @@ namespace Limitless::EditorInspectorPanel
 
             ImGui::TextUnformatted("Enabled");
             ImGui::Checkbox("##EntityEnabled", &tag->Enabled);
-            TrackInteractiveMutation(undoService, "Edit Entity Enabled");
+            TrackInteractiveMemberMutation<TagComponent>(
+                undoService, "Edit Entity Enabled", selectedEntity, &TagComponent::Enabled, tag->Enabled);
         }
 
         ImGui::Spacing();
@@ -351,17 +414,41 @@ namespace Limitless::EditorInspectorPanel
                 const bool positionChanged = ImGui::DragFloat3("##TransformPosition", &transform->Position.x, 0.1f);
                 if (positionChanged && scene)
                     scene->MarkTransformDirty(selectedEntity);
-                TrackInteractiveMutation(undoService, "Edit Transform Position");
+                TrackInteractiveMemberMutation<TransformComponent>(
+                    undoService,
+                    "Edit Transform Position",
+                    selectedEntity,
+                    &TransformComponent::Position,
+                    transform->Position,
+                    [selectedEntity](Scene& activeScene, TransformComponent&) {
+                        activeScene.MarkTransformDirty(selectedEntity);
+                    });
                 ImGui::TextUnformatted("Rotation");
                 const bool rotationChanged = ImGui::DragFloat3("##TransformRotation", &transform->Rotation.x, 1.0f);
                 if (rotationChanged && scene)
                     scene->MarkTransformDirty(selectedEntity);
-                TrackInteractiveMutation(undoService, "Edit Transform Rotation");
+                TrackInteractiveMemberMutation<TransformComponent>(
+                    undoService,
+                    "Edit Transform Rotation",
+                    selectedEntity,
+                    &TransformComponent::Rotation,
+                    transform->Rotation,
+                    [selectedEntity](Scene& activeScene, TransformComponent&) {
+                        activeScene.MarkTransformDirty(selectedEntity);
+                    });
                 ImGui::TextUnformatted("Scale");
                 const bool scaleChanged = ImGui::DragFloat3("##TransformScale", &transform->Scale.x, 0.1f);
                 if (scaleChanged && scene)
                     scene->MarkTransformDirty(selectedEntity);
-                TrackInteractiveMutation(undoService, "Edit Transform Scale");
+                TrackInteractiveMemberMutation<TransformComponent>(
+                    undoService,
+                    "Edit Transform Scale",
+                    selectedEntity,
+                    &TransformComponent::Scale,
+                    transform->Scale,
+                    [selectedEntity](Scene& activeScene, TransformComponent&) {
+                        activeScene.MarkTransformDirty(selectedEntity);
+                    });
                 ImGui::TreePop();
             }
         }
@@ -389,17 +476,24 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::TextUnformatted("Render Mode");
                 if (ImGui::Combo("##CanvasRenderMode", &renderModeIndex, renderModes, 2))
                     canvas->Mode = static_cast<CanvasComponent::RenderMode>(renderModeIndex);
-                TrackInteractiveMutation(undoService, "Edit Canvas Render Mode");
+                TrackInteractiveMemberMutation<CanvasComponent>(
+                    undoService, "Edit Canvas Render Mode", selectedEntity, &CanvasComponent::Mode, canvas->Mode);
 
                 ImGui::TextUnformatted("Sort Order");
                 ImGui::DragInt("##CanvasSortOrder", &canvas->SortOrder, 1.0f);
-                TrackInteractiveMutation(undoService, "Edit Canvas Sort Order");
+                TrackInteractiveMemberMutation<CanvasComponent>(
+                    undoService, "Edit Canvas Sort Order", selectedEntity, &CanvasComponent::SortOrder, canvas->SortOrder);
 
                 ImGui::TextUnformatted("Reference Resolution");
                 ImGui::DragFloat2("##CanvasReferenceResolution", &canvas->ReferenceResolution.x, 1.0f, 1.0f, 16384.0f, "%.0f");
                 canvas->ReferenceResolution.x = std::max(1.0f, canvas->ReferenceResolution.x);
                 canvas->ReferenceResolution.y = std::max(1.0f, canvas->ReferenceResolution.y);
-                TrackInteractiveMutation(undoService, "Edit Canvas Reference Resolution");
+                TrackInteractiveMemberMutation<CanvasComponent>(
+                    undoService,
+                    "Edit Canvas Reference Resolution",
+                    selectedEntity,
+                    &CanvasComponent::ReferenceResolution,
+                    canvas->ReferenceResolution);
                 ImGui::TreePop();
             }
         }
@@ -479,19 +573,41 @@ namespace Limitless::EditorInspectorPanel
                     }
                     ImGui::EndCombo();
                 }
-                TrackInteractiveMutation(undoService, "Edit RectTransform Anchor Preset");
+                struct AnchorPresetSnapshot
+                {
+                    glm::vec2 AnchorMin;
+                    glm::vec2 AnchorMax;
+                    glm::vec2 Pivot;
+                };
+                const AnchorPresetSnapshot anchorPresetSnapshot{ rectTransform->AnchorMin, rectTransform->AnchorMax, rectTransform->Pivot };
+                TrackInteractiveValueMutation(undoService, "Edit RectTransform Anchor Preset", anchorPresetSnapshot, [undoService, selectedEntity](const AnchorPresetSnapshot& value) {
+                    if (!undoService)
+                        return false;
+                    Scene* activeScene = undoService->GetActiveScene();
+                    if (!activeScene || !activeScene->IsValid(selectedEntity))
+                        return false;
+                    auto* activeRectTransform = activeScene->GetRegistry().try_get<RectTransformComponent>(selectedEntity);
+                    if (!activeRectTransform)
+                        return false;
+                    activeRectTransform->AnchorMin = value.AnchorMin;
+                    activeRectTransform->AnchorMax = value.AnchorMax;
+                    activeRectTransform->Pivot = value.Pivot;
+                    return true;
+                });
 
                 ImGui::TextUnformatted("Anchor Min");
                 ImGui::DragFloat2("##RectTransformAnchorMin", &rectTransform->AnchorMin.x, 0.01f, 0.0f, 1.0f);
                 rectTransform->AnchorMin.x = std::clamp(rectTransform->AnchorMin.x, 0.0f, 1.0f);
                 rectTransform->AnchorMin.y = std::clamp(rectTransform->AnchorMin.y, 0.0f, 1.0f);
-                TrackInteractiveMutation(undoService, "Edit RectTransform Anchor Min");
+                TrackInteractiveMemberMutation<RectTransformComponent>(
+                    undoService, "Edit RectTransform Anchor Min", selectedEntity, &RectTransformComponent::AnchorMin, rectTransform->AnchorMin);
 
                 ImGui::TextUnformatted("Anchor Max");
                 ImGui::DragFloat2("##RectTransformAnchorMax", &rectTransform->AnchorMax.x, 0.01f, 0.0f, 1.0f);
                 rectTransform->AnchorMax.x = std::clamp(rectTransform->AnchorMax.x, 0.0f, 1.0f);
                 rectTransform->AnchorMax.y = std::clamp(rectTransform->AnchorMax.y, 0.0f, 1.0f);
-                TrackInteractiveMutation(undoService, "Edit RectTransform Anchor Max");
+                TrackInteractiveMemberMutation<RectTransformComponent>(
+                    undoService, "Edit RectTransform Anchor Max", selectedEntity, &RectTransformComponent::AnchorMax, rectTransform->AnchorMax);
 
                 if (rectTransform->AnchorMin.x > rectTransform->AnchorMax.x)
                     std::swap(rectTransform->AnchorMin.x, rectTransform->AnchorMax.x);
@@ -502,15 +618,22 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::DragFloat2("##RectTransformPivot", &rectTransform->Pivot.x, 0.01f, 0.0f, 1.0f);
                 rectTransform->Pivot.x = std::clamp(rectTransform->Pivot.x, 0.0f, 1.0f);
                 rectTransform->Pivot.y = std::clamp(rectTransform->Pivot.y, 0.0f, 1.0f);
-                TrackInteractiveMutation(undoService, "Edit RectTransform Pivot");
+                TrackInteractiveMemberMutation<RectTransformComponent>(
+                    undoService, "Edit RectTransform Pivot", selectedEntity, &RectTransformComponent::Pivot, rectTransform->Pivot);
 
                 ImGui::TextUnformatted("Size Delta");
                 ImGui::DragFloat2("##RectTransformSizeDelta", &rectTransform->SizeDelta.x, 1.0f, -16384.0f, 16384.0f);
-                TrackInteractiveMutation(undoService, "Edit RectTransform Size Delta");
+                TrackInteractiveMemberMutation<RectTransformComponent>(
+                    undoService, "Edit RectTransform Size Delta", selectedEntity, &RectTransformComponent::SizeDelta, rectTransform->SizeDelta);
 
                 ImGui::TextUnformatted("Anchored Position");
                 ImGui::DragFloat2("##RectTransformAnchoredPosition", &rectTransform->AnchoredPosition.x, 1.0f);
-                TrackInteractiveMutation(undoService, "Edit RectTransform Anchored Position");
+                TrackInteractiveMemberMutation<RectTransformComponent>(
+                    undoService,
+                    "Edit RectTransform Anchored Position",
+                    selectedEntity,
+                    &RectTransformComponent::AnchoredPosition,
+                    rectTransform->AnchoredPosition);
 
                 ImGui::TreePop();
             }
@@ -548,21 +671,26 @@ namespace Limitless::EditorInspectorPanel
                 {
                     ImGui::TextUnformatted("Color");
                     ImGui::ColorEdit4("##SpriteColor", &sprite->Color.r);
-                    TrackInteractiveMutation(undoService, "Edit Sprite Color");
+                    TrackInteractiveMemberMutation<SpriteComponent>(
+                        undoService, "Edit Sprite Color", selectedEntity, &SpriteComponent::Color, sprite->Color);
                     ImGui::TextUnformatted("Tiling Factor");
                     ImGui::DragFloat2("##SpriteTilingFactor", &sprite->TilingFactor.x, 0.05f, 0.001f, 100.0f, "%.3f");
                     sprite->TilingFactor.x = std::max(0.001f, sprite->TilingFactor.x);
                     sprite->TilingFactor.y = std::max(0.001f, sprite->TilingFactor.y);
-                    TrackInteractiveMutation(undoService, "Edit Sprite Tiling Factor");
+                    TrackInteractiveMemberMutation<SpriteComponent>(
+                        undoService, "Edit Sprite Tiling Factor", selectedEntity, &SpriteComponent::TilingFactor, sprite->TilingFactor);
                     ImGui::TextUnformatted("Render Order");
                     ImGui::DragInt("##SpriteRenderOrder", &sprite->RenderOrder, 1.0f);
-                    TrackInteractiveMutation(undoService, "Edit Sprite Render Order");
+                    TrackInteractiveMemberMutation<SpriteComponent>(
+                        undoService, "Edit Sprite Render Order", selectedEntity, &SpriteComponent::RenderOrder, sprite->RenderOrder);
                     ImGui::TextUnformatted("Cast Shadows");
                     ImGui::Checkbox("##SpriteCastShadows", &sprite->CastShadows);
-                    TrackInteractiveMutation(undoService, "Edit Sprite Cast Shadows");
+                    TrackInteractiveMemberMutation<SpriteComponent>(
+                        undoService, "Edit Sprite Cast Shadows", selectedEntity, &SpriteComponent::CastShadows, sprite->CastShadows);
                     ImGui::TextUnformatted("Receive Shadows");
                     ImGui::Checkbox("##SpriteReceiveShadows", &sprite->ReceiveShadows);
-                    TrackInteractiveMutation(undoService, "Edit Sprite Receive Shadows");
+                    TrackInteractiveMemberMutation<SpriteComponent>(
+                        undoService, "Edit Sprite Receive Shadows", selectedEntity, &SpriteComponent::ReceiveShadows, sprite->ReceiveShadows);
 
                 // Material slot (Unity-style): dropping a material assigns it to the renderer.
                 auto* material = registry.try_get<MaterialComponent>(selectedEntity);
@@ -724,24 +852,29 @@ namespace Limitless::EditorInspectorPanel
             {
                 ImGui::TextUnformatted("Enabled");
                 ImGui::Checkbox("##AnimatorEnabled", &animator->Enabled);
-                TrackInteractiveMutation(undoService, "Edit Animator Enabled");
+                TrackInteractiveMemberMutation<AnimatorComponent>(
+                    undoService, "Edit Animator Enabled", selectedEntity, &AnimatorComponent::Enabled, animator->Enabled);
 
                 ImGui::TextUnformatted("Auto Play");
                 ImGui::Checkbox("##AnimatorAutoPlay", &animator->AutoPlay);
-                TrackInteractiveMutation(undoService, "Edit Animator Auto Play");
+                TrackInteractiveMemberMutation<AnimatorComponent>(
+                    undoService, "Edit Animator Auto Play", selectedEntity, &AnimatorComponent::AutoPlay, animator->AutoPlay);
 
                 ImGui::TextUnformatted("Apply To Sprite");
                 ImGui::Checkbox("##AnimatorApplyToSprite", &animator->ApplyToSprite);
-                TrackInteractiveMutation(undoService, "Edit Animator Apply To Sprite");
+                TrackInteractiveMemberMutation<AnimatorComponent>(
+                    undoService, "Edit Animator Apply To Sprite", selectedEntity, &AnimatorComponent::ApplyToSprite, animator->ApplyToSprite);
 
                 ImGui::TextUnformatted("Apply To Transform");
                 ImGui::Checkbox("##AnimatorApplyToTransform", &animator->ApplyToTransform);
-                TrackInteractiveMutation(undoService, "Edit Animator Apply To Transform");
+                TrackInteractiveMemberMutation<AnimatorComponent>(
+                    undoService, "Edit Animator Apply To Transform", selectedEntity, &AnimatorComponent::ApplyToTransform, animator->ApplyToTransform);
 
                 ImGui::TextUnformatted("Playback Speed");
                 ImGui::DragFloat("##AnimatorPlaybackSpeed", &animator->PlaybackSpeed, 0.01f, 0.0f, 10.0f);
                 animator->PlaybackSpeed = std::max(0.0f, animator->PlaybackSpeed);
-                TrackInteractiveMutation(undoService, "Edit Animator Playback Speed");
+                TrackInteractiveMemberMutation<AnimatorComponent>(
+                    undoService, "Edit Animator Playback Speed", selectedEntity, &AnimatorComponent::PlaybackSpeed, animator->PlaybackSpeed);
 
                 const auto assignControllerKey = [&](const std::string& key) {
                     if (undoService)
@@ -1093,7 +1226,31 @@ namespace Limitless::EditorInspectorPanel
                         }
                     }
 
-                    TrackInteractiveMutation(undoService, "Edit Animator Parameters");
+                    const AnimatorParametersSnapshot animatorParametersSnapshot{
+                        animator->BoolParameters,
+                        animator->FloatParameters,
+                        animator->IntegerParameters,
+                        animator->TriggerParameters
+                    };
+                    TrackInteractiveValueMutation(
+                        undoService,
+                        "Edit Animator Parameters",
+                        animatorParametersSnapshot,
+                        [undoService, selectedEntity](const AnimatorParametersSnapshot& value) {
+                            if (!undoService)
+                                return false;
+                            Scene* activeScene = undoService->GetActiveScene();
+                            if (!activeScene || !activeScene->IsValid(selectedEntity))
+                                return false;
+                            auto* activeAnimator = activeScene->GetRegistry().try_get<AnimatorComponent>(selectedEntity);
+                            if (!activeAnimator)
+                                return false;
+                            activeAnimator->BoolParameters = value.BoolParameters;
+                            activeAnimator->FloatParameters = value.FloatParameters;
+                            activeAnimator->IntegerParameters = value.IntegerParameters;
+                            activeAnimator->TriggerParameters = value.TriggerParameters;
+                            return true;
+                        });
                     ImGui::TreePop();
                 }
 
@@ -1127,7 +1284,12 @@ namespace Limitless::EditorInspectorPanel
             {
                 ImGui::TextUnformatted("Enabled");
                 ImGui::Checkbox("##AnimationEventReceiverEnabled", &animationEventReceiver->Enabled);
-                TrackInteractiveMutation(undoService, "Edit Animation Event Receiver Enabled");
+                TrackInteractiveMemberMutation<AnimationEventReceiverComponent>(
+                    undoService,
+                    "Edit Animation Event Receiver Enabled",
+                    selectedEntity,
+                    &AnimationEventReceiverComponent::Enabled,
+                    animationEventReceiver->Enabled);
 
                 ImGui::Text("Received Events This Frame: %u", static_cast<uint32_t>(animationEventReceiver->RuntimeDispatchedEvents.size()));
                 for (const auto& eventMessage : animationEventReceiver->RuntimeDispatchedEvents)
@@ -1185,7 +1347,27 @@ namespace Limitless::EditorInspectorPanel
                         }
                     }
                 }
-                TrackInteractiveMutation(undoService, "Edit Camera Projection");
+                struct CameraProjectionSnapshot
+                {
+                    CameraComponent::ProjectionType Projection;
+                    float NearPlane;
+                    float FarPlane;
+                };
+                const CameraProjectionSnapshot cameraProjectionSnapshot{ camera->Projection, camera->NearPlane, camera->FarPlane };
+                TrackInteractiveValueMutation(undoService, "Edit Camera Projection", cameraProjectionSnapshot, [undoService, selectedEntity](const CameraProjectionSnapshot& value) {
+                    if (!undoService)
+                        return false;
+                    Scene* activeScene = undoService->GetActiveScene();
+                    if (!activeScene || !activeScene->IsValid(selectedEntity))
+                        return false;
+                    auto* activeCamera = activeScene->GetRegistry().try_get<CameraComponent>(selectedEntity);
+                    if (!activeCamera)
+                        return false;
+                    activeCamera->Projection = value.Projection;
+                    activeCamera->NearPlane = value.NearPlane;
+                    activeCamera->FarPlane = value.FarPlane;
+                    return true;
+                });
 
                 if (camera->Projection == CameraComponent::ProjectionType::Orthographic2D)
                 {
@@ -1193,13 +1375,16 @@ namespace Limitless::EditorInspectorPanel
                         camera->FarPlane = camera->NearPlane + 2.0f;
                     ImGui::TextUnformatted("Zoom");
                     ImGui::DragFloat("##CameraZoom", &camera->Zoom, 0.05f, 0.01f, 100.0f);
-                    TrackInteractiveMutation(undoService, "Edit Camera Zoom");
+                    TrackInteractiveMemberMutation<CameraComponent>(
+                        undoService, "Edit Camera Zoom", selectedEntity, &CameraComponent::Zoom, camera->Zoom);
                     ImGui::TextUnformatted("Near Plane");
                     ImGui::DragFloat("##CameraNearPlaneOrtho", &camera->NearPlane, 0.01f);
-                    TrackInteractiveMutation(undoService, "Edit Camera Near Plane");
+                    TrackInteractiveMemberMutation<CameraComponent>(
+                        undoService, "Edit Camera Near Plane", selectedEntity, &CameraComponent::NearPlane, camera->NearPlane);
                     ImGui::TextUnformatted("Far Plane");
                     ImGui::DragFloat("##CameraFarPlaneOrtho", &camera->FarPlane, 0.01f);
-                    TrackInteractiveMutation(undoService, "Edit Camera Far Plane");
+                    TrackInteractiveMemberMutation<CameraComponent>(
+                        undoService, "Edit Camera Far Plane", selectedEntity, &CameraComponent::FarPlane, camera->FarPlane);
                 }
                 else
                 {
@@ -1209,13 +1394,20 @@ namespace Limitless::EditorInspectorPanel
                         camera->FarPlane = camera->NearPlane + 1000.0f;
                     ImGui::TextUnformatted("Field Of View");
                     ImGui::DragFloat("##CameraFieldOfView", &camera->FieldOfViewYDegrees, 0.1f, 1.0f, 179.0f);
-                    TrackInteractiveMutation(undoService, "Edit Camera Field Of View");
+                    TrackInteractiveMemberMutation<CameraComponent>(
+                        undoService,
+                        "Edit Camera Field Of View",
+                        selectedEntity,
+                        &CameraComponent::FieldOfViewYDegrees,
+                        camera->FieldOfViewYDegrees);
                     ImGui::TextUnformatted("Near Plane");
                     ImGui::DragFloat("##CameraNearPlanePersp", &camera->NearPlane, 0.01f, 0.001f, 1000.0f);
-                    TrackInteractiveMutation(undoService, "Edit Camera Near Plane");
+                    TrackInteractiveMemberMutation<CameraComponent>(
+                        undoService, "Edit Camera Near Plane", selectedEntity, &CameraComponent::NearPlane, camera->NearPlane);
                     ImGui::TextUnformatted("Far Plane");
                     ImGui::DragFloat("##CameraFarPlanePersp", &camera->FarPlane, 1.0f, 0.01f, 100000.0f);
-                    TrackInteractiveMutation(undoService, "Edit Camera Far Plane");
+                    TrackInteractiveMemberMutation<CameraComponent>(
+                        undoService, "Edit Camera Far Plane", selectedEntity, &CameraComponent::FarPlane, camera->FarPlane);
                 }
 
                 bool isPrimary = camera->IsPrimary;
@@ -1226,7 +1418,22 @@ namespace Limitless::EditorInspectorPanel
                     if (camera->IsPrimary)
                         ClearPrimaryFlagFromOtherCameras(registry, selectedEntity);
                 }
-                TrackInteractiveMutation(undoService, "Edit Camera Primary");
+                TrackInteractiveValueMutation(undoService, "Edit Camera Primary", camera->IsPrimary, [undoService, selectedEntity](bool value) {
+                    if (!undoService)
+                        return false;
+                    Scene* activeScene = undoService->GetActiveScene();
+                    if (!activeScene || !activeScene->IsValid(selectedEntity))
+                        return false;
+
+                    auto& activeRegistry = activeScene->GetRegistry();
+                    auto* activeCamera = activeRegistry.try_get<CameraComponent>(selectedEntity);
+                    if (!activeCamera)
+                        return false;
+                    activeCamera->IsPrimary = value;
+                    if (activeCamera->IsPrimary)
+                        ClearPrimaryFlagFromOtherCameras(activeRegistry, selectedEntity);
+                    return true;
+                });
 
                 ImGui::TreePop();
             }
@@ -1252,10 +1459,16 @@ namespace Limitless::EditorInspectorPanel
             {
                 ImGui::TextUnformatted("Enabled");
                 ImGui::Checkbox("##AudioListenerEnabled", &audioListener->Enabled);
-                TrackInteractiveMutation(undoService, "Edit Audio Listener 2D Enabled");
+                TrackInteractiveMemberMutation<AudioListener2DComponent>(
+                    undoService, "Edit Audio Listener 2D Enabled", selectedEntity, &AudioListener2DComponent::Enabled, audioListener->Enabled);
                 ImGui::TextUnformatted("Use Primary Camera Position");
                 ImGui::Checkbox("##AudioListenerUsePrimaryCameraPosition", &audioListener->UsePrimaryCameraPosition);
-                TrackInteractiveMutation(undoService, "Edit Audio Listener 2D Camera Follow");
+                TrackInteractiveMemberMutation<AudioListener2DComponent>(
+                    undoService,
+                    "Edit Audio Listener 2D Camera Follow",
+                    selectedEntity,
+                    &AudioListener2DComponent::UsePrimaryCameraPosition,
+                    audioListener->UsePrimaryCameraPosition);
                 ImGui::TextDisabled("When enabled, spatial 2D sources attenuate and pan relative to this listener.");
                 ImGui::TreePop();
             }
@@ -1281,10 +1494,12 @@ namespace Limitless::EditorInspectorPanel
             {
                 ImGui::TextUnformatted("Cell Size");
                 ImGui::DragFloat2("##Grid2DCellSize", &grid2D->CellSize.x, 0.05f, 0.001f, 100.0f);
-                TrackInteractiveMutation(undoService, "Edit Grid2D Cell Size");
+                TrackInteractiveMemberMutation<Grid2DComponent>(
+                    undoService, "Edit Grid2D Cell Size", selectedEntity, &Grid2DComponent::CellSize, grid2D->CellSize);
                 ImGui::TextUnformatted("Cell Gap");
                 ImGui::DragFloat2("##Grid2DCellGap", &grid2D->CellGap.x, 0.01f, 0.0f, 10.0f);
-                TrackInteractiveMutation(undoService, "Edit Grid2D Cell Gap");
+                TrackInteractiveMemberMutation<Grid2DComponent>(
+                    undoService, "Edit Grid2D Cell Gap", selectedEntity, &Grid2DComponent::CellGap, grid2D->CellGap);
 
                 ImGui::Separator();
                 if (ImGui::Button("Add Layer"))
@@ -1371,19 +1586,39 @@ namespace Limitless::EditorInspectorPanel
                     if (gridSize != tilemapLayer->GridSize)
                         tilemapLayer->ResizeGrid(gridSize);
                 }
-                TrackInteractiveMutation(undoService, "Edit TilemapLayer Grid Size");
+                TrackInteractiveValueMutation(undoService, "Edit TilemapLayer Grid Size", tilemapLayer->GridSize, [undoService, selectedEntity](const glm::ivec2& value) {
+                    if (!undoService)
+                        return false;
+                    Scene* activeScene = undoService->GetActiveScene();
+                    if (!activeScene || !activeScene->IsValid(selectedEntity))
+                        return false;
+                    auto* activeLayer = activeScene->GetRegistry().try_get<TilemapLayerComponent>(selectedEntity);
+                    if (!activeLayer)
+                        return false;
+                    const glm::ivec2 clampedSize(std::max(1, value.x), std::max(1, value.y));
+                    if (clampedSize != activeLayer->GridSize)
+                        activeLayer->ResizeGrid(clampedSize);
+                    return true;
+                });
 
                 ImGui::TextUnformatted("Render Order");
                 ImGui::DragInt("##TilemapRenderOrder", &tilemapLayer->RenderOrder);
-                TrackInteractiveMutation(undoService, "Edit TilemapLayer Render Order");
+                TrackInteractiveMemberMutation<TilemapLayerComponent>(
+                    undoService, "Edit TilemapLayer Render Order", selectedEntity, &TilemapLayerComponent::RenderOrder, tilemapLayer->RenderOrder);
 
                 ImGui::TextUnformatted("Collision Enabled");
                 ImGui::Checkbox("##TilemapCollisionEnabled", &tilemapLayer->CollisionEnabled);
-                TrackInteractiveMutation(undoService, "Edit TilemapLayer Collision");
+                TrackInteractiveMemberMutation<TilemapLayerComponent>(
+                    undoService,
+                    "Edit TilemapLayer Collision",
+                    selectedEntity,
+                    &TilemapLayerComponent::CollisionEnabled,
+                    tilemapLayer->CollisionEnabled);
 
                 ImGui::TextUnformatted("Cast Shadows");
                 ImGui::Checkbox("##TilemapCastShadows", &tilemapLayer->CastShadows);
-                TrackInteractiveMutation(undoService, "Edit TilemapLayer Cast Shadows");
+                TrackInteractiveMemberMutation<TilemapLayerComponent>(
+                    undoService, "Edit TilemapLayer Cast Shadows", selectedEntity, &TilemapLayerComponent::CastShadows, tilemapLayer->CastShadows);
 
                 const int32_t tileCount = tilemapLayer->GetCellCount();
                 int32_t nonEmptyCount = 0;
@@ -1484,27 +1719,33 @@ namespace Limitless::EditorInspectorPanel
 
                 ImGui::TextUnformatted("Play On Start");
                 ImGui::Checkbox("##AudioSourcePlayOnStart", &audioSource->PlayOnStart);
-                TrackInteractiveMutation(undoService, "Edit Audio Play On Start");
+                TrackInteractiveMemberMutation<AudioSourceComponent>(
+                    undoService, "Edit Audio Play On Start", selectedEntity, &AudioSourceComponent::PlayOnStart, audioSource->PlayOnStart);
                 ImGui::TextUnformatted("Loop");
                 ImGui::Checkbox("##AudioSourceLoop", &audioSource->Loop);
-                TrackInteractiveMutation(undoService, "Edit Audio Loop");
+                TrackInteractiveMemberMutation<AudioSourceComponent>(
+                    undoService, "Edit Audio Loop", selectedEntity, &AudioSourceComponent::Loop, audioSource->Loop);
                 ImGui::TextUnformatted("Muted");
                 ImGui::Checkbox("##AudioSourceMuted", &audioSource->Muted);
-                TrackInteractiveMutation(undoService, "Edit Audio Muted");
+                TrackInteractiveMemberMutation<AudioSourceComponent>(
+                    undoService, "Edit Audio Muted", selectedEntity, &AudioSourceComponent::Muted, audioSource->Muted);
                 ImGui::TextUnformatted("Volume");
                 ImGui::SliderFloat("##AudioSourceVolume", &audioSource->Volume, 0.0f, 2.0f, "%.2f");
-                TrackInteractiveMutation(undoService, "Edit Audio Volume");
+                TrackInteractiveMemberMutation<AudioSourceComponent>(
+                    undoService, "Edit Audio Volume", selectedEntity, &AudioSourceComponent::Volume, audioSource->Volume);
                 ImGui::TextUnformatted("Pitch");
                 ImGui::SliderFloat("##AudioSourcePitch", &audioSource->Pitch, 0.1f, 4.0f, "%.2f");
                 audioSource->Pitch = std::max(0.01f, audioSource->Pitch);
-                TrackInteractiveMutation(undoService, "Edit Audio Pitch");
+                TrackInteractiveMemberMutation<AudioSourceComponent>(
+                    undoService, "Edit Audio Pitch", selectedEntity, &AudioSourceComponent::Pitch, audioSource->Pitch);
 
                 int playbackSpaceIndex = static_cast<int>(audioSource->Space);
                 const char* playbackSpaceNames[] = { "Global", "Spatial 2D" };
                 ImGui::TextUnformatted("Playback Space");
                 if (ImGui::Combo("##AudioSourcePlaybackSpace", &playbackSpaceIndex, playbackSpaceNames, 2))
                     audioSource->Space = static_cast<AudioSourceComponent::PlaybackSpace>(playbackSpaceIndex);
-                TrackInteractiveMutation(undoService, "Edit Audio Playback Space");
+                TrackInteractiveMemberMutation<AudioSourceComponent>(
+                    undoService, "Edit Audio Playback Space", selectedEntity, &AudioSourceComponent::Space, audioSource->Space);
 
                 std::array<char, 128> mixerGroupBuffer{};
                 std::snprintf(mixerGroupBuffer.data(), mixerGroupBuffer.size(), "%s", audioSource->MixerGroup.c_str());
@@ -1513,36 +1754,62 @@ namespace Limitless::EditorInspectorPanel
                     audioSource->MixerGroup = mixerGroupBuffer.data();
                 if (audioSource->MixerGroup.empty())
                     audioSource->MixerGroup = "SFX";
-                TrackInteractiveMutation(undoService, "Edit Audio Mixer Group");
+                TrackInteractiveMemberMutation<AudioSourceComponent>(
+                    undoService, "Edit Audio Mixer Group", selectedEntity, &AudioSourceComponent::MixerGroup, audioSource->MixerGroup);
 
                 if (audioSource->Space == AudioSourceComponent::PlaybackSpace::Spatial2D)
                 {
                     ImGui::TextUnformatted("Min Distance");
                     ImGui::DragFloat("##AudioSourceSpatialMinDistance", &audioSource->SpatialMinDistance, 0.01f, 0.001f, 10000.0f, "%.3f");
                     audioSource->SpatialMinDistance = std::max(0.001f, audioSource->SpatialMinDistance);
-                    TrackInteractiveMutation(undoService, "Edit Audio Spatial Min Distance");
+                    TrackInteractiveMemberMutation<AudioSourceComponent>(
+                        undoService,
+                        "Edit Audio Spatial Min Distance",
+                        selectedEntity,
+                        &AudioSourceComponent::SpatialMinDistance,
+                        audioSource->SpatialMinDistance);
 
                     ImGui::TextUnformatted("Max Distance");
                     ImGui::DragFloat("##AudioSourceSpatialMaxDistance", &audioSource->SpatialMaxDistance, 0.05f, 0.001f, 10000.0f, "%.3f");
                     audioSource->SpatialMaxDistance = std::max(audioSource->SpatialMinDistance, audioSource->SpatialMaxDistance);
-                    TrackInteractiveMutation(undoService, "Edit Audio Spatial Max Distance");
+                    TrackInteractiveMemberMutation<AudioSourceComponent>(
+                        undoService,
+                        "Edit Audio Spatial Max Distance",
+                        selectedEntity,
+                        &AudioSourceComponent::SpatialMaxDistance,
+                        audioSource->SpatialMaxDistance);
 
                     ImGui::TextUnformatted("Rolloff Exponent");
                     ImGui::DragFloat("##AudioSourceSpatialRolloffExponent", &audioSource->SpatialRolloffExponent, 0.01f, 0.01f, 16.0f, "%.2f");
                     audioSource->SpatialRolloffExponent = std::max(0.01f, audioSource->SpatialRolloffExponent);
-                    TrackInteractiveMutation(undoService, "Edit Audio Spatial Rolloff Exponent");
+                    TrackInteractiveMemberMutation<AudioSourceComponent>(
+                        undoService,
+                        "Edit Audio Spatial Rolloff Exponent",
+                        selectedEntity,
+                        &AudioSourceComponent::SpatialRolloffExponent,
+                        audioSource->SpatialRolloffExponent);
 
                     ImGui::TextUnformatted("Stereo Pan Strength");
                     ImGui::SliderFloat("##AudioSourceStereoPanStrength", &audioSource->StereoPanStrength, 0.0f, 1.0f, "%.2f");
                     audioSource->StereoPanStrength = std::clamp(audioSource->StereoPanStrength, 0.0f, 1.0f);
-                    TrackInteractiveMutation(undoService, "Edit Audio Spatial Pan Strength");
+                    TrackInteractiveMemberMutation<AudioSourceComponent>(
+                        undoService,
+                        "Edit Audio Spatial Pan Strength",
+                        selectedEntity,
+                        &AudioSourceComponent::StereoPanStrength,
+                        audioSource->StereoPanStrength);
 
                     std::array<char, 256> attenuationCurveBuffer{};
                     std::snprintf(attenuationCurveBuffer.data(), attenuationCurveBuffer.size(), "%s", audioSource->AttenuationCurveKey.c_str());
                     ImGui::TextUnformatted("Attenuation Curve Key");
                     if (ImGui::InputText("##AudioSourceAttenuationCurveKey", attenuationCurveBuffer.data(), attenuationCurveBuffer.size()))
                         audioSource->AttenuationCurveKey = attenuationCurveBuffer.data();
-                    TrackInteractiveMutation(undoService, "Edit Audio Attenuation Curve Key");
+                    TrackInteractiveMemberMutation<AudioSourceComponent>(
+                        undoService,
+                        "Edit Audio Attenuation Curve Key",
+                        selectedEntity,
+                        &AudioSourceComponent::AttenuationCurveKey,
+                        audioSource->AttenuationCurveKey);
                 }
 
                 if (audioSource->RuntimeVoiceId != 0 &&
@@ -1611,7 +1878,8 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::TextUnformatted("Body Type");
                 if (ImGui::Combo("##Rigidbody2DBodyType", &bodyTypeIndex, bodyTypeNames, 3))
                     rigidbody2D->Type = static_cast<Rigidbody2DComponent::BodyType>(bodyTypeIndex);
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Body Type");
+                TrackInteractiveMemberMutation<Rigidbody2DComponent>(
+                    undoService, "Edit Rigidbody2D Body Type", selectedEntity, &Rigidbody2DComponent::Type, rigidbody2D->Type);
                 if (rigidbody2D->Type == Rigidbody2DComponent::BodyType::Kinematic)
                 {
                     ImGui::TextWrapped(
@@ -1624,54 +1892,79 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::DragInt("##Rigidbody2DPhysicsWorldSlot", &physicsWorldSlot, 1.0f, 0, static_cast<int>(sceneWorldCount - 1));
                 physicsWorldSlot = std::clamp(physicsWorldSlot, 0, static_cast<int>(sceneWorldCount - 1));
                 rigidbody2D->PhysicsWorldSlot = static_cast<uint16_t>(physicsWorldSlot);
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Physics World Slot");
+                TrackInteractiveMemberMutation<Rigidbody2DComponent>(
+                    undoService,
+                    "Edit Rigidbody2D Physics World Slot",
+                    selectedEntity,
+                    &Rigidbody2DComponent::PhysicsWorldSlot,
+                    rigidbody2D->PhysicsWorldSlot);
 
                 bool freezeRotation = rigidbody2D->IsRotationLocked();
                 ImGui::TextDisabled("Constraints");
                 ImGui::TextUnformatted("Freeze Position X");
                 ImGui::Checkbox("##Rigidbody2DFreezePositionX", &rigidbody2D->FreezePositionX);
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Freeze Position X");
+                TrackInteractiveMemberMutation<Rigidbody2DComponent>(
+                    undoService, "Edit Rigidbody2D Freeze Position X", selectedEntity, &Rigidbody2DComponent::FreezePositionX, rigidbody2D->FreezePositionX);
                 ImGui::TextUnformatted("Freeze Position Y");
                 ImGui::Checkbox("##Rigidbody2DFreezePositionY", &rigidbody2D->FreezePositionY);
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Freeze Position Y");
+                TrackInteractiveMemberMutation<Rigidbody2DComponent>(
+                    undoService, "Edit Rigidbody2D Freeze Position Y", selectedEntity, &Rigidbody2DComponent::FreezePositionY, rigidbody2D->FreezePositionY);
                 ImGui::TextUnformatted("Freeze Rotation");
                 if (ImGui::Checkbox("##Rigidbody2DFreezeRotation", &freezeRotation))
                 {
                     rigidbody2D->FixedRotation = freezeRotation;
                 }
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Freeze Rotation");
+                TrackInteractiveMemberMutation<Rigidbody2DComponent>(
+                    undoService, "Edit Rigidbody2D Freeze Rotation", selectedEntity, &Rigidbody2DComponent::FixedRotation, rigidbody2D->FixedRotation);
                 ImGui::TextUnformatted("Use CCD");
                 ImGui::Checkbox("##Rigidbody2DUseCcd", &rigidbody2D->UseCCD);
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
                     ImGui::SetTooltip("Continuous Collision Detection. Use for fast-moving bodies to reduce tunneling through colliders.");
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Use CCD");
+                TrackInteractiveMemberMutation<Rigidbody2DComponent>(
+                    undoService, "Edit Rigidbody2D Use CCD", selectedEntity, &Rigidbody2DComponent::UseCCD, rigidbody2D->UseCCD);
                 ImGui::TextUnformatted("Enable Sleep");
                 ImGui::Checkbox("##Rigidbody2DEnableSleep", &rigidbody2D->EnableSleep);
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Enable Sleep");
+                TrackInteractiveMemberMutation<Rigidbody2DComponent>(
+                    undoService, "Edit Rigidbody2D Enable Sleep", selectedEntity, &Rigidbody2DComponent::EnableSleep, rigidbody2D->EnableSleep);
                 ImGui::TextUnformatted("Start Awake");
                 ImGui::Checkbox("##Rigidbody2DStartAwake", &rigidbody2D->StartAwake);
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Start Awake");
+                TrackInteractiveMemberMutation<Rigidbody2DComponent>(
+                    undoService, "Edit Rigidbody2D Start Awake", selectedEntity, &Rigidbody2DComponent::StartAwake, rigidbody2D->StartAwake);
                 ImGui::TextUnformatted("Interpolate");
                 ImGui::Checkbox("##Rigidbody2DInterpolate", &rigidbody2D->Interpolate);
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Interpolate");
+                TrackInteractiveMemberMutation<Rigidbody2DComponent>(
+                    undoService, "Edit Rigidbody2D Interpolate", selectedEntity, &Rigidbody2DComponent::Interpolate, rigidbody2D->Interpolate);
                 ImGui::TextUnformatted("High Contact Quality");
                 ImGui::Checkbox("##Rigidbody2DHighContactQuality", &rigidbody2D->HighContactQuality);
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
                     ImGui::SetTooltip("Applies extra world solver sub-steps when this body is present. Useful for rotating platforms and dense contact stacks.");
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D High Contact Quality");
+                TrackInteractiveMemberMutation<Rigidbody2DComponent>(
+                    undoService,
+                    "Edit Rigidbody2D High Contact Quality",
+                    selectedEntity,
+                    &Rigidbody2DComponent::HighContactQuality,
+                    rigidbody2D->HighContactQuality);
                 ImGui::TextUnformatted("Extra Solver Sub Steps");
                 ImGui::DragInt("##Rigidbody2DExtraSolverSubSteps", &rigidbody2D->ExtraSolverSubSteps, 1.0f, 0, 24);
                 rigidbody2D->ExtraSolverSubSteps = std::max(0, rigidbody2D->ExtraSolverSubSteps);
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Extra Solver Sub Steps");
+                TrackInteractiveMemberMutation<Rigidbody2DComponent>(
+                    undoService,
+                    "Edit Rigidbody2D Extra Solver Sub Steps",
+                    selectedEntity,
+                    &Rigidbody2DComponent::ExtraSolverSubSteps,
+                    rigidbody2D->ExtraSolverSubSteps);
                 ImGui::TextUnformatted("Gravity Scale");
                 ImGui::DragFloat("##Rigidbody2DGravityScale", &rigidbody2D->GravityScale, 0.01f, -10.0f, 10.0f);
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Gravity Scale");
+                TrackInteractiveMemberMutation<Rigidbody2DComponent>(
+                    undoService, "Edit Rigidbody2D Gravity Scale", selectedEntity, &Rigidbody2DComponent::GravityScale, rigidbody2D->GravityScale);
                 ImGui::TextUnformatted("Linear Damping");
                 ImGui::DragFloat("##Rigidbody2DLinearDamping", &rigidbody2D->LinearDamping, 0.01f, 0.0f, 100.0f);
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Linear Damping");
+                TrackInteractiveMemberMutation<Rigidbody2DComponent>(
+                    undoService, "Edit Rigidbody2D Linear Damping", selectedEntity, &Rigidbody2DComponent::LinearDamping, rigidbody2D->LinearDamping);
                 ImGui::TextUnformatted("Angular Damping");
                 ImGui::DragFloat("##Rigidbody2DAngularDamping", &rigidbody2D->AngularDamping, 0.01f, 0.0f, 100.0f);
-                TrackInteractiveMutation(undoService, "Edit Rigidbody2D Angular Damping");
+                TrackInteractiveMemberMutation<Rigidbody2DComponent>(
+                    undoService, "Edit Rigidbody2D Angular Damping", selectedEntity, &Rigidbody2DComponent::AngularDamping, rigidbody2D->AngularDamping);
 
                 ImGui::Separator();
                 ImGui::TextDisabled("Runtime Diagnostics");
@@ -1739,28 +2032,36 @@ namespace Limitless::EditorInspectorPanel
             {
                 ImGui::TextUnformatted("Offset");
                 ImGui::DragFloat2("##BoxColliderOffset", &boxCollider2D->Offset.x, 0.01f);
-                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Offset");
+                TrackInteractiveMemberMutation<BoxCollider2DComponent>(
+                    undoService, "Edit BoxCollider2D Offset", selectedEntity, &BoxCollider2DComponent::Offset, boxCollider2D->Offset);
                 ImGui::TextUnformatted("Size");
                 ImGui::DragFloat2("##BoxColliderSize", &boxCollider2D->Size.x, 0.01f, 0.001f, 1000.0f);
-                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Size");
+                TrackInteractiveMemberMutation<BoxCollider2DComponent>(
+                    undoService, "Edit BoxCollider2D Size", selectedEntity, &BoxCollider2DComponent::Size, boxCollider2D->Size);
                 ImGui::TextUnformatted("Density");
                 ImGui::DragFloat("##BoxColliderDensity", &boxCollider2D->Density, 0.01f, 0.0f, 1000.0f);
-                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Density");
+                TrackInteractiveMemberMutation<BoxCollider2DComponent>(
+                    undoService, "Edit BoxCollider2D Density", selectedEntity, &BoxCollider2DComponent::Density, boxCollider2D->Density);
                 ImGui::TextUnformatted("Friction");
                 ImGui::DragFloat("##BoxColliderFriction", &boxCollider2D->Friction, 0.01f, 0.0f, 1.0f);
-                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Friction");
+                TrackInteractiveMemberMutation<BoxCollider2DComponent>(
+                    undoService, "Edit BoxCollider2D Friction", selectedEntity, &BoxCollider2DComponent::Friction, boxCollider2D->Friction);
                 ImGui::TextUnformatted("Restitution");
                 ImGui::DragFloat("##BoxColliderRestitution", &boxCollider2D->Restitution, 0.01f, 0.0f, 1.0f);
-                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Restitution");
+                TrackInteractiveMemberMutation<BoxCollider2DComponent>(
+                    undoService, "Edit BoxCollider2D Restitution", selectedEntity, &BoxCollider2DComponent::Restitution, boxCollider2D->Restitution);
                 ImGui::TextUnformatted("Is Sensor");
                 ImGui::Checkbox("##BoxColliderIsSensor", &boxCollider2D->IsSensor);
-                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Sensor");
+                TrackInteractiveMemberMutation<BoxCollider2DComponent>(
+                    undoService, "Edit BoxCollider2D Sensor", selectedEntity, &BoxCollider2DComponent::IsSensor, boxCollider2D->IsSensor);
                 ImGui::TextUnformatted("Layer Bits");
                 ImGui::InputScalar("##BoxColliderLayerBits", ImGuiDataType_U64, &boxCollider2D->CollisionLayer);
-                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Layer");
+                TrackInteractiveMemberMutation<BoxCollider2DComponent>(
+                    undoService, "Edit BoxCollider2D Layer", selectedEntity, &BoxCollider2DComponent::CollisionLayer, boxCollider2D->CollisionLayer);
                 ImGui::TextUnformatted("Mask Bits");
                 ImGui::InputScalar("##BoxColliderMaskBits", ImGuiDataType_U64, &boxCollider2D->CollisionMask);
-                TrackInteractiveMutation(undoService, "Edit BoxCollider2D Mask");
+                TrackInteractiveMemberMutation<BoxCollider2DComponent>(
+                    undoService, "Edit BoxCollider2D Mask", selectedEntity, &BoxCollider2DComponent::CollisionMask, boxCollider2D->CollisionMask);
 
                 ImGui::TreePop();
             }
@@ -1786,28 +2087,36 @@ namespace Limitless::EditorInspectorPanel
             {
                 ImGui::TextUnformatted("Offset");
                 ImGui::DragFloat2("##CircleColliderOffset", &circleCollider2D->Offset.x, 0.01f);
-                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Offset");
+                TrackInteractiveMemberMutation<CircleCollider2DComponent>(
+                    undoService, "Edit CircleCollider2D Offset", selectedEntity, &CircleCollider2DComponent::Offset, circleCollider2D->Offset);
                 ImGui::TextUnformatted("Radius");
                 ImGui::DragFloat("##CircleColliderRadius", &circleCollider2D->Radius, 0.01f, 0.001f, 1000.0f);
-                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Radius");
+                TrackInteractiveMemberMutation<CircleCollider2DComponent>(
+                    undoService, "Edit CircleCollider2D Radius", selectedEntity, &CircleCollider2DComponent::Radius, circleCollider2D->Radius);
                 ImGui::TextUnformatted("Density");
                 ImGui::DragFloat("##CircleColliderDensity", &circleCollider2D->Density, 0.01f, 0.0f, 1000.0f);
-                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Density");
+                TrackInteractiveMemberMutation<CircleCollider2DComponent>(
+                    undoService, "Edit CircleCollider2D Density", selectedEntity, &CircleCollider2DComponent::Density, circleCollider2D->Density);
                 ImGui::TextUnformatted("Friction");
                 ImGui::DragFloat("##CircleColliderFriction", &circleCollider2D->Friction, 0.01f, 0.0f, 1.0f);
-                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Friction");
+                TrackInteractiveMemberMutation<CircleCollider2DComponent>(
+                    undoService, "Edit CircleCollider2D Friction", selectedEntity, &CircleCollider2DComponent::Friction, circleCollider2D->Friction);
                 ImGui::TextUnformatted("Restitution");
                 ImGui::DragFloat("##CircleColliderRestitution", &circleCollider2D->Restitution, 0.01f, 0.0f, 1.0f);
-                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Restitution");
+                TrackInteractiveMemberMutation<CircleCollider2DComponent>(
+                    undoService, "Edit CircleCollider2D Restitution", selectedEntity, &CircleCollider2DComponent::Restitution, circleCollider2D->Restitution);
                 ImGui::TextUnformatted("Is Sensor");
                 ImGui::Checkbox("##CircleColliderIsSensor", &circleCollider2D->IsSensor);
-                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Sensor");
+                TrackInteractiveMemberMutation<CircleCollider2DComponent>(
+                    undoService, "Edit CircleCollider2D Sensor", selectedEntity, &CircleCollider2DComponent::IsSensor, circleCollider2D->IsSensor);
                 ImGui::TextUnformatted("Layer Bits");
                 ImGui::InputScalar("##CircleColliderLayerBits", ImGuiDataType_U64, &circleCollider2D->CollisionLayer);
-                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Layer");
+                TrackInteractiveMemberMutation<CircleCollider2DComponent>(
+                    undoService, "Edit CircleCollider2D Layer", selectedEntity, &CircleCollider2DComponent::CollisionLayer, circleCollider2D->CollisionLayer);
                 ImGui::TextUnformatted("Mask Bits");
                 ImGui::InputScalar("##CircleColliderMaskBits", ImGuiDataType_U64, &circleCollider2D->CollisionMask);
-                TrackInteractiveMutation(undoService, "Edit CircleCollider2D Mask");
+                TrackInteractiveMemberMutation<CircleCollider2DComponent>(
+                    undoService, "Edit CircleCollider2D Mask", selectedEntity, &CircleCollider2DComponent::CollisionMask, circleCollider2D->CollisionMask);
 
                 ImGui::TreePop();
             }
@@ -1833,48 +2142,71 @@ namespace Limitless::EditorInspectorPanel
             {
                 ImGui::TextUnformatted("Enabled");
                 ImGui::Checkbox("##DirectionalLightEnabled", &directionalLight->Enabled);
-                TrackInteractiveMutation(undoService, "Edit Directional Light Enabled");
+                TrackInteractiveMemberMutation<DirectionalLight2DComponent>(
+                    undoService,
+                    "Edit Directional Light Enabled",
+                    selectedEntity,
+                    &DirectionalLight2DComponent::Enabled,
+                    directionalLight->Enabled);
                 ImGui::TextUnformatted("Color");
                 ImGui::ColorEdit3("##DirectionalLightColor", &directionalLight->Color.r);
-                TrackInteractiveMutation(undoService, "Edit Directional Light Color");
+                TrackInteractiveMemberMutation<DirectionalLight2DComponent>(
+                    undoService, "Edit Directional Light Color", selectedEntity, &DirectionalLight2DComponent::Color, directionalLight->Color);
                 ImGui::TextUnformatted("Intensity");
                 ImGui::DragFloat("##DirectionalLightIntensity", &directionalLight->Intensity, 0.01f, 0.0f, 100.0f, "%.2f");
-                TrackInteractiveMutation(undoService, "Edit Directional Light Intensity");
+                TrackInteractiveMemberMutation<DirectionalLight2DComponent>(
+                    undoService, "Edit Directional Light Intensity", selectedEntity, &DirectionalLight2DComponent::Intensity, directionalLight->Intensity);
                 ImGui::TextUnformatted("Use Entity Rotation");
                 ImGui::Checkbox("##DirectionalLightUseEntityRotation", &directionalLight->UseEntityRotation);
-                TrackInteractiveMutation(undoService, "Edit Directional Light Rotation Mode");
+                TrackInteractiveMemberMutation<DirectionalLight2DComponent>(
+                    undoService,
+                    "Edit Directional Light Rotation Mode",
+                    selectedEntity,
+                    &DirectionalLight2DComponent::UseEntityRotation,
+                    directionalLight->UseEntityRotation);
                 if (!directionalLight->UseEntityRotation)
                 {
                     ImGui::TextUnformatted("Direction");
                     ImGui::DragFloat2("##DirectionalLightDirection", &directionalLight->Direction.x, 0.01f, -1.0f, 1.0f, "%.3f");
                     directionalLight->Direction = NormalizeDirectionOrFallback(directionalLight->Direction);
-                    TrackInteractiveMutation(undoService, "Edit Directional Light Direction");
+                    TrackInteractiveMemberMutation<DirectionalLight2DComponent>(
+                        undoService,
+                        "Edit Directional Light Direction",
+                        selectedEntity,
+                        &DirectionalLight2DComponent::Direction,
+                        directionalLight->Direction);
                 }
 
                 ImGui::TextUnformatted("Cast Shadows");
                 ImGui::Checkbox("##DirectionalLightCastShadows", &directionalLight->CastShadows);
-                TrackInteractiveMutation(undoService, "Edit Directional Light Cast Shadows");
+                TrackInteractiveMemberMutation<DirectionalLight2DComponent>(
+                    undoService, "Edit Directional Light Cast Shadows", selectedEntity, &DirectionalLight2DComponent::CastShadows, directionalLight->CastShadows);
                 ImGui::TextUnformatted("Shadow Strength");
                 ImGui::DragFloat("##DirectionalLightShadowStrength", &directionalLight->ShadowStrength, 0.01f, 0.0f, 1.0f, "%.2f");
                 directionalLight->ShadowStrength = std::clamp(directionalLight->ShadowStrength, 0.0f, 1.0f);
-                TrackInteractiveMutation(undoService, "Edit Directional Light Shadow Strength");
+                TrackInteractiveMemberMutation<DirectionalLight2DComponent>(
+                    undoService, "Edit Directional Light Shadow Strength", selectedEntity, &DirectionalLight2DComponent::ShadowStrength, directionalLight->ShadowStrength);
                 ImGui::TextUnformatted("Shadow Softness");
                 ImGui::DragFloat("##DirectionalLightShadowSoftness", &directionalLight->ShadowSoftness, 0.01f, 0.0f, 256.0f, "%.2f");
                 directionalLight->ShadowSoftness = std::max(0.0f, directionalLight->ShadowSoftness);
-                TrackInteractiveMutation(undoService, "Edit Directional Light Shadow Softness");
+                TrackInteractiveMemberMutation<DirectionalLight2DComponent>(
+                    undoService, "Edit Directional Light Shadow Softness", selectedEntity, &DirectionalLight2DComponent::ShadowSoftness, directionalLight->ShadowSoftness);
                 ImGui::TextUnformatted("Shadow Samples");
                 ImGui::DragInt("##DirectionalLightShadowSamples", &directionalLight->ShadowSamples, 1.0f, 1, 32);
                 directionalLight->ShadowSamples = std::clamp(directionalLight->ShadowSamples, 1, 32);
-                TrackInteractiveMutation(undoService, "Edit Directional Light Shadow Samples");
+                TrackInteractiveMemberMutation<DirectionalLight2DComponent>(
+                    undoService, "Edit Directional Light Shadow Samples", selectedEntity, &DirectionalLight2DComponent::ShadowSamples, directionalLight->ShadowSamples);
                 ImGui::TextDisabled("Directional light intensity is global (no distance falloff).");
                 ImGui::TextUnformatted("Shadow Distance");
                 ImGui::DragFloat("##DirectionalLightShadowDistance", &directionalLight->ShadowDistance, 0.05f, 0.0f, 10000.0f, "%.2f");
                 directionalLight->ShadowDistance = std::max(0.0f, directionalLight->ShadowDistance);
-                TrackInteractiveMutation(undoService, "Edit Directional Light Shadow Distance");
+                TrackInteractiveMemberMutation<DirectionalLight2DComponent>(
+                    undoService, "Edit Directional Light Shadow Distance", selectedEntity, &DirectionalLight2DComponent::ShadowDistance, directionalLight->ShadowDistance);
                 ImGui::TextUnformatted("Shadow Bias");
                 ImGui::DragFloat("##DirectionalLightShadowBias", &directionalLight->ShadowBias, 0.0005f, 0.0f, 2.0f, "%.4f");
                 directionalLight->ShadowBias = std::max(0.0f, directionalLight->ShadowBias);
-                TrackInteractiveMutation(undoService, "Edit Directional Light Shadow Bias");
+                TrackInteractiveMemberMutation<DirectionalLight2DComponent>(
+                    undoService, "Edit Directional Light Shadow Bias", selectedEntity, &DirectionalLight2DComponent::ShadowBias, directionalLight->ShadowBias);
 
                 ImGui::TreePop();
             }
@@ -1900,40 +2232,50 @@ namespace Limitless::EditorInspectorPanel
             {
                 ImGui::TextUnformatted("Enabled");
                 ImGui::Checkbox("##PointLightEnabled", &pointLight->Enabled);
-                TrackInteractiveMutation(undoService, "Edit Point Light Enabled");
+                TrackInteractiveMemberMutation<PointLight2DComponent>(
+                    undoService, "Edit Point Light Enabled", selectedEntity, &PointLight2DComponent::Enabled, pointLight->Enabled);
                 ImGui::TextUnformatted("Color");
                 ImGui::ColorEdit3("##PointLightColor", &pointLight->Color.r);
-                TrackInteractiveMutation(undoService, "Edit Point Light Color");
+                TrackInteractiveMemberMutation<PointLight2DComponent>(
+                    undoService, "Edit Point Light Color", selectedEntity, &PointLight2DComponent::Color, pointLight->Color);
                 ImGui::TextUnformatted("Intensity");
                 ImGui::DragFloat("##PointLightIntensity", &pointLight->Intensity, 0.01f, 0.0f, 100.0f, "%.2f");
-                TrackInteractiveMutation(undoService, "Edit Point Light Intensity");
+                TrackInteractiveMemberMutation<PointLight2DComponent>(
+                    undoService, "Edit Point Light Intensity", selectedEntity, &PointLight2DComponent::Intensity, pointLight->Intensity);
                 ImGui::TextUnformatted("Radius");
                 ImGui::DragFloat("##PointLightRadius", &pointLight->Radius, 0.01f, 0.01f, 10000.0f, "%.2f");
                 pointLight->Radius = std::max(0.01f, pointLight->Radius);
-                TrackInteractiveMutation(undoService, "Edit Point Light Radius");
+                TrackInteractiveMemberMutation<PointLight2DComponent>(
+                    undoService, "Edit Point Light Radius", selectedEntity, &PointLight2DComponent::Radius, pointLight->Radius);
                 ImGui::TextUnformatted("Falloff");
                 ImGui::DragFloat("##PointLightFalloff", &pointLight->Falloff, 0.01f, 0.1f, 8.0f, "%.2f");
                 pointLight->Falloff = std::max(0.1f, pointLight->Falloff);
-                TrackInteractiveMutation(undoService, "Edit Point Light Falloff");
+                TrackInteractiveMemberMutation<PointLight2DComponent>(
+                    undoService, "Edit Point Light Falloff", selectedEntity, &PointLight2DComponent::Falloff, pointLight->Falloff);
                 ImGui::TextUnformatted("Cast Shadows");
                 ImGui::Checkbox("##PointLightCastShadows", &pointLight->CastShadows);
-                TrackInteractiveMutation(undoService, "Edit Point Light Cast Shadows");
+                TrackInteractiveMemberMutation<PointLight2DComponent>(
+                    undoService, "Edit Point Light Cast Shadows", selectedEntity, &PointLight2DComponent::CastShadows, pointLight->CastShadows);
                 ImGui::TextUnformatted("Shadow Strength");
                 ImGui::DragFloat("##PointLightShadowStrength", &pointLight->ShadowStrength, 0.01f, 0.0f, 1.0f, "%.2f");
                 pointLight->ShadowStrength = std::clamp(pointLight->ShadowStrength, 0.0f, 1.0f);
-                TrackInteractiveMutation(undoService, "Edit Point Light Shadow Strength");
+                TrackInteractiveMemberMutation<PointLight2DComponent>(
+                    undoService, "Edit Point Light Shadow Strength", selectedEntity, &PointLight2DComponent::ShadowStrength, pointLight->ShadowStrength);
                 ImGui::TextUnformatted("Shadow Softness");
                 ImGui::DragFloat("##PointLightShadowSoftness", &pointLight->ShadowSoftness, 0.01f, 0.0f, 256.0f, "%.2f");
                 pointLight->ShadowSoftness = std::max(0.0f, pointLight->ShadowSoftness);
-                TrackInteractiveMutation(undoService, "Edit Point Light Shadow Softness");
+                TrackInteractiveMemberMutation<PointLight2DComponent>(
+                    undoService, "Edit Point Light Shadow Softness", selectedEntity, &PointLight2DComponent::ShadowSoftness, pointLight->ShadowSoftness);
                 ImGui::TextUnformatted("Shadow Samples");
                 ImGui::DragInt("##PointLightShadowSamples", &pointLight->ShadowSamples, 1.0f, 1, 32);
                 pointLight->ShadowSamples = std::clamp(pointLight->ShadowSamples, 1, 32);
-                TrackInteractiveMutation(undoService, "Edit Point Light Shadow Samples");
+                TrackInteractiveMemberMutation<PointLight2DComponent>(
+                    undoService, "Edit Point Light Shadow Samples", selectedEntity, &PointLight2DComponent::ShadowSamples, pointLight->ShadowSamples);
                 ImGui::TextUnformatted("Shadow Bias");
                 ImGui::DragFloat("##PointLightShadowBias", &pointLight->ShadowBias, 0.0001f, 0.0f, 10.0f, "%.4f");
                 pointLight->ShadowBias = std::max(0.0f, pointLight->ShadowBias);
-                TrackInteractiveMutation(undoService, "Edit Point Light Shadow Bias");
+                TrackInteractiveMemberMutation<PointLight2DComponent>(
+                    undoService, "Edit Point Light Shadow Bias", selectedEntity, &PointLight2DComponent::ShadowBias, pointLight->ShadowBias);
 
                 ImGui::TreePop();
             }
@@ -1959,22 +2301,26 @@ namespace Limitless::EditorInspectorPanel
             {
                 ImGui::TextUnformatted("Enabled");
                 ImGui::Checkbox("##ShadowOccluderEnabled", &shadowOccluder->Enabled);
-                TrackInteractiveMutation(undoService, "Edit Shadow Occluder Enabled");
+                TrackInteractiveMemberMutation<ShadowOccluder2DComponent>(
+                    undoService, "Edit Shadow Occluder Enabled", selectedEntity, &ShadowOccluder2DComponent::Enabled, shadowOccluder->Enabled);
 
                 int sourceMode = static_cast<int>(shadowOccluder->Source);
                 const char* sourceModeNames[] = { "Manual Polygon", "Physics Collider" };
                 ImGui::TextUnformatted("Source");
                 if (ImGui::Combo("##ShadowOccluderSource", &sourceMode, sourceModeNames, 2))
                     shadowOccluder->Source = static_cast<ShadowOccluder2DComponent::SourceMode>(sourceMode);
-                TrackInteractiveMutation(undoService, "Edit Shadow Occluder Source");
+                TrackInteractiveMemberMutation<ShadowOccluder2DComponent>(
+                    undoService, "Edit Shadow Occluder Source", selectedEntity, &ShadowOccluder2DComponent::Source, shadowOccluder->Source);
 
                 ImGui::TextUnformatted("Closed Polygon");
                 ImGui::Checkbox("##ShadowOccluderClosedPolygon", &shadowOccluder->Closed);
-                TrackInteractiveMutation(undoService, "Edit Shadow Occluder Closed");
+                TrackInteractiveMemberMutation<ShadowOccluder2DComponent>(
+                    undoService, "Edit Shadow Occluder Closed", selectedEntity, &ShadowOccluder2DComponent::Closed, shadowOccluder->Closed);
                 ImGui::TextUnformatted("Extrusion");
                 ImGui::DragFloat("##ShadowOccluderExtrusion", &shadowOccluder->Extrusion, 0.01f, 0.0f, 1000.0f, "%.2f");
                 shadowOccluder->Extrusion = std::max(0.0f, shadowOccluder->Extrusion);
-                TrackInteractiveMutation(undoService, "Edit Shadow Occluder Extrusion");
+                TrackInteractiveMemberMutation<ShadowOccluder2DComponent>(
+                    undoService, "Edit Shadow Occluder Extrusion", selectedEntity, &ShadowOccluder2DComponent::Extrusion, shadowOccluder->Extrusion);
 
                 if (shadowOccluder->Source == ShadowOccluder2DComponent::SourceMode::ManualPolygon)
                 {
@@ -1984,20 +2330,33 @@ namespace Limitless::EditorInspectorPanel
                             ? glm::vec2(0.0f)
                             : (shadowOccluder->PolygonPoints.back() + glm::vec2(0.5f, 0.0f));
 
+                        const std::vector<glm::vec2> beforePoints = shadowOccluder->PolygonPoints;
+                        shadowOccluder->PolygonPoints.push_back(newPoint);
+                        const std::vector<glm::vec2> afterPoints = shadowOccluder->PolygonPoints;
                         if (undoService)
                         {
-                            (void)undoService->ExecuteSceneMutation("Add Shadow Occluder Point", [&](Scene& mutableScene) {
-                                auto* mutableOccluder = mutableScene.GetRegistry().try_get<ShadowOccluder2DComponent>(selectedEntity);
-                                if (!mutableOccluder)
-                                    return false;
-                                mutableOccluder->PolygonPoints.push_back(newPoint);
-                                return true;
-                            });
-                            shadowOccluder = registry.try_get<ShadowOccluder2DComponent>(selectedEntity);
-                        }
-                        else
-                        {
-                            shadowOccluder->PolygonPoints.push_back(newPoint);
+                            (void)undoService->ExecuteLambdaCommand(
+                                "Add Shadow Occluder Point",
+                                [undoService, selectedEntity, beforePoints]() {
+                                    Scene* activeScene = undoService ? undoService->GetActiveScene() : nullptr;
+                                    if (!activeScene || !activeScene->IsValid(selectedEntity))
+                                        return false;
+                                    auto* activeOccluder = activeScene->GetRegistry().try_get<ShadowOccluder2DComponent>(selectedEntity);
+                                    if (!activeOccluder)
+                                        return false;
+                                    activeOccluder->PolygonPoints = beforePoints;
+                                    return true;
+                                },
+                                [undoService, selectedEntity, afterPoints]() {
+                                    Scene* activeScene = undoService ? undoService->GetActiveScene() : nullptr;
+                                    if (!activeScene || !activeScene->IsValid(selectedEntity))
+                                        return false;
+                                    auto* activeOccluder = activeScene->GetRegistry().try_get<ShadowOccluder2DComponent>(selectedEntity);
+                                    if (!activeOccluder)
+                                        return false;
+                                    activeOccluder->PolygonPoints = afterPoints;
+                                    return true;
+                                });
                         }
                     }
 
@@ -2007,7 +2366,22 @@ namespace Limitless::EditorInspectorPanel
                         ImGui::PushID(static_cast<int>(pointIndex));
                         ImGui::TextUnformatted("Point");
                         ImGui::DragFloat2("##Point", &shadowOccluder->PolygonPoints[pointIndex].x, 0.01f, -10000.0f, 10000.0f, "%.3f");
-                        TrackInteractiveMutation(undoService, "Edit Shadow Occluder Point");
+                        TrackInteractiveValueMutation(
+                            undoService,
+                            "Edit Shadow Occluder Point",
+                            shadowOccluder->PolygonPoints[pointIndex],
+                            [undoService, selectedEntity, pointIndex](const glm::vec2& value) {
+                                if (!undoService)
+                                    return false;
+                                Scene* activeScene = undoService->GetActiveScene();
+                                if (!activeScene || !activeScene->IsValid(selectedEntity))
+                                    return false;
+                                auto* activeOccluder = activeScene->GetRegistry().try_get<ShadowOccluder2DComponent>(selectedEntity);
+                                if (!activeOccluder || pointIndex >= activeOccluder->PolygonPoints.size())
+                                    return false;
+                                activeOccluder->PolygonPoints[pointIndex] = value;
+                                return true;
+                            });
                         ImGui::SameLine();
                         if (ImGui::Button("X"))
                             removePointIndex = static_cast<int>(pointIndex);
@@ -2016,21 +2390,34 @@ namespace Limitless::EditorInspectorPanel
 
                     if (removePointIndex >= 0)
                     {
+                        const std::vector<glm::vec2> beforePoints = shadowOccluder->PolygonPoints;
+                        if (removePointIndex >= 0 && removePointIndex < static_cast<int>(shadowOccluder->PolygonPoints.size()))
+                            shadowOccluder->PolygonPoints.erase(shadowOccluder->PolygonPoints.begin() + removePointIndex);
+                        const std::vector<glm::vec2> afterPoints = shadowOccluder->PolygonPoints;
                         if (undoService)
                         {
-                            (void)undoService->ExecuteSceneMutation("Remove Shadow Occluder Point", [&](Scene& mutableScene) {
-                                auto* mutableOccluder = mutableScene.GetRegistry().try_get<ShadowOccluder2DComponent>(selectedEntity);
-                                if (!mutableOccluder)
-                                    return false;
-                                if (removePointIndex < 0 || removePointIndex >= static_cast<int>(mutableOccluder->PolygonPoints.size()))
-                                    return false;
-                                mutableOccluder->PolygonPoints.erase(mutableOccluder->PolygonPoints.begin() + removePointIndex);
-                                return true;
-                            });
-                        }
-                        else
-                        {
-                            shadowOccluder->PolygonPoints.erase(shadowOccluder->PolygonPoints.begin() + removePointIndex);
+                            (void)undoService->ExecuteLambdaCommand(
+                                "Remove Shadow Occluder Point",
+                                [undoService, selectedEntity, beforePoints]() {
+                                    Scene* activeScene = undoService ? undoService->GetActiveScene() : nullptr;
+                                    if (!activeScene || !activeScene->IsValid(selectedEntity))
+                                        return false;
+                                    auto* activeOccluder = activeScene->GetRegistry().try_get<ShadowOccluder2DComponent>(selectedEntity);
+                                    if (!activeOccluder)
+                                        return false;
+                                    activeOccluder->PolygonPoints = beforePoints;
+                                    return true;
+                                },
+                                [undoService, selectedEntity, afterPoints]() {
+                                    Scene* activeScene = undoService ? undoService->GetActiveScene() : nullptr;
+                                    if (!activeScene || !activeScene->IsValid(selectedEntity))
+                                        return false;
+                                    auto* activeOccluder = activeScene->GetRegistry().try_get<ShadowOccluder2DComponent>(selectedEntity);
+                                    if (!activeOccluder)
+                                        return false;
+                                    activeOccluder->PolygonPoints = afterPoints;
+                                    return true;
+                                });
                         }
                     }
                 }
@@ -2066,50 +2453,64 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::TextUnformatted("Type");
                 if (ImGui::Combo("##Joint2DType", &jointTypeIndex, jointTypeNames, 3))
                     joint2D->Type = static_cast<Joint2DComponent::JointType>(jointTypeIndex);
-                TrackInteractiveMutation(undoService, "Edit Joint2D Type");
+                TrackInteractiveMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Type", selectedEntity, &Joint2DComponent::Type, joint2D->Type);
 
                 int connectedEntityId = (joint2D->ConnectedEntity == entt::null) ? -1 : static_cast<int>(joint2D->ConnectedEntity);
                 ImGui::TextUnformatted("Connected Entity ID");
                 if (ImGui::InputInt("##Joint2DConnectedEntityId", &connectedEntityId))
                     joint2D->ConnectedEntity = connectedEntityId >= 0 ? static_cast<entt::entity>(connectedEntityId) : entt::null;
-                TrackInteractiveMutation(undoService, "Edit Joint2D Connected Entity");
+                TrackInteractiveMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Connected Entity", selectedEntity, &Joint2DComponent::ConnectedEntity, joint2D->ConnectedEntity);
 
                 ImGui::TextUnformatted("Collide Connected");
                 ImGui::Checkbox("##Joint2DCollideConnected", &joint2D->CollideConnected);
-                TrackInteractiveMutation(undoService, "Edit Joint2D Collide Connected");
+                TrackInteractiveMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Collide Connected", selectedEntity, &Joint2DComponent::CollideConnected, joint2D->CollideConnected);
                 ImGui::TextUnformatted("Anchor A");
                 ImGui::DragFloat2("##Joint2DAnchorA", &joint2D->AnchorA.x, 0.01f);
-                TrackInteractiveMutation(undoService, "Edit Joint2D Anchor A");
+                TrackInteractiveMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Anchor A", selectedEntity, &Joint2DComponent::AnchorA, joint2D->AnchorA);
                 ImGui::TextUnformatted("Anchor B");
                 ImGui::DragFloat2("##Joint2DAnchorB", &joint2D->AnchorB.x, 0.01f);
-                TrackInteractiveMutation(undoService, "Edit Joint2D Anchor B");
+                TrackInteractiveMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Anchor B", selectedEntity, &Joint2DComponent::AnchorB, joint2D->AnchorB);
                 ImGui::TextUnformatted("Axis");
                 ImGui::DragFloat2("##Joint2DAxis", &joint2D->Axis.x, 0.01f);
-                TrackInteractiveMutation(undoService, "Edit Joint2D Axis");
+                TrackInteractiveMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Axis", selectedEntity, &Joint2DComponent::Axis, joint2D->Axis);
                 ImGui::TextUnformatted("Enable Limit");
                 ImGui::Checkbox("##Joint2DEnableLimit", &joint2D->EnableLimit);
-                TrackInteractiveMutation(undoService, "Edit Joint2D Enable Limit");
+                TrackInteractiveMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Enable Limit", selectedEntity, &Joint2DComponent::EnableLimit, joint2D->EnableLimit);
                 ImGui::TextUnformatted("Limits");
                 ImGui::DragFloat2("##Joint2DLimits", &joint2D->Limits.x, 0.01f);
-                TrackInteractiveMutation(undoService, "Edit Joint2D Limits");
+                TrackInteractiveMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Limits", selectedEntity, &Joint2DComponent::Limits, joint2D->Limits);
                 ImGui::TextUnformatted("Enable Motor");
                 ImGui::Checkbox("##Joint2DEnableMotor", &joint2D->EnableMotor);
-                TrackInteractiveMutation(undoService, "Edit Joint2D Enable Motor");
+                TrackInteractiveMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Enable Motor", selectedEntity, &Joint2DComponent::EnableMotor, joint2D->EnableMotor);
                 ImGui::TextUnformatted("Motor Speed");
                 ImGui::DragFloat("##Joint2DMotorSpeed", &joint2D->MotorSpeed, 0.01f);
-                TrackInteractiveMutation(undoService, "Edit Joint2D Motor Speed");
+                TrackInteractiveMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Motor Speed", selectedEntity, &Joint2DComponent::MotorSpeed, joint2D->MotorSpeed);
                 ImGui::TextUnformatted("Max Motor Force/Torque");
                 ImGui::DragFloat("##Joint2DMaxMotorForceOrTorque", &joint2D->MaxMotorForceOrTorque, 0.1f, 0.0f, 100000.0f);
-                TrackInteractiveMutation(undoService, "Edit Joint2D Max Motor");
+                TrackInteractiveMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Max Motor", selectedEntity, &Joint2DComponent::MaxMotorForceOrTorque, joint2D->MaxMotorForceOrTorque);
                 ImGui::TextUnformatted("Enable Spring");
                 ImGui::Checkbox("##Joint2DEnableSpring", &joint2D->EnableSpring);
-                TrackInteractiveMutation(undoService, "Edit Joint2D Enable Spring");
+                TrackInteractiveMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Enable Spring", selectedEntity, &Joint2DComponent::EnableSpring, joint2D->EnableSpring);
                 ImGui::TextUnformatted("Hertz");
                 ImGui::DragFloat("##Joint2DHertz", &joint2D->Hertz, 0.1f, 0.0f, 1000.0f);
-                TrackInteractiveMutation(undoService, "Edit Joint2D Hertz");
+                TrackInteractiveMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Hertz", selectedEntity, &Joint2DComponent::Hertz, joint2D->Hertz);
                 ImGui::TextUnformatted("Damping Ratio");
                 ImGui::DragFloat("##Joint2DDampingRatio", &joint2D->DampingRatio, 0.01f, 0.0f, 10.0f);
-                TrackInteractiveMutation(undoService, "Edit Joint2D Damping");
+                TrackInteractiveMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Damping", selectedEntity, &Joint2DComponent::DampingRatio, joint2D->DampingRatio);
 
                 ImGui::TreePop();
             }
@@ -2204,7 +2605,8 @@ namespace Limitless::EditorInspectorPanel
 
                 ImGui::TextUnformatted("Raycast Target");
                 ImGui::Checkbox("##UIImageRaycastTarget", &uiImage->RaycastTarget);
-                TrackInteractiveMutation(undoService, "Edit UIImage Raycast Target");
+                TrackInteractiveMemberMutation<UIImageComponent>(
+                    undoService, "Edit UIImage Raycast Target", selectedEntity, &UIImageComponent::RaycastTarget, uiImage->RaycastTarget);
                 ImGui::TreePop();
             }
         }
@@ -2298,15 +2700,18 @@ namespace Limitless::EditorInspectorPanel
 
                 ImGui::TextUnformatted("Background Color");
                 ImGui::ColorEdit4("##UIPanelBackgroundColor", &uiPanel->BackgroundColor.r);
-                TrackInteractiveMutation(undoService, "Edit UIPanel Background Color");
+                TrackInteractiveMemberMutation<UIPanelComponent>(
+                    undoService, "Edit UIPanel Background Color", selectedEntity, &UIPanelComponent::BackgroundColor, uiPanel->BackgroundColor);
 
                 ImGui::TextUnformatted("Use Sprite Texture");
                 ImGui::Checkbox("##UIPanelUseSpriteTexture", &uiPanel->UseSpriteTexture);
-                TrackInteractiveMutation(undoService, "Edit UIPanel Use Sprite Texture");
+                TrackInteractiveMemberMutation<UIPanelComponent>(
+                    undoService, "Edit UIPanel Use Sprite Texture", selectedEntity, &UIPanelComponent::UseSpriteTexture, uiPanel->UseSpriteTexture);
 
                 ImGui::TextUnformatted("Raycast Target");
                 ImGui::Checkbox("##UIPanelRaycastTarget", &uiPanel->RaycastTarget);
-                TrackInteractiveMutation(undoService, "Edit UIPanel Raycast Target");
+                TrackInteractiveMemberMutation<UIPanelComponent>(
+                    undoService, "Edit UIPanel Raycast Target", selectedEntity, &UIPanelComponent::RaycastTarget, uiPanel->RaycastTarget);
                 ImGui::TreePop();
             }
         }
@@ -2341,31 +2746,47 @@ namespace Limitless::EditorInspectorPanel
 
                 ImGui::TextUnformatted("Text Value");
                 ImGui::InputTextMultiline("##UITextValue", uiTextValueBuffer.data(), uiTextValueBuffer.size(), ImVec2(-1.0f, 84.0f));
-                if (ImGui::IsItemDeactivatedAfterEdit())
-                {
-                    uiText->Text = uiTextValueBuffer.data();
-                    if (undoService)
-                        (void)undoService->CommitInteractiveSceneMutation("Edit UI Text Value");
-                }
-                else if (ImGui::IsItemActivated() && undoService)
-                {
-                    undoService->BeginInteractiveSceneMutation();
-                }
+                uiText->Text = uiTextValueBuffer.data();
+                TrackInteractiveValueMutation(
+                    undoService,
+                    "Edit UI Text Value",
+                    uiText->Text,
+                    [undoService, selectedEntity](const std::string& value) {
+                        if (!undoService)
+                            return false;
+                        Scene* activeScene = undoService->GetActiveScene();
+                        if (!activeScene || !activeScene->IsValid(selectedEntity))
+                            return false;
+                        auto* activeText = activeScene->GetRegistry().try_get<UITextComponent>(selectedEntity);
+                        if (!activeText)
+                            return false;
+                        activeText->Text = value;
+                        return true;
+                    });
 
                 ImGui::TextUnformatted("Font File Path");
                 ImGui::InputText("##UITextFontFilePath", uiTextFontPathBuffer.data(), uiTextFontPathBuffer.size());
-                if (ImGui::IsItemDeactivatedAfterEdit())
-                {
-                    uiText->FontFilePath = uiTextFontPathBuffer.data();
-                    uiText->CachedFont.reset();
-                    uiText->FontLoadAttempted = false;
-                    if (undoService)
-                        (void)undoService->CommitInteractiveSceneMutation("Edit UI Font File Path");
-                }
-                else if (ImGui::IsItemActivated() && undoService)
-                {
-                    undoService->BeginInteractiveSceneMutation();
-                }
+                uiText->FontFilePath = uiTextFontPathBuffer.data();
+                uiText->CachedFont.reset();
+                uiText->FontLoadAttempted = false;
+                TrackInteractiveValueMutation(
+                    undoService,
+                    "Edit UI Font File Path",
+                    uiText->FontFilePath,
+                    [undoService, selectedEntity](const std::string& value) {
+                        if (!undoService)
+                            return false;
+                        Scene* activeScene = undoService->GetActiveScene();
+                        if (!activeScene || !activeScene->IsValid(selectedEntity))
+                            return false;
+                        auto* activeText = activeScene->GetRegistry().try_get<UITextComponent>(selectedEntity);
+                        if (!activeText)
+                            return false;
+                        activeText->FontFilePath = value;
+                        activeText->CachedFont.reset();
+                        activeText->FontLoadAttempted = false;
+                        return true;
+                    });
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("Example: Assets/Fonts/YourFont.ttf");
 
@@ -2405,15 +2826,18 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::TextUnformatted("Font Size");
                 if (ImGui::DragFloat("##UITextFontSize", &uiText->FontSize, 1.0f, 4.0f, 512.0f))
                     uiText->FontSize = std::max(4.0f, uiText->FontSize);
-                TrackInteractiveMutation(undoService, "Edit UI Font Size");
+                TrackInteractiveMemberMutation<UITextComponent>(
+                    undoService, "Edit UI Font Size", selectedEntity, &UITextComponent::FontSize, uiText->FontSize);
 
                 ImGui::TextUnformatted("Color");
                 ImGui::ColorEdit4("##UITextColor", &uiText->Color.r);
-                TrackInteractiveMutation(undoService, "Edit UI Text Color");
+                TrackInteractiveMemberMutation<UITextComponent>(
+                    undoService, "Edit UI Text Color", selectedEntity, &UITextComponent::Color, uiText->Color);
 
                 ImGui::TextUnformatted("Raycast Target");
                 ImGui::Checkbox("##UITextRaycastTarget", &uiText->RaycastTarget);
-                TrackInteractiveMutation(undoService, "Edit UIText Raycast Target");
+                TrackInteractiveMemberMutation<UITextComponent>(
+                    undoService, "Edit UIText Raycast Target", selectedEntity, &UITextComponent::RaycastTarget, uiText->RaycastTarget);
                 ImGui::TreePop();
             }
         }
@@ -2438,49 +2862,59 @@ namespace Limitless::EditorInspectorPanel
             {
                 ImGui::TextUnformatted("Interactable");
                 ImGui::Checkbox("##UIButtonInteractable", &uiButton->Interactable);
-                TrackInteractiveMutation(undoService, "Edit UIButton Interactable");
+                TrackInteractiveMemberMutation<UIButtonComponent>(
+                    undoService, "Edit UIButton Interactable", selectedEntity, &UIButtonComponent::Interactable, uiButton->Interactable);
                 ImGui::TextUnformatted("Use State Colors");
                 ImGui::Checkbox("##UIButtonUseStateColors", &uiButton->UseStateColors);
-                TrackInteractiveMutation(undoService, "Edit UIButton Use State Colors");
+                TrackInteractiveMemberMutation<UIButtonComponent>(
+                    undoService, "Edit UIButton Use State Colors", selectedEntity, &UIButtonComponent::UseStateColors, uiButton->UseStateColors);
                 if (uiButton->UseStateColors)
                 {
                     ImGui::TextUnformatted("Normal Color");
                     ImGui::ColorEdit4("##UIButtonNormalColor", &uiButton->NormalColor.r);
-                    TrackInteractiveMutation(undoService, "Edit UIButton Normal Color");
+                    TrackInteractiveMemberMutation<UIButtonComponent>(
+                        undoService, "Edit UIButton Normal Color", selectedEntity, &UIButtonComponent::NormalColor, uiButton->NormalColor);
                     ImGui::TextUnformatted("Hovered Color");
                     ImGui::ColorEdit4("##UIButtonHoveredColor", &uiButton->HoveredColor.r);
-                    TrackInteractiveMutation(undoService, "Edit UIButton Hovered Color");
+                    TrackInteractiveMemberMutation<UIButtonComponent>(
+                        undoService, "Edit UIButton Hovered Color", selectedEntity, &UIButtonComponent::HoveredColor, uiButton->HoveredColor);
                     ImGui::TextUnformatted("Pressed Color");
                     ImGui::ColorEdit4("##UIButtonPressedColor", &uiButton->PressedColor.r);
-                    TrackInteractiveMutation(undoService, "Edit UIButton Pressed Color");
+                    TrackInteractiveMemberMutation<UIButtonComponent>(
+                        undoService, "Edit UIButton Pressed Color", selectedEntity, &UIButtonComponent::PressedColor, uiButton->PressedColor);
                     ImGui::TextUnformatted("Disabled Color");
                     ImGui::ColorEdit4("##UIButtonDisabledColor", &uiButton->DisabledColor.r);
-                    TrackInteractiveMutation(undoService, "Edit UIButton Disabled Color");
+                    TrackInteractiveMemberMutation<UIButtonComponent>(
+                        undoService, "Edit UIButton Disabled Color", selectedEntity, &UIButtonComponent::DisabledColor, uiButton->DisabledColor);
                 }
                 std::array<char, 256> onClickEventBuffer{};
                 std::snprintf(onClickEventBuffer.data(), onClickEventBuffer.size(), "%s", uiButton->OnClickEvent.c_str());
                 ImGui::TextUnformatted("On Click Event");
                 if (ImGui::InputText("##UIButtonOnClickEvent", onClickEventBuffer.data(), onClickEventBuffer.size()))
                     uiButton->OnClickEvent = onClickEventBuffer.data();
-                TrackInteractiveMutation(undoService, "Edit UIButton OnClick Event");
+                TrackInteractiveMemberMutation<UIButtonComponent>(
+                    undoService, "Edit UIButton OnClick Event", selectedEntity, &UIButtonComponent::OnClickEvent, uiButton->OnClickEvent);
                 std::array<char, 256> onHoverEnterEventBuffer{};
                 std::snprintf(onHoverEnterEventBuffer.data(), onHoverEnterEventBuffer.size(), "%s", uiButton->OnHoverEnterEvent.c_str());
                 ImGui::TextUnformatted("On Hover Enter Event");
                 if (ImGui::InputText("##UIButtonOnHoverEnterEvent", onHoverEnterEventBuffer.data(), onHoverEnterEventBuffer.size()))
                     uiButton->OnHoverEnterEvent = onHoverEnterEventBuffer.data();
-                TrackInteractiveMutation(undoService, "Edit UIButton OnHoverEnter Event");
+                TrackInteractiveMemberMutation<UIButtonComponent>(
+                    undoService, "Edit UIButton OnHoverEnter Event", selectedEntity, &UIButtonComponent::OnHoverEnterEvent, uiButton->OnHoverEnterEvent);
                 std::array<char, 256> onHoverExitEventBuffer{};
                 std::snprintf(onHoverExitEventBuffer.data(), onHoverExitEventBuffer.size(), "%s", uiButton->OnHoverExitEvent.c_str());
                 ImGui::TextUnformatted("On Hover Exit Event");
                 if (ImGui::InputText("##UIButtonOnHoverExitEvent", onHoverExitEventBuffer.data(), onHoverExitEventBuffer.size()))
                     uiButton->OnHoverExitEvent = onHoverExitEventBuffer.data();
-                TrackInteractiveMutation(undoService, "Edit UIButton OnHoverExit Event");
+                TrackInteractiveMemberMutation<UIButtonComponent>(
+                    undoService, "Edit UIButton OnHoverExit Event", selectedEntity, &UIButtonComponent::OnHoverExitEvent, uiButton->OnHoverExitEvent);
                 std::array<char, 256> onPressedEventBuffer{};
                 std::snprintf(onPressedEventBuffer.data(), onPressedEventBuffer.size(), "%s", uiButton->OnPressedEvent.c_str());
                 ImGui::TextUnformatted("On Pressed Event");
                 if (ImGui::InputText("##UIButtonOnPressedEvent", onPressedEventBuffer.data(), onPressedEventBuffer.size()))
                     uiButton->OnPressedEvent = onPressedEventBuffer.data();
-                TrackInteractiveMutation(undoService, "Edit UIButton OnPressed Event");
+                TrackInteractiveMemberMutation<UIButtonComponent>(
+                    undoService, "Edit UIButton OnPressed Event", selectedEntity, &UIButtonComponent::OnPressedEvent, uiButton->OnPressedEvent);
                 ImGui::TreePop();
             }
         }
@@ -2506,19 +2940,23 @@ namespace Limitless::EditorInspectorPanel
                 const bool sliderUsesVisualChildren = SliderHasVisualChildren(registry, selectedEntity);
                 ImGui::TextUnformatted("Interactable");
                 ImGui::Checkbox("##UISliderInteractable", &uiSlider->Interactable);
-                TrackInteractiveMutation(undoService, "Edit UISlider Interactable");
+                TrackInteractiveMemberMutation<UISliderComponent>(
+                    undoService, "Edit UISlider Interactable", selectedEntity, &UISliderComponent::Interactable, uiSlider->Interactable);
                 ImGui::TextUnformatted("Min Value");
                 ImGui::DragFloat("##UISliderMinValue", &uiSlider->MinValue, 0.1f);
-                TrackInteractiveMutation(undoService, "Edit UISlider Min Value");
+                TrackInteractiveMemberMutation<UISliderComponent>(
+                    undoService, "Edit UISlider Min Value", selectedEntity, &UISliderComponent::MinValue, uiSlider->MinValue);
                 ImGui::TextUnformatted("Max Value");
                 ImGui::DragFloat("##UISliderMaxValue", &uiSlider->MaxValue, 0.1f);
                 if (uiSlider->MaxValue < uiSlider->MinValue)
                     uiSlider->MaxValue = uiSlider->MinValue;
-                TrackInteractiveMutation(undoService, "Edit UISlider Max Value");
+                TrackInteractiveMemberMutation<UISliderComponent>(
+                    undoService, "Edit UISlider Max Value", selectedEntity, &UISliderComponent::MaxValue, uiSlider->MaxValue);
                 ImGui::TextUnformatted("Value");
                 ImGui::SliderFloat("##UISliderValue", &uiSlider->Value, uiSlider->MinValue, uiSlider->MaxValue);
                 uiSlider->Value = std::clamp(uiSlider->Value, uiSlider->MinValue, uiSlider->MaxValue);
-                TrackInteractiveMutation(undoService, "Edit UISlider Value");
+                TrackInteractiveMemberMutation<UISliderComponent>(
+                    undoService, "Edit UISlider Value", selectedEntity, &UISliderComponent::Value, uiSlider->Value);
                 if (sliderUsesVisualChildren)
                 {
                     ImGui::TextWrapped("Unity-style slider visuals are authored on child entities:");
@@ -2529,13 +2967,16 @@ namespace Limitless::EditorInspectorPanel
                     {
                         ImGui::TextUnformatted("Background Color");
                         ImGui::ColorEdit4("##UISliderBackgroundColorFallback", &uiSlider->BackgroundColor.r);
-                        TrackInteractiveMutation(undoService, "Edit UISlider Background Color");
+                        TrackInteractiveMemberMutation<UISliderComponent>(
+                            undoService, "Edit UISlider Background Color", selectedEntity, &UISliderComponent::BackgroundColor, uiSlider->BackgroundColor);
                         ImGui::TextUnformatted("Fill Color");
                         ImGui::ColorEdit4("##UISliderFillColorFallback", &uiSlider->FillColor.r);
-                        TrackInteractiveMutation(undoService, "Edit UISlider Fill Color");
+                        TrackInteractiveMemberMutation<UISliderComponent>(
+                            undoService, "Edit UISlider Fill Color", selectedEntity, &UISliderComponent::FillColor, uiSlider->FillColor);
                         ImGui::TextUnformatted("Handle Color");
                         ImGui::ColorEdit4("##UISliderHandleColorFallback", &uiSlider->HandleColor.r);
-                        TrackInteractiveMutation(undoService, "Edit UISlider Handle Color");
+                        TrackInteractiveMemberMutation<UISliderComponent>(
+                            undoService, "Edit UISlider Handle Color", selectedEntity, &UISliderComponent::HandleColor, uiSlider->HandleColor);
                         ImGui::TreePop();
                     }
                 }
@@ -2543,31 +2984,42 @@ namespace Limitless::EditorInspectorPanel
                 {
                     ImGui::TextUnformatted("Background Color");
                     ImGui::ColorEdit4("##UISliderBackgroundColor", &uiSlider->BackgroundColor.r);
-                    TrackInteractiveMutation(undoService, "Edit UISlider Background Color");
+                    TrackInteractiveMemberMutation<UISliderComponent>(
+                        undoService, "Edit UISlider Background Color", selectedEntity, &UISliderComponent::BackgroundColor, uiSlider->BackgroundColor);
                     ImGui::TextUnformatted("Fill Color");
                     ImGui::ColorEdit4("##UISliderFillColor", &uiSlider->FillColor.r);
-                    TrackInteractiveMutation(undoService, "Edit UISlider Fill Color");
+                    TrackInteractiveMemberMutation<UISliderComponent>(
+                        undoService, "Edit UISlider Fill Color", selectedEntity, &UISliderComponent::FillColor, uiSlider->FillColor);
                     ImGui::TextUnformatted("Handle Color");
                     ImGui::ColorEdit4("##UISliderHandleColor", &uiSlider->HandleColor.r);
-                    TrackInteractiveMutation(undoService, "Edit UISlider Handle Color");
+                    TrackInteractiveMemberMutation<UISliderComponent>(
+                        undoService, "Edit UISlider Handle Color", selectedEntity, &UISliderComponent::HandleColor, uiSlider->HandleColor);
                 }
                 ImGui::TextUnformatted("Handle Width");
                 ImGui::DragFloat("##UISliderHandleWidth", &uiSlider->HandleWidth, 0.5f, 1.0f, 4096.0f);
                 uiSlider->HandleWidth = std::max(1.0f, uiSlider->HandleWidth);
-                TrackInteractiveMutation(undoService, "Edit UISlider Handle Width");
+                TrackInteractiveMemberMutation<UISliderComponent>(
+                    undoService, "Edit UISlider Handle Width", selectedEntity, &UISliderComponent::HandleWidth, uiSlider->HandleWidth);
                 ImGui::TextUnformatted("Handle Height Multiplier");
                 ImGui::DragFloat("##UISliderHandleHeightMultiplier", &uiSlider->HandleHeightMultiplier, 0.01f, 0.1f, 8.0f);
                 uiSlider->HandleHeightMultiplier = std::max(0.1f, uiSlider->HandleHeightMultiplier);
-                TrackInteractiveMutation(undoService, "Edit UISlider Handle Height Multiplier");
+                TrackInteractiveMemberMutation<UISliderComponent>(
+                    undoService, "Edit UISlider Handle Height Multiplier", selectedEntity, &UISliderComponent::HandleHeightMultiplier, uiSlider->HandleHeightMultiplier);
                 ImGui::TextUnformatted("Show Handle");
                 ImGui::Checkbox("##UISliderShowHandle", &uiSlider->ShowHandle);
-                TrackInteractiveMutation(undoService, "Edit UISlider Show Handle");
+                TrackInteractiveMemberMutation<UISliderComponent>(
+                    undoService, "Edit UISlider Show Handle", selectedEntity, &UISliderComponent::ShowHandle, uiSlider->ShowHandle);
                 std::array<char, 256> onValueChangedEventBuffer{};
                 std::snprintf(onValueChangedEventBuffer.data(), onValueChangedEventBuffer.size(), "%s", uiSlider->OnValueChangedEvent.c_str());
                 ImGui::TextUnformatted("On Value Changed Event");
                 if (ImGui::InputText("##UISliderOnValueChangedEvent", onValueChangedEventBuffer.data(), onValueChangedEventBuffer.size()))
                     uiSlider->OnValueChangedEvent = onValueChangedEventBuffer.data();
-                TrackInteractiveMutation(undoService, "Edit UISlider OnValueChanged Event");
+                TrackInteractiveMemberMutation<UISliderComponent>(
+                    undoService,
+                    "Edit UISlider OnValueChanged Event",
+                    selectedEntity,
+                    &UISliderComponent::OnValueChangedEvent,
+                    uiSlider->OnValueChangedEvent);
                 ImGui::TreePop();
             }
         }
@@ -2636,37 +3088,44 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::TextUnformatted("Spawn Rate");
                     ImGui::DragFloat("##ParticleSpawnRate", &particleEmitter->SpawnRate, 0.5f, 0.0f, 10000.0f);
                     particleEmitter->SpawnRate = std::max(0.0f, particleEmitter->SpawnRate);
-                    TrackInteractiveMutation(undoService, "Edit Particle Spawn Rate");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Spawn Rate", selectedEntity, &ParticleEmitterComponent::SpawnRate, particleEmitter->SpawnRate);
 
                     ImGui::TextUnformatted("Lifetime Min");
                     ImGui::DragFloat("##ParticleLifetimeMin", &particleEmitter->LifetimeMin, 0.05f, 0.01f, 100.0f);
                     particleEmitter->LifetimeMin = std::max(0.01f, particleEmitter->LifetimeMin);
-                    TrackInteractiveMutation(undoService, "Edit Particle Lifetime Min");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Lifetime Min", selectedEntity, &ParticleEmitterComponent::LifetimeMin, particleEmitter->LifetimeMin);
 
                     ImGui::TextUnformatted("Lifetime Max");
                     ImGui::DragFloat("##ParticleLifetimeMax", &particleEmitter->LifetimeMax, 0.05f, 0.01f, 100.0f);
                     particleEmitter->LifetimeMax = std::max(particleEmitter->LifetimeMin, particleEmitter->LifetimeMax);
-                    TrackInteractiveMutation(undoService, "Edit Particle Lifetime Max");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Lifetime Max", selectedEntity, &ParticleEmitterComponent::LifetimeMax, particleEmitter->LifetimeMax);
 
                     ImGui::TextUnformatted("Looping");
                     ImGui::Checkbox("##ParticleLooping", &particleEmitter->Looping);
-                    TrackInteractiveMutation(undoService, "Edit Particle Looping");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Looping", selectedEntity, &ParticleEmitterComponent::Looping, particleEmitter->Looping);
 
                     if (!particleEmitter->Looping)
                     {
                         ImGui::TextUnformatted("Duration");
                         ImGui::DragFloat("##ParticleDuration", &particleEmitter->Duration, 0.1f, 0.1f, 600.0f);
                         particleEmitter->Duration = std::max(0.1f, particleEmitter->Duration);
-                        TrackInteractiveMutation(undoService, "Edit Particle Duration");
+                        TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                            undoService, "Edit Particle Duration", selectedEntity, &ParticleEmitterComponent::Duration, particleEmitter->Duration);
                     }
 
                     ImGui::TextUnformatted("Play On Start");
                     ImGui::Checkbox("##ParticlePlayOnStart", &particleEmitter->PlayOnStart);
-                    TrackInteractiveMutation(undoService, "Edit Particle Play On Start");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Play On Start", selectedEntity, &ParticleEmitterComponent::PlayOnStart, particleEmitter->PlayOnStart);
 
                     ImGui::TextUnformatted("Burst Enabled");
                     ImGui::Checkbox("##ParticleBurstEnabled", &particleEmitter->BurstEnabled);
-                    TrackInteractiveMutation(undoService, "Edit Particle Burst Enabled");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Burst Enabled", selectedEntity, &ParticleEmitterComponent::BurstEnabled, particleEmitter->BurstEnabled);
 
                     if (particleEmitter->BurstEnabled)
                     {
@@ -2674,34 +3133,40 @@ namespace Limitless::EditorInspectorPanel
                         ImGui::TextUnformatted("Burst Count");
                         ImGui::DragInt("##ParticleBurstCount", &burstCount, 1, 1, static_cast<int>(ParticleEmitterComponent::kMaxParticlesCap));
                         particleEmitter->BurstCount = static_cast<uint32_t>(std::max(1, burstCount));
-                        TrackInteractiveMutation(undoService, "Edit Particle Burst Count");
+                        TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                            undoService, "Edit Particle Burst Count", selectedEntity, &ParticleEmitterComponent::BurstCount, particleEmitter->BurstCount);
                     }
 
                     ImGui::TextUnformatted("Radial Spawn Position");
                     ImGui::Checkbox("##ParticleRadialSpawnPosition", &particleEmitter->UseRadialSpawn);
-                    TrackInteractiveMutation(undoService, "Edit Particle Radial Spawn Position");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Radial Spawn Position", selectedEntity, &ParticleEmitterComponent::UseRadialSpawn, particleEmitter->UseRadialSpawn);
 
                     if (particleEmitter->UseRadialSpawn)
                     {
                         ImGui::TextUnformatted("Spawn Radius Min");
                         ImGui::DragFloat("##ParticleSpawnRadiusMin", &particleEmitter->SpawnRadiusMin, 0.01f, 0.0f, 1000.0f);
                         particleEmitter->SpawnRadiusMin = std::max(0.0f, particleEmitter->SpawnRadiusMin);
-                        TrackInteractiveMutation(undoService, "Edit Particle Spawn Radius Min");
+                        TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                            undoService, "Edit Particle Spawn Radius Min", selectedEntity, &ParticleEmitterComponent::SpawnRadiusMin, particleEmitter->SpawnRadiusMin);
 
                         ImGui::TextUnformatted("Spawn Radius Max");
                         ImGui::DragFloat("##ParticleSpawnRadiusMax", &particleEmitter->SpawnRadiusMax, 0.01f, 0.0f, 1000.0f);
                         particleEmitter->SpawnRadiusMax = std::max(particleEmitter->SpawnRadiusMin, particleEmitter->SpawnRadiusMax);
-                        TrackInteractiveMutation(undoService, "Edit Particle Spawn Radius Max");
+                        TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                            undoService, "Edit Particle Spawn Radius Max", selectedEntity, &ParticleEmitterComponent::SpawnRadiusMax, particleEmitter->SpawnRadiusMax);
                     }
                     else
                     {
                         ImGui::TextUnformatted("Spawn Offset Min");
                         ImGui::DragFloat2("##ParticleSpawnOffsetMin", &particleEmitter->SpawnOffsetMin.x, 0.01f, -1000.0f, 1000.0f, "%.3f");
-                        TrackInteractiveMutation(undoService, "Edit Particle Spawn Offset Min");
+                        TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                            undoService, "Edit Particle Spawn Offset Min", selectedEntity, &ParticleEmitterComponent::SpawnOffsetMin, particleEmitter->SpawnOffsetMin);
 
                         ImGui::TextUnformatted("Spawn Offset Max");
                         ImGui::DragFloat2("##ParticleSpawnOffsetMax", &particleEmitter->SpawnOffsetMax.x, 0.01f, -1000.0f, 1000.0f, "%.3f");
-                        TrackInteractiveMutation(undoService, "Edit Particle Spawn Offset Max");
+                        TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                            undoService, "Edit Particle Spawn Offset Max", selectedEntity, &ParticleEmitterComponent::SpawnOffsetMax, particleEmitter->SpawnOffsetMax);
                     }
 
                     ImGui::TreePop();
@@ -2713,28 +3178,34 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::TextUnformatted("Speed Min");
                     ImGui::DragFloat("##ParticleSpeedMin", &particleEmitter->SpeedMin, 0.5f, 0.0f, 10000.0f);
                     particleEmitter->SpeedMin = std::max(0.0f, particleEmitter->SpeedMin);
-                    TrackInteractiveMutation(undoService, "Edit Particle Speed Min");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Speed Min", selectedEntity, &ParticleEmitterComponent::SpeedMin, particleEmitter->SpeedMin);
 
                     ImGui::TextUnformatted("Speed Max");
                     ImGui::DragFloat("##ParticleSpeedMax", &particleEmitter->SpeedMax, 0.5f, 0.0f, 10000.0f);
                     particleEmitter->SpeedMax = std::max(particleEmitter->SpeedMin, particleEmitter->SpeedMax);
-                    TrackInteractiveMutation(undoService, "Edit Particle Speed Max");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Speed Max", selectedEntity, &ParticleEmitterComponent::SpeedMax, particleEmitter->SpeedMax);
 
                     ImGui::TextUnformatted("Angle Min");
                     ImGui::DragFloat("##ParticleAngleMin", &particleEmitter->AngleMin, 1.0f, 0.0f, 360.0f);
-                    TrackInteractiveMutation(undoService, "Edit Particle Angle Min");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Angle Min", selectedEntity, &ParticleEmitterComponent::AngleMin, particleEmitter->AngleMin);
 
                     ImGui::TextUnformatted("Angle Max");
                     ImGui::DragFloat("##ParticleAngleMax", &particleEmitter->AngleMax, 1.0f, 0.0f, 360.0f);
-                    TrackInteractiveMutation(undoService, "Edit Particle Angle Max");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Angle Max", selectedEntity, &ParticleEmitterComponent::AngleMax, particleEmitter->AngleMax);
 
                     ImGui::TextUnformatted("Radial Velocity");
                     ImGui::Checkbox("##ParticleRadialVelocity", &particleEmitter->RadialVelocity);
-                    TrackInteractiveMutation(undoService, "Edit Particle Radial Velocity");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Radial Velocity", selectedEntity, &ParticleEmitterComponent::RadialVelocity, particleEmitter->RadialVelocity);
 
                     ImGui::TextUnformatted("Gravity Modifier");
                     ImGui::DragFloat("##ParticleGravityModifier", &particleEmitter->GravityModifier, 0.05f, -100.0f, 100.0f);
-                    TrackInteractiveMutation(undoService, "Edit Particle Gravity Modifier");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Gravity Modifier", selectedEntity, &ParticleEmitterComponent::GravityModifier, particleEmitter->GravityModifier);
 
                     ImGui::TreePop();
                 }
@@ -2745,25 +3216,30 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::TextUnformatted("Start Size Min");
                     ImGui::DragFloat("##ParticleStartSizeMin", &particleEmitter->StartSizeMin, 0.01f, 0.001f, 100.0f);
                     particleEmitter->StartSizeMin = std::max(0.001f, particleEmitter->StartSizeMin);
-                    TrackInteractiveMutation(undoService, "Edit Particle Start Size Min");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Start Size Min", selectedEntity, &ParticleEmitterComponent::StartSizeMin, particleEmitter->StartSizeMin);
 
                     ImGui::TextUnformatted("Start Size Max");
                     ImGui::DragFloat("##ParticleStartSizeMax", &particleEmitter->StartSizeMax, 0.01f, 0.001f, 100.0f);
                     particleEmitter->StartSizeMax = std::max(particleEmitter->StartSizeMin, particleEmitter->StartSizeMax);
-                    TrackInteractiveMutation(undoService, "Edit Particle Start Size Max");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Start Size Max", selectedEntity, &ParticleEmitterComponent::StartSizeMax, particleEmitter->StartSizeMax);
 
                     ImGui::TextUnformatted("End Size");
                     ImGui::DragFloat("##ParticleEndSize", &particleEmitter->EndSize, 0.01f, 0.0f, 100.0f);
                     particleEmitter->EndSize = std::max(0.0f, particleEmitter->EndSize);
-                    TrackInteractiveMutation(undoService, "Edit Particle End Size");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle End Size", selectedEntity, &ParticleEmitterComponent::EndSize, particleEmitter->EndSize);
 
                     ImGui::TextUnformatted("Start Color");
                     ImGui::ColorEdit4("##ParticleStartColor", &particleEmitter->StartColor.r);
-                    TrackInteractiveMutation(undoService, "Edit Particle Start Color");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Start Color", selectedEntity, &ParticleEmitterComponent::StartColor, particleEmitter->StartColor);
 
                     ImGui::TextUnformatted("End Color");
                     ImGui::ColorEdit4("##ParticleEndColor", &particleEmitter->EndColor.r);
-                    TrackInteractiveMutation(undoService, "Edit Particle End Color");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle End Color", selectedEntity, &ParticleEmitterComponent::EndColor, particleEmitter->EndColor);
 
                     ImGui::TreePop();
                 }
@@ -2773,19 +3249,23 @@ namespace Limitless::EditorInspectorPanel
                 {
                     ImGui::TextUnformatted("Start Rotation Min");
                     ImGui::DragFloat("##ParticleStartRotationMin", &particleEmitter->StartRotationMin, 1.0f, -360.0f, 360.0f);
-                    TrackInteractiveMutation(undoService, "Edit Particle Start Rotation Min");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Start Rotation Min", selectedEntity, &ParticleEmitterComponent::StartRotationMin, particleEmitter->StartRotationMin);
 
                     ImGui::TextUnformatted("Start Rotation Max");
                     ImGui::DragFloat("##ParticleStartRotationMax", &particleEmitter->StartRotationMax, 1.0f, -360.0f, 360.0f);
-                    TrackInteractiveMutation(undoService, "Edit Particle Start Rotation Max");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Start Rotation Max", selectedEntity, &ParticleEmitterComponent::StartRotationMax, particleEmitter->StartRotationMax);
 
                     ImGui::TextUnformatted("Rotation Speed Min");
                     ImGui::DragFloat("##ParticleRotationSpeedMin", &particleEmitter->RotationSpeedMin, 1.0f, -1000.0f, 1000.0f);
-                    TrackInteractiveMutation(undoService, "Edit Particle Rotation Speed Min");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Rotation Speed Min", selectedEntity, &ParticleEmitterComponent::RotationSpeedMin, particleEmitter->RotationSpeedMin);
 
                     ImGui::TextUnformatted("Rotation Speed Max");
                     ImGui::DragFloat("##ParticleRotationSpeedMax", &particleEmitter->RotationSpeedMax, 1.0f, -1000.0f, 1000.0f);
-                    TrackInteractiveMutation(undoService, "Edit Particle Rotation Speed Max");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Rotation Speed Max", selectedEntity, &ParticleEmitterComponent::RotationSpeedMax, particleEmitter->RotationSpeedMax);
 
                     ImGui::TreePop();
                 }
@@ -2793,6 +3273,37 @@ namespace Limitless::EditorInspectorPanel
                 // -- Texture --
                 if (ImGui::TreeNodeEx("Texture##ParticleEmitter"))
                 {
+                    const auto assignParticleTextureKey = [&](const std::string& textureKey) {
+                        const std::string beforeTextureKey = particleEmitter->TextureKey;
+                        if (beforeTextureKey == textureKey)
+                            return;
+
+                        particleEmitter->TextureKey = textureKey;
+                        particleEmitter->CachedTexture.reset();
+                        particleEmitter->TextureLoadAttempted = false;
+
+                        if (!undoService)
+                            return;
+                        (void)undoService->ExecuteValueMutation<std::string>(
+                            "Edit Particle Emitter Texture",
+                            beforeTextureKey,
+                            textureKey,
+                            [undoService, selectedEntity](const std::string& value) {
+                                if (!undoService)
+                                    return false;
+                                Scene* activeScene = undoService->GetActiveScene();
+                                if (!activeScene || !activeScene->IsValid(selectedEntity))
+                                    return false;
+                                auto* activeEmitter = activeScene->GetRegistry().try_get<ParticleEmitterComponent>(selectedEntity);
+                                if (!activeEmitter)
+                                    return false;
+                                activeEmitter->TextureKey = value;
+                                activeEmitter->CachedTexture.reset();
+                                activeEmitter->TextureLoadAttempted = false;
+                                return true;
+                            });
+                    };
+
                     const std::string textureLabel = !particleEmitter->TextureKey.empty()
                         ? EditorAssetNaming::GetAssetDisplayNameFromAssetKey(particleEmitter->TextureKey)
                         : std::string("None (White Quad)");
@@ -2807,9 +3318,7 @@ namespace Limitless::EditorInspectorPanel
                             const char* key = static_cast<const char*>(payload->Data);
                             if (key && key[0])
                             {
-                                particleEmitter->TextureKey = ResolveTextureKeyFromDroppedKey(key);
-                                particleEmitter->CachedTexture.reset();
-                                particleEmitter->TextureLoadAttempted = false;
+                                assignParticleTextureKey(ResolveTextureKeyFromDroppedKey(key));
                             }
                         }
                         else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
@@ -2817,9 +3326,7 @@ namespace Limitless::EditorInspectorPanel
                             const char* key = static_cast<const char*>(payload->Data);
                             if (key && key[0])
                             {
-                                particleEmitter->TextureKey = ResolveTextureKeyFromDroppedKey(key);
-                                particleEmitter->CachedTexture.reset();
-                                particleEmitter->TextureLoadAttempted = false;
+                                assignParticleTextureKey(ResolveTextureKeyFromDroppedKey(key));
                             }
                         }
                         ImGui::EndDragDropTarget();
@@ -2828,11 +3335,8 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::SameLine();
                     if (ImGui::Button("Clear##ParticleEmitterTexture"))
                     {
-                        particleEmitter->TextureKey.clear();
-                        particleEmitter->CachedTexture.reset();
-                        particleEmitter->TextureLoadAttempted = false;
+                        assignParticleTextureKey({});
                     }
-                    TrackInteractiveMutation(undoService, "Edit Particle Emitter Texture");
 
                     ImGui::TreePop();
                 }
@@ -2843,7 +3347,8 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::TextUnformatted("Max Particles");
                     ImGui::DragInt("##ParticleMaxParticles", &maxParticles, 16, 1, static_cast<int>(ParticleEmitterComponent::kMaxParticlesCap));
                     particleEmitter->MaxParticles = static_cast<uint32_t>(std::clamp(maxParticles, 1, static_cast<int>(ParticleEmitterComponent::kMaxParticlesCap)));
-                    TrackInteractiveMutation(undoService, "Edit Particle Max Particles");
+                    TrackInteractiveMemberMutation<ParticleEmitterComponent>(
+                        undoService, "Edit Particle Max Particles", selectedEntity, &ParticleEmitterComponent::MaxParticles, particleEmitter->MaxParticles);
                 }
 
                 ImGui::TreePop();

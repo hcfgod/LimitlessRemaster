@@ -1,0 +1,186 @@
+name: Quality Gates Windows
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  msvc-analyzer:
+    name: MSVC Analyzer Gate
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v1.1
+
+      - name: Download premake5
+        run: |
+          if (!(Test-Path "Vendor\Premake")) {
+            New-Item -ItemType Directory -Path "Vendor\Premake" -Force | Out-Null
+          }
+
+          $premakeUrl = "https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip"
+          $premakeZip = "Vendor\Premake\premake5.zip"
+          $premakeDir = "Vendor\Premake"
+
+          Invoke-WebRequest -Uri $premakeUrl -OutFile $premakeZip
+          Expand-Archive -Path $premakeZip -DestinationPath $premakeDir -Force
+          Remove-Item $premakeZip
+
+          Vendor\Premake\premake5.exe --version
+
+      - name: Generate Visual Studio solution
+        run: |
+          Vendor\Premake\premake5.exe vs2022
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Build with MSVC code analysis (hard gate)
+        run: |
+          msbuild LimitlessRemaster.sln `
+            /p:Configuration=Debug `
+            /p:Platform=x64 `
+            /m `
+            /p:BuildProjectReferences=true `
+            /p:RunCodeAnalysis=true `
+            /p:CodeAnalysisTreatWarningsAsErrors=true `
+            /p:TreatWarningsAsErrors=true `
+            /v:minimal
+
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Run tests
+        run: |
+          $testExe = Get-ChildItem -Path Build -Recurse -Filter "Test.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName
+
+          if ($null -eq $testExe -or !(Test-Path $testExe)) {
+            Write-Error "Test executable not found under Build/"
+            exit 1
+          }
+
+          & $testExe --no-success --abort-after=1
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+  clang-tidy-windows:
+    name: Clang-Tidy Gate (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v1.1
+
+      - name: Install LLVM clang-tidy
+        run: |
+          choco install llvm -y --no-progress
+          $llvmBin = "C:\Program Files\LLVM\bin"
+          if (!(Test-Path "$llvmBin\clang-tidy.exe")) {
+            Write-Error "clang-tidy.exe not found at $llvmBin"
+            exit 1
+          }
+          "$llvmBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install ms2cc
+        run: |
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/freddiehaddad/ms2cc/releases/latest"
+          $asset = $release.assets | Where-Object { $_.name -match 'windows' -or $_.name -match '\.zip$' } | Select-Object -First 1
+          if ($null -eq $asset) {
+            Write-Error "Unable to locate a downloadable ms2cc release asset."
+            exit 1
+          }
+
+          $zipPath = "$env:RUNNER_TEMP\ms2cc.zip"
+          $extractDir = "$env:RUNNER_TEMP\ms2cc"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+
+          $ms2ccExe = Get-ChildItem -Path $extractDir -Recurse -Filter "ms2cc.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if ([string]::IsNullOrWhiteSpace($ms2ccExe)) {
+            Write-Error "ms2cc.exe was not found in downloaded release archive."
+            exit 1
+          }
+
+          Split-Path -Parent $ms2ccExe | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Download premake5
+        run: |
+          if (!(Test-Path "Vendor\Premake")) {
+            New-Item -ItemType Directory -Path "Vendor\Premake" -Force | Out-Null
+          }
+
+          $premakeUrl = "https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip"
+          $premakeZip = "Vendor\Premake\premake5.zip"
+          $premakeDir = "Vendor\Premake"
+
+          Invoke-WebRequest -Uri $premakeUrl -OutFile $premakeZip
+          Expand-Archive -Path $premakeZip -DestinationPath $premakeDir -Force
+          Remove-Item $premakeZip
+
+          Vendor\Premake\premake5.exe --version
+
+      - name: Generate Visual Studio solution
+        run: |
+          Vendor\Premake\premake5.exe vs2022
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Build with detailed logging
+        run: |
+          msbuild LimitlessRemaster.sln `
+            /p:Configuration=Debug `
+            /p:Platform=x64 `
+            /m `
+            /p:BuildProjectReferences=true `
+            /v:detailed `
+            /fl `
+            /flp:logfile=msbuild.log;verbosity=detailed
+
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Generate compile_commands.json with ms2cc
+        run: |
+          ms2cc -i msbuild.log -o compile_commands.json
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "ms2cc failed to generate compile_commands.json"
+            exit $LASTEXITCODE
+          }
+          if (!(Test-Path "compile_commands.json")) {
+            Write-Error "compile_commands.json not found after ms2cc run"
+            exit 1
+          }
+
+      - name: Run clang-tidy (hard fail on warnings)
+        run: |
+          $sourceFiles = git ls-files | Where-Object { $_ -match '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' }
+          if ($null -eq $sourceFiles -or $sourceFiles.Count -eq 0) {
+            Write-Error "No first-party source files matched clang-tidy file filter."
+            exit 1
+          }
+
+          $hadFailure = $false
+          foreach ($sourceFile in $sourceFiles) {
+            clang-tidy $sourceFile -p . -checks='-*,clang-analyzer-*' -warnings-as-errors='*'
+            if ($LASTEXITCODE -ne 0) {
+              $hadFailure = $true
+            }
+          }
+
+          if ($hadFailure) {
+            exit 1
+          }

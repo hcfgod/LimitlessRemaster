@@ -1,0 +1,189 @@
+name: Quality Gates Linux
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  sanitizer-linux:
+    name: Sanitizer (${{ matrix.gate_name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - gate_name: asan-ubsan
+            san_flags: -fsanitize=address,undefined
+          - gate_name: tsan
+            san_flags: -fsanitize=thread
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential make cmake pkg-config git clang
+          sudo apt-get install -y libasound2-dev libpulse-dev libaudio-dev libjack-dev
+          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev libxxf86vm-dev libxss-dev
+          sudo apt-get install -y libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev
+          sudo apt-get install -y libdbus-1-dev libudev-dev libibus-1.0-dev
+          sudo apt-get install -y libdrm-dev libgbm-dev
+          sudo apt-get install -y libwayland-dev libxkbcommon-dev
+          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libswresample-dev
+
+      - name: Install Box2D 3.x
+        run: |
+          cd /tmp
+          rm -rf box2d
+          git clone --depth 1 --branch v3.1.1 https://github.com/erincatto/box2d.git
+          cmake -S box2d -B box2d/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
+          cmake --build box2d/build --parallel "$(nproc)"
+          sudo cmake --install box2d/build
+          sudo ldconfig
+
+      - name: Install SDL3
+        run: |
+          if sudo apt-get install -y libsdl3-dev 2>/dev/null; then
+            echo "SDL3 installed from package manager"
+          else
+            cd /tmp
+            rm -rf SDL
+            git clone https://github.com/libsdl-org/SDL.git
+            cd SDL
+            git checkout release-3.2.18
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_TEST=OFF -DSDL_OPENGL=ON -DSDL_OPENGLES=ON
+            cmake --build build --parallel "$(nproc)"
+            sudo cmake --install build
+            sudo ldconfig
+          fi
+
+      - name: Download premake5
+        run: |
+          curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
+          tar -xzf premake5.tar.gz
+          chmod +x premake5
+
+      - name: Generate Makefiles (clang)
+        run: ./premake5 gmake2 --cc=clang
+
+      - name: Build with sanitizer
+        env:
+          SAN_FLAGS: ${{ matrix.san_flags }}
+        run: |
+          export LIBRARY_PATH="/usr/local/lib:${LIBRARY_PATH}"
+          export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
+          make -j"$(nproc)" config=debug_x64 \
+            CC=clang CXX=clang++ \
+            CFLAGS="${SAN_FLAGS} -fno-omit-frame-pointer" \
+            CXXFLAGS="${SAN_FLAGS} -fno-omit-frame-pointer" \
+            LDFLAGS="${SAN_FLAGS}"
+
+      - name: Run tests with sanitizer
+        env:
+          GATE_NAME: ${{ matrix.gate_name }}
+        run: |
+          export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
+
+          TEST_EXE=""
+          for candidate in Build/*/Test/Test; do
+            if [ -f "$candidate" ]; then
+              TEST_EXE="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$TEST_EXE" ]; then
+            echo "Test executable not found"
+            exit 1
+          fi
+
+          case "$GATE_NAME" in
+            asan-ubsan)
+              export ASAN_OPTIONS="detect_leaks=1:strict_init_order=1:halt_on_error=1"
+              export UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1"
+              ;;
+            tsan)
+              export TSAN_OPTIONS="halt_on_error=1:history_size=7"
+              ;;
+          esac
+
+          "$TEST_EXE" --no-success --abort-after=1
+
+  clang-tidy-linux:
+    name: Clang-Tidy Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential make cmake pkg-config git clang clang-tidy bear ripgrep
+          sudo apt-get install -y libasound2-dev libpulse-dev libaudio-dev libjack-dev
+          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev libxxf86vm-dev libxss-dev
+          sudo apt-get install -y libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev
+          sudo apt-get install -y libdbus-1-dev libudev-dev libibus-1.0-dev
+          sudo apt-get install -y libdrm-dev libgbm-dev
+          sudo apt-get install -y libwayland-dev libxkbcommon-dev
+          sudo apt-get install -y libavcodec-dev libavformat-dev libavutil-dev libswresample-dev
+
+      - name: Install Box2D 3.x
+        run: |
+          cd /tmp
+          rm -rf box2d
+          git clone --depth 1 --branch v3.1.1 https://github.com/erincatto/box2d.git
+          cmake -S box2d -B box2d/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
+          cmake --build box2d/build --parallel "$(nproc)"
+          sudo cmake --install box2d/build
+          sudo ldconfig
+
+      - name: Install SDL3
+        run: |
+          if sudo apt-get install -y libsdl3-dev 2>/dev/null; then
+            echo "SDL3 installed from package manager"
+          else
+            cd /tmp
+            rm -rf SDL
+            git clone https://github.com/libsdl-org/SDL.git
+            cd SDL
+            git checkout release-3.2.18
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSDL_STATIC=OFF -DSDL_SHARED=ON -DSDL_TEST=OFF -DSDL_OPENGL=ON -DSDL_OPENGLES=ON
+            cmake --build build --parallel "$(nproc)"
+            sudo cmake --install build
+            sudo ldconfig
+          fi
+
+      - name: Download premake5
+        run: |
+          curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz
+          tar -xzf premake5.tar.gz
+          chmod +x premake5
+
+      - name: Generate Makefiles (clang)
+        run: ./premake5 gmake2 --cc=clang
+
+      - name: Build compile database
+        run: |
+          export LIBRARY_PATH="/usr/local/lib:${LIBRARY_PATH}"
+          export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
+          bear -- make -j"$(nproc)" config=debug_x64 CC=clang CXX=clang++
+
+      - name: Run clang-tidy (hard fail on warnings)
+        run: |
+          mapfile -t source_files < <(git ls-files | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$')
+
+          if [ "${#source_files[@]}" -eq 0 ]; then
+            echo "No first-party source files matched clang-tidy file filter."
+            exit 1
+          fi
+
+          printf '%s\n' "${source_files[@]}" | xargs -r -n 1 -P "$(nproc)" \
+            clang-tidy -p . \
+            -checks='-*,clang-analyzer-*' \
+            -warnings-as-errors='*'

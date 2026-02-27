@@ -1,0 +1,120 @@
+name: Quality Gates macOS
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  sanitizer-macos:
+    name: Sanitizer (${{ matrix.gate_name }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - gate_name: asan-ubsan
+            san_flags: -fsanitize=address,undefined
+          - gate_name: tsan
+            san_flags: -fsanitize=thread
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install pkg-config sdl3 box2d ffmpeg
+
+      - name: Download premake5
+        run: |
+          curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-macosx.tar.gz
+          tar -xzf premake5.tar.gz
+          chmod +x premake5
+
+      - name: Generate Makefiles (clang)
+        run: ./premake5 gmake2 --cc=clang
+
+      - name: Build with sanitizer
+        env:
+          SAN_FLAGS: ${{ matrix.san_flags }}
+        run: |
+          make -j"$(sysctl -n hw.ncpu)" config=debug_arm64 \
+            CC=clang CXX=clang++ \
+            CFLAGS="${SAN_FLAGS} -fno-omit-frame-pointer" \
+            CXXFLAGS="${SAN_FLAGS} -fno-omit-frame-pointer" \
+            LDFLAGS="${SAN_FLAGS}"
+
+      - name: Run tests with sanitizer
+        env:
+          GATE_NAME: ${{ matrix.gate_name }}
+        run: |
+          TEST_EXE=""
+          for candidate in Build/*/Test/Test; do
+            if [ -f "$candidate" ]; then
+              TEST_EXE="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$TEST_EXE" ]; then
+            echo "Test executable not found"
+            exit 1
+          fi
+
+          case "$GATE_NAME" in
+            asan-ubsan)
+              export ASAN_OPTIONS="detect_leaks=1:strict_init_order=1:halt_on_error=1"
+              export UBSAN_OPTIONS="print_stacktrace=1:halt_on_error=1"
+              ;;
+            tsan)
+              export TSAN_OPTIONS="halt_on_error=1:history_size=7"
+              ;;
+          esac
+
+          "$TEST_EXE" --no-success --abort-after=1
+
+  clang-tidy-macos:
+    name: Clang-Tidy Gate
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install pkg-config sdl3 box2d ffmpeg llvm bear ripgrep
+
+      - name: Configure LLVM toolchain
+        run: |
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+
+      - name: Download premake5
+        run: |
+          curl -L -o premake5.tar.gz https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-macosx.tar.gz
+          tar -xzf premake5.tar.gz
+          chmod +x premake5
+
+      - name: Generate Makefiles (clang)
+        run: ./premake5 gmake2 --cc=clang
+
+      - name: Build compile database
+        run: |
+          bear -- make -j"$(sysctl -n hw.ncpu)" config=debug_arm64 CC=clang CXX=clang++
+
+      - name: Run clang-tidy (hard fail on warnings)
+        run: |
+          git ls-files | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt
+          if [ ! -s clang-tidy-files.txt ]; then
+            echo "No first-party source files matched clang-tidy file filter."
+            exit 1
+          fi
+
+          while IFS= read -r source_file; do
+            [ -n "$source_file" ] || continue
+            clang-tidy "$source_file" -p . \
+              -checks='-*,clang-analyzer-*' \
+              -warnings-as-errors='*'
+          done < clang-tidy-files.txt

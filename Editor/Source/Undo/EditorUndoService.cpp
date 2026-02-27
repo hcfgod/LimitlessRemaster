@@ -1,6 +1,7 @@
 #include "PrecompiledHeader.h"
 
 #include "EditorUndoService.h"
+#include "EditorLambdaCommand.h"
 
 #include "Core/Debug/Log.h"
 
@@ -53,6 +54,7 @@ namespace Limitless
         if (!command)
             return false;
         m_UndoCommands.push_back(std::move(command));
+        TrimToMaxUndoCommands();
         m_RedoCommands.clear();
         return true;
     }
@@ -91,6 +93,12 @@ namespace Limitless
         m_RedoCommands.clear();
     }
 
+    void EditorUndoStack::SetMaxUndoCommands(size_t maxCommands)
+    {
+        m_MaxUndoCommands = maxCommands;
+        TrimToMaxUndoCommands();
+    }
+
     bool EditorUndoStack::CanUndo() const
     {
         return !m_UndoCommands.empty();
@@ -113,6 +121,17 @@ namespace Limitless
         if (m_RedoCommands.empty())
             return kEmptyLabel;
         return m_RedoCommands.back()->GetLabel();
+    }
+
+    void EditorUndoStack::TrimToMaxUndoCommands()
+    {
+        if (m_MaxUndoCommands == 0)
+            return;
+        if (m_UndoCommands.size() <= m_MaxUndoCommands)
+            return;
+
+        const size_t overflowCount = m_UndoCommands.size() - m_MaxUndoCommands;
+        m_UndoCommands.erase(m_UndoCommands.begin(), m_UndoCommands.begin() + static_cast<std::ptrdiff_t>(overflowCount));
     }
 
     void EditorUndoService::Initialize(SceneGetter sceneGetter, SceneSetter sceneSetter, SceneSwap sceneSwap)
@@ -150,6 +169,16 @@ namespace Limitless
         m_PendingInteractiveSnapshot.reset();
         m_IsDirty = true;
         return true;
+    }
+
+    bool EditorUndoService::ExecuteLambdaCommand(const std::string& label,
+                                                 std::function<bool()> undoCallback,
+                                                 std::function<bool()> redoCallback)
+    {
+        if (!undoCallback || !redoCallback)
+            return false;
+        auto command = std::make_unique<EditorLambdaCommand>(label, std::move(undoCallback), std::move(redoCallback));
+        return ExecuteCommand(std::move(command));
     }
 
     void EditorUndoService::BeginInteractiveSceneMutation()
