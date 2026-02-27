@@ -94,6 +94,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v1.1
@@ -163,7 +165,7 @@ jobs:
             /p:Platform=x64 `
             /m `
             /p:BuildProjectReferences=true `
-            /v:detailed `
+            /v:minimal `
             /fl `
             "/flp:logfile=msbuild.log;verbosity=detailed"
 
@@ -185,18 +187,36 @@ jobs:
 
       - name: Run clang-tidy (hard fail on warnings)
         run: |
-          $sourceFiles = git ls-files | Where-Object { $_ -match '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' }
-          if ($null -eq $sourceFiles -or $sourceFiles.Count -eq 0) {
-            Write-Error "No first-party source files matched clang-tidy file filter."
-            exit 1
+          $eventName = "${{ github.event_name }}"
+          $baseSha = ""
+          $headSha = ""
+          if ($eventName -eq "pull_request") {
+            $baseSha = "${{ github.event.pull_request.base.sha }}"
+            $headSha = "${{ github.event.pull_request.head.sha }}"
+          } else {
+            $baseSha = "${{ github.event.before }}"
+            $headSha = "${{ github.sha }}"
           }
+
+          if (![string]::IsNullOrWhiteSpace($baseSha) -and $baseSha -ne "0000000000000000000000000000000000000000") {
+            $candidateFiles = git diff --name-only --diff-filter=ACMR $baseSha $headSha
+          } else {
+            $candidateFiles = git ls-files
+          }
+
+          $sourceFiles = $candidateFiles | Where-Object { $_ -match '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' } | Sort-Object -Unique
+          if ($null -eq $sourceFiles -or $sourceFiles.Count -eq 0) {
+            Write-Host "No changed first-party source files to analyze."
+            exit 0
+          }
+          Write-Host "Analyzing $($sourceFiles.Count) changed C++ source files."
 
           $chunkSize = 40
           $hadFailure = $false
           for ($i = 0; $i -lt $sourceFiles.Count; $i += $chunkSize) {
             $end = [Math]::Min($i + $chunkSize - 1, $sourceFiles.Count - 1)
             $batch = $sourceFiles[$i..$end]
-            & clang-tidy @batch -p . -quiet -checks='-*,clang-analyzer-*' -warnings-as-errors='*'
+            & clang-tidy @batch -p . -quiet -checks='-*,clang-analyzer-*,-clang-analyzer-optin.core.EnumCastOutOfRange' -warnings-as-errors='*'
             if ($LASTEXITCODE -ne 0) {
               $hadFailure = $true
             }

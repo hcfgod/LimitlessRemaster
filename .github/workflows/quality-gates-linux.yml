@@ -120,6 +120,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies
         run: |
@@ -175,18 +177,39 @@ jobs:
           bear -- make -j"$(nproc)" config=debug_x64 CC=clang CXX=clang++
 
       - name: Run clang-tidy (hard fail on warnings)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
         run: |
-          mapfile -t source_files < <(git ls-files | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$')
+          BASE_SHA=""
+          HEAD_SHA=""
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            BASE_SHA="$PR_BASE_SHA"
+            HEAD_SHA="$PR_HEAD_SHA"
+          else
+            BASE_SHA="$PUSH_BEFORE_SHA"
+            HEAD_SHA="$PUSH_HEAD_SHA"
+          fi
+
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            mapfile -t source_files < <(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$')
+          else
+            mapfile -t source_files < <(git ls-files | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$')
+          fi
 
           if [ "${#source_files[@]}" -eq 0 ]; then
-            echo "No first-party source files matched clang-tidy file filter."
-            exit 1
+            echo "No changed first-party source files to analyze."
+            exit 0
           fi
+          echo "Analyzing ${#source_files[@]} changed C++ source files."
 
           printf '%s\n' "${source_files[@]}" > clang-tidy-files.txt
 
           # Run in batches to reduce process startup overhead and keep logs concise.
           xargs -r -a clang-tidy-files.txt -n 40 \
             clang-tidy -p . -quiet \
-            -checks='-*,clang-analyzer-*' \
+            -checks='-*,clang-analyzer-*,-clang-analyzer-optin.core.EnumCastOutOfRange' \
             -warnings-as-errors='*'

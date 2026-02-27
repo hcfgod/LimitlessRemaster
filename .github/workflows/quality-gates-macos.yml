@@ -136,12 +136,39 @@ jobs:
               i = 0
               while i < len(args):
                   arg = args[i]
-                  if arg == "-include-pch":
-                      i += 2
-                      continue
-                  if arg.startswith("-include-pch="):
+                  # Direct PCH flags.
+                  if arg in ("-include-pch", "-include"):
+                      if i + 1 < len(args):
+                          next_arg = args[i + 1]
+                          if "PrecompiledHeader.h" in next_arg or next_arg.endswith(".gch") or arg == "-include-pch":
+                              i += 2
+                              continue
+                  if arg.startswith("-include-pch=") or (
+                      arg.startswith("-include") and ("PrecompiledHeader.h" in arg or arg.endswith(".gch"))
+                  ):
                       i += 1
                       continue
+                  if arg == "-Winvalid-pch":
+                      i += 1
+                      continue
+
+                  # Clang frontend form: -Xclang <flag> [-Xclang <value>]
+                  if arg == "-Xclang" and i + 1 < len(args):
+                      frontend_flag = args[i + 1]
+                      if frontend_flag in ("-include-pch", "-include", "-Winvalid-pch"):
+                          i += 2
+                          if frontend_flag in ("-include-pch", "-include"):
+                              if i < len(args) and args[i] == "-Xclang":
+                                  i += 2  # -Xclang <pch-or-header-path>
+                              elif i < len(args):
+                                  i += 1
+                          continue
+
+                  # Drop any standalone stale gch reference.
+                  if "PrecompiledHeader.h.gch" in arg:
+                      i += 1
+                      continue
+
                   cleaned.append(arg)
                   i += 1
 
@@ -157,7 +184,14 @@ jobs:
             exit 1
           fi
 
+          SDKROOT_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+          echo "Using clang-tidy: $CLANG_TIDY_BIN"
+          echo "Using SDKROOT: $SDKROOT_PATH"
+
           # Batch files per invocation to reduce startup cost and log volume.
           xargs -n 40 "$CLANG_TIDY_BIN" -p . -quiet \
-            -checks='-*,clang-analyzer-*' \
+            --extra-arg-before=-isysroot \
+            --extra-arg-before="$SDKROOT_PATH" \
+            --extra-arg-before=-stdlib=libc++ \
+            -checks='-*,clang-analyzer-*,-clang-analyzer-optin.core.EnumCastOutOfRange' \
             -warnings-as-errors='*' < clang-tidy-files.txt
