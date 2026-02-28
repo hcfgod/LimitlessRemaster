@@ -507,7 +507,6 @@ namespace Limitless::EditorScenePanel
             const ImVec2 itemMax = ImGui::GetItemRectMax();
             const float zoneHeight = 2.0f;
             const float zoneWidth = itemMax.x - itemMin.x;
-            const entt::entity parentEntity = scene->GetParent(entity);
 
             ImGui::PushID(static_cast<int>(entity));
             ImGui::SetCursorScreenPos(ImVec2(itemMin.x, itemMin.y - zoneHeight * 0.5f));

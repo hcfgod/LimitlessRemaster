@@ -578,8 +578,6 @@ namespace Limitless
                     SanitizeFiniteNonNegative(boxCollider->Density, 1.0f),
                     0.0f,
                     kMaximumShapeDensity);
-                shapeDefinition.friction = SanitizeFiniteNonNegative(boxCollider->Friction, 0.5f);
-                shapeDefinition.restitution = glm::clamp(SanitizeFiniteNonNegative(boxCollider->Restitution, 0.0f), 0.0f, 1.0f);
                 shapeDefinition.isSensor = boxCollider->IsSensor;
                 shapeDefinition.enableContactEvents = true;
                 shapeDefinition.filter.categoryBits = boxCollider->CollisionLayer;
@@ -600,6 +598,13 @@ namespace Limitless
 
                 boxCollider->RuntimeShapeId = b2CreatePolygonShape(rigidbody.RuntimeBodyId, &shapeDefinition, &boxPolygon);
                 boxCollider->RuntimeShapeCreated = b2Shape_IsValid(boxCollider->RuntimeShapeId);
+                if (boxCollider->RuntimeShapeCreated)
+                {
+                    b2Shape_SetFriction(boxCollider->RuntimeShapeId, SanitizeFiniteNonNegative(boxCollider->Friction, 0.5f));
+                    b2Shape_SetRestitution(
+                        boxCollider->RuntimeShapeId,
+                        glm::clamp(SanitizeFiniteNonNegative(boxCollider->Restitution, 0.0f), 0.0f, 1.0f));
+                }
             }
 
             if (auto* circleCollider = registry.try_get<CircleCollider2DComponent>(entity))
@@ -639,8 +644,6 @@ namespace Limitless
                     SanitizeFiniteNonNegative(circleCollider->Density, 1.0f),
                     0.0f,
                     kMaximumShapeDensity);
-                shapeDefinition.friction = SanitizeFiniteNonNegative(circleCollider->Friction, 0.5f);
-                shapeDefinition.restitution = glm::clamp(SanitizeFiniteNonNegative(circleCollider->Restitution, 0.0f), 0.0f, 1.0f);
                 shapeDefinition.isSensor = circleCollider->IsSensor;
                 shapeDefinition.enableContactEvents = true;
                 shapeDefinition.filter.categoryBits = circleCollider->CollisionLayer;
@@ -662,6 +665,13 @@ namespace Limitless
 
                 circleCollider->RuntimeShapeId = b2CreateCircleShape(rigidbody.RuntimeBodyId, &shapeDefinition, &circleShape);
                 circleCollider->RuntimeShapeCreated = b2Shape_IsValid(circleCollider->RuntimeShapeId);
+                if (circleCollider->RuntimeShapeCreated)
+                {
+                    b2Shape_SetFriction(circleCollider->RuntimeShapeId, SanitizeFiniteNonNegative(circleCollider->Friction, 0.5f));
+                    b2Shape_SetRestitution(
+                        circleCollider->RuntimeShapeId,
+                        glm::clamp(SanitizeFiniteNonNegative(circleCollider->Restitution, 0.0f), 0.0f, 1.0f));
+                }
             }
         }
 

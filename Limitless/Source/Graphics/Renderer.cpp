@@ -392,7 +392,8 @@ namespace Limitless
 
     void Renderer::SwapBuffers()
     {
-        if (!m_Initialized || !m_GraphicsContext)
+        GraphicsContext* graphicsContext = m_GraphicsContext;
+        if (!m_Initialized || !graphicsContext)
         {
             LT_CORE_WARN("Cannot swap buffers - renderer not initialized");
             return;
@@ -409,15 +410,15 @@ namespace Limitless
             return;
         }
 
-        if (auto* glContext = dynamic_cast<OpenGLContext*>(m_GraphicsContext))
+        if (auto* glContext = dynamic_cast<OpenGLContext*>(graphicsContext))
         {
             OpenGLContext::ScopedCurrentContext scope(*glContext);
-            m_GraphicsContext->SwapBuffers();
+            graphicsContext->SwapBuffers();
             return;
         }
 
-        m_GraphicsContext->MakeCurrent();
-        m_GraphicsContext->SwapBuffers();
+        graphicsContext->MakeCurrent();
+        graphicsContext->SwapBuffers();
     }
 
     void Renderer::EnableRenderThread(bool enable)

@@ -100,7 +100,6 @@ namespace Limitless::Assets::Cooking
         out.Vertex.assign(reinterpret_cast<const char*>(bytes + cursor), header.VertexSize);
         cursor += header.VertexSize;
         out.Fragment.assign(reinterpret_cast<const char*>(bytes + cursor), header.FragmentSize);
-        cursor += header.FragmentSize;
 
         if (out.Vertex.empty() || out.Fragment.empty())
         {

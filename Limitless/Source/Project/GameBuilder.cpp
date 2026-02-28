@@ -1350,8 +1350,8 @@ namespace Limitless::Project
 
         const bool internalBackend = IsInternalBackend(request);
         std::filesystem::path scriptPath;
-        const bool windowsLinuxCross = IsWindowsHostLinuxTarget(request);
 #if defined(LT_PLATFORM_WINDOWS)
+        const bool windowsLinuxCross = IsWindowsHostLinuxTarget(request);
         if (windowsLinuxCross)
             scriptPath = request.EngineRoot / "Scripts" / (internalBackend ? "build-project-scriptcore-unix.sh" : "build-scriptcore-unix.sh");
         else
@@ -1450,7 +1450,6 @@ namespace Limitless::Project
         const std::string config = request.Settings.BuildConfiguration;
         const std::string targetOS = ResolveTargetOS(request);
         const bool useInternalBackend = IsInternalBackend(request);
-        const bool windowsLinuxCross = IsWindowsHostLinuxTarget(request);
 
         if (useInternalBackend)
         {
@@ -1468,6 +1467,7 @@ namespace Limitless::Project
         else
         {
 #if defined(LT_PLATFORM_WINDOWS)
+            const bool windowsLinuxCross = IsWindowsHostLinuxTarget(request);
             if (windowsLinuxCross)
             {
                 const auto runtimeBuildScript = request.EngineRoot / "Scripts" / "build-runtime-unix.sh";

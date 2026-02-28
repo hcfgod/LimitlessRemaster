@@ -372,6 +372,45 @@ namespace
 
         return std::nullopt;
     }
+
+    bool ApplyWindowIcon(SDL_Window* window, const std::string& iconPath, std::string* outAppliedPath)
+    {
+        if (!window || iconPath.empty())
+            return false;
+
+        const auto resolvedIconPath = ResolveIconPath(iconPath);
+        if (!resolvedIconPath.has_value())
+        {
+            LT_CORE_WARN("Failed to resolve icon path '{}'. Expected either a path relative to CWD/executable or under a nearby Resources/ folder.", iconPath);
+            return false;
+        }
+
+        const std::string resolvedPathString = resolvedIconPath->string();
+
+        SDL_Surface* surface = SDL_LoadBMP(resolvedPathString.c_str());
+        if (!surface)
+            surface = TryLoadSurfaceWithStb(resolvedPathString);
+        if (!surface)
+            surface = TryLoadSurfaceFromIco(resolvedPathString);
+
+        if (!surface)
+        {
+            const std::string errorMsg = fmt::format(
+                "Failed to load resolved icon '{}' (requested '{}') as BMP, standard image, or PNG-based ICO. SDL error: {}",
+                resolvedPathString,
+                iconPath,
+                SDL_GetError()
+            );
+            LT_CORE_WARN("{}", errorMsg);
+            return false;
+        }
+
+        SDL_SetWindowIcon(window, surface);
+        SDL_DestroySurface(surface);
+        if (outAppliedPath)
+            *outAppliedPath = iconPath;
+        return true;
+    }
 }
 
 namespace Limitless
@@ -543,7 +582,7 @@ namespace Limitless
         // Set icon if specified
         if (!props.IconPath.empty())
         {
-            SetIcon(props.IconPath);
+            (void)ApplyWindowIcon(m_Window, props.IconPath, &m_Data.IconPath);
         }
 
         // Initialize graphics context using clean step-by-step approach
@@ -823,45 +862,9 @@ namespace Limitless
     {
         LT_VERIFY(m_Window, "Window not initialized");
         LT_VERIFY(!iconPath.empty(), "Icon path cannot be empty");
-        
+
         if (m_Window && !iconPath.empty())
-        {
-            const auto resolvedIconPath = ResolveIconPath(iconPath);
-            if (!resolvedIconPath.has_value())
-            {
-                LT_CORE_WARN("Failed to resolve icon path '{}'. Expected either a path relative to CWD/executable or under a nearby Resources/ folder.", iconPath);
-                return;
-            }
-
-            const std::string resolvedPathString = resolvedIconPath->string();
-
-            SDL_Surface* surface = SDL_LoadBMP(resolvedPathString.c_str());
-            if (!surface)
-            {
-                surface = TryLoadSurfaceWithStb(resolvedPathString);
-            }
-            if (!surface)
-            {
-                surface = TryLoadSurfaceFromIco(resolvedPathString);
-            }
-
-            if (surface)
-            {
-                SDL_SetWindowIcon(m_Window, surface);
-                SDL_DestroySurface(surface);
-                m_Data.IconPath = iconPath;
-            }
-            else
-            {
-                const std::string errorMsg = fmt::format(
-                    "Failed to load resolved icon '{}' (requested '{}') as BMP, standard image, or PNG-based ICO. SDL error: {}",
-                    resolvedPathString,
-                    iconPath,
-                    SDL_GetError()
-                );
-                LT_CORE_WARN("{}", errorMsg);
-            }
-        }
+            (void)ApplyWindowIcon(m_Window, iconPath, &m_Data.IconPath);
     }
 
     // Window state management

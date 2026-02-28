@@ -1954,7 +1954,6 @@ namespace Limitless::EditorInspectorPanel
         };
 
         std::string scriptEditorMode = Project::ScriptEditorMode::Internal;
-        bool useInternalBackend = false;
         const auto openedProjectRoot = GetOpenedProjectRoot();
         if (openedProjectRoot.has_value())
         {
@@ -1963,11 +1962,17 @@ namespace Limitless::EditorInspectorPanel
             {
                 const auto& buildSettings = buildSettingsResult.GetValue();
                 scriptEditorMode = NormalizeScriptEditorMode(buildSettings.ScriptEditorMode);
-                useInternalBackend = (buildSettings.BuildBackend == Project::BuildBackend::InternalToolchain);
             }
         }
 
 #if defined(LT_PLATFORM_WINDOWS)
+        bool useInternalBackend = false;
+        if (openedProjectRoot.has_value())
+        {
+            const auto buildSettingsResult = Project::LoadBuildSettings(openedProjectRoot.value());
+            if (buildSettingsResult.IsSuccess())
+                useInternalBackend = (buildSettingsResult.GetValue().BuildBackend == Project::BuildBackend::InternalToolchain);
+        }
         if (scriptEditorMode == Project::ScriptEditorMode::External)
         {
             if (!openedProjectRoot.has_value())

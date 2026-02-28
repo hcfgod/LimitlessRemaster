@@ -36,7 +36,12 @@ namespace Limitless {
     }
 
     macOSCPUPlatform::~macOSCPUPlatform() {
-        Shutdown();
+        // Avoid virtual call from destructor; apply shutdown state directly.
+        m_CurrentUsage = 0.0;
+        m_AverageUsage = 0.0;
+        m_CoreCount = 0;
+        m_Host = MACH_PORT_NULL;
+        m_LastUpdate = std::chrono::high_resolution_clock::now();
     }
 
     bool macOSCPUPlatform::Initialize() {
@@ -215,7 +220,8 @@ namespace Limitless {
     }
 
     macOSGPUPlatform::~macOSGPUPlatform() {
-        Shutdown();
+        // Avoid virtual call from destructor; apply shutdown state directly.
+        m_Available = false;
     }
 
     bool macOSGPUPlatform::Initialize() {
@@ -288,7 +294,7 @@ namespace Limitless {
     }
 
     macOSSystemPlatform::~macOSSystemPlatform() {
-        Shutdown();
+        // Nothing to clean up.
     }
 
     bool macOSSystemPlatform::Initialize() {

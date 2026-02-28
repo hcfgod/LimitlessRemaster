@@ -61,7 +61,7 @@ namespace Limitless::Audio::Decoders
             }
 
             const int normalizedWhence = whence & ~AVSEEK_FORCE;
-            size_t newOffset = r->Offset;
+            size_t newOffset = 0;
             if (normalizedWhence == SEEK_SET)
             {
                 if (offset < 0)
@@ -263,8 +263,12 @@ namespace Limitless::Audio::Decoders
             clip->ChannelCount = 2;
 
             // Decode loop.
-            while ((err = av_read_frame(fmt, pkt)) >= 0)
+            for (;;)
             {
+                err = av_read_frame(fmt, pkt);
+                if (err < 0)
+                    break;
+
                 if (pkt->stream_index != audioStreamIndex)
                 {
                     av_packet_unref(pkt);
@@ -281,8 +285,12 @@ namespace Limitless::Audio::Decoders
                     return Result<std::shared_ptr<AudioClip>>(ErrorCode::FileCorrupted, "FFmpeg: send_packet failed: " + AvErr(err));
                 }
 
-                while ((err = avcodec_receive_frame(codecCtx, frame)) >= 0)
+                for (;;)
                 {
+                    err = avcodec_receive_frame(codecCtx, frame);
+                    if (err < 0)
+                        break;
+
                     const std::string resamplerError = ensureResamplerConfigured(frame);
                     if (!resamplerError.empty())
                     {
@@ -336,8 +344,12 @@ namespace Limitless::Audio::Decoders
             err = avcodec_send_packet(codecCtx, nullptr);
             if (err >= 0)
             {
-                while ((err = avcodec_receive_frame(codecCtx, frame)) >= 0)
+                for (;;)
                 {
+                    err = avcodec_receive_frame(codecCtx, frame);
+                    if (err < 0)
+                        break;
+
                     const std::string resamplerError = ensureResamplerConfigured(frame);
                     if (!resamplerError.empty())
                     {

@@ -147,8 +147,8 @@ namespace Limitless
         std::string GetHint(const std::string& name) const override;
 
     private:
-        virtual void Init(const WindowProps& props);
-        virtual void Shutdown();
+        void Init(const WindowProps& props);
+        void Shutdown();
         void HandleWindowEvent(const SDL_Event& event);
         void OnWindowConfigChanged(Events::WindowConfigChangedEvent& event);
         void OnWindowConfigChangedCallback(Event& event);
