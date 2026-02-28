@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies
         run: |
@@ -106,6 +108,12 @@ jobs:
           fi
 
       - name: Run clang-tidy (hard fail on warnings)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
         run: |
           CLANG_TIDY_BIN="$(xcrun --find clang-tidy 2>/dev/null || true)"
           if [ -z "$CLANG_TIDY_BIN" ]; then
@@ -120,12 +128,17 @@ jobs:
           # Strip -include-pch flags from compile_commands to keep analysis portable.
           python3 - <<'PY'
           import json
+          import os
+          from pathlib import Path
           import shlex
+
+          repo_root = Path(os.getcwd()).resolve()
 
           with open("compile_commands.json", "r", encoding="utf-8") as f:
               database = json.load(f)
 
           for entry in database:
+              original_file = entry.get("file", "")
               args = entry.get("arguments")
               if args is None:
                   args = shlex.split(entry.get("command", ""))
@@ -172,26 +185,77 @@ jobs:
                   cleaned.append(arg)
                   i += 1
 
+              # Normalize source file path and working directory so clang-tidy can
+              # reliably read files across subprojects (Editor/Limitless/Runtime/Test).
+              file_candidate = None
+              if original_file:
+                  raw_file = Path(original_file)
+                  directory = Path(entry.get("directory", "."))
+                  if not directory.is_absolute():
+                      directory = (repo_root / directory).resolve()
+                  file_candidate = raw_file if raw_file.is_absolute() else (directory / raw_file).resolve()
+
+                  if not file_candidate.exists():
+                      fallback_candidates = []
+                      if not raw_file.is_absolute():
+                          fallback_candidates.append((repo_root / raw_file).resolve())
+                          if str(raw_file).startswith("Source/"):
+                              for project_root in ("Limitless", "Editor", "Runtime", "Test"):
+                                  fallback_candidates.append((repo_root / project_root / raw_file).resolve())
+
+                      for candidate in fallback_candidates:
+                          if candidate.exists():
+                              file_candidate = candidate
+                              break
+
+                  if file_candidate.exists():
+                      entry["file"] = str(file_candidate)
+                      entry["directory"] = str(file_candidate.parent)
+                      cleaned = [str(file_candidate) if arg == original_file else arg for arg in cleaned]
+
               entry["arguments"] = cleaned
 
           with open("compile_commands.json", "w", encoding="utf-8") as f:
               json.dump(database, f, indent=2)
           PY
 
-          git ls-files | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt
-          if [ ! -s clang-tidy-files.txt ]; then
-            echo "No first-party source files matched clang-tidy file filter."
-            exit 1
+          BASE_SHA=""
+          HEAD_SHA=""
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            BASE_SHA="$PR_BASE_SHA"
+            HEAD_SHA="$PR_HEAD_SHA"
+          else
+            BASE_SHA="$PUSH_BEFORE_SHA"
+            HEAD_SHA="$PUSH_HEAD_SHA"
           fi
+
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt
+          else
+            git ls-files | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt
+          fi
+
+          if [ ! -s clang-tidy-files.txt ]; then
+            echo "No changed first-party source files to analyze."
+            exit 0
+          fi
+          sort -u -o clang-tidy-files.txt clang-tidy-files.txt
+          echo "Analyzing $(wc -l < clang-tidy-files.txt) changed C++ source files."
 
           SDKROOT_PATH="$(xcrun --sdk macosx --show-sdk-path)"
           echo "Using clang-tidy: $CLANG_TIDY_BIN"
           echo "Using SDKROOT: $SDKROOT_PATH"
 
           # Batch files per invocation to reduce startup cost and log volume.
-          xargs -n 40 "$CLANG_TIDY_BIN" -p . -quiet \
+          xargs -r -n 40 "$CLANG_TIDY_BIN" -p . -quiet \
             --extra-arg-before=-isysroot \
             --extra-arg-before="$SDKROOT_PATH" \
             --extra-arg-before=-stdlib=libc++ \
+            --extra-arg-before="-I${PWD}/Limitless" \
+            --extra-arg-before="-I${PWD}/Limitless/Source" \
+            --extra-arg-before="-I${PWD}/Runtime" \
+            --extra-arg-before="-I${PWD}/Runtime/Source" \
+            --extra-arg-before="-I${PWD}/Test" \
+            --extra-arg-before="-I${PWD}/Test/Source" \
             -checks='-*,clang-analyzer-*,-clang-analyzer-optin.core.EnumCastOutOfRange,-clang-analyzer-cplusplus.NewDeleteLeaks,-clang-analyzer-optin.cplusplus.UninitializedObject' \
             -warnings-as-errors='*' < clang-tidy-files.txt
