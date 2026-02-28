@@ -112,6 +112,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
           PUSH_HEAD_SHA: ${{ github.sha }}
         run: |
@@ -210,7 +211,6 @@ jobs:
 
                   if file_candidate.exists():
                       entry["file"] = str(file_candidate)
-                      entry["directory"] = str(file_candidate.parent)
                       cleaned = [str(file_candidate) if arg == original_file else arg for arg in cleaned]
 
               entry["arguments"] = cleaned
@@ -224,18 +224,30 @@ jobs:
           if [ "$EVENT_NAME" = "pull_request" ]; then
             BASE_SHA="$PR_BASE_SHA"
             HEAD_SHA="$PR_HEAD_SHA"
+            if [ -n "$PR_BASE_REF" ]; then
+              git fetch --no-tags --prune --depth=1 origin "$PR_BASE_REF" || true
+              if [ -z "$BASE_SHA" ] || ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+                BASE_SHA="$(git rev-parse "origin/$PR_BASE_REF" 2>/dev/null || true)"
+              fi
+            fi
           else
             BASE_SHA="$PUSH_BEFORE_SHA"
             HEAD_SHA="$PUSH_HEAD_SHA"
+            if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+              BASE_SHA="$(git rev-parse "${HEAD_SHA}^" 2>/dev/null || true)"
+            fi
           fi
 
           if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ] && \
              git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null && \
              [ -n "$HEAD_SHA" ] && git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
-            git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt
+            (git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt) || true
+          elif [ -n "$HEAD_SHA" ] && git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            echo "Diff base commit unavailable; falling back to changed files in HEAD commit."
+            (git show --name-only --pretty="" --diff-filter=ACMR "$HEAD_SHA" | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt) || true
           else
             echo "Diff base/head commit unavailable in local clone; falling back to tracked source file list."
-            git ls-files | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt
+            (git ls-files | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt) || true
           fi
 
           if [ ! -s clang-tidy-files.txt ]; then
@@ -254,8 +266,14 @@ jobs:
             --extra-arg-before=-isysroot \
             --extra-arg-before="$SDKROOT_PATH" \
             --extra-arg-before=-stdlib=libc++ \
+            --extra-arg-before="-I/opt/homebrew/include" \
+            --extra-arg-before="-I/usr/local/include" \
+            --extra-arg-before="-I${PWD}/Editor" \
+            --extra-arg-before="-I${PWD}/Editor/Source" \
             --extra-arg-before="-I${PWD}/Limitless" \
             --extra-arg-before="-I${PWD}/Limitless/Source" \
+            --extra-arg-before="-I${PWD}/Limitless/Vendor" \
+            --extra-arg-before="-I${PWD}/Limitless/Vendor/doctest" \
             --extra-arg-before="-I${PWD}/Runtime" \
             --extra-arg-before="-I${PWD}/Runtime/Source" \
             --extra-arg-before="-I${PWD}/Test" \
