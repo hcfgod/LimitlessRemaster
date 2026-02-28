@@ -156,7 +156,9 @@ namespace Limitless
         entt::entity ResolveEntityReference(entt::entity entity) const;
 
         /// Get the EnTT registry for custom queries (views, groups, etc.).
-        entt::registry& GetRegistry() { return m_Registry; }
+        /// Mutable access is an escape hatch and can bypass scene structural/deferred safeguards.
+        /// Prefer Scene/Entity structural APIs for runtime mutations.
+        entt::registry& GetRegistry();
         const entt::registry& GetRegistry() const { return m_Registry; }
 
         /// Create a deep copy of this scene for runtime simulation.
@@ -198,15 +200,18 @@ namespace Limitless
         uint16_t m_MaxHierarchyDepth = 0;
         RuntimePhase m_RuntimePhase = RuntimePhase::Idle;
         bool m_IsApplyingDeferredStructuralMutations = false;
+        mutable std::atomic<uint32_t> m_WarnedUnsafeMutableRegistryAccessPhases{ 0 };
 
         static constexpr size_t kDeferredStructuralMutationQueueSize = 8192;
         static constexpr size_t kDeferredStructuralMutationOverflowQueueSize = 65536;
+        static constexpr uint32_t kDefaultDeferredStructuralMutationFlushBudget = 1024;
         mutable std::unique_ptr<Concurrency::LockFreeMPMCQueue<DeferredStructuralMutation, kDeferredStructuralMutationQueueSize>> m_DeferredStructuralMutationQueue;
         mutable std::unique_ptr<Concurrency::LockFreeMPMCQueue<DeferredStructuralMutation, kDeferredStructuralMutationOverflowQueueSize>> m_DeferredStructuralMutationOverflowQueue;
         mutable std::mutex m_DeferredStructuralMutationsOverflowMutex;
         std::deque<DeferredStructuralMutation> m_DeferredStructuralMutationsOverflow;
         std::atomic<uint64_t> m_NextDeferredStructuralMutationSequence{ 1 };
         std::atomic<bool> m_WarnedDeferredStructuralMutationQueueOverflow{ false };
+        std::atomic<bool> m_WarnedDeferredStructuralMutationFlushBudgetExceeded{ false };
         mutable std::mutex m_DeferredEntityReferencesMutex;
         std::unordered_map<entt::entity, entt::entity> m_DeferredEntityReferences;
         std::atomic<uint64_t> m_NextDeferredEntityReferenceSequence{ 1 };

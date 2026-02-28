@@ -588,6 +588,58 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(scripts.Scripts[2].RuntimeUpdateCount >= 1);
     }
 
+    TEST_CASE("Deferred structural mutation flush respects budget and carries work to later flushes")
+    {
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const uint32_t previousFlushBudget = config.GetValue<uint32_t>(
+            "ecs.mt.deferred_structural_mutation_flush_budget",
+            1024u);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            uint32_t FlushBudget;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.deferred_structural_mutation_flush_budget", FlushBudget);
+            }
+        } configRestore{
+            config,
+            previousFlushBudget
+        };
+
+        constexpr uint32_t kFlushBudget = 8;
+        constexpr int kTotalCascadeMutations = 37;
+        config.SetValue("ecs.mt.deferred_structural_mutation_flush_budget", kFlushBudget);
+
+        Limitless::Scene scene;
+        int appliedMutations = 0;
+        std::function<void(Limitless::Scene&)> cascadingMutation;
+        cascadingMutation = [&](Limitless::Scene& mutableScene) {
+            ++appliedMutations;
+            if (appliedMutations < kTotalCascadeMutations)
+                (void)mutableScene.EnqueueDeferredStructuralMutation(cascadingMutation, "CascadingBudgetStressMutation");
+        };
+
+        (void)scene.EnqueueDeferredStructuralMutation(cascadingMutation, "CascadingBudgetStressSeedMutation");
+
+        scene.FlushDeferredStructuralMutations();
+        CHECK(appliedMutations == static_cast<int>(kFlushBudget));
+
+        int flushCalls = 1;
+        constexpr int kMaxFlushCalls = 64;
+        while (appliedMutations < kTotalCascadeMutations && flushCalls < kMaxFlushCalls)
+        {
+            scene.FlushDeferredStructuralMutations();
+            ++flushCalls;
+        }
+
+        CHECK(appliedMutations == kTotalCascadeMutations);
+        CHECK(flushCalls > 1);
+        CHECK(flushCalls <= kMaxFlushCalls);
+    }
+
     TEST_CASE("Parallel-safe transform writes without declared write mask are flagged")
     {
         struct NativeScriptRegistryCleanup final

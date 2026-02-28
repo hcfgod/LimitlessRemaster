@@ -1352,32 +1352,100 @@ namespace Limitless::EditorViewportPanel
             return static_cast<uint32_t>(std::floor(value));
         };
 
-        auto drawLoadingOverlay = [scene](const ImVec2& minPos, const ImVec2& maxPos) {
+        auto drawLoadingOverlay = [scene](const ImVec2& minPos, const ImVec2& maxPos) -> bool {
             const LoadingScreen::Context ctx = LoadingScreen::BuildContext(
                 scene, Renderer2D::IsShaderReady(), Renderer2D::GetDefaultShaderKey());
             const LoadingScreen::State state = LoadingScreen::GetState(ctx);
-            if (!state.IsLoading)
-                return;
 
-            const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
+            static bool s_LoadingSessionActive = false;
+            static bool s_LoadingToastVisible = false;
+            static double s_LoadingVisibleWindowStartTime = 0.0;
+            static double s_LoadingToastHideDeadline = 0.0;
+            static std::string s_LastLoadingStatusText = "Loading...";
+            static float s_LastLoadingProgressValue = 0.0f;
+            constexpr double kLoadingToastDelaySeconds = 0.2;
+            constexpr double kLoadingToastHoldSeconds = 0.8;
+            const double nowSeconds = ImGui::GetTime();
+
+            if (state.IsLoading)
+            {
+                if (!s_LoadingSessionActive)
+                {
+                    s_LoadingSessionActive = true;
+                    s_LoadingVisibleWindowStartTime = nowSeconds;
+                    s_LoadingToastVisible = false;
+                }
+
+                s_LastLoadingStatusText = state.StatusText.empty() ? "Loading..." : state.StatusText;
+                s_LastLoadingProgressValue = std::clamp(state.Progress, 0.0f, 1.0f);
+
+                if (!s_LoadingToastVisible &&
+                    (nowSeconds - s_LoadingVisibleWindowStartTime) >= kLoadingToastDelaySeconds)
+                {
+                    s_LoadingToastVisible = true;
+                }
+            }
+            else
+            {
+                if (s_LoadingSessionActive)
+                {
+                    s_LoadingSessionActive = false;
+                    // Always show a short completion toast, even for very fast
+                    // loads that finished before the initial show-delay elapsed.
+                    s_LoadingToastVisible = true;
+                    std::string completionStatus = s_LastLoadingStatusText;
+                    if (completionStatus.empty())
+                        completionStatus = "Loading";
+                    if (completionStatus.size() >= 3 &&
+                        completionStatus.substr(completionStatus.size() - 3) == "...")
+                    {
+                        completionStatus = completionStatus.substr(0, completionStatus.size() - 3);
+                    }
+                    s_LastLoadingStatusText = completionStatus + " complete";
+                    s_LastLoadingProgressValue = 1.0f;
+                    s_LoadingToastHideDeadline = nowSeconds + kLoadingToastHoldSeconds;
+                }
+
+                if (s_LoadingToastVisible && nowSeconds >= s_LoadingToastHideDeadline)
+                {
+                    s_LoadingToastVisible = false;
+                }
+            }
+
+            if (!s_LoadingToastVisible)
+                return false;
+
             ImDrawList* drawList = ImGui::GetWindowDrawList();
-            drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 255));
 
-            const char* loadingText = state.StatusText.empty() ? "Loading..." : state.StatusText.c_str();
-            const float progressValue = std::clamp(state.Progress, 0.0f, 1.0f);
-
+            const char* loadingText = s_LastLoadingStatusText.c_str();
+            const float progressValue = std::clamp(s_LastLoadingProgressValue, 0.0f, 1.0f);
             const ImVec2 textSize = ImGui::CalcTextSize(loadingText);
-            drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f - 24.0f),
-                              IM_COL32(255, 255, 255, 255),
+
+            const float margin = 12.0f;
+            const float panelWidth = std::max(260.0f, textSize.x + 28.0f);
+            const float panelHeight = 54.0f;
+
+            ImVec2 panelMin(maxPos.x - panelWidth - margin, maxPos.y - panelHeight - margin);
+            panelMin.x = std::max(panelMin.x, minPos.x + margin);
+            panelMin.y = std::max(panelMin.y, minPos.y + margin);
+            ImVec2 panelMax(panelMin.x + panelWidth, panelMin.y + panelHeight);
+            panelMax.x = std::min(panelMax.x, maxPos.x - margin);
+            panelMax.y = std::min(panelMax.y, maxPos.y - margin);
+
+            drawList->AddRectFilled(panelMin, panelMax, IM_COL32(24, 24, 28, 215), 6.0f);
+            drawList->AddRect(panelMin, panelMax, IM_COL32(255, 255, 255, 32), 6.0f);
+
+            drawList->AddText(ImVec2(panelMin.x + 12.0f, panelMin.y + 9.0f),
+                              IM_COL32(235, 235, 240, 255),
                               loadingText);
 
-            const float barWidth = 200.0f;
-            const float barHeight = 8.0f;
-            const ImVec2 barMin(center.x - barWidth * 0.5f, center.y - barHeight * 0.5f + 8.0f);
-            const ImVec2 barMax(center.x + barWidth * 0.5f, center.y + barHeight * 0.5f + 8.0f);
-            drawList->AddRectFilled(barMin, barMax, IM_COL32(50, 50, 55, 255));
-            const ImVec2 fillMax(barMin.x + barWidth * progressValue, barMax.y);
-            drawList->AddRectFilled(barMin, fillMax, IM_COL32(80, 140, 220, 255));
+            const float barHeight = 6.0f;
+            const ImVec2 barMin(panelMin.x + 12.0f, panelMax.y - 14.0f);
+            const ImVec2 barMax(panelMax.x - 12.0f, barMin.y + barHeight);
+            drawList->AddRectFilled(barMin, barMax, IM_COL32(58, 58, 64, 230), 3.0f);
+            const ImVec2 fillMax(barMin.x + (barMax.x - barMin.x) * progressValue, barMax.y);
+            drawList->AddRectFilled(barMin, fillMax, IM_COL32(95, 160, 245, 255), 3.0f);
+            return true;
         };
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
@@ -1576,11 +1644,8 @@ namespace Limitless::EditorViewportPanel
                     ImGui::EndDragDropTarget();
                 }
 
-                if (LoadingScreen::GetState(LoadingScreen::BuildContext(scene, Renderer2D::IsShaderReady(), Renderer2D::GetDefaultShaderKey())).IsLoading)
-                {
-                    drawLoadingOverlay(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
-                }
-                else if (!sceneViewCamera)
+                const bool sceneLoadingToastDrawn = drawLoadingOverlay(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+                if (!sceneLoadingToastDrawn && !sceneViewCamera)
                 {
                     const ImVec2 minPos = ImGui::GetItemRectMin();
                     const ImVec2 maxPos = ImGui::GetItemRectMax();
@@ -1757,11 +1822,8 @@ namespace Limitless::EditorViewportPanel
                     maxPos.x - minPos.x,
                     maxPos.y - minPos.y,
                     true);
-                if (LoadingScreen::GetState(LoadingScreen::BuildContext(scene, Renderer2D::IsShaderReady(), Renderer2D::GetDefaultShaderKey())).IsLoading)
-                {
-                    drawLoadingOverlay(minPos, maxPos);
-                }
-                else if (showMissingGameplayCameraOverlay)
+                const bool gameLoadingToastDrawn = drawLoadingOverlay(minPos, maxPos);
+                if (!gameLoadingToastDrawn && showMissingGameplayCameraOverlay)
                 {
                     ImDrawList* drawList = ImGui::GetWindowDrawList();
                     drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 180));

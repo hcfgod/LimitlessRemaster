@@ -35,6 +35,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -415,7 +416,41 @@ namespace Limitless
         {
             if (shaderAsset)
                 return;
-            shaderAsset = Assets::AssetManager::LoadBlocking<Assets::ShaderAsset>(shaderKey);
+
+            shaderAsset = std::dynamic_pointer_cast<Assets::ShaderAsset>(Assets::AssetManager::GetCachedByKey(shaderKey));
+            if (!shaderAsset)
+            {
+                static std::mutex s_PendingShaderLoadsMutex;
+                static std::unordered_map<std::string, Async::Task<Assets::ShaderAsset::Ptr>> s_PendingShaderLoads;
+
+                std::lock_guard<std::mutex> lock(s_PendingShaderLoadsMutex);
+                auto pendingLoad = s_PendingShaderLoads.find(shaderKey);
+                if (pendingLoad == s_PendingShaderLoads.end())
+                {
+                    s_PendingShaderLoads.emplace(
+                        shaderKey,
+                        Assets::AssetManager::LoadAsync<Assets::ShaderAsset>(shaderKey));
+                }
+                else if (pendingLoad->second.IsDone())
+                {
+                    try
+                    {
+                        shaderAsset = pendingLoad->second.Get();
+                    }
+                    catch (const std::exception& exception)
+                    {
+                        LT_WARN("Lighting2DRenderer shader async load failed for '{}': {}", shaderKey, exception.what());
+                        shaderAsset.reset();
+                    }
+                    catch (...)
+                    {
+                        LT_WARN("Lighting2DRenderer shader async load failed for '{}' with unknown error", shaderKey);
+                        shaderAsset.reset();
+                    }
+
+                    s_PendingShaderLoads.erase(pendingLoad);
+                }
+            }
         }
 
         std::shared_ptr<Shader> ResolveShaderFromAsset(Assets::ShaderAsset::Ptr& shaderAsset, const char* shaderKey)
@@ -593,15 +628,55 @@ namespace Limitless
             if (material.MaterialKey.empty())
                 return;
 
+            static std::mutex s_PendingMaterialLoadsMutex;
+            static std::unordered_map<std::string, Async::Task<Assets::MaterialAsset::Ptr>> s_PendingMaterialLoads;
+
             if (!material.CachedMaterial && !material.MaterialLoadAttempted)
             {
-                material.CachedMaterial = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(material.MaterialKey);
+                material.CachedMaterial = std::dynamic_pointer_cast<Assets::MaterialAsset>(
+                    Assets::AssetManager::GetCachedByKey(material.MaterialKey));
+                if (!material.CachedMaterial)
+                {
+                    std::lock_guard<std::mutex> lock(s_PendingMaterialLoadsMutex);
+                    if (!s_PendingMaterialLoads.contains(material.MaterialKey))
+                    {
+                        s_PendingMaterialLoads.emplace(
+                            material.MaterialKey,
+                            Assets::AssetManager::LoadAsync<Assets::MaterialAsset>(material.MaterialKey));
+                    }
+                }
                 material.MaterialLoadAttempted = true;
             }
             else if (!material.CachedMaterial && material.MaterialLoadAttempted)
             {
                 material.CachedMaterial = std::dynamic_pointer_cast<Assets::MaterialAsset>(
                     Assets::AssetManager::GetCachedByKey(material.MaterialKey));
+                if (!material.CachedMaterial)
+                {
+                    std::lock_guard<std::mutex> lock(s_PendingMaterialLoadsMutex);
+                    auto pendingIt = s_PendingMaterialLoads.find(material.MaterialKey);
+                    if (pendingIt != s_PendingMaterialLoads.end() && pendingIt->second.IsDone())
+                    {
+                        try
+                        {
+                            material.CachedMaterial = pendingIt->second.Get();
+                        }
+                        catch (const std::exception& exception)
+                        {
+                            LT_WARN("Lighting2DRenderer material async load failed for '{}': {}",
+                                    material.MaterialKey,
+                                    exception.what());
+                            material.CachedMaterial.reset();
+                        }
+                        catch (...)
+                        {
+                            LT_WARN("Lighting2DRenderer material async load failed for '{}' with unknown error",
+                                    material.MaterialKey);
+                            material.CachedMaterial.reset();
+                        }
+                        s_PendingMaterialLoads.erase(pendingIt);
+                    }
+                }
             }
         }
 
@@ -610,15 +685,55 @@ namespace Limitless
             if (sprite.TextureKey.empty())
                 return;
 
+            static std::mutex s_PendingTextureLoadsMutex;
+            static std::unordered_map<std::string, Async::Task<Assets::TextureAsset::Ptr>> s_PendingTextureLoads;
+
             if (!sprite.CachedTexture && !sprite.TextureLoadAttempted)
             {
-                sprite.CachedTexture = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(sprite.TextureKey);
+                sprite.CachedTexture = std::dynamic_pointer_cast<Assets::TextureAsset>(
+                    Assets::AssetManager::GetCachedByKey(sprite.TextureKey));
+                if (!sprite.CachedTexture)
+                {
+                    std::lock_guard<std::mutex> lock(s_PendingTextureLoadsMutex);
+                    if (!s_PendingTextureLoads.contains(sprite.TextureKey))
+                    {
+                        s_PendingTextureLoads.emplace(
+                            sprite.TextureKey,
+                            Assets::AssetManager::LoadAsync<Assets::TextureAsset>(sprite.TextureKey));
+                    }
+                }
                 sprite.TextureLoadAttempted = true;
             }
             else if (!sprite.CachedTexture && sprite.TextureLoadAttempted)
             {
                 sprite.CachedTexture = std::dynamic_pointer_cast<Assets::TextureAsset>(
                     Assets::AssetManager::GetCachedByKey(sprite.TextureKey));
+                if (!sprite.CachedTexture)
+                {
+                    std::lock_guard<std::mutex> lock(s_PendingTextureLoadsMutex);
+                    auto pendingIt = s_PendingTextureLoads.find(sprite.TextureKey);
+                    if (pendingIt != s_PendingTextureLoads.end() && pendingIt->second.IsDone())
+                    {
+                        try
+                        {
+                            sprite.CachedTexture = pendingIt->second.Get();
+                        }
+                        catch (const std::exception& exception)
+                        {
+                            LT_WARN("Lighting2DRenderer texture async load failed for '{}': {}",
+                                    sprite.TextureKey,
+                                    exception.what());
+                            sprite.CachedTexture.reset();
+                        }
+                        catch (...)
+                        {
+                            LT_WARN("Lighting2DRenderer texture async load failed for '{}' with unknown error",
+                                    sprite.TextureKey);
+                            sprite.CachedTexture.reset();
+                        }
+                        s_PendingTextureLoads.erase(pendingIt);
+                    }
+                }
             }
         }
 

@@ -1,7 +1,7 @@
 #include "EditorInspectorPanelComponentManagement.h"
 
+#include "EditorComponentRegistry.h"
 #include "Undo/EditorUndoService.h"
-#include "Audio/AudioEngine.h"
 #include "Scene/Scene.h"
 #include "imgui/imgui.h"
 
@@ -17,16 +17,54 @@ namespace Limitless::EditorInspectorPanel
             return registry.all_of<ComponentType>(entity);
         }
 
-        void ClearPrimaryFlagFromOtherCameras(entt::registry& registry, entt::entity currentEntity)
+        void DrawAddComponentMenuItem(const ComponentRegistryEntry& entry,
+                                      Scene* scene,
+                                      entt::registry& registry,
+                                      entt::entity selectedEntity,
+                                      EditorUndoService* undoService)
         {
-            auto view = registry.view<CameraComponent>();
-            for (entt::entity entity : view)
-            {
-                if (entity == currentEntity)
-                    continue;
+            if (entry.HasComponent(registry, selectedEntity))
+                ImGui::BeginDisabled();
 
-                auto& otherCamera = view.get<CameraComponent>(entity);
-                otherCamera.IsPrimary = false;
+            if (ImGui::MenuItem(entry.MenuItemLabel))
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation(entry.AddMutationLabel, [&](Scene& mutableScene) {
+                        entry.AddComponent(mutableScene.GetRegistry(), selectedEntity);
+                        return true;
+                    });
+                }
+                else
+                {
+                    (void)scene;
+                    entry.AddComponent(registry, selectedEntity);
+                }
+            }
+
+            if (entry.HasComponent(registry, selectedEntity))
+                ImGui::EndDisabled();
+        }
+
+        void ApplyPendingRemoval(const ComponentRegistryEntry& entry,
+                                 bool shouldRemove,
+                                 entt::registry& registry,
+                                 entt::entity selectedEntity,
+                                 EditorUndoService* undoService)
+        {
+            if (!shouldRemove)
+                return;
+
+            if (undoService)
+            {
+                (void)undoService->ExecuteSceneMutation(entry.RemoveMutationLabel, [&](Scene& mutableScene) {
+                    entry.RemoveComponent(mutableScene.GetRegistry(), selectedEntity);
+                    return true;
+                });
+            }
+            else
+            {
+                entry.RemoveComponent(registry, selectedEntity);
             }
         }
     }
@@ -389,82 +427,17 @@ namespace Limitless::EditorInspectorPanel
         if (HasComponent<UISliderComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (HasComponent<SpriteComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Sprite))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (ImGui::MenuItem("Sprite Component"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add Sprite Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<SpriteComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<SpriteComponent>(selectedEntity);
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Camera))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (HasComponent<SpriteComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AudioListener2D))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (HasComponent<CameraComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("Camera Component"))
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Add Camera Component", [&](Scene& mutableScene) {
-                    auto& mutableRegistry = mutableScene.GetRegistry();
-                    auto& camera = mutableRegistry.emplace<CameraComponent>(selectedEntity);
-                    camera.IsPrimary = true;
-                    ClearPrimaryFlagFromOtherCameras(mutableRegistry, selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                auto& camera = registry.emplace<CameraComponent>(selectedEntity);
-                camera.IsPrimary = true;
-                ClearPrimaryFlagFromOtherCameras(registry, selectedEntity);
-            }
-        }
-
-        if (HasComponent<CameraComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
-
-        if (HasComponent<AudioListener2DComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("Audio Listener 2D"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add Audio Listener 2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<AudioListener2DComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<AudioListener2DComponent>(selectedEntity);
-        }
-
-        if (HasComponent<AudioListener2DComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
-
-        if (HasComponent<AudioSourceComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("Audio Source"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add Audio Source Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<AudioSourceComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<AudioSourceComponent>(selectedEntity);
-        }
-
-        if (HasComponent<AudioSourceComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AudioSource))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
         if (HasComponent<NativeScriptComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
@@ -483,179 +456,35 @@ namespace Limitless::EditorInspectorPanel
         if (HasComponent<NativeScriptComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (HasComponent<AnimatorComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Animator))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (ImGui::MenuItem("Animator"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add Animator Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<AnimatorComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<AnimatorComponent>(selectedEntity);
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AnimationEventReceiver))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (HasComponent<AnimatorComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Rigidbody2D))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (HasComponent<AnimationEventReceiverComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::BoxCollider2D))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (ImGui::MenuItem("Animation Event Receiver"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add Animation Event Receiver Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<AnimationEventReceiverComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<AnimationEventReceiverComponent>(selectedEntity);
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::CircleCollider2D))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (HasComponent<AnimationEventReceiverComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Joint2D))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (HasComponent<Rigidbody2DComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::DirectionalLight2D))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (ImGui::MenuItem("Rigidbody 2D"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add Rigidbody2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<Rigidbody2DComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<Rigidbody2DComponent>(selectedEntity);
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::PointLight2D))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (HasComponent<Rigidbody2DComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::ShadowOccluder2D))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (HasComponent<BoxCollider2DComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("Box Collider 2D"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add BoxCollider2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<BoxCollider2DComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<BoxCollider2DComponent>(selectedEntity);
-        }
-
-        if (HasComponent<BoxCollider2DComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
-
-        if (HasComponent<CircleCollider2DComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("Circle Collider 2D"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add CircleCollider2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<CircleCollider2DComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<CircleCollider2DComponent>(selectedEntity);
-        }
-
-        if (HasComponent<CircleCollider2DComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
-
-        if (HasComponent<Joint2DComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("Joint 2D"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add Joint2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<Joint2DComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<Joint2DComponent>(selectedEntity);
-        }
-
-        if (HasComponent<Joint2DComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
-
-        if (HasComponent<DirectionalLight2DComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("Directional Light 2D"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add DirectionalLight2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<DirectionalLight2DComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<DirectionalLight2DComponent>(selectedEntity);
-        }
-
-        if (HasComponent<DirectionalLight2DComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
-
-        if (HasComponent<PointLight2DComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("Point Light 2D"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add PointLight2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<PointLight2DComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<PointLight2DComponent>(selectedEntity);
-        }
-
-        if (HasComponent<PointLight2DComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
-
-        if (HasComponent<ShadowOccluder2DComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("Shadow Occluder 2D"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add ShadowOccluder2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<ShadowOccluder2DComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<ShadowOccluder2DComponent>(selectedEntity);
-        }
-
-        if (HasComponent<ShadowOccluder2DComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
-
-        if (HasComponent<Grid2DComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("Grid 2D"))
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Add Grid2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<Grid2DComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.emplace<Grid2DComponent>(selectedEntity);
-            }
-        }
-
-        if (HasComponent<Grid2DComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Grid2D))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
         if (HasComponent<TilemapLayerComponent>(registry, selectedEntity))
             ImGui::BeginDisabled();
@@ -680,22 +509,8 @@ namespace Limitless::EditorInspectorPanel
         if (HasComponent<TilemapLayerComponent>(registry, selectedEntity))
             ImGui::EndDisabled();
 
-        if (HasComponent<ParticleEmitterComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("Particle Emitter"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add Particle Emitter Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<ParticleEmitterComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<ParticleEmitterComponent>(selectedEntity);
-        }
-
-        if (HasComponent<ParticleEmitterComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::ParticleEmitter))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
         ImGui::EndPopup();
     }
@@ -814,25 +629,8 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (pendingRemovals.RemoveSpriteComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove Sprite Component", [&](Scene& mutableScene) {
-                    auto& mutableRegistry = mutableScene.GetRegistry();
-                    mutableRegistry.remove<SpriteComponent>(selectedEntity);
-                    if (mutableRegistry.all_of<MaterialComponent>(selectedEntity))
-                        mutableRegistry.remove<MaterialComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<SpriteComponent>(selectedEntity);
-                if (registry.all_of<MaterialComponent>(selectedEntity))
-                    pendingRemovals.RemoveMaterialComponent = true;
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Sprite))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveSpriteComponent, registry, selectedEntity, undoService);
 
         if (pendingRemovals.RemoveMaterialComponent)
         {
@@ -849,61 +647,14 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (pendingRemovals.RemoveCameraComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove Camera Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<CameraComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<CameraComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Camera))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveCameraComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveAudioListener2DComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove Audio Listener 2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<AudioListener2DComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<AudioListener2DComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AudioListener2D))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveAudioListener2DComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveAudioSourceComponent)
-        {
-            if (auto* audioSource = registry.try_get<AudioSourceComponent>(selectedEntity))
-            {
-                if (audioSource->RuntimeVoiceId != 0)
-                    Audio::AudioEngine::GetInstance().Stop(audioSource->RuntimeVoiceId);
-            }
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove Audio Source Component", [&](Scene& mutableScene) {
-                    auto& mutableRegistry = mutableScene.GetRegistry();
-                    if (auto* mutableAudioSource = mutableRegistry.try_get<AudioSourceComponent>(selectedEntity))
-                    {
-                        if (mutableAudioSource->RuntimeVoiceId != 0)
-                            Audio::AudioEngine::GetInstance().Stop(mutableAudioSource->RuntimeVoiceId);
-                    }
-                    mutableRegistry.remove<AudioSourceComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<AudioSourceComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AudioSource))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveAudioSourceComponent, registry, selectedEntity, undoService);
 
         if (removeNativeScriptComponent)
         {
@@ -937,170 +688,38 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (pendingRemovals.RemoveAnimatorComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove Animator Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<AnimatorComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<AnimatorComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Animator))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveAnimatorComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveAnimationEventReceiverComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove Animation Event Receiver Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<AnimationEventReceiverComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<AnimationEventReceiverComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AnimationEventReceiver))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveAnimationEventReceiverComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveRigidbody2DComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove Rigidbody2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<Rigidbody2DComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<Rigidbody2DComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Rigidbody2D))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveRigidbody2DComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveBoxCollider2DComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove BoxCollider2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<BoxCollider2DComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<BoxCollider2DComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::BoxCollider2D))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveBoxCollider2DComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveCircleCollider2DComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove CircleCollider2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<CircleCollider2DComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<CircleCollider2DComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::CircleCollider2D))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveCircleCollider2DComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveJoint2DComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove Joint2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<Joint2DComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<Joint2DComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Joint2D))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveJoint2DComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveDirectionalLight2DComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove DirectionalLight2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<DirectionalLight2DComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<DirectionalLight2DComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::DirectionalLight2D))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveDirectionalLight2DComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemovePointLight2DComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove PointLight2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<PointLight2DComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<PointLight2DComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::PointLight2D))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemovePointLight2DComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveShadowOccluder2DComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove ShadowOccluder2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<ShadowOccluder2DComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<ShadowOccluder2DComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::ShadowOccluder2D))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveShadowOccluder2DComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveParticleEmitterComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove Particle Emitter Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<ParticleEmitterComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<ParticleEmitterComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::ParticleEmitter))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveParticleEmitterComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveGrid2DComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove Grid2D Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<Grid2DComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<Grid2DComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Grid2D))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveGrid2DComponent, registry, selectedEntity, undoService);
 
         if (pendingRemovals.RemoveTilemapLayerComponent)
         {

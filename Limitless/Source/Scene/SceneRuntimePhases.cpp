@@ -4,6 +4,7 @@
 #include "Core/Debug/Log.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <exception>
 
 namespace Limitless
@@ -11,6 +12,11 @@ namespace Limitless
     namespace
     {
         thread_local bool s_IsParallelScriptExecutionThread = false;
+
+        bool IsMutableRegistryAccessValidationEnabled()
+        {
+            return ConfigManager::GetInstance().GetValue<bool>("ecs.mt.validate_mutable_registry_access", true);
+        }
     }
 
     bool Scene::IsCurrentThreadParallelScriptExecution()
@@ -21,6 +27,30 @@ namespace Limitless
     void Scene::SetCurrentThreadParallelScriptExecution(bool enabled)
     {
         s_IsParallelScriptExecutionThread = enabled;
+    }
+
+    entt::registry& Scene::GetRegistry()
+    {
+        if (IsMutableRegistryAccessValidationEnabled() && IsCurrentThreadParallelScriptExecution())
+        {
+            const RuntimePhase phase = m_RuntimePhase;
+            if (phase != RuntimePhase::Idle && phase != RuntimePhase::Structural && !m_IsApplyingDeferredStructuralMutations)
+            {
+                const uint32_t phaseIndex = static_cast<uint32_t>(phase);
+                if (phaseIndex < 32)
+                {
+                    const uint32_t phaseBit = (1u << phaseIndex);
+                    const uint32_t warnedPhases = m_WarnedUnsafeMutableRegistryAccessPhases.fetch_or(phaseBit, std::memory_order_relaxed);
+                    if ((warnedPhases & phaseBit) == 0)
+                    {
+                        LT_WARN("Scene::GetRegistry mutable access during runtime phase {} on a parallel script thread can bypass deferred structural safeguards. Prefer Scene/Entity structural APIs.",
+                                phaseIndex);
+                    }
+                }
+            }
+        }
+
+        return m_Registry;
     }
 
     bool Scene::ShouldDeferStructuralMutations() const
@@ -107,20 +137,71 @@ namespace Limitless
             }
         };
 
+        auto pushBackPendingMutations = [this](std::vector<DeferredStructuralMutation>& pending) {
+            if (pending.empty())
+                return;
+
+            std::lock_guard<std::mutex> lock(m_DeferredStructuralMutationsOverflowMutex);
+            for (DeferredStructuralMutation& deferred : pending)
+                m_DeferredStructuralMutationsOverflow.emplace_back(std::move(deferred));
+            pending.clear();
+        };
+
+        auto mergePendingMutations = [](std::vector<DeferredStructuralMutation>& pending,
+                                        std::vector<DeferredStructuralMutation>& newlyDrained) {
+            if (newlyDrained.empty())
+                return;
+            if (pending.empty())
+            {
+                pending = std::move(newlyDrained);
+                return;
+            }
+
+            std::vector<DeferredStructuralMutation> merged;
+            merged.reserve(pending.size() + newlyDrained.size());
+
+            size_t pendingIndex = 0;
+            size_t drainedIndex = 0;
+            while (pendingIndex < pending.size() && drainedIndex < newlyDrained.size())
+            {
+                if (pending[pendingIndex].Sequence <= newlyDrained[drainedIndex].Sequence)
+                    merged.emplace_back(std::move(pending[pendingIndex++]));
+                else
+                    merged.emplace_back(std::move(newlyDrained[drainedIndex++]));
+            }
+
+            while (pendingIndex < pending.size())
+                merged.emplace_back(std::move(pending[pendingIndex++]));
+            while (drainedIndex < newlyDrained.size())
+                merged.emplace_back(std::move(newlyDrained[drainedIndex++]));
+
+            pending = std::move(merged);
+            newlyDrained.clear();
+        };
+
         std::vector<DeferredStructuralMutation> pending;
         drainPendingMutations(pending);
         if (pending.empty())
             return;
 
+        const uint32_t configuredBudget = ConfigManager::GetInstance().GetValue<uint32_t>(
+            "ecs.mt.deferred_structural_mutation_flush_budget",
+            kDefaultDeferredStructuralMutationFlushBudget);
+        const size_t remainingBudgetInitial = std::max<size_t>(1, static_cast<size_t>(configuredBudget));
+
         const RuntimePhase previousPhase = m_RuntimePhase;
         m_RuntimePhase = RuntimePhase::Structural;
         m_IsApplyingDeferredStructuralMutations = true;
         bool appliedStructuralMutation = false;
+        size_t remainingBudget = remainingBudgetInitial;
+        size_t processedMutations = 0;
 
-        while (true)
+        while (!pending.empty() && remainingBudget > 0)
         {
-            for (DeferredStructuralMutation& deferred : pending)
+            const size_t mutationsToProcess = std::min(remainingBudget, pending.size());
+            for (size_t mutationIndex = 0; mutationIndex < mutationsToProcess; ++mutationIndex)
             {
+                DeferredStructuralMutation& deferred = pending[mutationIndex];
                 try
                 {
                     deferred.Apply();
@@ -136,9 +217,36 @@ namespace Limitless
                 }
             }
 
-            drainPendingMutations(pending);
-            if (pending.empty())
-                break;
+            processedMutations += mutationsToProcess;
+            remainingBudget -= mutationsToProcess;
+
+            if (mutationsToProcess < pending.size())
+                pending.erase(pending.begin(), pending.begin() + static_cast<std::ptrdiff_t>(mutationsToProcess));
+            else
+                pending.clear();
+
+            std::vector<DeferredStructuralMutation> newlyDrained;
+            drainPendingMutations(newlyDrained);
+            mergePendingMutations(pending, newlyDrained);
+        }
+
+        const size_t deferredRemainder = pending.size();
+        if (deferredRemainder > 0)
+        {
+            pushBackPendingMutations(pending);
+            bool expectedWarnState = false;
+            if (m_WarnedDeferredStructuralMutationFlushBudgetExceeded.compare_exchange_strong(expectedWarnState, true, std::memory_order_relaxed))
+            {
+                LT_WARN("Scene deferred structural mutation flush budget exceeded (budget={}, processed={}, deferred_remainder={}). "
+                        "Remaining structural mutations will be carried into a future flush.",
+                        remainingBudgetInitial,
+                        processedMutations,
+                        deferredRemainder);
+            }
+        }
+        else
+        {
+            m_WarnedDeferredStructuralMutationFlushBudgetExceeded.store(false, std::memory_order_relaxed);
         }
 
         m_IsApplyingDeferredStructuralMutations = false;

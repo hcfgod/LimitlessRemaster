@@ -187,7 +187,38 @@ namespace Limitless
 
             outClip = std::dynamic_pointer_cast<Assets::AnimationClipAsset>(Assets::AssetManager::GetCachedByKey(clipKey));
             if (!outClip)
-                outClip = Assets::AssetManager::LoadBlocking<Assets::AnimationClipAsset>(clipKey);
+            {
+                static std::mutex s_PendingAnimationClipLoadsMutex;
+                static std::unordered_map<std::string, Async::Task<Assets::AnimationClipAsset::Ptr>> s_PendingAnimationClipLoads;
+
+                std::lock_guard<std::mutex> lock(s_PendingAnimationClipLoadsMutex);
+                auto pendingLoad = s_PendingAnimationClipLoads.find(clipKey);
+                if (pendingLoad == s_PendingAnimationClipLoads.end())
+                {
+                    s_PendingAnimationClipLoads.emplace(
+                        clipKey,
+                        Assets::AssetManager::LoadAsync<Assets::AnimationClipAsset>(clipKey));
+                }
+                else if (pendingLoad->second.IsDone())
+                {
+                    try
+                    {
+                        outClip = pendingLoad->second.Get();
+                    }
+                    catch (const std::exception& exception)
+                    {
+                        LT_WARN("Animation clip async load failed for '{}': {}", clipKey, exception.what());
+                        outClip.reset();
+                    }
+                    catch (...)
+                    {
+                        LT_WARN("Animation clip async load failed for '{}' with unknown error", clipKey);
+                        outClip.reset();
+                    }
+
+                    s_PendingAnimationClipLoads.erase(pendingLoad);
+                }
+            }
             return (outClip != nullptr);
         }
 
@@ -203,10 +234,8 @@ namespace Limitless
             if (animator.CachedDefaultClip && animator.CachedDefaultClip->GetKey() == animator.DefaultClipKey)
                 return true;
 
-            animator.CachedDefaultClip = std::dynamic_pointer_cast<Assets::AnimationClipAsset>(
-                Assets::AssetManager::GetCachedByKey(animator.DefaultClipKey));
-            if (!animator.CachedDefaultClip)
-                animator.CachedDefaultClip = Assets::AssetManager::LoadBlocking<Assets::AnimationClipAsset>(animator.DefaultClipKey);
+            animator.CachedDefaultClip.reset();
+            (void)TryResolveAnimationClipAssetByKey(animator.DefaultClipKey, animator.CachedDefaultClip);
 
             animator.DefaultClipLoadAttempted = true;
             return (animator.CachedDefaultClip != nullptr);
