@@ -369,7 +369,8 @@ TEST_SUITE("Performance Monitor") {
         // Add multiple samples
         std::vector<double> expectedValues = {10.0, 20.0, 5.0, 15.0, 25.0};
         
-        for (double expected : expectedValues) {
+        for (double ignoredExpected : expectedValues) {
+            (void)ignoredExpected;
             counter.Start();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             counter.Stop();
@@ -448,11 +449,9 @@ TEST_SUITE("Performance Monitor") {
         
         // Collect final metrics with extensive error handling
         PerformanceMetrics metrics;
-        bool metricsSuccess = false;
         
         try {
             metrics = monitor.CollectMetrics();
-            metricsSuccess = true;
         } catch (...) {
             // If metrics collection fails, create minimal metrics
             metrics = PerformanceMetrics{};
@@ -602,11 +601,9 @@ TEST_SUITE("Performance Monitor") {
                 
                 // Test metrics collection with multiple fallback attempts
                 PerformanceMetrics metrics;
-                bool metricsSuccess = false;
                 
                 try {
                     metrics = monitor.CollectMetrics();
-                    metricsSuccess = true;
                 } catch (...) {
                     // First fallback: create minimal metrics
                     metrics = PerformanceMetrics{};
