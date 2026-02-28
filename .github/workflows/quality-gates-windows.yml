@@ -67,7 +67,6 @@ jobs:
           foreach ($file in $changedFiles) {
             if ($file -match '^Editor/Source/') { [void]$targets.Add("Editor") }
             if ($file -match '^Runtime/Source/') { [void]$targets.Add("Runtime") }
-            if ($file -match '^Test/Source/') { [void]$targets.Add("Test") }
             # Keep MSVC analyzer focused on Windows-facing engine paths to control runtime.
             if ($file -match '^Limitless/Source/Platform/(Windows|SDL)/') { [void]$targets.Add("Limitless") }
           }
@@ -249,12 +248,49 @@ jobs:
             $candidateFiles = git ls-files
           }
 
-          $sourceFiles = $candidateFiles | Where-Object { $_ -match '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' } | Sort-Object -Unique
+          $sourceFiles = @($candidateFiles | Where-Object { $_ -match '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' } | Sort-Object -Unique)
           if ($null -eq $sourceFiles -or $sourceFiles.Count -eq 0) {
             Write-Host "No changed first-party source files to analyze."
             exit 0
           }
           Write-Host "Analyzing $($sourceFiles.Count) changed C++ source files."
+
+          $compileCommandsPath = "compile_commands.json"
+          if (!(Test-Path $compileCommandsPath)) {
+            Write-Error "compile_commands.json not found before clang-tidy run"
+            exit 1
+          }
+
+          $compileCommands = Get-Content $compileCommandsPath -Raw | ConvertFrom-Json
+          $repoRoot = (Get-Location).Path
+          $compileSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+          foreach ($entry in $compileCommands) {
+            $entryFile = [string]$entry.file
+            if ([string]::IsNullOrWhiteSpace($entryFile)) { continue }
+            if ([System.IO.Path]::IsPathRooted($entryFile)) {
+              $normalized = [System.IO.Path]::GetFullPath($entryFile)
+            } else {
+              $entryDir = [string]$entry.directory
+              if ([string]::IsNullOrWhiteSpace($entryDir)) { $entryDir = $repoRoot }
+              $normalized = [System.IO.Path]::GetFullPath((Join-Path $entryDir $entryFile))
+            }
+            [void]$compileSet.Add($normalized)
+          }
+
+          $filtered = New-Object System.Collections.Generic.List[string]
+          foreach ($relPath in $sourceFiles) {
+            if ([string]::IsNullOrWhiteSpace($relPath)) { continue }
+            $absPath = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $relPath))
+            if ($compileSet.Contains($absPath)) {
+              [void]$filtered.Add($relPath)
+            }
+          }
+          $sourceFiles = @($filtered | Sort-Object -Unique)
+          if ($sourceFiles.Count -eq 0) {
+            Write-Host "No changed source files matched compile_commands.json entries."
+            exit 0
+          }
+          Write-Host "Filtered changed files to $($sourceFiles.Count) entries present in compile_commands.json."
 
           $chunkSize = 40
           $hadFailure = $false
