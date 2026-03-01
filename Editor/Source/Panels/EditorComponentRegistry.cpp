@@ -5,6 +5,14 @@ namespace Limitless::EditorInspectorPanel
 {
     namespace
     {
+        template<typename ComponentType>
+        ComponentType& EnsureComponent(entt::registry& registry, entt::entity entity)
+        {
+            if (auto* existing = registry.try_get<ComponentType>(entity))
+                return *existing;
+            return registry.emplace<ComponentType>(entity);
+        }
+
         void ClearPrimaryFlagFromOtherCameras(entt::registry& registry, entt::entity currentEntity)
         {
             auto view = registry.view<CameraComponent>();
@@ -57,6 +65,75 @@ namespace Limitless::EditorInspectorPanel
                     Audio::AudioEngine::GetInstance().Stop(audioSource->RuntimeVoiceId);
             }
             registry.remove<AudioSourceComponent>(entity);
+        }
+
+        void AddTilemapLayerComponent(entt::registry& registry, entt::entity entity)
+        {
+            auto& layer = registry.emplace<TilemapLayerComponent>(entity);
+            layer.EnsureStorage();
+        }
+
+        void AddCanvasComponent(entt::registry& registry, entt::entity entity)
+        {
+            registry.emplace<CanvasComponent>(entity);
+            (void)EnsureComponent<RectTransformComponent>(registry, entity);
+        }
+
+        void AddUIImageComponent(entt::registry& registry, entt::entity entity)
+        {
+            registry.emplace<UIImageComponent>(entity);
+            (void)EnsureComponent<RectTransformComponent>(registry, entity);
+            (void)EnsureComponent<SpriteComponent>(registry, entity);
+        }
+
+        void AddUIPanelComponent(entt::registry& registry, entt::entity entity)
+        {
+            auto& panel = registry.emplace<UIPanelComponent>(entity);
+            (void)EnsureComponent<RectTransformComponent>(registry, entity);
+            if (!registry.all_of<SpriteComponent>(entity))
+            {
+                auto& sprite = registry.emplace<SpriteComponent>(entity);
+                sprite.Color = panel.BackgroundColor;
+            }
+        }
+
+        void AddUITextComponent(entt::registry& registry, entt::entity entity)
+        {
+            auto& uiText = registry.emplace<UITextComponent>(entity);
+            uiText.FontFilePath = "Assets/Fonts/Default.ttf";
+            (void)EnsureComponent<RectTransformComponent>(registry, entity);
+        }
+
+        void AddUIButtonComponent(entt::registry& registry, entt::entity entity)
+        {
+            auto& button = registry.emplace<UIButtonComponent>(entity);
+            (void)EnsureComponent<UIImageComponent>(registry, entity);
+            (void)EnsureComponent<RectTransformComponent>(registry, entity);
+            if (!registry.all_of<SpriteComponent>(entity))
+            {
+                auto& sprite = registry.emplace<SpriteComponent>(entity);
+                sprite.Color = glm::vec4(0.82f, 0.82f, 0.82f, 1.0f);
+            }
+            if (auto* sprite = registry.try_get<SpriteComponent>(entity))
+            {
+                button.NormalColor = sprite->Color;
+                button.HoveredColor = glm::clamp(sprite->Color * glm::vec4(1.12f, 1.12f, 1.12f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
+                button.PressedColor = glm::clamp(sprite->Color * glm::vec4(0.85f, 0.85f, 0.85f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
+                button.DisabledColor = glm::clamp(sprite->Color * glm::vec4(0.55f, 0.55f, 0.55f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
+            }
+        }
+
+        void RemoveNativeScriptComponent(entt::registry& registry, entt::entity entity)
+        {
+            if (auto* nativeScript = registry.try_get<NativeScriptComponent>(entity))
+            {
+                for (auto& scriptEntry : nativeScript->Scripts)
+                {
+                    scriptEntry.RuntimeInitialized = false;
+                    scriptEntry.RuntimeInstance.reset();
+                }
+            }
+            registry.remove<NativeScriptComponent>(entity);
         }
 
         const ComponentRegistryEntry kAudioListener2DEntry{
@@ -193,6 +270,78 @@ namespace Limitless::EditorInspectorPanel
             &AddComponent<AudioSourceComponent>,
             &RemoveAudioSourceComponent
         };
+
+        const ComponentRegistryEntry kNativeScriptEntry{
+            "Native Script",
+            "Add Native Script Component",
+            "Remove Native Script Component",
+            &HasComponent<NativeScriptComponent>,
+            &AddComponent<NativeScriptComponent>,
+            &RemoveNativeScriptComponent
+        };
+
+        const ComponentRegistryEntry kTilemapLayerEntry{
+            "Tilemap Layer",
+            "Add TilemapLayer Component",
+            "Remove TilemapLayer Component",
+            &HasComponent<TilemapLayerComponent>,
+            &AddTilemapLayerComponent,
+            &RemoveComponent<TilemapLayerComponent>
+        };
+
+        const ComponentRegistryEntry kCanvasEntry{
+            "Canvas",
+            "Add Canvas Component",
+            "Remove Canvas Component",
+            &HasComponent<CanvasComponent>,
+            &AddCanvasComponent,
+            &RemoveComponent<CanvasComponent>
+        };
+
+        const ComponentRegistryEntry kRectTransformEntry{
+            "RectTransform",
+            "Add RectTransform Component",
+            "Remove RectTransform Component",
+            &HasComponent<RectTransformComponent>,
+            &AddComponent<RectTransformComponent>,
+            &RemoveComponent<RectTransformComponent>
+        };
+
+        const ComponentRegistryEntry kUIImageEntry{
+            "UI Image",
+            "Add UIImage Component",
+            "Remove UIImage Component",
+            &HasComponent<UIImageComponent>,
+            &AddUIImageComponent,
+            &RemoveComponent<UIImageComponent>
+        };
+
+        const ComponentRegistryEntry kUIPanelEntry{
+            "UI Panel",
+            "Add UIPanel Component",
+            "Remove UIPanel Component",
+            &HasComponent<UIPanelComponent>,
+            &AddUIPanelComponent,
+            &RemoveComponent<UIPanelComponent>
+        };
+
+        const ComponentRegistryEntry kUITextEntry{
+            "UI Text",
+            "Add UIText Component",
+            "Remove UIText Component",
+            &HasComponent<UITextComponent>,
+            &AddUITextComponent,
+            &RemoveComponent<UITextComponent>
+        };
+
+        const ComponentRegistryEntry kUIButtonEntry{
+            "UI Button",
+            "Add UIButton Component",
+            "Remove UIButton Component",
+            &HasComponent<UIButtonComponent>,
+            &AddUIButtonComponent,
+            &RemoveComponent<UIButtonComponent>
+        };
     }
 
     const ComponentRegistryEntry* FindComponentRegistryEntry(ComponentRegistryKey key)
@@ -229,6 +378,22 @@ namespace Limitless::EditorInspectorPanel
                 return &kSpriteEntry;
             case ComponentRegistryKey::AudioSource:
                 return &kAudioSourceEntry;
+            case ComponentRegistryKey::NativeScript:
+                return &kNativeScriptEntry;
+            case ComponentRegistryKey::TilemapLayer:
+                return &kTilemapLayerEntry;
+            case ComponentRegistryKey::Canvas:
+                return &kCanvasEntry;
+            case ComponentRegistryKey::RectTransform:
+                return &kRectTransformEntry;
+            case ComponentRegistryKey::UIImage:
+                return &kUIImageEntry;
+            case ComponentRegistryKey::UIPanel:
+                return &kUIPanelEntry;
+            case ComponentRegistryKey::UIText:
+                return &kUITextEntry;
+            case ComponentRegistryKey::UIButton:
+                return &kUIButtonEntry;
             default:
                 break;
         }

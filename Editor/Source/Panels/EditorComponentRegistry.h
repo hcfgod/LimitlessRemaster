@@ -22,7 +22,15 @@ namespace Limitless::EditorInspectorPanel
         Animator = 11,
         AnimationEventReceiver = 12,
         Sprite = 13,
-        AudioSource = 14
+        AudioSource = 14,
+        NativeScript = 15,
+        TilemapLayer = 16,
+        Canvas = 17,
+        RectTransform = 18,
+        UIImage = 19,
+        UIPanel = 20,
+        UIText = 21,
+        UIButton = 22
     };
 
     struct ComponentRegistryEntry

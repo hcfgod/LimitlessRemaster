@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace Limitless
 {
@@ -19,6 +20,7 @@ namespace Limitless
         ScriptDestroyEntityBridgeCallback s_DestroyEntityBridgeCallback = nullptr;
         ScriptInstantiatePrefabBridgeCallback s_InstantiatePrefabBridgeCallback = nullptr;
         ScriptParallelExecutionBridgeCallback s_ParallelExecutionBridgeCallback = nullptr;
+        ScriptGetContactEntityHandlesBridgeCallback s_GetContactEntityHandlesBridgeCallback = nullptr;
 
         std::string GetUnqualifiedClassName(const std::string& className)
         {
@@ -54,6 +56,11 @@ namespace Limitless
     void ScriptableEntity::SetParallelScriptExecutionBridgeCallback(ScriptParallelExecutionBridgeCallback callback)
     {
         s_ParallelExecutionBridgeCallback = callback;
+    }
+
+    void ScriptableEntity::SetContactEntityHandlesBridgeCallback(ScriptGetContactEntityHandlesBridgeCallback callback)
+    {
+        s_GetContactEntityHandlesBridgeCallback = callback;
     }
 
     bool ScriptableEntity::IsParallelScriptExecutionContext()
@@ -588,9 +595,8 @@ namespace Limitless
     bool ScriptableEntity::HasContactWith(entt::entity otherEntity, bool includeSensorContacts) const
     {
 #ifdef SCRIPTCORE_EXPORTS
-        (void)otherEntity;
-        (void)includeSensorContacts;
-        return false;
+        const std::vector<entt::entity> contacts = GetContactEntityHandles(m_EntityHandle, includeSensorContacts);
+        return std::find(contacts.begin(), contacts.end(), otherEntity) != contacts.end();
 #else
         if (!m_Scene)
             return false;
@@ -616,8 +622,10 @@ namespace Limitless
     int ScriptableEntity::GetContactCount(bool includeSensorContacts) const
     {
 #ifdef SCRIPTCORE_EXPORTS
-        (void)includeSensorContacts;
-        return 0;
+        if (!s_GetContactEntityHandlesBridgeCallback)
+            return 0;
+        const uint32_t count = s_GetContactEntityHandlesBridgeCallback(m_EntityHandle, includeSensorContacts, nullptr, 0u);
+        return static_cast<int>(count);
 #else
         if (!m_Scene)
             return 0;
@@ -636,6 +644,75 @@ namespace Limitless
         }
         return contactCount;
 #endif
+    }
+
+    std::vector<entt::entity> ScriptableEntity::GetContactEntityHandles(bool includeSensorContacts) const
+    {
+        return GetContactEntityHandles(m_EntityHandle, includeSensorContacts);
+    }
+
+    std::vector<entt::entity> ScriptableEntity::GetContactEntityHandles(entt::entity entity, bool includeSensorContacts) const
+    {
+#ifdef SCRIPTCORE_EXPORTS
+        if (!s_GetContactEntityHandlesBridgeCallback || entity == entt::null)
+            return {};
+
+        const uint32_t count = s_GetContactEntityHandlesBridgeCallback(entity, includeSensorContacts, nullptr, 0u);
+        if (count == 0u)
+            return {};
+
+        std::vector<entt::entity> contactsOut;
+        contactsOut.resize(static_cast<size_t>(count));
+        const uint32_t written = s_GetContactEntityHandlesBridgeCallback(entity, includeSensorContacts, contactsOut.data(), count);
+        if (written < count)
+            contactsOut.resize(static_cast<size_t>(written));
+        return contactsOut;
+#else
+        std::vector<entt::entity> contactsOut;
+        if (!m_Scene || entity == entt::null)
+            return contactsOut;
+        const Physics2DContactListener* contacts = m_Scene->GetPhysics2DContactEventsForEntity(entity);
+        if (!contacts)
+            return contactsOut;
+
+        std::unordered_set<entt::entity> uniqueContacts;
+        const auto& events = contacts->GetEvents();
+        for (const auto& eventData : events)
+        {
+            if (!includeSensorContacts && eventData.IsSensor)
+                continue;
+
+            entt::entity other = entt::null;
+            if (eventData.EntityA == entity)
+                other = eventData.EntityB;
+            else if (eventData.EntityB == entity)
+                other = eventData.EntityA;
+
+            if (other == entt::null)
+                continue;
+            if (m_Registry && !m_Registry->valid(other))
+                continue;
+            if (uniqueContacts.insert(other).second)
+                contactsOut.push_back(other);
+        }
+
+        return contactsOut;
+#endif
+    }
+
+    std::vector<Entity> ScriptableEntity::GetContactEntities(bool includeSensorContacts) const
+    {
+        return GetContactEntities(m_EntityHandle, includeSensorContacts);
+    }
+
+    std::vector<Entity> ScriptableEntity::GetContactEntities(entt::entity entity, bool includeSensorContacts) const
+    {
+        std::vector<Entity> entitiesOut;
+        const std::vector<entt::entity> handles = GetContactEntityHandles(entity, includeSensorContacts);
+        entitiesOut.reserve(handles.size());
+        for (entt::entity handle : handles)
+            entitiesOut.emplace_back(m_Registry, handle);
+        return entitiesOut;
     }
 
     bool ScriptableEntity::HasAnimator() const

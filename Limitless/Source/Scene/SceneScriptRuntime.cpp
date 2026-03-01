@@ -678,6 +678,21 @@ namespace Limitless
             }
         };
 
+        auto executeWithDeferredEntityDestroy = [this](auto&& callback) {
+            const bool previousForceDeferredDestroy = m_ForceDeferredEntityDestruction;
+            m_ForceDeferredEntityDestruction = true;
+            try
+            {
+                callback();
+            }
+            catch (...)
+            {
+                m_ForceDeferredEntityDestruction = previousForceDeferredDestroy;
+                throw;
+            }
+            m_ForceDeferredEntityDestruction = previousForceDeferredDestroy;
+        };
+
         auto executeScriptUpdateSlot = [&](entt::entity entity, size_t scriptIndex) {
             NativeScriptEntry* scriptEntry = tryGetScriptEntry(entity, scriptIndex);
             if (!scriptEntry || !scriptEntry->RuntimeInstance)
@@ -894,9 +909,11 @@ namespace Limitless
 
             try
             {
-                scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
-                scriptEntry->RuntimeInstance->OnUpdate(deltaTime);
-                Coroutine::TickOwner(*scriptEntry->RuntimeInstance, deltaTime);
+                executeWithDeferredEntityDestroy([&]() {
+                    scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
+                    scriptEntry->RuntimeInstance->OnUpdate(deltaTime);
+                    Coroutine::TickOwner(*scriptEntry->RuntimeInstance, deltaTime);
+                });
             }
             catch (const std::exception& exception)
             {
@@ -1184,7 +1201,7 @@ namespace Limitless
                 if (transformAfterUpdate && transformChanged)
                 {
                     const auto* tag = m_Registry.try_get<TagComponent>(entity);
-                    LT_WARN("Script '{}' on entity '{}' is mutating Transform in OnUpdate while Rigidbody2D is Dynamic/Kinematic. Move physics-related transform writes to OnFixedUpdate for stable simulation.",
+                    LT_WARN("Script '{}' on entity '{}' is mutating Transform in OnUpdate while Rigidbody2D is Dynamic/Kinematic. Use OnFixedUpdate and prefer Rigidbody2D velocity/force APIs (or move in FixedUpdate) to keep physics contacts stable.",
                             scriptEntry->ScriptClassName,
                             tag ? tag->Tag : "Entity");
                     scriptEntry->RuntimeWarnedOnUpdateTransformMutation = true;
@@ -1293,7 +1310,9 @@ namespace Limitless
                     {
                         try
                         {
-                            scriptEntry->RuntimeInstance->OnDestroy();
+                            executeWithDeferredEntityDestroy([&]() {
+                                scriptEntry->RuntimeInstance->OnDestroy();
+                            });
                         }
                         catch (const std::exception& exception)
                         {
@@ -1376,8 +1395,10 @@ namespace Limitless
             {
                 try
                 {
-                    scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
-                    scriptEntry->RuntimeInstance->OnCreate();
+                    executeWithDeferredEntityDestroy([&]() {
+                        scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
+                        scriptEntry->RuntimeInstance->OnCreate();
+                    });
                 }
                 catch (const std::exception& exception)
                 {
@@ -1639,6 +1660,21 @@ namespace Limitless
             }
         };
 
+        auto executeWithDeferredEntityDestroy = [this](auto&& callback) {
+            const bool previousForceDeferredDestroy = m_ForceDeferredEntityDestruction;
+            m_ForceDeferredEntityDestruction = true;
+            try
+            {
+                callback();
+            }
+            catch (...)
+            {
+                m_ForceDeferredEntityDestruction = previousForceDeferredDestroy;
+                throw;
+            }
+            m_ForceDeferredEntityDestruction = previousForceDeferredDestroy;
+        };
+
         auto executeScriptFixedUpdateSlot = [&](entt::entity entity, size_t scriptIndex) {
             NativeScriptEntry* scriptEntry = tryGetScriptEntry(entity, scriptIndex);
             if (!scriptEntry || !scriptEntry->RuntimeInstance)
@@ -1849,8 +1885,10 @@ namespace Limitless
 
             try
             {
-                scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
-                scriptEntry->RuntimeInstance->OnFixedUpdate(fixedDeltaTime);
+                executeWithDeferredEntityDestroy([&]() {
+                    scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
+                    scriptEntry->RuntimeInstance->OnFixedUpdate(fixedDeltaTime);
+                });
             }
             catch (const std::exception& exception)
             {
@@ -2227,7 +2265,9 @@ namespace Limitless
                     {
                         try
                         {
-                            scriptEntry->RuntimeInstance->OnDestroy();
+                            executeWithDeferredEntityDestroy([&]() {
+                                scriptEntry->RuntimeInstance->OnDestroy();
+                            });
                         }
                         catch (const std::exception& exception)
                         {
@@ -2308,8 +2348,10 @@ namespace Limitless
             {
                 try
                 {
-                    scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
-                    scriptEntry->RuntimeInstance->OnCreate();
+                    executeWithDeferredEntityDestroy([&]() {
+                        scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
+                        scriptEntry->RuntimeInstance->OnCreate();
+                    });
                 }
                 catch (const std::exception& exception)
                 {

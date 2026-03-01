@@ -86,6 +86,59 @@ namespace Limitless
             return value;
         }
 
+        float ExtractZRotationRadians(const glm::mat4& transformMatrix)
+        {
+            return std::atan2(transformMatrix[1][0], transformMatrix[0][0]);
+        }
+
+        struct Pose2D
+        {
+            glm::vec2 Position = glm::vec2(0.0f);
+            float AngleRadians = 0.0f;
+        };
+
+        Pose2D GetEntityWorldPose2D(const Scene& scene, entt::entity entity, const TransformComponent& transform)
+        {
+            Pose2D pose{};
+            pose.Position = glm::vec2(transform.Position.x, transform.Position.y);
+            pose.AngleRadians = glm::radians(transform.Rotation.z);
+
+            const entt::entity parent = scene.GetParent(entity);
+            if (parent == entt::null || !scene.IsValid(parent))
+                return pose;
+
+            const glm::mat4 worldTransform = scene.GetWorldTransformMatrix(entity);
+            pose.Position = glm::vec2(worldTransform[3].x, worldTransform[3].y);
+            pose.AngleRadians = ExtractZRotationRadians(worldTransform);
+            return pose;
+        }
+
+        void SetEntityLocalPoseFromWorld2D(const Scene& scene,
+                                           entt::entity entity,
+                                           const glm::vec2& worldPosition,
+                                           float worldAngleRadians,
+                                           TransformComponent& transform)
+        {
+            const entt::entity parent = scene.GetParent(entity);
+            if (parent == entt::null || !scene.IsValid(parent))
+            {
+                transform.Position.x = worldPosition.x;
+                transform.Position.y = worldPosition.y;
+                transform.Rotation.z = glm::degrees(worldAngleRadians);
+                return;
+            }
+
+            const glm::mat4 parentWorld = scene.GetWorldTransformMatrix(parent);
+            const glm::mat4 inverseParentWorld = glm::inverse(parentWorld);
+            const glm::vec4 localPosition4 = inverseParentWorld * glm::vec4(worldPosition.x, worldPosition.y, transform.Position.z, 1.0f);
+            const float parentWorldAngleRadians = ExtractZRotationRadians(parentWorld);
+            const float localAngleRadians = WrapAngleRadians(worldAngleRadians - parentWorldAngleRadians);
+
+            transform.Position.x = localPosition4.x;
+            transform.Position.y = localPosition4.y;
+            transform.Rotation.z = glm::degrees(localAngleRadians);
+        }
+
         bool IsEntityAssignedToWorld(const Scene& scene,
                                      entt::entity entity,
                                      uint16_t worldSlot,
@@ -435,17 +488,18 @@ namespace Limitless
 
             auto& transform = bodyView.get<TransformComponent>(entity);
 
-            const float safePositionX = glm::clamp(SanitizeFinite(transform.Position.x, 0.0f), -kMaximumWorldPosition, kMaximumWorldPosition);
-            const float safePositionY = glm::clamp(SanitizeFinite(transform.Position.y, 0.0f), -kMaximumWorldPosition, kMaximumWorldPosition);
-            const float safeRotationDegrees = SanitizeFinite(transform.Rotation.z, 0.0f);
+            const Pose2D authoredWorldPose = GetEntityWorldPose2D(scene, entity, transform);
+            const float safePositionX = glm::clamp(SanitizeFinite(authoredWorldPose.Position.x, 0.0f), -kMaximumWorldPosition, kMaximumWorldPosition);
+            const float safePositionY = glm::clamp(SanitizeFinite(authoredWorldPose.Position.y, 0.0f), -kMaximumWorldPosition, kMaximumWorldPosition);
+            const float safeRotationDegrees = glm::degrees(SanitizeFinite(authoredWorldPose.AngleRadians, 0.0f));
             const float safeLinearDamping = SanitizeFiniteNonNegative(rigidbody.LinearDamping, 0.0f);
             const float safeAngularDamping = SanitizeFiniteNonNegative(rigidbody.AngularDamping, 0.01f);
             const float safeGravityScale = SanitizeFinite(rigidbody.GravityScale, 1.0f);
 
             const bool hadInvalidBodyParameters =
-                (safePositionX != transform.Position.x) ||
-                (safePositionY != transform.Position.y) ||
-                (safeRotationDegrees != transform.Rotation.z) ||
+                (safePositionX != authoredWorldPose.Position.x) ||
+                (safePositionY != authoredWorldPose.Position.y) ||
+                (safeRotationDegrees != glm::degrees(authoredWorldPose.AngleRadians)) ||
                 (safeLinearDamping != rigidbody.LinearDamping) ||
                 (safeAngularDamping != rigidbody.AngularDamping) ||
                 (safeGravityScale != rigidbody.GravityScale);
@@ -485,8 +539,8 @@ namespace Limitless
             rigidbody.RuntimeBodyCreated = b2Body_IsValid(rigidbody.RuntimeBodyId);
             rigidbody.RuntimeWorldSlot = rigidbody.RuntimeBodyCreated ? m_SceneWorldSlot : 0;
             ++newBodiesCreatedThisStep;
-            rigidbody.RuntimePreviousPosition = glm::vec2(transform.Position.x, transform.Position.y);
-            rigidbody.RuntimePreviousAngleRadians = glm::radians(transform.Rotation.z);
+            rigidbody.RuntimePreviousPosition = glm::vec2(safePositionX, safePositionY);
+            rigidbody.RuntimePreviousAngleRadians = glm::radians(safeRotationDegrees);
             rigidbody.RuntimeRenderPreviousPosition = rigidbody.RuntimePreviousPosition;
             rigidbody.RuntimeRenderPreviousAngleRadians = rigidbody.RuntimePreviousAngleRadians;
             rigidbody.RuntimeRenderCurrentPosition = rigidbody.RuntimePreviousPosition;
@@ -702,21 +756,10 @@ namespace Limitless
 
             const b2BodyType expectedType = ToBox2DBodyType(rigidbody.Type);
 
-            // -----------------------------------------------------------
-            // Fast path: skip sleeping dynamic bodies with no script writes.
-            // Keep kinematic/static bodies on the full path so transform-
-            // authored motion (e.g. rotating kinematic platforms) still
-            // drives collision updates even when Box2D marks them as sleeping.
-            // -----------------------------------------------------------
             const bool hasPendingVelocityWrites =
                 rigidbody.RuntimeHasPendingLinearVelocity ||
                 rigidbody.RuntimeHasPendingLinearVelocityX ||
                 rigidbody.RuntimeHasPendingLinearVelocityY;
-
-            if (expectedType == b2_dynamicBody &&
-                !b2Body_IsAwake(rigidbody.RuntimeBodyId) &&
-                !hasPendingVelocityWrites)
-                continue;
             if (b2Body_GetType(rigidbody.RuntimeBodyId) != expectedType)
                 b2Body_SetType(rigidbody.RuntimeBodyId, expectedType);
 
@@ -724,6 +767,76 @@ namespace Limitless
             const bool freezePositionY = rigidbody.FreezePositionY;
             const bool freezeRotation = rigidbody.IsRotationLocked();
             rigidbody.FixedRotation = freezeRotation;
+
+            b2Transform runtimeTransform = b2Body_GetTransform(rigidbody.RuntimeBodyId);
+            glm::vec2 runtimePosition(runtimeTransform.p.x, runtimeTransform.p.y);
+            float runtimeAngleRadians = b2Rot_GetAngle(runtimeTransform.q);
+            const Pose2D authoredWorldPose = GetEntityWorldPose2D(scene, entity, transform);
+            glm::vec2 authoringPosition = authoredWorldPose.Position;
+            float authoringAngleRadians = authoredWorldPose.AngleRadians;
+            glm::vec2 snappedAuthoringPosition = authoringPosition;
+            float snappedAuthoringAngleRadians = authoringAngleRadians;
+            bool snappedTransformToRuntime = false;
+
+            // Constraints are authoritative during simulation.
+            // If scripts/editor mutate constrained axes directly, snap world pose back to the body.
+            if (freezePositionX)
+                snappedAuthoringPosition.x = runtimePosition.x;
+            if (freezePositionY)
+                snappedAuthoringPosition.y = runtimePosition.y;
+            if (freezeRotation)
+                snappedAuthoringAngleRadians = runtimeAngleRadians;
+
+            if (glm::distance(snappedAuthoringPosition, authoringPosition) > kTransformSnapEpsilon ||
+                std::abs(WrapAngleRadians(snappedAuthoringAngleRadians - authoringAngleRadians)) > kTransformSnapEpsilon)
+            {
+                SetEntityLocalPoseFromWorld2D(scene, entity, snappedAuthoringPosition, snappedAuthoringAngleRadians, transform);
+                authoringPosition = snappedAuthoringPosition;
+                authoringAngleRadians = snappedAuthoringAngleRadians;
+                snappedTransformToRuntime = true;
+            }
+
+            if (snappedTransformToRuntime)
+                scene.MarkTransformDirty(entity);
+
+            const glm::vec2 positionDelta = authoringPosition - runtimePosition;
+            const float angleDelta = WrapAngleRadians(authoringAngleRadians - runtimeAngleRadians);
+            bool transformChangedByAuthoring = glm::length(positionDelta) > kTransformSnapEpsilon ||
+                                               std::abs(angleDelta) > kTransformSnapEpsilon;
+
+            // -----------------------------------------------------------
+            // Fast path: skip sleeping dynamic bodies only when they have
+            // no pending velocity writes and no authored transform delta.
+            // This keeps transform-driven dynamic motion in sync with Box2D.
+            // -----------------------------------------------------------
+            if (expectedType == b2_dynamicBody &&
+                !b2Body_IsAwake(rigidbody.RuntimeBodyId) &&
+                !hasPendingVelocityWrites)
+            {
+                if (!transformChangedByAuthoring)
+                    continue;
+
+                b2Body_SetTransform(
+                    rigidbody.RuntimeBodyId,
+                    { authoringPosition.x, authoringPosition.y },
+                    b2MakeRot(authoringAngleRadians));
+                b2Body_SetAwake(rigidbody.RuntimeBodyId, true);
+                runtimePosition = authoringPosition;
+                runtimeAngleRadians = authoringAngleRadians;
+                transformChangedByAuthoring = false;
+
+#if !defined(NDEBUG)
+                static uint64_t s_TransformWakeEventCount = 0;
+                ++s_TransformWakeEventCount;
+                if (s_TransformWakeEventCount <= 4 || (s_TransformWakeEventCount % 64ull) == 0ull)
+                {
+                    const auto* tag = registry.try_get<TagComponent>(entity);
+                    LT_WARN("Physics2D: woke sleeping dynamic body '{}' after transform-authored pose update (event #{})",
+                            tag ? tag->Tag : "Entity",
+                            s_TransformWakeEventCount);
+                }
+#endif
+            }
 
             // -----------------------------------------------------------
             // Property sync: damping, gravity scale, CCD, sleep, rotation
@@ -775,47 +888,6 @@ namespace Limitless
                 if (b2Body_IsBullet(rigidbody.RuntimeBodyId) != rigidbody.UseCCD)
                     b2Body_SetBullet(rigidbody.RuntimeBodyId, rigidbody.UseCCD);
             }
-
-            const b2Transform runtimeTransform = b2Body_GetTransform(rigidbody.RuntimeBodyId);
-            const glm::vec2 runtimePosition(runtimeTransform.p.x, runtimeTransform.p.y);
-            const float runtimeAngleRadians = b2Rot_GetAngle(runtimeTransform.q);
-            const float runtimeAngleDegrees = glm::degrees(runtimeAngleRadians);
-            glm::vec2 authoringPosition(transform.Position.x, transform.Position.y);
-            float authoringAngleRadians = glm::radians(transform.Rotation.z);
-            bool snappedTransformToRuntime = false;
-
-            // Constraints are authoritative during simulation.
-            // If scripts/editor mutate constrained axes directly, snap back to the body.
-            if (freezePositionX)
-            {
-                authoringPosition.x = runtimePosition.x;
-                if (std::abs(transform.Position.x - runtimePosition.x) > kTransformSnapEpsilon)
-                {
-                    transform.Position.x = runtimePosition.x;
-                    snappedTransformToRuntime = true;
-                }
-            }
-            if (freezePositionY)
-            {
-                authoringPosition.y = runtimePosition.y;
-                if (std::abs(transform.Position.y - runtimePosition.y) > kTransformSnapEpsilon)
-                {
-                    transform.Position.y = runtimePosition.y;
-                    snappedTransformToRuntime = true;
-                }
-            }
-            if (freezeRotation)
-            {
-                authoringAngleRadians = runtimeAngleRadians;
-                if (std::abs(WrapAngleRadians(glm::radians(transform.Rotation.z) - runtimeAngleRadians)) > kTransformSnapEpsilon)
-                {
-                    transform.Rotation.z = runtimeAngleDegrees;
-                    snappedTransformToRuntime = true;
-                }
-            }
-
-            if (snappedTransformToRuntime)
-                scene.MarkTransformDirty(entity);
 
             if (expectedType == b2_kinematicBody)
             {
@@ -899,10 +971,6 @@ namespace Limitless
                     b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, 0.0f);
             }
 
-            const glm::vec2 positionDelta = authoringPosition - runtimePosition;
-            const float angleDelta = WrapAngleRadians(authoringAngleRadians - runtimeAngleRadians);
-            const bool transformChangedByAuthoring = glm::length(positionDelta) > kTransformSnapEpsilon ||
-                                                     std::abs(angleDelta) > kTransformSnapEpsilon;
             if (transformChangedByAuthoring)
             {
                 b2Body_SetTransform(
@@ -1068,6 +1136,7 @@ namespace Limitless
             const bool freezePositionY = rigidbody->FreezePositionY;
             const bool freezeRotation = rigidbody->IsRotationLocked();
             rigidbody->FixedRotation = freezeRotation;
+            const Pose2D authoredWorldPose = GetEntityWorldPose2D(scene, entity, *transform);
 
             glm::vec2 bodyPosition(moveEvent.transform.p.x, moveEvent.transform.p.y);
             float bodyAngleRadians = b2Rot_GetAngle(moveEvent.transform.q);
@@ -1100,11 +1169,11 @@ namespace Limitless
                 glm::vec2 constrainedPosition = bodyPosition;
                 float constrainedAngleRadians = bodyAngleRadians;
                 if (freezePositionX)
-                    constrainedPosition.x = transform->Position.x;
+                    constrainedPosition.x = authoredWorldPose.Position.x;
                 if (freezePositionY)
-                    constrainedPosition.y = transform->Position.y;
+                    constrainedPosition.y = authoredWorldPose.Position.y;
                 if (freezeRotation)
-                    constrainedAngleRadians = glm::radians(transform->Rotation.z);
+                    constrainedAngleRadians = authoredWorldPose.AngleRadians;
 
                 if (glm::distance(constrainedPosition, bodyPosition) > kTransformSnapEpsilon ||
                     std::abs(WrapAngleRadians(constrainedAngleRadians - bodyAngleRadians)) > kTransformSnapEpsilon)
@@ -1135,18 +1204,15 @@ namespace Limitless
             if (rigidbody->Type == Rigidbody2DComponent::BodyType::Kinematic)
                 continue;
 
-            rigidbody->RuntimePreviousPosition = glm::vec2(transform->Position.x, transform->Position.y);
-            rigidbody->RuntimePreviousAngleRadians = glm::radians(transform->Rotation.z);
+            rigidbody->RuntimePreviousPosition = authoredWorldPose.Position;
+            rigidbody->RuntimePreviousAngleRadians = authoredWorldPose.AngleRadians;
 
-            const float newRotationDegrees = glm::degrees(bodyAngleRadians);
             const bool transformChanged =
-                std::abs(transform->Position.x - bodyPosition.x) > kTransformSnapEpsilon ||
-                std::abs(transform->Position.y - bodyPosition.y) > kTransformSnapEpsilon ||
-                std::abs(WrapAngleRadians(glm::radians(transform->Rotation.z) - bodyAngleRadians)) > kTransformSnapEpsilon;
+                std::abs(authoredWorldPose.Position.x - bodyPosition.x) > kTransformSnapEpsilon ||
+                std::abs(authoredWorldPose.Position.y - bodyPosition.y) > kTransformSnapEpsilon ||
+                std::abs(WrapAngleRadians(authoredWorldPose.AngleRadians - bodyAngleRadians)) > kTransformSnapEpsilon;
 
-            transform->Position.x = bodyPosition.x;
-            transform->Position.y = bodyPosition.y;
-            transform->Rotation.z = newRotationDegrees;
+            SetEntityLocalPoseFromWorld2D(scene, entity, bodyPosition, bodyAngleRadians, *transform);
 
             if (transformChanged)
                 scene.MarkTransformDirty(entity);
@@ -1219,6 +1285,41 @@ namespace Limitless
     {
 #ifdef LT_ENABLE_PHYSICS2D
         m_ContactListener.Clear();
+
+        auto resolveShapeEntity = [](b2ShapeId shapeId) -> entt::entity
+        {
+            if (!b2Shape_IsValid(shapeId))
+                return entt::null;
+
+            const b2BodyId bodyId = b2Shape_GetBody(shapeId);
+            if (!b2Body_IsValid(bodyId))
+                return entt::null;
+
+            return ToEntityHandle(b2Body_GetUserData(bodyId));
+        };
+
+        const b2SensorEvents sensorEvents = b2World_GetSensorEvents(m_WorldId);
+        for (int eventIndex = 0; eventIndex < sensorEvents.beginCount; ++eventIndex)
+        {
+            const auto& eventData = sensorEvents.beginEvents[eventIndex];
+            const entt::entity sensorEntity = resolveShapeEntity(eventData.sensorShapeId);
+            const entt::entity visitorEntity = resolveShapeEntity(eventData.visitorShapeId);
+            if (sensorEntity == entt::null || visitorEntity == entt::null)
+                continue;
+
+            m_ContactListener.PushBegin(sensorEntity, visitorEntity, true);
+        }
+
+        for (int eventIndex = 0; eventIndex < sensorEvents.endCount; ++eventIndex)
+        {
+            const auto& eventData = sensorEvents.endEvents[eventIndex];
+            const entt::entity sensorEntity = resolveShapeEntity(eventData.sensorShapeId);
+            const entt::entity visitorEntity = resolveShapeEntity(eventData.visitorShapeId);
+            if (sensorEntity == entt::null || visitorEntity == entt::null)
+                continue;
+
+            m_ContactListener.PushEnd(sensorEntity, visitorEntity, true);
+        }
 
         const b2ContactEvents contactEvents = b2World_GetContactEvents(m_WorldId);
         for (int eventIndex = 0; eventIndex < contactEvents.beginCount; ++eventIndex)

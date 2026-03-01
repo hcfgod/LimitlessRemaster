@@ -239,8 +239,8 @@ namespace Limitless
             const glm::vec2 anchorMinPosition = parentRect.Min + parentSize * anchorMin;
             const glm::vec2 anchorMaxPosition = parentRect.Min + parentSize * anchorMax;
             glm::vec2 size = (anchorMaxPosition - anchorMinPosition) + rect.SizeDelta;
-            size.x = std::max(1.0f, size.x);
-            size.y = std::max(1.0f, size.y);
+            size.x = std::max(0.0f, size.x);
+            size.y = std::max(0.0f, size.y);
 
             const glm::vec2 pivot = Clamp01(rect.Pivot);
             const glm::vec2 anchorCenter = (anchorMinPosition + anchorMaxPosition) * 0.5f;

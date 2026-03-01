@@ -26,4 +26,5 @@ extern "C"
     LT_SCRIPTCORE_API uint32_t LT_GetScriptCoreAbiVersion();
     LT_SCRIPTCORE_API void LT_RegisterScriptCoreTypes(Limitless::NativeScriptRegistrationCallback registrationCallback);
     LT_SCRIPTCORE_API void LT_SetScriptInstantiatePrefabBridge(Limitless::ScriptInstantiatePrefabBridgeCallback callback);
+    LT_SCRIPTCORE_API void LT_SetScriptContactEntityHandlesBridge(Limitless::ScriptGetContactEntityHandlesBridgeCallback callback);
 }

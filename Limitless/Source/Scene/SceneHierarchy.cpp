@@ -95,6 +95,14 @@ namespace Limitless
 
     void Scene::DestroyEntity(entt::entity entity)
     {
+        if (m_ForceDeferredEntityDestruction)
+        {
+            EnqueueDeferredStructuralMutation([entity](Scene& scene) {
+                scene.DestroyEntity(entity);
+            }, "DestroyEntity");
+            return;
+        }
+
         if (ShouldDeferStructuralMutations())
         {
             EnqueueDeferredStructuralMutation([entity](Scene& scene) {

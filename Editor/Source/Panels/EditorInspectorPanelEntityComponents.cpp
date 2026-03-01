@@ -333,6 +333,39 @@ namespace Limitless::EditorInspectorPanel
                 || FindDirectChildByTag(registry, sliderEntity, "Slider Handle") != entt::null;
         }
 
+        void SyncSliderVisualChildrenInEditor(entt::registry& registry, entt::entity sliderEntity, const UISliderComponent& slider)
+        {
+            const float valueRange = std::max(0.0f, slider.MaxValue - slider.MinValue);
+            const float normalizedValue = (valueRange > 0.0001f)
+                ? std::clamp((slider.Value - slider.MinValue) / valueRange, 0.0f, 1.0f)
+                : 0.0f;
+
+            if (const entt::entity fillEntity = FindDirectChildByTag(registry, sliderEntity, "Slider Fill");
+                fillEntity != entt::null)
+            {
+                if (auto* fillRect = registry.try_get<RectTransformComponent>(fillEntity))
+                {
+                    fillRect->AnchorMin.x = 0.0f;
+                    fillRect->AnchorMax.x = normalizedValue;
+                    if (fillRect->AnchorMax.x < fillRect->AnchorMin.x)
+                        fillRect->AnchorMax.x = fillRect->AnchorMin.x;
+                }
+            }
+
+            if (const entt::entity handleEntity = FindDirectChildByTag(registry, sliderEntity, "Slider Handle");
+                handleEntity != entt::null)
+            {
+                if (auto* handleRect = registry.try_get<RectTransformComponent>(handleEntity))
+                {
+                    handleRect->AnchorMin.x = normalizedValue;
+                    handleRect->AnchorMax.x = normalizedValue;
+                    handleRect->AnchoredPosition.x = 0.0f;
+                }
+                if (auto* handleTag = registry.try_get<TagComponent>(handleEntity))
+                    handleTag->Enabled = slider.ShowHandle;
+            }
+        }
+
     }
 
     void DrawStandardEntityComponentSections(Scene* scene,
@@ -3020,6 +3053,10 @@ namespace Limitless::EditorInspectorPanel
                     selectedEntity,
                     &UISliderComponent::OnValueChangedEvent,
                     uiSlider->OnValueChangedEvent);
+
+                // Keep editor-authored visual children aligned with inspector slider values.
+                if (sliderUsesVisualChildren)
+                    SyncSliderVisualChildrenInEditor(registry, selectedEntity, *uiSlider);
                 ImGui::TreePop();
             }
         }

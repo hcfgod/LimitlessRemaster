@@ -23,7 +23,8 @@ namespace Limitless::EditorInspectorPanel
                                       entt::entity selectedEntity,
                                       EditorUndoService* undoService)
         {
-            if (entry.HasComponent(registry, selectedEntity))
+            const bool wasDisabled = entry.HasComponent(registry, selectedEntity);
+            if (wasDisabled)
                 ImGui::BeginDisabled();
 
             if (ImGui::MenuItem(entry.MenuItemLabel))
@@ -42,7 +43,7 @@ namespace Limitless::EditorInspectorPanel
                 }
             }
 
-            if (entry.HasComponent(registry, selectedEntity))
+            if (wasDisabled)
                 ImGui::EndDisabled();
         }
 
@@ -80,185 +81,26 @@ namespace Limitless::EditorInspectorPanel
         if (!ImGui::BeginPopup("AddComponentPopup"))
             return;
 
-        if (HasComponent<CanvasComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Canvas))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (ImGui::MenuItem("Canvas"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add Canvas Component", [&](Scene& mutableScene) {
-                    auto& mutableRegistry = mutableScene.GetRegistry();
-                    mutableRegistry.emplace<CanvasComponent>(selectedEntity);
-                    if (!mutableRegistry.all_of<RectTransformComponent>(selectedEntity))
-                        mutableRegistry.emplace<RectTransformComponent>(selectedEntity);
-                    return true;
-                });
-            else {
-                registry.emplace<CanvasComponent>(selectedEntity);
-                if (!registry.all_of<RectTransformComponent>(selectedEntity))
-                    registry.emplace<RectTransformComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::RectTransform))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (HasComponent<CanvasComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::UIImage))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (HasComponent<RectTransformComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::UIPanel))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (ImGui::MenuItem("RectTransform"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add RectTransform Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<RectTransformComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<RectTransformComponent>(selectedEntity);
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::UIText))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (HasComponent<RectTransformComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::UIButton))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (HasComponent<UIImageComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("UI Image"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add UIImage Component", [&](Scene& mutableScene) {
-                    auto& mutableRegistry = mutableScene.GetRegistry();
-                    mutableRegistry.emplace<UIImageComponent>(selectedEntity);
-                    if (!mutableRegistry.all_of<RectTransformComponent>(selectedEntity))
-                        mutableRegistry.emplace<RectTransformComponent>(selectedEntity);
-                    if (!mutableRegistry.all_of<SpriteComponent>(selectedEntity))
-                        mutableRegistry.emplace<SpriteComponent>(selectedEntity);
-                    return true;
-                });
-            else {
-                registry.emplace<UIImageComponent>(selectedEntity);
-                if (!registry.all_of<RectTransformComponent>(selectedEntity))
-                    registry.emplace<RectTransformComponent>(selectedEntity);
-                if (!registry.all_of<SpriteComponent>(selectedEntity))
-                    registry.emplace<SpriteComponent>(selectedEntity);
-            }
-        }
-
-        if (HasComponent<UIImageComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
-
-        if (HasComponent<UIPanelComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("UI Panel"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add UIPanel Component", [&](Scene& mutableScene) {
-                    auto& mutableRegistry = mutableScene.GetRegistry();
-                    auto& panel = mutableRegistry.emplace<UIPanelComponent>(selectedEntity);
-                    if (!mutableRegistry.all_of<RectTransformComponent>(selectedEntity))
-                        mutableRegistry.emplace<RectTransformComponent>(selectedEntity);
-                    if (!mutableRegistry.all_of<SpriteComponent>(selectedEntity))
-                    {
-                        auto& sprite = mutableRegistry.emplace<SpriteComponent>(selectedEntity);
-                        sprite.Color = panel.BackgroundColor;
-                    }
-                    return true;
-                });
-            else
-            {
-                auto& panel = registry.emplace<UIPanelComponent>(selectedEntity);
-                if (!registry.all_of<RectTransformComponent>(selectedEntity))
-                    registry.emplace<RectTransformComponent>(selectedEntity);
-                if (!registry.all_of<SpriteComponent>(selectedEntity))
-                {
-                    auto& sprite = registry.emplace<SpriteComponent>(selectedEntity);
-                    sprite.Color = panel.BackgroundColor;
-                }
-            }
-        }
-
-        if (HasComponent<UIPanelComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
-
-        if (HasComponent<UITextComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("UI Text"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add UIText Component", [&](Scene& mutableScene) {
-                    auto& mutableRegistry = mutableScene.GetRegistry();
-                    auto& uiText = mutableRegistry.emplace<UITextComponent>(selectedEntity);
-                    uiText.FontFilePath = "Assets/Fonts/Default.ttf";
-                    if (!mutableRegistry.all_of<RectTransformComponent>(selectedEntity))
-                        mutableRegistry.emplace<RectTransformComponent>(selectedEntity);
-                    return true;
-                });
-            else
-            {
-                auto& uiText = registry.emplace<UITextComponent>(selectedEntity);
-                uiText.FontFilePath = "Assets/Fonts/Default.ttf";
-                if (!registry.all_of<RectTransformComponent>(selectedEntity))
-                    registry.emplace<RectTransformComponent>(selectedEntity);
-            }
-        }
-
-        if (HasComponent<UITextComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
-
-        if (HasComponent<UIButtonComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("UI Button"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add UIButton Component", [&](Scene& mutableScene) {
-                    auto& mutableRegistry = mutableScene.GetRegistry();
-                    auto& button = mutableRegistry.emplace<UIButtonComponent>(selectedEntity);
-                    if (!mutableRegistry.all_of<UIImageComponent>(selectedEntity))
-                        mutableRegistry.emplace<UIImageComponent>(selectedEntity);
-                    if (!mutableRegistry.all_of<RectTransformComponent>(selectedEntity))
-                        mutableRegistry.emplace<RectTransformComponent>(selectedEntity);
-                    if (!mutableRegistry.all_of<SpriteComponent>(selectedEntity))
-                    {
-                        auto& sprite = mutableRegistry.emplace<SpriteComponent>(selectedEntity);
-                        sprite.Color = glm::vec4(0.82f, 0.82f, 0.82f, 1.0f);
-                    }
-                    if (auto* sprite = mutableRegistry.try_get<SpriteComponent>(selectedEntity))
-                    {
-                        button.NormalColor = sprite->Color;
-                        button.HoveredColor = glm::clamp(sprite->Color * glm::vec4(1.12f, 1.12f, 1.12f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
-                        button.PressedColor = glm::clamp(sprite->Color * glm::vec4(0.85f, 0.85f, 0.85f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
-                        button.DisabledColor = glm::clamp(sprite->Color * glm::vec4(0.55f, 0.55f, 0.55f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
-                    }
-                    return true;
-                });
-            else {
-                auto& button = registry.emplace<UIButtonComponent>(selectedEntity);
-                if (!registry.all_of<UIImageComponent>(selectedEntity))
-                    registry.emplace<UIImageComponent>(selectedEntity);
-                if (!registry.all_of<RectTransformComponent>(selectedEntity))
-                    registry.emplace<RectTransformComponent>(selectedEntity);
-                if (!registry.all_of<SpriteComponent>(selectedEntity))
-                {
-                    auto& sprite = registry.emplace<SpriteComponent>(selectedEntity);
-                    sprite.Color = glm::vec4(0.82f, 0.82f, 0.82f, 1.0f);
-                }
-                if (auto* sprite = registry.try_get<SpriteComponent>(selectedEntity))
-                {
-                    button.NormalColor = sprite->Color;
-                    button.HoveredColor = glm::clamp(sprite->Color * glm::vec4(1.12f, 1.12f, 1.12f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
-                    button.PressedColor = glm::clamp(sprite->Color * glm::vec4(0.85f, 0.85f, 0.85f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
-                    button.DisabledColor = glm::clamp(sprite->Color * glm::vec4(0.55f, 0.55f, 0.55f, 1.0f), glm::vec4(0.0f), glm::vec4(1.0f));
-                }
-            }
-        }
-
-        if (HasComponent<UIButtonComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
-
-        if (HasComponent<UISliderComponent>(registry, selectedEntity))
+        const bool wasSliderDisabled = HasComponent<UISliderComponent>(registry, selectedEntity);
+        if (wasSliderDisabled)
             ImGui::BeginDisabled();
 
         if (ImGui::MenuItem("UI Slider"))
@@ -424,7 +266,7 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (HasComponent<UISliderComponent>(registry, selectedEntity))
+        if (wasSliderDisabled)
             ImGui::EndDisabled();
 
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Sprite))
@@ -439,22 +281,8 @@ namespace Limitless::EditorInspectorPanel
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AudioSource))
             DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (HasComponent<NativeScriptComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("Native Script"))
-        {
-            if (undoService)
-                (void)undoService->ExecuteSceneMutation("Add Native Script Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().emplace<NativeScriptComponent>(selectedEntity);
-                    return true;
-                });
-            else
-                registry.emplace<NativeScriptComponent>(selectedEntity);
-        }
-
-        if (HasComponent<NativeScriptComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::NativeScript))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Animator))
             DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
@@ -486,28 +314,8 @@ namespace Limitless::EditorInspectorPanel
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Grid2D))
             DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (HasComponent<TilemapLayerComponent>(registry, selectedEntity))
-            ImGui::BeginDisabled();
-
-        if (ImGui::MenuItem("Tilemap Layer"))
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Add TilemapLayer Component", [&](Scene& mutableScene) {
-                    auto& layer = mutableScene.GetRegistry().emplace<TilemapLayerComponent>(selectedEntity);
-                    layer.EnsureStorage();
-                    return true;
-                });
-            }
-            else
-            {
-                auto& layer = registry.emplace<TilemapLayerComponent>(selectedEntity);
-                layer.EnsureStorage();
-            }
-        }
-
-        if (HasComponent<TilemapLayerComponent>(registry, selectedEntity))
-            ImGui::EndDisabled();
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::TilemapLayer))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::ParticleEmitter))
             DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
@@ -524,95 +332,23 @@ namespace Limitless::EditorInspectorPanel
     {
         (void)scene;
 
-        if (pendingRemovals.RemoveCanvasComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove Canvas Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<CanvasComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<CanvasComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Canvas))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveCanvasComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveRectTransformComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove RectTransform Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<RectTransformComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<RectTransformComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::RectTransform))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveRectTransformComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveUIImageComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove UIImage Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<UIImageComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<UIImageComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::UIImage))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveUIImageComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveUIPanelComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove UIPanel Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<UIPanelComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<UIPanelComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::UIPanel))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveUIPanelComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveUITextComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove UIText Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<UITextComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<UITextComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::UIText))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveUITextComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveUIButtonComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove UIButton Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<UIButtonComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<UIButtonComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::UIButton))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveUIButtonComponent, registry, selectedEntity, undoService);
 
         if (pendingRemovals.RemoveUISliderComponent)
         {
@@ -656,37 +392,8 @@ namespace Limitless::EditorInspectorPanel
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AudioSource))
             ApplyPendingRemoval(*entry, pendingRemovals.RemoveAudioSourceComponent, registry, selectedEntity, undoService);
 
-        if (removeNativeScriptComponent)
-        {
-            if (auto* nativeScript = registry.try_get<NativeScriptComponent>(selectedEntity))
-            {
-                for (auto& scriptEntry : nativeScript->Scripts)
-                {
-                    scriptEntry.RuntimeInitialized = false;
-                    scriptEntry.RuntimeInstance.reset();
-                }
-            }
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove Native Script Component", [&](Scene& mutableScene) {
-                    auto& mutableRegistry = mutableScene.GetRegistry();
-                    if (auto* mutableNativeScript = mutableRegistry.try_get<NativeScriptComponent>(selectedEntity))
-                    {
-                        for (auto& scriptEntry : mutableNativeScript->Scripts)
-                        {
-                            scriptEntry.RuntimeInitialized = false;
-                            scriptEntry.RuntimeInstance.reset();
-                        }
-                    }
-                    mutableRegistry.remove<NativeScriptComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<NativeScriptComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::NativeScript))
+            ApplyPendingRemoval(*entry, removeNativeScriptComponent, registry, selectedEntity, undoService);
 
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Animator))
             ApplyPendingRemoval(*entry, pendingRemovals.RemoveAnimatorComponent, registry, selectedEntity, undoService);
@@ -721,19 +428,7 @@ namespace Limitless::EditorInspectorPanel
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Grid2D))
             ApplyPendingRemoval(*entry, pendingRemovals.RemoveGrid2DComponent, registry, selectedEntity, undoService);
 
-        if (pendingRemovals.RemoveTilemapLayerComponent)
-        {
-            if (undoService)
-            {
-                (void)undoService->ExecuteSceneMutation("Remove TilemapLayer Component", [&](Scene& mutableScene) {
-                    mutableScene.GetRegistry().remove<TilemapLayerComponent>(selectedEntity);
-                    return true;
-                });
-            }
-            else
-            {
-                registry.remove<TilemapLayerComponent>(selectedEntity);
-            }
-        }
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::TilemapLayer))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveTilemapLayerComponent, registry, selectedEntity, undoService);
     }
 }

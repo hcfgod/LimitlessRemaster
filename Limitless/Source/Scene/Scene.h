@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Limitless
@@ -31,6 +32,30 @@ namespace Limitless
         uint64_t Sequence = 0;
         std::function<void()> Apply;
         std::string DebugName;
+    };
+
+    struct RuntimeContactPairKey
+    {
+        uint32_t EntityA = 0;
+        uint32_t EntityB = 0;
+        bool IsSensor = false;
+
+        bool operator==(const RuntimeContactPairKey& other) const
+        {
+            return EntityA == other.EntityA &&
+                   EntityB == other.EntityB &&
+                   IsSensor == other.IsSensor;
+        }
+    };
+
+    struct RuntimeContactPairKeyHasher
+    {
+        size_t operator()(const RuntimeContactPairKey& key) const
+        {
+            const uint64_t packedEntities = (static_cast<uint64_t>(key.EntityA) << 32u) | static_cast<uint64_t>(key.EntityB);
+            const uint64_t sensorTag = key.IsSensor ? 0x9e3779b97f4a7c15ull : 0x85ebca77c2b2ae63ull;
+            return static_cast<size_t>(packedEntities ^ sensorTag);
+        }
     };
 
     // -----------------------------------------------------------------------------
@@ -200,6 +225,7 @@ namespace Limitless
         uint16_t m_MaxHierarchyDepth = 0;
         RuntimePhase m_RuntimePhase = RuntimePhase::Idle;
         bool m_IsApplyingDeferredStructuralMutations = false;
+        bool m_ForceDeferredEntityDestruction = false;
         mutable std::atomic<uint32_t> m_WarnedUnsafeMutableRegistryAccessPhases{ 0 };
 
         static constexpr size_t kDeferredStructuralMutationQueueSize = 8192;
@@ -215,6 +241,8 @@ namespace Limitless
         mutable std::mutex m_DeferredEntityReferencesMutex;
         std::unordered_map<entt::entity, entt::entity> m_DeferredEntityReferences;
         std::atomic<uint64_t> m_NextDeferredEntityReferenceSequence{ 1 };
+
+        std::unordered_set<RuntimeContactPairKey, RuntimeContactPairKeyHasher> m_RuntimeActiveContactPairs;
     };
 
     // -----------------------------------------------------------------------------

@@ -32,6 +32,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace Limitless
@@ -189,6 +190,51 @@ namespace Limitless
             if (!s_ActiveScene || !prefabAssetKey || prefabAssetKey[0] == '\0')
                 return entt::null;
             return s_ActiveScene->InstantiatePrefab(prefabAssetKey, parentEntity);
+        }
+
+        uint32_t ForwardScriptContactEntityHandlesToHost(entt::entity entity,
+                                                         bool includeSensorContacts,
+                                                         entt::entity* outHandles,
+                                                         uint32_t capacity)
+        {
+            if (!s_ActiveScene || entity == entt::null)
+                return 0u;
+            auto& registry = s_ActiveScene->GetRegistry();
+            if (!registry.valid(entity))
+                return 0u;
+
+            const Physics2DContactListener* contacts = s_ActiveScene->GetPhysics2DContactEventsForEntity(entity);
+            if (!contacts)
+                return 0u;
+
+            std::vector<entt::entity> uniqueContacts;
+            std::unordered_set<entt::entity> seenContacts;
+            const auto& events = contacts->GetEvents();
+            for (const auto& eventData : events)
+            {
+                if (!includeSensorContacts && eventData.IsSensor)
+                    continue;
+
+                entt::entity other = entt::null;
+                if (eventData.EntityA == entity)
+                    other = eventData.EntityB;
+                else if (eventData.EntityB == entity)
+                    other = eventData.EntityA;
+
+                if (other == entt::null || !registry.valid(other))
+                    continue;
+                if (seenContacts.insert(other).second)
+                    uniqueContacts.push_back(other);
+            }
+
+            const uint32_t totalCount = static_cast<uint32_t>(uniqueContacts.size());
+            if (!outHandles || capacity == 0u)
+                return totalCount;
+
+            const uint32_t toWrite = std::min(totalCount, capacity);
+            for (uint32_t index = 0; index < toWrite; ++index)
+                outHandles[index] = uniqueContacts[static_cast<size_t>(index)];
+            return toWrite;
         }
 
         bool ForwardScriptParallelExecutionStateToHost()
@@ -915,6 +961,7 @@ namespace Limitless
         connectBridge("LT_SetScriptCreateEntityBridge", &ForwardScriptCreateEntityToHost);
         connectBridge("LT_SetScriptDestroyEntityBridge", &ForwardScriptDestroyEntityToHost);
         connectBridge("LT_SetScriptInstantiatePrefabBridge", &ForwardScriptInstantiatePrefabToHost);
+        connectBridge("LT_SetScriptContactEntityHandlesBridge", &ForwardScriptContactEntityHandlesToHost);
 
         // Legacy bridge names (backward compat with older ScriptCore builds).
         connectBridge("LT_SetInputButtonDownBridge", &ForwardInputActionStartedToHost);
@@ -927,6 +974,7 @@ namespace Limitless
         ScriptableEntity::SetCreateEntityBridgeCallback(&ForwardScriptCreateEntityToHost);
         ScriptableEntity::SetDestroyEntityBridgeCallback(&ForwardScriptDestroyEntityToHost);
         ScriptableEntity::SetInstantiatePrefabBridgeCallback(&ForwardScriptInstantiatePrefabToHost);
+        ScriptableEntity::SetContactEntityHandlesBridgeCallback(&ForwardScriptContactEntityHandlesToHost);
         ScriptableEntity::SetParallelScriptExecutionBridgeCallback(&ForwardScriptParallelExecutionStateToHost);
         Entity::SetDestroyBridgeCallback(&ForwardScriptDestroyEntityToHost);
         Entity::SetParallelExecutionBridgeCallback(&ForwardScriptParallelExecutionStateToHost);

@@ -4,8 +4,12 @@
 #include "Core/ConfigManager.h"
 #include "Physics/Physics2DQueries.h"
 #include "Physics/Physics2DWorld.h"
+#include "Scripting/ScriptableEntity.h"
 
 #include <algorithm>
+#include <exception>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace Limitless
 {
@@ -25,6 +29,81 @@ namespace Limitless
                 return 0;
             return std::min<uint16_t>(requestedSlot, static_cast<uint16_t>(worldCount - 1));
         }
+
+        RuntimeContactPairKey MakeContactPairKey(entt::entity entityA, entt::entity entityB, bool isSensor)
+        {
+            const uint32_t encodedA = static_cast<uint32_t>(entityA);
+            const uint32_t encodedB = static_cast<uint32_t>(entityB);
+            RuntimeContactPairKey key{};
+            key.EntityA = std::min(encodedA, encodedB);
+            key.EntityB = std::max(encodedA, encodedB);
+            key.IsSensor = isSensor;
+            return key;
+        }
+
+        void DispatchScriptContactCallbackForEntity(Scene& scene,
+                                                    entt::entity selfEntity,
+                                                    entt::entity otherEntity,
+                                                    bool isSensor,
+                                                    bool dispatchEnter,
+                                                    bool dispatchStay,
+                                                    bool dispatchExit)
+        {
+            if (!scene.IsValid(selfEntity) || !scene.IsValid(otherEntity))
+                return;
+            if (!scene.IsEntityEnabledInHierarchy(selfEntity))
+                return;
+
+            auto& registry = scene.GetRegistry();
+            auto* nativeScriptComponent = registry.try_get<NativeScriptComponent>(selfEntity);
+            if (!nativeScriptComponent)
+                return;
+
+            const Entity other(&registry, otherEntity);
+            for (auto& scriptEntry : nativeScriptComponent->Scripts)
+            {
+                if (!scriptEntry.Enabled || !scriptEntry.RuntimeInstance || !scriptEntry.RuntimeInitialized)
+                    continue;
+
+                const auto* tag = registry.try_get<TagComponent>(selfEntity);
+                try
+                {
+                    if (isSensor)
+                    {
+                        if (dispatchEnter)
+                            scriptEntry.RuntimeInstance->DispatchTriggerEnter(other);
+                        if (dispatchStay)
+                            scriptEntry.RuntimeInstance->DispatchTriggerStay(other);
+                        if (dispatchExit)
+                            scriptEntry.RuntimeInstance->DispatchTriggerExit(other);
+                    }
+                    else
+                    {
+                        if (dispatchEnter)
+                            scriptEntry.RuntimeInstance->DispatchCollisionEnter(other);
+                        if (dispatchStay)
+                            scriptEntry.RuntimeInstance->DispatchCollisionStay(other);
+                        if (dispatchExit)
+                            scriptEntry.RuntimeInstance->DispatchCollisionExit(other);
+                    }
+                }
+                catch (const std::exception& exception)
+                {
+                    LT_WARN("Script '{}' on entity '{}' threw during {} callback: {}",
+                            scriptEntry.ScriptClassName,
+                            tag ? tag->Tag : "Entity",
+                            isSensor ? "trigger" : "collision",
+                            exception.what());
+                }
+                catch (...)
+                {
+                    LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during {} callback",
+                            scriptEntry.ScriptClassName,
+                            tag ? tag->Tag : "Entity",
+                            isSensor ? "trigger" : "collision");
+                }
+            }
+        }
     }
 
     void Scene::BeginLoadingState()
@@ -32,6 +111,7 @@ namespace Limitless
         m_LoadState = LoadState::Loading;
         m_SceneObjectsInitialized = false;
         m_PhysicsWorldInitializedForLoading = false;
+        m_RuntimeActiveContactPairs.clear();
     }
 
     void Scene::MarkSceneObjectsInitialized()
@@ -105,6 +185,85 @@ namespace Limitless
         {
             physicsWorld->SyncAfterStep(*this);
         }
+
+        // Dispatch Unity-style collision/trigger callbacks for runtime scripts.
+        // This keeps contact state persistent across steps for Enter/Stay/Exit semantics.
+        if (!m_RuntimeActiveContactPairs.empty())
+        {
+            for (auto it = m_RuntimeActiveContactPairs.begin(); it != m_RuntimeActiveContactPairs.end();)
+            {
+                const entt::entity entityA = static_cast<entt::entity>(it->EntityA);
+                const entt::entity entityB = static_cast<entt::entity>(it->EntityB);
+                if (!IsValid(entityA) || !IsValid(entityB))
+                {
+                    it = m_RuntimeActiveContactPairs.erase(it);
+                    continue;
+                }
+                ++it;
+            }
+        }
+
+        std::unordered_set<RuntimeContactPairKey, RuntimeContactPairKeyHasher> beginPairs;
+        std::unordered_set<RuntimeContactPairKey, RuntimeContactPairKeyHasher> endPairs;
+        for (Physics2DWorld* physicsWorld : activeWorlds)
+        {
+            if (!physicsWorld)
+                continue;
+
+            const auto& events = physicsWorld->GetContactListener().GetEvents();
+            for (const auto& eventData : events)
+            {
+                if (eventData.EntityA == entt::null || eventData.EntityB == entt::null)
+                    continue;
+                const RuntimeContactPairKey key = MakeContactPairKey(eventData.EntityA, eventData.EntityB, eventData.IsSensor);
+                if (eventData.IsBegin)
+                    beginPairs.insert(key);
+                else
+                    endPairs.insert(key);
+            }
+        }
+
+        std::unordered_set<RuntimeContactPairKey, RuntimeContactPairKeyHasher> changedPairs = beginPairs;
+        changedPairs.insert(endPairs.begin(), endPairs.end());
+        m_ForceDeferredEntityDestruction = true;
+        for (const RuntimeContactPairKey& key : changedPairs)
+        {
+            const bool hasBegin = beginPairs.find(key) != beginPairs.end();
+            const bool hasEnd = endPairs.find(key) != endPairs.end();
+            const bool wasActive = m_RuntimeActiveContactPairs.find(key) != m_RuntimeActiveContactPairs.end();
+
+            const entt::entity entityA = static_cast<entt::entity>(key.EntityA);
+            const entt::entity entityB = static_cast<entt::entity>(key.EntityB);
+
+            if (!wasActive)
+            {
+                if (hasBegin && !hasEnd)
+                {
+                    m_RuntimeActiveContactPairs.insert(key);
+                    DispatchScriptContactCallbackForEntity(*this, entityA, entityB, key.IsSensor, true, false, false);
+                    DispatchScriptContactCallbackForEntity(*this, entityB, entityA, key.IsSensor, true, false, false);
+                }
+                continue;
+            }
+
+            if (hasEnd && !hasBegin)
+            {
+                DispatchScriptContactCallbackForEntity(*this, entityA, entityB, key.IsSensor, false, false, true);
+                DispatchScriptContactCallbackForEntity(*this, entityB, entityA, key.IsSensor, false, false, true);
+                m_RuntimeActiveContactPairs.erase(key);
+            }
+        }
+
+        for (const RuntimeContactPairKey& key : m_RuntimeActiveContactPairs)
+        {
+            const entt::entity entityA = static_cast<entt::entity>(key.EntityA);
+            const entt::entity entityB = static_cast<entt::entity>(key.EntityB);
+            DispatchScriptContactCallbackForEntity(*this, entityA, entityB, key.IsSensor, false, true, false);
+            DispatchScriptContactCallbackForEntity(*this, entityB, entityA, key.IsSensor, false, true, false);
+        }
+        m_ForceDeferredEntityDestruction = false;
+        FlushDeferredStructuralMutations();
+
         m_PhysicsWorldInitializedForLoading = true;
         SetRuntimePhase(RuntimePhase::Transform);
         UpdateTransforms();
@@ -218,6 +377,7 @@ namespace Limitless
 
     void Scene::ResetPhysicsRuntimeState()
     {
+        m_RuntimeActiveContactPairs.clear();
         for (auto& physicsWorld : m_Physics2DWorlds)
         {
             if (physicsWorld)
@@ -227,6 +387,7 @@ namespace Limitless
 
     void Scene::ResetPhysicsRuntimeState(uint16_t worldSlot)
     {
+        m_RuntimeActiveContactPairs.clear();
         if (m_Physics2DWorlds.empty())
             return;
 

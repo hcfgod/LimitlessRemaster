@@ -23,6 +23,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace Limitless::ScriptCoreModuleRuntime
@@ -42,6 +43,7 @@ namespace Limitless::ScriptCoreModuleRuntime
         using SetScriptCreateEntityBridgeFunction = void (*)(ScriptCreateEntityBridgeCallback callback);
         using SetScriptDestroyEntityBridgeFunction = void (*)(ScriptDestroyEntityBridgeCallback callback);
         using SetScriptInstantiatePrefabBridgeFunction = void (*)(ScriptInstantiatePrefabBridgeCallback callback);
+        using SetScriptContactEntityHandlesBridgeFunction = void (*)(ScriptGetContactEntityHandlesBridgeCallback callback);
 
         struct RuntimeState final
         {
@@ -480,6 +482,53 @@ namespace Limitless::ScriptCoreModuleRuntime
             return scene->InstantiatePrefab(prefabAssetKey, parentEntity);
         }
 
+        uint32_t ForwardScriptContactEntityHandlesToHost(entt::entity entity,
+                                                         bool includeSensorContacts,
+                                                         entt::entity* outHandles,
+                                                         uint32_t capacity)
+        {
+            Scene* scene = Physics2DQueries::GetActiveSceneForScriptQueries();
+            if (!scene || entity == entt::null)
+                return 0u;
+
+            auto& registry = scene->GetRegistry();
+            if (!registry.valid(entity))
+                return 0u;
+
+            const Physics2DContactListener* contacts = scene->GetPhysics2DContactEventsForEntity(entity);
+            if (!contacts)
+                return 0u;
+
+            std::vector<entt::entity> uniqueContacts;
+            std::unordered_set<entt::entity> seenContacts;
+            const auto& events = contacts->GetEvents();
+            for (const auto& eventData : events)
+            {
+                if (!includeSensorContacts && eventData.IsSensor)
+                    continue;
+
+                entt::entity other = entt::null;
+                if (eventData.EntityA == entity)
+                    other = eventData.EntityB;
+                else if (eventData.EntityB == entity)
+                    other = eventData.EntityA;
+
+                if (other == entt::null || !registry.valid(other))
+                    continue;
+                if (seenContacts.insert(other).second)
+                    uniqueContacts.push_back(other);
+            }
+
+            const uint32_t totalCount = static_cast<uint32_t>(uniqueContacts.size());
+            if (!outHandles || capacity == 0u)
+                return totalCount;
+
+            const uint32_t toWrite = std::min(totalCount, capacity);
+            for (uint32_t index = 0; index < toWrite; ++index)
+                outHandles[index] = uniqueContacts[static_cast<size_t>(index)];
+            return toWrite;
+        }
+
         bool ReloadScriptCoreModule(const std::filesystem::path& libraryPath)
         {
             std::error_code errorCode;
@@ -656,6 +705,11 @@ namespace Limitless::ScriptCoreModuleRuntime
                 PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptInstantiatePrefabBridge"));
             if (setScriptInstantiatePrefabBridge)
                 setScriptInstantiatePrefabBridge(&ForwardScriptInstantiatePrefabToHost);
+
+            const auto setScriptContactEntityHandlesBridge = reinterpret_cast<SetScriptContactEntityHandlesBridgeFunction>(
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptContactEntityHandlesBridge"));
+            if (setScriptContactEntityHandlesBridge)
+                setScriptContactEntityHandlesBridge(&ForwardScriptContactEntityHandlesToHost);
 
             ResetRuntimeScriptRegistry();
             registerFunction(&RegisterScriptFromModule);

@@ -54,6 +54,8 @@ namespace Limitless
     using ScriptDestroyEntityBridgeCallback = void (*)(entt::entity entity);
     using ScriptInstantiatePrefabBridgeCallback = entt::entity (*)(const char* prefabAssetKey, entt::entity parentEntity);
     using ScriptParallelExecutionBridgeCallback = bool (*)();
+    using ScriptGetContactEntityHandlesBridgeCallback =
+        uint32_t (*)(entt::entity entity, bool includeSensorContacts, entt::entity* outHandles, uint32_t capacity);
 
     // Base type for native C++ entity scripts.
     // Derive from this, register in NativeScriptRegistry, then assign in NativeScriptComponent.
@@ -222,6 +224,16 @@ namespace Limitless
         static void SetDestroyEntityBridgeCallback(ScriptDestroyEntityBridgeCallback callback);
         static void SetInstantiatePrefabBridgeCallback(ScriptInstantiatePrefabBridgeCallback callback);
         static void SetParallelScriptExecutionBridgeCallback(ScriptParallelExecutionBridgeCallback callback);
+        static void SetContactEntityHandlesBridgeCallback(ScriptGetContactEntityHandlesBridgeCallback callback);
+
+        // Runtime dispatch wrappers used by scene physics integration.
+        // Keep callback virtuals protected for script authors.
+        void DispatchCollisionEnter(const Entity& other) { OnCollisionEnter(other); }
+        void DispatchCollisionStay(const Entity& other) { OnCollisionStay(other); }
+        void DispatchCollisionExit(const Entity& other) { OnCollisionExit(other); }
+        void DispatchTriggerEnter(const Entity& other) { OnTriggerEnter(other); }
+        void DispatchTriggerStay(const Entity& other) { OnTriggerStay(other); }
+        void DispatchTriggerExit(const Entity& other) { OnTriggerExit(other); }
 
         // Optional class-level declaration for parallel compatibility scheduling.
         // If a NativeScriptEntry has no authored masks, runtime will use these defaults.
@@ -264,6 +276,10 @@ namespace Limitless
 
         bool HasContactWith(entt::entity otherEntity, bool includeSensorContacts = true) const;
         int GetContactCount(bool includeSensorContacts = true) const;
+        std::vector<entt::entity> GetContactEntityHandles(bool includeSensorContacts = true) const;
+        std::vector<entt::entity> GetContactEntityHandles(entt::entity entity, bool includeSensorContacts = true) const;
+        std::vector<Entity> GetContactEntities(bool includeSensorContacts = true) const;
+        std::vector<Entity> GetContactEntities(entt::entity entity, bool includeSensorContacts = true) const;
 
         // Animator 2D runtime controls.
         bool HasAnimator() const;
@@ -296,6 +312,12 @@ namespace Limitless
         virtual void OnCreate() {}
         virtual void OnFixedUpdate(float fixedDeltaTime) { (void)fixedDeltaTime; }
         virtual void OnUpdate(float deltaTime) {}
+        virtual void OnCollisionEnter(const Entity& other) { (void)other; }
+        virtual void OnCollisionStay(const Entity& other) { (void)other; }
+        virtual void OnCollisionExit(const Entity& other) { (void)other; }
+        virtual void OnTriggerEnter(const Entity& other) { (void)other; }
+        virtual void OnTriggerStay(const Entity& other) { (void)other; }
+        virtual void OnTriggerExit(const Entity& other) { (void)other; }
         virtual void OnDestroy() {}
 
     private:
