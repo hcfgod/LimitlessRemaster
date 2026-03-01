@@ -227,8 +227,48 @@ jobs:
                               break
 
                   if file_candidate.exists():
-                      entry["file"] = str(file_candidate)
-                      entry["arguments"] = [str(file_candidate) if arg == original_file else arg for arg in args]
+                      resolved_file = str(file_candidate)
+                      entry["file"] = resolved_file
+
+                      original_norm = str(original_file).replace("\\", "/").lower()
+                      rewritten_args = []
+                      replaced_source_arg = False
+                      for arg in args:
+                          if not isinstance(arg, str):
+                              rewritten_args.append(arg)
+                              continue
+
+                          arg_norm = arg.replace("\\", "/").lower()
+                          arg_is_cpp = arg_norm.endswith(".cpp")
+                          arg_looks_like_source = arg_norm.startswith("source/") or "/source/" in arg_norm
+
+                          if (
+                              arg == original_file
+                              or arg_norm == original_norm
+                              or (
+                                  arg_is_cpp
+                                  and arg_looks_like_source
+                                  and (
+                                      original_norm.endswith(arg_norm)
+                                      or arg_norm.endswith(original_norm)
+                                  )
+                              )
+                          ):
+                              rewritten_args.append(resolved_file)
+                              replaced_source_arg = True
+                          else:
+                              rewritten_args.append(arg)
+
+                      if not replaced_source_arg and rewritten_args:
+                          # Last-resort repair for compile commands that keep a stale
+                          # relative source argument even after file path normalization.
+                          last_arg = rewritten_args[-1]
+                          if isinstance(last_arg, str):
+                              last_norm = last_arg.replace("\\", "/").lower()
+                              if last_norm.endswith(".cpp") and (last_norm.startswith("source/") or "/source/" in last_norm):
+                                  rewritten_args[-1] = resolved_file
+
+                      entry["arguments"] = rewritten_args
 
           with open("compile_commands.json", "w", encoding="utf-8") as f:
               json.dump(database, f, indent=2)
