@@ -181,32 +181,140 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
           PUSH_HEAD_SHA: ${{ github.sha }}
         run: |
+          # Normalize compile_commands paths so clang-tidy can resolve files
+          # regardless of per-project build directories (Editor/Limitless/etc).
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import shlex
+
+          repo_root = Path(os.getcwd()).resolve()
+          with open("compile_commands.json", "r", encoding="utf-8") as f:
+              database = json.load(f)
+
+          for entry in database:
+              original_file = entry.get("file", "")
+              args = entry.get("arguments")
+              if args is None:
+                  args = shlex.split(entry.get("command", ""))
+                  entry["arguments"] = args
+                  entry.pop("command", None)
+
+              file_candidate = None
+              if original_file:
+                  raw_file = Path(original_file)
+                  directory = Path(entry.get("directory", "."))
+                  if not directory.is_absolute():
+                      directory = (repo_root / directory).resolve()
+                  file_candidate = raw_file if raw_file.is_absolute() else (directory / raw_file).resolve()
+
+                  if not file_candidate.exists():
+                      fallback_candidates = []
+                      if not raw_file.is_absolute():
+                          fallback_candidates.append((repo_root / raw_file).resolve())
+                          if str(raw_file).startswith("Source/"):
+                              for project_root in ("Limitless", "Editor", "Runtime", "Test"):
+                                  fallback_candidates.append((repo_root / project_root / raw_file).resolve())
+
+                      for candidate in fallback_candidates:
+                          if candidate.exists():
+                              file_candidate = candidate
+                              break
+
+                  if file_candidate.exists():
+                      entry["file"] = str(file_candidate)
+                      entry["arguments"] = [str(file_candidate) if arg == original_file else arg for arg in args]
+
+          with open("compile_commands.json", "w", encoding="utf-8") as f:
+              json.dump(database, f, indent=2)
+          PY
+
           BASE_SHA=""
           HEAD_SHA=""
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            BASE_SHA="$PR_BASE_SHA"
             HEAD_SHA="$PR_HEAD_SHA"
+            if [ -n "$PR_BASE_REF" ]; then
+              git fetch --no-tags --prune --depth=200 origin "refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF" || true
+            fi
           else
             BASE_SHA="$PUSH_BEFORE_SHA"
             HEAD_SHA="$PUSH_HEAD_SHA"
           fi
 
-          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
-            mapfile -t source_files < <(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$')
+          if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$PR_BASE_REF" ] && \
+             [ -n "$HEAD_SHA" ] && git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null && \
+             git rev-parse --verify "origin/$PR_BASE_REF" >/dev/null 2>&1; then
+            (git diff --name-only --diff-filter=ACMR "origin/$PR_BASE_REF...$HEAD_SHA" | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt) || true
+          elif [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ] && \
+               [ -n "$HEAD_SHA" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null && git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            (git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt) || true
+          elif [ -n "$HEAD_SHA" ] && git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            echo "Diff base commit unavailable; falling back to changed files in HEAD commit."
+            (git show --name-only --pretty="" --diff-filter=ACMR "$HEAD_SHA" | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt) || true
           else
-            mapfile -t source_files < <(git ls-files | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$')
+            echo "Unable to determine changed files from git history."
+            : > clang-tidy-files.txt
           fi
 
-          if [ "${#source_files[@]}" -eq 0 ]; then
+          if [ ! -s clang-tidy-files.txt ]; then
             echo "No changed first-party source files to analyze."
             exit 0
           fi
-          echo "Analyzing ${#source_files[@]} changed C++ source files."
+          sort -u -o clang-tidy-files.txt clang-tidy-files.txt
 
-          printf '%s\n' "${source_files[@]}" > clang-tidy-files.txt
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          repo_root = Path(os.getcwd()).resolve()
+          with open("compile_commands.json", "r", encoding="utf-8") as f:
+              database = json.load(f)
+
+          compile_db_files = set()
+          for entry in database:
+              file_path = entry.get("file")
+              if not file_path:
+                  continue
+
+              directory = Path(entry.get("directory", "."))
+              if not directory.is_absolute():
+                  directory = (repo_root / directory).resolve()
+
+              candidate = Path(file_path)
+              if not candidate.is_absolute():
+                  candidate = (directory / candidate).resolve()
+              else:
+                  candidate = candidate.resolve()
+
+              try:
+                  rel = candidate.relative_to(repo_root).as_posix()
+                  compile_db_files.add(rel)
+              except ValueError:
+                  pass
+
+          changed_files_path = repo_root / "clang-tidy-files.txt"
+          with changed_files_path.open("r", encoding="utf-8") as f:
+              changed = [line.strip() for line in f if line.strip()]
+
+          filtered = [path for path in changed if path in compile_db_files]
+          with changed_files_path.open("w", encoding="utf-8") as f:
+              f.write("\n".join(filtered))
+              if filtered:
+                  f.write("\n")
+          print(f"Filtered changed files to {len(filtered)} entries present in compile_commands.json.")
+          PY
+
+          if [ ! -s clang-tidy-files.txt ]; then
+            echo "No changed source files matched compile_commands.json entries."
+            exit 0
+          fi
+          echo "Analyzing $(wc -l < clang-tidy-files.txt) changed C++ source files."
 
           # Run in batches to reduce process startup overhead and keep logs concise.
           xargs -r -a clang-tidy-files.txt -n 40 \

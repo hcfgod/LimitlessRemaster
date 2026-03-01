@@ -821,8 +821,6 @@ namespace Limitless
                     { authoringPosition.x, authoringPosition.y },
                     b2MakeRot(authoringAngleRadians));
                 b2Body_SetAwake(rigidbody.RuntimeBodyId, true);
-                runtimePosition = authoringPosition;
-                runtimeAngleRadians = authoringAngleRadians;
                 transformChangedByAuthoring = false;
 
 #if !defined(NDEBUG)

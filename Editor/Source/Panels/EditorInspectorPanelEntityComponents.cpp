@@ -219,17 +219,20 @@ namespace Limitless::EditorInspectorPanel
                     keys.push_back(record.Key);
             }
 
-            auto tryAddKnownDefault = [&](const char* key) {
-                if (!key || !key[0] || seen.contains(key))
+            auto tryAddKnownDefault = [&](std::string_view key) {
+                if (key.empty())
                     return;
-                const auto resolved = Assets::ResolveAssetKeyToPath(key);
+                const std::string keyText(key);
+                if (seen.contains(keyText))
+                    return;
+                const auto resolved = Assets::ResolveAssetKeyToPath(keyText);
                 if (resolved.IsFailure())
                     return;
                 std::error_code ec;
                 if (std::filesystem::exists(resolved.GetValue(), ec))
                 {
-                    seen.insert(key);
-                    keys.emplace_back(key);
+                    seen.insert(keyText);
+                    keys.emplace_back(keyText);
                 }
             };
 

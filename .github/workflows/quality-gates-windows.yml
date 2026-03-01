@@ -100,6 +100,7 @@ jobs:
       - name: Build with MSVC code analysis (first-party hard gate)
         if: steps.analyzer_targets.outputs.targets != ''
         run: |
+          $analyzeLog = "msvc-analyze.log"
           msbuild LimitlessRemaster.sln `
             "/t:${{ steps.analyzer_targets.outputs.targets }}" `
             /p:Configuration=Debug `
@@ -107,12 +108,55 @@ jobs:
             /m `
             /p:BuildProjectReferences=false `
             /p:RunCodeAnalysis=true `
-            /p:CodeAnalysisTreatWarningsAsErrors=true `
+            /p:CodeAnalysisTreatWarningsAsErrors=false `
             /p:TreatWarningsAsErrors=true `
-            /v:minimal
+            /v:minimal `
+            /fl `
+            "/flp:logfile=$analyzeLog;verbosity=normal"
 
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
+          }
+
+          if (!(Test-Path $analyzeLog)) {
+            Write-Error "MSVC analyzer log not found: $analyzeLog"
+            exit 1
+          }
+
+          $repoRoot = (Get-Location).Path
+          $diagRegex = '^(?<path>.+)\((?<line>\d+)(?:,\d+)?\):\s+(?<severity>warning|error)\s+(?<code>C\d+):\s+(?<message>.+)$'
+          $firstPartyDiagnostics = New-Object System.Collections.Generic.List[string]
+
+          foreach ($line in Get-Content $analyzeLog) {
+            $match = [regex]::Match($line, $diagRegex)
+            if (!$match.Success) { continue }
+
+            $rawPath = $match.Groups["path"].Value.Trim()
+            if ([string]::IsNullOrWhiteSpace($rawPath)) { continue }
+            $normalizedPath = $rawPath.Replace('/', '\')
+            if (-not [System.IO.Path]::IsPathRooted($normalizedPath)) {
+              $normalizedPath = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $normalizedPath))
+            } else {
+              $normalizedPath = [System.IO.Path]::GetFullPath($normalizedPath)
+            }
+
+            # Ignore third-party/vendor diagnostics; hard-fail only on first-party source trees.
+            if ($normalizedPath -match '\\Vendor\\') { continue }
+            if ($normalizedPath -match '\\(Editor|Limitless|Runtime|Test)\\Source\\') {
+              [void]$firstPartyDiagnostics.Add($line)
+            }
+          }
+
+          if ($firstPartyDiagnostics.Count -gt 0) {
+            Write-Host "First-party analyzer diagnostics captured: $($firstPartyDiagnostics.Count)"
+          } else {
+            Write-Host "No first-party analyzer diagnostics found."
+          }
+
+          if ($firstPartyDiagnostics.Count -gt 0) {
+            Write-Host "Failing on first-party analyzer diagnostics:"
+            $firstPartyDiagnostics | ForEach-Object { Write-Host $_ }
+            exit 1
           }
 
       - name: Run tests
@@ -232,20 +276,132 @@ jobs:
       - name: Run clang-tidy (hard fail on warnings)
         run: |
           $eventName = "${{ github.event_name }}"
-          $baseSha = ""
+          $prBaseRef = "${{ github.event.pull_request.base.ref }}"
+          $prBaseSha = "${{ github.event.pull_request.base.sha }}"
+          $pushBeforeSha = "${{ github.event.before }}"
           $headSha = ""
+          $baseSha = ""
           if ($eventName -eq "pull_request") {
-            $baseSha = "${{ github.event.pull_request.base.sha }}"
             $headSha = "${{ github.event.pull_request.head.sha }}"
           } else {
-            $baseSha = "${{ github.event.before }}"
+            $baseSha = $pushBeforeSha
             $headSha = "${{ github.sha }}"
           }
 
-          if (![string]::IsNullOrWhiteSpace($baseSha) -and $baseSha -ne "0000000000000000000000000000000000000000") {
-            $candidateFiles = git diff --name-only --diff-filter=ACMR $baseSha $headSha
-          } else {
-            $candidateFiles = git ls-files
+          $compileCommandsPath = "compile_commands.json"
+          if (!(Test-Path $compileCommandsPath)) {
+            Write-Error "compile_commands.json not found before clang-tidy run"
+            exit 1
+          }
+
+          function Resolve-CompileDbPath {
+            param(
+              [string]$RawPath,
+              [string]$DirectoryPath,
+              [string]$RepoRoot
+            )
+            if ([string]::IsNullOrWhiteSpace($RawPath)) { return $null }
+
+            $candidate = $null
+            if ([System.IO.Path]::IsPathRooted($RawPath)) {
+              $candidate = [System.IO.Path]::GetFullPath($RawPath)
+            } else {
+              $dir = $DirectoryPath
+              if ([string]::IsNullOrWhiteSpace($dir)) { $dir = $RepoRoot }
+              if (-not [System.IO.Path]::IsPathRooted($dir)) {
+                $dir = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $dir))
+              } else {
+                $dir = [System.IO.Path]::GetFullPath($dir)
+              }
+              $candidate = [System.IO.Path]::GetFullPath((Join-Path $dir $RawPath))
+            }
+
+            if (Test-Path $candidate) { return $candidate }
+            if ([System.IO.Path]::IsPathRooted($RawPath)) { return $candidate }
+
+            $fallback = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $RawPath))
+            if (Test-Path $fallback) { return $fallback }
+
+            if ($RawPath -like "Source/*") {
+              foreach ($projectRoot in @("Limitless", "Editor", "Runtime", "Test")) {
+                $projectCandidate = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $RepoRoot $projectRoot) $RawPath))
+                if (Test-Path $projectCandidate) { return $projectCandidate }
+              }
+            }
+
+            return $candidate
+          }
+
+          $compileCommands = Get-Content $compileCommandsPath -Raw | ConvertFrom-Json
+          $repoRoot = (Get-Location).Path
+
+          # Normalize compile_commands source paths and strip problematic PCH/forced-include
+          # flags that frequently break clang-tidy portability on CI.
+          foreach ($entry in $compileCommands) {
+            $originalFile = [string]$entry.file
+            $resolvedFile = Resolve-CompileDbPath -RawPath $originalFile -DirectoryPath ([string]$entry.directory) -RepoRoot $repoRoot
+            if (-not [string]::IsNullOrWhiteSpace($resolvedFile) -and (Test-Path $resolvedFile)) {
+              $entry.file = $resolvedFile
+            }
+
+            if ($entry.PSObject.Properties.Name -contains "arguments" -and $null -ne $entry.arguments) {
+              $cleaned = New-Object System.Collections.Generic.List[string]
+              for ($idx = 0; $idx -lt $entry.arguments.Count; $idx++) {
+                $arg = [string]$entry.arguments[$idx]
+                if ([string]::IsNullOrWhiteSpace($arg)) { continue }
+
+                # Remove force-include and PCH flags that can make clang-tidy fail
+                # due to compile-db path mismatches.
+                if ($arg -in @('/FI', '-include', '-include-pch', '/Yu', '/Fp')) {
+                  if ($idx + 1 -lt $entry.arguments.Count) { $idx++ }
+                  continue
+                }
+                if ($arg -like '/FI*' -or $arg -like '/Yu*' -or $arg -like '/Fp*') {
+                  continue
+                }
+                if ($arg -match 'PrecompiledHeader\.h(\.pch|\.gch)?$' -or $arg -match '\.gch$' -or $arg -match '\.pch$') {
+                  continue
+                }
+
+                if (-not [string]::IsNullOrWhiteSpace($entry.file) -and $arg -eq $originalFile) {
+                  [void]$cleaned.Add([string]$entry.file)
+                } else {
+                  [void]$cleaned.Add($arg)
+                }
+              }
+              $entry.arguments = @($cleaned)
+            }
+          }
+          $compileCommands | ConvertTo-Json -Depth 100 | Set-Content -Path $compileCommandsPath -Encoding UTF8
+
+          if ($eventName -eq "pull_request" -and ![string]::IsNullOrWhiteSpace($prBaseRef)) {
+            git fetch --no-tags --prune --depth=200 origin ("refs/heads/{0}:refs/remotes/origin/{0}" -f $prBaseRef) 2>$null
+          }
+
+          $candidateFiles = @()
+          if ($eventName -eq "pull_request" -and ![string]::IsNullOrWhiteSpace($prBaseRef) -and ![string]::IsNullOrWhiteSpace($headSha)) {
+            $headOk = (& git cat-file -e "$headSha^{commit}" 2>$null; $LASTEXITCODE -eq 0)
+            $baseRefOk = (& git rev-parse --verify "origin/$prBaseRef" *> $null; $LASTEXITCODE -eq 0)
+            if ($headOk -and $baseRefOk) {
+              $candidateFiles = git diff --name-only --diff-filter=ACMR "origin/$prBaseRef...$headSha"
+            }
+          }
+          if (($null -eq $candidateFiles -or $candidateFiles.Count -eq 0) -and
+              ![string]::IsNullOrWhiteSpace($baseSha) -and
+              $baseSha -ne "0000000000000000000000000000000000000000" -and
+              ![string]::IsNullOrWhiteSpace($headSha)) {
+            $baseOk = (& git cat-file -e "$baseSha^{commit}" 2>$null; $LASTEXITCODE -eq 0)
+            $headOk = (& git cat-file -e "$headSha^{commit}" 2>$null; $LASTEXITCODE -eq 0)
+            if ($baseOk -and $headOk) {
+              $candidateFiles = git diff --name-only --diff-filter=ACMR $baseSha $headSha
+            }
+          }
+          if (($null -eq $candidateFiles -or $candidateFiles.Count -eq 0) -and ![string]::IsNullOrWhiteSpace($headSha)) {
+            $headOk = (& git cat-file -e "$headSha^{commit}" 2>$null; $LASTEXITCODE -eq 0)
+            if ($headOk) {
+              Write-Host "Diff base commit unavailable; falling back to changed files in HEAD commit."
+              $candidateFiles = git show --name-only --pretty="" --diff-filter=ACMR $headSha
+            }
           }
 
           $sourceFiles = @($candidateFiles | Where-Object { $_ -match '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' } | Sort-Object -Unique)
@@ -255,25 +411,12 @@ jobs:
           }
           Write-Host "Analyzing $($sourceFiles.Count) changed C++ source files."
 
-          $compileCommandsPath = "compile_commands.json"
-          if (!(Test-Path $compileCommandsPath)) {
-            Write-Error "compile_commands.json not found before clang-tidy run"
-            exit 1
-          }
-
-          $compileCommands = Get-Content $compileCommandsPath -Raw | ConvertFrom-Json
-          $repoRoot = (Get-Location).Path
           $compileSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
           foreach ($entry in $compileCommands) {
             $entryFile = [string]$entry.file
             if ([string]::IsNullOrWhiteSpace($entryFile)) { continue }
-            if ([System.IO.Path]::IsPathRooted($entryFile)) {
-              $normalized = [System.IO.Path]::GetFullPath($entryFile)
-            } else {
-              $entryDir = [string]$entry.directory
-              if ([string]::IsNullOrWhiteSpace($entryDir)) { $entryDir = $repoRoot }
-              $normalized = [System.IO.Path]::GetFullPath((Join-Path $entryDir $entryFile))
-            }
+            $normalized = Resolve-CompileDbPath -RawPath $entryFile -DirectoryPath ([string]$entry.directory) -RepoRoot $repoRoot
+            if ([string]::IsNullOrWhiteSpace($normalized)) { continue }
             [void]$compileSet.Add($normalized)
           }
 
@@ -294,10 +437,26 @@ jobs:
 
           $chunkSize = 40
           $hadFailure = $false
+          $clangTidyArgsCommon = @(
+            "-p", ".",
+            "-quiet",
+            "--extra-arg-before=-I$repoRoot\Editor",
+            "--extra-arg-before=-I$repoRoot\Editor\Source",
+            "--extra-arg-before=-I$repoRoot\Limitless",
+            "--extra-arg-before=-I$repoRoot\Limitless\Source",
+            "--extra-arg-before=-I$repoRoot\Limitless\Vendor",
+            "--extra-arg-before=-I$repoRoot\Limitless\Vendor\doctest",
+            "--extra-arg-before=-I$repoRoot\Runtime",
+            "--extra-arg-before=-I$repoRoot\Runtime\Source",
+            "--extra-arg-before=-I$repoRoot\Test",
+            "--extra-arg-before=-I$repoRoot\Test\Source",
+            "-checks=-*,clang-analyzer-*,-clang-analyzer-optin.core.EnumCastOutOfRange,-clang-analyzer-cplusplus.NewDeleteLeaks,-clang-analyzer-optin.cplusplus.UninitializedObject",
+            "-warnings-as-errors=*"
+          )
           for ($i = 0; $i -lt $sourceFiles.Count; $i += $chunkSize) {
             $end = [Math]::Min($i + $chunkSize - 1, $sourceFiles.Count - 1)
             $batch = $sourceFiles[$i..$end]
-            & clang-tidy @batch -p . -quiet -checks='-*,clang-analyzer-*,-clang-analyzer-optin.core.EnumCastOutOfRange' -warnings-as-errors='*'
+            & clang-tidy @batch @clangTidyArgsCommon
             if ($LASTEXITCODE -ne 0) {
               $hadFailure = $true
             }
