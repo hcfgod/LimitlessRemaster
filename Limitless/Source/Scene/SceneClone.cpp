@@ -213,6 +213,9 @@ namespace Limitless
                 destinationSprite.TextureLoadAttempted = false;
                 destinationSprite.Color = sprite->Color;
                 destinationSprite.TilingFactor = sprite->TilingFactor;
+                destinationSprite.SubSpriteIndex = sprite->SubSpriteIndex;
+                destinationSprite.UvMin = sprite->UvMin;
+                destinationSprite.UvMax = sprite->UvMax;
                 destinationSprite.RenderOrder = sprite->RenderOrder;
                 destinationSprite.CastShadows = sprite->CastShadows;
                 destinationSprite.ReceiveShadows = sprite->ReceiveShadows;

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <exception>
+#include <stdexcept>
 
 namespace Limitless
 {
@@ -47,6 +48,8 @@ namespace Limitless
                                 phaseIndex);
                     }
                 }
+
+                throw std::runtime_error("Scene::GetRegistry mutable access is not supported during parallel script execution");
             }
         }
 

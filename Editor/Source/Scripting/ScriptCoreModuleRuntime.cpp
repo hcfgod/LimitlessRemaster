@@ -260,9 +260,8 @@ namespace Limitless::ScriptCoreModuleRuntime
             if (const auto projectRoot = GetOpenProjectRoot(); projectRoot.has_value())
             {
                 // Project-local ScriptCore staging path uses the config-platform folder name.
-                // Prefer Dist first because script builds are now fixed to Dist.
-                addCandidate(projectRoot.value() / "Build" / "ScriptCore" / distConfigPlatformFolderName / scriptCoreLibraryFileName);
                 addCandidate(projectRoot.value() / "Build" / "ScriptCore" / currentConfigPlatformFolderName / scriptCoreLibraryFileName);
+                addCandidate(projectRoot.value() / "Build" / "ScriptCore" / distConfigPlatformFolderName / scriptCoreLibraryFileName);
             }
 
             const std::string executablePath = PlatformDetection::GetExecutablePath();
@@ -275,14 +274,14 @@ namespace Limitless::ScriptCoreModuleRuntime
 
             if (const auto configuredBuildRoot = GetConfiguredBuildRoot(); configuredBuildRoot.has_value())
             {
-                addCandidate(configuredBuildRoot.value() / distConfigOutput / scriptCoreLibraryFileName);
                 addCandidate(configuredBuildRoot.value() / currentConfigOutput / scriptCoreLibraryFileName);
+                addCandidate(configuredBuildRoot.value() / distConfigOutput / scriptCoreLibraryFileName);
             }
 
             if (const auto engineRoot = FindEngineWorkspaceRoot(); engineRoot.has_value())
             {
-                addCandidate(engineRoot.value() / distConfigOutput / scriptCoreLibraryFileName);
                 addCandidate(engineRoot.value() / currentConfigOutput / scriptCoreLibraryFileName);
+                addCandidate(engineRoot.value() / distConfigOutput / scriptCoreLibraryFileName);
             }
 
             return candidates;
@@ -577,7 +576,7 @@ namespace Limitless::ScriptCoreModuleRuntime
             const uint32_t reportedAbiVersion = getAbiVersionFunction();
             if (reportedAbiVersion != kScriptCoreAbiVersion)
             {
-                LT_WARN("ScriptCore runtime: ABI mismatch for '{}'. expected={}, got={}.",
+                LT_WARN("ScriptCore runtime: ABI mismatch for '{}'. expected={}, got={}. Rebuild project scripts/ScriptCore for this engine revision.",
                         libraryPath.string(),
                         kScriptCoreAbiVersion,
                         reportedAbiVersion);

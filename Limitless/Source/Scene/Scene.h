@@ -38,12 +38,14 @@ namespace Limitless
     {
         uint32_t EntityA = 0;
         uint32_t EntityB = 0;
+        uint16_t WorldSlot = 0;
         bool IsSensor = false;
 
         bool operator==(const RuntimeContactPairKey& other) const
         {
             return EntityA == other.EntityA &&
                    EntityB == other.EntityB &&
+                   WorldSlot == other.WorldSlot &&
                    IsSensor == other.IsSensor;
         }
     };
@@ -54,7 +56,8 @@ namespace Limitless
         {
             const uint64_t packedEntities = (static_cast<uint64_t>(key.EntityA) << 32u) | static_cast<uint64_t>(key.EntityB);
             const uint64_t sensorTag = key.IsSensor ? 0x9e3779b97f4a7c15ull : 0x85ebca77c2b2ae63ull;
-            return static_cast<size_t>(packedEntities ^ sensorTag);
+            const uint64_t worldTag = static_cast<uint64_t>(key.WorldSlot) * 0x94d049bb133111ebull;
+            return static_cast<size_t>(packedEntities ^ sensorTag ^ worldTag);
         }
     };
 
@@ -202,6 +205,65 @@ namespace Limitless
         const std::optional<EditorCameraBookmark>& GetEditorCameraBookmark() const { return m_EditorCameraBookmark; }
 
     private:
+        void EnterForcedDeferredEntityDestructionScope()
+        {
+            m_ForceDeferredEntityDestructionScopeDepth.fetch_add(1, std::memory_order_acq_rel);
+        }
+
+        void ExitForcedDeferredEntityDestructionScope()
+        {
+            uint32_t currentDepth = m_ForceDeferredEntityDestructionScopeDepth.load(std::memory_order_acquire);
+            while (currentDepth > 0)
+            {
+                if (m_ForceDeferredEntityDestructionScopeDepth.compare_exchange_weak(
+                        currentDepth,
+                        currentDepth - 1,
+                        std::memory_order_acq_rel,
+                        std::memory_order_acquire))
+                {
+                    return;
+                }
+            }
+        }
+
+        bool IsForcedDeferredEntityDestructionEnabled() const
+        {
+            return m_ForceDeferredEntityDestructionScopeDepth.load(std::memory_order_acquire) > 0;
+        }
+
+        class ScopedForcedDeferredEntityDestruction final
+        {
+        public:
+            explicit ScopedForcedDeferredEntityDestruction(Scene& scene)
+                : m_Scene(&scene)
+            {
+                m_Scene->EnterForcedDeferredEntityDestructionScope();
+            }
+
+            ~ScopedForcedDeferredEntityDestruction()
+            {
+                if (m_Scene)
+                    m_Scene->ExitForcedDeferredEntityDestructionScope();
+            }
+
+            ScopedForcedDeferredEntityDestruction(const ScopedForcedDeferredEntityDestruction&) = delete;
+            ScopedForcedDeferredEntityDestruction& operator=(const ScopedForcedDeferredEntityDestruction&) = delete;
+
+            ScopedForcedDeferredEntityDestruction(ScopedForcedDeferredEntityDestruction&&) = delete;
+            ScopedForcedDeferredEntityDestruction& operator=(ScopedForcedDeferredEntityDestruction&&) = delete;
+
+        private:
+            Scene* m_Scene = nullptr;
+        };
+
+        [[nodiscard]] ScopedForcedDeferredEntityDestruction MakeForcedDeferredEntityDestructionScope()
+        {
+            return ScopedForcedDeferredEntityDestruction(*this);
+        }
+
+        void OnRigidbody2DComponentDestroyed(entt::registry& registry, entt::entity entity);
+        void OnJoint2DComponentDestroyed(entt::registry& registry, entt::entity entity);
+
         void ResetPhysicsRuntimeState();
         void ResetPhysicsRuntimeState(uint16_t worldSlot);
         void EnsurePhysics2DWorldCount(uint16_t worldCount);
@@ -224,8 +286,9 @@ namespace Limitless
         bool m_HierarchyDepthDirty = true;
         uint16_t m_MaxHierarchyDepth = 0;
         RuntimePhase m_RuntimePhase = RuntimePhase::Idle;
+        bool m_IsShuttingDown = false;
         bool m_IsApplyingDeferredStructuralMutations = false;
-        bool m_ForceDeferredEntityDestruction = false;
+        std::atomic<uint32_t> m_ForceDeferredEntityDestructionScopeDepth{ 0 };
         mutable std::atomic<uint32_t> m_WarnedUnsafeMutableRegistryAccessPhases{ 0 };
 
         static constexpr size_t kDeferredStructuralMutationQueueSize = 8192;

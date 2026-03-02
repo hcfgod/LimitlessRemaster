@@ -704,36 +704,126 @@ namespace Limitless
         : m_DeferredStructuralMutationQueue(std::make_unique<Concurrency::LockFreeMPMCQueue<DeferredStructuralMutation, kDeferredStructuralMutationQueueSize>>())
         , m_DeferredStructuralMutationOverflowQueue(std::make_unique<Concurrency::LockFreeMPMCQueue<DeferredStructuralMutation, kDeferredStructuralMutationOverflowQueueSize>>())
     {
+        m_Registry.on_destroy<Rigidbody2DComponent>().connect<&Scene::OnRigidbody2DComponentDestroyed>(*this);
+        m_Registry.on_destroy<Joint2DComponent>().connect<&Scene::OnJoint2DComponentDestroyed>(*this);
     }
 
     Scene::~Scene()
     {
+        m_IsShuttingDown = true;
+        Physics2DQueries::SetActiveSceneForScriptQueries(nullptr);
+
+        m_Registry.on_destroy<Rigidbody2DComponent>().disconnect<&Scene::OnRigidbody2DComponentDestroyed>(*this);
+        m_Registry.on_destroy<Joint2DComponent>().disconnect<&Scene::OnJoint2DComponentDestroyed>(*this);
+
         for (auto& physicsWorld : m_Physics2DWorlds)
         {
             if (physicsWorld)
                 physicsWorld->Shutdown(*this);
         }
 
-        auto view = m_Registry.view<NativeScriptComponent>();
-        for (entt::entity entity : view)
+        std::vector<std::pair<entt::entity, size_t>> scriptSlots;
         {
-            (void)entity;
-            auto& nativeScript = view.get<NativeScriptComponent>(entity);
-            for (auto& scriptEntry : nativeScript.Scripts)
+            auto snapshotView = m_Registry.view<NativeScriptComponent>();
+            for (entt::entity entity : snapshotView)
             {
-                if (scriptEntry.RuntimeInstance)
-                {
-                    if (scriptEntry.RuntimeInitialized)
-                        scriptEntry.RuntimeInstance->OnDestroy();
-                    Coroutine::StopAll(*scriptEntry.RuntimeInstance);
-                    scriptEntry.RuntimeInstance.reset();
-                }
-                scriptEntry.RuntimeInitialized = false;
-                scriptEntry.RuntimeUpdateCount = 0;
-                scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-                scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
-                scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
+                const auto& nativeScript = snapshotView.get<NativeScriptComponent>(entity);
+                for (size_t scriptIndex = 0; scriptIndex < nativeScript.Scripts.size(); ++scriptIndex)
+                    scriptSlots.emplace_back(entity, scriptIndex);
             }
+        }
+
+        auto tryGetScriptEntry = [this](entt::entity scriptEntity, size_t scriptIndex) -> NativeScriptEntry* {
+            auto* nativeScript = m_Registry.try_get<NativeScriptComponent>(scriptEntity);
+            if (!nativeScript || scriptIndex >= nativeScript->Scripts.size())
+                return nullptr;
+            return &nativeScript->Scripts[scriptIndex];
+        };
+
+        for (const auto& scriptSlot : scriptSlots)
+        {
+            const entt::entity entity = scriptSlot.first;
+            const size_t scriptIndex = scriptSlot.second;
+            NativeScriptEntry* scriptEntry = tryGetScriptEntry(entity, scriptIndex);
+            if (!scriptEntry || !scriptEntry->RuntimeInstance)
+                continue;
+
+            const auto* tag = m_Registry.try_get<TagComponent>(entity);
+            if (scriptEntry->RuntimeInitialized)
+            {
+                try
+                {
+                    scriptEntry->RuntimeInstance->OnDestroy();
+                }
+                catch (const std::exception& exception)
+                {
+                    LT_ERROR("Script '{}' on entity '{}' threw during OnDestroy in Scene destructor: {}",
+                             scriptEntry->ScriptClassName,
+                             tag ? tag->Tag : "Entity",
+                             exception.what());
+                }
+                catch (...)
+                {
+                    LT_ERROR("Script '{}' on entity '{}' threw a non-standard exception during OnDestroy in Scene destructor",
+                             scriptEntry->ScriptClassName,
+                             tag ? tag->Tag : "Entity");
+                }
+            }
+
+            scriptEntry = tryGetScriptEntry(entity, scriptIndex);
+            if (!scriptEntry || !scriptEntry->RuntimeInstance)
+                continue;
+
+            try
+            {
+                Coroutine::StopAll(*scriptEntry->RuntimeInstance);
+            }
+            catch (const std::exception& exception)
+            {
+                LT_WARN("Script '{}' on entity '{}' threw during coroutine cleanup in Scene destructor: {}",
+                        scriptEntry->ScriptClassName,
+                        tag ? tag->Tag : "Entity",
+                        exception.what());
+            }
+            catch (...)
+            {
+                LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during coroutine cleanup in Scene destructor",
+                        scriptEntry->ScriptClassName,
+                        tag ? tag->Tag : "Entity");
+            }
+
+            scriptEntry->RuntimeInstance.reset();
+            scriptEntry->RuntimeInitialized = false;
+            scriptEntry->RuntimeUpdateCount = 0;
+            scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
+            scriptEntry->RuntimeWarnedMissingAccessDeclaration = false;
+            scriptEntry->RuntimeWarnedAccessMaskMismatch = false;
+        }
+    }
+
+    void Scene::OnRigidbody2DComponentDestroyed(entt::registry& registry, entt::entity entity)
+    {
+        if (!registry.valid(entity) || !registry.all_of<Rigidbody2DComponent>(entity))
+            return;
+        const auto& rigidbody = registry.get<Rigidbody2DComponent>(entity);
+
+        for (auto& physicsWorld : m_Physics2DWorlds)
+        {
+            if (physicsWorld)
+                physicsWorld->TeardownRuntimeBodyForRemovedComponent(registry, entity, rigidbody);
+        }
+    }
+
+    void Scene::OnJoint2DComponentDestroyed(entt::registry& registry, entt::entity entity)
+    {
+        if (!registry.valid(entity) || !registry.all_of<Joint2DComponent>(entity))
+            return;
+        const auto& joint = registry.get<Joint2DComponent>(entity);
+
+        for (auto& physicsWorld : m_Physics2DWorlds)
+        {
+            if (physicsWorld)
+                physicsWorld->TeardownRuntimeJointForRemovedComponent(registry, entity, joint);
         }
     }
 

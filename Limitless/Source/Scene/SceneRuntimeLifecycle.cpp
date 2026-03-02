@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -30,15 +31,22 @@ namespace Limitless
             return std::min<uint16_t>(requestedSlot, static_cast<uint16_t>(worldCount - 1));
         }
 
-        RuntimeContactPairKey MakeContactPairKey(entt::entity entityA, entt::entity entityB, bool isSensor)
+        RuntimeContactPairKey MakeContactPairKey(entt::entity entityA, entt::entity entityB, uint16_t worldSlot, bool isSensor)
         {
             const uint32_t encodedA = static_cast<uint32_t>(entityA);
             const uint32_t encodedB = static_cast<uint32_t>(entityB);
             RuntimeContactPairKey key{};
             key.EntityA = std::min(encodedA, encodedB);
             key.EntityB = std::max(encodedA, encodedB);
+            key.WorldSlot = worldSlot;
             key.IsSensor = isSensor;
             return key;
+        }
+
+        bool RuntimeContactPairSortLess(const RuntimeContactPairKey& left, const RuntimeContactPairKey& right)
+        {
+            return std::tie(left.WorldSlot, left.IsSensor, left.EntityA, left.EntityB) <
+                   std::tie(right.WorldSlot, right.IsSensor, right.EntityA, right.EntityB);
         }
 
         void DispatchScriptContactCallbackForEntity(Scene& scene,
@@ -210,12 +218,13 @@ namespace Limitless
             if (!physicsWorld)
                 continue;
 
+            const uint16_t worldSlot = physicsWorld->GetSceneWorldSlot();
             const auto& events = physicsWorld->GetContactListener().GetEvents();
             for (const auto& eventData : events)
             {
                 if (eventData.EntityA == entt::null || eventData.EntityB == entt::null)
                     continue;
-                const RuntimeContactPairKey key = MakeContactPairKey(eventData.EntityA, eventData.EntityB, eventData.IsSensor);
+                const RuntimeContactPairKey key = MakeContactPairKey(eventData.EntityA, eventData.EntityB, worldSlot, eventData.IsSensor);
                 if (eventData.IsBegin)
                     beginPairs.insert(key);
                 else
@@ -225,8 +234,11 @@ namespace Limitless
 
         std::unordered_set<RuntimeContactPairKey, RuntimeContactPairKeyHasher> changedPairs = beginPairs;
         changedPairs.insert(endPairs.begin(), endPairs.end());
-        m_ForceDeferredEntityDestruction = true;
-        for (const RuntimeContactPairKey& key : changedPairs)
+        std::vector<RuntimeContactPairKey> orderedChangedPairs(changedPairs.begin(), changedPairs.end());
+        std::sort(orderedChangedPairs.begin(), orderedChangedPairs.end(), RuntimeContactPairSortLess);
+
+        [[maybe_unused]] auto forcedDeferredDestroyScope = MakeForcedDeferredEntityDestructionScope();
+        for (const RuntimeContactPairKey& key : orderedChangedPairs)
         {
             const bool hasBegin = beginPairs.find(key) != beginPairs.end();
             const bool hasEnd = endPairs.find(key) != endPairs.end();
@@ -254,14 +266,15 @@ namespace Limitless
             }
         }
 
-        for (const RuntimeContactPairKey& key : m_RuntimeActiveContactPairs)
+        std::vector<RuntimeContactPairKey> orderedActivePairs(m_RuntimeActiveContactPairs.begin(), m_RuntimeActiveContactPairs.end());
+        std::sort(orderedActivePairs.begin(), orderedActivePairs.end(), RuntimeContactPairSortLess);
+        for (const RuntimeContactPairKey& key : orderedActivePairs)
         {
             const entt::entity entityA = static_cast<entt::entity>(key.EntityA);
             const entt::entity entityB = static_cast<entt::entity>(key.EntityB);
             DispatchScriptContactCallbackForEntity(*this, entityA, entityB, key.IsSensor, false, true, false);
             DispatchScriptContactCallbackForEntity(*this, entityB, entityA, key.IsSensor, false, true, false);
         }
-        m_ForceDeferredEntityDestruction = false;
         FlushDeferredStructuralMutations();
 
         m_PhysicsWorldInitializedForLoading = true;
@@ -387,11 +400,18 @@ namespace Limitless
 
     void Scene::ResetPhysicsRuntimeState(uint16_t worldSlot)
     {
-        m_RuntimeActiveContactPairs.clear();
         if (m_Physics2DWorlds.empty())
             return;
 
         const uint16_t clampedSlot = ClampWorldSlot(worldSlot, static_cast<uint16_t>(m_Physics2DWorlds.size()));
+        for (auto it = m_RuntimeActiveContactPairs.begin(); it != m_RuntimeActiveContactPairs.end();)
+        {
+            if (it->WorldSlot == clampedSlot)
+                it = m_RuntimeActiveContactPairs.erase(it);
+            else
+                ++it;
+        }
+
         auto& physicsWorld = m_Physics2DWorlds[clampedSlot];
         if (physicsWorld)
             physicsWorld->Shutdown(*this);

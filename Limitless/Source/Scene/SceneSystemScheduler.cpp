@@ -28,6 +28,7 @@ namespace Limitless
         {
             std::vector<size_t> batch;
             std::vector<size_t> nextPending;
+            bool batchContainsSerial = false;
             batch.reserve(pending.size());
             nextPending.reserve(pending.size());
 
@@ -38,7 +39,7 @@ namespace Limitless
                 if (!candidate.Execute)
                     continue;
 
-                bool conflictsBatch = !candidate.AllowParallel && !batch.empty();
+                bool conflictsBatch = batchContainsSerial || (!candidate.AllowParallel && !batch.empty());
                 if (!conflictsBatch)
                 {
                     for (size_t batchIndex : batch)
@@ -52,7 +53,11 @@ namespace Limitless
                 }
 
                 if (!conflictsBatch)
+                {
                     batch.push_back(pendingIndex);
+                    if (!candidate.AllowParallel)
+                        batchContainsSerial = true;
+                }
                 else
                     nextPending.push_back(pendingIndex);
             }
@@ -66,7 +71,12 @@ namespace Limitless
                     nextPending.erase(forcedIt);
             }
 
-            if (batch.size() == 1 || !jobSystem.IsInitialized())
+            if (!jobSystem.IsInitialized())
+            {
+                for (size_t batchIndex : batch)
+                    systems[batchIndex].Execute();
+            }
+            else if (batch.size() == 1)
             {
                 systems[batch.front()].Execute();
             }

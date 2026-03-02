@@ -84,6 +84,9 @@ namespace Limitless
         void SetDiagnosticsEnabled(bool enabled) { m_DiagnosticsEnabled = enabled; }
         bool IsDiagnosticsEnabled() const { return m_DiagnosticsEnabled; }
 
+        void TeardownRuntimeBodyForRemovedComponent(entt::registry& registry, entt::entity entity, const Rigidbody2DComponent& removedComponent);
+        void TeardownRuntimeJointForRemovedComponent(entt::registry& registry, entt::entity entity, const Joint2DComponent& removedComponent);
+
     private:
         void DestroyRuntimeState(Scene& scene);
 

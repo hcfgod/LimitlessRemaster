@@ -422,16 +422,22 @@ namespace Limitless::EditorInspectorPanel
 
         std::pair<std::string, std::string> GetBuildConfigurationAndPlatform(const std::filesystem::path& settingsRoot)
         {
+            std::string configuration = "Debug";
+#if defined(LT_CONFIG_RELEASE)
+            configuration = "Release";
+#elif defined(LT_CONFIG_DIST)
+            configuration = "Dist";
+#endif
+
             const auto buildTargetsResult = Project::LoadBuildTargetsSettings(settingsRoot);
             if (buildTargetsResult.IsSuccess())
             {
                 const auto& settings = buildTargetsResult.GetValue();
-                const std::string configuration = "Dist";
                 const std::string platform = settings.Platform.empty() ? "x64" : settings.Platform;
                 return { configuration, platform };
             }
 
-            return { "Dist", "x64" };
+            return { configuration, "x64" };
         }
 
         std::filesystem::path BuildNativeScriptBuildLogPath()
@@ -1514,13 +1520,8 @@ namespace Limitless::EditorInspectorPanel
                 }
             }
 
-            for (auto iterator = nativeScript.ExposedProperties.begin(); iterator != nativeScript.ExposedProperties.end();)
-            {
-                if (declaredFieldNames.find(iterator->first) == declaredFieldNames.end())
-                    iterator = nativeScript.ExposedProperties.erase(iterator);
-                else
-                    ++iterator;
-            }
+            // Keep undeclared/unsupported properties so authoring data is not dropped
+            // during automatic inspector synchronization.
 
             return true;
         }

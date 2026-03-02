@@ -558,6 +558,7 @@ namespace Limitless
         // for existing ScriptCore builds that still reference older layouts.
         uint16_t PhysicsWorldSlot = 0;
         uint16_t RuntimeWorldSlot = 0;
+        uint64_t RuntimeBodyAndShapeSignature = 0;
     };
 
     struct BoxCollider2DComponent
@@ -617,6 +618,7 @@ namespace Limitless
         Physics2DJointHandle RuntimeJointId = kNullPhysics2DJoint;
         bool RuntimeJointCreated = false;
         uint16_t RuntimeWorldSlot = 0;
+        uint64_t RuntimeJointSignature = 0;
     };
 
     enum class ScriptExecutionPolicy : uint8_t

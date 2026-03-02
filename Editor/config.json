@@ -10,6 +10,9 @@
         "max_files": 10,
         "pattern": "[%T] [%l] %n: %v"
     },
+    "physics2d": {
+        "debug_kinematic_motion": true
+    },
     "system": {
         "log_directory": "logs",
         "max_threads": 20,

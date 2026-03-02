@@ -1,5 +1,6 @@
 #include "Physics/Physics2DWorld.h"
 
+#include "Core/ConfigManager.h"
 #include "Core/Debug/Log.h"
 #include "Scene/Scene.h"
 
@@ -168,6 +169,80 @@ namespace Limitless
             return static_cast<uint64_t>(std::bit_cast<uint32_t>(value));
         }
 
+        uint64_t BuildBodyAndShapeSignature(const Rigidbody2DComponent& rigidbody,
+                                            const TransformComponent& transform,
+                                            const BoxCollider2DComponent* boxCollider,
+                                            const CircleCollider2DComponent* circleCollider,
+                                            uint16_t worldSlot)
+        {
+            uint64_t signature = 0;
+            signature = HashCombine64(signature, static_cast<uint64_t>(worldSlot));
+            signature = HashCombine64(signature, static_cast<uint64_t>(rigidbody.Type));
+            signature = HashCombine64(signature, HashFloat(transform.Scale.x));
+            signature = HashCombine64(signature, HashFloat(transform.Scale.y));
+
+            signature = HashCombine64(signature, boxCollider ? 1ull : 0ull);
+            if (boxCollider)
+            {
+                signature = HashCombine64(signature, HashFloat(boxCollider->Offset.x));
+                signature = HashCombine64(signature, HashFloat(boxCollider->Offset.y));
+                signature = HashCombine64(signature, HashFloat(boxCollider->Size.x));
+                signature = HashCombine64(signature, HashFloat(boxCollider->Size.y));
+                signature = HashCombine64(signature, HashFloat(boxCollider->Density));
+                signature = HashCombine64(signature, HashFloat(boxCollider->Friction));
+                signature = HashCombine64(signature, HashFloat(boxCollider->Restitution));
+                signature = HashCombine64(signature, boxCollider->IsSensor ? 1ull : 0ull);
+                signature = HashCombine64(signature, boxCollider->CollisionLayer);
+                signature = HashCombine64(signature, boxCollider->CollisionMask);
+            }
+
+            signature = HashCombine64(signature, circleCollider ? 1ull : 0ull);
+            if (circleCollider)
+            {
+                signature = HashCombine64(signature, HashFloat(circleCollider->Offset.x));
+                signature = HashCombine64(signature, HashFloat(circleCollider->Offset.y));
+                signature = HashCombine64(signature, HashFloat(circleCollider->Radius));
+                signature = HashCombine64(signature, HashFloat(circleCollider->Density));
+                signature = HashCombine64(signature, HashFloat(circleCollider->Friction));
+                signature = HashCombine64(signature, HashFloat(circleCollider->Restitution));
+                signature = HashCombine64(signature, circleCollider->IsSensor ? 1ull : 0ull);
+                signature = HashCombine64(signature, circleCollider->CollisionLayer);
+                signature = HashCombine64(signature, circleCollider->CollisionMask);
+            }
+
+            return signature;
+        }
+
+        uint64_t BuildJointSignature(const Joint2DComponent& joint,
+                                     const Rigidbody2DComponent& bodyA,
+                                     const Rigidbody2DComponent& bodyB,
+                                     uint16_t worldSlot)
+        {
+            uint64_t signature = 0;
+            signature = HashCombine64(signature, static_cast<uint64_t>(worldSlot));
+            signature = HashCombine64(signature, static_cast<uint64_t>(joint.Type));
+            signature = HashCombine64(signature, static_cast<uint64_t>(joint.ConnectedEntity));
+            signature = HashCombine64(signature, joint.CollideConnected ? 1ull : 0ull);
+            signature = HashCombine64(signature, HashFloat(joint.AnchorA.x));
+            signature = HashCombine64(signature, HashFloat(joint.AnchorA.y));
+            signature = HashCombine64(signature, HashFloat(joint.AnchorB.x));
+            signature = HashCombine64(signature, HashFloat(joint.AnchorB.y));
+            signature = HashCombine64(signature, HashFloat(joint.Axis.x));
+            signature = HashCombine64(signature, HashFloat(joint.Axis.y));
+            signature = HashCombine64(signature, joint.EnableLimit ? 1ull : 0ull);
+            signature = HashCombine64(signature, HashFloat(joint.Limits.x));
+            signature = HashCombine64(signature, HashFloat(joint.Limits.y));
+            signature = HashCombine64(signature, joint.EnableMotor ? 1ull : 0ull);
+            signature = HashCombine64(signature, HashFloat(joint.MotorSpeed));
+            signature = HashCombine64(signature, HashFloat(joint.MaxMotorForceOrTorque));
+            signature = HashCombine64(signature, joint.EnableSpring ? 1ull : 0ull);
+            signature = HashCombine64(signature, HashFloat(joint.Hertz));
+            signature = HashCombine64(signature, HashFloat(joint.DampingRatio));
+            signature = HashCombine64(signature, bodyA.RuntimeBodyAndShapeSignature);
+            signature = HashCombine64(signature, bodyB.RuntimeBodyAndShapeSignature);
+            return signature;
+        }
+
     }
 
     Physics2DWorld::~Physics2DWorld() = default;
@@ -218,6 +293,61 @@ namespace Limitless
 #else
         return false;
 #endif
+    }
+
+    void Physics2DWorld::TeardownRuntimeBodyForRemovedComponent(entt::registry& registry,
+                                                                entt::entity entity,
+                                                                const Rigidbody2DComponent& removedComponent)
+    {
+#ifdef LT_ENABLE_PHYSICS2D
+        if (removedComponent.RuntimeBodyCreated &&
+            removedComponent.RuntimeWorldSlot == m_SceneWorldSlot &&
+            b2Body_IsValid(removedComponent.RuntimeBodyId))
+        {
+            b2DestroyBody(removedComponent.RuntimeBodyId);
+            m_SubStepsCacheDirty = true;
+        }
+#else
+        (void)entity;
+        (void)removedComponent;
+#endif
+
+        if (auto* boxCollider = registry.try_get<BoxCollider2DComponent>(entity))
+        {
+            boxCollider->RuntimeShapeId = kNullPhysics2DShape;
+            boxCollider->RuntimeShapeCreated = false;
+        }
+        if (auto* circleCollider = registry.try_get<CircleCollider2DComponent>(entity))
+        {
+            circleCollider->RuntimeShapeId = kNullPhysics2DShape;
+            circleCollider->RuntimeShapeCreated = false;
+        }
+        if (auto* joint = registry.try_get<Joint2DComponent>(entity))
+        {
+            joint->RuntimeJointId = kNullPhysics2DJoint;
+            joint->RuntimeJointCreated = false;
+            joint->RuntimeWorldSlot = 0;
+            joint->RuntimeJointSignature = 0;
+        }
+    }
+
+    void Physics2DWorld::TeardownRuntimeJointForRemovedComponent(entt::registry& registry,
+                                                                 entt::entity entity,
+                                                                 const Joint2DComponent& removedComponent)
+    {
+#ifdef LT_ENABLE_PHYSICS2D
+        if (removedComponent.RuntimeJointCreated &&
+            removedComponent.RuntimeWorldSlot == m_SceneWorldSlot &&
+            b2Joint_IsValid(removedComponent.RuntimeJointId))
+        {
+            b2DestroyJoint(removedComponent.RuntimeJointId);
+        }
+#else
+        (void)entity;
+        (void)removedComponent;
+#endif
+        (void)registry;
+        (void)entity;
     }
 
     void Physics2DWorld::SetSettings(const Physics2DWorldSettings& settings)
@@ -273,11 +403,9 @@ namespace Limitless
             // entities with a cheap bool check, so calling it every step is
             // lightweight when no new entities exist.
             const int created = BuildBodiesAndShapes(scene);
+            BuildJoints(scene);
             if (created > 0)
-            {
-                BuildJoints(scene);
                 m_SubStepsCacheDirty = true;
-            }
         }
 
         const float step = std::max(fixedDeltaTime, kMinimumStepDelta);
@@ -353,6 +481,7 @@ namespace Limitless
 #endif
             joint.RuntimeJointCreated = false;
             joint.RuntimeWorldSlot = 0;
+            joint.RuntimeJointSignature = 0;
         }
 
         auto boxColliderView = registry.view<BoxCollider2DComponent>();
@@ -392,6 +521,7 @@ namespace Limitless
 #endif
             rigidbody.RuntimeBodyCreated = false;
             rigidbody.RuntimeWorldSlot = 0;
+            rigidbody.RuntimeBodyAndShapeSignature = 0;
             rigidbody.RuntimePreviousPosition = glm::vec2(0.0f);
             rigidbody.RuntimePreviousAngleRadians = 0.0f;
             rigidbody.RuntimeRenderPreviousPosition = glm::vec2(0.0f);
@@ -424,6 +554,8 @@ namespace Limitless
         for (entt::entity entity : bodyView)
         {
             auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
+            auto* boxCollider = registry.try_get<BoxCollider2DComponent>(entity);
+            auto* circleCollider = registry.try_get<CircleCollider2DComponent>(entity);
             const bool assignedToThisWorld = IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &rigidbody);
             if (!assignedToThisWorld)
             {
@@ -436,12 +568,13 @@ namespace Limitless
                     rigidbody.RuntimeWorldSlot = 0;
                     rigidbody.RuntimeContactCount = 0;
                     rigidbody.RuntimeContactCountExcludingSensors = 0;
-                    if (auto* boxCollider = registry.try_get<BoxCollider2DComponent>(entity))
+                    rigidbody.RuntimeBodyAndShapeSignature = 0;
+                    if (boxCollider)
                     {
                         boxCollider->RuntimeShapeId = kNullPhysics2DShape;
                         boxCollider->RuntimeShapeCreated = false;
                     }
-                    if (auto* circleCollider = registry.try_get<CircleCollider2DComponent>(entity))
+                    if (circleCollider)
                     {
                         circleCollider->RuntimeShapeId = kNullPhysics2DShape;
                         circleCollider->RuntimeShapeCreated = false;
@@ -463,12 +596,13 @@ namespace Limitless
                 rigidbody.RuntimeWorldSlot = 0;
                 rigidbody.RuntimeContactCount = 0;
                 rigidbody.RuntimeContactCountExcludingSensors = 0;
-                if (auto* boxCollider = registry.try_get<BoxCollider2DComponent>(entity))
+                rigidbody.RuntimeBodyAndShapeSignature = 0;
+                if (boxCollider)
                 {
                     boxCollider->RuntimeShapeId = kNullPhysics2DShape;
                     boxCollider->RuntimeShapeCreated = false;
                 }
-                if (auto* circleCollider = registry.try_get<CircleCollider2DComponent>(entity))
+                if (circleCollider)
                 {
                     circleCollider->RuntimeShapeId = kNullPhysics2DShape;
                     circleCollider->RuntimeShapeCreated = false;
@@ -476,17 +610,53 @@ namespace Limitless
                 continue;
             }
 
-            // Incremental guard: skip entities that already have a valid runtime body.
-            if (rigidbody.RuntimeBodyCreated && b2Body_IsValid(rigidbody.RuntimeBodyId))
-                continue;
+            auto& transform = bodyView.get<TransformComponent>(entity);
+            const uint64_t desiredBodyAndShapeSignature =
+                BuildBodyAndShapeSignature(rigidbody, transform, boxCollider, circleCollider, m_SceneWorldSlot);
+
+            const bool hasValidRuntimeBody = rigidbody.RuntimeBodyCreated && b2Body_IsValid(rigidbody.RuntimeBodyId);
+            bool shouldRebuildExistingRuntimeBody = false;
+            glm::vec2 previousRuntimePosition = rigidbody.RuntimePreviousPosition;
+            float previousRuntimeAngleRadians = rigidbody.RuntimePreviousAngleRadians;
+            if (hasValidRuntimeBody)
+            {
+                if (rigidbody.RuntimeWorldSlot != m_SceneWorldSlot)
+                    continue;
+                if (rigidbody.RuntimeBodyAndShapeSignature == desiredBodyAndShapeSignature)
+                    continue;
+                shouldRebuildExistingRuntimeBody = true;
+            }
 
             // Engine-side batching: cap the number of new bodies per step to
             // prevent overwhelming Box2D's allocator. Deferred entities will
             // be created on subsequent physics steps automatically.
             if (newBodiesCreatedThisStep >= kMaxNewBodiesPerStep)
+            {
+                if (shouldRebuildExistingRuntimeBody)
+                    continue;
                 break;
+            }
 
-            auto& transform = bodyView.get<TransformComponent>(entity);
+            if (shouldRebuildExistingRuntimeBody)
+            {
+                b2DestroyBody(rigidbody.RuntimeBodyId);
+                rigidbody.RuntimeBodyId = kNullPhysics2DBody;
+                rigidbody.RuntimeBodyCreated = false;
+                rigidbody.RuntimeWorldSlot = 0;
+                rigidbody.RuntimeContactCount = 0;
+                rigidbody.RuntimeContactCountExcludingSensors = 0;
+                rigidbody.RuntimeBodyAndShapeSignature = 0;
+                if (boxCollider)
+                {
+                    boxCollider->RuntimeShapeId = kNullPhysics2DShape;
+                    boxCollider->RuntimeShapeCreated = false;
+                }
+                if (circleCollider)
+                {
+                    circleCollider->RuntimeShapeId = kNullPhysics2DShape;
+                    circleCollider->RuntimeShapeCreated = false;
+                }
+            }
 
             const Pose2D authoredWorldPose = GetEntityWorldPose2D(scene, entity, transform);
             const float safePositionX = glm::clamp(SanitizeFinite(authoredWorldPose.Position.x, 0.0f), -kMaximumWorldPosition, kMaximumWorldPosition);
@@ -530,8 +700,9 @@ namespace Limitless
             bodyDefinition.angularDamping = safeAngularDamping;
             bodyDefinition.gravityScale = safeGravityScale;
             bodyDefinition.fixedRotation = rigidbody.IsRotationLocked();
-            bodyDefinition.enableSleep = rigidbody.EnableSleep;
-            bodyDefinition.isAwake = rigidbody.StartAwake;
+            const bool isKinematicBody = rigidbody.Type == Rigidbody2DComponent::BodyType::Kinematic;
+            bodyDefinition.enableSleep = !isKinematicBody && rigidbody.EnableSleep;
+            bodyDefinition.isAwake = isKinematicBody || rigidbody.StartAwake;
             bodyDefinition.isBullet = rigidbody.UseCCD;
             bodyDefinition.userData = ToUserData(entity);
 
@@ -546,6 +717,14 @@ namespace Limitless
             rigidbody.RuntimeRenderCurrentPosition = rigidbody.RuntimePreviousPosition;
             rigidbody.RuntimeRenderCurrentAngleRadians = rigidbody.RuntimePreviousAngleRadians;
             rigidbody.RuntimeLinearVelocity = glm::vec2(0.0f);
+
+            // Preserve kinematic authored motion continuity when a body is
+            // rebuilt due structural signature changes.
+            if (shouldRebuildExistingRuntimeBody && rigidbody.Type == Rigidbody2DComponent::BodyType::Kinematic)
+            {
+                rigidbody.RuntimePreviousPosition = previousRuntimePosition;
+                rigidbody.RuntimePreviousAngleRadians = previousRuntimeAngleRadians;
+            }
 
             // Preserve script-authored velocity writes made in the same frame as
             // body creation (for example, freshly instantiated projectiles).
@@ -585,9 +764,12 @@ namespace Limitless
             rigidbody.RuntimeHasPendingLinearVelocityY = false;
 
             if (!rigidbody.RuntimeBodyCreated)
+            {
+                rigidbody.RuntimeBodyAndShapeSignature = 0;
                 continue;
+            }
 
-            if (auto* boxCollider = registry.try_get<BoxCollider2DComponent>(entity))
+            if (boxCollider)
             {
                 const float safeScaleX = SanitizeFinite(transform.Scale.x, 1.0f);
                 const float safeScaleY = SanitizeFinite(transform.Scale.y, 1.0f);
@@ -661,7 +843,7 @@ namespace Limitless
                 }
             }
 
-            if (auto* circleCollider = registry.try_get<CircleCollider2DComponent>(entity))
+            if (circleCollider)
             {
                 const float safeScaleX = SanitizeFinite(transform.Scale.x, 1.0f);
                 const float safeScaleY = SanitizeFinite(transform.Scale.y, 1.0f);
@@ -727,6 +909,8 @@ namespace Limitless
                         glm::clamp(SanitizeFiniteNonNegative(circleCollider->Restitution, 0.0f), 0.0f, 1.0f));
                 }
             }
+
+            rigidbody.RuntimeBodyAndShapeSignature = desiredBodyAndShapeSignature;
         }
 
 #else
@@ -738,23 +922,66 @@ namespace Limitless
     void Physics2DWorld::SyncAuthoringTransformsToBodies(Scene& scene, float fixedDeltaTime)
     {
 #ifdef LT_ENABLE_PHYSICS2D
+        const bool debugKinematicMotion =
+            ConfigManager::GetInstance().GetValue<bool>("physics2d.debug_kinematic_motion", false);
         auto& registry = scene.GetRegistry();
         auto bodyView = registry.view<Rigidbody2DComponent, TransformComponent>();
+        static std::unordered_map<entt::entity, uint32_t> s_AstroidMissingRuntimeBodyFrames;
+        static std::unordered_map<entt::entity, uint32_t> s_AstroidUnexpectedBodyTypeFrames;
         for (entt::entity entity : bodyView)
         {
             if (!scene.IsEntityEnabledInHierarchy(entity))
                 continue;
             auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
             auto& transform = bodyView.get<TransformComponent>(entity);
-            if (!IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &rigidbody))
+            const auto* tag = debugKinematicMotion ? registry.try_get<TagComponent>(entity) : nullptr;
+            const bool debugAstroid = tag && tag->Tag.rfind("Astroid", 0) == 0;
+            const bool assignedToThisWorld = IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &rigidbody);
+            if (!assignedToThisWorld)
                 continue;
             if (rigidbody.RuntimeWorldSlot != m_SceneWorldSlot)
                 continue;
 
             if (!rigidbody.RuntimeBodyCreated || !b2Body_IsValid(rigidbody.RuntimeBodyId))
+            {
+                if (debugAstroid)
+                {
+                    uint32_t& missingBodyFrameCount = s_AstroidMissingRuntimeBodyFrames[entity];
+                    ++missingBodyFrameCount;
+                    if (missingBodyFrameCount == 1u || (missingBodyFrameCount % 30u) == 0u)
+                    {
+                        LT_WARN("Physics2D kinematic debug: entity='{}' missing runtime body (frames={} assigned_to_world={} runtime_created={} runtime_valid={} world_slot={} expected_slot={})",
+                                tag->Tag,
+                                missingBodyFrameCount,
+                                assignedToThisWorld,
+                                rigidbody.RuntimeBodyCreated,
+                                b2Body_IsValid(rigidbody.RuntimeBodyId),
+                                rigidbody.RuntimeWorldSlot,
+                                m_SceneWorldSlot);
+                    }
+                }
                 continue;
+            }
+            if (debugAstroid)
+                s_AstroidMissingRuntimeBodyFrames.erase(entity);
 
             const b2BodyType expectedType = ToBox2DBodyType(rigidbody.Type);
+            if (debugAstroid && expectedType != b2_kinematicBody)
+            {
+                uint32_t& unexpectedTypeFrameCount = s_AstroidUnexpectedBodyTypeFrames[entity];
+                ++unexpectedTypeFrameCount;
+                if (unexpectedTypeFrameCount == 1u || (unexpectedTypeFrameCount % 30u) == 0u)
+                {
+                    LT_WARN("Physics2D kinematic debug: entity='{}' uses non-kinematic body type={} (frames={})",
+                            tag->Tag,
+                            static_cast<int>(rigidbody.Type),
+                            unexpectedTypeFrameCount);
+                }
+            }
+            else if (debugAstroid)
+            {
+                s_AstroidUnexpectedBodyTypeFrames.erase(entity);
+            }
 
             const bool hasPendingVelocityWrites =
                 rigidbody.RuntimeHasPendingLinearVelocity ||
@@ -881,42 +1108,138 @@ namespace Limitless
                     b2Body_SetGravityScale(rigidbody.RuntimeBodyId, safeGravityScale);
                 if (b2Body_IsFixedRotation(rigidbody.RuntimeBodyId) != freezeRotation)
                     b2Body_SetFixedRotation(rigidbody.RuntimeBodyId, freezeRotation);
-                if (b2Body_IsSleepEnabled(rigidbody.RuntimeBodyId) != rigidbody.EnableSleep)
-                    b2Body_EnableSleep(rigidbody.RuntimeBodyId, rigidbody.EnableSleep);
+                const bool effectiveEnableSleep = (expectedType != b2_kinematicBody) && rigidbody.EnableSleep;
+                if (b2Body_IsSleepEnabled(rigidbody.RuntimeBodyId) != effectiveEnableSleep)
+                    b2Body_EnableSleep(rigidbody.RuntimeBodyId, effectiveEnableSleep);
                 if (b2Body_IsBullet(rigidbody.RuntimeBodyId) != rigidbody.UseCCD)
                     b2Body_SetBullet(rigidbody.RuntimeBodyId, rigidbody.UseCCD);
             }
 
             if (expectedType == b2_kinematicBody)
             {
-                // For authored kinematic bodies, drive velocity from authored transform deltas.
-                // This avoids solver-feedback jitter when a dynamic body is in contact.
-                const glm::vec2 authoredPositionDelta = authoringPosition - rigidbody.RuntimePreviousPosition;
-                const float authoredAngleDelta = WrapAngleRadians(authoringAngleRadians - rigidbody.RuntimePreviousAngleRadians);
-                const bool authoringChanged = glm::length(authoredPositionDelta) > kTransformSnapEpsilon ||
-                                              std::abs(authoredAngleDelta) > kTransformSnapEpsilon;
+                b2Vec2 runtimeVelocity = b2Body_GetLinearVelocity(rigidbody.RuntimeBodyId);
+                const bool hadPendingVelocityWrites = hasPendingVelocityWrites;
+                const glm::vec2 authoredPositionDeltaSinceLastFrame = authoringPosition - rigidbody.RuntimePreviousPosition;
+                const float authoredAngleDeltaSinceLastFrame =
+                    WrapAngleRadians(authoringAngleRadians - rigidbody.RuntimePreviousAngleRadians);
+                const bool authoredPoseChangedSinceLastFrame =
+                    glm::length(authoredPositionDeltaSinceLastFrame) > kTransformSnapEpsilon ||
+                    std::abs(authoredAngleDeltaSinceLastFrame) > kTransformSnapEpsilon;
+                const bool hasRuntimeVelocityBeforeUpdates =
+                    std::abs(runtimeVelocity.x) > kTransformSnapEpsilon ||
+                    std::abs(runtimeVelocity.y) > kTransformSnapEpsilon;
+                const bool treatAsVelocityDriven = hadPendingVelocityWrites || hasRuntimeVelocityBeforeUpdates;
+                bool velocityChanged = false;
 
-                if (!authoringChanged)
+                if (hadPendingVelocityWrites)
                 {
-                    b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, { 0.0f, 0.0f });
-                    b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, 0.0f);
-                    rigidbody.RuntimePreviousPosition = authoringPosition;
-                    rigidbody.RuntimePreviousAngleRadians = authoringAngleRadians;
-                    continue;
+                    if (rigidbody.RuntimeHasPendingLinearVelocity)
+                    {
+                        runtimeVelocity.x = rigidbody.RuntimePendingLinearVelocity.x;
+                        runtimeVelocity.y = rigidbody.RuntimePendingLinearVelocity.y;
+                        velocityChanged = true;
+                    }
+                    else
+                    {
+                        if (rigidbody.RuntimeHasPendingLinearVelocityX)
+                        {
+                            runtimeVelocity.x = rigidbody.RuntimePendingLinearVelocityX;
+                            velocityChanged = true;
+                        }
+                        if (rigidbody.RuntimeHasPendingLinearVelocityY)
+                        {
+                            runtimeVelocity.y = rigidbody.RuntimePendingLinearVelocityY;
+                            velocityChanged = true;
+                        }
+                    }
+
+                    rigidbody.RuntimeHasPendingLinearVelocity = false;
+                    rigidbody.RuntimeHasPendingLinearVelocityX = false;
+                    rigidbody.RuntimeHasPendingLinearVelocityY = false;
                 }
 
-                const float inverseStep = 1.0f / std::max(fixedDeltaTime, kMinimumStepDelta);
-                glm::vec2 targetLinearVelocity = authoredPositionDelta * inverseStep;
-                float targetAngularVelocity = authoredAngleDelta * inverseStep;
-                if (freezePositionX)
-                    targetLinearVelocity.x = 0.0f;
-                if (freezePositionY)
-                    targetLinearVelocity.y = 0.0f;
-                if (freezeRotation)
-                    targetAngularVelocity = 0.0f;
-                b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, { targetLinearVelocity.x, targetLinearVelocity.y });
-                b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, targetAngularVelocity);
+                if (freezePositionX && std::abs(runtimeVelocity.x) > kTransformSnapEpsilon)
+                {
+                    runtimeVelocity.x = 0.0f;
+                    velocityChanged = true;
+                }
+                if (freezePositionY && std::abs(runtimeVelocity.y) > kTransformSnapEpsilon)
+                {
+                    runtimeVelocity.y = 0.0f;
+                    velocityChanged = true;
+                }
 
+                if (velocityChanged)
+                    b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, runtimeVelocity);
+
+                if (transformChangedByAuthoring)
+                {
+                    // When kinematic movement is velocity-driven, runtime body motion
+                    // can transiently get ahead of authored transform sync by one frame.
+                    // Avoid snapping body back to stale authored pose in that case.
+                    const bool shouldApplyAuthoredPose =
+                        authoredPoseChangedSinceLastFrame || !treatAsVelocityDriven;
+                    if (shouldApplyAuthoredPose)
+                    {
+                        b2Body_SetTransform(
+                            rigidbody.RuntimeBodyId,
+                            { authoringPosition.x, authoringPosition.y },
+                            b2MakeRot(authoringAngleRadians));
+                        b2Body_SetAwake(rigidbody.RuntimeBodyId, true);
+
+                        // Transform-authored kinematic motion should not inherit stale
+                        // velocity unless this frame explicitly wrote kinematic velocity.
+                        if (!treatAsVelocityDriven)
+                        {
+                            runtimeVelocity = { 0.0f, 0.0f };
+                            b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, runtimeVelocity);
+                            velocityChanged = true;
+                        }
+                    }
+                    else
+                    {
+                        transformChangedByAuthoring = false;
+                    }
+                }
+
+                const bool hasRuntimeVelocityAfterUpdates =
+                    std::abs(runtimeVelocity.x) > kTransformSnapEpsilon ||
+                    std::abs(runtimeVelocity.y) > kTransformSnapEpsilon;
+                if (hasRuntimeVelocityAfterUpdates || transformChangedByAuthoring)
+                    b2Body_SetAwake(rigidbody.RuntimeBodyId, true);
+
+                if (debugKinematicMotion)
+                {
+                    if (debugAstroid)
+                    {
+                        static std::unordered_map<entt::entity, uint32_t> s_KinematicStallFrameCounts;
+                        const bool appearsStalled =
+                            hasRuntimeVelocityAfterUpdates &&
+                            glm::length(authoredPositionDeltaSinceLastFrame) <= kTransformSnapEpsilon;
+                        uint32_t& stallFrameCount = s_KinematicStallFrameCounts[entity];
+                        stallFrameCount = appearsStalled ? (stallFrameCount + 1u) : 0u;
+                        if (stallFrameCount > 0u && (stallFrameCount % 30u) == 0u)
+                        {
+                            LT_WARN("Physics2D kinematic debug: entity='{}' stalled_frames={} pending_writes={} transform_changed={} "
+                                    "runtime_velocity=({}, {}) authored_delta=({}, {}) sleep_enabled={} awake={}",
+                                    tag->Tag,
+                                    stallFrameCount,
+                                    hadPendingVelocityWrites,
+                                    transformChangedByAuthoring,
+                                    runtimeVelocity.x,
+                                    runtimeVelocity.y,
+                                    authoredPositionDeltaSinceLastFrame.x,
+                                    authoredPositionDeltaSinceLastFrame.y,
+                                    b2Body_IsSleepEnabled(rigidbody.RuntimeBodyId),
+                                    b2Body_IsAwake(rigidbody.RuntimeBodyId));
+                        }
+                    }
+                }
+
+                if (freezeRotation)
+                    b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, 0.0f);
+
+                rigidbody.RuntimeLinearVelocity = glm::vec2(runtimeVelocity.x, runtimeVelocity.y);
                 rigidbody.RuntimePreviousPosition = authoringPosition;
                 rigidbody.RuntimePreviousAngleRadians = authoringAngleRadians;
                 continue;
@@ -989,32 +1312,31 @@ namespace Limitless
 #ifdef LT_ENABLE_PHYSICS2D
         auto& registry = scene.GetRegistry();
         auto jointView = registry.view<Joint2DComponent, Rigidbody2DComponent>();
+        auto destroyRuntimeJoint = [this](Joint2DComponent& joint) {
+            if (joint.RuntimeJointCreated &&
+                joint.RuntimeWorldSlot == m_SceneWorldSlot &&
+                b2Joint_IsValid(joint.RuntimeJointId))
+            {
+                b2DestroyJoint(joint.RuntimeJointId);
+            }
+            joint.RuntimeJointId = kNullPhysics2DJoint;
+            joint.RuntimeJointCreated = false;
+            joint.RuntimeWorldSlot = 0;
+            joint.RuntimeJointSignature = 0;
+        };
         for (entt::entity entity : jointView)
         {
             auto& joint = jointView.get<Joint2DComponent>(entity);
             auto& bodyAComponent = jointView.get<Rigidbody2DComponent>(entity);
             if (!IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &bodyAComponent))
             {
-                if (joint.RuntimeJointCreated &&
-                    joint.RuntimeWorldSlot == m_SceneWorldSlot &&
-                    b2Joint_IsValid(joint.RuntimeJointId))
-                {
-                    b2DestroyJoint(joint.RuntimeJointId);
-                    joint.RuntimeJointId = kNullPhysics2DJoint;
-                    joint.RuntimeJointCreated = false;
-                    joint.RuntimeWorldSlot = 0;
-                }
+                destroyRuntimeJoint(joint);
                 continue;
             }
 
             if (!scene.IsEntityEnabledInHierarchy(entity))
-                continue;
-
-            // Incremental guard: skip joints that are already built and valid.
-            if (joint.RuntimeJointCreated &&
-                joint.RuntimeWorldSlot == m_SceneWorldSlot &&
-                b2Joint_IsValid(joint.RuntimeJointId))
             {
+                destroyRuntimeJoint(joint);
                 continue;
             }
 
@@ -1022,13 +1344,20 @@ namespace Limitless
                 bodyAComponent.RuntimeWorldSlot != m_SceneWorldSlot ||
                 !b2Body_IsValid(bodyAComponent.RuntimeBodyId))
             {
+                destroyRuntimeJoint(joint);
                 continue;
             }
 
             if (joint.ConnectedEntity == entt::null || !scene.IsValid(joint.ConnectedEntity))
+            {
+                destroyRuntimeJoint(joint);
                 continue;
+            }
             if (!scene.IsEntityEnabledInHierarchy(joint.ConnectedEntity))
+            {
+                destroyRuntimeJoint(joint);
                 continue;
+            }
 
             auto* bodyBComponent = registry.try_get<Rigidbody2DComponent>(joint.ConnectedEntity);
             if (!bodyBComponent ||
@@ -1037,7 +1366,21 @@ namespace Limitless
                 bodyBComponent->RuntimeWorldSlot != m_SceneWorldSlot ||
                 !b2Body_IsValid(bodyBComponent->RuntimeBodyId))
             {
+                destroyRuntimeJoint(joint);
                 continue;
+            }
+
+            const uint64_t desiredJointSignature =
+                BuildJointSignature(joint, bodyAComponent, *bodyBComponent, m_SceneWorldSlot);
+
+            if (joint.RuntimeJointCreated &&
+                joint.RuntimeWorldSlot == m_SceneWorldSlot &&
+                b2Joint_IsValid(joint.RuntimeJointId))
+            {
+                if (joint.RuntimeJointSignature == desiredJointSignature)
+                    continue;
+
+                destroyRuntimeJoint(joint);
             }
 
             if (joint.Type == Joint2DComponent::JointType::Distance)
@@ -1101,6 +1444,7 @@ namespace Limitless
 
             joint.RuntimeJointCreated = b2Joint_IsValid(joint.RuntimeJointId);
             joint.RuntimeWorldSlot = joint.RuntimeJointCreated ? m_SceneWorldSlot : 0;
+            joint.RuntimeJointSignature = joint.RuntimeJointCreated ? desiredJointSignature : 0;
         }
 #else
         (void)scene;
@@ -1199,7 +1543,11 @@ namespace Limitless
             rigidbody->RuntimeRenderCurrentAngleRadians = bodyAngleRadians;
             rigidbody->RuntimeLinearVelocity = glm::vec2(bodyVelocity.x, bodyVelocity.y);
 
-            if (rigidbody->Type == Rigidbody2DComponent::BodyType::Kinematic)
+            const bool isKinematicBody = rigidbody->Type == Rigidbody2DComponent::BodyType::Kinematic;
+            const bool kinematicHasRuntimeVelocity =
+                std::abs(bodyVelocity.x) > kTransformSnapEpsilon ||
+                std::abs(bodyVelocity.y) > kTransformSnapEpsilon;
+            if (isKinematicBody && !kinematicHasRuntimeVelocity)
                 continue;
 
             rigidbody->RuntimePreviousPosition = authoredWorldPose.Position;

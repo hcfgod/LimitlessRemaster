@@ -320,20 +320,7 @@ namespace Limitless
                 return true;
             }
 
-            if (!before.Tiles.empty())
-            {
-                const size_t firstIndex = 0;
-                const size_t middleIndex = before.Tiles.size() / 2;
-                const size_t lastIndex = before.Tiles.size() - 1;
-                if (before.Tiles[firstIndex] != after.Tiles[firstIndex] ||
-                    before.Tiles[middleIndex] != after.Tiles[middleIndex] ||
-                    before.Tiles[lastIndex] != after.Tiles[lastIndex])
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            return before.Tiles != after.Tiles;
         }
 
         bool HasAnimatorChangedForAccessValidation(const AnimatorComponent& before, const AnimatorComponent& after)
@@ -679,18 +666,8 @@ namespace Limitless
         };
 
         auto executeWithDeferredEntityDestroy = [this](auto&& callback) {
-            const bool previousForceDeferredDestroy = m_ForceDeferredEntityDestruction;
-            m_ForceDeferredEntityDestruction = true;
-            try
-            {
-                callback();
-            }
-            catch (...)
-            {
-                m_ForceDeferredEntityDestruction = previousForceDeferredDestroy;
-                throw;
-            }
-            m_ForceDeferredEntityDestruction = previousForceDeferredDestroy;
+            [[maybe_unused]] auto forcedDeferredDestroyScope = MakeForcedDeferredEntityDestructionScope();
+            callback();
         };
 
         auto executeScriptUpdateSlot = [&](entt::entity entity, size_t scriptIndex) {
@@ -1661,18 +1638,8 @@ namespace Limitless
         };
 
         auto executeWithDeferredEntityDestroy = [this](auto&& callback) {
-            const bool previousForceDeferredDestroy = m_ForceDeferredEntityDestruction;
-            m_ForceDeferredEntityDestruction = true;
-            try
-            {
-                callback();
-            }
-            catch (...)
-            {
-                m_ForceDeferredEntityDestruction = previousForceDeferredDestroy;
-                throw;
-            }
-            m_ForceDeferredEntityDestruction = previousForceDeferredDestroy;
+            [[maybe_unused]] auto forcedDeferredDestroyScope = MakeForcedDeferredEntityDestructionScope();
+            callback();
         };
 
         auto executeScriptFixedUpdateSlot = [&](entt::entity entity, size_t scriptIndex) {

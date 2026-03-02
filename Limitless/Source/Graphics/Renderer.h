@@ -191,6 +191,105 @@ namespace Limitless
             return SubmitPrimaryResourceAndWait("PrimaryResource", std::forward<Func>(func));
         }
 
+        template<typename Func>
+        std::future<decltype(std::declval<Func>()(static_cast<GraphicsContext*>(nullptr)))> SubmitPrimaryResourceAsync(const char* debugName, Func&& func)
+        {
+            using ResultT = decltype(func(static_cast<GraphicsContext*>(nullptr)));
+
+            if (IsOnRenderThread())
+            {
+                std::promise<ResultT> promise;
+                auto future = promise.get_future();
+                try
+                {
+                    if constexpr (std::is_void_v<ResultT>)
+                    {
+                        func(m_GraphicsContext);
+                        promise.set_value();
+                    }
+                    else
+                    {
+                        promise.set_value(func(m_GraphicsContext));
+                    }
+                }
+                catch (...)
+                {
+                    promise.set_exception(std::current_exception());
+                }
+                return future;
+            }
+
+            if (!m_RenderThreadRunning.load(std::memory_order_relaxed))
+            {
+                throw std::runtime_error("SubmitPrimaryResourceAsync requires the render thread to be running");
+            }
+
+            struct SharedState
+            {
+                std::promise<ResultT> promise;
+                std::function<ResultT(GraphicsContext*)> function;
+                const char* debugName = "PrimaryResource";
+            };
+
+            auto state = std::make_shared<SharedState>();
+            state->function = std::forward<Func>(func);
+            state->debugName = (debugName && debugName[0] != '\0') ? debugName : "PrimaryResource";
+            std::future<ResultT> future = state->promise.get_future();
+
+            class CommandImpl final : public RenderResourceCommandQueue::Command
+            {
+            public:
+                explicit CommandImpl(std::shared_ptr<SharedState> shared)
+                    : m_Shared(std::move(shared))
+                {
+                }
+
+                const char* GetDebugName() const override
+                {
+                    return m_Shared->debugName;
+                }
+
+                void Execute(GraphicsContext* context) override
+                {
+                    try
+                    {
+                        if constexpr (std::is_void_v<ResultT>)
+                        {
+                            m_Shared->function(context);
+                            m_Shared->promise.set_value();
+                        }
+                        else
+                        {
+                            ResultT result = m_Shared->function(context);
+                            m_Shared->promise.set_value(std::move(result));
+                        }
+                    }
+                    catch (...)
+                    {
+                        m_Shared->promise.set_exception(std::current_exception());
+                    }
+                }
+
+            private:
+                std::shared_ptr<SharedState> m_Shared;
+            };
+
+            if (!m_PrimaryResourceQueue.Submit(std::make_unique<CommandImpl>(state)))
+            {
+                throw std::runtime_error("RenderResourceCommandQueue (primary) is full");
+            }
+
+            // Wake the render thread; it is the only consumer of the primary-resource queue.
+            NotifyRenderThreadResourceWorkAvailable();
+            return future;
+        }
+
+        template<typename Func>
+        std::future<decltype(std::declval<Func>()(static_cast<GraphicsContext*>(nullptr)))> SubmitPrimaryResourceAsync(Func&& func)
+        {
+            return SubmitPrimaryResourceAsync("PrimaryResource", std::forward<Func>(func));
+        }
+
         // Returns true when the OpenGL shared-context resource thread is active.
         // When enabled, GPU resource work executes on a dedicated thread with its own shared
         // OpenGL context (in parallel with frame rendering on the render thread).

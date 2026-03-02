@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -18,6 +19,75 @@ namespace Limitless::EditorPrefabSystem
 {
     namespace
     {
+        constexpr float kParentInverseDeterminantEpsilon = 1e-6f;
+
+        bool IsFiniteMatrix(const glm::mat4& matrix)
+        {
+            for (int column = 0; column < 4; ++column)
+            {
+                for (int row = 0; row < 4; ++row)
+                {
+                    if (!std::isfinite(matrix[column][row]))
+                        return false;
+                }
+            }
+            return true;
+        }
+
+        bool IsFiniteVec3(const glm::vec3& value)
+        {
+            return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+        }
+
+        bool IsFiniteQuat(const glm::quat& value)
+        {
+            return std::isfinite(value.w) && std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+        }
+
+        bool TryAssignLocalTransformFromWorld(const glm::mat4& parentWorld,
+                                              const glm::mat4& childWorld,
+                                              TransformComponent& destinationTransform)
+        {
+            if (!IsFiniteMatrix(parentWorld) || !IsFiniteMatrix(childWorld))
+                return false;
+
+            const float determinant = glm::determinant(parentWorld);
+            if (!std::isfinite(determinant) || std::abs(determinant) <= kParentInverseDeterminantEpsilon)
+                return false;
+
+            const glm::mat4 childLocal = glm::inverse(parentWorld) * childWorld;
+            if (!IsFiniteMatrix(childLocal))
+                return false;
+
+            glm::vec3 skew(0.0f);
+            glm::vec4 perspective(0.0f);
+            glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
+            glm::vec3 translation(0.0f);
+            glm::vec3 scale(1.0f);
+            if (!glm::decompose(childLocal, scale, orientation, translation, skew, perspective))
+                return false;
+            if (!IsFiniteVec3(translation) || !IsFiniteVec3(scale) || !IsFiniteQuat(orientation))
+                return false;
+
+            const float orientationLengthSquared =
+                orientation.w * orientation.w +
+                orientation.x * orientation.x +
+                orientation.y * orientation.y +
+                orientation.z * orientation.z;
+            if (!std::isfinite(orientationLengthSquared) || orientationLengthSquared <= 0.0f)
+                return false;
+            orientation = glm::normalize(orientation);
+
+            const glm::vec3 eulerDegrees = glm::degrees(glm::eulerAngles(orientation));
+            if (!IsFiniteVec3(eulerDegrees))
+                return false;
+
+            destinationTransform.Position = translation;
+            destinationTransform.Rotation = eulerDegrees;
+            destinationTransform.Scale = scale;
+            return true;
+        }
+
         bool IsNullEntity(entt::entity entity)
         {
             return entity == entt::null;
@@ -233,18 +303,8 @@ namespace Limitless::EditorPrefabSystem
                     {
                         const glm::mat4 sourceRootWorld = sourceScene.GetWorldTransformMatrix(sourceEntity);
                         const glm::mat4 parentWorld = destinationScene.GetWorldTransformMatrix(resolvedDestinationParentEntity);
-                        const glm::mat4 childLocal = glm::inverse(parentWorld) * sourceRootWorld;
-
-                        glm::vec3 skew(0.0f);
-                        glm::vec4 perspective(0.0f);
-                        glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
-                        glm::vec3 translation(0.0f);
-                        glm::vec3 scale(1.0f);
-                        if (glm::decompose(childLocal, scale, orientation, translation, skew, perspective))
+                        if (TryAssignLocalTransformFromWorld(parentWorld, sourceRootWorld, *destinationTransform))
                         {
-                            destinationTransform->Position = translation;
-                            destinationTransform->Rotation = glm::degrees(glm::eulerAngles(orientation));
-                            destinationTransform->Scale = scale;
                             destinationScene.MarkTransformDirty(destinationEntity);
                         }
                     }

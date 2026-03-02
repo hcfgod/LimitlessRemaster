@@ -919,7 +919,7 @@ namespace Limitless
         const uint32_t reportedAbiVersion = getAbiVersionFunction();
         if (reportedAbiVersion != kScriptCoreAbiVersion)
         {
-            LT_ERROR("GameLayer: ScriptCore ABI mismatch. expected={}, got={}.",
+            LT_ERROR("GameLayer: ScriptCore ABI mismatch. expected={}, got={}. Rebuild project scripts/ScriptCore for this engine revision.",
                      kScriptCoreAbiVersion,
                      reportedAbiVersion);
             PlatformUtils::FreeLibrary(m_ScriptCoreLibraryHandle);

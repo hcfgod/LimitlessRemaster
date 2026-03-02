@@ -72,7 +72,12 @@ namespace Limitless
         entt::entity GetHandle() const { return m_EntityHandle; }
 
         /// Access the underlying registry (for advanced / editor use).
-        entt::registry* GetRegistry() const { return m_Registry; }
+        entt::registry* GetRegistry() const
+        {
+            if (IsParallelExecutionContext())
+                throw std::runtime_error("Entity::GetRegistry is not supported during parallel script execution");
+            return m_Registry;
+        }
 
         /// Returns true when this value represents a prefab asset reference.
         bool IsPrefabReference() const { return !m_PrefabAssetKey.empty(); }

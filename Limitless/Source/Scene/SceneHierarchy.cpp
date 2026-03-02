@@ -5,7 +5,10 @@
 #include "Scripting/Coroutine.h"
 
 #include <algorithm>
+#include <cmath>
+#include <exception>
 #include <type_traits>
+#include <unordered_set>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/matrix_decompose.hpp>
@@ -16,6 +19,74 @@ namespace Limitless
     namespace
     {
         constexpr int32_t kSiblingOrderStep = 10;
+        constexpr float kParentInverseDeterminantEpsilon = 1e-6f;
+
+        bool IsFiniteMatrix(const glm::mat4& matrix)
+        {
+            for (int column = 0; column < 4; ++column)
+            {
+                for (int row = 0; row < 4; ++row)
+                {
+                    if (!std::isfinite(matrix[column][row]))
+                        return false;
+                }
+            }
+            return true;
+        }
+
+        bool IsFiniteVec3(const glm::vec3& value)
+        {
+            return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+        }
+
+        bool IsFiniteQuat(const glm::quat& value)
+        {
+            return std::isfinite(value.w) && std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+        }
+
+        bool TryAssignLocalTransformFromWorld(const glm::mat4& parentWorld,
+                                              const glm::mat4& childWorld,
+                                              TransformComponent& childTransform)
+        {
+            if (!IsFiniteMatrix(parentWorld) || !IsFiniteMatrix(childWorld))
+                return false;
+
+            const float determinant = glm::determinant(parentWorld);
+            if (!std::isfinite(determinant) || std::abs(determinant) <= kParentInverseDeterminantEpsilon)
+                return false;
+
+            const glm::mat4 childLocal = glm::inverse(parentWorld) * childWorld;
+            if (!IsFiniteMatrix(childLocal))
+                return false;
+
+            glm::vec3 skew(0.0f);
+            glm::vec4 perspective(0.0f);
+            glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
+            glm::vec3 translation(0.0f);
+            glm::vec3 scale(1.0f);
+            if (!glm::decompose(childLocal, scale, orientation, translation, skew, perspective))
+                return false;
+            if (!IsFiniteVec3(translation) || !IsFiniteVec3(scale) || !IsFiniteQuat(orientation))
+                return false;
+
+            const float orientationLengthSquared =
+                orientation.w * orientation.w +
+                orientation.x * orientation.x +
+                orientation.y * orientation.y +
+                orientation.z * orientation.z;
+            if (!std::isfinite(orientationLengthSquared) || orientationLengthSquared <= 0.0f)
+                return false;
+            orientation = glm::normalize(orientation);
+
+            const glm::vec3 eulerDegrees = glm::degrees(glm::eulerAngles(orientation));
+            if (!IsFiniteVec3(eulerDegrees))
+                return false;
+
+            childTransform.Position = translation;
+            childTransform.Rotation = eulerDegrees;
+            childTransform.Scale = scale;
+            return true;
+        }
 
         bool IsStructuralPhaseValidationEnabled()
         {
@@ -47,6 +118,9 @@ namespace Limitless
 
     entt::entity Scene::CreateEntity(const std::string& name)
     {
+        if (m_IsShuttingDown)
+            return entt::null;
+
         if (ShouldDeferStructuralMutations())
         {
             const std::string deferredName = name;
@@ -95,7 +169,10 @@ namespace Limitless
 
     void Scene::DestroyEntity(entt::entity entity)
     {
-        if (m_ForceDeferredEntityDestruction)
+        if (m_IsShuttingDown)
+            return;
+
+        if (IsForcedDeferredEntityDestructionEnabled())
         {
             EnqueueDeferredStructuralMutation([entity](Scene& scene) {
                 scene.DestroyEntity(entity);
@@ -116,8 +193,7 @@ namespace Limitless
         if (!IsValid(entity))
             return;
 
-        const uint16_t physicsWorldCount = std::max<uint16_t>(GetPhysics2DWorldCount(), 1);
-        std::vector<bool> affectedPhysicsWorldSlots(static_cast<size_t>(physicsWorldCount), false);
+        std::unordered_set<uint32_t> destroyedEntityIds;
 
         auto destroyRecursive = [&](auto&& self, entt::entity target) -> void
         {
@@ -128,13 +204,6 @@ namespace Limitless
             for (entt::entity child : children)
                 self(self, child);
 
-            if (const auto* rigidbody = m_Registry.try_get<Rigidbody2DComponent>(target))
-            {
-                const uint16_t clampedWorldSlot =
-                    std::min<uint16_t>(rigidbody->PhysicsWorldSlot, static_cast<uint16_t>(physicsWorldCount - 1));
-                affectedPhysicsWorldSlots[clampedWorldSlot] = true;
-            }
-
             if (auto* nativeScript = m_Registry.try_get<NativeScriptComponent>(target))
             {
                 for (auto& scriptEntry : nativeScript->Scripts)
@@ -142,7 +211,26 @@ namespace Limitless
                     if (scriptEntry.RuntimeInstance)
                     {
                         if (scriptEntry.RuntimeInitialized)
-                            scriptEntry.RuntimeInstance->OnDestroy();
+                        {
+                            const auto* tag = m_Registry.try_get<TagComponent>(target);
+                            try
+                            {
+                                scriptEntry.RuntimeInstance->OnDestroy();
+                            }
+                            catch (const std::exception& exception)
+                            {
+                                LT_ERROR("Script '{}' on entity '{}' threw during OnDestroy while destroying entity: {}",
+                                         scriptEntry.ScriptClassName,
+                                         tag ? tag->Tag : "Entity",
+                                         exception.what());
+                            }
+                            catch (...)
+                            {
+                                LT_ERROR("Script '{}' on entity '{}' threw a non-standard exception during OnDestroy while destroying entity",
+                                         scriptEntry.ScriptClassName,
+                                         tag ? tag->Tag : "Entity");
+                            }
+                        }
                         Coroutine::StopAll(*scriptEntry.RuntimeInstance);
                         scriptEntry.RuntimeInstance.reset();
                     }
@@ -154,15 +242,21 @@ namespace Limitless
                 }
             }
 
+            destroyedEntityIds.insert(static_cast<uint32_t>(target));
             m_Registry.destroy(target);
             RemoveDeferredEntityReferencesFor(target);
         };
         destroyRecursive(destroyRecursive, entity);
 
-        for (uint16_t worldSlot = 0; worldSlot < physicsWorldCount; ++worldSlot)
+        if (!destroyedEntityIds.empty() && !m_RuntimeActiveContactPairs.empty())
         {
-            if (affectedPhysicsWorldSlots[worldSlot])
-                ResetPhysicsRuntimeState(worldSlot);
+            for (auto it = m_RuntimeActiveContactPairs.begin(); it != m_RuntimeActiveContactPairs.end();)
+            {
+                if (destroyedEntityIds.contains(it->EntityA) || destroyedEntityIds.contains(it->EntityB))
+                    it = m_RuntimeActiveContactPairs.erase(it);
+                else
+                    ++it;
+            }
         }
 
         m_TransformsDirty = true;
@@ -243,19 +337,7 @@ namespace Limitless
         if (auto* childTransform = m_Registry.try_get<TransformComponent>(child))
         {
             const glm::mat4 parentWorld = (parent != entt::null) ? GetWorldTransformMatrix(parent) : glm::mat4(1.0f);
-            const glm::mat4 childLocal = glm::inverse(parentWorld) * childWorldBefore;
-
-            glm::vec3 skew(0.0f);
-            glm::vec4 perspective(0.0f);
-            glm::quat orientation(1.0f, 0.0f, 0.0f, 0.0f);
-            glm::vec3 translation(0.0f);
-            glm::vec3 scale(1.0f);
-            if (glm::decompose(childLocal, scale, orientation, translation, skew, perspective))
-            {
-                childTransform->Position = translation;
-                childTransform->Rotation = glm::degrees(glm::eulerAngles(orientation));
-                childTransform->Scale = scale;
-            }
+            (void)TryAssignLocalTransformFromWorld(parentWorld, childWorldBefore, *childTransform);
         }
 
         MarkTransformDirty(child);

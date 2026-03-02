@@ -10,13 +10,16 @@
 
 #include <atomic>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <unordered_set>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -230,6 +233,82 @@ namespace
         }
     };
 
+    class ParallelTilemapMutateScript final : public Limitless::ScriptableEntity
+    {
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            auto& tilemapLayer = GetComponent<Limitless::TilemapLayerComponent>();
+            if (tilemapLayer.Tiles.size() > 1)
+                tilemapLayer.Tiles[1] = tilemapLayer.Tiles[1] + 1u;
+        }
+    };
+
+    class ParallelTilemapFixedMutateScript final : public Limitless::ScriptableEntity
+    {
+    protected:
+        void OnFixedUpdate(float /*fixedDeltaTime*/) override
+        {
+            auto& tilemapLayer = GetComponent<Limitless::TilemapLayerComponent>();
+            if (tilemapLayer.Tiles.size() > 1)
+                tilemapLayer.Tiles[1] = tilemapLayer.Tiles[1] + 1u;
+        }
+    };
+
+    class ParallelMutableRegistryAccessScript final : public Limitless::ScriptableEntity
+    {
+    protected:
+        void OnUpdate(float /*deltaTime*/) override
+        {
+            auto* scene = GetScene();
+            auto& registry = scene->GetRegistry();
+            auto& transform = registry.get<Limitless::TransformComponent>(GetEntityHandle());
+            transform.Position.x += 1.0f;
+        }
+    };
+
+    class ContactOrderRecordingScript final : public Limitless::ScriptableEntity
+    {
+    public:
+        static void ResetEvents()
+        {
+            std::lock_guard<std::mutex> lock(EventMutex);
+            TriggerEnterEvents.clear();
+        }
+
+        static std::vector<std::string> GetEventsSnapshot()
+        {
+            std::lock_guard<std::mutex> lock(EventMutex);
+            return TriggerEnterEvents;
+        }
+
+    protected:
+        void OnTriggerEnter(const Limitless::Entity& other) override
+        {
+            std::string selfTag = "Entity";
+            const auto& selfTagComponent = GetComponent<Limitless::TagComponent>();
+            if (!selfTagComponent.Tag.empty())
+                selfTag = selfTagComponent.Tag;
+
+            std::string otherTag = "Entity";
+            if (other)
+            {
+                if (const auto* otherTagComponent = other.TryGetComponent<Limitless::TagComponent>())
+                {
+                    if (!otherTagComponent->Tag.empty())
+                        otherTag = otherTagComponent->Tag;
+                }
+            }
+
+            std::lock_guard<std::mutex> lock(EventMutex);
+            TriggerEnterEvents.push_back(selfTag + "->" + otherTag);
+        }
+
+    private:
+        static std::mutex EventMutex;
+        static std::vector<std::string> TriggerEnterEvents;
+    };
+
     class ParallelHelperDeclaredAccessScript final : public Limitless::ScriptableEntity
     {
     public:
@@ -244,6 +323,47 @@ namespace
             transform.Position.x += 2.0f;
         }
     };
+
+    class ThrowingOnDestroyScript final : public Limitless::ScriptableEntity
+    {
+    public:
+        static std::atomic<int> DestroyCallCount;
+
+        static void ResetCounters()
+        {
+            DestroyCallCount.store(0, std::memory_order_relaxed);
+        }
+
+    protected:
+        void OnDestroy() override
+        {
+            DestroyCallCount.fetch_add(1, std::memory_order_relaxed);
+            throw std::runtime_error("ThrowingOnDestroyScript failure");
+        }
+    };
+
+    class DestroySelfOnDestroyScript final : public Limitless::ScriptableEntity
+    {
+    public:
+        static std::atomic<int> DestroyCallCount;
+
+        static void ResetCounters()
+        {
+            DestroyCallCount.store(0, std::memory_order_relaxed);
+        }
+
+    protected:
+        void OnDestroy() override
+        {
+            DestroyCallCount.fetch_add(1, std::memory_order_relaxed);
+            DestroyEntity(GetEntityHandle());
+        }
+    };
+
+    std::atomic<int> ThrowingOnDestroyScript::DestroyCallCount{ 0 };
+    std::atomic<int> DestroySelfOnDestroyScript::DestroyCallCount{ 0 };
+    std::mutex ContactOrderRecordingScript::EventMutex{};
+    std::vector<std::string> ContactOrderRecordingScript::TriggerEnterEvents{};
 
     bool IsNullEntity(entt::entity entity)
     {
@@ -497,6 +617,39 @@ TEST_SUITE("Scene And Editor Flows")
 
         CHECK(ExtractWorldPosition(childTransform).x == doctest::Approx(10.0f));
         CHECK(childTransform.RuntimeWorldUpdatedThisFrame == true);
+    }
+
+    TEST_CASE("SetParent with singular parent transform keeps child local transform finite")
+    {
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+
+        const entt::entity parent = scene.CreateEntity("SingularParent");
+        const entt::entity child = scene.CreateEntity("SingularChild");
+
+        auto& parentTransform = registry.get<Limitless::TransformComponent>(parent);
+        parentTransform.Position = { 4.0f, -3.0f, 0.0f };
+        parentTransform.Rotation = { 0.0f, 0.0f, 25.0f };
+        parentTransform.Scale = { 0.0f, 2.0f, 1.0f };
+
+        auto& childTransform = registry.get<Limitless::TransformComponent>(child);
+        childTransform.Position = { 1.0f, 2.0f, 3.0f };
+        childTransform.Rotation = { 10.0f, -15.0f, 20.0f };
+        childTransform.Scale = { 1.5f, 0.75f, 1.0f };
+
+        scene.UpdateTransforms();
+        REQUIRE(scene.SetParent(child, parent));
+
+        const auto& updatedChildTransform = registry.get<Limitless::TransformComponent>(child);
+        CHECK(std::isfinite(updatedChildTransform.Position.x));
+        CHECK(std::isfinite(updatedChildTransform.Position.y));
+        CHECK(std::isfinite(updatedChildTransform.Position.z));
+        CHECK(std::isfinite(updatedChildTransform.Rotation.x));
+        CHECK(std::isfinite(updatedChildTransform.Rotation.y));
+        CHECK(std::isfinite(updatedChildTransform.Rotation.z));
+        CHECK(std::isfinite(updatedChildTransform.Scale.x));
+        CHECK(std::isfinite(updatedChildTransform.Scale.y));
+        CHECK(std::isfinite(updatedChildTransform.Scale.z));
     }
 
     TEST_CASE("Parallel-safe scripts defer structural mutations and apply them in structural phase")
@@ -1440,6 +1593,228 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(scriptEntry.RuntimeUpdateCount >= 1);
     }
 
+    TEST_CASE("Parallel-safe Tilemap writes on update without declared write mask are flagged")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateAccessMasks = config.GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+        const bool previousWarnAccessMaskMismatch = config.GetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateAccessMasks;
+            bool WarnAccessMaskMismatch;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_parallel_script_access_masks", ValidateAccessMasks);
+                Config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", WarnAccessMaskMismatch);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateAccessMasks,
+            previousWarnAccessMaskMismatch
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+        config.SetValue("ecs.mt.validate_parallel_script_access_masks", true);
+        config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelTilemapMutateScript>("ParallelTilemapMutateScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelTilemapMaskMismatchHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelTilemapMutateScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scriptEntry.DeclaredWriteAccessMask = 0;
+        registry.emplace<Limitless::Grid2DComponent>(scriptHost);
+        auto& tilemapLayer = registry.emplace<Limitless::TilemapLayerComponent>(scriptHost);
+        tilemapLayer.GridSize = { 4, 2 };
+        tilemapLayer.ResizeGrid(tilemapLayer.GridSize);
+        const uint32_t tileBeforeUpdate = tilemapLayer.Tiles[1];
+
+        scene.Update(1.0f / 60.0f);
+
+        CHECK(tilemapLayer.Tiles[1] != tileBeforeUpdate);
+        CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == true);
+        CHECK(scriptEntry.RuntimeUpdateCount >= 1);
+    }
+
+    TEST_CASE("Parallel-safe Tilemap writes on fixed update without declared write mask are flagged")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateAccessMasks = config.GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
+        const bool previousWarnAccessMaskMismatch = config.GetValue<bool>("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateAccessMasks;
+            bool WarnAccessMaskMismatch;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_parallel_script_access_masks", ValidateAccessMasks);
+                Config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", WarnAccessMaskMismatch);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateAccessMasks,
+            previousWarnAccessMaskMismatch
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+        config.SetValue("ecs.mt.validate_parallel_script_access_masks", true);
+        config.SetValue("ecs.mt.warn_parallel_script_access_mismatch", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelTilemapFixedMutateScript>("ParallelTilemapFixedMutateScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelTilemapFixedMaskMismatchHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelTilemapFixedMutateScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scriptEntry.DeclaredWriteAccessMask = 0;
+        registry.emplace<Limitless::Grid2DComponent>(scriptHost);
+        auto& tilemapLayer = registry.emplace<Limitless::TilemapLayerComponent>(scriptHost);
+        tilemapLayer.GridSize = { 4, 2 };
+        tilemapLayer.ResizeGrid(tilemapLayer.GridSize);
+        const uint32_t tileBeforeFixedUpdate = tilemapLayer.Tiles[1];
+
+        scene.FixedUpdate(1.0f / 60.0f);
+
+        CHECK(tilemapLayer.Tiles[1] != tileBeforeFixedUpdate);
+        CHECK(scriptEntry.RuntimeWarnedAccessMaskMismatch == true);
+        CHECK(scriptEntry.RuntimeInstance != nullptr);
+    }
+
+    TEST_CASE("Parallel-safe mutable scene registry access is blocked")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        auto& config = Limitless::ConfigManager::GetInstance();
+        const bool previousEnableParallelScripts = config.GetValue<bool>("ecs.mt.enable_parallel_scripts", true);
+        const bool previousRequireAccessDeclarations = config.GetValue<bool>("ecs.mt.require_parallel_script_access_declarations", true);
+        const bool previousWarnImplicitAccess = config.GetValue<bool>("ecs.mt.warn_implicit_parallel_script_access", true);
+        const bool previousValidateMutableRegistryAccess = config.GetValue<bool>("ecs.mt.validate_mutable_registry_access", true);
+
+        struct ConfigRestore final
+        {
+            Limitless::ConfigManager& Config;
+            bool EnableParallelScripts;
+            bool RequireAccessDeclarations;
+            bool WarnImplicitAccess;
+            bool ValidateMutableRegistryAccess;
+
+            ~ConfigRestore()
+            {
+                Config.SetValue("ecs.mt.enable_parallel_scripts", EnableParallelScripts);
+                Config.SetValue("ecs.mt.require_parallel_script_access_declarations", RequireAccessDeclarations);
+                Config.SetValue("ecs.mt.warn_implicit_parallel_script_access", WarnImplicitAccess);
+                Config.SetValue("ecs.mt.validate_mutable_registry_access", ValidateMutableRegistryAccess);
+            }
+        } configRestore{
+            config,
+            previousEnableParallelScripts,
+            previousRequireAccessDeclarations,
+            previousWarnImplicitAccess,
+            previousValidateMutableRegistryAccess
+        };
+
+        config.SetValue("ecs.mt.enable_parallel_scripts", true);
+        config.SetValue("ecs.mt.require_parallel_script_access_declarations", true);
+        config.SetValue("ecs.mt.warn_implicit_parallel_script_access", false);
+        config.SetValue("ecs.mt.validate_mutable_registry_access", true);
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ParallelMutableRegistryAccessScript>("ParallelMutableRegistryAccessScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity scriptHost = scene.CreateEntity("ParallelMutableRegistryAccessHost");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
+        scripts.Scripts.emplace_back();
+        auto& scriptEntry = scripts.Scripts.back();
+        scriptEntry.ScriptClassName = "ParallelMutableRegistryAccessScript";
+        scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        scriptEntry.DeclaredWriteAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+
+        auto& transform = registry.get<Limitless::TransformComponent>(scriptHost);
+        const float initialX = transform.Position.x;
+
+        scene.Update(1.0f / 60.0f);
+
+        CHECK(transform.Position.x == doctest::Approx(initialX));
+        CHECK(scriptEntry.RuntimeInstance == nullptr);
+        CHECK(scriptEntry.RuntimeInitialized == false);
+        CHECK(scriptEntry.RuntimeUpdateCount == 0);
+    }
+
     TEST_CASE("Parallel-safe scripts can declare access masks with helper macros")
     {
         struct NativeScriptRegistryCleanup final
@@ -1587,6 +1962,173 @@ TEST_SUITE("Scene And Editor Flows")
             CHECK(appliedOrder[static_cast<size_t>(command)] == command);
     }
 
+    TEST_CASE("SceneSystemScheduler isolates serial systems from parallel candidates")
+    {
+        auto& jobSystem = Limitless::Concurrency::GetJobSystem();
+        const bool wasJobSystemInitialized = jobSystem.IsInitialized();
+        if (!wasJobSystemInitialized)
+            jobSystem.Initialize(2);
+        struct JobSystemRestore final
+        {
+            Limitless::Concurrency::JobSystem& JobSystem;
+            bool WasInitialized;
+            ~JobSystemRestore()
+            {
+                if (!WasInitialized && JobSystem.IsInitialized())
+                    JobSystem.Shutdown();
+            }
+        } jobSystemRestore{ jobSystem, wasJobSystemInitialized };
+
+        std::atomic<bool> serialRunning{ false };
+        std::atomic<bool> overlapDetected{ false };
+        std::atomic<int> executedCount{ 0 };
+
+        std::vector<Limitless::ScheduledSceneSystem> systems;
+        systems.reserve(3);
+
+        Limitless::ScheduledSceneSystem serialSystem{};
+        serialSystem.Name = "Serial";
+        serialSystem.AllowParallel = false;
+        serialSystem.Execute = [&]() {
+            serialRunning.store(true, std::memory_order_release);
+            std::this_thread::sleep_for(std::chrono::milliseconds(60));
+            executedCount.fetch_add(1, std::memory_order_relaxed);
+            serialRunning.store(false, std::memory_order_release);
+        };
+        systems.push_back(std::move(serialSystem));
+
+        auto makeParallelProbeSystem = [&](const char* name) {
+            Limitless::ScheduledSceneSystem system{};
+            system.Name = name;
+            system.AllowParallel = true;
+            system.Execute = [&]() {
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(120);
+                while (!serialRunning.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+                {
+                    std::this_thread::yield();
+                }
+                if (serialRunning.load(std::memory_order_acquire))
+                    overlapDetected.store(true, std::memory_order_relaxed);
+                executedCount.fetch_add(1, std::memory_order_relaxed);
+            };
+            return system;
+        };
+
+        systems.push_back(makeParallelProbeSystem("ParallelA"));
+        systems.push_back(makeParallelProbeSystem("ParallelB"));
+
+        Limitless::SceneSystemScheduler::Run(jobSystem, systems);
+
+        CHECK(executedCount.load(std::memory_order_relaxed) == 3);
+        CHECK(overlapDetected.load(std::memory_order_relaxed) == false);
+    }
+
+    TEST_CASE("Runtime contact callbacks dispatch in deterministic pair order")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ContactOrderRecordingScript>("ContactOrderRecordingScript");
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        Limitless::Physics2DWorldSettings settings = scene.GetPhysics2DSettings();
+        settings.WorldCount = 1;
+        settings.Gravity = { 0.0f, 0.0f };
+        scene.SetPhysics2DSettings(settings);
+
+        const auto attachScript = [&](entt::entity entity) {
+            auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(entity);
+            scripts.Scripts.emplace_back();
+            auto& scriptEntry = scripts.Scripts.back();
+            scriptEntry.ScriptClassName = "ContactOrderRecordingScript";
+        };
+
+        const entt::entity triggerB = scene.CreateEntity("TriggerB");
+        const entt::entity visitor = scene.CreateEntity("Visitor");
+        const entt::entity triggerA = scene.CreateEntity("TriggerA");
+
+        attachScript(triggerA);
+        attachScript(triggerB);
+        attachScript(visitor);
+
+        auto& visitorTransform = registry.get<Limitless::TransformComponent>(visitor);
+        visitorTransform.Position = { 0.0f, 0.0f, 0.0f };
+        auto& visitorBody = registry.emplace<Limitless::Rigidbody2DComponent>(visitor);
+        visitorBody.Type = Limitless::Rigidbody2DComponent::BodyType::Dynamic;
+        auto& visitorCollider = registry.emplace<Limitless::BoxCollider2DComponent>(visitor);
+        visitorCollider.Size = { 5.0f, 5.0f };
+
+        auto& triggerATransform = registry.get<Limitless::TransformComponent>(triggerA);
+        triggerATransform.Position = { -1.0f, 0.0f, 0.0f };
+        auto& triggerABody = registry.emplace<Limitless::Rigidbody2DComponent>(triggerA);
+        triggerABody.Type = Limitless::Rigidbody2DComponent::BodyType::Static;
+        auto& triggerACollider = registry.emplace<Limitless::BoxCollider2DComponent>(triggerA);
+        triggerACollider.Size = { 0.8f, 0.8f };
+        triggerACollider.IsSensor = true;
+
+        auto& triggerBTransform = registry.get<Limitless::TransformComponent>(triggerB);
+        triggerBTransform.Position = { 1.0f, 0.0f, 0.0f };
+        auto& triggerBBody = registry.emplace<Limitless::Rigidbody2DComponent>(triggerB);
+        triggerBBody.Type = Limitless::Rigidbody2DComponent::BodyType::Static;
+        auto& triggerBCollider = registry.emplace<Limitless::BoxCollider2DComponent>(triggerB);
+        triggerBCollider.Size = { 0.8f, 0.8f };
+        triggerBCollider.IsSensor = true;
+
+        scene.Update(1.0f / 60.0f);
+        ContactOrderRecordingScript::ResetEvents();
+        scene.StepPhysics2D(1.0f / 60.0f);
+
+        auto makePairKey = [](entt::entity entityA, entt::entity entityB) {
+            Limitless::RuntimeContactPairKey key{};
+            key.EntityA = std::min(static_cast<uint32_t>(entityA), static_cast<uint32_t>(entityB));
+            key.EntityB = std::max(static_cast<uint32_t>(entityA), static_cast<uint32_t>(entityB));
+            key.WorldSlot = 0;
+            key.IsSensor = true;
+            return key;
+        };
+
+        std::vector<Limitless::RuntimeContactPairKey> expectedPairs;
+        expectedPairs.push_back(makePairKey(triggerA, visitor));
+        expectedPairs.push_back(makePairKey(triggerB, visitor));
+        std::sort(expectedPairs.begin(), expectedPairs.end(), [](const Limitless::RuntimeContactPairKey& left,
+                                                                 const Limitless::RuntimeContactPairKey& right) {
+            if (left.WorldSlot != right.WorldSlot)
+                return left.WorldSlot < right.WorldSlot;
+            if (left.IsSensor != right.IsSensor)
+                return left.IsSensor < right.IsSensor;
+            if (left.EntityA != right.EntityA)
+                return left.EntityA < right.EntityA;
+            return left.EntityB < right.EntityB;
+        });
+
+        auto getTagFor = [&](entt::entity entity) -> std::string {
+            return registry.get<Limitless::TagComponent>(entity).Tag;
+        };
+
+        std::vector<std::string> expectedOrder;
+        expectedOrder.reserve(expectedPairs.size() * 2);
+        for (const auto& pair : expectedPairs)
+        {
+            const entt::entity entityA = static_cast<entt::entity>(pair.EntityA);
+            const entt::entity entityB = static_cast<entt::entity>(pair.EntityB);
+            expectedOrder.push_back(getTagFor(entityA) + "->" + getTagFor(entityB));
+            expectedOrder.push_back(getTagFor(entityB) + "->" + getTagFor(entityA));
+        }
+
+        const std::vector<std::string> actualOrder = ContactOrderRecordingScript::GetEventsSnapshot();
+        REQUIRE(actualOrder.size() == expectedOrder.size());
+        for (size_t eventIndex = 0; eventIndex < expectedOrder.size(); ++eventIndex)
+            CHECK(actualOrder[eventIndex] == expectedOrder[eventIndex]);
+    }
+
     TEST_CASE("Parallel physics world stepping matches sequential stepping for isolated worlds")
     {
         auto& config = Limitless::ConfigManager::GetInstance();
@@ -1681,6 +2223,46 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(parallelWorldOneY == doctest::Approx(sequentialWorldOneY).epsilon(0.0001f));
     }
 
+    TEST_CASE("DestroyEntity keeps unrelated runtime bodies alive in same physics world slot")
+    {
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+
+        Limitless::Physics2DWorldSettings settings = scene.GetPhysics2DSettings();
+        settings.WorldCount = 2;
+        settings.Gravity = { 0.0f, -9.81f };
+        scene.SetPhysics2DSettings(settings);
+
+        const entt::entity survivor = scene.CreateEntity("Survivor");
+        auto& survivorTransform = registry.get<Limitless::TransformComponent>(survivor);
+        survivorTransform.Position = { -0.5f, 3.0f, 0.0f };
+        auto& survivorBody = registry.emplace<Limitless::Rigidbody2DComponent>(survivor);
+        survivorBody.Type = Limitless::Rigidbody2DComponent::BodyType::Dynamic;
+        survivorBody.PhysicsWorldSlot = 0;
+        registry.emplace<Limitless::BoxCollider2DComponent>(survivor);
+
+        const entt::entity victim = scene.CreateEntity("Victim");
+        auto& victimTransform = registry.get<Limitless::TransformComponent>(victim);
+        victimTransform.Position = { 0.75f, 4.0f, 0.0f };
+        auto& victimBody = registry.emplace<Limitless::Rigidbody2DComponent>(victim);
+        victimBody.Type = Limitless::Rigidbody2DComponent::BodyType::Dynamic;
+        victimBody.PhysicsWorldSlot = 0;
+        registry.emplace<Limitless::BoxCollider2DComponent>(victim);
+
+        scene.StepPhysics2D(1.0f / 60.0f);
+
+        CHECK(registry.get<Limitless::Rigidbody2DComponent>(survivor).RuntimeBodyCreated == true);
+        CHECK(registry.get<Limitless::Rigidbody2DComponent>(victim).RuntimeBodyCreated == true);
+
+        CHECK_NOTHROW(scene.DestroyEntity(victim));
+        CHECK(scene.IsValid(survivor));
+        CHECK_FALSE(scene.IsValid(victim));
+
+        const auto& survivorAfterDestroy = registry.get<Limitless::Rigidbody2DComponent>(survivor);
+        CHECK(survivorAfterDestroy.RuntimeBodyCreated == true);
+        CHECK(survivorAfterDestroy.RuntimeWorldSlot == 0);
+    }
+
     TEST_CASE("Scene clone preserves authored data and resets runtime state")
     {
         Limitless::Scene scene;
@@ -1702,6 +2284,9 @@ TEST_SUITE("Scene And Editor Flows")
         sprite.TextureKey = "Assets/Textures/Ui/Button.png";
         sprite.TextureLoadAttempted = true; // runtime-only behavior should reset in clone
         sprite.Color = { 0.25f, 0.5f, 0.75f, 1.0f };
+        sprite.SubSpriteIndex = 4;
+        sprite.UvMin = { 0.125f, 0.25f };
+        sprite.UvMax = { 0.625f, 0.75f };
 
         auto& material = registry.emplace<Limitless::MaterialComponent>(child);
         material.MaterialKey = "Assets/Materials/Ui/Button.material.json";
@@ -1820,6 +2405,11 @@ TEST_SUITE("Scene And Editor Flows")
         const auto& clonedSprite = cloneRegistry.get<Limitless::SpriteComponent>(clonedChild);
         CHECK(clonedSprite.TextureKey == sprite.TextureKey);
         CHECK(clonedSprite.TextureLoadAttempted == false);
+        CHECK(clonedSprite.SubSpriteIndex == sprite.SubSpriteIndex);
+        CHECK(clonedSprite.UvMin.x == doctest::Approx(sprite.UvMin.x));
+        CHECK(clonedSprite.UvMin.y == doctest::Approx(sprite.UvMin.y));
+        CHECK(clonedSprite.UvMax.x == doctest::Approx(sprite.UvMax.x));
+        CHECK(clonedSprite.UvMax.y == doctest::Approx(sprite.UvMax.y));
 
         const auto& clonedMaterial = cloneRegistry.get<Limitless::MaterialComponent>(clonedChild);
         CHECK(clonedMaterial.MaterialKey == material.MaterialKey);
@@ -1909,6 +2499,85 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(clonedJoint.ConnectedEntity == clonedParent);
 
         CHECK(clone->GetParent(clonedChild) == clonedParent);
+    }
+
+    TEST_CASE("InstantiatePrefab preserves sprite sub-sprite authored fields")
+    {
+        Limitless::Scene prefabScene;
+        auto& prefabRegistry = prefabScene.GetRegistry();
+
+        const entt::entity prefabRoot = prefabScene.CreateEntity("PrefabRoot");
+        auto& prefabSprite = prefabRegistry.emplace<Limitless::SpriteComponent>(prefabRoot);
+        prefabSprite.TextureKey = "Assets/Textures/Characters/Player.png";
+        prefabSprite.SubSpriteIndex = 2;
+        prefabSprite.UvMin = { 0.2f, 0.3f };
+        prefabSprite.UvMax = { 0.7f, 0.9f };
+
+        const std::filesystem::path prefabPath = MakeTempScenePath("SpriteSubSprite.prefab.json");
+        std::error_code errorCode;
+        std::filesystem::create_directories(prefabPath.parent_path(), errorCode);
+        REQUIRE(!errorCode);
+
+        const auto saveResult = prefabScene.SaveToFile(prefabPath);
+        REQUIRE(saveResult.IsSuccess());
+
+        Limitless::Scene destinationScene;
+        const entt::entity instantiatedRoot = destinationScene.InstantiatePrefab(prefabPath.string());
+        REQUIRE_FALSE(IsNullEntity(instantiatedRoot));
+        REQUIRE(destinationScene.GetRegistry().all_of<Limitless::SpriteComponent>(instantiatedRoot));
+
+        const auto& instantiatedSprite = destinationScene.GetRegistry().get<Limitless::SpriteComponent>(instantiatedRoot);
+        CHECK(instantiatedSprite.TextureKey == prefabSprite.TextureKey);
+        CHECK(instantiatedSprite.SubSpriteIndex == prefabSprite.SubSpriteIndex);
+        CHECK(instantiatedSprite.UvMin.x == doctest::Approx(prefabSprite.UvMin.x));
+        CHECK(instantiatedSprite.UvMin.y == doctest::Approx(prefabSprite.UvMin.y));
+        CHECK(instantiatedSprite.UvMax.x == doctest::Approx(prefabSprite.UvMax.x));
+        CHECK(instantiatedSprite.UvMax.y == doctest::Approx(prefabSprite.UvMax.y));
+
+        std::filesystem::remove(prefabPath, errorCode);
+    }
+
+    TEST_CASE("InstantiatePrefab under singular parent transform keeps instantiated transform finite")
+    {
+        Limitless::Scene prefabScene;
+        auto& prefabRegistry = prefabScene.GetRegistry();
+
+        const entt::entity prefabRoot = prefabScene.CreateEntity("PrefabRootSingularParent");
+        auto& prefabRootTransform = prefabRegistry.get<Limitless::TransformComponent>(prefabRoot);
+        prefabRootTransform.Position = { 2.5f, -1.25f, 0.0f };
+        prefabRootTransform.Rotation = { 0.0f, 0.0f, 45.0f };
+        prefabRootTransform.Scale = { 1.25f, 0.8f, 1.0f };
+
+        const std::filesystem::path prefabPath = MakeTempScenePath("SingularParentInstantiate.prefab.json");
+        std::error_code errorCode;
+        std::filesystem::create_directories(prefabPath.parent_path(), errorCode);
+        REQUIRE(!errorCode);
+
+        const auto saveResult = prefabScene.SaveToFile(prefabPath);
+        REQUIRE(saveResult.IsSuccess());
+
+        Limitless::Scene destinationScene;
+        auto& destinationRegistry = destinationScene.GetRegistry();
+        const entt::entity parent = destinationScene.CreateEntity("SingularParent");
+        auto& parentTransform = destinationRegistry.get<Limitless::TransformComponent>(parent);
+        parentTransform.Position = { -3.0f, 6.0f, 0.0f };
+        parentTransform.Scale = { 0.0f, 1.0f, 1.0f };
+
+        const entt::entity instantiatedRoot = destinationScene.InstantiatePrefab(prefabPath.string(), parent);
+        REQUIRE_FALSE(IsNullEntity(instantiatedRoot));
+
+        const auto& instantiatedTransform = destinationRegistry.get<Limitless::TransformComponent>(instantiatedRoot);
+        CHECK(std::isfinite(instantiatedTransform.Position.x));
+        CHECK(std::isfinite(instantiatedTransform.Position.y));
+        CHECK(std::isfinite(instantiatedTransform.Position.z));
+        CHECK(std::isfinite(instantiatedTransform.Rotation.x));
+        CHECK(std::isfinite(instantiatedTransform.Rotation.y));
+        CHECK(std::isfinite(instantiatedTransform.Rotation.z));
+        CHECK(std::isfinite(instantiatedTransform.Scale.x));
+        CHECK(std::isfinite(instantiatedTransform.Scale.y));
+        CHECK(std::isfinite(instantiatedTransform.Scale.z));
+
+        std::filesystem::remove(prefabPath, errorCode);
     }
 
     TEST_CASE("Scene save and load round-trips key scene content")
@@ -2183,6 +2852,99 @@ TEST_SUITE("Scene And Editor Flows")
 
         std::error_code errorCode;
         std::filesystem::remove(scenePath, errorCode);
+    }
+
+    TEST_CASE("DestroyEntity does not throw when script OnDestroy throws")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ThrowingOnDestroyScript>("ThrowingOnDestroyScript");
+        ThrowingOnDestroyScript::ResetCounters();
+
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+        const entt::entity entity = scene.CreateEntity("ThrowingOnDestroyEntity");
+
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(entity);
+        scripts.Scripts.emplace_back();
+        scripts.Scripts.back().ScriptClassName = "ThrowingOnDestroyScript";
+
+        scene.Update(1.0f / 60.0f);
+        REQUIRE(scripts.Scripts.back().RuntimeInstance != nullptr);
+        REQUIRE(scripts.Scripts.back().RuntimeInitialized == true);
+
+        CHECK_NOTHROW(scene.DestroyEntity(entity));
+        CHECK_FALSE(scene.IsValid(entity));
+        CHECK(ThrowingOnDestroyScript::DestroyCallCount.load(std::memory_order_relaxed) >= 1);
+    }
+
+    TEST_CASE("Scene destructor does not throw when script OnDestroy throws")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<ThrowingOnDestroyScript>("ThrowingOnDestroyScript");
+        ThrowingOnDestroyScript::ResetCounters();
+
+        auto scene = std::make_unique<Limitless::Scene>();
+        auto& registry = scene->GetRegistry();
+        const entt::entity entity = scene->CreateEntity("ThrowingOnDestroyOnSceneDestruct");
+
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(entity);
+        scripts.Scripts.emplace_back();
+        scripts.Scripts.back().ScriptClassName = "ThrowingOnDestroyScript";
+
+        scene->Update(1.0f / 60.0f);
+        REQUIRE(scripts.Scripts.back().RuntimeInstance != nullptr);
+        REQUIRE(scripts.Scripts.back().RuntimeInitialized == true);
+
+        CHECK_NOTHROW(scene.reset());
+        CHECK(ThrowingOnDestroyScript::DestroyCallCount.load(std::memory_order_relaxed) >= 1);
+    }
+
+    TEST_CASE("Scene destructor tolerates script OnDestroy structural mutation")
+    {
+        struct NativeScriptRegistryCleanup final
+        {
+            ~NativeScriptRegistryCleanup()
+            {
+                Limitless::NativeScriptRegistry::Clear();
+            }
+        };
+        [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
+
+        Limitless::NativeScriptRegistry::Clear();
+        Limitless::NativeScriptRegistry::RegisterScript<DestroySelfOnDestroyScript>("DestroySelfOnDestroyScript");
+        DestroySelfOnDestroyScript::ResetCounters();
+
+        auto scene = std::make_unique<Limitless::Scene>();
+        auto& registry = scene->GetRegistry();
+        const entt::entity entity = scene->CreateEntity("DestroySelfOnDestroyEntity");
+        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(entity);
+        scripts.Scripts.emplace_back();
+        scripts.Scripts.back().ScriptClassName = "DestroySelfOnDestroyScript";
+
+        scene->Update(1.0f / 60.0f);
+        REQUIRE(scripts.Scripts.back().RuntimeInstance != nullptr);
+        REQUIRE(scripts.Scripts.back().RuntimeInitialized == true);
+
+        CHECK_NOTHROW(scene.reset());
+        CHECK(DestroySelfOnDestroyScript::DestroyCallCount.load(std::memory_order_relaxed) >= 1);
     }
 
     TEST_CASE("Project lighting settings save-load round-trips and clamps invalid values")

@@ -70,7 +70,7 @@ namespace Limitless
         /// Factory: creates a framebuffer on the render thread. Blocks until complete.
         static std::shared_ptr<Framebuffer> Create(const FramebufferSpecification& specification);
 
-        /// Async factory: schedules creation on the render thread. Returns a future.
+        /// Async factory: schedules creation on the primary render context queue. Returns a future.
         static std::future<std::shared_ptr<Framebuffer>> CreateAsync(const FramebufferSpecification& specification);
     };
 

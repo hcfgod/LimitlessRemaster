@@ -3,6 +3,8 @@
 #include "Core/Debug/Log.h"
 
 #include <cstring>
+#include <mutex>
+#include <string_view>
 
 #if defined(LT_ENABLE_FFMPEG)
 
@@ -20,6 +22,36 @@ namespace Limitless::Audio::Decoders
 {
     namespace
     {
+        void FilteredFfmpegLogCallback(void* ptr, int level, const char* fmt, va_list vl)
+        {
+            if (level > av_log_get_level())
+                return;
+
+            char formattedLine[1024]{};
+            int printPrefix = 1;
+            va_list formatArgs;
+            va_copy(formatArgs, vl);
+            av_log_format_line(ptr, level, fmt, formatArgs, formattedLine, sizeof(formattedLine), &printPrefix);
+            va_end(formatArgs);
+
+            const std::string_view line(formattedLine);
+            if (line.find("Could not update timestamps for discarded samples") != std::string_view::npos)
+                return;
+
+            va_list forwardArgs;
+            va_copy(forwardArgs, vl);
+            av_log_default_callback(ptr, level, fmt, forwardArgs);
+            va_end(forwardArgs);
+        }
+
+        void EnsureFfmpegLogFilteringInitialized()
+        {
+            static std::once_flag initialized;
+            std::call_once(initialized, []() {
+                av_log_set_callback(&FilteredFfmpegLogCallback);
+            });
+        }
+
         struct MemoryReader
         {
             const uint8_t* Data = nullptr;
@@ -407,6 +439,8 @@ namespace Limitless::Audio::Decoders
 
     Result<std::shared_ptr<AudioClip>> FfmpegAudioDecoder::DecodeFromFile(const std::string& absolutePath, const DecodeSettings& settings)
     {
+        EnsureFfmpegLogFilteringInitialized();
+
         if (absolutePath.empty())
         {
             return Result<std::shared_ptr<AudioClip>>(ErrorCode::InvalidArgument, "FFmpeg: empty path");
@@ -442,6 +476,8 @@ namespace Limitless::Audio::Decoders
 
     Result<std::shared_ptr<AudioClip>> FfmpegAudioDecoder::DecodeFromMemory(const uint8_t* bytes, size_t byteCount, const std::string& debugName, const DecodeSettings& settings)
     {
+        EnsureFfmpegLogFilteringInitialized();
+
         if (!bytes || byteCount == 0)
         {
             return Result<std::shared_ptr<AudioClip>>(ErrorCode::InvalidArgument, "FFmpeg: empty memory buffer");
