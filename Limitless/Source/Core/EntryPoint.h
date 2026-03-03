@@ -6,23 +6,22 @@
 #include <filesystem>
 #include <memory>
 
-// Prevent console window from appearing in Dist builds on Windows
-#if defined(LT_PLATFORM_WINDOWS) && defined(LT_CONFIG_DIST)
-    /*
-     * Ensure distribution / release builds on Windows do not spawn a console
-     * window by switching the subsystem to WINDOWS and setting the CRT entry
-     * point appropriately.  This pragma is MSVC-specific and is ignored by
-     * other compilers.
-     */
-    #if defined(_MSC_VER)
-        #pragma comment(linker, "/SUBSYSTEM:windows /ENTRY:mainCRTStartup")
+#if defined(LT_PLATFORM_WINDOWS)
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
     #endif
+    #include <windows.h>
 #endif
 
 // This function must be defined by the client application.
 // Returns unique_ptr so main() can take ownership and avoid leaks on exceptions.
 extern std::unique_ptr<Limitless::Application> CreateApplication();
 
+// This is the main entry point for the application.
+// It initializes the configuration system, loads the configuration file,
+// initializes the logging system, creates the application instance,
+// and starts the main loop.
+// It also handles the shutdown of the application.
 int main(int argc, char** argv)
 {
 	// Initialize configuration system first (before logging)
@@ -137,3 +136,22 @@ int main(int argc, char** argv)
 
 	return 0;
 }
+
+// This allows the engine to run as a GUI application on Windows when built in Dist configuration 
+// so the console window is not opened when the application is launched.
+#if defined(LT_PLATFORM_WINDOWS) && defined(LT_CONFIG_DIST)
+// Dist builds on Windows run with GUI subsystem; keep main() and bridge through
+// WinMain/wWinMain so runtime startup remains shared across configurations.
+#if defined(UNICODE) || defined(_UNICODE)
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
+#else
+int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
+#endif
+{
+#if defined(_MSC_VER)
+    return main(__argc, __argv);
+#else
+    return main(0, nullptr);
+#endif
+}
+#endif

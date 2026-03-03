@@ -1982,7 +1982,12 @@ namespace Limitless::EditorInspectorPanel
             }
 
             std::string mirrorError;
-            if (!MirrorAllProjectNativeScriptsToGeneratedDirectory(mirrorError))
+            if (nativeScriptAuthoringState.BuildInProgress.load(std::memory_order_relaxed))
+            {
+                // Avoid clearing/rebuilding Generated/ScriptCore while an active compile is reading it.
+                LT_WARN("Native scripts: skipping full generated mirror refresh because a build is currently running.");
+            }
+            else if (!MirrorAllProjectNativeScriptsToGeneratedDirectory(mirrorError))
             {
                 return openInternalEditor(
                     "Could not prepare external script mirror (" + mirrorError + "). Using built-in editor.",

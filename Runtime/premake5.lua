@@ -169,6 +169,11 @@ project "Runtime"
             }
         end
 
+        -- Ship Dist builds as GUI applications on Windows so launching the
+        -- packaged game does not open a separate console window.
+        filter { "system:windows", "configurations:Dist" }
+            kind "WindowedApp"
+
     filter "system:macosx"
         cppdialect "C++20"
         staticruntime "Off"

@@ -18,6 +18,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #if defined(LT_PLATFORM_WINDOWS)
@@ -1104,13 +1105,6 @@ namespace Limitless::Project
             std::error_code errorCode;
             for (const std::filesystem::path& generatedDirectory : generatedDirectories)
             {
-                std::filesystem::remove_all(generatedDirectory, errorCode);
-                if (errorCode)
-                {
-                    result.ErrorMessage = "Cannot clear generated ScriptCore mirror directory '" + generatedDirectory.string() + "': " + errorCode.message();
-                    return false;
-                }
-
                 std::filesystem::create_directories(generatedDirectory, errorCode);
                 if (errorCode)
                 {
@@ -1119,7 +1113,17 @@ namespace Limitless::Project
                 }
             }
 
+            const auto isLikelyLockError = [](const std::error_code& ec) -> bool
+            {
+                return ec == std::make_error_code(std::errc::permission_denied) ||
+                       ec == std::make_error_code(std::errc::operation_not_permitted) ||
+                       ec == std::make_error_code(std::errc::device_or_resource_busy);
+            };
+
+            std::unordered_set<std::string> expectedRelativeScriptFiles;
+            size_t lockedOverwriteCount = 0;
             size_t mirroredScriptPairCount = 0;
+
             for (const auto& entry : std::filesystem::recursive_directory_iterator(assetsRoot, std::filesystem::directory_options::skip_permission_denied))
             {
                 if (!entry.is_regular_file() || entry.path().extension() != ".cpp")
@@ -1139,6 +1143,9 @@ namespace Limitless::Project
                 if (relativePathError || relativeHeaderPath.empty())
                     continue;
 
+                expectedRelativeScriptFiles.insert(relativeCppPath.generic_string());
+                expectedRelativeScriptFiles.insert(relativeHeaderPath.generic_string());
+
                 for (const std::filesystem::path& generatedDirectory : generatedDirectories)
                 {
                     const std::filesystem::path destinationCppPath = generatedDirectory / relativeCppPath;
@@ -1154,19 +1161,79 @@ namespace Limitless::Project
                     std::filesystem::copy_file(sourceCppPath, destinationCppPath, std::filesystem::copy_options::overwrite_existing, errorCode);
                     if (errorCode)
                     {
-                        result.ErrorMessage = "Failed to mirror script source '" + sourceCppPath.string() + "' to '" + destinationCppPath.string() + "': " + errorCode.message();
-                        return false;
+                        if (!(isLikelyLockError(errorCode) && std::filesystem::exists(destinationCppPath)))
+                        {
+                            result.ErrorMessage = "Failed to mirror script source '" + sourceCppPath.string() + "' to '" + destinationCppPath.string() + "': " + errorCode.message();
+                            return false;
+                        }
+                        ++lockedOverwriteCount;
                     }
 
                     std::filesystem::copy_file(sourceHeaderPath, destinationHeaderPath, std::filesystem::copy_options::overwrite_existing, errorCode);
                     if (errorCode)
                     {
-                        result.ErrorMessage = "Failed to mirror script header '" + sourceHeaderPath.string() + "' to '" + destinationHeaderPath.string() + "': " + errorCode.message();
-                        return false;
+                        if (!(isLikelyLockError(errorCode) && std::filesystem::exists(destinationHeaderPath)))
+                        {
+                            result.ErrorMessage = "Failed to mirror script header '" + sourceHeaderPath.string() + "' to '" + destinationHeaderPath.string() + "': " + errorCode.message();
+                            return false;
+                        }
+                        ++lockedOverwriteCount;
                     }
                 }
 
                 ++mirroredScriptPairCount;
+            }
+
+            size_t staleScriptFilesPrunedCount = 0;
+            size_t staleScriptFilesLockedCount = 0;
+            for (const std::filesystem::path& generatedDirectory : generatedDirectories)
+            {
+                std::error_code iteratorError;
+                const auto directoryOptions = std::filesystem::directory_options::skip_permission_denied;
+                std::filesystem::recursive_directory_iterator iterator(generatedDirectory, directoryOptions, iteratorError);
+                const std::filesystem::recursive_directory_iterator end;
+                for (; !iteratorError && iterator != end; iterator.increment(iteratorError))
+                {
+                    std::error_code fileTypeError;
+                    if (!iterator->is_regular_file(fileTypeError) || fileTypeError)
+                        continue;
+
+                    std::string extension = iterator->path().extension().string();
+                    std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char value) {
+                        return static_cast<char>(std::tolower(value));
+                    });
+                    if (extension != ".cpp" && extension != ".h")
+                        continue;
+
+                    std::error_code relativePathError;
+                    const std::filesystem::path relativePath = std::filesystem::relative(iterator->path(), generatedDirectory, relativePathError);
+                    if (relativePathError || relativePath.empty())
+                        continue;
+
+                    if (expectedRelativeScriptFiles.find(relativePath.generic_string()) != expectedRelativeScriptFiles.end())
+                        continue;
+
+                    std::error_code removeError;
+                    const bool removed = std::filesystem::remove(iterator->path(), removeError);
+                    if (removeError)
+                    {
+                        if (isLikelyLockError(removeError))
+                            ++staleScriptFilesLockedCount;
+                        continue;
+                    }
+
+                    if (removed)
+                        ++staleScriptFilesPrunedCount;
+                }
+
+                if (iteratorError)
+                {
+                    result.StepLog.push_back(
+                        "Warning: Could not fully enumerate generated ScriptCore mirror directory '"
+                        + generatedDirectory.string()
+                        + "': "
+                        + iteratorError.message());
+                }
             }
 
             std::string mirroredDirectoriesText;
@@ -1175,6 +1242,25 @@ namespace Limitless::Project
                 if (index != 0)
                     mirroredDirectoriesText += "; ";
                 mirroredDirectoriesText += generatedDirectories[index].string();
+            }
+
+            if (lockedOverwriteCount > 0)
+            {
+                result.StepLog.push_back(
+                    "Warning: Reused " + std::to_string(lockedOverwriteCount)
+                    + " in-use generated script file(s) while mirroring.");
+            }
+            if (staleScriptFilesPrunedCount > 0)
+            {
+                result.StepLog.push_back(
+                    "Pruned " + std::to_string(staleScriptFilesPrunedCount)
+                    + " stale generated script file(s).");
+            }
+            if (staleScriptFilesLockedCount > 0)
+            {
+                result.StepLog.push_back(
+                    "Warning: Could not prune " + std::to_string(staleScriptFilesLockedCount)
+                    + " stale generated script file(s) because they are in use.");
             }
 
             result.StepLog.push_back("Mirrored " + std::to_string(mirroredScriptPairCount)

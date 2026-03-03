@@ -62,6 +62,7 @@ set "SDK_LIB_DIR=%TOOLCHAIN_ROOT%\SDK\lib\%BUILD_FOLDER%"
 set "OUTPUT_DIR=%TOOLCHAIN_ROOT%\Build\%BUILD_FOLDER%\Editor"
 set "INTERMEDIATE_DIR=%TOOLCHAIN_ROOT%\Build\Intermediates\%BUILD_FOLDER%\ProjectScriptCore"
 set "SOURCES_RSP=%INTERMEDIATE_DIR%\ScriptSources.rsp"
+set "SNAPSHOT_DIR=%INTERMEDIATE_DIR%\ScriptSourcesSnapshot"
 
 if not exist "%SDK_INCLUDE_DIR%\Limitless.h" (
     echo Error: SDK include root is missing Limitless headers: "%SDK_INCLUDE_DIR%\Limitless.h"
@@ -88,13 +89,19 @@ if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$sourceDir = [IO.Path]::GetFullPath('%GENERATED_DIR%');" ^
+    "$snapshotDir = [IO.Path]::GetFullPath('%SNAPSHOT_DIR%');" ^
     "$rspPath = [IO.Path]::GetFullPath('%SOURCES_RSP%');" ^
-    "$files = Get-ChildItem -Path $sourceDir -Recurse -Filter '*.cpp' -ErrorAction SilentlyContinue |" ^
+    "if (Test-Path -LiteralPath $snapshotDir) { Remove-Item -LiteralPath $snapshotDir -Recurse -Force -ErrorAction Stop };" ^
+    "New-Item -ItemType Directory -Path $snapshotDir -Force | Out-Null;" ^
+    "if (Test-Path -LiteralPath $sourceDir) {" ^
+    "    Get-ChildItem -Path $sourceDir -Force -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $snapshotDir -Recurse -Force -ErrorAction Stop }" ^
+    "};" ^
+    "$files = Get-ChildItem -Path $snapshotDir -Recurse -Filter '*.cpp' -ErrorAction SilentlyContinue |" ^
     "    Where-Object { $_.Name -ne 'ScriptCoreHostGlue.cpp' } |" ^
     "    ForEach-Object { '\"' + $_.FullName + '\"' };" ^
     "Set-Content -Path $rspPath -Value $files -Encoding Ascii"
 if errorlevel 1 (
-    echo Error: Failed to enumerate generated script sources.
+    echo Error: Failed to create script source snapshot.
     exit /b 1
 )
 
@@ -142,6 +149,7 @@ cl /nologo /std:c++20 /EHsc /MD /LD /bigobj /utf-8 /FS ^
    /I "%SDK_VENDOR_DIR%\ffmpeg\include" ^
    /I "%SDK_VENDOR_DIR%\imgui" ^
    /I "%SDK_VENDOR_DIR%\glm" ^
+   /I "%SNAPSHOT_DIR%" ^
    /I "%GENERATED_DIR%" ^
    @"%SOURCES_RSP%" ^
    /link /NOLOGO ^

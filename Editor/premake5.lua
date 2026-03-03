@@ -163,6 +163,11 @@ project "Editor"
             postbuildcommands { "{COPYDIR} \"" .. ffmpegDllDir .. "\" \"%{cfg.targetdir}\"" }
         end
 
+        -- Ship Dist Editor builds as GUI applications on Windows so launching
+        -- Editor.exe does not open an extra console window.
+        filter { "system:windows", "configurations:Dist" }
+            kind "WindowedApp"
+
     filter "system:macosx"
         cppdialect "C++20"
         staticruntime "Off"
