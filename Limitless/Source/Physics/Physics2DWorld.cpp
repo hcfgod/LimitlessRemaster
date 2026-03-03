@@ -928,14 +928,16 @@ namespace Limitless
         auto bodyView = registry.view<Rigidbody2DComponent, TransformComponent>();
         static std::unordered_map<entt::entity, uint32_t> s_AstroidMissingRuntimeBodyFrames;
         static std::unordered_map<entt::entity, uint32_t> s_AstroidUnexpectedBodyTypeFrames;
+        static std::unordered_map<entt::entity, uint32_t> s_AstroidOriginMismatchFrames;
         for (entt::entity entity : bodyView)
         {
             if (!scene.IsEntityEnabledInHierarchy(entity))
                 continue;
             auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
             auto& transform = bodyView.get<TransformComponent>(entity);
-            const auto* tag = debugKinematicMotion ? registry.try_get<TagComponent>(entity) : nullptr;
-            const bool debugAstroid = tag && tag->Tag.rfind("Astroid", 0) == 0;
+            const auto* tag = registry.try_get<TagComponent>(entity);
+            const bool astroidTagged = tag && tag->Tag.rfind("Astroid", 0) == 0;
+            const bool debugAstroid = debugKinematicMotion && astroidTagged;
             const bool assignedToThisWorld = IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &rigidbody);
             if (!assignedToThisWorld)
                 continue;
@@ -1030,6 +1032,38 @@ namespace Limitless
             const float angleDelta = WrapAngleRadians(authoringAngleRadians - runtimeAngleRadians);
             bool transformChangedByAuthoring = glm::length(positionDelta) > kTransformSnapEpsilon ||
                                                std::abs(angleDelta) > kTransformSnapEpsilon;
+            if (astroidTagged)
+            {
+                const bool runtimeNearOrigin = std::abs(runtimePosition.x) <= 0.05f && std::abs(runtimePosition.y) <= 0.05f;
+                const bool authoredFarFromRuntime = glm::length(positionDelta) >= 0.35f;
+                if (runtimeNearOrigin && authoredFarFromRuntime)
+                {
+                    uint32_t& mismatchFrames = s_AstroidOriginMismatchFrames[entity];
+                    ++mismatchFrames;
+                    if (mismatchFrames == 1u || (mismatchFrames % 30u) == 0u)
+                    {
+                        LT_WARN("Physics2D astroid anomaly: entity='{}' runtime_near_origin=1 mismatch_frames={} "
+                                "runtime_pos=({}, {}) authored_pos=({}, {}) delta=({}, {}) pending_velocity_writes={} "
+                                "transform_changed={} body_type={} awake={}",
+                                tag ? tag->Tag : "Entity",
+                                mismatchFrames,
+                                runtimePosition.x,
+                                runtimePosition.y,
+                                authoringPosition.x,
+                                authoringPosition.y,
+                                positionDelta.x,
+                                positionDelta.y,
+                                hasPendingVelocityWrites,
+                                transformChangedByAuthoring,
+                                static_cast<int>(rigidbody.Type),
+                                b2Body_IsAwake(rigidbody.RuntimeBodyId));
+                    }
+                }
+                else
+                {
+                    s_AstroidOriginMismatchFrames.erase(entity);
+                }
+            }
 
             // -----------------------------------------------------------
             // Fast path: skip sleeping dynamic bodies only when they have
@@ -1117,127 +1151,98 @@ namespace Limitless
 
             if (expectedType == b2_kinematicBody)
             {
+                // Drive kinematic bodies from authored transform deltas unless a script
+                // explicitly wrote linear velocity. This keeps pooled enemy movement
+                // deterministic in debug and avoids stale-body snapback.
                 b2Vec2 runtimeVelocity = b2Body_GetLinearVelocity(rigidbody.RuntimeBodyId);
-                const bool hadPendingVelocityWrites = hasPendingVelocityWrites;
-                const glm::vec2 authoredPositionDeltaSinceLastFrame = authoringPosition - rigidbody.RuntimePreviousPosition;
-                const float authoredAngleDeltaSinceLastFrame =
-                    WrapAngleRadians(authoringAngleRadians - rigidbody.RuntimePreviousAngleRadians);
-                const bool authoredPoseChangedSinceLastFrame =
-                    glm::length(authoredPositionDeltaSinceLastFrame) > kTransformSnapEpsilon ||
-                    std::abs(authoredAngleDeltaSinceLastFrame) > kTransformSnapEpsilon;
-                const bool hasRuntimeVelocityBeforeUpdates =
-                    std::abs(runtimeVelocity.x) > kTransformSnapEpsilon ||
-                    std::abs(runtimeVelocity.y) > kTransformSnapEpsilon;
-                const bool treatAsVelocityDriven = hadPendingVelocityWrites || hasRuntimeVelocityBeforeUpdates;
-                bool velocityChanged = false;
+                const glm::vec2 authoredPositionDelta = authoringPosition - rigidbody.RuntimePreviousPosition;
+                const float authoredAngleDelta = WrapAngleRadians(authoringAngleRadians - rigidbody.RuntimePreviousAngleRadians);
+                const bool authoringChanged = glm::length(authoredPositionDelta) > kTransformSnapEpsilon ||
+                                              std::abs(authoredAngleDelta) > kTransformSnapEpsilon;
 
-                if (hadPendingVelocityWrites)
+                float targetAngularVelocity = 0.0f;
+                if (hasPendingVelocityWrites)
                 {
                     if (rigidbody.RuntimeHasPendingLinearVelocity)
                     {
                         runtimeVelocity.x = rigidbody.RuntimePendingLinearVelocity.x;
                         runtimeVelocity.y = rigidbody.RuntimePendingLinearVelocity.y;
-                        velocityChanged = true;
                     }
                     else
                     {
                         if (rigidbody.RuntimeHasPendingLinearVelocityX)
-                        {
                             runtimeVelocity.x = rigidbody.RuntimePendingLinearVelocityX;
-                            velocityChanged = true;
-                        }
                         if (rigidbody.RuntimeHasPendingLinearVelocityY)
-                        {
                             runtimeVelocity.y = rigidbody.RuntimePendingLinearVelocityY;
-                            velocityChanged = true;
-                        }
                     }
 
                     rigidbody.RuntimeHasPendingLinearVelocity = false;
                     rigidbody.RuntimeHasPendingLinearVelocityX = false;
                     rigidbody.RuntimeHasPendingLinearVelocityY = false;
+                    targetAngularVelocity = authoredAngleDelta / std::max(fixedDeltaTime, kMinimumStepDelta);
+                }
+                else
+                {
+                    if (!authoringChanged)
+                    {
+                        runtimeVelocity = { 0.0f, 0.0f };
+                        b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, runtimeVelocity);
+                        b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, 0.0f);
+                        rigidbody.RuntimeLinearVelocity = glm::vec2(0.0f);
+                        rigidbody.RuntimePreviousPosition = authoringPosition;
+                        rigidbody.RuntimePreviousAngleRadians = authoringAngleRadians;
+                        continue;
+                    }
+
+                    const float inverseStep = 1.0f / std::max(fixedDeltaTime, kMinimumStepDelta);
+                    runtimeVelocity.x = authoredPositionDelta.x * inverseStep;
+                    runtimeVelocity.y = authoredPositionDelta.y * inverseStep;
+                    targetAngularVelocity = authoredAngleDelta * inverseStep;
                 }
 
-                if (freezePositionX && std::abs(runtimeVelocity.x) > kTransformSnapEpsilon)
-                {
+                if (freezePositionX)
                     runtimeVelocity.x = 0.0f;
-                    velocityChanged = true;
-                }
-                if (freezePositionY && std::abs(runtimeVelocity.y) > kTransformSnapEpsilon)
-                {
+                if (freezePositionY)
                     runtimeVelocity.y = 0.0f;
-                    velocityChanged = true;
-                }
+                if (freezeRotation)
+                    targetAngularVelocity = 0.0f;
 
-                if (velocityChanged)
-                    b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, runtimeVelocity);
-
+                // Authoring transform writes (spawn/reposition) must be applied even
+                // when scripts also drive velocity this frame.
                 if (transformChangedByAuthoring)
                 {
-                    // When kinematic movement is velocity-driven, runtime body motion
-                    // can transiently get ahead of authored transform sync by one frame.
-                    // Avoid snapping body back to stale authored pose in that case.
-                    const bool shouldApplyAuthoredPose =
-                        authoredPoseChangedSinceLastFrame || !treatAsVelocityDriven;
-                    if (shouldApplyAuthoredPose)
-                    {
-                        b2Body_SetTransform(
-                            rigidbody.RuntimeBodyId,
-                            { authoringPosition.x, authoringPosition.y },
-                            b2MakeRot(authoringAngleRadians));
-                        b2Body_SetAwake(rigidbody.RuntimeBodyId, true);
-
-                        // Transform-authored kinematic motion should not inherit stale
-                        // velocity unless this frame explicitly wrote kinematic velocity.
-                        if (!treatAsVelocityDriven)
-                        {
-                            runtimeVelocity = { 0.0f, 0.0f };
-                            b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, runtimeVelocity);
-                            velocityChanged = true;
-                        }
-                    }
-                    else
-                    {
-                        transformChangedByAuthoring = false;
-                    }
-                }
-
-                const bool hasRuntimeVelocityAfterUpdates =
-                    std::abs(runtimeVelocity.x) > kTransformSnapEpsilon ||
-                    std::abs(runtimeVelocity.y) > kTransformSnapEpsilon;
-                if (hasRuntimeVelocityAfterUpdates || transformChangedByAuthoring)
+                    b2Body_SetTransform(
+                        rigidbody.RuntimeBodyId,
+                        { authoringPosition.x, authoringPosition.y },
+                        b2MakeRot(authoringAngleRadians));
                     b2Body_SetAwake(rigidbody.RuntimeBodyId, true);
-
-                if (debugKinematicMotion)
-                {
-                    if (debugAstroid)
-                    {
-                        static std::unordered_map<entt::entity, uint32_t> s_KinematicStallFrameCounts;
-                        const bool appearsStalled =
-                            hasRuntimeVelocityAfterUpdates &&
-                            glm::length(authoredPositionDeltaSinceLastFrame) <= kTransformSnapEpsilon;
-                        uint32_t& stallFrameCount = s_KinematicStallFrameCounts[entity];
-                        stallFrameCount = appearsStalled ? (stallFrameCount + 1u) : 0u;
-                        if (stallFrameCount > 0u && (stallFrameCount % 30u) == 0u)
-                        {
-                            LT_WARN("Physics2D kinematic debug: entity='{}' stalled_frames={} pending_writes={} transform_changed={} "
-                                    "runtime_velocity=({}, {}) authored_delta=({}, {}) sleep_enabled={} awake={}",
-                                    tag->Tag,
-                                    stallFrameCount,
-                                    hadPendingVelocityWrites,
-                                    transformChangedByAuthoring,
-                                    runtimeVelocity.x,
-                                    runtimeVelocity.y,
-                                    authoredPositionDeltaSinceLastFrame.x,
-                                    authoredPositionDeltaSinceLastFrame.y,
-                                    b2Body_IsSleepEnabled(rigidbody.RuntimeBodyId),
-                                    b2Body_IsAwake(rigidbody.RuntimeBodyId));
-                        }
-                    }
                 }
 
-                if (freezeRotation)
-                    b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, 0.0f);
+                b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, runtimeVelocity);
+                b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, targetAngularVelocity);
+
+                if (debugKinematicMotion && debugAstroid)
+                {
+                    static std::unordered_map<entt::entity, uint32_t> s_KinematicStallFrameCounts;
+                    const bool hasRuntimeVelocity =
+                        std::abs(runtimeVelocity.x) > kTransformSnapEpsilon ||
+                        std::abs(runtimeVelocity.y) > kTransformSnapEpsilon;
+                    const bool appearsStalled = hasRuntimeVelocity && !authoringChanged;
+                    uint32_t& stallFrameCount = s_KinematicStallFrameCounts[entity];
+                    stallFrameCount = appearsStalled ? (stallFrameCount + 1u) : 0u;
+                    if (stallFrameCount > 0u && (stallFrameCount % 30u) == 0u)
+                    {
+                        LT_WARN("Physics2D kinematic debug: entity='{}' stalled_frames={} authoring_changed={} "
+                                "runtime_velocity=({}, {}) authored_delta=({}, {})",
+                                tag->Tag,
+                                stallFrameCount,
+                                authoringChanged,
+                                runtimeVelocity.x,
+                                runtimeVelocity.y,
+                                authoredPositionDelta.x,
+                                authoredPositionDelta.y);
+                    }
+                }
 
                 rigidbody.RuntimeLinearVelocity = glm::vec2(runtimeVelocity.x, runtimeVelocity.y);
                 rigidbody.RuntimePreviousPosition = authoringPosition;

@@ -43,6 +43,7 @@ namespace Limitless::ScriptCoreModuleRuntime
         using SetScriptCreateEntityBridgeFunction = void (*)(ScriptCreateEntityBridgeCallback callback);
         using SetScriptDestroyEntityBridgeFunction = void (*)(ScriptDestroyEntityBridgeCallback callback);
         using SetScriptInstantiatePrefabBridgeFunction = void (*)(ScriptInstantiatePrefabBridgeCallback callback);
+        using SetScriptResolveEntityReferenceBridgeFunction = void (*)(ScriptResolveEntityReferenceBridgeCallback callback);
         using SetScriptContactEntityHandlesBridgeFunction = void (*)(ScriptGetContactEntityHandlesBridgeCallback callback);
 
         struct RuntimeState final
@@ -481,6 +482,14 @@ namespace Limitless::ScriptCoreModuleRuntime
             return scene->InstantiatePrefab(prefabAssetKey, parentEntity);
         }
 
+        entt::entity ForwardScriptResolveEntityReferenceToHost(entt::entity entity)
+        {
+            Scene* scene = Physics2DQueries::GetActiveSceneForScriptQueries();
+            if (!scene || entity == entt::null)
+                return entity;
+            return scene->ResolveEntityReference(entity);
+        }
+
         uint32_t ForwardScriptContactEntityHandlesToHost(entt::entity entity,
                                                          bool includeSensorContacts,
                                                          entt::entity* outHandles,
@@ -704,6 +713,11 @@ namespace Limitless::ScriptCoreModuleRuntime
                 PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptInstantiatePrefabBridge"));
             if (setScriptInstantiatePrefabBridge)
                 setScriptInstantiatePrefabBridge(&ForwardScriptInstantiatePrefabToHost);
+
+            const auto setScriptResolveEntityReferenceBridge = reinterpret_cast<SetScriptResolveEntityReferenceBridgeFunction>(
+                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptResolveEntityReferenceBridge"));
+            if (setScriptResolveEntityReferenceBridge)
+                setScriptResolveEntityReferenceBridge(&ForwardScriptResolveEntityReferenceToHost);
 
             const auto setScriptContactEntityHandlesBridge = reinterpret_cast<SetScriptContactEntityHandlesBridgeFunction>(
                 PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptContactEntityHandlesBridge"));

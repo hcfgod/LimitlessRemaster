@@ -192,6 +192,13 @@ namespace Limitless
             return s_ActiveScene->InstantiatePrefab(prefabAssetKey, parentEntity);
         }
 
+        entt::entity ForwardScriptResolveEntityReferenceToHost(entt::entity entity)
+        {
+            if (!s_ActiveScene || entity == entt::null)
+                return entity;
+            return s_ActiveScene->ResolveEntityReference(entity);
+        }
+
         uint32_t ForwardScriptContactEntityHandlesToHost(entt::entity entity,
                                                          bool includeSensorContacts,
                                                          entt::entity* outHandles,
@@ -961,6 +968,7 @@ namespace Limitless
         connectBridge("LT_SetScriptCreateEntityBridge", &ForwardScriptCreateEntityToHost);
         connectBridge("LT_SetScriptDestroyEntityBridge", &ForwardScriptDestroyEntityToHost);
         connectBridge("LT_SetScriptInstantiatePrefabBridge", &ForwardScriptInstantiatePrefabToHost);
+        connectBridge("LT_SetScriptResolveEntityReferenceBridge", &ForwardScriptResolveEntityReferenceToHost);
         connectBridge("LT_SetScriptContactEntityHandlesBridge", &ForwardScriptContactEntityHandlesToHost);
 
         // Legacy bridge names (backward compat with older ScriptCore builds).
@@ -974,6 +982,7 @@ namespace Limitless
         ScriptableEntity::SetCreateEntityBridgeCallback(&ForwardScriptCreateEntityToHost);
         ScriptableEntity::SetDestroyEntityBridgeCallback(&ForwardScriptDestroyEntityToHost);
         ScriptableEntity::SetInstantiatePrefabBridgeCallback(&ForwardScriptInstantiatePrefabToHost);
+        ScriptableEntity::SetResolveEntityReferenceBridgeCallback(&ForwardScriptResolveEntityReferenceToHost);
         ScriptableEntity::SetContactEntityHandlesBridgeCallback(&ForwardScriptContactEntityHandlesToHost);
         ScriptableEntity::SetParallelScriptExecutionBridgeCallback(&ForwardScriptParallelExecutionStateToHost);
         Entity::SetDestroyBridgeCallback(&ForwardScriptDestroyEntityToHost);

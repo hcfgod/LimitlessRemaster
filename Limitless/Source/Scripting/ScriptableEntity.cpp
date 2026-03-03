@@ -19,6 +19,7 @@ namespace Limitless
         ScriptCreateEntityBridgeCallback s_CreateEntityBridgeCallback = nullptr;
         ScriptDestroyEntityBridgeCallback s_DestroyEntityBridgeCallback = nullptr;
         ScriptInstantiatePrefabBridgeCallback s_InstantiatePrefabBridgeCallback = nullptr;
+        ScriptResolveEntityReferenceBridgeCallback s_ResolveEntityReferenceBridgeCallback = nullptr;
         ScriptParallelExecutionBridgeCallback s_ParallelExecutionBridgeCallback = nullptr;
         ScriptGetContactEntityHandlesBridgeCallback s_GetContactEntityHandlesBridgeCallback = nullptr;
 
@@ -51,6 +52,11 @@ namespace Limitless
     void ScriptableEntity::SetInstantiatePrefabBridgeCallback(ScriptInstantiatePrefabBridgeCallback callback)
     {
         s_InstantiatePrefabBridgeCallback = callback;
+    }
+
+    void ScriptableEntity::SetResolveEntityReferenceBridgeCallback(ScriptResolveEntityReferenceBridgeCallback callback)
+    {
+        s_ResolveEntityReferenceBridgeCallback = callback;
     }
 
     void ScriptableEntity::SetParallelScriptExecutionBridgeCallback(ScriptParallelExecutionBridgeCallback callback)
@@ -184,6 +190,9 @@ namespace Limitless
 
     Entity ScriptableEntity::GetEntity(entt::entity entity) const
     {
+        if (s_ResolveEntityReferenceBridgeCallback)
+            entity = s_ResolveEntityReferenceBridgeCallback(entity);
+
 #ifndef SCRIPTCORE_EXPORTS
         if (m_Scene)
             entity = m_Scene->ResolveEntityReference(entity);
@@ -191,6 +200,13 @@ namespace Limitless
         if (!IsEntityValid(entity))
             return Entity{};
         return Entity(m_Registry, entity);
+    }
+
+    Entity ScriptableEntity::ResolveEntity(const Entity& entity) const
+    {
+        if (!entity.HasHandle())
+            return Entity{};
+        return GetEntity(entity.GetHandle());
     }
 
     Entity ScriptableEntity::FindEntityByTag(const std::string& tag) const

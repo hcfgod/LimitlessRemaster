@@ -70,6 +70,8 @@ namespace Limitless
 
         /// Access the raw EnTT handle (for interop with low-level code).
         entt::entity GetHandle() const { return m_EntityHandle; }
+        /// Returns true when this wrapper stores any entity handle (resolved or deferred).
+        bool HasHandle() const { return m_EntityHandle != entt::null; }
 
         /// Access the underlying registry (for advanced / editor use).
         entt::registry* GetRegistry() const

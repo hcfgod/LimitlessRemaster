@@ -519,11 +519,22 @@ namespace Limitless
         if (ShouldDeferStructuralMutations())
         {
             const std::string deferredPrefabAssetKey = prefabAssetKey;
-            EnqueueDeferredStructuralMutation([deferredPrefabAssetKey, parentEntity](Scene& scene) {
-                (void)scene.InstantiatePrefab(deferredPrefabAssetKey, parentEntity);
+            const entt::entity deferredEntity = AllocateDeferredEntityReference();
+            const bool enqueued = EnqueueDeferredStructuralMutation([deferredPrefabAssetKey, parentEntity, deferredEntity](Scene& scene) {
+                const entt::entity createdEntity = scene.InstantiatePrefab(deferredPrefabAssetKey, parentEntity);
+                scene.BindDeferredEntityReference(deferredEntity, createdEntity);
             }, "InstantiatePrefab");
-            return entt::null;
+            if (!enqueued)
+            {
+                ForgetDeferredEntityReference(deferredEntity);
+                return entt::null;
+            }
+            return deferredEntity;
         }
+
+        parentEntity = ResolveEntityReference(parentEntity);
+        if (parentEntity != entt::null && !IsValid(parentEntity))
+            parentEntity = entt::null;
 
         auto loadedPrefabSceneResult = Scene::LoadFromFile(prefabAssetKey);
         if (const auto resolvedPath = Assets::ResolveAssetKeyToPath(prefabAssetKey); resolvedPath.IsSuccess())

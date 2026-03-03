@@ -573,15 +573,15 @@ namespace Limitless
         auto applyScriptDeclaredAccessDefaults = [&](NativeScriptEntry& scriptEntry) {
             if (!scriptEntry.RuntimeInstance)
                 return;
-            if (scriptEntry.DeclaredReadAccessMask != 0 || scriptEntry.DeclaredWriteAccessMask != 0)
-                return;
 
             const uint64_t defaultReadMask = scriptEntry.RuntimeInstance->GetDeclaredReadAccessMask();
             const uint64_t defaultWriteMask = scriptEntry.RuntimeInstance->GetDeclaredWriteAccessMask();
             if (defaultReadMask != 0 || defaultWriteMask != 0)
             {
-                scriptEntry.DeclaredReadAccessMask = defaultReadMask;
-                scriptEntry.DeclaredWriteAccessMask = defaultWriteMask;
+                // Merge script-authored defaults with serialized entry masks so
+                // existing scene data cannot keep stale/missing access bits.
+                scriptEntry.DeclaredReadAccessMask |= defaultReadMask;
+                scriptEntry.DeclaredWriteAccessMask |= defaultWriteMask;
             }
         };
 
@@ -1545,15 +1545,15 @@ namespace Limitless
         auto applyScriptDeclaredAccessDefaults = [&](NativeScriptEntry& scriptEntry) {
             if (!scriptEntry.RuntimeInstance)
                 return;
-            if (scriptEntry.DeclaredReadAccessMask != 0 || scriptEntry.DeclaredWriteAccessMask != 0)
-                return;
 
             const uint64_t defaultReadMask = scriptEntry.RuntimeInstance->GetDeclaredReadAccessMask();
             const uint64_t defaultWriteMask = scriptEntry.RuntimeInstance->GetDeclaredWriteAccessMask();
             if (defaultReadMask != 0 || defaultWriteMask != 0)
             {
-                scriptEntry.DeclaredReadAccessMask = defaultReadMask;
-                scriptEntry.DeclaredWriteAccessMask = defaultWriteMask;
+                // Merge script-authored defaults with serialized entry masks so
+                // existing scene data cannot keep stale/missing access bits.
+                scriptEntry.DeclaredReadAccessMask |= defaultReadMask;
+                scriptEntry.DeclaredWriteAccessMask |= defaultWriteMask;
             }
         };
 

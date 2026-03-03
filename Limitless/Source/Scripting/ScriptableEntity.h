@@ -53,6 +53,7 @@ namespace Limitless
     using ScriptCreateEntityBridgeCallback = entt::entity (*)(const char* name);
     using ScriptDestroyEntityBridgeCallback = void (*)(entt::entity entity);
     using ScriptInstantiatePrefabBridgeCallback = entt::entity (*)(const char* prefabAssetKey, entt::entity parentEntity);
+    using ScriptResolveEntityReferenceBridgeCallback = entt::entity (*)(entt::entity entity);
     using ScriptParallelExecutionBridgeCallback = bool (*)();
     using ScriptGetContactEntityHandlesBridgeCallback =
         uint32_t (*)(entt::entity entity, bool includeSensorContacts, entt::entity* outHandles, uint32_t capacity);
@@ -212,6 +213,7 @@ namespace Limitless
         void DestroyEntity(entt::entity entity);
         bool IsEntityValid(entt::entity entity) const;
         Entity GetEntity(entt::entity entity) const;
+        Entity ResolveEntity(const Entity& entity) const;
         Entity FindEntityByTag(const std::string& tag) const;
         Entity GetParent(const Entity& entity) const;
         Entity GetParent(entt::entity entity) const;
@@ -223,6 +225,7 @@ namespace Limitless
         static void SetCreateEntityBridgeCallback(ScriptCreateEntityBridgeCallback callback);
         static void SetDestroyEntityBridgeCallback(ScriptDestroyEntityBridgeCallback callback);
         static void SetInstantiatePrefabBridgeCallback(ScriptInstantiatePrefabBridgeCallback callback);
+        static void SetResolveEntityReferenceBridgeCallback(ScriptResolveEntityReferenceBridgeCallback callback);
         static void SetParallelScriptExecutionBridgeCallback(ScriptParallelExecutionBridgeCallback callback);
         static void SetContactEntityHandlesBridgeCallback(ScriptGetContactEntityHandlesBridgeCallback callback);
 

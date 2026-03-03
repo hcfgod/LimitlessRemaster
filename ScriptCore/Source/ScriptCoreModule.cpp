@@ -105,6 +105,11 @@ extern "C" LT_SCRIPTCORE_API void LT_SetScriptInstantiatePrefabBridge(Limitless:
     Limitless::ScriptableEntity::SetInstantiatePrefabBridgeCallback(callback);
 }
 
+extern "C" LT_SCRIPTCORE_API void LT_SetScriptResolveEntityReferenceBridge(Limitless::ScriptResolveEntityReferenceBridgeCallback callback)
+{
+    Limitless::ScriptableEntity::SetResolveEntityReferenceBridgeCallback(callback);
+}
+
 extern "C" LT_SCRIPTCORE_API void LT_SetScriptContactEntityHandlesBridge(Limitless::ScriptGetContactEntityHandlesBridgeCallback callback)
 {
     Limitless::ScriptableEntity::SetContactEntityHandlesBridgeCallback(callback);
