@@ -7,13 +7,10 @@
 #include "Scripting/ScriptableEntity.h"
 
 #include <algorithm>
-#include <chrono>
 #include <exception>
-#include <fstream>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
-#include <nlohmann/json.hpp>
 
 namespace Limitless
 {
@@ -52,71 +49,6 @@ namespace Limitless
                    std::tie(right.WorldSlot, right.IsSensor, right.EntityA, right.EntityB);
         }
 
-        int64_t AgentDebugTimestampMs()
-        {
-            return std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-        }
-
-        void AgentAppendDebugLog(std::string_view runId,
-                                 std::string_view hypothesisId,
-                                 std::string_view location,
-                                 std::string_view message,
-                                 const nlohmann::json& data)
-        {
-            try
-            {
-                const nlohmann::json payload{
-                    { "sessionId", "050170" },
-                    { "runId", runId },
-                    { "hypothesisId", hypothesisId },
-                    { "location", location },
-                    { "message", message },
-                    { "data", data },
-                    { "timestamp", AgentDebugTimestampMs() }
-                };
-                std::ofstream out("debug-050170.log", std::ios::app);
-                if (out.is_open())
-                    out << payload.dump() << '\n';
-            }
-            catch (...)
-            {
-            }
-        }
-
-        bool IsContactOrderDebugEntity(const Scene& scene, entt::entity entity)
-        {
-            if (entity == entt::null || !scene.IsValid(entity))
-                return false;
-
-            const auto& registry = scene.GetRegistry();
-            const auto* tag = registry.try_get<TagComponent>(entity);
-            if (!tag)
-                return false;
-
-            return tag->Tag == "TriggerA" || tag->Tag == "TriggerB" || tag->Tag == "Visitor";
-        }
-
-        bool IsContactOrderDebugScene(const Scene& scene)
-        {
-            const auto& registry = scene.GetRegistry();
-            auto tagView = registry.view<TagComponent>();
-            bool hasTriggerA = false;
-            bool hasTriggerB = false;
-            bool hasVisitor = false;
-            for (entt::entity entity : tagView)
-            {
-                const std::string& tag = tagView.get<TagComponent>(entity).Tag;
-                if (tag == "TriggerA")
-                    hasTriggerA = true;
-                else if (tag == "TriggerB")
-                    hasTriggerB = true;
-                else if (tag == "Visitor")
-                    hasVisitor = true;
-            }
-            return hasTriggerA && hasTriggerB && hasVisitor;
-        }
-
         void DispatchScriptContactCallbackForEntity(Scene& scene,
                                                     entt::entity selfEntity,
                                                     entt::entity otherEntity,
@@ -134,46 +66,6 @@ namespace Limitless
             auto* nativeScriptComponent = registry.try_get<NativeScriptComponent>(selfEntity);
             if (!nativeScriptComponent)
                 return;
-
-            if (IsContactOrderDebugEntity(scene, selfEntity))
-            {
-                size_t enabledScriptCount = 0;
-                size_t runtimeInitializedScriptCount = 0;
-                size_t runtimeInstanceScriptCount = 0;
-                for (const auto& scriptEntry : nativeScriptComponent->Scripts)
-                {
-                    if (scriptEntry.Enabled)
-                        ++enabledScriptCount;
-                    if (scriptEntry.RuntimeInitialized)
-                        ++runtimeInitializedScriptCount;
-                    if (scriptEntry.RuntimeInstance)
-                        ++runtimeInstanceScriptCount;
-                }
-
-                const auto* selfTag = registry.try_get<TagComponent>(selfEntity);
-                const auto* otherTag = registry.try_get<TagComponent>(otherEntity);
-                // #region agent log
-                AgentAppendDebugLog(
-                    "contact-order-initial",
-                    "H5",
-                    "Limitless/Source/Scene/SceneRuntimeLifecycle.cpp:139",
-                    "Dispatch gate state for contact callback entity",
-                    nlohmann::json{
-                        { "selfEntity", static_cast<uint32_t>(selfEntity) },
-                        { "otherEntity", static_cast<uint32_t>(otherEntity) },
-                        { "selfTag", selfTag ? selfTag->Tag : std::string("Entity") },
-                        { "otherTag", otherTag ? otherTag->Tag : std::string("Entity") },
-                        { "dispatchEnter", dispatchEnter },
-                        { "dispatchStay", dispatchStay },
-                        { "dispatchExit", dispatchExit },
-                        { "isSensor", isSensor },
-                        { "scriptSlots", nativeScriptComponent->Scripts.size() },
-                        { "enabledScriptCount", enabledScriptCount },
-                        { "runtimeInitializedScriptCount", runtimeInitializedScriptCount },
-                        { "runtimeInstanceScriptCount", runtimeInstanceScriptCount }
-                    });
-                // #endregion
-            }
 
             const Entity other(&registry, otherEntity);
             for (auto& scriptEntry : nativeScriptComponent->Scripts)
@@ -321,11 +213,6 @@ namespace Limitless
 
         std::unordered_set<RuntimeContactPairKey, RuntimeContactPairKeyHasher> beginPairs;
         std::unordered_set<RuntimeContactPairKey, RuntimeContactPairKeyHasher> endPairs;
-        size_t rawEventCount = 0;
-        size_t rawBeginCount = 0;
-        size_t rawSensorBeginCount = 0;
-        size_t rawEndCount = 0;
-        size_t rawSensorEndCount = 0;
         for (Physics2DWorld* physicsWorld : activeWorlds)
         {
             if (!physicsWorld)
@@ -335,19 +222,6 @@ namespace Limitless
             const auto& events = physicsWorld->GetContactListener().GetEvents();
             for (const auto& eventData : events)
             {
-                ++rawEventCount;
-                if (eventData.IsBegin)
-                {
-                    ++rawBeginCount;
-                    if (eventData.IsSensor)
-                        ++rawSensorBeginCount;
-                }
-                else
-                {
-                    ++rawEndCount;
-                    if (eventData.IsSensor)
-                        ++rawSensorEndCount;
-                }
                 if (eventData.EntityA == entt::null || eventData.EntityB == entt::null)
                     continue;
                 const RuntimeContactPairKey key = MakeContactPairKey(eventData.EntityA, eventData.EntityB, worldSlot, eventData.IsSensor);
@@ -362,32 +236,8 @@ namespace Limitless
         changedPairs.insert(endPairs.begin(), endPairs.end());
         std::vector<RuntimeContactPairKey> orderedChangedPairs(changedPairs.begin(), changedPairs.end());
         std::sort(orderedChangedPairs.begin(), orderedChangedPairs.end(), RuntimeContactPairSortLess);
-        if (IsContactOrderDebugScene(*this))
-        {
-            // #region agent log
-            AgentAppendDebugLog(
-                "contact-order-initial",
-                "H3",
-                "Limitless/Source/Scene/SceneRuntimeLifecycle.cpp:325",
-                "StepPhysics2D pair extraction state",
-                nlohmann::json{
-                    { "rawEventCount", rawEventCount },
-                    { "rawBeginCount", rawBeginCount },
-                    { "rawSensorBeginCount", rawSensorBeginCount },
-                    { "rawEndCount", rawEndCount },
-                    { "rawSensorEndCount", rawSensorEndCount },
-                    { "beginPairs", beginPairs.size() },
-                    { "endPairs", endPairs.size() },
-                    { "changedPairs", orderedChangedPairs.size() },
-                    { "activePairsBeforeDispatch", m_RuntimeActiveContactPairs.size() }
-                });
-            // #endregion
-        }
 
         [[maybe_unused]] auto forcedDeferredDestroyScope = MakeForcedDeferredEntityDestructionScope();
-        size_t enterDispatchCalls = 0;
-        size_t exitDispatchCalls = 0;
-        size_t stayDispatchCalls = 0;
         for (const RuntimeContactPairKey& key : orderedChangedPairs)
         {
             const bool hasBegin = beginPairs.find(key) != beginPairs.end();
@@ -399,12 +249,21 @@ namespace Limitless
 
             if (!wasActive)
             {
-                if (hasBegin && !hasEnd)
+                if (hasBegin)
                 {
-                    m_RuntimeActiveContactPairs.insert(key);
                     DispatchScriptContactCallbackForEntity(*this, entityA, entityB, key.IsSensor, true, false, false);
                     DispatchScriptContactCallbackForEntity(*this, entityB, entityA, key.IsSensor, true, false, false);
-                    enterDispatchCalls += 2;
+                    if (hasEnd)
+                    {
+                        // Some backends/platforms can report transient contacts
+                        // that begin and end within the same fixed step.
+                        DispatchScriptContactCallbackForEntity(*this, entityA, entityB, key.IsSensor, false, false, true);
+                        DispatchScriptContactCallbackForEntity(*this, entityB, entityA, key.IsSensor, false, false, true);
+                    }
+                    else
+                    {
+                        m_RuntimeActiveContactPairs.insert(key);
+                    }
                 }
                 continue;
             }
@@ -413,7 +272,6 @@ namespace Limitless
             {
                 DispatchScriptContactCallbackForEntity(*this, entityA, entityB, key.IsSensor, false, false, true);
                 DispatchScriptContactCallbackForEntity(*this, entityB, entityA, key.IsSensor, false, false, true);
-                exitDispatchCalls += 2;
                 m_RuntimeActiveContactPairs.erase(key);
             }
         }
@@ -426,23 +284,6 @@ namespace Limitless
             const entt::entity entityB = static_cast<entt::entity>(key.EntityB);
             DispatchScriptContactCallbackForEntity(*this, entityA, entityB, key.IsSensor, false, true, false);
             DispatchScriptContactCallbackForEntity(*this, entityB, entityA, key.IsSensor, false, true, false);
-            stayDispatchCalls += 2;
-        }
-        if (IsContactOrderDebugScene(*this))
-        {
-            // #region agent log
-            AgentAppendDebugLog(
-                "contact-order-initial",
-                "H4",
-                "Limitless/Source/Scene/SceneRuntimeLifecycle.cpp:390",
-                "StepPhysics2D dispatch outcome state",
-                nlohmann::json{
-                    { "enterDispatchCalls", enterDispatchCalls },
-                    { "stayDispatchCalls", stayDispatchCalls },
-                    { "exitDispatchCalls", exitDispatchCalls },
-                    { "activePairsAfterDispatch", m_RuntimeActiveContactPairs.size() }
-                });
-            // #endregion
         }
         FlushDeferredStructuralMutations();
 
