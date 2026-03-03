@@ -63,7 +63,6 @@ project "Limitless"
     {
         "Source",
         "Vendor/",
-        "Vendor/box2d/include",
         "Vendor/Zstd/include",
         "Vendor/glad",
         "Vendor/spdlog",
@@ -100,6 +99,11 @@ project "Limitless"
         cppdialect "C++20"
         staticruntime "Off"
         systemversion "latest"
+
+        includedirs
+        {
+            "Vendor/box2d/include"
+        }
 
         defines
         {
@@ -180,6 +184,12 @@ project "Limitless"
         cppdialect "C++20"
         staticruntime "Off"
 
+        includedirs
+        {
+            "/opt/homebrew/include",
+            "/usr/local/include"
+        }
+
         defines
         {
             "LT_PLATFORM_MACOS",
@@ -249,6 +259,12 @@ project "Limitless"
     filter "system:linux"
         cppdialect "C++20"
         staticruntime "Off"
+
+        includedirs
+        {
+            "/usr/local/include",
+            "/usr/include"
+        }
 
         defines
         {
