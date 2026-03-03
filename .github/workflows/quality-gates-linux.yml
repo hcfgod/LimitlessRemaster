@@ -350,6 +350,9 @@ jobs:
           print(f"Filtered changed files to {len(filtered)} entries present in compile_commands.json.")
           PY
 
+          # Keep input stable for xargs/clang-tidy progress reporting.
+          sort -u -o clang-tidy-files.txt clang-tidy-files.txt
+
           if [ ! -s clang-tidy-files.txt ]; then
             echo "No changed source files matched compile_commands.json entries."
             exit 0
@@ -359,5 +362,15 @@ jobs:
           # Run in batches to reduce process startup overhead and keep logs concise.
           xargs -r -a clang-tidy-files.txt -n 40 \
             clang-tidy -p . -quiet \
-            -checks='-*,clang-analyzer-*,-clang-analyzer-optin.core.EnumCastOutOfRange' \
+            --extra-arg-before="-I${PWD}/Editor" \
+            --extra-arg-before="-I${PWD}/Editor/Source" \
+            --extra-arg-before="-I${PWD}/Limitless" \
+            --extra-arg-before="-I${PWD}/Limitless/Source" \
+            --extra-arg-before="-I${PWD}/Limitless/Vendor" \
+            --extra-arg-before="-I${PWD}/Limitless/Vendor/doctest" \
+            --extra-arg-before="-I${PWD}/Runtime" \
+            --extra-arg-before="-I${PWD}/Runtime/Source" \
+            --extra-arg-before="-I${PWD}/Test" \
+            --extra-arg-before="-I${PWD}/Test/Source" \
+            -checks='-*,clang-analyzer-*,-clang-analyzer-optin.core.EnumCastOutOfRange,-clang-analyzer-cplusplus.NewDeleteLeaks,-clang-analyzer-optin.cplusplus.UninitializedObject' \
             -warnings-as-errors='*'

@@ -2060,7 +2060,7 @@ TEST_SUITE("Scene And Editor Flows")
         attachScript(visitor);
 
         auto& visitorTransform = registry.get<Limitless::TransformComponent>(visitor);
-        visitorTransform.Position = { 0.0f, 0.0f, 0.0f };
+        visitorTransform.Position = { 10.0f, 0.0f, 0.0f };
         auto& visitorBody = registry.emplace<Limitless::Rigidbody2DComponent>(visitor);
         visitorBody.Type = Limitless::Rigidbody2DComponent::BodyType::Dynamic;
         auto& visitorCollider = registry.emplace<Limitless::BoxCollider2DComponent>(visitor);
@@ -2083,7 +2083,14 @@ TEST_SUITE("Scene And Editor Flows")
         triggerBCollider.IsSensor = true;
 
         scene.Update(1.0f / 60.0f);
+
+        // Ensure runtime bodies exist before we drive an explicit non-overlap -> overlap transition.
+        // Relying on "already overlapping at spawn" begin events can vary across platforms.
+        scene.StepPhysics2D(1.0f / 60.0f);
         ContactOrderRecordingScript::ResetEvents();
+
+        visitorTransform.Position = { 0.0f, 0.0f, 0.0f };
+        scene.MarkTransformDirty(visitor);
         scene.StepPhysics2D(1.0f / 60.0f);
 
         auto makePairKey = [](entt::entity entityA, entt::entity entityB) {
