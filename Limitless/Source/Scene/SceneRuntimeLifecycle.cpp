@@ -249,21 +249,11 @@ namespace Limitless
 
             if (!wasActive)
             {
-                if (hasBegin)
+                if (hasBegin && !hasEnd)
                 {
+                    m_RuntimeActiveContactPairs.insert(key);
                     DispatchScriptContactCallbackForEntity(*this, entityA, entityB, key.IsSensor, true, false, false);
                     DispatchScriptContactCallbackForEntity(*this, entityB, entityA, key.IsSensor, true, false, false);
-                    if (hasEnd)
-                    {
-                        // Some backends/platforms can report transient contacts
-                        // that begin and end within the same fixed step.
-                        DispatchScriptContactCallbackForEntity(*this, entityA, entityB, key.IsSensor, false, false, true);
-                        DispatchScriptContactCallbackForEntity(*this, entityB, entityA, key.IsSensor, false, false, true);
-                    }
-                    else
-                    {
-                        m_RuntimeActiveContactPairs.insert(key);
-                    }
                 }
                 continue;
             }

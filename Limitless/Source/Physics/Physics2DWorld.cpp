@@ -816,6 +816,7 @@ namespace Limitless
                     kMaximumShapeDensity);
                 shapeDefinition.isSensor = boxCollider->IsSensor;
                 shapeDefinition.enableContactEvents = true;
+                shapeDefinition.enableSensorEvents = shapeDefinition.isSensor;
                 shapeDefinition.filter.categoryBits = boxCollider->CollisionLayer;
                 shapeDefinition.filter.maskBits = boxCollider->CollisionMask;
                 shapeDefinition.updateBodyMass = !shapeDefinition.isSensor;
@@ -882,6 +883,7 @@ namespace Limitless
                     kMaximumShapeDensity);
                 shapeDefinition.isSensor = circleCollider->IsSensor;
                 shapeDefinition.enableContactEvents = true;
+                shapeDefinition.enableSensorEvents = shapeDefinition.isSensor;
                 shapeDefinition.filter.categoryBits = circleCollider->CollisionLayer;
                 shapeDefinition.filter.maskBits = circleCollider->CollisionMask;
                 shapeDefinition.updateBodyMass = !shapeDefinition.isSensor;

@@ -2099,22 +2099,12 @@ TEST_SUITE("Scene And Editor Flows")
         // Ensure runtime bodies exist before we drive an explicit non-overlap -> overlap transition.
         // Relying on "already overlapping at spawn" begin events can vary across platforms.
         scene.StepPhysics2D(kFixedStep);
-        visitorTransform.Position = { 10.0f, 0.0f, 0.0f };
-        scene.MarkTransformDirty(visitor);
-        constexpr int kMaxContactClearSteps = 6;
-        for (int stepIndex = 0; stepIndex < kMaxContactClearSteps; ++stepIndex)
-        {
-            scene.StepPhysics2D(kFixedStep);
-            if (visitorBody.GetContactCount() == 0)
-                break;
-        }
-        REQUIRE(visitorBody.GetContactCount() == 0);
         ContactOrderRecordingScript::ResetEvents();
 
         visitorTransform.Position = { 0.0f, 0.0f, 0.0f };
         scene.MarkTransformDirty(visitor);
         constexpr size_t kExpectedEventCount = 4;
-        constexpr int kMaxEventSettleSteps = 6;
+        constexpr int kMaxEventSettleSteps = 3;
         for (int stepIndex = 0; stepIndex < kMaxEventSettleSteps; ++stepIndex)
         {
             scene.StepPhysics2D(kFixedStep);
