@@ -64,6 +64,19 @@ namespace Limitless
             }
         }
 
+        template<typename ShapeDefType>
+        void EnableSensorEventsIfSupported(ShapeDefType& shapeDefinition)
+        {
+            // Some Box2D versions expose explicit sensor-event toggles on b2ShapeDef,
+            // while others emit sensor events when contact events are enabled.
+            if constexpr (requires(ShapeDefType& def) {
+                              def.enableSensorEvents;
+                          })
+            {
+                shapeDefinition.enableSensorEvents = shapeDefinition.isSensor;
+            }
+        }
+
         float WrapAngleRadians(float angleRadians)
         {
             while (angleRadians > glm::pi<float>())
@@ -816,7 +829,7 @@ namespace Limitless
                     kMaximumShapeDensity);
                 shapeDefinition.isSensor = boxCollider->IsSensor;
                 shapeDefinition.enableContactEvents = true;
-                shapeDefinition.enableSensorEvents = shapeDefinition.isSensor;
+                EnableSensorEventsIfSupported(shapeDefinition);
                 shapeDefinition.filter.categoryBits = boxCollider->CollisionLayer;
                 shapeDefinition.filter.maskBits = boxCollider->CollisionMask;
                 shapeDefinition.updateBodyMass = !shapeDefinition.isSensor;
@@ -883,7 +896,7 @@ namespace Limitless
                     kMaximumShapeDensity);
                 shapeDefinition.isSensor = circleCollider->IsSensor;
                 shapeDefinition.enableContactEvents = true;
-                shapeDefinition.enableSensorEvents = shapeDefinition.isSensor;
+                EnableSensorEventsIfSupported(shapeDefinition);
                 shapeDefinition.filter.categoryBits = circleCollider->CollisionLayer;
                 shapeDefinition.filter.maskBits = circleCollider->CollisionMask;
                 shapeDefinition.updateBodyMass = !shapeDefinition.isSensor;
