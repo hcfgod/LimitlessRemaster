@@ -39,7 +39,25 @@ jobs:
         run: |
           cd /tmp
           rm -rf box2d
-          git clone --depth 1 --branch v3.1.1 https://github.com/erincatto/box2d.git
+          # Prefer release tarball with retries (more reliable than git clone on CI),
+          # then fall back to clone with retries.
+          if curl -fL \
+              --retry 5 \
+              --retry-delay 2 \
+              --retry-all-errors \
+              -o box2d.tar.gz \
+              https://codeload.github.com/erincatto/box2d/tar.gz/refs/tags/v3.1.1; then
+            mkdir -p box2d
+            tar -xzf box2d.tar.gz --strip-components=1 -C box2d
+          else
+            for attempt in 1 2 3; do
+              git clone --depth 1 --branch v3.1.1 https://github.com/erincatto/box2d.git && break
+              echo "Box2D clone attempt ${attempt}/3 failed; retrying..."
+              rm -rf box2d
+              sleep $((attempt * 3))
+            done
+          fi
+          test -d box2d
           cmake -S box2d -B box2d/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
           cmake --build box2d/build --parallel "$(nproc)"
           sudo cmake --install box2d/build
@@ -139,7 +157,25 @@ jobs:
         run: |
           cd /tmp
           rm -rf box2d
-          git clone --depth 1 --branch v3.1.1 https://github.com/erincatto/box2d.git
+          # Prefer release tarball with retries (more reliable than git clone on CI),
+          # then fall back to clone with retries.
+          if curl -fL \
+              --retry 5 \
+              --retry-delay 2 \
+              --retry-all-errors \
+              -o box2d.tar.gz \
+              https://codeload.github.com/erincatto/box2d/tar.gz/refs/tags/v3.1.1; then
+            mkdir -p box2d
+            tar -xzf box2d.tar.gz --strip-components=1 -C box2d
+          else
+            for attempt in 1 2 3; do
+              git clone --depth 1 --branch v3.1.1 https://github.com/erincatto/box2d.git && break
+              echo "Box2D clone attempt ${attempt}/3 failed; retrying..."
+              rm -rf box2d
+              sleep $((attempt * 3))
+            done
+          fi
+          test -d box2d
           cmake -S box2d -B box2d/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON
           cmake --build box2d/build --parallel "$(nproc)"
           sudo cmake --install box2d/build
