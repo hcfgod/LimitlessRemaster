@@ -283,7 +283,7 @@ namespace
         }
 
     protected:
-        void OnTriggerEnter(const Limitless::Entity& other) override
+        void RecordEnterEvent(const Limitless::Entity& other)
         {
             std::string selfTag = "Entity";
             const auto& selfTagComponent = GetComponent<Limitless::TagComponent>();
@@ -302,6 +302,16 @@ namespace
 
             std::lock_guard<std::mutex> lock(EventMutex);
             TriggerEnterEvents.push_back(selfTag + "->" + otherTag);
+        }
+
+        void OnTriggerEnter(const Limitless::Entity& other) override
+        {
+            RecordEnterEvent(other);
+        }
+
+        void OnCollisionEnter(const Limitless::Entity& other) override
+        {
+            RecordEnterEvent(other);
         }
 
     private:
@@ -2083,7 +2093,7 @@ TEST_SUITE("Scene And Editor Flows")
         triggerABody.Type = Limitless::Rigidbody2DComponent::BodyType::Static;
         auto& triggerACollider = registry.emplace<Limitless::BoxCollider2DComponent>(triggerA);
         triggerACollider.Size = { 0.8f, 0.8f };
-        triggerACollider.IsSensor = true;
+        triggerACollider.IsSensor = false;
 
         auto& triggerBTransform = registry.get<Limitless::TransformComponent>(triggerB);
         triggerBTransform.Position = { 1.0f, 0.0f, 0.0f };
@@ -2091,7 +2101,7 @@ TEST_SUITE("Scene And Editor Flows")
         triggerBBody.Type = Limitless::Rigidbody2DComponent::BodyType::Static;
         auto& triggerBCollider = registry.emplace<Limitless::BoxCollider2DComponent>(triggerB);
         triggerBCollider.Size = { 0.8f, 0.8f };
-        triggerBCollider.IsSensor = true;
+        triggerBCollider.IsSensor = false;
 
         constexpr float kFixedStep = 1.0f / 60.0f;
         scene.Update(kFixedStep);
@@ -2118,7 +2128,7 @@ TEST_SUITE("Scene And Editor Flows")
             key.EntityA = std::min(static_cast<uint32_t>(entityA), static_cast<uint32_t>(entityB));
             key.EntityB = std::max(static_cast<uint32_t>(entityA), static_cast<uint32_t>(entityB));
             key.WorldSlot = 0;
-            key.IsSensor = true;
+            key.IsSensor = false;
             return key;
         };
 
