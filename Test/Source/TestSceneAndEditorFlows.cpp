@@ -2034,6 +2034,17 @@ TEST_SUITE("Scene And Editor Flows")
         };
         [[maybe_unused]] NativeScriptRegistryCleanup registryCleanup;
 
+        const bool wasExecutionBlocked = Limitless::NativeScriptRegistry::IsExecutionBlocked();
+        struct NativeScriptExecutionBlockedRestore final
+        {
+            bool PreviousBlocked = false;
+            ~NativeScriptExecutionBlockedRestore()
+            {
+                Limitless::NativeScriptRegistry::SetExecutionBlocked(PreviousBlocked);
+            }
+        } executionBlockedRestore{ wasExecutionBlocked };
+
+        Limitless::NativeScriptRegistry::SetExecutionBlocked(false);
         Limitless::NativeScriptRegistry::Clear();
         Limitless::NativeScriptRegistry::RegisterScript<ContactOrderRecordingScript>("ContactOrderRecordingScript");
 
@@ -2082,16 +2093,24 @@ TEST_SUITE("Scene And Editor Flows")
         triggerBCollider.Size = { 0.8f, 0.8f };
         triggerBCollider.IsSensor = true;
 
-        scene.Update(1.0f / 60.0f);
+        constexpr float kFixedStep = 1.0f / 60.0f;
+        scene.Update(kFixedStep);
 
         // Ensure runtime bodies exist before we drive an explicit non-overlap -> overlap transition.
         // Relying on "already overlapping at spawn" begin events can vary across platforms.
-        scene.StepPhysics2D(1.0f / 60.0f);
+        scene.StepPhysics2D(kFixedStep);
         ContactOrderRecordingScript::ResetEvents();
 
         visitorTransform.Position = { 0.0f, 0.0f, 0.0f };
         scene.MarkTransformDirty(visitor);
-        scene.StepPhysics2D(1.0f / 60.0f);
+        constexpr size_t kExpectedEventCount = 4;
+        constexpr int kMaxEventSettleSteps = 3;
+        for (int stepIndex = 0; stepIndex < kMaxEventSettleSteps; ++stepIndex)
+        {
+            scene.StepPhysics2D(kFixedStep);
+            if (ContactOrderRecordingScript::GetEventsSnapshot().size() >= kExpectedEventCount)
+                break;
+        }
 
         auto makePairKey = [](entt::entity entityA, entt::entity entityB) {
             Limitless::RuntimeContactPairKey key{};
