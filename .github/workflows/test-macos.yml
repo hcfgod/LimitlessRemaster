@@ -132,6 +132,16 @@ jobs:
           echo "x64 test executable not found"
           exit 1
         fi
+
+    - name: Dump debug session log
+      if: always()
+      run: |
+        if [ -f debug-050170.log ]; then
+          echo "debug-050170.log contents:"
+          cat debug-050170.log
+        else
+          echo "debug-050170.log not found"
+        fi
         
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
@@ -141,4 +151,5 @@ jobs:
         path: |
           Build/
           Makefile
+          debug-050170.log
         retention-days: 7 

@@ -365,6 +365,38 @@ namespace
     std::mutex ContactOrderRecordingScript::EventMutex{};
     std::vector<std::string> ContactOrderRecordingScript::TriggerEnterEvents{};
 
+    int64_t AgentDebugTimestampMs()
+    {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+
+    void AgentAppendDebugLog(std::string_view runId,
+                             std::string_view hypothesisId,
+                             std::string_view location,
+                             std::string_view message,
+                             const nlohmann::json& data)
+    {
+        try
+        {
+            const nlohmann::json payload{
+                { "sessionId", "050170" },
+                { "runId", runId },
+                { "hypothesisId", hypothesisId },
+                { "location", location },
+                { "message", message },
+                { "data", data },
+                { "timestamp", AgentDebugTimestampMs() }
+            };
+            std::ofstream out("debug-050170.log", std::ios::app);
+            if (out.is_open())
+                out << payload.dump() << '\n';
+        }
+        catch (...)
+        {
+        }
+    }
+
     bool IsNullEntity(entt::entity entity)
     {
         return entity == entt::null;
@@ -2045,6 +2077,17 @@ TEST_SUITE("Scene And Editor Flows")
         } executionBlockedRestore{ wasExecutionBlocked };
 
         Limitless::NativeScriptRegistry::SetExecutionBlocked(false);
+        // #region agent log
+        AgentAppendDebugLog(
+            "contact-order-initial",
+            "H1",
+            "Test/Source/TestSceneAndEditorFlows.cpp:2069",
+            "Execution blocked state before/after override",
+            nlohmann::json{
+                { "wasExecutionBlocked", wasExecutionBlocked },
+                { "isExecutionBlockedNow", Limitless::NativeScriptRegistry::IsExecutionBlocked() }
+            });
+        // #endregion
         Limitless::NativeScriptRegistry::Clear();
         Limitless::NativeScriptRegistry::RegisterScript<ContactOrderRecordingScript>("ContactOrderRecordingScript");
 
@@ -2099,6 +2142,54 @@ TEST_SUITE("Scene And Editor Flows")
         // Ensure runtime bodies exist before we drive an explicit non-overlap -> overlap transition.
         // Relying on "already overlapping at spawn" begin events can vary across platforms.
         scene.StepPhysics2D(kFixedStep);
+        {
+            const auto getScriptRuntimeState = [&](entt::entity entity) -> nlohmann::json {
+                const auto* scripts = registry.try_get<Limitless::NativeScriptComponent>(entity);
+                if (!scripts || scripts->Scripts.empty())
+                    return nlohmann::json{ { "hasNativeScriptComponent", false } };
+                const auto& entry = scripts->Scripts.front();
+                return nlohmann::json{
+                    { "hasNativeScriptComponent", true },
+                    { "enabled", entry.Enabled },
+                    { "runtimeInitialized", entry.RuntimeInitialized },
+                    { "hasRuntimeInstance", static_cast<bool>(entry.RuntimeInstance) }
+                };
+            };
+
+            size_t contactEventCount = 0;
+            size_t beginCount = 0;
+            size_t sensorBeginCount = 0;
+            if (const auto* listener = scene.GetPhysics2DContactEvents())
+            {
+                const auto& events = listener->GetEvents();
+                contactEventCount = events.size();
+                for (const auto& eventData : events)
+                {
+                    if (eventData.IsBegin)
+                    {
+                        ++beginCount;
+                        if (eventData.IsSensor)
+                            ++sensorBeginCount;
+                    }
+                }
+            }
+
+            // #region agent log
+            AgentAppendDebugLog(
+                "contact-order-initial",
+                "H2",
+                "Test/Source/TestSceneAndEditorFlows.cpp:2144",
+                "Post-warmup script runtime and contact event state",
+                nlohmann::json{
+                    { "triggerA", getScriptRuntimeState(triggerA) },
+                    { "triggerB", getScriptRuntimeState(triggerB) },
+                    { "visitor", getScriptRuntimeState(visitor) },
+                    { "contactEventCount", contactEventCount },
+                    { "beginCount", beginCount },
+                    { "sensorBeginCount", sensorBeginCount }
+                });
+            // #endregion
+        }
         ContactOrderRecordingScript::ResetEvents();
 
         visitorTransform.Position = { 0.0f, 0.0f, 0.0f };
@@ -2108,7 +2199,40 @@ TEST_SUITE("Scene And Editor Flows")
         for (int stepIndex = 0; stepIndex < kMaxEventSettleSteps; ++stepIndex)
         {
             scene.StepPhysics2D(kFixedStep);
-            if (ContactOrderRecordingScript::GetEventsSnapshot().size() >= kExpectedEventCount)
+            const std::vector<std::string> stepEvents = ContactOrderRecordingScript::GetEventsSnapshot();
+            size_t contactEventCount = 0;
+            size_t beginCount = 0;
+            size_t sensorBeginCount = 0;
+            if (const auto* listener = scene.GetPhysics2DContactEvents())
+            {
+                const auto& events = listener->GetEvents();
+                contactEventCount = events.size();
+                for (const auto& eventData : events)
+                {
+                    if (eventData.IsBegin)
+                    {
+                        ++beginCount;
+                        if (eventData.IsSensor)
+                            ++sensorBeginCount;
+                    }
+                }
+            }
+            // #region agent log
+            AgentAppendDebugLog(
+                "contact-order-initial",
+                "H3",
+                "Test/Source/TestSceneAndEditorFlows.cpp:2202",
+                "Per-step settle loop state",
+                nlohmann::json{
+                    { "stepIndex", stepIndex },
+                    { "recordedEventCount", stepEvents.size() },
+                    { "recordedEvents", stepEvents },
+                    { "contactEventCount", contactEventCount },
+                    { "beginCount", beginCount },
+                    { "sensorBeginCount", sensorBeginCount }
+                });
+            // #endregion
+            if (stepEvents.size() >= kExpectedEventCount)
                 break;
         }
 
@@ -2150,6 +2274,19 @@ TEST_SUITE("Scene And Editor Flows")
         }
 
         const std::vector<std::string> actualOrder = ContactOrderRecordingScript::GetEventsSnapshot();
+        // #region agent log
+        AgentAppendDebugLog(
+            "contact-order-initial",
+            "H4",
+            "Test/Source/TestSceneAndEditorFlows.cpp:2257",
+            "Final expected vs actual order before assertions",
+            nlohmann::json{
+                { "expectedOrder", expectedOrder },
+                { "actualOrder", actualOrder },
+                { "expectedCount", expectedOrder.size() },
+                { "actualCount", actualOrder.size() }
+            });
+        // #endregion
         REQUIRE(actualOrder.size() == expectedOrder.size());
         for (size_t eventIndex = 0; eventIndex < expectedOrder.size(); ++eventIndex)
             CHECK(actualOrder[eventIndex] == expectedOrder[eventIndex]);
