@@ -20,6 +20,7 @@
 #include "Scene/Components/TilemapComponents.h"
 #include "Scene/Scene.h"
 #include "Scene/SceneManager.h"
+#include "Scene/SceneRenderer.h"
 #include "Scripting/NativeScriptRegistry.h"
 #include "Scripting/ScriptableEntity.h"
 #include "Scripting/ScriptCoreApi.h"

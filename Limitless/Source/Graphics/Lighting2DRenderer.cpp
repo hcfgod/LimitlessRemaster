@@ -23,6 +23,7 @@
 #include "Scene/Components/RenderingComponents.h"
 #include "Scene/Components/TilemapComponents.h"
 #include "Scene/Scene.h"
+#include "Scene/SceneRenderer.h"
 
 #ifdef LT_USE_GLAD
 #include <glad/glad.h>

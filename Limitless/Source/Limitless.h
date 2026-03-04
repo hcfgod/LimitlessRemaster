@@ -44,6 +44,7 @@
 #include "Scene/Components.h"
 #include "Scene/SceneManager.h"
 #include "Scene/Scene.h"
+#include "Scene/SceneRenderer.h"
 #include "Scripting/ScriptableEntity.h"
 #include "Scripting/NativeScriptRegistry.h"
 #include "Scripting/Input.h"

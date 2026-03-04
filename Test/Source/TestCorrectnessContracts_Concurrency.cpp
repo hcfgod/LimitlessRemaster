@@ -423,6 +423,142 @@ TEST_SUITE("Correctness Contracts - Concurrency Queues")
         CHECK(invalidObservedState.load(std::memory_order_relaxed) == 0);
     }
 
+    TEST_CASE("LockFreeSPSCQueue Clear resets to empty state")
+    {
+        using Queue = Limitless::Concurrency::LockFreeSPSCQueue<int, 8>;
+        Queue queue;
+
+        for (int i = 0; i < 5; ++i)
+            CHECK(queue.TryPush(int{i}));
+
+        CHECK(queue.GetSize() == 5);
+        CHECK_FALSE(queue.IsEmpty());
+
+        queue.Clear();
+
+        CHECK(queue.IsEmpty());
+        CHECK(queue.GetSize() == 0);
+        CHECK_FALSE(queue.IsFull());
+
+        CHECK(queue.TryPush(int{42}));
+        auto val = queue.TryPop();
+        REQUIRE(val.has_value());
+        CHECK(*val == 42);
+    }
+
+    TEST_CASE("LockFreeSPSCQueue GetSize tracks push and pop")
+    {
+        using Queue = Limitless::Concurrency::LockFreeSPSCQueue<int, 16>;
+        Queue queue;
+
+        CHECK(queue.GetSize() == 0);
+        CHECK(queue.IsEmpty());
+        CHECK_FALSE(queue.IsFull());
+
+        queue.TryPush(int{1});
+        CHECK(queue.GetSize() == 1);
+        CHECK_FALSE(queue.IsEmpty());
+
+        queue.TryPush(int{2});
+        queue.TryPush(int{3});
+        CHECK(queue.GetSize() == 3);
+
+        queue.TryPop();
+        CHECK(queue.GetSize() == 2);
+
+        queue.TryPop();
+        queue.TryPop();
+        CHECK(queue.GetSize() == 0);
+        CHECK(queue.IsEmpty());
+    }
+
+    TEST_CASE("LockFreeMPMCQueue Clear resets to empty state")
+    {
+        using Queue = Limitless::Concurrency::LockFreeMPMCQueue<int, 8>;
+        Queue queue;
+
+        for (int i = 0; i < 6; ++i)
+            CHECK(queue.TryPush(int{i}));
+
+        CHECK(queue.GetSize() == 6);
+        CHECK_FALSE(queue.IsEmpty());
+
+        queue.Clear();
+
+        CHECK(queue.IsEmpty());
+        CHECK(queue.GetSize() == 0);
+        CHECK_FALSE(queue.IsFull());
+
+        for (int i = 0; i < 8; ++i)
+            CHECK(queue.TryPush(int{i}));
+
+        CHECK(queue.IsFull());
+
+        for (int i = 0; i < 8; ++i)
+        {
+            auto val = queue.TryPop();
+            REQUIRE(val.has_value());
+            CHECK(*val == i);
+        }
+    }
+
+    TEST_CASE("LockFreeMPMCQueue GetSize tracks push and pop")
+    {
+        using Queue = Limitless::Concurrency::LockFreeMPMCQueue<int, 16>;
+        Queue queue;
+
+        CHECK(queue.GetSize() == 0);
+        CHECK(queue.IsEmpty());
+
+        queue.TryPush(int{10});
+        queue.TryPush(int{20});
+        CHECK(queue.GetSize() == 2);
+
+        queue.TryPop();
+        CHECK(queue.GetSize() == 1);
+
+        queue.TryPop();
+        CHECK(queue.GetSize() == 0);
+        CHECK(queue.IsEmpty());
+    }
+
+    TEST_CASE("WorkStealingQueue Clear via drain leaves queue reusable")
+    {
+        using Queue = Limitless::Concurrency::WorkStealingQueue<int, 8>;
+        Queue queue;
+
+        for (int i = 0; i < 6; ++i)
+            CHECK(queue.TryPush(int{i}));
+
+        CHECK(queue.GetSize() == 6);
+
+        while (queue.Pop().has_value()) {}
+        CHECK(queue.IsEmpty());
+        CHECK(queue.GetSize() == 0);
+
+        CHECK(queue.TryPush(int{99}));
+        auto val = queue.Pop();
+        REQUIRE(val.has_value());
+        CHECK(*val == 99);
+    }
+
+    TEST_CASE("ObjectPool Acquire returns valid objects and Release recycles them")
+    {
+        using Pool = Limitless::Concurrency::ObjectPool<int, 4>;
+        Pool pool;
+
+        auto obj1 = pool.Acquire();
+        REQUIRE(obj1 != nullptr);
+        *obj1 = 42;
+        pool.Release(std::move(obj1));
+
+        auto obj2 = pool.Acquire();
+        REQUIRE(obj2 != nullptr);
+        CHECK(*obj2 == 42);
+
+        pool.Clear();
+    }
+
     TEST_CASE("JobSystem Submit rejects when unavailable and drains all accepted jobs")
     {
         auto& jobSystem = Limitless::Concurrency::GetJobSystem();
@@ -464,6 +600,101 @@ TEST_SUITE("Correctness Contracts - Concurrency Queues")
         CHECK(executed.load(std::memory_order_relaxed) == kTotalJobs);
 
         jobSystem.Shutdown();
+    }
+
+    TEST_CASE("WaitGroup blocks until all work is done")
+    {
+        Limitless::Concurrency::WaitGroup wg;
+
+        constexpr int kCount = 8;
+        std::atomic<int> completed{0};
+
+        std::vector<std::thread> workers;
+        workers.reserve(kCount);
+        for (int i = 0; i < kCount; ++i)
+        {
+            wg.Add(1);
+            workers.emplace_back([&wg, &completed]()
+            {
+                std::this_thread::sleep_for(std::chrono::microseconds(50));
+                completed.fetch_add(1, std::memory_order_relaxed);
+                wg.Done();
+            });
+        }
+
+        wg.Wait();
+        CHECK(completed.load(std::memory_order_relaxed) == kCount);
+
+        for (auto& worker : workers)
+            worker.join();
+    }
+
+    TEST_CASE("JobSystem ParallelFor processes all items")
+    {
+        auto& jobSystem = Limitless::Concurrency::GetJobSystem();
+        jobSystem.Shutdown();
+        jobSystem.Initialize(4);
+
+        constexpr size_t kSize = 10000;
+        std::vector<std::atomic<int>> results(kSize);
+        for (auto& r : results)
+            r.store(0, std::memory_order_relaxed);
+
+        jobSystem.ParallelFor(0, kSize, 0, [&results](size_t index)
+        {
+            results[index].fetch_add(1, std::memory_order_relaxed);
+        });
+
+        for (size_t i = 0; i < kSize; ++i)
+        {
+            CHECK(results[i].load(std::memory_order_relaxed) == 1);
+        }
+
+        jobSystem.Shutdown();
+    }
+
+    TEST_CASE("JobSystem ParallelFor empty range is a no-op")
+    {
+        auto& jobSystem = Limitless::Concurrency::GetJobSystem();
+        jobSystem.Shutdown();
+        jobSystem.Initialize(2);
+
+        std::atomic<int> executed{0};
+        jobSystem.ParallelFor(5, 5, 1, [&executed](size_t)
+        {
+            executed.fetch_add(1, std::memory_order_relaxed);
+        });
+
+        CHECK(executed.load(std::memory_order_relaxed) == 0);
+
+        jobSystem.ParallelFor(10, 3, 1, [&executed](size_t)
+        {
+            executed.fetch_add(1, std::memory_order_relaxed);
+        });
+
+        CHECK(executed.load(std::memory_order_relaxed) == 0);
+
+        jobSystem.Shutdown();
+    }
+
+    TEST_CASE("JobSystem ParallelFor falls back to sequential when not initialized")
+    {
+        auto& jobSystem = Limitless::Concurrency::GetJobSystem();
+        jobSystem.Shutdown();
+        CHECK_FALSE(jobSystem.IsInitialized());
+
+        constexpr size_t kSize = 100;
+        std::vector<int> results(kSize, 0);
+
+        jobSystem.ParallelFor(0, kSize, 10, [&results](size_t index)
+        {
+            results[index] = static_cast<int>(index) + 1;
+        });
+
+        for (size_t i = 0; i < kSize; ++i)
+        {
+            CHECK(results[i] == static_cast<int>(i) + 1);
+        }
     }
 }
 

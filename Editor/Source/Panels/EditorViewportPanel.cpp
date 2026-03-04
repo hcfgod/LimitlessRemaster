@@ -10,6 +10,7 @@
 #include "Graphics/Renderer2D.h"
 #include "Core/Time.h"
 #include "Scene/Scene.h"
+#include "Scene/SceneRenderer.h"
 #include "Undo/EditorUndoService.h"
 #include "imgui/imgui.h"
 

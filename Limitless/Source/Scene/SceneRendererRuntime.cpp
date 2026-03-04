@@ -1,4 +1,5 @@
 #include "Scene/Scene.h"
+#include "Scene/SceneRenderer.h"
 #include "Scene/Components/RenderingComponents.h"
 #include "Scene/Components/TilemapComponents.h"
 
