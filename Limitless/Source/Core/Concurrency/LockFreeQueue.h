@@ -274,6 +274,7 @@ namespace Limitless
                 return result ? std::move(*result) : nullptr;
             }
 
+            // Inline ring-buffer storage for pooled handles; avoids per-slot heap nodes.
             LockFreeSPSCQueue<std::unique_ptr<T>, PoolSize> m_Pool;
         };
 
@@ -329,6 +330,8 @@ namespace Limitless
                 
                 if (top == bottom)
                 {
+                    // Seq-cst here preserves the Chase-Lev "last item" race resolution
+                    // semantics across weaker memory models (e.g. ARM).
                     if (!m_Top.compare_exchange_strong(top, top + 1,
                                                       std::memory_order_seq_cst,
                                                       std::memory_order_relaxed))
@@ -353,6 +356,8 @@ namespace Limitless
                 
                 T item = std::move(m_Buffer[top & (Size - 1)]);
                 
+                // Seq-cst pairs with owner pop path for portable correctness on weakly
+                // ordered architectures while keeping the common path mostly acq/rel.
                 if (!m_Top.compare_exchange_strong(top, top + 1,
                                                   std::memory_order_seq_cst,
                                                   std::memory_order_relaxed))

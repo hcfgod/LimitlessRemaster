@@ -107,6 +107,8 @@ namespace Limitless::Concurrency
         using Job = std::function<void()>;
         static constexpr size_t kWorkerQueueSize = 1024;
         static constexpr size_t kInjectorQueueSize = 8192;
+        static_assert((kWorkerQueueSize & (kWorkerQueueSize - 1)) == 0, "kWorkerQueueSize must be power of 2");
+        static_assert((kInjectorQueueSize & (kInjectorQueueSize - 1)) == 0, "kInjectorQueueSize must be power of 2");
 
         struct WorkerContext
         {
