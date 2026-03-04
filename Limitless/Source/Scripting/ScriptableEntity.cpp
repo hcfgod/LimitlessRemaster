@@ -1,6 +1,8 @@
 #include "Scripting/ScriptableEntity.h"
 
-#include "Scene/Components.h"
+#include "Scene/Components/CoreComponents.h"
+#include "Scene/Components/RenderingComponents.h"
+#include "Scene/Components/ScriptingComponents.h"
 #include "Scene/ParticleEmitterSystem.h"
 
 #ifndef SCRIPTCORE_EXPORTS

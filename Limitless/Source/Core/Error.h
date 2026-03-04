@@ -460,15 +460,13 @@ namespace Limitless
         // Get current error handler
         ErrorHandler GetErrorHandler();
 
-        /**
-         * @brief Temporarily override the global error handler (RAII).
-         *
-         * This is primarily intended for tests and tooling where errors are expected
-         * (e.g. verifying that an assertion throws) and logging would add noisy output.
-         *
-         * Note: The error handler is a process-global setting. Do not use this to "silence"
-         * errors in production code paths; prefer proper control of logging configuration instead.
-         */
+        /// Temporarily override the global error handler (RAII).
+        ///
+        /// This is primarily intended for tests and tooling where errors are expected
+        /// (e.g. verifying that an assertion throws) and logging would add noisy output.
+        ///
+        /// Note: The error handler is a process-global setting. Do not use this to "silence"
+        /// errors in production code paths; prefer proper control of logging configuration instead.
         class ScopedErrorHandlerOverride final
         {
         public:

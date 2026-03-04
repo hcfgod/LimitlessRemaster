@@ -1,4 +1,7 @@
 #include "Scene/Scene.h"
+#include "Scene/Components/PhysicsComponents.h"
+#include "Scene/Components/RenderingComponents.h"
+#include "Scene/Components/TilemapComponents.h"
 #include "Scene/SceneSerialization.h"
 
 #include "Assets/AssetBundle.h"

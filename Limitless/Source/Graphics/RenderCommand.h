@@ -126,7 +126,7 @@ namespace Limitless
     class Renderer2DFlushCommand final : public RenderCommand
     {
     public:
-        static constexpr uint32_t kMaxTextureSlots = 16;
+        static constexpr uint32_t kMaxTextureSlots = 32;
 
         struct KeepAlive
         {

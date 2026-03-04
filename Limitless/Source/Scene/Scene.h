@@ -3,7 +3,7 @@
 #include "Core/Error.h"
 #include "Core/Concurrency/LockFreeQueue.h"
 #include "Physics/Physics2DWorld.h"
-#include "Scene/Components.h"
+#include "Scene/Components/CoreComponents.h"
 #include "Scene/Entity.h"
 
 #include <glm/glm.hpp>

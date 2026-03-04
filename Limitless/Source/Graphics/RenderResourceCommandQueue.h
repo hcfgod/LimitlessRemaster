@@ -17,15 +17,11 @@ namespace Limitless
 {
     class GraphicsContext;
 
-    /**
-     * RenderResourceCommandQueue
-     *
-     * A dedicated queue for GPU resource operations that must execute on the render thread
-     * (or more specifically: on the thread that owns/makes-current the graphics context).
-     *
-     * - Submission: safe from multiple producer threads.
-     * - Execution: intended to run on ONE thread (the render thread) with a valid current context.
-     */
+    /// A dedicated queue for GPU resource operations that must execute on the render thread
+    /// (or more specifically: on the thread that owns/makes-current the graphics context).
+    ///
+    /// - Submission: safe from multiple producer threads.
+    /// - Execution: intended to run on ONE thread (the render thread) with a valid current context.
     class RenderResourceCommandQueue final
     {
     public:

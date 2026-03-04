@@ -3,8 +3,6 @@
 #include "Graphics/GraphicsAPIDetector.h"
 #include "Core/Debug/Log.h"
 
-#define LT_USE_GLAD
-
 // Optionally include glad if available
 #ifdef LT_USE_GLAD
 #include <glad/glad.h>

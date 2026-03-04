@@ -4,6 +4,7 @@ project "Limitless"
     language "C++"
     cppdialect "C++20"
     staticruntime "off"
+    defines { "LT_USE_GLAD" }
 
     targetdir ("../Build/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")
     objdir ("../Build/Intermediates/%{cfg.shortname}-%{cfg.system}-%{cfg.platform}/%{prj.name}")

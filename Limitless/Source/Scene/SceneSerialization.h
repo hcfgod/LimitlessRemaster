@@ -1,7 +1,8 @@
 #pragma once
 
 #include "Assets/AssetTypes.h"
-#include "Scene/Components.h"
+#include "Scene/Components/AudioComponents.h"
+#include "Scene/Components/ScriptingComponents.h"
 
 #include <nlohmann/json.hpp>
 

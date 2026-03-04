@@ -1,4 +1,6 @@
 #include "Scene/Scene.h"
+#include "Scene/Components/RenderingComponents.h"
+#include "Scene/Components/TilemapComponents.h"
 
 #include "Assets/AssetManager.h"
 #include "Assets/MaterialAsset.h"

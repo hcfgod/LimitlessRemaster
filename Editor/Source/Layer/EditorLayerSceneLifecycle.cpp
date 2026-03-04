@@ -13,7 +13,8 @@
 #include "Panels/EditorInspectorPanel.h"
 #include "Project/BuildSettings.h"
 #include "Project/ProjectManager.h"
-#include "Scene/Components.h"
+#include "Scene/Components/AudioComponents.h"
+#include "Scene/Components/CoreComponents.h"
 #include "Scene/Scene.h"
 #include "Scripting/NativeScriptRegistry.h"
 

@@ -6,6 +6,7 @@ namespace Limitless::Assets
     std::unordered_map<std::string, std::weak_ptr<Asset>> AssetManager::s_GuidCache;
     std::unordered_map<std::string, std::chrono::steady_clock::time_point> AssetManager::s_FailedLoadRetryByKey;
     std::shared_mutex AssetManager::s_Mutex;
+    std::chrono::milliseconds AssetManager::s_RetryCooldown{1000};
 
     void AssetManager::GarbageCollect()
     {

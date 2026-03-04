@@ -1,4 +1,7 @@
 #include "Scene/Scene.h"
+#include "Scene/Components/PhysicsComponents.h"
+#include "Scene/Components/RenderingComponents.h"
+#include "Scene/Components/ScriptingComponents.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetBundle.h"
 #include "Assets/AssetManager.h"

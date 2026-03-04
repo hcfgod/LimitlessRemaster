@@ -6,6 +6,10 @@
 #include "Scene/Scene.h"
 #include "Scene/SceneManager.h"
 #include "Scene/SceneSystemScheduler.h"
+#include "Scene/Components/AudioComponents.h"
+#include "Scene/Components/RenderingComponents.h"
+#include "Scene/Components/ScriptingComponents.h"
+#include "Scene/Components/TilemapComponents.h"
 #include "Scripting/NativeScriptRegistry.h"
 
 #include <atomic>

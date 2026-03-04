@@ -11,9 +11,7 @@ namespace Limitless {
 
 #ifdef LT_PLATFORM_MACOS
 
-    /**
-     * @brief macOS-specific CPU monitoring implementation
-     */
+    /// macOS-specific CPU monitoring implementation.
     class macOSCPUPlatform : public ICPUPlatform {
     public:
         macOSCPUPlatform();
@@ -39,9 +37,7 @@ namespace Limitless {
         std::chrono::high_resolution_clock::time_point m_LastUpdate;
     };
 
-    /**
-     * @brief macOS-specific GPU monitoring implementation
-     */
+    /// macOS-specific GPU monitoring implementation.
     class macOSGPUPlatform : public IGPUPlatform {
     public:
         macOSGPUPlatform();
@@ -67,9 +63,7 @@ namespace Limitless {
         std::chrono::high_resolution_clock::time_point m_LastUpdate;
     };
 
-    /**
-     * @brief macOS-specific system monitoring implementation
-     */
+    /// macOS-specific system monitoring implementation.
     class macOSSystemPlatform : public ISystemPlatform {
     public:
         macOSSystemPlatform();

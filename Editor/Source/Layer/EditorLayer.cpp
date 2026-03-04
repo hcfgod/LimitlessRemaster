@@ -36,7 +36,10 @@
 #include "ImGui/ImGuiLayer.h"
 #include "Project/ProjectManager.h"
 #include "Project/ProjectSettings.h"
-#include "Scene/Components.h"
+#include "Scene/Components/AudioComponents.h"
+#include "Scene/Components/CoreComponents.h"
+#include "Scene/Components/RenderingComponents.h"
+#include "Scene/Components/ScriptingComponents.h"
 #include "Scene/Scene.h"
 #include "imgui/imgui.h"
 

@@ -7,7 +7,7 @@
 #include "Core/Debug/Log.h"
 #include "EditorPrefabSystem.h"
 #include "Project/ProjectManager.h"
-#include "Scene/Components.h"
+#include "Scene/Components/CoreComponents.h"
 #include "Scene/Scene.h"
 
 #include <algorithm>

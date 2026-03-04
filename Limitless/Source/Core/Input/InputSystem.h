@@ -8,6 +8,7 @@
 #include <SDL3/SDL_gamepad.h>
 
 #include <array>
+#include <bitset>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -140,9 +141,9 @@ namespace Limitless
         static size_t FindSlotByGamepadId(std::array<PerGamepadState, kMaxGamepads>& gamepads, SDL_JoystickID id);
         static size_t FindFreeGamepadSlot(std::array<PerGamepadState, kMaxGamepads>& gamepads);
 
-        std::array<uint8_t, SDL_SCANCODE_COUNT> m_KeyDown{};
-        std::array<uint8_t, SDL_SCANCODE_COUNT> m_KeyPressedThisFrame{};
-        std::array<uint8_t, SDL_SCANCODE_COUNT> m_KeyReleasedThisFrame{};
+        std::bitset<SDL_SCANCODE_COUNT> m_KeyDown;
+        std::bitset<SDL_SCANCODE_COUNT> m_KeyPressedThisFrame;
+        std::bitset<SDL_SCANCODE_COUNT> m_KeyReleasedThisFrame;
 
         std::array<uint8_t, kMaxMouseButtons> m_MouseDown{};
         std::array<uint8_t, kMaxMouseButtons> m_MousePressedThisFrame{};

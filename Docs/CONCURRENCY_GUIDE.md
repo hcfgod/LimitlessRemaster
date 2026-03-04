@@ -272,6 +272,22 @@ File: `Limitless/Source/Core/Concurrency/LockFreeQueue.h`
 - **Lifetime / safety**
   - `Clear()` is **not thread-safe** and must only be called when no other thread is pushing/popping.
 
+### `ObjectPool<T, PoolSize>` (bounded pooled reuse)
+
+File: `Limitless/Source/Core/Concurrency/LockFreeQueue.h`
+
+- **Thread model**
+  - Multiple threads may call `Acquire()` and `Release()` concurrently.
+  - Internally uses a bounded `LockFreeMPMCQueue<std::unique_ptr<T>, PoolSize>`.
+- **Capacity**
+  - Pool retention is bounded by `PoolSize`.
+  - `Release()` drops (destroys) the object when the pool is full.
+- **Ownership**
+  - `Acquire()` returns pooled object ownership when available, otherwise allocates a new `T`.
+  - `Release()` returns ownership to the pool on success.
+- **Lifetime / safety**
+  - `Clear()` is **not thread-safe** and must only be called when no other threads are operating on the pool.
+
 ### Work-stealing queue (`WorkStealingQueue<T, Size>`)
 
 - **Thread model**
@@ -279,7 +295,7 @@ File: `Limitless/Source/Core/Concurrency/LockFreeQueue.h`
   - `Steal()` may be called by other threads.
 - **Capacity**
   - The queue is bounded to **`Size`** items.
-  - Prefer `TryPush()` for explicit overflow handling (`false` when full).
+  - `TryPush()` and `Push()` both return `false` when full (no silent drop).
 - **Correctness notes**
   - `Pop()` on empty returns `std::nullopt` and does not underflow internal indices.
   - Last-item owner/stealer races return `std::nullopt` on failed CAS handoff (no sentinel payloads).

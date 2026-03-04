@@ -28,8 +28,8 @@ namespace Limitless
 
     void InputSystem::BeginFrame()
     {
-        m_KeyPressedThisFrame.fill(0);
-        m_KeyReleasedThisFrame.fill(0);
+        m_KeyPressedThisFrame.reset();
+        m_KeyReleasedThisFrame.reset();
 
         m_MousePressedThisFrame.fill(0);
         m_MouseReleasedThisFrame.fill(0);
@@ -213,7 +213,7 @@ namespace Limitless
         {
             return false;
         }
-        return m_KeyDown[scancode] != 0;
+        return m_KeyDown.test(static_cast<size_t>(scancode));
     }
 
     bool InputSystem::WasKeyPressedThisFrame(SDL_Scancode scancode) const
@@ -222,7 +222,7 @@ namespace Limitless
         {
             return false;
         }
-        return m_KeyPressedThisFrame[scancode] != 0;
+        return m_KeyPressedThisFrame.test(static_cast<size_t>(scancode));
     }
 
     bool InputSystem::WasKeyReleasedThisFrame(SDL_Scancode scancode) const
@@ -231,7 +231,7 @@ namespace Limitless
         {
             return false;
         }
-        return m_KeyReleasedThisFrame[scancode] != 0;
+        return m_KeyReleasedThisFrame.test(static_cast<size_t>(scancode));
     }
 
     bool InputSystem::IsMouseButtonDown(uint8_t button) const
@@ -423,18 +423,19 @@ namespace Limitless
             return;
         }
 
-        const bool wasDown = (m_KeyDown[scancode] != 0);
-        m_KeyDown[scancode] = down ? 1 : 0;
+        const auto idx = static_cast<size_t>(scancode);
+        const bool wasDown = m_KeyDown.test(idx);
+        m_KeyDown.set(idx, down);
 
         if (!repeat)
         {
             if (!wasDown && down)
             {
-                m_KeyPressedThisFrame[scancode] = 1;
+                m_KeyPressedThisFrame.set(idx);
             }
             if (wasDown && !down)
             {
-                m_KeyReleasedThisFrame[scancode] = 1;
+                m_KeyReleasedThisFrame.set(idx);
             }
         }
     }

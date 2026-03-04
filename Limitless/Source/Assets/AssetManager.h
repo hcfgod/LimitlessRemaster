@@ -28,6 +28,11 @@ namespace Limitless::Assets
     class AssetManager final
     {
     public:
+        /// Configures the cooldown duration before retrying a failed asset load.
+        /// Default is 1 second.
+        static void SetFailedLoadRetryCooldown(std::chrono::milliseconds cooldown) { s_RetryCooldown = cooldown; }
+        static std::chrono::milliseconds GetFailedLoadRetryCooldown() { return s_RetryCooldown; }
+
         // Generic Unity-style load API.
         // Users call: `AssetManager::LoadAsync<TextureAsset>("Assets/...")`
         template<typename TAsset>
@@ -100,7 +105,7 @@ namespace Limitless::Assets
                 {
                     std::unique_lock<std::shared_mutex> wlock(s_Mutex);
                     auto [it, inserted] = s_FailedLoadRetryByKey.insert_or_assign(
-                        key, now + std::chrono::seconds(1));
+                        key, now + s_RetryCooldown);
                     shouldLog = inserted;
                     (void)it;
                 }
@@ -231,6 +236,7 @@ namespace Limitless::Assets
         static std::unordered_map<std::string, std::weak_ptr<Asset>> s_GuidCache;
         static std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_FailedLoadRetryByKey;
         static std::shared_mutex s_Mutex;
+        static std::chrono::milliseconds s_RetryCooldown;
     };
 }
 

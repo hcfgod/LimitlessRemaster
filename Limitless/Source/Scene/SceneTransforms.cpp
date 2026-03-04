@@ -1,4 +1,5 @@
 #include "Scene/Scene.h"
+#include "Scene/Components/PhysicsComponents.h"
 #include "Core/Concurrency/JobSystem.h"
 #include "Core/ConfigManager.h"
 

@@ -2,6 +2,7 @@
 
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetPaths.h"
+#include "Assets/AssetUtils.h"
 
 #include <nlohmann/json.hpp>
 

@@ -10,16 +10,14 @@
 
 namespace Limitless::Project
 {
-    /**
-     * @brief Editor/tooling-facing project manager.
-     *
-     * Owns the "currently open" project context:
-     * - project root directory
-     * - loaded `ProjectDefinition`
-     *
-     * When a project is opened, this manager also sets the AssetPaths root override so the
-     * rest of the engine can resolve `Assets/...` deterministically.
-     */
+    /// Editor/tooling-facing project manager.
+    ///
+    /// Owns the "currently open" project context:
+    /// - project root directory
+    /// - loaded `ProjectDefinition`
+    ///
+    /// When a project is opened, this manager also sets the AssetPaths root override so the
+    /// rest of the engine can resolve `Assets/...` deterministically.
     class ProjectManager final
     {
     public:

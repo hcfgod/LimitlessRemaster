@@ -43,6 +43,8 @@ namespace Limitless {
             return m_VSyncActuallyEnabled;
         }
 
+        int32_t GetMaxTextureImageUnits() const override { return m_MaxTextureImageUnits; }
+
         // Create a resource-sharing OpenGL context suitable for running GPU resource work on a
         // secondary thread (uploads/creates/deletes). Returns null if creation fails.
         //
@@ -66,5 +68,7 @@ namespace Limitless {
         // Requested GL version
         int m_RequestMajor{4};
         int m_RequestMinor{5};
+
+        int32_t m_MaxTextureImageUnits{16};
     };
 } // namespace Limitless

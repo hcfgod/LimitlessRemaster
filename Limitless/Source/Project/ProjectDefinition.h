@@ -7,16 +7,14 @@
 
 namespace Limitless::Project
 {
-    /**
-     * @brief Minimal persistent project descriptor stored at `<ProjectRoot>/Project/Project.json`.
-     *
-     * This is the project's "solution marker" (Unity-style) that makes root discovery deterministic
-     * and centralizes project-level settings like asset/build roots and default scene.
-     *
-     * Notes:
-     * - The file is intended to be committed to source control.
-     * - GUID is stable-by-source-control (random at creation, never changes after).
-     */
+    /// Minimal persistent project descriptor stored at `<ProjectRoot>/Project/Project.json`.
+    ///
+    /// This is the project's "solution marker" (Unity-style) that makes root discovery deterministic
+    /// and centralizes project-level settings like asset/build roots and default scene.
+    ///
+    /// Notes:
+    /// - The file is intended to be committed to source control.
+    /// - GUID is stable-by-source-control (random at creation, never changes after).
     struct ProjectDefinition final
     {
         uint32_t Version = 1;

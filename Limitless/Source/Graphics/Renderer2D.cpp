@@ -15,6 +15,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <vector>
@@ -41,9 +42,10 @@ namespace Limitless
             static constexpr uint32_t kMaxQuads = 10000;
             static constexpr uint32_t kMaxVertices = kMaxQuads * 4;
             static constexpr uint32_t kMaxIndices = kMaxQuads * 6;
-            static constexpr uint32_t kMaxTextureSlots = 16;
+            static constexpr uint32_t kCompileTimeMaxTextureSlots = 32;
 
             bool Initialized = false;
+            uint32_t MaxTextureSlots = 16;
 
             std::shared_ptr<VertexArray> QuadVertexArray;
             std::shared_ptr<VertexBuffer> QuadVertexBuffer;
@@ -55,7 +57,7 @@ namespace Limitless
             std::shared_ptr<Shader> TextShaderProgram;
 
             std::shared_ptr<Texture2D> WhiteTexture;
-            std::array<std::shared_ptr<Texture2D>, kMaxTextureSlots> TextureSlots{};
+            std::array<std::shared_ptr<Texture2D>, kCompileTimeMaxTextureSlots> TextureSlots{};
             uint32_t TextureSlotCount = 0;
 
             glm::mat4 ViewProjection{1.0f};
@@ -64,7 +66,7 @@ namespace Limitless
             QuadVertex* VertexBufferPtr = nullptr;
             uint32_t IndexCount = 0;
 
-            std::array<std::shared_ptr<Texture2D>, kMaxTextureSlots> TextTextureSlots{};
+            std::array<std::shared_ptr<Texture2D>, kCompileTimeMaxTextureSlots> TextTextureSlots{};
             uint32_t TextTextureSlotCount = 0;
             std::unique_ptr<QuadVertex[]> TextVertexBufferBase;
             QuadVertex* TextVertexBufferPtr = nullptr;
@@ -147,6 +149,14 @@ namespace Limitless
         g_Data.QuadIndexBuffer = IndexBuffer::Create(indices.data(), static_cast<uint32_t>(indices.size()));
         g_Data.QuadVertexArray->SetIndexBuffer(g_Data.QuadIndexBuffer);
 
+        // Query the GPU's actual texture unit limit and clamp to our compile-time array cap.
+        if (auto* ctx = renderer.GetGraphicsContext())
+        {
+            const int32_t hwMax = ctx->GetMaxTextureImageUnits();
+            g_Data.MaxTextureSlots = static_cast<uint32_t>(
+                std::clamp(hwMax, int32_t(1), static_cast<int32_t>(Renderer2DData::kCompileTimeMaxTextureSlots)));
+        }
+
         // 1x1 white texture for untextured (color-only) quads and as a guaranteed slot 0.
         // This keeps the shader sampling path uniform and makes batching rules deterministic.
         const uint32_t whitePixelRGBA8 = 0xFFFFFFFFu;
@@ -182,12 +192,12 @@ namespace Limitless
 
         // Bind sampler array once: u_Textures[i] -> texture unit i.
         {
-            std::array<int, Renderer2DData::kMaxTextureSlots> samplers{};
-            for (uint32_t i = 0; i < Renderer2DData::kMaxTextureSlots; ++i)
+            std::array<int, Renderer2DData::kCompileTimeMaxTextureSlots> samplers{};
+            for (uint32_t i = 0; i < g_Data.MaxTextureSlots; ++i)
             {
                 samplers[i] = static_cast<int>(i);
             }
-            g_Data.ShaderProgram->SetIntArray("u_Textures", samplers.data(), static_cast<uint32_t>(samplers.size()));
+            g_Data.ShaderProgram->SetIntArray("u_Textures", samplers.data(), g_Data.MaxTextureSlots);
         }
 
         g_Data.TextMaterial = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(kDefaultTextMaterialKey);
@@ -205,12 +215,12 @@ namespace Limitless
 
         if (g_Data.TextShaderProgram)
         {
-            std::array<int, Renderer2DData::kMaxTextureSlots> samplers{};
-            for (uint32_t i = 0; i < Renderer2DData::kMaxTextureSlots; ++i)
+            std::array<int, Renderer2DData::kCompileTimeMaxTextureSlots> samplers{};
+            for (uint32_t i = 0; i < g_Data.MaxTextureSlots; ++i)
             {
                 samplers[i] = static_cast<int>(i);
             }
-            g_Data.TextShaderProgram->SetIntArray("u_Textures", samplers.data(), static_cast<uint32_t>(samplers.size()));
+            g_Data.TextShaderProgram->SetIntArray("u_Textures", samplers.data(), g_Data.MaxTextureSlots);
         }
         else
         {
@@ -225,7 +235,7 @@ namespace Limitless
         g_Data.Initialized = true;
 
         LT_CORE_INFO("Renderer2D initialized (MaxQuadsPerBatch={}, MaxTextureSlotsPerBatch={})",
-                     Renderer2DData::kMaxQuads, Renderer2DData::kMaxTextureSlots);
+                     Renderer2DData::kMaxQuads, g_Data.MaxTextureSlots);
     }
 
     void Renderer2D::Shutdown()
@@ -389,7 +399,7 @@ namespace Limitless
         if (texIndex < 0)
         {
             // Not found in current batch.
-            if (g_Data.TextureSlotCount >= Renderer2DData::kMaxTextureSlots)
+            if (g_Data.TextureSlotCount >= g_Data.MaxTextureSlots)
             {
                 // Texture slot overflow -> flush and start a new batch.
                 FlushQuadBatch();
@@ -457,7 +467,7 @@ namespace Limitless
 
         if (texIndex < 0)
         {
-            if (g_Data.TextTextureSlotCount >= Renderer2DData::kMaxTextureSlots)
+            if (g_Data.TextTextureSlotCount >= g_Data.MaxTextureSlots)
             {
                 FlushTextBatch();
             }
@@ -568,12 +578,12 @@ namespace Limitless
             g_Data.ShaderProgram = g_Data.Material->GetShader();
             if (g_Data.ShaderProgram)
             {
-                std::array<int, Renderer2DData::kMaxTextureSlots> samplers{};
-                for (uint32_t i = 0; i < Renderer2DData::kMaxTextureSlots; ++i)
+                std::array<int, Renderer2DData::kCompileTimeMaxTextureSlots> samplers{};
+                for (uint32_t i = 0; i < g_Data.MaxTextureSlots; ++i)
                 {
                     samplers[i] = static_cast<int>(i);
                 }
-                g_Data.ShaderProgram->SetIntArray("u_Textures", samplers.data(), static_cast<uint32_t>(samplers.size()));
+                g_Data.ShaderProgram->SetIntArray("u_Textures", samplers.data(), g_Data.MaxTextureSlots);
             }
         }
 
@@ -603,8 +613,8 @@ namespace Limitless
         }
 
         std::memcpy(uploadBytes, g_Data.VertexBufferBase.get(), dataSizeBytes);
-        std::array<std::shared_ptr<Texture>, Renderer2DData::kMaxTextureSlots> textures{};
-        for (uint32_t slot = 0; slot < g_Data.TextureSlotCount && slot < Renderer2DData::kMaxTextureSlots; ++slot)
+        std::array<std::shared_ptr<Texture>, Renderer2DData::kCompileTimeMaxTextureSlots> textures{};
+        for (uint32_t slot = 0; slot < g_Data.TextureSlotCount && slot < g_Data.MaxTextureSlots; ++slot)
         {
             // Move shared_ptr ownership into the flush packet so we avoid additional refcount churn.
             // `TextureSlots` are reset right after submission anyway.
@@ -656,12 +666,12 @@ namespace Limitless
             g_Data.TextShaderProgram = g_Data.TextMaterial->GetShader();
             if (g_Data.TextShaderProgram)
             {
-                std::array<int, Renderer2DData::kMaxTextureSlots> samplers{};
-                for (uint32_t i = 0; i < Renderer2DData::kMaxTextureSlots; ++i)
+                std::array<int, Renderer2DData::kCompileTimeMaxTextureSlots> samplers{};
+                for (uint32_t i = 0; i < g_Data.MaxTextureSlots; ++i)
                 {
                     samplers[i] = static_cast<int>(i);
                 }
-                g_Data.TextShaderProgram->SetIntArray("u_Textures", samplers.data(), static_cast<uint32_t>(samplers.size()));
+                g_Data.TextShaderProgram->SetIntArray("u_Textures", samplers.data(), g_Data.MaxTextureSlots);
             }
         }
 
@@ -688,8 +698,8 @@ namespace Limitless
         }
 
         std::memcpy(uploadBytes, g_Data.TextVertexBufferBase.get(), dataSizeBytes);
-        std::array<std::shared_ptr<Texture>, Renderer2DData::kMaxTextureSlots> textures{};
-        for (uint32_t slot = 0; slot < g_Data.TextTextureSlotCount && slot < Renderer2DData::kMaxTextureSlots; ++slot)
+        std::array<std::shared_ptr<Texture>, Renderer2DData::kCompileTimeMaxTextureSlots> textures{};
+        for (uint32_t slot = 0; slot < g_Data.TextTextureSlotCount && slot < g_Data.MaxTextureSlots; ++slot)
         {
             textures[slot] = std::move(g_Data.TextTextureSlots[slot]);
         }
@@ -743,12 +753,12 @@ namespace Limitless
             g_Data.ShaderProgram = g_Data.Material->GetShader();
             if (g_Data.ShaderProgram)
             {
-                std::array<int, Renderer2DData::kMaxTextureSlots> samplers{};
-                for (uint32_t i = 0; i < Renderer2DData::kMaxTextureSlots; ++i)
+                std::array<int, Renderer2DData::kCompileTimeMaxTextureSlots> samplers{};
+                for (uint32_t i = 0; i < g_Data.MaxTextureSlots; ++i)
                 {
                     samplers[i] = static_cast<int>(i);
                 }
-                g_Data.ShaderProgram->SetIntArray("u_Textures", samplers.data(), static_cast<uint32_t>(samplers.size()));
+                g_Data.ShaderProgram->SetIntArray("u_Textures", samplers.data(), g_Data.MaxTextureSlots);
                 return true;
             }
         }

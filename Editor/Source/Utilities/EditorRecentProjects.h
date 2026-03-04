@@ -17,11 +17,9 @@ namespace Limitless::Editor
         std::string LastOpenedUtc;
     };
 
-    /**
-     * @brief Persistent "recent projects" list stored in the user data directory.
-     *
-     * This is editor-only UX state and should never be stored under a project directory.
-     */
+    /// Persistent "recent projects" list stored in the user data directory.
+    ///
+    /// This is editor-only UX state and should never be stored under a project directory.
     class EditorRecentProjects final
     {
     public:

@@ -9,10 +9,8 @@ namespace Limitless
 {
     class Texture2D;
 
-    /**
-     * Framebuffer specification for render-to-texture and off-screen rendering.
-     * Used to create framebuffers for viewports, post-processing, and editor UIs.
-     */
+    /// Framebuffer specification for render-to-texture and off-screen rendering.
+    /// Used to create framebuffers for viewports, post-processing, and editor UIs.
     struct FramebufferSpecification
     {
         uint32_t Width = 0;
@@ -34,10 +32,8 @@ namespace Limitless
         bool SwapChainTarget = false;
     };
 
-    /**
-     * Abstract framebuffer interface for render-to-texture and off-screen rendering.
-     * Framebuffers must be created on the render thread via Framebuffer::Create().
-     */
+    /// Abstract framebuffer interface for render-to-texture and off-screen rendering.
+    /// Framebuffers must be created on the render thread via Framebuffer::Create().
     class Framebuffer
     {
     public:

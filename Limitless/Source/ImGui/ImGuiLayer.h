@@ -7,15 +7,13 @@
 
 namespace Limitless
 {
-    /**
-     * @brief Layer that integrates Dear ImGui with SDL3 and multiple graphics backends.
-     *
-     * Supports OpenGL3 by default; Vulkan, DirectX, and Metal backends are
-     * prepared for future implementation. Uses context->GetAPI() to select
-     * the appropriate renderer. Push as an overlay so it renders on top of all
-     * other layers. Registers ImGui lifecycle callbacks with Application for
-     * correct frame ordering. Docking is enabled by default.
-     */
+    /// Layer that integrates Dear ImGui with SDL3 and multiple graphics backends.
+    ///
+    /// Supports OpenGL3 by default; Vulkan, DirectX, and Metal backends are
+    /// prepared for future implementation. Uses context->GetAPI() to select
+    /// the appropriate renderer. Push as an overlay so it renders on top of all
+    /// other layers. Registers ImGui lifecycle callbacks with Application for
+    /// correct frame ordering. Docking is enabled by default.
     class ImGuiLayer : public Layer
     {
     public:

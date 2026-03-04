@@ -11,9 +11,7 @@ namespace Limitless {
     struct GPUMetrics;
     struct SystemMetrics;
 
-    /**
-     * @brief Platform-specific CPU monitoring interface
-     */
+    /// Platform-specific CPU monitoring interface.
     class ICPUPlatform {
     public:
         virtual ~ICPUPlatform() = default;
@@ -29,9 +27,7 @@ namespace Limitless {
         virtual void SetUpdateInterval(double intervalSeconds) = 0;
     };
 
-    /**
-     * @brief Platform-specific GPU monitoring interface
-     */
+    /// Platform-specific GPU monitoring interface.
     class IGPUPlatform {
     public:
         virtual ~IGPUPlatform() = default;
@@ -48,9 +44,7 @@ namespace Limitless {
         virtual void SetUpdateInterval(double intervalSeconds) = 0;
     };
 
-    /**
-     * @brief Platform-specific system monitoring interface
-     */
+    /// Platform-specific system monitoring interface.
     class ISystemPlatform {
     public:
         virtual ~ISystemPlatform() = default;
@@ -66,9 +60,7 @@ namespace Limitless {
         virtual uint32_t GetThreadId() const = 0;
     };
 
-    /**
-     * @brief Factory for creating platform-specific performance monitoring objects
-     */
+    /// Factory for creating platform-specific performance monitoring objects.
     class PerformancePlatformFactory {
     public:
         static std::unique_ptr<ICPUPlatform> CreateCPUPlatform();

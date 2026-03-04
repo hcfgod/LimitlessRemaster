@@ -37,14 +37,12 @@ namespace Limitless::Assets
         std::string ResolvedPath;
     };
 
-    /**
-     * @brief Editor/tooling import pipeline for project assets.
-     *
-     * This pipeline is distinct from runtime `AssetImporter<T>::LoadAsync`:
-     * - It scans `Assets/` for known types
-     * - It performs incremental import (only changed assets)
-     * - It can cascade to dependents
-     */
+    /// Editor/tooling import pipeline for project assets.
+    ///
+    /// This pipeline is distinct from runtime `AssetImporter<T>::LoadAsync`:
+    /// - It scans `Assets/` for known types
+    /// - It performs incremental import (only changed assets)
+    /// - It can cascade to dependents
     namespace AssetImportPipeline
     {
         Result<AssetImportStatistics> ReimportAll(bool includeDependents = true);

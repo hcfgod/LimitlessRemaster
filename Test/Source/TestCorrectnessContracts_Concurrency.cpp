@@ -5,6 +5,7 @@
 #include "Core/Concurrency/LockFreeQueue.h"
 
 #include <atomic>
+#include <cstdint>
 #include <thread>
 #include <vector>
 
@@ -185,6 +186,73 @@ TEST_SUITE("Correctness Contracts - Concurrency Queues")
         CHECK(queue.IsFull() == true);
     }
 
+    TEST_CASE("LockFreeMPMCQueue sustained contention stress preserves uniqueness")
+    {
+        using Queue = Limitless::Concurrency::LockFreeMPMCQueue<int, 4096>;
+        Queue queue;
+
+        constexpr int kProducers = 8;
+        constexpr int kConsumers = 8;
+        constexpr int kItemsPerProducer = 25000;
+        constexpr int kTotal = kProducers * kItemsPerProducer;
+
+        std::atomic<int> nextId{0};
+        std::atomic<int> popped{0};
+        std::vector<std::atomic<int>> seen(static_cast<size_t>(kTotal));
+        for (auto& counter : seen)
+            counter.store(0, std::memory_order_relaxed);
+
+        std::vector<std::thread> producers;
+        producers.reserve(kProducers);
+        for (int producer = 0; producer < kProducers; ++producer)
+        {
+            producers.emplace_back([&]()
+            {
+                for (int i = 0; i < kItemsPerProducer; ++i)
+                {
+                    const int id = nextId.fetch_add(1, std::memory_order_relaxed);
+                    while (!queue.TryPush(int{id}))
+                        std::this_thread::yield();
+                }
+            });
+        }
+
+        std::vector<std::thread> consumers;
+        consumers.reserve(kConsumers);
+        for (int consumer = 0; consumer < kConsumers; ++consumer)
+        {
+            consumers.emplace_back([&]()
+            {
+                while (popped.load(std::memory_order_relaxed) < kTotal)
+                {
+                    auto value = queue.TryPop();
+                    if (!value)
+                    {
+                        std::this_thread::yield();
+                        continue;
+                    }
+
+                    const int id = *value;
+                    if (id >= 0 && id < kTotal)
+                        seen[static_cast<size_t>(id)].fetch_add(1, std::memory_order_relaxed);
+                    popped.fetch_add(1, std::memory_order_relaxed);
+                }
+            });
+        }
+
+        for (auto& producer : producers)
+            producer.join();
+        for (auto& consumer : consumers)
+            consumer.join();
+
+        CHECK(nextId.load(std::memory_order_relaxed) == kTotal);
+        CHECK(popped.load(std::memory_order_relaxed) == kTotal);
+        for (int id = 0; id < kTotal; ++id)
+        {
+            CHECK(seen[static_cast<size_t>(id)].load(std::memory_order_relaxed) == 1);
+        }
+    }
+
     TEST_CASE("WorkStealingQueue pop on empty and bounded TryPush are safe")
     {
         using Queue = Limitless::Concurrency::WorkStealingQueue<int, 8>;
@@ -210,6 +278,149 @@ TEST_SUITE("Correctness Contracts - Concurrency Queues")
         auto head = queue.Steal();
         REQUIRE(head.has_value());
         CHECK(*head == 0);
+    }
+
+    TEST_CASE("WorkStealingQueue Push reports overflow and never silently drops")
+    {
+        using Queue = Limitless::Concurrency::WorkStealingQueue<int, 4>;
+        Queue queue;
+
+        CHECK(queue.Push(1) == true);
+        CHECK(queue.Push(2) == true);
+        CHECK(queue.Push(3) == true);
+        CHECK(queue.Push(4) == true);
+        CHECK(queue.Push(5) == false);
+    }
+
+    TEST_CASE("WorkStealingQueue owner and thief race never duplicates last-item handoff")
+    {
+        using Queue = Limitless::Concurrency::WorkStealingQueue<int, 1024>;
+        Queue queue;
+
+        constexpr int kIterations = 100000;
+        std::vector<std::atomic<int>> seen(static_cast<size_t>(kIterations));
+        for (auto& counter : seen)
+            counter.store(0, std::memory_order_relaxed);
+
+        std::atomic<int> ownerPops{0};
+        std::atomic<int> thiefSteals{0};
+        std::atomic<bool> done{false};
+
+        std::thread thief([&]()
+        {
+            while (!done.load(std::memory_order_acquire) || !queue.IsEmpty())
+            {
+                auto value = queue.Steal();
+                if (!value)
+                {
+                    std::this_thread::yield();
+                    continue;
+                }
+
+                const int id = *value;
+                if (id >= 0 && id < kIterations)
+                    seen[static_cast<size_t>(id)].fetch_add(1, std::memory_order_relaxed);
+                thiefSteals.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+
+        for (int id = 0; id < kIterations; ++id)
+        {
+            while (!queue.TryPush(int{id}))
+            {
+                auto drained = queue.Pop();
+                if (drained)
+                {
+                    const int drainedId = *drained;
+                    if (drainedId >= 0 && drainedId < kIterations)
+                        seen[static_cast<size_t>(drainedId)].fetch_add(1, std::memory_order_relaxed);
+                    ownerPops.fetch_add(1, std::memory_order_relaxed);
+                }
+                else
+                {
+                    std::this_thread::yield();
+                }
+            }
+
+            auto ownerValue = queue.Pop();
+            if (ownerValue)
+            {
+                const int ownerId = *ownerValue;
+                if (ownerId >= 0 && ownerId < kIterations)
+                    seen[static_cast<size_t>(ownerId)].fetch_add(1, std::memory_order_relaxed);
+                ownerPops.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+
+        done.store(true, std::memory_order_release);
+        thief.join();
+
+        while (auto tail = queue.Pop())
+        {
+            const int id = *tail;
+            if (id >= 0 && id < kIterations)
+                seen[static_cast<size_t>(id)].fetch_add(1, std::memory_order_relaxed);
+            ownerPops.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        const int totalProcessed = ownerPops.load(std::memory_order_relaxed) +
+                                   thiefSteals.load(std::memory_order_relaxed);
+        CHECK(totalProcessed == kIterations);
+        for (int id = 0; id < kIterations; ++id)
+        {
+            CHECK(seen[static_cast<size_t>(id)].load(std::memory_order_relaxed) == 1);
+        }
+    }
+
+    TEST_CASE("ObjectPool supports concurrent acquire and release without corruption")
+    {
+        struct PooledPayload
+        {
+            uint64_t stamp = 0;
+            int ownerThread = -1;
+        };
+
+        using Pool = Limitless::Concurrency::ObjectPool<PooledPayload, 256>;
+        Pool pool;
+
+        constexpr int kThreads = 8;
+        constexpr int kIterationsPerThread = 50000;
+
+        std::atomic<int> invalidObservedState{0};
+        std::atomic<uint64_t> stampGenerator{1};
+
+        std::vector<std::thread> workers;
+        workers.reserve(kThreads);
+        for (int threadIndex = 0; threadIndex < kThreads; ++threadIndex)
+        {
+            workers.emplace_back([&, threadIndex]()
+            {
+                for (int i = 0; i < kIterationsPerThread; ++i)
+                {
+                    auto object = pool.Acquire();
+                    if (!object)
+                    {
+                        invalidObservedState.fetch_add(1, std::memory_order_relaxed);
+                        continue;
+                    }
+
+                    if (object->stamp != 0)
+                    {
+                        if (object->ownerThread < 0 || object->ownerThread >= kThreads)
+                            invalidObservedState.fetch_add(1, std::memory_order_relaxed);
+                    }
+
+                    object->ownerThread = threadIndex;
+                    object->stamp = stampGenerator.fetch_add(1, std::memory_order_relaxed);
+                    pool.Release(std::move(object));
+                }
+            });
+        }
+
+        for (auto& worker : workers)
+            worker.join();
+
+        CHECK(invalidObservedState.load(std::memory_order_relaxed) == 0);
     }
 
     TEST_CASE("JobSystem Submit rejects when unavailable and drains all accepted jobs")

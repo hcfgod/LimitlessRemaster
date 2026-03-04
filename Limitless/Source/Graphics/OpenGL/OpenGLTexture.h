@@ -2,7 +2,6 @@
 
 #include "Graphics/Texture.h"
 
-#define LT_USE_GLAD
 #ifdef LT_USE_GLAD
 #include <glad/glad.h>
 #endif

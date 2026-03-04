@@ -21,9 +21,7 @@ namespace Limitless {
     class IGPUPlatform;
     class ISystemPlatform;
 
-    /**
-     * @brief Performance data structure containing various metrics
-     */
+    /// Performance data structure containing various metrics.
     struct PerformanceMetrics {
         // Frame timing
         double frameTime;           // Current frame time in milliseconds
@@ -57,9 +55,7 @@ namespace Limitless {
         uint32_t frameCount;        // Total frame count since start
     };
 
-    /**
-     * @brief Performance counter for tracking specific metrics
-     */
+    /// Performance counter for tracking specific metrics.
     class PerformanceCounter {
     public:
         PerformanceCounter(const std::string& name);
@@ -89,9 +85,7 @@ namespace Limitless {
         mutable std::mutex m_Mutex;
     };
 
-    /**
-     * @brief High-resolution timer for precise measurements
-     */
+    /// High-resolution timer for precise measurements.
     class PerformanceTimer {
     public:
         PerformanceTimer();
@@ -112,9 +106,7 @@ namespace Limitless {
         bool m_IsRunning;
     };
 
-    /**
-     * @brief Memory usage tracker
-     */
+    /// Memory usage tracker.
     class MemoryTracker {
     public:
         MemoryTracker();
@@ -139,9 +131,7 @@ namespace Limitless {
         std::mutex m_Mutex;
     };
 
-    /**
-     * @brief CPU usage monitor
-     */
+    /// CPU usage monitor.
     class CPUMonitor {
     public:
         CPUMonitor();
@@ -167,9 +157,7 @@ namespace Limitless {
         std::unique_ptr<ICPUPlatform> m_Platform;
     };
 
-    /**
-     * @brief GPU metrics monitor
-     */
+    /// GPU metrics monitor.
     class GPUMonitor {
     public:
         GPUMonitor();
@@ -197,9 +185,7 @@ namespace Limitless {
         std::unique_ptr<IGPUPlatform> m_Platform;
     };
 
-    /**
-     * @brief Main performance monitoring system
-     */
+    /// Main performance monitoring system.
     class PerformanceMonitor {
     public:
         static PerformanceMonitor& GetInstance();

@@ -19,10 +19,11 @@
 #include "Graphics/Texture.h"
 #include "Graphics/VertexArray.h"
 #include "Platform/Platform.h"
-#include "Scene/Components.h"
+#include "Scene/Components/CoreComponents.h"
+#include "Scene/Components/RenderingComponents.h"
+#include "Scene/Components/TilemapComponents.h"
 #include "Scene/Scene.h"
 
-#define LT_USE_GLAD
 #ifdef LT_USE_GLAD
 #include <glad/glad.h>
 #endif

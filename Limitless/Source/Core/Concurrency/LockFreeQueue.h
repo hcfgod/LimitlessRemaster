@@ -11,7 +11,7 @@ namespace Limitless
 {
     namespace Concurrency
     {
-        // Lock-free single-producer single-consumer queue
+        /// Lock-free single-producer single-consumer queue.
         template<typename T, size_t Size>
         class LockFreeSPSCQueue
         {
@@ -22,7 +22,7 @@ namespace Limitless
         public:
             LockFreeSPSCQueue() : m_Head(0), m_Tail(0) {}
 
-            // Try to push an item to the queue (thread-safe)
+            /// Try to push an item to the queue (thread-safe).
             bool TryPush(T&& item) noexcept
             {
                 size_t currentTail = m_Tail.load(std::memory_order_relaxed);
@@ -36,7 +36,7 @@ namespace Limitless
                 return true;
             }
 
-            // Try to pop an item from the queue (thread-safe)
+            /// Try to pop an item from the queue (thread-safe).
             std::optional<T> TryPop() noexcept
             {
                 size_t currentHead = m_Head.load(std::memory_order_relaxed);
@@ -49,20 +49,20 @@ namespace Limitless
                 return std::move(item);
             }
 
-            // Check if queue is empty
+            /// Check if queue is empty.
             bool IsEmpty() const noexcept
             {
                 return m_Head.load(std::memory_order_acquire) == m_Tail.load(std::memory_order_acquire);
             }
 
-            // Check if queue is full
+            /// Check if queue is full.
             bool IsFull() const noexcept
             {
                 size_t nextTail = (m_Tail.load(std::memory_order_acquire) + 1) & (Size - 1);
                 return nextTail == m_Head.load(std::memory_order_acquire);
             }
 
-            // Get approximate size (not exact due to concurrent access)
+            /// Get approximate size (not exact due to concurrent access).
             size_t GetSize() const noexcept
             {
                 size_t head = m_Head.load(std::memory_order_acquire);
@@ -70,7 +70,7 @@ namespace Limitless
                 return (tail - head) & (Size - 1);
             }
 
-            // Clear the queue (not thread-safe, use with caution)
+            /// Clear the queue (not thread-safe, use with caution).
             void Clear() noexcept
             {
                 m_Head.store(0, std::memory_order_relaxed);
@@ -83,7 +83,7 @@ namespace Limitless
             std::atomic<size_t> m_Tail;
         };
 
-        // Lock-free multi-producer multi-consumer queue using CAS operations
+        /// Lock-free multi-producer multi-consumer queue using CAS operations.
         template<typename T, size_t Size>
         class LockFreeMPMCQueue
         {
@@ -101,7 +101,7 @@ namespace Limitless
                 }
             }
 
-            // Try to push an item to the queue (thread-safe, multiple producers)
+            /// Try to push an item to the queue (thread-safe, multiple producers).
             bool TryPush(T&& item) noexcept
             {
                 // Bounded MPMC ring buffer based on Dmitry Vyukov's algorithm:
@@ -140,7 +140,7 @@ namespace Limitless
                 return true;
             }
 
-            // Try to pop an item from the queue (thread-safe, multiple consumers)
+            /// Try to pop an item from the queue (thread-safe, multiple consumers).
             std::optional<T> TryPop() noexcept
             {
                 Cell* cell = nullptr;
@@ -176,7 +176,7 @@ namespace Limitless
                 return std::move(item);
             }
 
-            // Check if queue is empty
+            /// Check if queue is empty.
             bool IsEmpty() const noexcept
             {
                 // Conservative check: if dequeue pos has caught up to enqueue pos, the queue is empty.
@@ -185,7 +185,7 @@ namespace Limitless
                 return m_DequeuePos.load(std::memory_order_acquire) == m_EnqueuePos.load(std::memory_order_acquire);
             }
 
-            // Check if queue is full
+            /// Check if queue is full.
             bool IsFull() const noexcept
             {
                 // Conservative check: queue is full if we have Size elements outstanding.
@@ -194,7 +194,7 @@ namespace Limitless
                 return (enq - deq) >= Size;
             }
 
-            // Get approximate size (not exact due to concurrent access)
+            /// Get approximate size (not exact due to concurrent access).
             size_t GetSize() const noexcept
             {
                 const size_t enq = m_EnqueuePos.load(std::memory_order_acquire);
@@ -202,7 +202,7 @@ namespace Limitless
                 return (enq >= deq) ? (enq - deq) : 0;
             }
 
-            // Clear the queue (not thread-safe, use with caution)
+            /// Clear the queue (not thread-safe, use with caution).
             void Clear() noexcept
             {
                 // Not thread-safe: intended for single-threaded reset paths.
@@ -227,7 +227,8 @@ namespace Limitless
             alignas(64) std::atomic<size_t> m_DequeuePos{0};
         };
 
-        // Thread-safe object pool for frequently allocated objects
+        /// Thread-safe object pool for frequently allocated objects.
+        /// Backed by a bounded MPMC queue so multiple threads may acquire/release concurrently.
         template<typename T, size_t PoolSize = 64>
         class ObjectPool
         {
@@ -235,7 +236,7 @@ namespace Limitless
             ObjectPool() = default;
             ~ObjectPool() = default;
 
-            // Get an object from the pool or create a new one
+            /// Get an object from the pool or create a new one.
             std::unique_ptr<T> Acquire() noexcept
             {
                 std::unique_ptr<T> obj = TryPopFromPool();
@@ -246,7 +247,8 @@ namespace Limitless
                 return obj;
             }
 
-            // Return an object to the pool
+            /// Return an object to the pool.
+            /// If the bounded pool is full, the object is dropped and destroyed.
             void Release(std::unique_ptr<T> obj) noexcept
             {
                 if (obj && TryPushToPool(std::move(obj)))
@@ -256,7 +258,7 @@ namespace Limitless
                 // If pool is full, object will be automatically destroyed
             }
 
-            // Clear the pool
+            /// Clear the pool.
             void Clear() noexcept
             {
                 m_Pool.Clear();
@@ -275,10 +277,10 @@ namespace Limitless
             }
 
             // Inline ring-buffer storage for pooled handles; avoids per-slot heap nodes.
-            LockFreeSPSCQueue<std::unique_ptr<T>, PoolSize> m_Pool;
+            LockFreeMPMCQueue<std::unique_ptr<T>, PoolSize> m_Pool;
         };
 
-        // Thread-safe work stealing queue for task scheduling
+        /// Thread-safe work stealing queue for task scheduling.
         template<typename T, size_t Size = 1024>
         class WorkStealingQueue
         {
@@ -290,8 +292,8 @@ namespace Limitless
         public:
             WorkStealingQueue() : m_Bottom(0), m_Top(0) {}
 
-            // Push item to the bottom (owner thread only)
-            bool TryPush(T&& item) noexcept
+            /// Push item to the bottom (owner thread only).
+            [[nodiscard]] bool TryPush(T&& item) noexcept
             {
                 const size_t bottom = m_Bottom.load(std::memory_order_relaxed);
                 const size_t top = m_Top.load(std::memory_order_acquire);
@@ -304,12 +306,12 @@ namespace Limitless
             }
 
             // Backward-compatible alias for legacy call sites.
-            void Push(T&& item) noexcept
+            [[nodiscard]] bool Push(T&& item) noexcept
             {
-                (void)TryPush(std::move(item));
+                return TryPush(std::move(item));
             }
 
-            // Pop item from the bottom (owner thread only)
+            /// Pop item from the bottom (owner thread only).
             std::optional<T> Pop() noexcept
             {
                 size_t bottom = m_Bottom.load(std::memory_order_relaxed);
@@ -345,7 +347,7 @@ namespace Limitless
                 return std::move(item);
             }
 
-            // Steal item from the top (other threads)
+            /// Steal item from the top (other threads).
             std::optional<T> Steal() noexcept
             {
                 size_t top = m_Top.load(std::memory_order_acquire);
@@ -368,7 +370,7 @@ namespace Limitless
                 return std::move(item);
             }
 
-            // Check if queue is empty
+            /// Check if queue is empty.
             bool IsEmpty() const noexcept
             {
                 size_t top = m_Top.load(std::memory_order_acquire);
@@ -376,7 +378,7 @@ namespace Limitless
                 return top >= bottom;
             }
 
-            // Get approximate size
+            /// Get approximate size.
             size_t GetSize() const noexcept
             {
                 size_t top = m_Top.load(std::memory_order_acquire);

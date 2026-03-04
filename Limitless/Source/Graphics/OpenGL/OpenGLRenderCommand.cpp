@@ -11,8 +11,6 @@
 #include "Core/Error.h"
 #include "Core/Debug/Log.h"
 
-#define LT_USE_GLAD
-
 // OpenGL includes
 #ifdef LT_USE_GLAD
 #include <glad/glad.h>

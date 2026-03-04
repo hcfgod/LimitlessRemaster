@@ -29,7 +29,7 @@ namespace Limitless
 {
     namespace Async
     {
-        // Future-backed task wrapper for asynchronous operations.
+        /// Future-backed task wrapper for asynchronous operations.
         template<typename T>
         class Task
         {
@@ -114,56 +114,56 @@ namespace Limitless
             std::shared_future<void> m_Future;
         };
 
-        // Async I/O manager
+        /// Async I/O manager.
         class AsyncIO
         {
         public:
             static AsyncIO& GetInstance();
 
-            // Initialize the async I/O system
+            /// Initialize the async I/O system.
             void Initialize(size_t threadCount = 0);
             void Shutdown();
 
-            // File operations
+            /// File operations.
             Task<std::string> ReadFileAsync(const std::string& path);
             Task<void> WriteFileAsync(const std::string& path, const std::string& content);
             Task<bool> FileExistsAsync(const std::string& path);
             Task<std::vector<std::string>> ReadLinesAsync(const std::string& path);
             Task<void> AppendFileAsync(const std::string& path, const std::string& content);
 
-            // Result-returning variants (preferred for engine code).
-            // These never throw across the async boundary; failures are returned as Result<T>.
+            /// Result-returning variants (preferred for engine code).
+            /// These never throw across the async boundary; failures are returned as Result<T>.
             Task<Result<std::string>> ReadFileAsyncResult(const std::string& path);
             Task<Result<void>> WriteFileAsyncResult(const std::string& path, const std::string& content);
             Task<Result<void>> AppendFileAsyncResult(const std::string& path, const std::string& content);
 
-            // Directory operations
+            /// Directory operations.
             Task<std::vector<std::string>> ListDirectoryAsync(const std::string& path);
             Task<bool> CreateDirectoryAsync(const std::string& path);
             Task<bool> DeleteFileAsync(const std::string& path);
             Task<bool> DeleteDirectoryAsync(const std::string& path);
 
-            // Configuration operations
+            /// Configuration operations.
             Task<void> SaveConfigAsync(const std::string& path, const nlohmann::json& config);
             Task<nlohmann::json> LoadConfigAsync(const std::string& path);
 
             Task<Result<void>> SaveConfigAsyncResult(const std::string& path, const nlohmann::json& config);
             Task<Result<nlohmann::json>> LoadConfigAsyncResult(const std::string& path);
 
-            // Utility operations
+            /// Utility operations.
             Task<size_t> GetFileSizeAsync(const std::string& path);
             Task<std::filesystem::file_time_type> GetFileModifiedTimeAsync(const std::string& path);
 
-            // General-purpose async execution on the AsyncIO worker pool.
-            // This is useful for CPU-side asset processing (decode, parsing) where you want
-            // the engine-managed worker threads (not std::async).
+            /// General-purpose async execution on the AsyncIO worker pool.
+            /// This is useful for CPU-side asset processing (decode, parsing) where you want
+            /// the engine-managed worker threads (not std::async).
             template<typename Func>
             auto RunAsync(Func&& func) -> Task<std::invoke_result_t<Func>>
             {
                 return Submit(std::forward<Func>(func));
             }
 
-            // Thread pool management
+            /// Thread pool management.
             size_t GetThreadCount() const { return m_Threads.size(); }
             bool IsInitialized() const { return m_Initialized.load(); }
 
@@ -218,58 +218,58 @@ namespace Limitless
             std::atomic<bool> m_AcceptingTasks{false};
         };
 
-        // Convenience functions
+        /// Convenience functions.
         inline AsyncIO& GetAsyncIO() { return AsyncIO::GetInstance(); }
 
-        // Async file reading
+        /// Async file reading.
         inline Task<std::string> ReadFileAsync(const std::string& path)
         {
             return GetAsyncIO().ReadFileAsync(path);
         }
 
-        // Async file writing
+        /// Async file writing.
         inline Task<void> WriteFileAsync(const std::string& path, const std::string& content)
         {
             return GetAsyncIO().WriteFileAsync(path, content);
         }
 
-        // Async configuration loading
+        /// Async configuration loading.
         inline Task<nlohmann::json> LoadConfigAsync(const std::string& path)
         {
             return GetAsyncIO().LoadConfigAsync(path);
         }
 
-        // Async configuration saving
+        /// Async configuration saving.
         inline Task<void> SaveConfigAsync(const std::string& path, const nlohmann::json& config)
         {
             return GetAsyncIO().SaveConfigAsync(path, config);
         }
 
-        // Async directory listing
+        /// Async directory listing.
         inline Task<std::vector<std::string>> ListDirectoryAsync(const std::string& path)
         {
             return GetAsyncIO().ListDirectoryAsync(path);
         }
 
-        // Async file existence check
+        /// Async file existence check.
         inline Task<bool> FileExistsAsync(const std::string& path)
         {
             return GetAsyncIO().FileExistsAsync(path);
         }
 
-        // Async file size
+        /// Async file size.
         inline Task<size_t> GetFileSizeAsync(const std::string& path)
         {
             return GetAsyncIO().GetFileSizeAsync(path);
         }
 
-        // Async file modification time
+        /// Async file modification time.
         inline Task<std::filesystem::file_time_type> GetFileModifiedTimeAsync(const std::string& path)
         {
             return GetAsyncIO().GetFileModifiedTimeAsync(path);
         }
 
-        // Utility function to run async operations synchronously (for compatibility)
+        /// Utility function to run async operations synchronously (for compatibility).
         template<typename T>
         T RunSync(Task<T>&& task)
         {
@@ -277,7 +277,7 @@ namespace Limitless
             return task.Get();
         }
 
-        // Utility function to run async operations with callback
+        /// Utility function to run async operations with callback.
         template<typename T>
         void RunAsync(Task<T>&& task, std::function<void(T)> callback)
         {
@@ -294,7 +294,7 @@ namespace Limitless
             }).detach();
         }
 
-        // Utility function to run async operations with error handling
+        /// Utility function to run async operations with error handling.
         template<typename T>
         void RunAsyncWithError(Task<T>&& task, 
                               std::function<void(T)> successCallback,

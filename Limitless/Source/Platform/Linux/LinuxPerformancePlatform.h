@@ -9,9 +9,7 @@ namespace Limitless {
 
 #ifdef LT_PLATFORM_LINUX
 
-    /**
-     * @brief Linux-specific CPU monitoring implementation
-     */
+    /// Linux-specific CPU monitoring implementation.
     class LinuxCPUPlatform : public ICPUPlatform {
     public:
         LinuxCPUPlatform();
@@ -39,9 +37,7 @@ namespace Limitless {
         std::chrono::high_resolution_clock::time_point m_LastUpdate;
     };
 
-    /**
-     * @brief Linux-specific GPU monitoring implementation
-     */
+    /// Linux-specific GPU monitoring implementation.
     class LinuxGPUPlatform : public IGPUPlatform {
     public:
         LinuxGPUPlatform();
@@ -67,9 +63,7 @@ namespace Limitless {
         std::chrono::high_resolution_clock::time_point m_LastUpdate;
     };
 
-    /**
-     * @brief Linux-specific system monitoring implementation
-     */
+    /// Linux-specific system monitoring implementation.
     class LinuxSystemPlatform : public ISystemPlatform {
     public:
         LinuxSystemPlatform();

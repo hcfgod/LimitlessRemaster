@@ -1,4 +1,4 @@
-#include "Scene/Components.h"
+#include "Scene/Components/CoreComponents.h"
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace Limitless

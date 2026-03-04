@@ -1,4 +1,8 @@
 #include "Scene/Scene.h"
+#include "Scene/Components/AudioComponents.h"
+#include "Scene/Components/PhysicsComponents.h"
+#include "Scene/Components/RenderingComponents.h"
+#include "Scene/Components/ScriptingComponents.h"
 
 #include "Assets/AssetPaths.h"
 #include "Scripting/Coroutine.h"

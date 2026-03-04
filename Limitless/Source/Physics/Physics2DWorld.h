@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Physics/Physics2DContactListener.h"
-#include "Scene/Components.h"
+#include "Scene/Components/PhysicsComponents.h"
 
 #include <glm/glm.hpp>
 #include <unordered_map>

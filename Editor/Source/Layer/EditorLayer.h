@@ -33,14 +33,12 @@ namespace Limitless
     class Framebuffer;
     class Scene;
 
-    /**
-     * @brief Editor layer with viewport, scene hierarchy, inspector, and project panels.
-     *
-     * Renders a 3D scene to a framebuffer displayed in the Viewport panel.
-     * Editor camera input is active when the viewport is hovered (Unity-style).
-     * Most panel/runtime logic is implemented in dedicated Editor* modules and
-     * this layer coordinates high-level state and call order.
-     */
+    /// Editor layer with viewport, scene hierarchy, inspector, and project panels.
+    ///
+    /// Renders a 3D scene to a framebuffer displayed in the Viewport panel.
+    /// Editor camera input is active when the viewport is hovered (Unity-style).
+    /// Most panel/runtime logic is implemented in dedicated Editor* modules and
+    /// this layer coordinates high-level state and call order.
     class EditorLayer : public Layer
     {
     public:

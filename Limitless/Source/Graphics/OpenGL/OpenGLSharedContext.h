@@ -9,19 +9,15 @@
 
 namespace Limitless
 {
-    /**
-     * OpenGLSharedContext
-     *
-     * Owns a secondary OpenGL context created with resource sharing enabled
-     * (shared object namespace with the primary context).
-     *
-     * This is intended for **GPU resource work** (uploads/creates/deletes) on a dedicated thread
-     * while the primary context continues executing frame rendering/present on the render thread.
-     *
-     * Important notes:
-     * - OpenGL state is per-context; object names/storage are shared across shared contexts.
-     * - This is NOT intended for multi-threaded draw execution (that remains single-threaded).
-     */
+    /// Owns a secondary OpenGL context created with resource sharing enabled
+    /// (shared object namespace with the primary context).
+    ///
+    /// This is intended for GPU resource work (uploads/creates/deletes) on a dedicated thread
+    /// while the primary context continues executing frame rendering/present on the render thread.
+    ///
+    /// Important notes:
+    /// - OpenGL state is per-context; object names/storage are shared across shared contexts.
+    /// - This is NOT intended for multi-threaded draw execution (that remains single-threaded).
     class OpenGLSharedContext final
     {
     public:

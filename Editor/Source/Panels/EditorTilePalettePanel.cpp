@@ -10,7 +10,8 @@
 #include "Core/Debug/Log.h"
 #include "Project/ProjectManager.h"
 #include "Scene/Scene.h"
-#include "Scene/Components.h"
+#include "Scene/Components/CoreComponents.h"
+#include "Scene/Components/TilemapComponents.h"
 #include "Undo/EditorUndoService.h"
 #include "imgui/imgui.h"
 

@@ -8,18 +8,16 @@
 
 namespace Limitless
 {
-    /**
-     * @brief Manages a stack of layers with overlay support
-     * 
-     * The LayerStack manages two sections:
-     * 1. Regular layers - added to the bottom part of the stack
-     * 2. Overlays - added to the top part of the stack
-     * 
-     * Event Processing Order: Top to Bottom (Overlays → Regular Layers)
-     * Rendering Order: Bottom to Top (Regular Layers → Overlays)
-     * 
-     * This ensures overlays receive events first and render on top.
-     */
+    /// Manages a stack of layers with overlay support.
+    ///
+    /// The LayerStack manages two sections:
+    /// 1. Regular layers - added to the bottom part of the stack
+    /// 2. Overlays - added to the top part of the stack
+    ///
+    /// Event Processing Order: Top to Bottom (Overlays -> Regular Layers)
+    /// Rendering Order: Bottom to Top (Regular Layers -> Overlays)
+    ///
+    /// This ensures overlays receive events first and render on top.
     class LayerStack : public EventListener
     {
     public:

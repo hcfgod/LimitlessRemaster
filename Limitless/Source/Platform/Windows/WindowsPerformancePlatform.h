@@ -13,9 +13,7 @@ namespace Limitless {
 
 #ifdef LT_PLATFORM_WINDOWS
 
-    /**
-     * @brief Windows-specific CPU monitoring implementation
-     */
+    /// Windows-specific CPU monitoring implementation.
     class WindowsCPUPlatform : public ICPUPlatform {
     public:
         WindowsCPUPlatform();
@@ -42,9 +40,7 @@ namespace Limitless {
         std::chrono::high_resolution_clock::time_point m_LastUpdate;
     };
 
-    /**
-     * @brief Windows-specific GPU monitoring implementation
-     */
+    /// Windows-specific GPU monitoring implementation.
     class WindowsGPUPlatform : public IGPUPlatform {
     public:
         WindowsGPUPlatform();
@@ -70,9 +66,7 @@ namespace Limitless {
         std::chrono::high_resolution_clock::time_point m_LastUpdate;
     };
 
-    /**
-     * @brief Windows-specific system monitoring implementation
-     */
+    /// Windows-specific system monitoring implementation.
     class WindowsSystemPlatform : public ISystemPlatform {
     public:
         WindowsSystemPlatform();

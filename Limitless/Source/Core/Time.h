@@ -5,20 +5,18 @@
 
 namespace Limitless
 {
-    /**
-     * @brief Unity-style time API for the engine main thread.
-     *
-     * Design goals:
-     * - Provide a single authoritative source for per-frame delta time.
-     * - Support time scaling (pause / slow-motion) without affecting "real time".
-     * - Provide a fixed-step accumulator for deterministic simulation updates.
-     *
-     * Usage:
-     * - Call Time::Initialize() once during application startup.
-     * - Call Time::Update() exactly once per frame (from the main loop).
-     * - Use Time::GetDeltaTime() for gameplay updates (scaled).
-     * - Use Time::GetUnscaledDeltaTime() for UI/tools and non-gameplay systems.
-     */
+    /// Unity-style time API for the engine main thread.
+    ///
+    /// Design goals:
+    /// - Provide a single authoritative source for per-frame delta time.
+    /// - Support time scaling (pause / slow-motion) without affecting "real time".
+    /// - Provide a fixed-step accumulator for deterministic simulation updates.
+    ///
+    /// Usage:
+    /// - Call Time::Initialize() once during application startup.
+    /// - Call Time::Update() exactly once per frame (from the main loop).
+    /// - Use Time::GetDeltaTime() for gameplay updates (scaled).
+    /// - Use Time::GetUnscaledDeltaTime() for UI/tools and non-gameplay systems.
     class Time final
     {
     public:
@@ -28,10 +26,8 @@ namespace Limitless
         static void Initialize();
         static void Shutdown();
 
-        /**
-         * @brief Advance the time system by one frame.
-         * Must be called once per frame from the main thread.
-         */
+        /// Advance the time system by one frame.
+        /// Must be called once per frame from the main thread.
         static void Update();
 
         // Scaled time (affected by TimeScale)
@@ -62,16 +58,14 @@ namespace Limitless
         static float GetFixedDeltaTimeSeconds() noexcept { return s_FixedDeltaTimeSeconds; }
         static float GetFixedTimeAccumulatorSeconds() noexcept { return s_FixedTimeAccumulatorSeconds; }
 
-        /**
-         * @brief Consume one fixed step if enough unscaled time has accumulated.
-         *
-         * Typical usage:
-         *
-         * while (Time::TryConsumeFixedStep())
-         * {
-         *     // FixedUpdate-style logic here.
-         * }
-         */
+        /// Consume one fixed step if enough unscaled time has accumulated.
+        ///
+        /// Typical usage:
+        ///
+        /// while (Time::TryConsumeFixedStep())
+        /// {
+        ///     // FixedUpdate-style logic here.
+        /// }
         static bool TryConsumeFixedStep() noexcept;
 
         static bool IsInitialized() noexcept { return s_Initialized; }

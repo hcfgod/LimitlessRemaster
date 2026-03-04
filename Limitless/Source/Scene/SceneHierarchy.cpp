@@ -1,4 +1,5 @@
 #include "Scene/Scene.h"
+#include "Scene/Components/ScriptingComponents.h"
 
 #include "Core/ConfigManager.h"
 #include "Core/Debug/Log.h"

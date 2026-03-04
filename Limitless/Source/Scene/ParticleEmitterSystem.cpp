@@ -1,5 +1,6 @@
 #include "Scene/ParticleEmitterSystem.h"
-#include "Scene/Components.h"
+#include "Scene/Components/CoreComponents.h"
+#include "Scene/Components/RenderingComponents.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>

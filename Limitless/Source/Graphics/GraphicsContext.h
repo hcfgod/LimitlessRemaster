@@ -35,6 +35,10 @@ public:
     /// Returns the graphics API this context was created with.
     virtual GraphicsAPI GetAPI() const = 0;
 
+    /// Returns the maximum number of texture image units available for fragment shaders.
+    /// Defaults to 16; backends override with the actual hardware limit.
+    virtual int32_t GetMaxTextureImageUnits() const { return 16; }
+
     // VSync control
     virtual bool SetVSync(bool enabled) = 0; // returns true if succeeded
     virtual bool IsVSync() const = 0;

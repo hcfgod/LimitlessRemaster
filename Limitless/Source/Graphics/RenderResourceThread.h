@@ -14,23 +14,19 @@ namespace Limitless
     class GraphicsContext;
     class OpenGLSharedContext;
 
-    /**
-     * RenderResourceThread
-     *
-     * Dedicated GPU resource execution thread for OpenGL.
-     *
-     * This thread owns a **shared OpenGL context** (sharing objects with the primary render context)
-     * and drains `RenderResourceCommandQueue`.
-     *
-     * Why:
-     * - Overlap GPU resource uploads/creates/deletes with frame rendering.
-     * - Keep draw/state execution deterministic and single-threaded on the render thread.
-     *
-     * Important contract:
-     * - Only GPU *resource* operations belong here.
-     * - If a caller needs a resource to be immediately safe-to-use on the render context, it must
-     *   use a submission helper that performs synchronization before signaling completion.
-     */
+    /// Dedicated GPU resource execution thread for OpenGL.
+    ///
+    /// This thread owns a shared OpenGL context (sharing objects with the primary render context)
+    /// and drains `RenderResourceCommandQueue`.
+    ///
+    /// Why:
+    /// - Overlap GPU resource uploads/creates/deletes with frame rendering.
+    /// - Keep draw/state execution deterministic and single-threaded on the render thread.
+    ///
+    /// Important contract:
+    /// - Only GPU resource operations belong here.
+    /// - If a caller needs a resource to be immediately safe-to-use on the render context, it must
+    ///   use a submission helper that performs synchronization before signaling completion.
     class RenderResourceThread final
     {
     public:

@@ -1,6 +1,6 @@
 #include <doctest/doctest.h>
 
-#include "Scene/Components.h"
+#include "Scene/Components/CoreComponents.h"
 #include "Scene/Scene.h"
 #include "Undo/EditorUndoService.h"
 #include "Undo/EditorTextAssetCommand.h"
