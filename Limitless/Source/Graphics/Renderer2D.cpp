@@ -37,57 +37,6 @@ namespace Limitless
             int32_t TexIndex = 0;
         };
 
-        struct Renderer2DData
-        {
-            static constexpr uint32_t kMaxQuads = 10000;
-            static constexpr uint32_t kMaxVertices = kMaxQuads * 4;
-            static constexpr uint32_t kMaxIndices = kMaxQuads * 6;
-            static constexpr uint32_t kCompileTimeMaxTextureSlots = 32;
-
-            bool Initialized = false;
-            uint32_t MaxTextureSlots = 16;
-
-            std::shared_ptr<VertexArray> QuadVertexArray;
-            std::shared_ptr<VertexBuffer> QuadVertexBuffer;
-            std::shared_ptr<IndexBuffer> QuadIndexBuffer;
-
-            Assets::MaterialAsset::Ptr Material;
-            std::shared_ptr<Shader> ShaderProgram;
-            Assets::MaterialAsset::Ptr TextMaterial;
-            std::shared_ptr<Shader> TextShaderProgram;
-
-            std::shared_ptr<Texture2D> WhiteTexture;
-            std::array<std::shared_ptr<Texture2D>, kCompileTimeMaxTextureSlots> TextureSlots{};
-            uint32_t TextureSlotCount = 0;
-
-            glm::mat4 ViewProjection{1.0f};
-
-            std::unique_ptr<QuadVertex[]> VertexBufferBase;
-            QuadVertex* VertexBufferPtr = nullptr;
-            uint32_t IndexCount = 0;
-
-            std::array<std::shared_ptr<Texture2D>, kCompileTimeMaxTextureSlots> TextTextureSlots{};
-            uint32_t TextTextureSlotCount = 0;
-            std::unique_ptr<QuadVertex[]> TextVertexBufferBase;
-            QuadVertex* TextVertexBufferPtr = nullptr;
-            uint32_t TextIndexCount = 0;
-
-            Renderer2D::Statistics Stats{};
-        };
-
-        struct Renderer2DRuntimeState
-        {
-            Renderer2DData Data{};
-        };
-
-        Renderer2DRuntimeState& GetRenderer2DRuntimeState()
-        {
-            static Renderer2DRuntimeState state{};
-            return state;
-        }
-
-        Renderer2DData& g_Data = GetRenderer2DRuntimeState().Data;
-
         static glm::mat4 MakeQuadTransform2D(const glm::vec2& position, const glm::vec2& size)
         {
             glm::mat4 transform(1.0f);
@@ -95,19 +44,82 @@ namespace Limitless
             transform = glm::scale(transform, glm::vec3(size, 1.0f));
             return transform;
         }
+    }
 
-        static void EnsureInitialized()
+    struct Renderer2D::Impl
+    {
+        static constexpr uint32_t kMaxQuads = 10000;
+        static constexpr uint32_t kMaxVertices = kMaxQuads * 4;
+        static constexpr uint32_t kMaxIndices = kMaxQuads * 6;
+        static constexpr uint32_t kCompileTimeMaxTextureSlots = 32;
+
+        bool Initialized = false;
+        uint32_t MaxTextureSlots = 16;
+
+        std::shared_ptr<VertexArray> QuadVertexArray;
+        std::shared_ptr<VertexBuffer> QuadVertexBuffer;
+        std::shared_ptr<IndexBuffer> QuadIndexBuffer;
+
+        Assets::MaterialAsset::Ptr Material;
+        std::shared_ptr<Shader> ShaderProgram;
+        Assets::MaterialAsset::Ptr TextMaterial;
+        std::shared_ptr<Shader> TextShaderProgram;
+
+        std::shared_ptr<Texture2D> WhiteTexture;
+        std::array<std::shared_ptr<Texture2D>, kCompileTimeMaxTextureSlots> TextureSlots{};
+        uint32_t TextureSlotCount = 0;
+
+        glm::mat4 ViewProjection{1.0f};
+
+        std::unique_ptr<QuadVertex[]> VertexBufferBase;
+        QuadVertex* VertexBufferPtr = nullptr;
+        uint32_t IndexCount = 0;
+
+        std::array<std::shared_ptr<Texture2D>, kCompileTimeMaxTextureSlots> TextTextureSlots{};
+        uint32_t TextTextureSlotCount = 0;
+        std::unique_ptr<QuadVertex[]> TextVertexBufferBase;
+        QuadVertex* TextVertexBufferPtr = nullptr;
+        uint32_t TextIndexCount = 0;
+
+        Renderer2D::Statistics Stats{};
+    };
+
+    Renderer2D* Renderer2D::s_Default = nullptr;
+
+    Renderer2D::Renderer2D()
+        : m_Impl(std::make_unique<Impl>())
+    {
+    }
+
+    Renderer2D::~Renderer2D()
+    {
+        if (s_Default == this)
+            s_Default = nullptr;
+    }
+
+    Renderer2D& Renderer2D::Default()
+    {
+        if (!s_Default)
         {
-            if (!g_Data.Initialized)
-            {
-                Renderer2D::Initialize();
-            }
+            static Renderer2D s_DefaultInstance;
+            s_Default = &s_DefaultInstance;
+        }
+        return *s_Default;
+    }
+
+    void Renderer2D::EnsureInitialized()
+    {
+        if (!m_Impl->Initialized)
+        {
+            Initialize();
         }
     }
 
     void Renderer2D::Initialize()
     {
-        if (g_Data.Initialized)
+        auto& d = *m_Impl;
+
+        if (d.Initialized)
         {
             return;
         }
@@ -119,21 +131,21 @@ namespace Limitless
             return;
         }
 
-        g_Data.QuadVertexArray = VertexArray::Create();
-        g_Data.QuadVertexBuffer = VertexBuffer::Create(Renderer2DData::kMaxVertices * static_cast<uint32_t>(sizeof(QuadVertex)));
+        d.QuadVertexArray = VertexArray::Create();
+        d.QuadVertexBuffer = VertexBuffer::Create(Impl::kMaxVertices * static_cast<uint32_t>(sizeof(QuadVertex)));
 
-        g_Data.QuadVertexBuffer->SetLayout({
+        d.QuadVertexBuffer->SetLayout({
             { ShaderDataType::Float3, "a_Position" },
             { ShaderDataType::Float2, "a_UV" },
             { ShaderDataType::Float4, "a_Color" },
             { ShaderDataType::Int,    "a_TexIndex" }
         });
-        g_Data.QuadVertexArray->AddVertexBuffer(g_Data.QuadVertexBuffer);
+        d.QuadVertexArray->AddVertexBuffer(d.QuadVertexBuffer);
 
         std::vector<uint16_t> indices;
-        indices.resize(Renderer2DData::kMaxIndices);
+        indices.resize(Impl::kMaxIndices);
         uint16_t offset = 0;
-        for (uint32_t i = 0; i < Renderer2DData::kMaxIndices; i += 6)
+        for (uint32_t i = 0; i < Impl::kMaxIndices; i += 6)
         {
             indices[i + 0] = static_cast<uint16_t>(offset + 0);
             indices[i + 1] = static_cast<uint16_t>(offset + 1);
@@ -146,19 +158,16 @@ namespace Limitless
             offset = static_cast<uint16_t>(offset + 4);
         }
 
-        g_Data.QuadIndexBuffer = IndexBuffer::Create(indices.data(), static_cast<uint32_t>(indices.size()));
-        g_Data.QuadVertexArray->SetIndexBuffer(g_Data.QuadIndexBuffer);
+        d.QuadIndexBuffer = IndexBuffer::Create(indices.data(), static_cast<uint32_t>(indices.size()));
+        d.QuadVertexArray->SetIndexBuffer(d.QuadIndexBuffer);
 
-        // Query the GPU's actual texture unit limit and clamp to our compile-time array cap.
         if (auto* ctx = renderer.GetGraphicsContext())
         {
             const int32_t hwMax = ctx->GetMaxTextureImageUnits();
-            g_Data.MaxTextureSlots = static_cast<uint32_t>(
-                std::clamp(hwMax, int32_t(1), static_cast<int32_t>(Renderer2DData::kCompileTimeMaxTextureSlots)));
+            d.MaxTextureSlots = static_cast<uint32_t>(
+                std::clamp(hwMax, int32_t(1), static_cast<int32_t>(Impl::kCompileTimeMaxTextureSlots)));
         }
 
-        // 1x1 white texture for untextured (color-only) quads and as a guaranteed slot 0.
-        // This keeps the shader sampling path uniform and makes batching rules deterministic.
         const uint32_t whitePixelRGBA8 = 0xFFFFFFFFu;
         TextureSpecification whiteSpec{};
         whiteSpec.GenerateMipmaps = false;
@@ -166,61 +175,57 @@ namespace Limitless
         whiteSpec.MagFilter = TextureFilter::Nearest;
         whiteSpec.WrapU = TextureWrap::ClampToEdge;
         whiteSpec.WrapV = TextureWrap::ClampToEdge;
-        g_Data.WhiteTexture = Texture2D::CreateFromRGBA8(1, 1, &whitePixelRGBA8, whiteSpec);
+        d.WhiteTexture = Texture2D::CreateFromRGBA8(1, 1, &whitePixelRGBA8, whiteSpec);
 
-        // Default 2D material (shader + placeholder texture ref).
-        g_Data.Material = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(kDefaultTexturedMaterialKey);
-        if (g_Data.Material)
+        d.Material = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(kDefaultTexturedMaterialKey);
+        if (d.Material)
         {
-            g_Data.ShaderProgram = g_Data.Material->GetShader();
+            d.ShaderProgram = d.Material->GetShader();
         }
         else
         {
-            // Shipped bundles may omit default material JSON assets when projects only
-            // use custom materials. Fall back to loading the built-in shader directly.
             LT_CORE_WARN("Renderer2D: default material asset missing; falling back to shader asset '{}'", kDefaultTexturedShaderKey);
             auto fallbackShaderAsset = Assets::ShaderAsset::LoadBlocking(kDefaultTexturedShaderKey);
             if (fallbackShaderAsset)
-                g_Data.ShaderProgram = fallbackShaderAsset->GetShader();
+                d.ShaderProgram = fallbackShaderAsset->GetShader();
         }
-        if (!g_Data.ShaderProgram)
+        if (!d.ShaderProgram)
         {
             LT_CORE_ERROR("Renderer2D: failed to load default 2D shader (material='{}', shader='{}')",
                           kDefaultTexturedMaterialKey, kDefaultTexturedShaderKey);
             return;
         }
 
-        // Bind sampler array once: u_Textures[i] -> texture unit i.
         {
-            std::array<int, Renderer2DData::kCompileTimeMaxTextureSlots> samplers{};
-            for (uint32_t i = 0; i < g_Data.MaxTextureSlots; ++i)
+            std::array<int, Impl::kCompileTimeMaxTextureSlots> samplers{};
+            for (uint32_t i = 0; i < d.MaxTextureSlots; ++i)
             {
                 samplers[i] = static_cast<int>(i);
             }
-            g_Data.ShaderProgram->SetIntArray("u_Textures", samplers.data(), g_Data.MaxTextureSlots);
+            d.ShaderProgram->SetIntArray("u_Textures", samplers.data(), d.MaxTextureSlots);
         }
 
-        g_Data.TextMaterial = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(kDefaultTextMaterialKey);
-        if (g_Data.TextMaterial)
+        d.TextMaterial = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(kDefaultTextMaterialKey);
+        if (d.TextMaterial)
         {
-            g_Data.TextShaderProgram = g_Data.TextMaterial->GetShader();
+            d.TextShaderProgram = d.TextMaterial->GetShader();
         }
         else
         {
             LT_CORE_WARN("Renderer2D: text material asset missing; falling back to shader asset '{}'", kDefaultTextShaderKey);
             auto fallbackTextShaderAsset = Assets::ShaderAsset::LoadBlocking(kDefaultTextShaderKey);
             if (fallbackTextShaderAsset)
-                g_Data.TextShaderProgram = fallbackTextShaderAsset->GetShader();
+                d.TextShaderProgram = fallbackTextShaderAsset->GetShader();
         }
 
-        if (g_Data.TextShaderProgram)
+        if (d.TextShaderProgram)
         {
-            std::array<int, Renderer2DData::kCompileTimeMaxTextureSlots> samplers{};
-            for (uint32_t i = 0; i < g_Data.MaxTextureSlots; ++i)
+            std::array<int, Impl::kCompileTimeMaxTextureSlots> samplers{};
+            for (uint32_t i = 0; i < d.MaxTextureSlots; ++i)
             {
                 samplers[i] = static_cast<int>(i);
             }
-            g_Data.TextShaderProgram->SetIntArray("u_Textures", samplers.data(), g_Data.MaxTextureSlots);
+            d.TextShaderProgram->SetIntArray("u_Textures", samplers.data(), d.MaxTextureSlots);
         }
         else
         {
@@ -228,25 +233,31 @@ namespace Limitless
                          kDefaultTextMaterialKey, kDefaultTextShaderKey);
         }
 
-        g_Data.VertexBufferBase = std::make_unique<QuadVertex[]>(Renderer2DData::kMaxVertices);
-        g_Data.VertexBufferPtr = g_Data.VertexBufferBase.get();
-        g_Data.TextVertexBufferBase = std::make_unique<QuadVertex[]>(Renderer2DData::kMaxVertices);
-        g_Data.TextVertexBufferPtr = g_Data.TextVertexBufferBase.get();
-        g_Data.Initialized = true;
+        d.VertexBufferBase = std::make_unique<QuadVertex[]>(Impl::kMaxVertices);
+        d.VertexBufferPtr = d.VertexBufferBase.get();
+        d.TextVertexBufferBase = std::make_unique<QuadVertex[]>(Impl::kMaxVertices);
+        d.TextVertexBufferPtr = d.TextVertexBufferBase.get();
+        d.Initialized = true;
+
+        if (!s_Default)
+            s_Default = this;
 
         LT_CORE_INFO("Renderer2D initialized (MaxQuadsPerBatch={}, MaxTextureSlotsPerBatch={})",
-                     Renderer2DData::kMaxQuads, g_Data.MaxTextureSlots);
+                     Impl::kMaxQuads, d.MaxTextureSlots);
     }
 
     void Renderer2D::Shutdown()
     {
-        g_Data = {};
+        *m_Impl = {};
+
+        if (s_Default == this)
+            s_Default = nullptr;
     }
 
     void Renderer2D::BeginScene(const Camera& camera)
     {
         EnsureInitialized();
-        if (!g_Data.Initialized)
+        if (!m_Impl->Initialized)
         {
             return;
         }
@@ -262,25 +273,23 @@ namespace Limitless
     void Renderer2D::BeginScene(const glm::mat4& viewProjection, bool enableDepthTest)
     {
         EnsureInitialized();
-        if (!g_Data.Initialized)
+        auto& d = *m_Impl;
+        if (!d.Initialized)
         {
             return;
         }
 
-        g_Data.ViewProjection = viewProjection;
-        g_Data.IndexCount = 0;
-        g_Data.VertexBufferPtr = g_Data.VertexBufferBase.get();
-        g_Data.TextIndexCount = 0;
-        g_Data.TextVertexBufferPtr = g_Data.TextVertexBufferBase.get();
+        d.ViewProjection = viewProjection;
+        d.IndexCount = 0;
+        d.VertexBufferPtr = d.VertexBufferBase.get();
+        d.TextIndexCount = 0;
+        d.TextVertexBufferPtr = d.TextVertexBufferBase.get();
 
-        // Reset texture slots for the new scene.
-        g_Data.TextureSlotCount = 1;
-        g_Data.TextureSlots[0] = g_Data.WhiteTexture;
-        g_Data.TextTextureSlotCount = 1;
-        g_Data.TextTextureSlots[0] = g_Data.WhiteTexture;
+        d.TextureSlotCount = 1;
+        d.TextureSlots[0] = d.WhiteTexture;
+        d.TextTextureSlotCount = 1;
+        d.TextTextureSlots[0] = d.WhiteTexture;
 
-        // Typical world-space 2D defaults: alpha blending on, cull off.
-        // Keep depth testing enabled so mixed sprite/text content respects Z ordering.
         auto& renderer = Renderer::GetInstance();
         renderer.SubmitCommandArena<SetBlendModeCommand>(BlendFactor::SrcAlpha, BlendFactor::OneMinusSrcAlpha, true);
         renderer.SubmitCommandArena<SetDepthTestCommand>(enableDepthTest);
@@ -289,7 +298,7 @@ namespace Limitless
 
     void Renderer2D::EndScene()
     {
-        if (!g_Data.Initialized)
+        if (!m_Impl->Initialized)
         {
             return;
         }
@@ -311,13 +320,13 @@ namespace Limitless
     void Renderer2D::DrawQuad(const glm::mat4& transform, const glm::vec4& color)
     {
         EnsureInitialized();
-        if (!g_Data.Initialized)
+        auto& d = *m_Impl;
+        if (!d.Initialized)
         {
             return;
         }
 
-        // Batch overflow guard.
-        if (g_Data.IndexCount + 6 > Renderer2DData::kMaxIndices)
+        if (d.IndexCount + 6 > Impl::kMaxIndices)
         {
             FlushQuadBatch();
         }
@@ -336,10 +345,9 @@ namespace Limitless
             glm::vec2(0.0f, 1.0f),
         };
 
-        // Slot 0 is always the white texture for color-only quads.
         constexpr int32_t texIndex = 0;
 
-        QuadVertex* v = g_Data.VertexBufferPtr;
+        QuadVertex* v = d.VertexBufferPtr;
         for (size_t i = 0; i < 4; ++i)
         {
             v->Position = glm::vec3(transform * kQuadPositions[i]);
@@ -348,10 +356,10 @@ namespace Limitless
             v->TexIndex = texIndex;
             ++v;
         }
-        g_Data.VertexBufferPtr = v;
+        d.VertexBufferPtr = v;
 
-        g_Data.IndexCount += 6;
-        g_Data.Stats.QuadCount += 1;
+        d.IndexCount += 6;
+        d.Stats.QuadCount += 1;
     }
 
     void Renderer2D::DrawQuad(const glm::mat4& transform, const Assets::TextureAsset::Ptr& texture, const glm::vec4& tintColor)
@@ -366,7 +374,8 @@ namespace Limitless
                               const glm::vec2& uvMax)
     {
         EnsureInitialized();
-        if (!g_Data.Initialized)
+        auto& d = *m_Impl;
+        if (!d.Initialized)
         {
             return;
         }
@@ -374,22 +383,19 @@ namespace Limitless
         std::shared_ptr<Texture2D> tex = texture ? texture->GetTexture() : nullptr;
         if (!tex)
         {
-            // If not ready, treat as "missing" and fall back to whatever current default is.
             DrawQuad(transform, tintColor);
             return;
         }
 
-        // Batch overflow guard: ensure there is room for this quad before we compute texture slot indices.
-        if (g_Data.IndexCount + 6 > Renderer2DData::kMaxIndices)
+        if (d.IndexCount + 6 > Impl::kMaxIndices)
         {
             FlushQuadBatch();
         }
 
-        // Find or allocate a texture slot for this batch.
         int32_t texIndex = -1;
-        for (uint32_t i = 0; i < g_Data.TextureSlotCount; ++i)
+        for (uint32_t i = 0; i < d.TextureSlotCount; ++i)
         {
-            if (g_Data.TextureSlots[i] == tex)
+            if (d.TextureSlots[i] == tex)
             {
                 texIndex = static_cast<int32_t>(i);
                 break;
@@ -398,18 +404,14 @@ namespace Limitless
 
         if (texIndex < 0)
         {
-            // Not found in current batch.
-            if (g_Data.TextureSlotCount >= g_Data.MaxTextureSlots)
+            if (d.TextureSlotCount >= d.MaxTextureSlots)
             {
-                // Texture slot overflow -> flush and start a new batch.
                 FlushQuadBatch();
             }
 
-            // After a flush, a new batch starts with only the white texture in slot 0.
-            // Allocate the next slot for this texture.
-            texIndex = static_cast<int32_t>(g_Data.TextureSlotCount);
-            g_Data.TextureSlots[g_Data.TextureSlotCount] = tex;
-            g_Data.TextureSlotCount++;
+            texIndex = static_cast<int32_t>(d.TextureSlotCount);
+            d.TextureSlots[d.TextureSlotCount] = tex;
+            d.TextureSlotCount++;
         }
 
         constexpr std::array<glm::vec4, 4> kQuadPositions = {
@@ -426,7 +428,7 @@ namespace Limitless
             glm::vec2(uvMin.x, uvMax.y),
         };
 
-        QuadVertex* v = g_Data.VertexBufferPtr;
+        QuadVertex* v = d.VertexBufferPtr;
         for (size_t i = 0; i < 4; ++i)
         {
             v->Position = glm::vec3(transform * kQuadPositions[i]);
@@ -435,16 +437,17 @@ namespace Limitless
             v->TexIndex = texIndex;
             ++v;
         }
-        g_Data.VertexBufferPtr = v;
+        d.VertexBufferPtr = v;
 
-        g_Data.IndexCount += 6;
-        g_Data.Stats.QuadCount += 1;
+        d.IndexCount += 6;
+        d.Stats.QuadCount += 1;
     }
 
     void Renderer2D::DrawText(const glm::mat4& transform, const std::string& text, const Font::Ptr& font, float fontSize, const glm::vec4& color)
     {
         EnsureInitialized();
-        if (!g_Data.Initialized || !font || text.empty())
+        auto& d = *m_Impl;
+        if (!d.Initialized || !font || text.empty())
         {
             return;
         }
@@ -456,9 +459,9 @@ namespace Limitless
         }
 
         int32_t texIndex = -1;
-        for (uint32_t i = 0; i < g_Data.TextTextureSlotCount; ++i)
+        for (uint32_t i = 0; i < d.TextTextureSlotCount; ++i)
         {
-            if (g_Data.TextTextureSlots[i] == atlasTexture)
+            if (d.TextTextureSlots[i] == atlasTexture)
             {
                 texIndex = static_cast<int32_t>(i);
                 break;
@@ -467,13 +470,13 @@ namespace Limitless
 
         if (texIndex < 0)
         {
-            if (g_Data.TextTextureSlotCount >= g_Data.MaxTextureSlots)
+            if (d.TextTextureSlotCount >= d.MaxTextureSlots)
             {
                 FlushTextBatch();
             }
-            texIndex = static_cast<int32_t>(g_Data.TextTextureSlotCount);
-            g_Data.TextTextureSlots[g_Data.TextTextureSlotCount] = atlasTexture;
-            ++g_Data.TextTextureSlotCount;
+            texIndex = static_cast<int32_t>(d.TextTextureSlotCount);
+            d.TextTextureSlots[d.TextTextureSlotCount] = atlasTexture;
+            ++d.TextTextureSlotCount;
         }
 
         std::vector<msdf_atlas::unicode_t> codepoints;
@@ -516,7 +519,7 @@ namespace Limitless
 
             if (glyph->HasGeometry)
             {
-                if (g_Data.TextIndexCount + 6 > Renderer2DData::kMaxIndices)
+                if (d.TextIndexCount + 6 > Impl::kMaxIndices)
                 {
                     FlushTextBatch();
                 }
@@ -540,7 +543,7 @@ namespace Limitless
                     glm::vec2(glyph->AtlasMin.x, glyph->AtlasMax.y),
                 };
 
-                QuadVertex* vertex = g_Data.TextVertexBufferPtr;
+                QuadVertex* vertex = d.TextVertexBufferPtr;
                 for (size_t vertexIndex = 0; vertexIndex < 4; ++vertexIndex)
                 {
                     vertex->Position = glm::vec3(transform * positions[vertexIndex]);
@@ -550,9 +553,9 @@ namespace Limitless
                     ++vertex;
                 }
 
-                g_Data.TextVertexBufferPtr = vertex;
-                g_Data.TextIndexCount += 6;
-                g_Data.Stats.QuadCount += 1;
+                d.TextVertexBufferPtr = vertex;
+                d.TextIndexCount += 6;
+                d.Stats.QuadCount += 1;
             }
 
             penX += glyphAdvance * atlasScale;
@@ -561,126 +564,120 @@ namespace Limitless
 
     void Renderer2D::FlushQuadBatch()
     {
-        if (!g_Data.Initialized)
+        auto& d = *m_Impl;
+        if (!d.Initialized)
         {
             return;
         }
 
-        const uint32_t vertexCount = static_cast<uint32_t>(g_Data.VertexBufferPtr - g_Data.VertexBufferBase.get());
-        if (g_Data.IndexCount == 0 || vertexCount == 0)
+        const uint32_t vertexCount = static_cast<uint32_t>(d.VertexBufferPtr - d.VertexBufferBase.get());
+        if (d.IndexCount == 0 || vertexCount == 0)
         {
             return;
         }
 
-        // Re-fetch shader in case the asset became ready after initialization.
-        if (g_Data.Material && !g_Data.ShaderProgram)
+        if (d.Material && !d.ShaderProgram)
         {
-            g_Data.ShaderProgram = g_Data.Material->GetShader();
-            if (g_Data.ShaderProgram)
+            d.ShaderProgram = d.Material->GetShader();
+            if (d.ShaderProgram)
             {
-                std::array<int, Renderer2DData::kCompileTimeMaxTextureSlots> samplers{};
-                for (uint32_t i = 0; i < g_Data.MaxTextureSlots; ++i)
+                std::array<int, Impl::kCompileTimeMaxTextureSlots> samplers{};
+                for (uint32_t i = 0; i < d.MaxTextureSlots; ++i)
                 {
                     samplers[i] = static_cast<int>(i);
                 }
-                g_Data.ShaderProgram->SetIntArray("u_Textures", samplers.data(), g_Data.MaxTextureSlots);
+                d.ShaderProgram->SetIntArray("u_Textures", samplers.data(), d.MaxTextureSlots);
             }
         }
 
-        if (!g_Data.ShaderProgram)
+        if (!d.ShaderProgram)
         {
-            // Shader still loading; drop quads silently. Caller shows loading progress in UI.
-            g_Data.IndexCount = 0;
-            g_Data.VertexBufferPtr = g_Data.VertexBufferBase.get();
-            g_Data.TextureSlotCount = 1;
-            g_Data.TextureSlots[0] = g_Data.WhiteTexture;
+            d.IndexCount = 0;
+            d.VertexBufferPtr = d.VertexBufferBase.get();
+            d.TextureSlotCount = 1;
+            d.TextureSlots[0] = d.WhiteTexture;
             return;
         }
 
         auto& renderer = Renderer::GetInstance();
 
-        // Upload CPU-staged vertices to the GPU buffer on the render thread.
         const uint32_t dataSizeBytes = vertexCount * static_cast<uint32_t>(sizeof(QuadVertex));
         void* uploadBytes = renderer.AllocateFrameUpload(dataSizeBytes, alignof(QuadVertex));
         if (!uploadBytes)
         {
-            LT_CORE_WARN("Renderer2D::Flush: frame upload allocator out of memory (dropping {} quads)", g_Data.IndexCount / 6);
-            g_Data.IndexCount = 0;
-            g_Data.VertexBufferPtr = g_Data.VertexBufferBase.get();
-            g_Data.TextureSlotCount = 1;
-            g_Data.TextureSlots[0] = g_Data.WhiteTexture;
+            LT_CORE_WARN("Renderer2D::Flush: frame upload allocator out of memory (dropping {} quads)", d.IndexCount / 6);
+            d.IndexCount = 0;
+            d.VertexBufferPtr = d.VertexBufferBase.get();
+            d.TextureSlotCount = 1;
+            d.TextureSlots[0] = d.WhiteTexture;
             return;
         }
 
-        std::memcpy(uploadBytes, g_Data.VertexBufferBase.get(), dataSizeBytes);
-        std::array<std::shared_ptr<Texture>, Renderer2DData::kCompileTimeMaxTextureSlots> textures{};
-        for (uint32_t slot = 0; slot < g_Data.TextureSlotCount && slot < g_Data.MaxTextureSlots; ++slot)
+        std::memcpy(uploadBytes, d.VertexBufferBase.get(), dataSizeBytes);
+        std::array<std::shared_ptr<Texture>, Impl::kCompileTimeMaxTextureSlots> textures{};
+        for (uint32_t slot = 0; slot < d.TextureSlotCount && slot < d.MaxTextureSlots; ++slot)
         {
-            // Move shared_ptr ownership into the flush packet so we avoid additional refcount churn.
-            // `TextureSlots` are reset right after submission anyway.
-            textures[slot] = std::move(g_Data.TextureSlots[slot]);
+            textures[slot] = std::move(d.TextureSlots[slot]);
         }
 
         Renderer2DFlushCommand::KeepAlive keepAlive{};
-        // These are long-lived renderer resources; copying the shared_ptr here is fine.
-        // (Texture handles are moved above to avoid per-flush refcount churn.)
-        keepAlive.VertexBufferHandle = g_Data.QuadVertexBuffer;
-        keepAlive.VertexArrayHandle = g_Data.QuadVertexArray;
-        keepAlive.ShaderProgramHandle = g_Data.ShaderProgram;
+        keepAlive.VertexBufferHandle = d.QuadVertexBuffer;
+        keepAlive.VertexArrayHandle = d.QuadVertexArray;
+        keepAlive.ShaderProgramHandle = d.ShaderProgram;
         keepAlive.TextureHandles = std::move(textures);
 
         renderer.SubmitCommandArena<Renderer2DFlushCommand>(
             std::move(keepAlive),
             uploadBytes,
             dataSizeBytes,
-            g_Data.ViewProjection,
-            g_Data.IndexCount,
+            d.ViewProjection,
+            d.IndexCount,
             IndexType::UnsignedShort,
-            g_Data.TextureSlotCount);
+            d.TextureSlotCount);
 
-        g_Data.Stats.DrawCalls += 1;
-        g_Data.Stats.Batches += 1;
+        d.Stats.DrawCalls += 1;
+        d.Stats.Batches += 1;
 
-        // Reset batch.
-        g_Data.IndexCount = 0;
-        g_Data.VertexBufferPtr = g_Data.VertexBufferBase.get();
-        g_Data.TextureSlotCount = 1;
-        g_Data.TextureSlots[0] = g_Data.WhiteTexture;
+        d.IndexCount = 0;
+        d.VertexBufferPtr = d.VertexBufferBase.get();
+        d.TextureSlotCount = 1;
+        d.TextureSlots[0] = d.WhiteTexture;
     }
 
     void Renderer2D::FlushTextBatch()
     {
-        if (!g_Data.Initialized)
+        auto& d = *m_Impl;
+        if (!d.Initialized)
         {
             return;
         }
 
-        const uint32_t vertexCount = static_cast<uint32_t>(g_Data.TextVertexBufferPtr - g_Data.TextVertexBufferBase.get());
-        if (g_Data.TextIndexCount == 0 || vertexCount == 0)
+        const uint32_t vertexCount = static_cast<uint32_t>(d.TextVertexBufferPtr - d.TextVertexBufferBase.get());
+        if (d.TextIndexCount == 0 || vertexCount == 0)
         {
             return;
         }
 
-        if (g_Data.TextMaterial && !g_Data.TextShaderProgram)
+        if (d.TextMaterial && !d.TextShaderProgram)
         {
-            g_Data.TextShaderProgram = g_Data.TextMaterial->GetShader();
-            if (g_Data.TextShaderProgram)
+            d.TextShaderProgram = d.TextMaterial->GetShader();
+            if (d.TextShaderProgram)
             {
-                std::array<int, Renderer2DData::kCompileTimeMaxTextureSlots> samplers{};
-                for (uint32_t i = 0; i < g_Data.MaxTextureSlots; ++i)
+                std::array<int, Impl::kCompileTimeMaxTextureSlots> samplers{};
+                for (uint32_t i = 0; i < d.MaxTextureSlots; ++i)
                 {
                     samplers[i] = static_cast<int>(i);
                 }
-                g_Data.TextShaderProgram->SetIntArray("u_Textures", samplers.data(), g_Data.MaxTextureSlots);
+                d.TextShaderProgram->SetIntArray("u_Textures", samplers.data(), d.MaxTextureSlots);
             }
         }
 
-        if (!g_Data.TextShaderProgram)
+        if (!d.TextShaderProgram)
         {
-            g_Data.TextIndexCount = 0;
-            g_Data.TextVertexBufferPtr = g_Data.TextVertexBufferBase.get();
-            g_Data.TextTextureSlotCount = 1;
-            g_Data.TextTextureSlots[0] = g_Data.WhiteTexture;
+            d.TextIndexCount = 0;
+            d.TextVertexBufferPtr = d.TextVertexBufferBase.get();
+            d.TextTextureSlotCount = 1;
+            d.TextTextureSlots[0] = d.WhiteTexture;
             return;
         }
 
@@ -689,48 +686,48 @@ namespace Limitless
         void* uploadBytes = renderer.AllocateFrameUpload(dataSizeBytes, alignof(QuadVertex));
         if (!uploadBytes)
         {
-            LT_CORE_WARN("Renderer2D::FlushTextBatch: frame upload allocator out of memory (dropping {} glyph quads)", g_Data.TextIndexCount / 6);
-            g_Data.TextIndexCount = 0;
-            g_Data.TextVertexBufferPtr = g_Data.TextVertexBufferBase.get();
-            g_Data.TextTextureSlotCount = 1;
-            g_Data.TextTextureSlots[0] = g_Data.WhiteTexture;
+            LT_CORE_WARN("Renderer2D::FlushTextBatch: frame upload allocator out of memory (dropping {} glyph quads)", d.TextIndexCount / 6);
+            d.TextIndexCount = 0;
+            d.TextVertexBufferPtr = d.TextVertexBufferBase.get();
+            d.TextTextureSlotCount = 1;
+            d.TextTextureSlots[0] = d.WhiteTexture;
             return;
         }
 
-        std::memcpy(uploadBytes, g_Data.TextVertexBufferBase.get(), dataSizeBytes);
-        std::array<std::shared_ptr<Texture>, Renderer2DData::kCompileTimeMaxTextureSlots> textures{};
-        for (uint32_t slot = 0; slot < g_Data.TextTextureSlotCount && slot < g_Data.MaxTextureSlots; ++slot)
+        std::memcpy(uploadBytes, d.TextVertexBufferBase.get(), dataSizeBytes);
+        std::array<std::shared_ptr<Texture>, Impl::kCompileTimeMaxTextureSlots> textures{};
+        for (uint32_t slot = 0; slot < d.TextTextureSlotCount && slot < d.MaxTextureSlots; ++slot)
         {
-            textures[slot] = std::move(g_Data.TextTextureSlots[slot]);
+            textures[slot] = std::move(d.TextTextureSlots[slot]);
         }
 
         Renderer2DFlushCommand::KeepAlive keepAlive{};
-        keepAlive.VertexBufferHandle = g_Data.QuadVertexBuffer;
-        keepAlive.VertexArrayHandle = g_Data.QuadVertexArray;
-        keepAlive.ShaderProgramHandle = g_Data.TextShaderProgram;
+        keepAlive.VertexBufferHandle = d.QuadVertexBuffer;
+        keepAlive.VertexArrayHandle = d.QuadVertexArray;
+        keepAlive.ShaderProgramHandle = d.TextShaderProgram;
         keepAlive.TextureHandles = std::move(textures);
 
         renderer.SubmitCommandArena<Renderer2DFlushCommand>(
             std::move(keepAlive),
             uploadBytes,
             dataSizeBytes,
-            g_Data.ViewProjection,
-            g_Data.TextIndexCount,
+            d.ViewProjection,
+            d.TextIndexCount,
             IndexType::UnsignedShort,
-            g_Data.TextTextureSlotCount);
+            d.TextTextureSlotCount);
 
-        g_Data.Stats.DrawCalls += 1;
-        g_Data.Stats.Batches += 1;
+        d.Stats.DrawCalls += 1;
+        d.Stats.Batches += 1;
 
-        g_Data.TextIndexCount = 0;
-        g_Data.TextVertexBufferPtr = g_Data.TextVertexBufferBase.get();
-        g_Data.TextTextureSlotCount = 1;
-        g_Data.TextTextureSlots[0] = g_Data.WhiteTexture;
+        d.TextIndexCount = 0;
+        d.TextVertexBufferPtr = d.TextVertexBufferBase.get();
+        d.TextTextureSlotCount = 1;
+        d.TextTextureSlots[0] = d.WhiteTexture;
     }
 
-    const Renderer2D::Statistics& Renderer2D::GetStatistics()
+    const Renderer2D::Statistics& Renderer2D::GetStatistics() const
     {
-        return g_Data.Stats;
+        return m_Impl->Stats;
     }
 
     const char* Renderer2D::GetDefaultShaderKey()
@@ -740,25 +737,26 @@ namespace Limitless
 
     bool Renderer2D::IsShaderReady()
     {
-        if (!g_Data.Initialized)
+        auto& d = *m_Impl;
+        if (!d.Initialized)
         {
             return false;
         }
-        if (g_Data.ShaderProgram)
+        if (d.ShaderProgram)
         {
             return true;
         }
-        if (g_Data.Material)
+        if (d.Material)
         {
-            g_Data.ShaderProgram = g_Data.Material->GetShader();
-            if (g_Data.ShaderProgram)
+            d.ShaderProgram = d.Material->GetShader();
+            if (d.ShaderProgram)
             {
-                std::array<int, Renderer2DData::kCompileTimeMaxTextureSlots> samplers{};
-                for (uint32_t i = 0; i < g_Data.MaxTextureSlots; ++i)
+                std::array<int, Impl::kCompileTimeMaxTextureSlots> samplers{};
+                for (uint32_t i = 0; i < d.MaxTextureSlots; ++i)
                 {
                     samplers[i] = static_cast<int>(i);
                 }
-                g_Data.ShaderProgram->SetIntArray("u_Textures", samplers.data(), g_Data.MaxTextureSlots);
+                d.ShaderProgram->SetIntArray("u_Textures", samplers.data(), d.MaxTextureSlots);
                 return true;
             }
         }
@@ -767,7 +765,6 @@ namespace Limitless
 
     void Renderer2D::ResetStatistics()
     {
-        g_Data.Stats.Reset();
+        m_Impl->Stats.Reset();
     }
 }
-

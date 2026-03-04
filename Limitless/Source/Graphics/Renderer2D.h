@@ -25,6 +25,11 @@ namespace Limitless
     // - This renderer intentionally stays OpenGL-first for now, built on the existing
     //   RenderCommandQueue infrastructure.
     // - Transforms are baked into vertices so we can batch without per-draw uniforms.
+    //
+    // Instancing:
+    // - Renderer2D is fully instantiable. Multiple instances can coexist for
+    //   split-screen, multi-viewport editors, or isolated test contexts.
+    // - Renderer2D::Default() returns the global default instance for convenience.
     // -----------------------------------------------------------------------------
     class Renderer2D final
     {
@@ -43,45 +48,50 @@ namespace Limitless
             }
         };
 
-        Renderer2D() = delete;
+        Renderer2D();
+        ~Renderer2D();
 
-        static void Initialize();
-        static void Shutdown();
+        Renderer2D(const Renderer2D&) = delete;
+        Renderer2D& operator=(const Renderer2D&) = delete;
 
-        // Begin a 2D rendering scene using any camera type (orthographic or perspective).
-        // Renderer2D only requires a stable ViewProjection matrix.
-        static void BeginScene(const Camera& camera);
-        static void BeginScene(const glm::mat4& viewProjection);
-        static void BeginScene(const glm::mat4& viewProjection, bool enableDepthTest);
-        static void EndScene();
+        void Initialize();
+        void Shutdown();
 
-        // Position/size overloads (Z is 0 in this MVP).
-        static void DrawQuad(const glm::vec2& position, const glm::vec2& size, const glm::vec4& color);
-        static void DrawQuad(const glm::vec2& position, const glm::vec2& size, const Assets::TextureAsset::Ptr& texture, const glm::vec4& tintColor = glm::vec4(1.0f));
+        void BeginScene(const Camera& camera);
+        void BeginScene(const glm::mat4& viewProjection);
+        void BeginScene(const glm::mat4& viewProjection, bool enableDepthTest);
+        void EndScene();
 
-        // Full transform overloads.
-        static void DrawQuad(const glm::mat4& transform, const glm::vec4& color);
-        static void DrawQuad(const glm::mat4& transform, const Assets::TextureAsset::Ptr& texture, const glm::vec4& tintColor = glm::vec4(1.0f));
-        static void DrawQuad(const glm::mat4& transform,
-                             const Assets::TextureAsset::Ptr& texture,
-                             const glm::vec4& tintColor,
-                             const glm::vec2& uvMin,
-                             const glm::vec2& uvMax);
-        static void DrawText(const glm::mat4& transform, const std::string& text, const Font::Ptr& font, float fontSize, const glm::vec4& color = glm::vec4(1.0f));
+        void DrawQuad(const glm::vec2& position, const glm::vec2& size, const glm::vec4& color);
+        void DrawQuad(const glm::vec2& position, const glm::vec2& size, const Assets::TextureAsset::Ptr& texture, const glm::vec4& tintColor = glm::vec4(1.0f));
 
-        static const Statistics& GetStatistics();
-        static void ResetStatistics();
+        void DrawQuad(const glm::mat4& transform, const glm::vec4& color);
+        void DrawQuad(const glm::mat4& transform, const Assets::TextureAsset::Ptr& texture, const glm::vec4& tintColor = glm::vec4(1.0f));
+        void DrawQuad(const glm::mat4& transform,
+                     const Assets::TextureAsset::Ptr& texture,
+                     const glm::vec4& tintColor,
+                     const glm::vec2& uvMin,
+                     const glm::vec2& uvMax);
+        void DrawText(const glm::mat4& transform, const std::string& text, const Font::Ptr& font, float fontSize, const glm::vec4& color = glm::vec4(1.0f));
 
-        /// Returns true when the default material shader is loaded and ready for rendering.
-        /// While false, DrawQuad calls are dropped silently and the caller may show a loading UI.
-        static bool IsShaderReady();
+        const Statistics& GetStatistics() const;
+        void ResetStatistics();
 
-        /// Asset key for the default Renderer2D shader. Used to query AssetLoadProgress.
+        bool IsShaderReady();
+
         static const char* GetDefaultShaderKey();
 
+        /// Returns the global default instance. Asserts if none has been initialized.
+        static Renderer2D& Default();
+
     private:
-        static void FlushQuadBatch();
-        static void FlushTextBatch();
+        struct Impl;
+        std::unique_ptr<Impl> m_Impl;
+
+        void EnsureInitialized();
+        void FlushQuadBatch();
+        void FlushTextBatch();
+
+        static Renderer2D* s_Default;
     };
 }
-

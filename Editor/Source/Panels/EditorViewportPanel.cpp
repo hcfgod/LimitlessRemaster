@@ -1355,7 +1355,7 @@ namespace Limitless::EditorViewportPanel
 
         auto drawLoadingOverlay = [scene](const ImVec2& minPos, const ImVec2& maxPos) -> bool {
             const LoadingScreen::Context ctx = LoadingScreen::BuildContext(
-                scene, Renderer2D::IsShaderReady(), Renderer2D::GetDefaultShaderKey());
+                scene, Renderer2D::Default().IsShaderReady(), Renderer2D::GetDefaultShaderKey());
             const LoadingScreen::State state = LoadingScreen::GetState(ctx);
 
             static bool s_LoadingSessionActive = false;

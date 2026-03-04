@@ -645,11 +645,11 @@ namespace Limitless
                         metrics.ProjectionRect.Min.x, metrics.ProjectionRect.Max.x,
                         metrics.ProjectionRect.Min.y, metrics.ProjectionRect.Max.y,
                         -10000.0f, 10000.0f);
-                    Renderer2D::BeginScene(screenProjection, false);
+                    Renderer2D::Default().BeginScene(screenProjection, false);
                 }
                 else
                 {
-                    Renderer2D::BeginScene(camera);
+                    Renderer2D::Default().BeginScene(camera);
                 }
 
                 std::vector<entt::entity> uiEntities;
@@ -745,22 +745,22 @@ namespace Limitless
                         {
                             Assets::TextureAsset::Ptr textureAsset = ResolveUiSpriteTexture(*sprite);
                             if (textureAsset)
-                                Renderer2D::DrawQuad(model, textureAsset, backgroundColor);
+                                Renderer2D::Default().DrawQuad(model, textureAsset, backgroundColor);
                             else if (!sprite->TextureKey.empty())
-                                Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, backgroundColor.a));
+                                Renderer2D::Default().DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, backgroundColor.a));
                             else
-                                Renderer2D::DrawQuad(model, backgroundColor);
+                                Renderer2D::Default().DrawQuad(model, backgroundColor);
                         }
                         else
                         {
-                            Renderer2D::DrawQuad(model, backgroundColor);
+                            Renderer2D::Default().DrawQuad(model, backgroundColor);
                         }
 
                         if (normalizedValue > 0.0f)
                         {
                             glm::mat4 fillModel = glm::translate(model, glm::vec3((normalizedValue - 1.0f) * 0.5f, 0.0f, 0.0f));
                             fillModel = glm::scale(fillModel, glm::vec3(normalizedValue, 1.0f, 1.0f));
-                            Renderer2D::DrawQuad(fillModel, fillColor);
+                            Renderer2D::Default().DrawQuad(fillModel, fillColor);
                         }
 
                         if (slider->ShowHandle)
@@ -770,7 +770,7 @@ namespace Limitless
                             const float handleHeightScale = std::max(0.1f, slider->HandleHeightMultiplier);
                             glm::mat4 handleModel = glm::translate(model, glm::vec3(normalizedValue - 0.5f, 0.0f, 0.0f));
                             handleModel = glm::scale(handleModel, glm::vec3(handleWidthScale, handleHeightScale, 1.0f));
-                            Renderer2D::DrawQuad(handleModel, handleColor);
+                            Renderer2D::Default().DrawQuad(handleModel, handleColor);
                         }
                     }
                     else if (sprite && !panel && !sliderHasVisualChildren)
@@ -790,11 +790,11 @@ namespace Limitless
 
                         Assets::TextureAsset::Ptr textureAsset = ResolveUiSpriteTexture(*sprite);
                         if (textureAsset)
-                            Renderer2D::DrawQuad(model, textureAsset, resolvedColor);
+                            Renderer2D::Default().DrawQuad(model, textureAsset, resolvedColor);
                         else if (!sprite->TextureKey.empty())
-                            Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, resolvedColor.a));
+                            Renderer2D::Default().DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, resolvedColor.a));
                         else
-                            Renderer2D::DrawQuad(model, resolvedColor);
+                            Renderer2D::Default().DrawQuad(model, resolvedColor);
                     }
                     else if (panel && !sliderHasVisualChildren)
                     {
@@ -815,15 +815,15 @@ namespace Limitless
                         {
                             Assets::TextureAsset::Ptr textureAsset = ResolveUiSpriteTexture(*sprite);
                             if (textureAsset)
-                                Renderer2D::DrawQuad(model, textureAsset, resolvedPanelColor);
+                                Renderer2D::Default().DrawQuad(model, textureAsset, resolvedPanelColor);
                             else if (!sprite->TextureKey.empty())
-                                Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, resolvedPanelColor.a));
+                                Renderer2D::Default().DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, resolvedPanelColor.a));
                             else
-                                Renderer2D::DrawQuad(model, resolvedPanelColor);
+                                Renderer2D::Default().DrawQuad(model, resolvedPanelColor);
                         }
                         else
                         {
-                            Renderer2D::DrawQuad(model, resolvedPanelColor);
+                            Renderer2D::Default().DrawQuad(model, resolvedPanelColor);
                         }
                     }
                     else if (!sliderHasVisualChildren && button && button->UseStateColors)
@@ -835,7 +835,7 @@ namespace Limitless
                             resolvedColor = button->PressedColor;
                         else if (button->IsHovered)
                             resolvedColor = button->HoveredColor;
-                        Renderer2D::DrawQuad(model, resolvedColor);
+                        Renderer2D::Default().DrawQuad(model, resolvedColor);
                     }
 
                     if (auto* text = registry.try_get<UITextComponent>(uiEntity))
@@ -854,11 +854,11 @@ namespace Limitless
                         if (!text->CachedFont)
                             continue;
 
-                        Renderer2D::DrawText(model, text->Text, text->CachedFont, text->FontSize, text->Color);
+                        Renderer2D::Default().DrawText(model, text->Text, text->CachedFont, text->FontSize, text->Color);
                     }
                 }
 
-                Renderer2D::EndScene();
+                Renderer2D::Default().EndScene();
             }
 
         }
@@ -873,7 +873,7 @@ namespace Limitless
     {
         scene.SetRuntimePhase(Scene::RuntimePhase::RenderBuild);
         scene.UpdateTransforms();
-        Renderer2D::BeginScene(camera.GetViewProjectionMatrix(), false);
+        Renderer2D::Default().BeginScene(camera.GetViewProjectionMatrix(), false);
         const float fixedDelta = Time::GetFixedDeltaTimeSeconds();
         const float interpolationAlpha = (fixedDelta > 0.0f)
             ? std::clamp(Time::GetFixedTimeAccumulatorSeconds() / fixedDelta, 0.0f, 1.0f)
@@ -1090,7 +1090,7 @@ namespace Limitless
                             glm::mat4 tileTransform = gridWorldTransform;
                             tileTransform = glm::translate(tileTransform, localPosition);
                             tileTransform = glm::scale(tileTransform, glm::vec3(cellSize, 1.0f));
-                            Renderer2D::DrawQuad(tileTransform, cached.Texture,
+                            Renderer2D::Default().DrawQuad(tileTransform, cached.Texture,
                                                  cached.Color, cached.UvMin, cached.UvMax);
                         }
                     }
@@ -1259,7 +1259,7 @@ namespace Limitless
 
             if (resolvedTextureAsset)
             {
-                Renderer2D::DrawQuad(model,
+                Renderer2D::Default().DrawQuad(model,
                                      resolvedTextureAsset,
                                      sprite.Color,
                                      renderUvMin,
@@ -1267,11 +1267,11 @@ namespace Limitless
             }
             else if (useMissingAssetFallback || !sprite.TextureKey.empty() || !animatedTextureKey.empty())
             {
-                Renderer2D::DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, sprite.Color.a));
+                Renderer2D::Default().DrawQuad(model, glm::vec4(1.0f, 0.0f, 1.0f, sprite.Color.a));
             }
             else
             {
-                Renderer2D::DrawQuad(model, sprite.Color);
+                Renderer2D::Default().DrawQuad(model, sprite.Color);
             }
         };
 
@@ -1330,9 +1330,9 @@ namespace Limitless
                     particleTransform = glm::scale(particleTransform, glm::vec3(size, size, 1.0f));
 
                     if (emitter.CachedTexture)
-                        Renderer2D::DrawQuad(particleTransform, emitter.CachedTexture, color);
+                        Renderer2D::Default().DrawQuad(particleTransform, emitter.CachedTexture, color);
                     else
-                        Renderer2D::DrawQuad(particleTransform, color);
+                        Renderer2D::Default().DrawQuad(particleTransform, color);
                 }
             }
         };
@@ -1414,7 +1414,7 @@ namespace Limitless
         if (!particlesRendered)
             drawParticleEmitters();
 
-        Renderer2D::EndScene();
+        Renderer2D::Default().EndScene();
         scene.SetRuntimePhase(Scene::RuntimePhase::Idle);
     }
 
@@ -1449,7 +1449,7 @@ namespace Limitless
         if (!renderer.IsInitialized())
             return;
 
-        const bool renderedWithLighting = Lighting2DRenderer::RenderToViewport(scene, camera, framebuffer, width, height, [&scene, &camera]() {
+        const bool renderedWithLighting = Lighting2DRenderer::Default().RenderToViewport(scene, camera, framebuffer, width, height, [&scene, &camera]() {
             SceneRenderer::Render(scene, camera);
         });
 

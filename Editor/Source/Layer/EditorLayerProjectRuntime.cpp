@@ -253,7 +253,7 @@ namespace Limitless
         runtimeSettings.ShadowFreezeAngularVelocityDegreesPerSecond = std::max(1.0f, m_ProjectLighting2DSettings.ShadowFreezeAngularVelocityDegreesPerSecond);
         runtimeSettings.ShadowFreezeFrameCount = std::max(1, m_ProjectLighting2DSettings.ShadowFreezeFrameCount);
         runtimeSettings.MaxShadowSamplesPerLight = std::max(1, m_ProjectLighting2DSettings.MaxShadowSamplesPerLight);
-        Lighting2DRenderer::SetSettings(runtimeSettings);
+        Lighting2DRenderer::Default().SetSettings(runtimeSettings);
     }
 
     void EditorLayer::LaunchStartupAssetImport()
@@ -425,7 +425,7 @@ namespace Limitless
         // rendering only starts after colliders/bodies are fully prepared.
         (void)m_Scene->InitializePhysicsWorldForLoading();
 
-        const bool shaderReady = Renderer2D::IsShaderReady();
+        const bool shaderReady = Renderer2D::Default().IsShaderReady();
         const bool assetsReady = IsSceneAssetPrewarmComplete();
         const bool objectsReady = m_Scene->IsSceneObjectsInitialized();
         const bool physicsReady = m_Scene->IsPhysicsWorldInitializedForLoading();

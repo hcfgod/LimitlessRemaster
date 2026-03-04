@@ -47,21 +47,40 @@ namespace Limitless
         float CpuSubmitTimeMs = 0.0f;
     };
 
-    namespace Lighting2DRenderer
+    // -------------------------------------------------------------------------
+    // Lighting2DRenderer
+    // Instantiable deferred-style 2D lighting renderer.
+    //
+    // Multiple instances can coexist for split-screen / multi-viewport editors.
+    // Lighting2DRenderer::Default() returns the global default instance.
+    // -------------------------------------------------------------------------
+    class Lighting2DRenderer final
     {
+    public:
+        Lighting2DRenderer();
+        ~Lighting2DRenderer();
+
+        Lighting2DRenderer(const Lighting2DRenderer&) = delete;
+        Lighting2DRenderer& operator=(const Lighting2DRenderer&) = delete;
+
         void SetSettings(const Lighting2DSettings& settings);
-        const Lighting2DSettings& GetSettings();
+        const Lighting2DSettings& GetSettings() const;
 
-        const Lighting2DDiagnostics& GetDiagnostics();
+        const Lighting2DDiagnostics& GetDiagnostics() const;
 
-        // Draws world-space 2D content with deferred-style lighting into target framebuffer.
-        // Returns true when lighting path executed; false lets caller use fallback path.
         bool RenderToViewport(Scene& scene,
                               const Camera& camera,
                               const std::shared_ptr<Framebuffer>& targetFramebuffer,
                               uint32_t width,
                               uint32_t height,
                               const std::function<void()>& renderWorldAlbedoPass);
-    }
-}
 
+        static Lighting2DRenderer& Default();
+
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> m_Impl;
+
+        static Lighting2DRenderer* s_Default;
+    };
+}

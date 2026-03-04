@@ -140,7 +140,7 @@ namespace Limitless
             uint32_t ShadowFreezeFramesRemaining = 0;
         };
 
-        Lighting2DRendererState g_State{};
+        Lighting2DRendererState* g_State = nullptr;
 
         std::string ToLowerCopy(std::string value)
         {
@@ -465,7 +465,7 @@ namespace Limitless
 
         void EnsureFallbackTextures()
         {
-            if (!g_State.WhiteTexture)
+            if (!g_State->WhiteTexture)
             {
                 const uint8_t whitePixel[4] = { 255, 255, 255, 255 };
                 TextureSpecification whiteSpecification{};
@@ -474,10 +474,10 @@ namespace Limitless
                 whiteSpecification.MagFilter = TextureFilter::Nearest;
                 whiteSpecification.WrapU = TextureWrap::ClampToEdge;
                 whiteSpecification.WrapV = TextureWrap::ClampToEdge;
-                g_State.WhiteTexture = Texture2D::CreateFromRGBA8(1, 1, whitePixel, whiteSpecification);
+                g_State->WhiteTexture = Texture2D::CreateFromRGBA8(1, 1, whitePixel, whiteSpecification);
             }
 
-            if (!g_State.FlatNormalTexture)
+            if (!g_State->FlatNormalTexture)
             {
                 const uint8_t flatNormalPixel[4] = { 128, 128, 255, 255 };
                 TextureSpecification normalSpecification{};
@@ -486,13 +486,13 @@ namespace Limitless
                 normalSpecification.MagFilter = TextureFilter::Nearest;
                 normalSpecification.WrapU = TextureWrap::ClampToEdge;
                 normalSpecification.WrapV = TextureWrap::ClampToEdge;
-                g_State.FlatNormalTexture = Texture2D::CreateFromRGBA8(1, 1, flatNormalPixel, normalSpecification);
+                g_State->FlatNormalTexture = Texture2D::CreateFromRGBA8(1, 1, flatNormalPixel, normalSpecification);
             }
         }
 
         void EnsureQuadGeometryCreated()
         {
-            if (g_State.UnitQuadVertexArray && g_State.UnitQuadVertexBuffer)
+            if (g_State->UnitQuadVertexArray && g_State->UnitQuadVertexBuffer)
                 return;
 
             const std::array<float, 16> quadVertices = {
@@ -502,13 +502,13 @@ namespace Limitless
                  0.5f,  0.5f, 1.0f, 1.0f
             };
 
-            g_State.UnitQuadVertexArray = VertexArray::Create();
-            g_State.UnitQuadVertexBuffer = VertexBuffer::Create(quadVertices.data(), static_cast<uint32_t>(sizeof(quadVertices)));
-            g_State.UnitQuadVertexBuffer->SetLayout({
+            g_State->UnitQuadVertexArray = VertexArray::Create();
+            g_State->UnitQuadVertexBuffer = VertexBuffer::Create(quadVertices.data(), static_cast<uint32_t>(sizeof(quadVertices)));
+            g_State->UnitQuadVertexBuffer->SetLayout({
                 { ShaderDataType::Float2, "a_Position" },
                 { ShaderDataType::Float2, "a_UV" }
             });
-            g_State.UnitQuadVertexArray->AddVertexBuffer(g_State.UnitQuadVertexBuffer);
+            g_State->UnitQuadVertexArray->AddVertexBuffer(g_State->UnitQuadVertexBuffer);
         }
 
         bool EnsureFramebuffers(uint32_t width, uint32_t height)
@@ -541,7 +541,7 @@ namespace Limitless
             };
 
             const uint64_t setKey = MakeFramebufferSetKey(width, height);
-            auto& framebufferSet = g_State.FramebufferSets[setKey];
+            auto& framebufferSet = g_State->FramebufferSets[setKey];
             if (!framebufferSet.GBuffer)
                 framebufferSet.GBuffer = createGBufferFramebuffer();
             if (!framebufferSet.Light)
@@ -558,28 +558,28 @@ namespace Limitless
             if (!framebufferSet.GBuffer || !framebufferSet.Light)
                 return false;
 
-            framebufferSet.LastUsedTick = ++g_State.FramebufferUseTick;
+            framebufferSet.LastUsedTick = ++g_State->FramebufferUseTick;
 
             constexpr size_t kMaxFramebufferSetCache = 4;
-            if (g_State.FramebufferSets.size() > kMaxFramebufferSetCache)
+            if (g_State->FramebufferSets.size() > kMaxFramebufferSetCache)
             {
-                auto evictIt = g_State.FramebufferSets.end();
-                for (auto it = g_State.FramebufferSets.begin(); it != g_State.FramebufferSets.end(); ++it)
+                auto evictIt = g_State->FramebufferSets.end();
+                for (auto it = g_State->FramebufferSets.begin(); it != g_State->FramebufferSets.end(); ++it)
                 {
                     if (it->first == setKey)
                         continue;
-                    if (evictIt == g_State.FramebufferSets.end() || it->second.LastUsedTick < evictIt->second.LastUsedTick)
+                    if (evictIt == g_State->FramebufferSets.end() || it->second.LastUsedTick < evictIt->second.LastUsedTick)
                         evictIt = it;
                 }
-                if (evictIt != g_State.FramebufferSets.end())
-                    g_State.FramebufferSets.erase(evictIt);
+                if (evictIt != g_State->FramebufferSets.end())
+                    g_State->FramebufferSets.erase(evictIt);
             }
 
-            g_State.GBufferFramebuffer = framebufferSet.GBuffer;
-            g_State.LightFramebuffer = framebufferSet.Light;
+            g_State->GBufferFramebuffer = framebufferSet.GBuffer;
+            g_State->LightFramebuffer = framebufferSet.Light;
 
-            g_State.FramebufferWidth = width;
-            g_State.FramebufferHeight = height;
+            g_State->FramebufferWidth = width;
+            g_State->FramebufferHeight = height;
             return true;
         }
 
@@ -753,8 +753,8 @@ namespace Limitless
                 NormalPassSpriteDraw draw{};
                 draw.Model = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
                 draw.Color = sprite.Color;
-                draw.AlbedoTexture = g_State.WhiteTexture;
-                draw.NormalTexture = g_State.FlatNormalTexture;
+                draw.AlbedoTexture = g_State->WhiteTexture;
+                draw.NormalTexture = g_State->FlatNormalTexture;
                 draw.NormalStrength = 1.0f;
                 draw.ReceiveShadows = sprite.ReceiveShadows;
                 draw.CasterEntityId = EncodeEntityIdToUnitVec2(entity);
@@ -768,7 +768,7 @@ namespace Limitless
                         if (auto mainTexture = material->CachedMaterial->GetMainTexture())
                             draw.AlbedoTexture = mainTexture;
 
-                        if (g_State.Settings.EnableNormalMaps)
+                        if (g_State->Settings.EnableNormalMaps)
                         {
                             if (auto normalTexture = material->CachedMaterial->GetNormalTexture())
                                 draw.NormalTexture = normalTexture;
@@ -781,7 +781,7 @@ namespace Limitless
                     }
                 }
 
-                if (!hasMaterialButFailed && draw.AlbedoTexture == g_State.WhiteTexture && !sprite.TextureKey.empty())
+                if (!hasMaterialButFailed && draw.AlbedoTexture == g_State->WhiteTexture && !sprite.TextureKey.empty())
                 {
                     RefreshSpriteTextureCache(sprite);
                     if (sprite.CachedTexture && sprite.CachedTexture->GetTexture())
@@ -900,21 +900,21 @@ namespace Limitless
             if (drawList.empty())
                 return;
 
-            auto shader = ResolveShaderFromAsset(g_State.GBufferNormalShaderAsset, kGBufferNormalShaderKey);
-            if (!shader || !g_State.UnitQuadVertexArray)
+            auto shader = ResolveShaderFromAsset(g_State->GBufferNormalShaderAsset, kGBufferNormalShaderKey);
+            if (!shader || !g_State->UnitQuadVertexArray)
                 return;
 
             Renderer::GetInstance().SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
             Renderer::GetInstance().SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::Zero, false));
             SubmitSelectNormalAndEntityAttachments();
-            const float shadowAlphaCutoff = std::clamp(g_State.Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
+            const float shadowAlphaCutoff = std::clamp(g_State->Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
 
             for (const NormalPassSpriteDraw& draw : drawList)
             {
                 auto shaderRef = shader;
-                auto vertexArrayRef = g_State.UnitQuadVertexArray;
-                auto albedoRef = draw.AlbedoTexture ? draw.AlbedoTexture : g_State.WhiteTexture;
-                auto normalRef = draw.NormalTexture ? draw.NormalTexture : g_State.FlatNormalTexture;
+                auto vertexArrayRef = g_State->UnitQuadVertexArray;
+                auto albedoRef = draw.AlbedoTexture ? draw.AlbedoTexture : g_State->WhiteTexture;
+                auto normalRef = draw.NormalTexture ? draw.NormalTexture : g_State->FlatNormalTexture;
                 const glm::mat4 model = draw.Model;
                 const glm::vec4 color = draw.Color;
                 const float normalStrength = draw.NormalStrength;
@@ -1450,9 +1450,9 @@ namespace Limitless
                                                                    float pixelsPerUnit)
         {
             std::vector<ScreenDirectionalLight> lights;
-            lights.reserve(std::max(0, g_State.Settings.MaxDirectionalLights));
+            lights.reserve(std::max(0, g_State->Settings.MaxDirectionalLights));
 
-            const uint32_t maxDirectionalLights = ClampDirectionalLightsByQuality(g_State.Settings);
+            const uint32_t maxDirectionalLights = ClampDirectionalLightsByQuality(g_State->Settings);
             if (maxDirectionalLights == 0)
                 return lights;
 
@@ -1498,13 +1498,13 @@ namespace Limitless
                 screenLight.Intensity = directional.Intensity;
                 screenLight.ShadowDirection = screenDirection;
                 screenLight.ShadingDirection = worldDirection;
-                screenLight.CastShadows = g_State.Settings.EnableShadows && directional.CastShadows;
+                screenLight.CastShadows = g_State->Settings.EnableShadows && directional.CastShadows;
                 screenLight.ShadowStrength = std::clamp(directional.ShadowStrength, 0.0f, 1.0f);
-                screenLight.ShadowSoftnessPixels = std::max(0.0f, directional.ShadowSoftness * g_State.Settings.ShadowSoftnessScale * pixelsPerUnit);
-                screenLight.ShadowSamples = ClampShadowSamplesByQuality(g_State.Settings, directional.ShadowSamples);
+                screenLight.ShadowSoftnessPixels = std::max(0.0f, directional.ShadowSoftness * g_State->Settings.ShadowSoftnessScale * pixelsPerUnit);
+                screenLight.ShadowSamples = ClampShadowSamplesByQuality(g_State->Settings, directional.ShadowSamples);
                 screenLight.ShadowDistancePixels = std::max(1.0f, directional.ShadowDistance * pixelsPerUnit);
                 // Screen-space directional ray tests need a bias to avoid self-occlusion on receiver quads.
-                const float biasScale = std::max(0.0f, g_State.Settings.DirectionalShadowBiasScale);
+                const float biasScale = std::max(0.0f, g_State->Settings.DirectionalShadowBiasScale);
                 screenLight.ShadowBiasPixels = std::max(0.0f, directional.ShadowBias * biasScale * pixelsPerUnit);
                 lights.push_back(screenLight);
             }
@@ -1520,9 +1520,9 @@ namespace Limitless
                                                        float pixelsPerUnit)
         {
             std::vector<ScreenPointLight> lights;
-            lights.reserve(std::max(0, g_State.Settings.MaxPointLights));
+            lights.reserve(std::max(0, g_State->Settings.MaxPointLights));
 
-            const uint32_t maxPointLights = ClampPointLightsByQuality(g_State.Settings);
+            const uint32_t maxPointLights = ClampPointLightsByQuality(g_State->Settings);
             if (maxPointLights == 0)
                 return lights;
 
@@ -1561,10 +1561,10 @@ namespace Limitless
                 screenLight.Position = screenPosition;
                 screenLight.RadiusPixels = std::max(1.0f, radiusPixels);
                 screenLight.Falloff = std::max(0.1f, pointLight.Falloff);
-                screenLight.CastShadows = g_State.Settings.EnableShadows && pointLight.CastShadows;
+                screenLight.CastShadows = g_State->Settings.EnableShadows && pointLight.CastShadows;
                 screenLight.ShadowStrength = std::clamp(pointLight.ShadowStrength, 0.0f, 1.0f);
-                screenLight.ShadowSoftnessPixels = std::max(0.0f, pointLight.ShadowSoftness * g_State.Settings.ShadowSoftnessScale * pixelsPerUnit);
-                screenLight.ShadowSamples = ClampShadowSamplesByQuality(g_State.Settings, pointLight.ShadowSamples);
+                screenLight.ShadowSoftnessPixels = std::max(0.0f, pointLight.ShadowSoftness * g_State->Settings.ShadowSoftnessScale * pixelsPerUnit);
+                screenLight.ShadowSamples = ClampShadowSamplesByQuality(g_State->Settings, pointLight.ShadowSamples);
                 screenLight.ShadowBiasPixels = std::max(0.0f, pointLight.ShadowBias * pixelsPerUnit);
                 lights.push_back(screenLight);
             }
@@ -1581,12 +1581,12 @@ namespace Limitless
                                         uint32_t height,
                                         float shadowSegmentSnapPixels)
         {
-            auto shader = ResolveShaderFromAsset(g_State.DirectionalLightShaderAsset, kDirectionalLightShaderKey);
-            if (!shader || !g_State.UnitQuadVertexArray)
+            auto shader = ResolveShaderFromAsset(g_State->DirectionalLightShaderAsset, kDirectionalLightShaderKey);
+            if (!shader || !g_State->UnitQuadVertexArray)
                 return;
 
             auto shaderRef = shader;
-            auto vertexArrayRef = g_State.UnitQuadVertexArray;
+            auto vertexArrayRef = g_State->UnitQuadVertexArray;
             auto albedoRef = albedoTexture;
             auto normalRef = normalTexture;
             auto entityIdRef = entityIdTexture;
@@ -1600,7 +1600,7 @@ namespace Limitless
             const int shadowSamples = light.ShadowSamples;
             const float shadowDistance = light.ShadowDistancePixels;
             const float shadowBias = light.ShadowBiasPixels;
-            const float shadowAlphaCutoff = std::clamp(g_State.Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
+            const float shadowAlphaCutoff = std::clamp(g_State->Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
             const float shadowSegmentSnapPixelsClamped = std::max(0.0f, shadowSegmentSnapPixels);
             // Use all shadow segments without screen-space facing filter.
             // The ray-segment intersection in the shader is geometrically
@@ -1696,12 +1696,12 @@ namespace Limitless
                                   uint32_t height,
                                   float shadowSegmentSnapPixels)
         {
-            auto shader = ResolveShaderFromAsset(g_State.PointLightShaderAsset, kPointLightShaderKey);
-            if (!shader || !g_State.UnitQuadVertexArray)
+            auto shader = ResolveShaderFromAsset(g_State->PointLightShaderAsset, kPointLightShaderKey);
+            if (!shader || !g_State->UnitQuadVertexArray)
                 return;
 
             auto shaderRef = shader;
-            auto vertexArrayRef = g_State.UnitQuadVertexArray;
+            auto vertexArrayRef = g_State->UnitQuadVertexArray;
             auto albedoRef = albedoTexture;
             auto normalRef = normalTexture;
             auto entityIdRef = entityIdTexture;
@@ -1715,7 +1715,7 @@ namespace Limitless
             const float shadowSoftness = light.ShadowSoftnessPixels;
             const int shadowSamples = light.ShadowSamples;
             const float shadowBias = light.ShadowBiasPixels;
-            const float shadowAlphaCutoff = std::clamp(g_State.Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
+            const float shadowAlphaCutoff = std::clamp(g_State->Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
             const float shadowSegmentSnapPixelsClamped = std::max(0.0f, shadowSegmentSnapPixels);
             const size_t segmentCountClamped = std::min<size_t>(shadowSegments.size(), kShaderShadowSegmentCap);
             std::vector<glm::vec4> segmentEndpoints;
@@ -1799,12 +1799,12 @@ namespace Limitless
         void SubmitCompositePass(const std::shared_ptr<Texture2D>& albedoTexture,
                                  const std::shared_ptr<Texture2D>& lightTexture)
         {
-            auto shader = ResolveShaderFromAsset(g_State.CompositeShaderAsset, kCompositeShaderKey);
-            if (!shader || !g_State.UnitQuadVertexArray || !albedoTexture || !lightTexture)
+            auto shader = ResolveShaderFromAsset(g_State->CompositeShaderAsset, kCompositeShaderKey);
+            if (!shader || !g_State->UnitQuadVertexArray || !albedoTexture || !lightTexture)
                 return;
 
             auto shaderRef = shader;
-            auto vertexArrayRef = g_State.UnitQuadVertexArray;
+            auto vertexArrayRef = g_State->UnitQuadVertexArray;
             auto albedoRef = albedoTexture;
             auto lightRef = lightTexture;
             Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, lightRef](GraphicsContext*) {
@@ -1840,257 +1840,251 @@ namespace Limitless
             if (!EnsureFramebuffers(width, height))
                 return false;
 
-            if (!ResolveShaderFromAsset(g_State.GBufferNormalShaderAsset, kGBufferNormalShaderKey))
+            if (!ResolveShaderFromAsset(g_State->GBufferNormalShaderAsset, kGBufferNormalShaderKey))
                 return false;
-            if (!ResolveShaderFromAsset(g_State.DirectionalLightShaderAsset, kDirectionalLightShaderKey))
+            if (!ResolveShaderFromAsset(g_State->DirectionalLightShaderAsset, kDirectionalLightShaderKey))
                 return false;
-            if (!ResolveShaderFromAsset(g_State.PointLightShaderAsset, kPointLightShaderKey))
+            if (!ResolveShaderFromAsset(g_State->PointLightShaderAsset, kPointLightShaderKey))
                 return false;
-            if (!ResolveShaderFromAsset(g_State.CompositeShaderAsset, kCompositeShaderKey))
+            if (!ResolveShaderFromAsset(g_State->CompositeShaderAsset, kCompositeShaderKey))
                 return false;
 
-            return g_State.GBufferFramebuffer &&
-                   g_State.LightFramebuffer &&
-                   g_State.UnitQuadVertexArray &&
-                   g_State.WhiteTexture &&
-                   g_State.FlatNormalTexture;
+            return g_State->GBufferFramebuffer &&
+                   g_State->LightFramebuffer &&
+                   g_State->UnitQuadVertexArray &&
+                   g_State->WhiteTexture &&
+                   g_State->FlatNormalTexture;
         }
     }
 
-    namespace Lighting2DRenderer
+    struct Lighting2DRenderer::Impl
     {
-        void SetSettings(const Lighting2DSettings& settings)
+        Lighting2DRendererState State{};
+    };
+
+    Lighting2DRenderer* Lighting2DRenderer::s_Default = nullptr;
+
+    Lighting2DRenderer::Lighting2DRenderer()
+        : m_Impl(std::make_unique<Impl>())
+    {
+    }
+
+    Lighting2DRenderer::~Lighting2DRenderer()
+    {
+        if (s_Default == this)
+            s_Default = nullptr;
+    }
+
+    Lighting2DRenderer& Lighting2DRenderer::Default()
+    {
+        if (!s_Default)
         {
-            g_State.Settings = settings;
-            g_State.Settings.ShadowQualityLevel = std::clamp(g_State.Settings.ShadowQualityLevel, 0, 2);
-            g_State.Settings.MaxDirectionalLights = std::max(0, g_State.Settings.MaxDirectionalLights);
-            g_State.Settings.MaxPointLights = std::max(0, g_State.Settings.MaxPointLights);
-            g_State.Settings.MaxShadowSegments = std::max(1, g_State.Settings.MaxShadowSegments);
-            g_State.Settings.MaxShadowSamplesPerLight = std::max(1, g_State.Settings.MaxShadowSamplesPerLight);
-            g_State.Settings.AmbientIntensity = std::max(0.0f, g_State.Settings.AmbientIntensity);
-            g_State.Settings.ShadowSoftnessScale = std::max(0.0f, g_State.Settings.ShadowSoftnessScale);
-            g_State.Settings.DirectionalShadowBiasScale = std::max(0.0f, g_State.Settings.DirectionalShadowBiasScale);
-            g_State.Settings.ShadowAlphaCutoff = std::clamp(g_State.Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
-            g_State.Settings.ShadowSegmentSnapPixels = std::max(0.0f, g_State.Settings.ShadowSegmentSnapPixels);
-            g_State.Settings.ShadowFreezeAngularVelocityDegreesPerSecond = std::max(1.0f, g_State.Settings.ShadowFreezeAngularVelocityDegreesPerSecond);
-            g_State.Settings.ShadowFreezeFrameCount = std::max(1, g_State.Settings.ShadowFreezeFrameCount);
-            if (!g_State.Settings.EnableHighAngularVelocityShadowFreeze)
-                g_State.ShadowFreezeFramesRemaining = 0;
+            static Lighting2DRenderer s_DefaultInstance;
+            s_Default = &s_DefaultInstance;
+        }
+        return *s_Default;
+    }
+
+    void Lighting2DRenderer::SetSettings(const Lighting2DSettings& settings)
+    {
+        g_State = &m_Impl->State;
+        g_State->Settings = settings;
+        g_State->Settings.ShadowQualityLevel = std::clamp(g_State->Settings.ShadowQualityLevel, 0, 2);
+        g_State->Settings.MaxDirectionalLights = std::max(0, g_State->Settings.MaxDirectionalLights);
+        g_State->Settings.MaxPointLights = std::max(0, g_State->Settings.MaxPointLights);
+        g_State->Settings.MaxShadowSegments = std::max(1, g_State->Settings.MaxShadowSegments);
+        g_State->Settings.MaxShadowSamplesPerLight = std::max(1, g_State->Settings.MaxShadowSamplesPerLight);
+        g_State->Settings.AmbientIntensity = std::max(0.0f, g_State->Settings.AmbientIntensity);
+        g_State->Settings.ShadowSoftnessScale = std::max(0.0f, g_State->Settings.ShadowSoftnessScale);
+        g_State->Settings.DirectionalShadowBiasScale = std::max(0.0f, g_State->Settings.DirectionalShadowBiasScale);
+        g_State->Settings.ShadowAlphaCutoff = std::clamp(g_State->Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
+        g_State->Settings.ShadowSegmentSnapPixels = std::max(0.0f, g_State->Settings.ShadowSegmentSnapPixels);
+        g_State->Settings.ShadowFreezeAngularVelocityDegreesPerSecond = std::max(1.0f, g_State->Settings.ShadowFreezeAngularVelocityDegreesPerSecond);
+        g_State->Settings.ShadowFreezeFrameCount = std::max(1, g_State->Settings.ShadowFreezeFrameCount);
+        if (!g_State->Settings.EnableHighAngularVelocityShadowFreeze)
+            g_State->ShadowFreezeFramesRemaining = 0;
+    }
+
+    const Lighting2DSettings& Lighting2DRenderer::GetSettings() const
+    {
+        return m_Impl->State.Settings;
+    }
+
+    const Lighting2DDiagnostics& Lighting2DRenderer::GetDiagnostics() const
+    {
+        return m_Impl->State.Diagnostics;
+    }
+
+    bool Lighting2DRenderer::RenderToViewport(Scene& scene,
+                          const Camera& camera,
+                          const std::shared_ptr<Framebuffer>& targetFramebuffer,
+                          uint32_t width,
+                          uint32_t height,
+                          const std::function<void()>& renderWorldAlbedoPass)
+    {
+        g_State = &m_Impl->State;
+        g_State->Diagnostics = {};
+
+        if (!g_State->Settings.Enabled || width == 0 || height == 0)
+            return false;
+
+        auto& renderer = Renderer::GetInstance();
+        if (!renderer.IsInitialized())
+            return false;
+
+        if (ShouldBypassDeferredLightingForDriver())
+            return false;
+
+        const auto buildStart = std::chrono::high_resolution_clock::now();
+        if (!PrepareResources(width, height))
+            return false;
+
+        const float interpolationAlpha = ComputeInterpolationAlpha();
+        const glm::mat4 viewProjection = camera.GetViewProjectionMatrix();
+        const float pixelsPerUnit = EstimatePixelsPerWorldUnit(camera.GetViewMatrix(), viewProjection, width, height);
+
+        const glm::mat4 cameraViewMatrix = camera.GetViewMatrix();
+        std::vector<NormalPassSpriteDraw> normalPassDraws = BuildNormalPassDrawList(scene, interpolationAlpha);
+        uint32_t occluderCount = 0;
+        const uint32_t maxShadowSegments = ClampSegmentsByQuality(g_State->Settings);
+        float effectiveShadowSegmentSnapPixels = std::max(0.0f, g_State->Settings.ShadowSegmentSnapPixels);
+        if (camera.GetUsage() == CameraUsage::Editor)
+        {
+            effectiveShadowSegmentSnapPixels = 0.0f;
+        }
+        const bool allowAngularVelocityShadowFreeze =
+            g_State->Settings.EnableHighAngularVelocityShadowFreeze && camera.GetUsage() == CameraUsage::Gameplay;
+        const glm::quat currentCameraRotation = ExtractCameraRotationFromViewMatrix(cameraViewMatrix);
+        float cameraAngularVelocityDegreesPerSecond = 0.0f;
+        if (allowAngularVelocityShadowFreeze && g_State->HasPreviousCameraRotation)
+        {
+            const float deltaTimeSeconds = std::max(Time::GetUnscaledDeltaTimeSeconds(), kEpsilon);
+            cameraAngularVelocityDegreesPerSecond = ComputeAngularVelocityDegreesPerSecond(
+                g_State->PreviousCameraRotation,
+                currentCameraRotation,
+                deltaTimeSeconds);
+        }
+        if (allowAngularVelocityShadowFreeze)
+        {
+            g_State->HasPreviousCameraRotation = true;
+            g_State->PreviousCameraRotation = currentCameraRotation;
+        }
+        else
+        {
+            g_State->HasPreviousCameraRotation = false;
+            g_State->ShadowFreezeFramesRemaining = 0;
         }
 
-        const Lighting2DSettings& GetSettings()
+        const float freezeThreshold = g_State->Settings.ShadowFreezeAngularVelocityDegreesPerSecond;
+        const int freezeFrameCount = g_State->Settings.ShadowFreezeFrameCount;
+
+        if (allowAngularVelocityShadowFreeze &&
+            cameraAngularVelocityDegreesPerSecond >= freezeThreshold)
         {
-            return g_State.Settings;
+            const uint32_t requestedFreezeFrames = static_cast<uint32_t>(std::max(1, freezeFrameCount));
+            g_State->ShadowFreezeFramesRemaining = std::max(g_State->ShadowFreezeFramesRemaining, requestedFreezeFrames);
         }
 
-        const Lighting2DDiagnostics& GetDiagnostics()
+        std::vector<ShadowSegment> shadowSegments;
+        const bool useFrozenShadowSegments = allowAngularVelocityShadowFreeze &&
+            g_State->ShadowFreezeFramesRemaining > 0 &&
+            !g_State->CachedShadowSegments.empty();
+        if (useFrozenShadowSegments)
         {
-            return g_State.Diagnostics;
+            shadowSegments = g_State->CachedShadowSegments;
+            occluderCount = g_State->CachedShadowOccluderCount;
+        }
+        else
+        {
+            shadowSegments = BuildShadowSegments(scene, interpolationAlpha, viewProjection, width, height, maxShadowSegments, occluderCount, effectiveShadowSegmentSnapPixels);
+            g_State->CachedShadowSegments = shadowSegments;
+            g_State->CachedShadowOccluderCount = occluderCount;
+        }
+        if (allowAngularVelocityShadowFreeze && g_State->ShadowFreezeFramesRemaining > 0)
+            --g_State->ShadowFreezeFramesRemaining;
+        std::vector<ScreenDirectionalLight> directionalLights = BuildDirectionalLights(scene, interpolationAlpha, camera, viewProjection, width, height, pixelsPerUnit);
+        std::vector<ScreenPointLight> pointLights = BuildPointLights(scene, interpolationAlpha, viewProjection, width, height, pixelsPerUnit);
+
+        const auto buildEnd = std::chrono::high_resolution_clock::now();
+        g_State->Diagnostics.CpuBuildTimeMs = std::chrono::duration<float, std::milli>(buildEnd - buildStart).count();
+        g_State->Diagnostics.ShadowOccluderCount = occluderCount;
+        g_State->Diagnostics.ShadowSegmentCount = static_cast<uint32_t>(shadowSegments.size());
+        g_State->Diagnostics.DirectionalLightsRendered = static_cast<uint32_t>(directionalLights.size());
+        g_State->Diagnostics.PointLightsRendered = static_cast<uint32_t>(pointLights.size());
+
+        const auto submitStart = std::chrono::high_resolution_clock::now();
+
+        renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(g_State->GBufferFramebuffer));
+        renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
+        SubmitSelectGBufferDrawBuffers();
+
+        ClearCommand::ClearFlags gBufferClearFlags{};
+        gBufferClearFlags.color = true;
+        gBufferClearFlags.depth = true;
+        gBufferClearFlags.stencil = false;
+        renderer.SubmitCommand(std::make_unique<ClearCommand>(gBufferClearFlags, 0.0f, 0.0f, 0.0f, 0.0f));
+        SubmitClearNormalAttachment();
+        SubmitClearEntityIdAttachment();
+
+        SubmitSelectAlbedoAttachmentOnly();
+        if (renderWorldAlbedoPass)
+            renderWorldAlbedoPass();
+
+        SubmitNormalPassDraws(normalPassDraws, viewProjection);
+
+        renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(g_State->LightFramebuffer));
+        renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
+
+        const glm::vec3 ambient = glm::max(g_State->Settings.AmbientColor * g_State->Settings.AmbientIntensity, glm::vec3(0.0f));
+        ClearCommand::ClearFlags lightClearFlags{};
+        lightClearFlags.color = true;
+        lightClearFlags.depth = false;
+        lightClearFlags.stencil = false;
+        renderer.SubmitCommand(std::make_unique<ClearCommand>(lightClearFlags, ambient.r, ambient.g, ambient.b, 1.0f));
+
+        renderer.SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
+        renderer.SubmitCommand(std::make_unique<SetCullFaceCommand>(false));
+        renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::One, true));
+
+        const auto gBufferAlbedo = g_State->GBufferFramebuffer->GetColorAttachment(0);
+        const auto gBufferNormal = g_State->GBufferFramebuffer->GetColorAttachment(1);
+        const auto gBufferEntityId = g_State->GBufferFramebuffer->GetColorAttachment(2);
+        for (const ScreenDirectionalLight& directionalLight : directionalLights)
+        {
+            SubmitDirectionalLightPass(gBufferAlbedo, gBufferNormal, gBufferEntityId, shadowSegments, directionalLight, width, height, effectiveShadowSegmentSnapPixels);
+        }
+        for (const ScreenPointLight& pointLight : pointLights)
+        {
+            SubmitPointLightPass(gBufferAlbedo, gBufferNormal, gBufferEntityId, shadowSegments, pointLight, width, height, effectiveShadowSegmentSnapPixels);
         }
 
-        bool RenderToViewport(Scene& scene,
-                              const Camera& camera,
-                              const std::shared_ptr<Framebuffer>& targetFramebuffer,
-                              uint32_t width,
-                              uint32_t height,
-                              const std::function<void()>& renderWorldAlbedoPass)
-        {
-            g_State.Diagnostics = {};
+        renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::Zero, false));
 
-            if (!g_State.Settings.Enabled || width == 0 || height == 0)
-                return false;
+        renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(targetFramebuffer));
+        renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
 
-            auto& renderer = Renderer::GetInstance();
-            if (!renderer.IsInitialized())
-                return false;
+        const glm::vec4 fallbackClearColor = SceneRenderer::GetViewportClearColor();
 
-            if (ShouldBypassDeferredLightingForDriver())
-                return false;
+        ClearCommand::ClearFlags targetClearFlags{};
+        targetClearFlags.color = true;
+        targetClearFlags.depth = true;
+        targetClearFlags.stencil = false;
+        renderer.SubmitCommand(std::make_unique<ClearCommand>(
+            targetClearFlags,
+            fallbackClearColor.r,
+            fallbackClearColor.g,
+            fallbackClearColor.b,
+            fallbackClearColor.a));
 
-            const auto buildStart = std::chrono::high_resolution_clock::now();
-            if (!PrepareResources(width, height))
-                return false;
+        renderer.SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
+        renderer.SubmitCommand(std::make_unique<SetCullFaceCommand>(false));
+        renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::OneMinusSrcAlpha, true));
+        SubmitCompositePass(gBufferAlbedo, g_State->LightFramebuffer->GetColorAttachment(0));
 
-            const float interpolationAlpha = ComputeInterpolationAlpha();
-            const glm::mat4 viewProjection = camera.GetViewProjectionMatrix();
-            const float pixelsPerUnit = EstimatePixelsPerWorldUnit(camera.GetViewMatrix(), viewProjection, width, height);
-
-            const glm::mat4 cameraViewMatrix = camera.GetViewMatrix();
-            std::vector<NormalPassSpriteDraw> normalPassDraws = BuildNormalPassDrawList(scene, interpolationAlpha);
-            uint32_t occluderCount = 0;
-            const uint32_t maxShadowSegments = ClampSegmentsByQuality(g_State.Settings);
-            float effectiveShadowSegmentSnapPixels = std::max(0.0f, g_State.Settings.ShadowSegmentSnapPixels);
-            if (camera.GetUsage() == CameraUsage::Editor)
-            {
-                // Disable screen-space snapping for the editor camera.
-                // Snapping rounds segment endpoints to a fixed screen-space grid,
-                // which helps prevent sub-pixel shimmer on a STATIC camera.
-                // But when the editor camera rotates, the world moves relative to
-                // the fixed grid, causing endpoints to jump between grid positions
-                // every frame.  This produces visible shadow edge flicker that is
-                // far more distracting than the sub-pixel shimmer it prevents.
-                effectiveShadowSegmentSnapPixels = 0.0f;
-            }
-            // Shadow freeze during fast camera rotation prevents temporal
-            // aliasing of the screen-space shadow system.  Freezing reuses
-            // cached segments from the last static frame.  Only enabled for
-            // gameplay cameras -- the editor camera updates segments every
-            // frame so the light direction and segments are always consistent.
-            // Freezing the editor camera caused shadow position mismatch
-            // (frozen segments + live direction) and brightness flashes when
-            // the freeze released.
-            const bool allowAngularVelocityShadowFreeze =
-                g_State.Settings.EnableHighAngularVelocityShadowFreeze && camera.GetUsage() == CameraUsage::Gameplay;
-            const glm::quat currentCameraRotation = ExtractCameraRotationFromViewMatrix(cameraViewMatrix);
-            float cameraAngularVelocityDegreesPerSecond = 0.0f;
-            if (allowAngularVelocityShadowFreeze && g_State.HasPreviousCameraRotation)
-            {
-                const float deltaTimeSeconds = std::max(Time::GetUnscaledDeltaTimeSeconds(), kEpsilon);
-                cameraAngularVelocityDegreesPerSecond = ComputeAngularVelocityDegreesPerSecond(
-                    g_State.PreviousCameraRotation,
-                    currentCameraRotation,
-                    deltaTimeSeconds);
-            }
-            if (allowAngularVelocityShadowFreeze)
-            {
-                g_State.HasPreviousCameraRotation = true;
-                g_State.PreviousCameraRotation = currentCameraRotation;
-            }
-            else
-            {
-                g_State.HasPreviousCameraRotation = false;
-                g_State.ShadowFreezeFramesRemaining = 0;
-            }
-
-            const float freezeThreshold = g_State.Settings.ShadowFreezeAngularVelocityDegreesPerSecond;
-            const int freezeFrameCount = g_State.Settings.ShadowFreezeFrameCount;
-
-            if (allowAngularVelocityShadowFreeze &&
-                cameraAngularVelocityDegreesPerSecond >= freezeThreshold)
-            {
-                const uint32_t requestedFreezeFrames = static_cast<uint32_t>(std::max(1, freezeFrameCount));
-                g_State.ShadowFreezeFramesRemaining = std::max(g_State.ShadowFreezeFramesRemaining, requestedFreezeFrames);
-            }
-
-            std::vector<ShadowSegment> shadowSegments;
-            const bool useFrozenShadowSegments = allowAngularVelocityShadowFreeze &&
-                g_State.ShadowFreezeFramesRemaining > 0 &&
-                !g_State.CachedShadowSegments.empty();
-            if (useFrozenShadowSegments)
-            {
-                shadowSegments = g_State.CachedShadowSegments;
-                occluderCount = g_State.CachedShadowOccluderCount;
-            }
-            else
-            {
-                shadowSegments = BuildShadowSegments(scene, interpolationAlpha, viewProjection, width, height, maxShadowSegments, occluderCount, effectiveShadowSegmentSnapPixels);
-                g_State.CachedShadowSegments = shadowSegments;
-                g_State.CachedShadowOccluderCount = occluderCount;
-            }
-            if (allowAngularVelocityShadowFreeze && g_State.ShadowFreezeFramesRemaining > 0)
-                --g_State.ShadowFreezeFramesRemaining;
-            std::vector<ScreenDirectionalLight> directionalLights = BuildDirectionalLights(scene, interpolationAlpha, camera, viewProjection, width, height, pixelsPerUnit);
-            std::vector<ScreenPointLight> pointLights = BuildPointLights(scene, interpolationAlpha, viewProjection, width, height, pixelsPerUnit);
-
-            const auto buildEnd = std::chrono::high_resolution_clock::now();
-            g_State.Diagnostics.CpuBuildTimeMs = std::chrono::duration<float, std::milli>(buildEnd - buildStart).count();
-            g_State.Diagnostics.ShadowOccluderCount = occluderCount;
-            g_State.Diagnostics.ShadowSegmentCount = static_cast<uint32_t>(shadowSegments.size());
-            g_State.Diagnostics.DirectionalLightsRendered = static_cast<uint32_t>(directionalLights.size());
-            g_State.Diagnostics.PointLightsRendered = static_cast<uint32_t>(pointLights.size());
-
-            const auto submitStart = std::chrono::high_resolution_clock::now();
-
-            // 1) Build GBuffer albedo and normal attachments.
-            renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(g_State.GBufferFramebuffer));
-            renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
-            SubmitSelectGBufferDrawBuffers();
-
-            ClearCommand::ClearFlags gBufferClearFlags{};
-            gBufferClearFlags.color = true;
-            gBufferClearFlags.depth = true;
-            gBufferClearFlags.stencil = false;
-            renderer.SubmitCommand(std::make_unique<ClearCommand>(gBufferClearFlags, 0.0f, 0.0f, 0.0f, 0.0f));
-            SubmitClearNormalAttachment();
-            SubmitClearEntityIdAttachment();
-
-            // Restrict the albedo pass to attachment 0 only.  The Renderer2D
-            // shader has a single output at location 0; leaving attachment 1
-            // active produces undefined fragment output on the normal channel
-            // per the OpenGL spec, which some drivers handle by corrupting the
-            // normal attachment in view-dependent ways (visible as color flashes
-            // when rotating the editor camera).
-            SubmitSelectAlbedoAttachmentOnly();
-            if (renderWorldAlbedoPass)
-                renderWorldAlbedoPass();
-
-            SubmitNormalPassDraws(normalPassDraws, viewProjection);
-
-            // 2) Accumulate lights into light buffer.
-            renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(g_State.LightFramebuffer));
-            renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
-
-            const glm::vec3 ambient = glm::max(g_State.Settings.AmbientColor * g_State.Settings.AmbientIntensity, glm::vec3(0.0f));
-            ClearCommand::ClearFlags lightClearFlags{};
-            lightClearFlags.color = true;
-            lightClearFlags.depth = false;
-            lightClearFlags.stencil = false;
-            renderer.SubmitCommand(std::make_unique<ClearCommand>(lightClearFlags, ambient.r, ambient.g, ambient.b, 1.0f));
-
-            renderer.SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
-            renderer.SubmitCommand(std::make_unique<SetCullFaceCommand>(false));
-            renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::One, true));
-
-            const auto gBufferAlbedo = g_State.GBufferFramebuffer->GetColorAttachment(0);
-            const auto gBufferNormal = g_State.GBufferFramebuffer->GetColorAttachment(1);
-            const auto gBufferEntityId = g_State.GBufferFramebuffer->GetColorAttachment(2);
-            for (const ScreenDirectionalLight& directionalLight : directionalLights)
-            {
-                SubmitDirectionalLightPass(gBufferAlbedo, gBufferNormal, gBufferEntityId, shadowSegments, directionalLight, width, height, effectiveShadowSegmentSnapPixels);
-            }
-            for (const ScreenPointLight& pointLight : pointLights)
-            {
-                SubmitPointLightPass(gBufferAlbedo, gBufferNormal, gBufferEntityId, shadowSegments, pointLight, width, height, effectiveShadowSegmentSnapPixels);
-            }
-
-            renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::Zero, false));
-
-            // 3) Composite (albedo * accumulated lighting) into target framebuffer.
-            // Null targetFramebuffer means default backbuffer.
-            renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(targetFramebuffer));
-            renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
-
-            // Keep target clear color in sync with SceneRenderer's configured viewport clear color.
-            const glm::vec4 fallbackClearColor = SceneRenderer::GetViewportClearColor();
-
-            ClearCommand::ClearFlags targetClearFlags{};
-            targetClearFlags.color = true;
-            targetClearFlags.depth = true;
-            targetClearFlags.stencil = false;
-            renderer.SubmitCommand(std::make_unique<ClearCommand>(
-                targetClearFlags,
-                fallbackClearColor.r,
-                fallbackClearColor.g,
-                fallbackClearColor.b,
-                fallbackClearColor.a));
-
-            renderer.SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
-            renderer.SubmitCommand(std::make_unique<SetCullFaceCommand>(false));
-            // The GBuffer albedo was rendered with standard alpha blending over
-            // a black-transparent background, which produces premultiplied-alpha
-            // output (RGB = color * alpha).  The composite must use premultiplied
-            // blending (One, OneMinusSrcAlpha) to avoid squaring the alpha at
-            // semi-transparent edges. The old SrcAlpha mode doubled the alpha
-            // contribution, amplifying sub-pixel coverage changes into visible
-            // per-frame flicker during camera movement.
-            renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::OneMinusSrcAlpha, true));
-            SubmitCompositePass(gBufferAlbedo, g_State.LightFramebuffer->GetColorAttachment(0));
-
-            const auto submitEnd = std::chrono::high_resolution_clock::now();
-            g_State.Diagnostics.CpuSubmitTimeMs = std::chrono::duration<float, std::milli>(submitEnd - submitStart).count();
-            g_State.Diagnostics.UsingLightingPath = true;
-            return true;
-        }
+        const auto submitEnd = std::chrono::high_resolution_clock::now();
+        g_State->Diagnostics.CpuSubmitTimeMs = std::chrono::duration<float, std::milli>(submitEnd - submitStart).count();
+        g_State->Diagnostics.UsingLightingPath = true;
+        return true;
     }
 }
 

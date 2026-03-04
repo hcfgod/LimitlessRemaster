@@ -1375,7 +1375,7 @@ namespace Limitless
             ImGui::Separator();
         }
 
-        const Lighting2DDiagnostics& lightingDiagnostics = Lighting2DRenderer::GetDiagnostics();
+        const Lighting2DDiagnostics& lightingDiagnostics = Lighting2DRenderer::Default().GetDiagnostics();
         ImGui::TextDisabled("Lighting 2D");
         ImGui::Text("Path Active: %s", lightingDiagnostics.UsingLightingPath ? "Yes" : "No");
         ImGui::Text("Directional Lights: %u", lightingDiagnostics.DirectionalLightsRendered);

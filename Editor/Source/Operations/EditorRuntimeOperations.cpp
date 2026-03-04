@@ -37,7 +37,7 @@ namespace Limitless::EditorRuntimeOperations
                 std::unique_ptr<EditorCameraController>& editorCameraController,
                 std::shared_ptr<Framebuffer>& viewportFramebuffer)
     {
-        Renderer2D::Initialize();
+        Renderer2D::Default().Initialize();
 
         scene = std::make_unique<Scene>();
 
@@ -90,7 +90,7 @@ namespace Limitless::EditorRuntimeOperations
         scene.reset();
         editSceneStored.reset();
         viewportFramebuffer.reset();
-        Renderer2D::Shutdown();
+        Renderer2D::Default().Shutdown();
 
         LT_INFO("EditorLayer detached");
     }

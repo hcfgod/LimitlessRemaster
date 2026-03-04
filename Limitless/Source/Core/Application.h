@@ -4,6 +4,7 @@
 #include <functional>
 #include "Error.h"
 #include "LayerStack.h"
+#include "ServiceRegistry.h"
 
 namespace Limitless
 {
@@ -33,6 +34,7 @@ namespace Limitless
         EventSystem& GetEventSystem();
         InputSystem& GetInputSystem();
         LayerStack& GetLayerStack() { return m_LayerStack; }
+        ServiceRegistry& GetServiceRegistry() { return m_Services; }
 
         // Layer management convenience methods
         void PushLayer(LayerRef layer) { m_LayerStack.PushLayer(layer); }
@@ -47,6 +49,7 @@ namespace Limitless
 		bool m_IsRunning = true;
 		std::unique_ptr<Window> m_Window;
 		LayerStack m_LayerStack;
+		ServiceRegistry m_Services;
 		std::function<void()> m_ImGuiBeginFrame;
 		std::function<void()> m_ImGuiEndFrame;
  

@@ -25,7 +25,7 @@ namespace Limitless
         (void)viewportWidthPixels;
         (void)viewportHeightPixels;
 
-        Renderer2D::Initialize();
+        Renderer2D::Default().Initialize();
 
         // Use existing TextureAsset type (async-ready, hot-reload friendly).
         TextureSpecification checkerSpec{};
@@ -139,7 +139,7 @@ namespace Limitless
             const uint64_t frames = m_FramesSinceLastStatsLog;
             m_FramesSinceLastStatsLog = 0;
 
-            const auto& stats = Renderer2D::GetStatistics();
+            const auto& stats = Renderer2D::Default().GetStatistics();
 
             const float fps = (intervalSeconds > 0.0f) ? (static_cast<float>(frames) / intervalSeconds) : 0.0f;
             const float quadsPerFrame = (frames > 0) ? (static_cast<float>(stats.QuadCount) / static_cast<float>(frames)) : 0.0f;
@@ -160,7 +160,7 @@ namespace Limitless
                     resourceStats.SharedTotalSubmitted,
                     resourceStats.SharedTotalProcessed);
 
-            Renderer2D::ResetStatistics();
+            Renderer2D::Default().ResetStatistics();
         }
     }
 
@@ -183,7 +183,7 @@ namespace Limitless
         const float a = 1.0f;
         renderer.SubmitCommand(std::make_unique<ClearCommand>(flags, r, g, b, a));
 
-        Renderer2D::BeginScene(camera);
+        Renderer2D::Default().BeginScene(camera);
 
         if (m_StressTest.Enabled)
         {
@@ -215,7 +215,7 @@ namespace Limitless
                     // Put the JPG at the center as a persistent “orientation / sampling” sanity check.
                     if (x == centerX && y == centerY)
                     {
-                        Renderer2D::DrawQuad(pos, quadSize, m_SissyTexture, glm::vec4(1.0f));
+                        Renderer2D::Default().DrawQuad(pos, quadSize, m_SissyTexture, glm::vec4(1.0f));
                         continue;
                     }
 
@@ -228,11 +228,11 @@ namespace Limitless
                         // This is a good way to see how much state changes cost on your machine.
                         const uint32_t linearIndex = x + y * gridWidth;
                         const bool usePhoto = ((linearIndex / stride) & 1u) != 0u;
-                        Renderer2D::DrawQuad(pos, quadSize, usePhoto ? m_SissyTexture : m_CheckerTexture, tint);
+                        Renderer2D::Default().DrawQuad(pos, quadSize, usePhoto ? m_SissyTexture : m_CheckerTexture, tint);
                     }
                     else
                     {
-                        Renderer2D::DrawQuad(pos, quadSize, m_CheckerTexture, tint);
+                        Renderer2D::Default().DrawQuad(pos, quadSize, m_CheckerTexture, tint);
                     }
                 }
             }
@@ -240,12 +240,12 @@ namespace Limitless
         else
         {
             // Minimal scene for quick sanity checks.
-            Renderer2D::DrawQuad(glm::vec2(-0.6f, 0.0f), glm::vec2(1.0f, 1.0f), m_CheckerTexture, glm::vec4(1.0f));
-            Renderer2D::DrawQuad(glm::vec2(0.6f, 0.0f), glm::vec2(1.0f, 1.0f), m_SissyTexture, glm::vec4(1.0f));
-            Renderer2D::DrawQuad(glm::vec2(0.0f, -1.25f), glm::vec2(2.0f, 0.35f), glm::vec4(0.15f, 0.85f, 0.25f, 1.0f));
+            Renderer2D::Default().DrawQuad(glm::vec2(-0.6f, 0.0f), glm::vec2(1.0f, 1.0f), m_CheckerTexture, glm::vec4(1.0f));
+            Renderer2D::Default().DrawQuad(glm::vec2(0.6f, 0.0f), glm::vec2(1.0f, 1.0f), m_SissyTexture, glm::vec4(1.0f));
+            Renderer2D::Default().DrawQuad(glm::vec2(0.0f, -1.25f), glm::vec2(2.0f, 0.35f), glm::vec4(0.15f, 0.85f, 0.25f, 1.0f));
         }
 
-        Renderer2D::EndScene();
+        Renderer2D::Default().EndScene();
     }
 
     void Renderer2DDemo::EnsureAssetsReady()

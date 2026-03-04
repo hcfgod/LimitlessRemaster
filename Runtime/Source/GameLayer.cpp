@@ -610,7 +610,7 @@ namespace Limitless
                         }
                     }
 
-                    Lighting2DRenderer::SetSettings(lightingSettings);
+                    Lighting2DRenderer::Default().SetSettings(lightingSettings);
                 }
                 catch (const std::exception& e)
                 {

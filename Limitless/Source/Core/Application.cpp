@@ -45,6 +45,8 @@ namespace Limitless
         s_ApplicationInstance = this;
 
 		LT_CORE_INFO("Application constructor starting...");
+
+		SetGlobalServiceRegistry(&m_Services);
 		
 		// Initialize AsyncIO system with thread count from config
 		auto& asyncIO = Limitless::Async::GetAsyncIO();
@@ -61,6 +63,11 @@ namespace Limitless
 		auto& hotReloadManager = Limitless::HotReloadManager::GetInstance();
 		hotReloadManager.Initialize();
 		hotReloadManager.EnableHotReload(true);
+
+		m_Services.Register<ConfigManager>(configManager);
+		m_Services.Register<Async::AsyncIO>(asyncIO);
+		m_Services.Register<Concurrency::JobSystem>(jobSystem);
+		m_Services.Register<HotReloadManager>(hotReloadManager);
 
 		LT_CORE_INFO("Application constructor completed successfully");
 	}
@@ -101,6 +108,8 @@ namespace Limitless
 
         m_ImGuiBeginFrame = nullptr;
         m_ImGuiEndFrame = nullptr;
+
+        SetGlobalServiceRegistry(nullptr);
 
         if (s_ApplicationInstance == this)
         {
@@ -319,6 +328,13 @@ namespace Limitless
 
 		// Register LayerStack with event system (non-owned: we own m_LayerStack)
 		GetEventSystem().AddListenerNonOwned(&m_LayerStack);
+
+		m_Services.Register<EventSystem>(GetEventSystem());
+		m_Services.Register<InputSystem>(GetInputSystem());
+		m_Services.Register<SDLManager>(SDLManager::GetInstance());
+		m_Services.Register<Audio::AudioEngine>(Audio::AudioEngine::GetInstance());
+		m_Services.Register<Renderer>(Renderer::GetInstance());
+		m_Services.Register<PerformanceMonitor>(PerformanceMonitor::GetInstance());
 
 		if (!Initialize())
 		{
