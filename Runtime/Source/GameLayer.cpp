@@ -1,9 +1,9 @@
 #include "GameLayer.h"
 
-#include "Assets/AudioClipAsset.h"
 #include "Assets/AssetBundle.h"
 #include "Assets/AssetManager.h"
 #include "Audio/AudioEngine.h"
+#include "Audio/SceneAudioSystem.h"
 #include "Audio/AudioMixerAsset.h"
 #include "Core/Application.h"
 #include "Core/Input/InputSystem.h"
@@ -14,7 +14,6 @@
 #include "Graphics/Renderer.h"
 #include "Platform/Platform.h"
 #include "Physics/Physics2DQueries.h"
-#include "Scene/Components/AudioComponents.h"
 #include "Scene/Components/CoreComponents.h"
 #include "Scene/Components/RenderingComponents.h"
 #include "Scene/Components/TilemapComponents.h"
@@ -270,241 +269,6 @@ namespace Limitless
 #endif
         }
 
-        struct AudioListener2DRuntimeState
-        {
-            bool HasListener = false;
-            glm::vec2 Position = glm::vec2(0.0f);
-        };
-
-        using AudioListenerPositions2D = std::vector<glm::vec2>;
-
-        struct AudioSpatialMix2D
-        {
-            float Gain = 1.0f;
-            float Pan = 0.0f;
-        };
-
-        glm::vec2 ComputeEntityWorldPosition2D(const Scene& scene, entt::entity entity)
-        {
-            const glm::mat4 worldTransform = scene.GetWorldTransformMatrix(entity);
-            return glm::vec2(worldTransform[3][0], worldTransform[3][1]);
-        }
-
-        bool TryFindPrimaryCameraEntity(const Scene& scene, entt::entity& outEntity)
-        {
-            const auto& registry = scene.GetRegistry();
-            auto cameraView = registry.view<CameraComponent>();
-            entt::entity fallbackEntity = entt::null;
-            for (entt::entity entity : cameraView)
-            {
-                if (fallbackEntity == entt::null)
-                    fallbackEntity = entity;
-
-                const auto& camera = cameraView.get<CameraComponent>(entity);
-                if (camera.IsPrimary)
-                {
-                    outEntity = entity;
-                    return true;
-                }
-            }
-
-            if (fallbackEntity != entt::null)
-            {
-                outEntity = fallbackEntity;
-                return true;
-            }
-
-            return false;
-        }
-
-        AudioListenerPositions2D CollectAudioListenerPositions2D(const Scene& scene)
-        {
-            AudioListenerPositions2D listenerPositions;
-            const auto& registry = scene.GetRegistry();
-
-            auto listenerView = registry.view<AudioListener2DComponent>();
-            for (entt::entity entity : listenerView)
-            {
-                if (!scene.IsEntityEnabledInHierarchy(entity))
-                    continue;
-
-                const auto& listener = listenerView.get<AudioListener2DComponent>(entity);
-                if (!listener.Enabled)
-                    continue;
-
-                if (listener.UsePrimaryCameraPosition)
-                {
-                    entt::entity cameraEntity = entt::null;
-                    if (TryFindPrimaryCameraEntity(scene, cameraEntity))
-                    {
-                        listenerPositions.push_back(ComputeEntityWorldPosition2D(scene, cameraEntity));
-                        continue;
-                    }
-                }
-
-                listenerPositions.push_back(ComputeEntityWorldPosition2D(scene, entity));
-            }
-
-            // Fallback keeps authored scenes audible before listeners are explicitly added.
-            if (listenerPositions.empty())
-            {
-                entt::entity fallbackCameraEntity = entt::null;
-                if (TryFindPrimaryCameraEntity(scene, fallbackCameraEntity))
-                    listenerPositions.push_back(ComputeEntityWorldPosition2D(scene, fallbackCameraEntity));
-            }
-
-            return listenerPositions;
-        }
-
-        AudioListener2DRuntimeState ResolveNearestAudioListener2DRuntimeState(const AudioListenerPositions2D& listeners,
-                                                                              const glm::vec2& sourcePosition)
-        {
-            AudioListener2DRuntimeState listenerState{};
-            if (listeners.empty())
-                return listenerState;
-
-            listenerState.HasListener = true;
-            listenerState.Position = listeners.front();
-            float bestDistanceSq = glm::dot(sourcePosition - listenerState.Position, sourcePosition - listenerState.Position);
-            for (size_t i = 1; i < listeners.size(); ++i)
-            {
-                const glm::vec2& listenerPosition = listeners[i];
-                const float distanceSq = glm::dot(sourcePosition - listenerPosition, sourcePosition - listenerPosition);
-                if (distanceSq < bestDistanceSq)
-                {
-                    bestDistanceSq = distanceSq;
-                    listenerState.Position = listenerPosition;
-                }
-            }
-
-            return listenerState;
-        }
-
-        AudioSpatialMix2D ComputeAudioSpatialMix2D(const AudioSourceComponent& audioSource,
-                                                   const glm::vec2& sourcePosition,
-                                                   const AudioListenerPositions2D& listeners)
-        {
-            AudioSpatialMix2D result{};
-            if (audioSource.Space != AudioSourceComponent::PlaybackSpace::Spatial2D || listeners.empty())
-                return result;
-
-            const AudioListener2DRuntimeState listenerState =
-                ResolveNearestAudioListener2DRuntimeState(listeners, sourcePosition);
-
-            const float minDistance = std::max(0.001f, audioSource.SpatialMinDistance);
-            const float maxDistance = std::max(minDistance, audioSource.SpatialMaxDistance);
-            const float rolloffExponent = std::max(0.01f, audioSource.SpatialRolloffExponent);
-            const float panStrength = std::clamp(audioSource.StereoPanStrength, 0.0f, 1.0f);
-
-            const float distanceToListener = glm::length(sourcePosition - listenerState.Position);
-            if (distanceToListener <= minDistance)
-            {
-                result.Gain = 1.0f;
-            }
-            else if (distanceToListener >= maxDistance)
-            {
-                result.Gain = 0.0f;
-            }
-            else
-            {
-                const float normalized = (distanceToListener - minDistance) / (maxDistance - minDistance);
-                result.Gain = std::pow(std::max(0.0f, 1.0f - normalized), rolloffExponent);
-            }
-
-            const float panNormalizationDistance = std::max(maxDistance, 0.001f);
-            const float signedPan = std::clamp((sourcePosition.x - listenerState.Position.x) / panNormalizationDistance, -1.0f, 1.0f);
-            result.Pan = signedPan * panStrength;
-            return result;
-        }
-
-        void StopAudioSourcesInScene(Scene* scene)
-        {
-            if (!scene)
-                return;
-
-            auto& registry = scene->GetRegistry();
-            auto audioView = registry.view<AudioSourceComponent>();
-            for (entt::entity entity : audioView)
-            {
-                auto& audioSource = audioView.get<AudioSourceComponent>(entity);
-                if (audioSource.RuntimeVoiceId != 0)
-                    Audio::AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
-                audioSource.RuntimeVoiceId = 0;
-                audioSource.RuntimePlaybackStarted = false;
-            }
-        }
-
-        void UpdateSceneAudioSources(Scene* scene)
-        {
-            if (!scene)
-                return;
-
-            auto& registry = scene->GetRegistry();
-            const AudioListenerPositions2D listenerPositions = CollectAudioListenerPositions2D(*scene);
-            auto audioView = registry.view<AudioSourceComponent>();
-            for (entt::entity entity : audioView)
-            {
-                auto& audioSource = audioView.get<AudioSourceComponent>(entity);
-                const bool entityEnabled = scene->IsEntityEnabledInHierarchy(entity);
-                if (audioSource.RuntimeVoiceId != 0 &&
-                    !Audio::AudioEngine::GetInstance().IsVoiceActive(audioSource.RuntimeVoiceId))
-                {
-                    audioSource.RuntimeVoiceId = 0;
-                }
-
-                if (!entityEnabled)
-                {
-                    if (audioSource.RuntimeVoiceId != 0)
-                        Audio::AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
-                    audioSource.RuntimeVoiceId = 0;
-                    audioSource.RuntimePlaybackStarted = false;
-                    continue;
-                }
-
-                const glm::vec2 sourcePosition = ComputeEntityWorldPosition2D(*scene, entity);
-                const AudioSpatialMix2D spatialMix = ComputeAudioSpatialMix2D(audioSource, sourcePosition, listenerPositions);
-                const float authoredVolume = audioSource.Muted ? 0.0f : std::max(0.0f, audioSource.Volume);
-                const float runtimeVolume = authoredVolume * spatialMix.Gain;
-                const float runtimePan = spatialMix.Pan;
-                const float runtimePitch = std::max(0.01f, audioSource.Pitch);
-
-                const bool shouldPlayOnStart =
-                    audioSource.PlayOnStart &&
-                    !audioSource.AudioClipKey.empty();
-
-                if (shouldPlayOnStart && !audioSource.RuntimePlaybackStarted)
-                {
-                    auto clipAsset = Assets::AudioClipAsset::LoadBlocking(audioSource.AudioClipKey);
-                    if (clipAsset && clipAsset->GetClip())
-                    {
-                        audioSource.RuntimeVoiceId = Audio::AudioEngine::GetInstance().PlayClip(
-                            clipAsset->GetClip(),
-                            runtimeVolume,
-                            audioSource.Loop,
-                            audioSource.MixerGroup,
-                            runtimePan,
-                            runtimePitch);
-                        audioSource.RuntimePlaybackStarted = (audioSource.RuntimeVoiceId != 0);
-                    }
-                }
-                else if (shouldPlayOnStart && audioSource.RuntimeVoiceId != 0)
-                {
-                    (void)Audio::AudioEngine::GetInstance().SetVoiceMixParameters(
-                        audioSource.RuntimeVoiceId,
-                        runtimeVolume,
-                        runtimePan,
-                        audioSource.MixerGroup,
-                        runtimePitch);
-                }
-                else if (!shouldPlayOnStart && audioSource.RuntimeVoiceId != 0)
-                {
-                    Audio::AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
-                    audioSource.RuntimeVoiceId = 0;
-                    audioSource.RuntimePlaybackStarted = false;
-                }
-            }
-        }
-
         void ApplyRuntimeProjectSettingsFromBundle()
         {
             auto& bundle = Assets::AssetBundle::GetInstance();
@@ -722,7 +486,7 @@ namespace Limitless
     {
         if (m_Scene)
         {
-            StopAudioSourcesInScene(m_Scene.get());
+            Audio::StopAudioSourcesInScene(m_Scene.get());
             s_ActiveScene = nullptr;
             Physics2DQueries::SetActiveSceneForScriptQueries(nullptr);
             m_Scene.reset();
@@ -734,7 +498,7 @@ namespace Limitless
 
     void GameLayer::OnUpdate(float deltaTime)
     {
-        UpdateSceneAudioSources(m_Scene.get());
+        Audio::UpdateSceneAudioSources(m_Scene.get());
 
         if (m_Scene && m_Scene->IsReady())
             m_Scene->Update(deltaTime);
@@ -848,7 +612,7 @@ namespace Limitless
         if (sceneAssetKey.empty())
             return false;
 
-        StopAudioSourcesInScene(m_Scene.get());
+        Audio::StopAudioSourcesInScene(m_Scene.get());
 
         // Scene::LoadFromFile can read directly from AssetBundle when enabled by key.
         auto loadResult = Scene::LoadFromFile(sceneAssetKey);

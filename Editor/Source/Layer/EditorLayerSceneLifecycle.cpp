@@ -1,7 +1,7 @@
 #include "PrecompiledHeader.h"
 #include "EditorLayer.h"
 
-#include "Audio/AudioEngine.h"
+#include "Audio/SceneAudioSystem.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetPaths.h"
 #include "Core/Debug/Log.h"
@@ -13,7 +13,6 @@
 #include "Panels/EditorInspectorPanel.h"
 #include "Project/BuildSettings.h"
 #include "Project/ProjectManager.h"
-#include "Scene/Components/AudioComponents.h"
 #include "Scene/Components/CoreComponents.h"
 #include "Scene/Scene.h"
 #include "Scripting/NativeScriptRegistry.h"
@@ -87,22 +86,6 @@ namespace Limitless
             camera.FarPlane = 1000.0f;
         }
 
-        void StopAudioSourcesInScene(Scene* scene)
-        {
-            if (!scene)
-                return;
-
-            auto& registry = scene->GetRegistry();
-            auto audioView = registry.view<AudioSourceComponent>();
-            for (entt::entity entity : audioView)
-            {
-                auto& audioSource = audioView.get<AudioSourceComponent>(entity);
-                if (audioSource.RuntimeVoiceId != 0)
-                    Audio::AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
-                audioSource.RuntimeVoiceId = 0;
-                audioSource.RuntimePlaybackStarted = false;
-            }
-        }
     }
 
     void EditorLayer::EnterPlayMode()
@@ -163,8 +146,8 @@ namespace Limitless
                 return;
         }
 
-        StopAudioSourcesInScene(m_Scene.get());
-        StopAudioSourcesInScene(m_EditSceneStored.get());
+        Audio::StopAudioSourcesInScene(m_Scene.get());
+        Audio::StopAudioSourcesInScene(m_EditSceneStored.get());
         m_EditSceneStoredAssetKey = m_CurrentSceneAssetKey;
 
         EditorPlayMode::Enter(
@@ -225,8 +208,8 @@ namespace Limitless
             LT_WARN("Simulate Mode Safe Mode enabled: scripts are disabled. {}", m_ScriptSafeModeMessage);
         }
 
-        StopAudioSourcesInScene(m_Scene.get());
-        StopAudioSourcesInScene(m_EditSceneStored.get());
+        Audio::StopAudioSourcesInScene(m_Scene.get());
+        Audio::StopAudioSourcesInScene(m_EditSceneStored.get());
         m_EditSceneStoredAssetKey = m_CurrentSceneAssetKey;
 
         EditorPlayMode::EnterSimulate(
@@ -251,8 +234,8 @@ namespace Limitless
         NativeScriptRegistry::SetExecutionBlocked(false);
         m_ScriptSafeModeActive = false;
         m_ScriptSafeModeMessage.clear();
-        StopAudioSourcesInScene(m_Scene.get());
-        StopAudioSourcesInScene(m_EditSceneStored.get());
+        Audio::StopAudioSourcesInScene(m_Scene.get());
+        Audio::StopAudioSourcesInScene(m_EditSceneStored.get());
 
         EditorPlayMode::Exit(
             m_PlayModeState,
@@ -297,7 +280,7 @@ namespace Limitless
             ExitPlayMode();
 
         BeginSceneSwitch();
-        StopAudioSourcesInScene(m_Scene.get());
+        Audio::StopAudioSourcesInScene(m_Scene.get());
 
         m_Scene = std::make_unique<Scene>();
         PopulateDefaultSceneTemplate(*m_Scene);
@@ -400,8 +383,8 @@ namespace Limitless
             ExitPlayMode();
 
         BeginSceneSwitch();
-        StopAudioSourcesInScene(m_Scene.get());
-        StopAudioSourcesInScene(m_EditSceneStored.get());
+        Audio::StopAudioSourcesInScene(m_Scene.get());
+        Audio::StopAudioSourcesInScene(m_EditSceneStored.get());
 
         const auto resolvedPathResult = Assets::ResolveAssetKeyToPath(assetKey);
         if (resolvedPathResult.IsFailure())
@@ -461,7 +444,7 @@ namespace Limitless
         if (assetKey.empty())
             return false;
 
-        StopAudioSourcesInScene(m_Scene.get());
+        Audio::StopAudioSourcesInScene(m_Scene.get());
 
         const auto resolvedPathResult = Assets::ResolveAssetKeyToPath(assetKey);
         if (resolvedPathResult.IsFailure())
