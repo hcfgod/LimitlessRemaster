@@ -76,9 +76,11 @@ namespace Limitless::Concurrency
         m_Workers.reserve(threadCount);
         for (size_t index = 0; index < threadCount; ++index)
         {
-            auto worker = std::make_unique<WorkerContext>();
-            worker->Thread = std::thread(&JobSystem::WorkerMain, this, index);
-            m_Workers.emplace_back(std::move(worker));
+            m_Workers.emplace_back(std::make_unique<WorkerContext>());
+        }
+        for (size_t index = 0; index < threadCount; ++index)
+        {
+            m_Workers[index]->Thread = std::thread(&JobSystem::WorkerMain, this, index);
         }
 
         LT_CORE_INFO("JobSystem initialized with {} simulation workers", threadCount);
