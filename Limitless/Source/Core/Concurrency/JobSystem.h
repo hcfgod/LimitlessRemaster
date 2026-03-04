@@ -104,7 +104,7 @@ namespace Limitless::Concurrency
         JobSystem(const JobSystem&) = delete;
         JobSystem& operator=(const JobSystem&) = delete;
 
-        using Job = std::shared_ptr<std::function<void()>>;
+        using Job = std::function<void()>;
         static constexpr size_t kWorkerQueueSize = 1024;
         static constexpr size_t kInjectorQueueSize = 8192;
 

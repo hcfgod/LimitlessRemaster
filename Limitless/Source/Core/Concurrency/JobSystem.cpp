@@ -118,7 +118,7 @@ namespace Limitless::Concurrency
             return false;
         }
 
-        Job queuedJob = std::make_shared<std::function<void()>>(std::move(job));
+        Job queuedJob = std::move(job);
         m_PendingJobs.Value.fetch_add(1, std::memory_order_acq_rel);
         if (TryEnqueue(queuedJob))
         {
@@ -138,7 +138,7 @@ namespace Limitless::Concurrency
         if (!job)
             return false;
 
-        Job queuedJob = std::make_shared<std::function<void()>>(std::move(job));
+        Job queuedJob = std::move(job);
         for (;;)
         {
             if (!m_Initialized.load(std::memory_order_acquire) ||
@@ -257,8 +257,8 @@ namespace Limitless::Concurrency
 
             try
             {
-                if (*job && **job)
-                    (**job)();
+                if (*job)
+                    (*job)();
             }
             catch (const std::exception& exception)
             {
