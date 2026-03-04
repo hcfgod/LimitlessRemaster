@@ -7,6 +7,27 @@
 #include <type_traits>
 #include <optional>
 
+// TSan annotations for lock-free algorithms that use speculative reads validated
+// by CAS. TSan cannot infer the happens-before through these patterns, so we
+// annotate the buffer accesses explicitly.
+#if defined(__SANITIZE_THREAD__)
+#define LT_TSAN_ENABLED 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define LT_TSAN_ENABLED 1
+#endif
+#endif
+
+#ifdef LT_TSAN_ENABLED
+extern "C" void __tsan_acquire(void* addr);
+extern "C" void __tsan_release(void* addr);
+#define LT_TSAN_ACQUIRE(addr) __tsan_acquire(static_cast<void*>(addr))
+#define LT_TSAN_RELEASE(addr) __tsan_release(static_cast<void*>(addr))
+#else
+#define LT_TSAN_ACQUIRE(addr) ((void)0)
+#define LT_TSAN_RELEASE(addr) ((void)0)
+#endif
+
 namespace Limitless
 {
     namespace Concurrency
@@ -300,7 +321,10 @@ namespace Limitless
                 if ((bottom - top) >= Size)
                     return false;
 
-                m_Buffer[bottom & (Size - 1)] = std::move(item);
+                const size_t index = bottom & (Size - 1);
+                LT_TSAN_ACQUIRE(&m_Buffer[index]);
+                m_Buffer[index] = std::move(item);
+                LT_TSAN_RELEASE(&m_Buffer[index]);
                 m_Bottom.store(bottom + 1, std::memory_order_release);
                 return true;
             }
@@ -320,20 +344,24 @@ namespace Limitless
 
                 bottom -= 1;
                 m_Bottom.store(bottom, std::memory_order_relaxed);
-                
-                size_t top = m_Top.load(std::memory_order_acquire);
+                // Full fence per the Chase-Lev algorithm: ensures the bottom
+                // decrement is visible to stealers before we inspect m_Top.
+                std::atomic_thread_fence(std::memory_order_seq_cst);
+
+                size_t top = m_Top.load(std::memory_order_relaxed);
                 if (top > bottom)
                 {
                     m_Bottom.store(bottom + 1, std::memory_order_relaxed);
                     return std::nullopt;
                 }
-                
-                T item = std::move(m_Buffer[bottom & (Size - 1)]);
-                
+
+                const size_t index = bottom & (Size - 1);
+                LT_TSAN_ACQUIRE(&m_Buffer[index]);
+                T item = std::move(m_Buffer[index]);
+                LT_TSAN_RELEASE(&m_Buffer[index]);
+
                 if (top == bottom)
                 {
-                    // Seq-cst here preserves the Chase-Lev "last item" race resolution
-                    // semantics across weaker memory models (e.g. ARM).
                     if (!m_Top.compare_exchange_strong(top, top + 1,
                                                       std::memory_order_seq_cst,
                                                       std::memory_order_relaxed))
@@ -343,7 +371,7 @@ namespace Limitless
                     }
                     m_Bottom.store(bottom + 1, std::memory_order_relaxed);
                 }
-                
+
                 return std::move(item);
             }
 
@@ -351,22 +379,26 @@ namespace Limitless
             std::optional<T> Steal() noexcept
             {
                 size_t top = m_Top.load(std::memory_order_acquire);
+                // Full fence per the Chase-Lev algorithm: ensures the top load
+                // completes before we sample m_Bottom for a consistent snapshot.
+                std::atomic_thread_fence(std::memory_order_seq_cst);
                 size_t bottom = m_Bottom.load(std::memory_order_acquire);
-                
+
                 if (top >= bottom)
                     return std::nullopt;
-                
-                T item = std::move(m_Buffer[top & (Size - 1)]);
-                
-                // Seq-cst pairs with owner pop path for portable correctness on weakly
-                // ordered architectures while keeping the common path mostly acq/rel.
+
+                const size_t index = top & (Size - 1);
+                LT_TSAN_ACQUIRE(&m_Buffer[index]);
+                T item = std::move(m_Buffer[index]);
+                LT_TSAN_RELEASE(&m_Buffer[index]);
+
                 if (!m_Top.compare_exchange_strong(top, top + 1,
                                                   std::memory_order_seq_cst,
                                                   std::memory_order_relaxed))
                 {
                     return std::nullopt;
                 }
-                
+
                 return std::move(item);
             }
 

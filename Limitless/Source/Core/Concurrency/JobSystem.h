@@ -127,16 +127,16 @@ namespace Limitless::Concurrency
             std::atomic<uint64_t> Value{ 0 };
         };
 
-        std::vector<std::unique_ptr<WorkerContext>> m_Workers;
+        PaddedAtomicU64 m_PendingJobs;
         LockFreeMPMCQueue<Job, kInjectorQueueSize> m_InjectorQueue;
-        std::mutex m_WakeMutex;
+        std::vector<std::unique_ptr<WorkerContext>> m_Workers;
         std::condition_variable m_WakeCondition;
-        std::mutex m_IdleMutex;
         std::condition_variable m_IdleCondition;
+        std::mutex m_WakeMutex;
+        std::mutex m_IdleMutex;
         std::atomic<bool> m_Initialized{ false };
         std::atomic<bool> m_ShutdownRequested{ false };
         std::atomic<bool> m_AcceptingJobs{ false };
-        PaddedAtomicU64 m_PendingJobs;
     };
 
     inline JobSystem& GetJobSystem()

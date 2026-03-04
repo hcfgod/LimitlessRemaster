@@ -257,16 +257,14 @@ namespace Limitless
         void ProcessCommandsInThread(uint32_t threadId);
 
     private:
-        GraphicsContext* m_Context;
         RenderCommandQueue m_Queue;
+        GraphicsContext* m_Context;
         std::vector<std::thread> m_WorkerThreads;
+        std::condition_variable m_WorkerCondition;
+        std::mutex m_WorkerMutex;
+        std::atomic<uint32_t> m_ActiveWorkers{0};
         std::atomic<bool> m_Running{false};
         std::atomic<bool> m_Shutdown{false};
-        
-        // Thread synchronization
-        std::mutex m_WorkerMutex;
-        std::condition_variable m_WorkerCondition;
-        std::atomic<uint32_t> m_ActiveWorkers{0};
     };
 
     // Render command batch for efficient command grouping

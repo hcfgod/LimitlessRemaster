@@ -322,5 +322,6 @@ jobs:
             --extra-arg-before="-I${PWD}/Runtime/Source" \
             --extra-arg-before="-I${PWD}/Test" \
             --extra-arg-before="-I${PWD}/Test/Source" \
+            -header-filter='.*/(Limitless|Editor|Runtime|Test)/Source/.*' \
             -checks='-*,clang-analyzer-*,-clang-analyzer-optin.core.EnumCastOutOfRange,-clang-analyzer-cplusplus.NewDeleteLeaks,-clang-analyzer-optin.cplusplus.UninitializedObject' \
             -warnings-as-errors='*' < clang-tidy-files.txt
