@@ -29,20 +29,32 @@ jobSystem.Initialize(simulationThreadCount);
 
 ### Usage
 
-`JobSystem` supports fire-and-forget tasks (`Submit`) and structured waits (`WaitGroup`, `ParallelFor`):
+`JobSystem` supports fire-and-forget tasks (`Submit`/`TrySubmit`) and structured waits (`WaitGroup`, `ParallelFor`):
 
 ```cpp
 auto& jobSystem = Limitless::Concurrency::GetJobSystem();
 Limitless::Concurrency::WaitGroup wg;
 
 wg.Add(1);
-jobSystem.Submit([&wg]() {
+const bool submitted = jobSystem.Submit([&wg]() {
+    struct DoneGuard
+    {
+        Limitless::Concurrency::WaitGroup& group;
+        ~DoneGuard() { group.Done(); }
+    } done{ wg };
     // simulation work
-    wg.Done();
 });
+
+if (!submitted)
+{
+    // System unavailable/shutting down: execute inline fallback if needed by caller policy.
+    wg.Done();
+}
 
 wg.Wait();
 ```
+
+`Submit()` now blocks/retries while the scheduler is accepting jobs and returns `false` when unavailable (not initialized or shutting down). `TrySubmit()` is non-blocking and returns `false` immediately when it cannot enqueue.
 
 This backend is used by scene runtime scheduling (parallel script batches, depth-batched transform solve, and scheduler-compatible simulation systems).
 
@@ -265,6 +277,19 @@ File: `Limitless/Source/Core/Concurrency/LockFreeQueue.h`
 - **Thread model**
   - `Push()` and `Pop()` are **owner-thread only**.
   - `Steal()` may be called by other threads.
+- **Capacity**
+  - The queue is bounded to **`Size`** items.
+  - Prefer `TryPush()` for explicit overflow handling (`false` when full).
+- **Correctness notes**
+  - `Pop()` on empty returns `std::nullopt` and does not underflow internal indices.
+  - Last-item owner/stealer races return `std::nullopt` on failed CAS handoff (no sentinel payloads).
+
+### Simulation `JobSystem` scheduling model
+
+- Per-worker owner-local work-stealing deque for local push/pop.
+- Shared bounded MPMC injection queue for submissions from non-worker threads and overflow fallback.
+- Worker execution order: local pop -> injection queue -> steal from peers -> sleep.
+- No global dequeue mutex on the hot path.
 
 ### Where these queues are used
 

@@ -153,11 +153,11 @@ namespace Limitless
 
             m_LayerStack.OnUpdate(deltaTime);
 
+			// Process events (this will also dispatch to layers)
+            GetEventSystem().ProcessEvents();
+
 			// Begin frame
 			Renderer::GetInstance().BeginFrame();
-			
-			// Process events (this will also dispatch to layers)
-			GetEventSystem().ProcessEvents();
 			
 			// Render layers
 			m_LayerStack.OnRender();

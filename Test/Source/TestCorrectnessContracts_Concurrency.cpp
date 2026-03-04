@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_WITH_VARIADIC_MACROS
 #include <doctest/doctest.h>
 
+#include "Core/Concurrency/JobSystem.h"
 #include "Core/Concurrency/LockFreeQueue.h"
 
 #include <atomic>
@@ -182,6 +183,76 @@ TEST_SUITE("Correctness Contracts - Concurrency Queues")
 
         CHECK(successCount == 8);
         CHECK(queue.IsFull() == true);
+    }
+
+    TEST_CASE("WorkStealingQueue pop on empty and bounded TryPush are safe")
+    {
+        using Queue = Limitless::Concurrency::WorkStealingQueue<int, 8>;
+        Queue queue;
+
+        CHECK(queue.Pop().has_value() == false);
+        CHECK(queue.Steal().has_value() == false);
+
+        for (int i = 0; i < 8; ++i)
+        {
+            CHECK(queue.TryPush(int{i}) == true);
+        }
+
+        CHECK(queue.TryPush(8) == false);
+        CHECK(queue.GetSize() == 8);
+
+        // Owner pops from bottom (LIFO).
+        auto tail = queue.Pop();
+        REQUIRE(tail.has_value());
+        CHECK(*tail == 7);
+
+        // Thief steals from top (oldest remaining).
+        auto head = queue.Steal();
+        REQUIRE(head.has_value());
+        CHECK(*head == 0);
+    }
+
+    TEST_CASE("JobSystem Submit rejects when unavailable and drains all accepted jobs")
+    {
+        auto& jobSystem = Limitless::Concurrency::GetJobSystem();
+        jobSystem.Shutdown();
+
+        CHECK(jobSystem.Submit([]() {}) == false);
+        CHECK(jobSystem.TrySubmit([]() {}) == false);
+
+        jobSystem.Initialize(2);
+
+        constexpr int kProducerCount = 4;
+        constexpr int kJobsPerProducer = 2000;
+        constexpr int kTotalJobs = kProducerCount * kJobsPerProducer;
+        std::atomic<int> executed{ 0 };
+        std::atomic<int> accepted{ 0 };
+
+        std::vector<std::thread> producers;
+        producers.reserve(kProducerCount);
+        for (int producer = 0; producer < kProducerCount; ++producer)
+        {
+            producers.emplace_back([&]() {
+                for (int i = 0; i < kJobsPerProducer; ++i)
+                {
+                    const bool submitted = jobSystem.Submit([&executed]() {
+                        executed.fetch_add(1, std::memory_order_relaxed);
+                    });
+                    if (submitted)
+                        accepted.fetch_add(1, std::memory_order_relaxed);
+                }
+            });
+        }
+
+        for (auto& producer : producers)
+            producer.join();
+
+        jobSystem.Wait();
+
+        CHECK(accepted.load(std::memory_order_relaxed) == kTotalJobs);
+        CHECK(executed.load(std::memory_order_relaxed) == kTotalJobs);
+
+        jobSystem.Shutdown();
     }
 }
 

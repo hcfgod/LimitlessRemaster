@@ -86,10 +86,20 @@ namespace Limitless
                 for (size_t batchIndex : batch)
                 {
                     waitGroup.Add(1);
-                    jobSystem.Submit([&systems, &waitGroup, batchIndex]() {
+                    const bool submitted = jobSystem.Submit([&systems, &waitGroup, batchIndex]() {
+                        struct WaitGroupDoneGuard final
+                        {
+                            Concurrency::WaitGroup& Group;
+                            ~WaitGroupDoneGuard() { Group.Done(); }
+                        } doneGuard{ waitGroup };
+
+                        systems[batchIndex].Execute();
+                    });
+                    if (!submitted)
+                    {
                         systems[batchIndex].Execute();
                         waitGroup.Done();
-                    });
+                    }
                 }
                 waitGroup.Wait();
             }

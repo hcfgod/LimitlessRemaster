@@ -1,11 +1,16 @@
 #pragma once
 
+#include "Core/Concurrency/LockFreeQueue.h"
+
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
+#include <memory>
+#include <optional>
 #include <type_traits>
 #include <mutex>
 #include <thread>
@@ -35,10 +40,11 @@ namespace Limitless::Concurrency
         void Initialize(size_t threadCount = 0);
         void Shutdown();
 
-        bool IsInitialized() const { return m_Initialized.load(std::memory_order_relaxed); }
+        bool IsInitialized() const { return m_Initialized.load(std::memory_order_acquire); }
         size_t GetWorkerCount() const { return m_Workers.size(); }
 
-        void Submit(std::function<void()> job);
+        bool TrySubmit(std::function<void()> job);
+        bool Submit(std::function<void()> job);
         void Wait();
 
         template<typename Func>
@@ -72,11 +78,22 @@ namespace Limitless::Concurrency
             {
                 const size_t chunkEnd = std::min(endIndex, chunkBegin + safeGrain);
                 waitGroup.Add(1);
-                Submit([chunkBegin, chunkEnd, fn = functionCopy, &waitGroup]() mutable {
+                const bool submitted = Submit([chunkBegin, chunkEnd, fn = functionCopy, &waitGroup]() mutable {
+                    struct WaitGroupDoneGuard final
+                    {
+                        WaitGroup& Group;
+                        ~WaitGroupDoneGuard() { Group.Done(); }
+                    } doneGuard{ waitGroup };
+
                     for (size_t index = chunkBegin; index < chunkEnd; ++index)
                         fn(index);
-                    waitGroup.Done();
                 });
+                if (!submitted)
+                {
+                    for (size_t index = chunkBegin; index < chunkEnd; ++index)
+                        functionCopy(index);
+                    waitGroup.Done();
+                }
             }
             waitGroup.Wait();
         }
@@ -87,7 +104,20 @@ namespace Limitless::Concurrency
         JobSystem(const JobSystem&) = delete;
         JobSystem& operator=(const JobSystem&) = delete;
 
-        void WorkerMain();
+        using Job = std::shared_ptr<std::function<void()>>;
+        static constexpr size_t kWorkerQueueSize = 1024;
+        static constexpr size_t kInjectorQueueSize = 8192;
+
+        struct WorkerContext
+        {
+            WorkStealingQueue<Job, kWorkerQueueSize> LocalQueue;
+            std::thread Thread;
+        };
+
+        void WorkerMain(size_t workerIndex);
+        std::optional<Job> TryAcquireJob(size_t workerIndex);
+        bool TryEnqueue(Job& job);
+        void CompleteOneJob();
 
     private:
         struct alignas(64) PaddedAtomicU64
@@ -95,10 +125,11 @@ namespace Limitless::Concurrency
             std::atomic<uint64_t> Value{ 0 };
         };
 
-        std::vector<std::thread> m_Workers;
-        std::vector<std::function<void()>> m_Queue;
-        std::mutex m_QueueMutex;
-        std::condition_variable m_QueueCondition;
+        std::vector<std::unique_ptr<WorkerContext>> m_Workers;
+        LockFreeMPMCQueue<Job, kInjectorQueueSize> m_InjectorQueue;
+        std::mutex m_WakeMutex;
+        std::condition_variable m_WakeCondition;
+        std::mutex m_IdleMutex;
         std::condition_variable m_IdleCondition;
         std::atomic<bool> m_Initialized{ false };
         std::atomic<bool> m_ShutdownRequested{ false };

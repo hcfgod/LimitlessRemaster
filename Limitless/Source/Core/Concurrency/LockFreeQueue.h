@@ -281,21 +281,41 @@ namespace Limitless
         template<typename T, size_t Size = 1024>
         class WorkStealingQueue
         {
+            static_assert(Size > 0 && ((Size & (Size - 1)) == 0), "Size must be a power of 2");
+            static_assert(std::is_default_constructible_v<T>, "T must be default constructible (queue uses a fixed ring buffer)");
+            static_assert(std::is_nothrow_move_constructible_v<T>, "T must be nothrow move constructible");
+            static_assert(std::is_nothrow_move_assignable_v<T>, "T must be nothrow move assignable");
+
         public:
             WorkStealingQueue() : m_Bottom(0), m_Top(0) {}
 
             // Push item to the bottom (owner thread only)
-            void Push(T&& item) noexcept
+            bool TryPush(T&& item) noexcept
             {
-                size_t bottom = m_Bottom.load(std::memory_order_relaxed);
+                const size_t bottom = m_Bottom.load(std::memory_order_relaxed);
+                const size_t top = m_Top.load(std::memory_order_acquire);
+                if ((bottom - top) >= Size)
+                    return false;
+
                 m_Buffer[bottom & (Size - 1)] = std::move(item);
                 m_Bottom.store(bottom + 1, std::memory_order_release);
+                return true;
+            }
+
+            // Backward-compatible alias for legacy call sites.
+            void Push(T&& item) noexcept
+            {
+                (void)TryPush(std::move(item));
             }
 
             // Pop item from the bottom (owner thread only)
             std::optional<T> Pop() noexcept
             {
-                size_t bottom = m_Bottom.load(std::memory_order_relaxed) - 1;
+                size_t bottom = m_Bottom.load(std::memory_order_relaxed);
+                if (bottom == 0)
+                    return std::nullopt;
+
+                bottom -= 1;
                 m_Bottom.store(bottom, std::memory_order_relaxed);
                 
                 size_t top = m_Top.load(std::memory_order_acquire);
@@ -313,7 +333,8 @@ namespace Limitless
                                                       std::memory_order_seq_cst,
                                                       std::memory_order_relaxed))
                     {
-                        item = T{}; // Failed to steal
+                        m_Bottom.store(bottom + 1, std::memory_order_relaxed);
+                        return std::nullopt;
                     }
                     m_Bottom.store(bottom + 1, std::memory_order_relaxed);
                 }

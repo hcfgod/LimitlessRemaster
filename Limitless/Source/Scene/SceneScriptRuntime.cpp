@@ -1486,10 +1486,20 @@ namespace Limitless
                     for (size_t batchIndex : batchIndices)
                     {
                         waitGroup.Add(1);
-                        jobSystem.Submit([&runParallelSlotAtIndex, &waitGroup, batchIndex]() {
+                        const bool submitted = jobSystem.Submit([&runParallelSlotAtIndex, &waitGroup, batchIndex]() {
+                            struct WaitGroupDoneGuard final
+                            {
+                                Concurrency::WaitGroup& Group;
+                                ~WaitGroupDoneGuard() { Group.Done(); }
+                            } doneGuard{ waitGroup };
+
+                            runParallelSlotAtIndex(batchIndex);
+                        });
+                        if (!submitted)
+                        {
                             runParallelSlotAtIndex(batchIndex);
                             waitGroup.Done();
-                        });
+                        }
                     }
                     waitGroup.Wait();
                 }
@@ -2429,10 +2439,20 @@ namespace Limitless
                     for (size_t batchIndex : batchIndices)
                     {
                         waitGroup.Add(1);
-                        jobSystem.Submit([&runParallelSlotAtIndex, &waitGroup, batchIndex]() {
+                        const bool submitted = jobSystem.Submit([&runParallelSlotAtIndex, &waitGroup, batchIndex]() {
+                            struct WaitGroupDoneGuard final
+                            {
+                                Concurrency::WaitGroup& Group;
+                                ~WaitGroupDoneGuard() { Group.Done(); }
+                            } doneGuard{ waitGroup };
+
+                            runParallelSlotAtIndex(batchIndex);
+                        });
+                        if (!submitted)
+                        {
                             runParallelSlotAtIndex(batchIndex);
                             waitGroup.Done();
-                        });
+                        }
                     }
                     waitGroup.Wait();
                 }

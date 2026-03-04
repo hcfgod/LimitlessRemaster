@@ -1075,6 +1075,7 @@ namespace Limitless::EditorInspectorPanel
             std::filesystem::path ResolvedPath;
             nlohmann::json Json = nlohmann::json::object();
             bool Loaded = false;
+            bool PendingSave = false;
         };
         static State s_State;
 
@@ -1181,6 +1182,7 @@ namespace Limitless::EditorInspectorPanel
             std::filesystem::path ResolvedPath;
             nlohmann::json Json = nlohmann::json::object();
             bool Loaded = false;
+            bool PendingSave = false;
         };
         static State s_State;
 
@@ -1257,8 +1259,8 @@ namespace Limitless::EditorInspectorPanel
 
             std::string mapName = mapJson.value("name", std::string("Map" + std::to_string(mapIndex + 1)));
             const std::string mapLabel = mapName.empty()
-                ? ("Map " + std::to_string(mapIndex + 1) + "##InputMap_" + std::to_string(mapIndex))
-                : ("Map: " + mapName + "##InputMap_" + std::to_string(mapIndex));
+                ? ("Map " + std::to_string(mapIndex + 1) + "###InputMap_" + std::to_string(mapIndex))
+                : ("Map: " + mapName + "###InputMap_" + std::to_string(mapIndex));
 
             ImGuiTreeNodeFlags mapFlags = ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
             const bool mapOpen = ImGui::TreeNodeEx(mapLabel.c_str(), mapFlags);
@@ -1331,8 +1333,8 @@ namespace Limitless::EditorInspectorPanel
 
                 const std::string actionName = actionJson.value("name", std::string("Action" + std::to_string(actionIndex + 1)));
                 const std::string actionLabel = actionName.empty()
-                    ? ("Action " + std::to_string(actionIndex + 1) + "##InputAction_" + std::to_string(actionIndex))
-                    : ("Action: " + actionName + "##InputAction_" + std::to_string(actionIndex));
+                    ? ("Action " + std::to_string(actionIndex + 1) + "###InputAction_" + std::to_string(actionIndex))
+                    : ("Action: " + actionName + "###InputAction_" + std::to_string(actionIndex));
                 const bool actionOpen = ImGui::TreeNodeEx(actionLabel.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth);
 
                 ImGui::SameLine();
@@ -1431,9 +1433,20 @@ namespace Limitless::EditorInspectorPanel
         }
 
         if (modified)
+            s_State.PendingSave = true;
+
+        // Defer disk save/reimport while user is actively editing widgets (especially text fields)
+        // to avoid interrupting ImGui active-item state and dropping keyboard focus.
+        if (s_State.PendingSave && !ImGui::IsAnyItemActive())
         {
             if (!SaveInputActionsJsonAndReload(selectedInputActionsAssetKey, s_State.Json, s_State.ResolvedPath))
+            {
                 saveFailed = true;
+            }
+            else
+            {
+                s_State.PendingSave = false;
+            }
         }
 
         if (saveFailed)
