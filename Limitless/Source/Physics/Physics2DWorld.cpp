@@ -1,6 +1,5 @@
 #include "Physics/Physics2DWorld.h"
 
-#include "Core/ConfigManager.h"
 #include "Core/Debug/Log.h"
 #include "Scene/Scene.h"
 #include "Scene/Components/RenderingComponents.h"
@@ -913,8 +912,6 @@ namespace Limitless
     void Physics2DWorld::SyncAuthoringTransformsToBodies(Scene& scene, float fixedDeltaTime)
     {
 #ifdef LT_ENABLE_PHYSICS2D
-        const bool debugKinematicMotion =
-            ConfigManager::GetInstance().GetValue<bool>("physics2d.debug_kinematic_motion", false);
         auto& registry = scene.GetRegistry();
         auto bodyView = registry.view<Rigidbody2DComponent, TransformComponent>();
         static std::unordered_map<entt::entity, uint32_t> s_AstroidMissingRuntimeBodyFrames;
@@ -926,7 +923,6 @@ namespace Limitless
                 continue;
             auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
             auto& transform = bodyView.get<TransformComponent>(entity);
-            const auto* tag = registry.try_get<TagComponent>(entity);
             const bool assignedToThisWorld = IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &rigidbody);
             if (!assignedToThisWorld)
                 continue;

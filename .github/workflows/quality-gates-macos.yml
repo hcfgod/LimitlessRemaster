@@ -85,6 +85,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies
         run: |
@@ -226,18 +228,32 @@ jobs:
             if [ -n "$PR_BASE_REF" ]; then
               git fetch --no-tags --prune --depth=200 origin "refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF" || true
             fi
+            if [ -n "$PR_BASE_SHA" ] && ! git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --prune --depth=200 origin "$PR_BASE_SHA" || true
+            fi
           else
             BASE_SHA="$PUSH_BEFORE_SHA"
             HEAD_SHA="$PUSH_HEAD_SHA"
+            if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+              if [ -n "$HEAD_SHA" ] && git cat-file -e "${HEAD_SHA}^" 2>/dev/null; then
+                BASE_SHA="$(git rev-parse "${HEAD_SHA}^")"
+              fi
+            fi
           fi
 
           if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$PR_BASE_REF" ] && \
              [ -n "$HEAD_SHA" ] && git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null && \
              git rev-parse --verify "origin/$PR_BASE_REF" >/dev/null 2>&1; then
             (git diff --name-only --diff-filter=ACMR "origin/$PR_BASE_REF...$HEAD_SHA" | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt) || true
+          elif [ "$EVENT_NAME" = "pull_request" ] && [ -n "$PR_BASE_SHA" ] && [ -n "$HEAD_SHA" ] && \
+               git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null && git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            (git diff --name-only --diff-filter=ACMR "$PR_BASE_SHA" "$HEAD_SHA" | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt) || true
           elif [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ] && \
                [ -n "$HEAD_SHA" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null && git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
             (git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt) || true
+          elif [ -n "$HEAD_SHA" ] && git cat-file -e "${HEAD_SHA}^" 2>/dev/null && git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            PARENT_SHA="$(git rev-parse "${HEAD_SHA}^")"
+            (git diff --name-only --diff-filter=ACMR "$PARENT_SHA" "$HEAD_SHA" | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt) || true
           elif [ -n "$HEAD_SHA" ] && git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
             echo "Diff base commit unavailable; falling back to changed files in HEAD commit."
             (git show --name-only --pretty="" --diff-filter=ACMR "$HEAD_SHA" | rg '^(Limitless|Editor|Runtime|Test)/Source/.*\.cpp$' > clang-tidy-files.txt) || true
