@@ -101,6 +101,7 @@ jobs:
             LDFLAGS="${SAN_FLAGS}"
 
       - name: Run tests with sanitizer
+        timeout-minutes: 16
         env:
           GATE_NAME: ${{ matrix.gate_name }}
         run: |
@@ -129,7 +130,18 @@ jobs:
               ;;
           esac
 
-          "$TEST_EXE" --no-success --abort-after=1
+          if [ "$GATE_NAME" = "tsan" ]; then
+            echo "Running TSAN tests with a 15-minute watchdog timeout."
+            timeout --signal=SIGABRT --kill-after=30s 15m "$TEST_EXE" --no-success --abort-after=1 || {
+              test_status=$?
+              if [ "$test_status" -eq 124 ] || [ "$test_status" -eq 137 ]; then
+                echo "TSAN test run timed out (possible deadlock/livelock)."
+              fi
+              exit "$test_status"
+            }
+          else
+            "$TEST_EXE" --no-success --abort-after=1
+          fi
 
   clang-tidy-linux:
     name: Clang-Tidy Gate
