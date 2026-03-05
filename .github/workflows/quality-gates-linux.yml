@@ -132,7 +132,7 @@ jobs:
 
           if [ "$GATE_NAME" = "tsan" ]; then
             echo "Running TSAN tests with a 15-minute watchdog timeout."
-            timeout --signal=SIGABRT --kill-after=30s 15m "$TEST_EXE" --no-success --abort-after=1 || {
+            timeout --signal=SIGTERM --kill-after=30s 15m "$TEST_EXE" --no-success --abort-after=1 || {
               test_status=$?
               if [ "$test_status" -eq 124 ] || [ "$test_status" -eq 137 ]; then
                 echo "TSAN test run timed out (possible deadlock/livelock)."
