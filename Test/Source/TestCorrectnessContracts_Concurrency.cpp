@@ -684,7 +684,7 @@ TEST_SUITE("Correctness Contracts - Concurrency Queues")
     TEST_CASE("JobSystem ParallelFor empty range is a no-op")
     {
 #ifdef LT_TSAN_ENABLED
-        DOCTEST_SKIP("Skipped under TSAN: this initialized shutdown path intermittently stalls in CI; non-TSAN gates cover this path.");
+        return; // Skip under TSAN: this initialized shutdown path intermittently stalls in CI.
 #endif
 
         auto& jobSystem = Limitless::Concurrency::GetJobSystem();
