@@ -221,9 +221,24 @@ namespace Limitless::Concurrency
 
     void JobSystem::CompleteOneJob()
     {
-        const uint64_t remaining = m_PendingJobs.Value.fetch_sub(1, std::memory_order_acq_rel) - 1;
-        if (remaining == 0)
-            m_IdleCondition.notify_all();
+        uint64_t pending = m_PendingJobs.Value.load(std::memory_order_acquire);
+        while (pending > 0)
+        {
+            if (m_PendingJobs.Value.compare_exchange_weak(
+                    pending,
+                    pending - 1,
+                    std::memory_order_acq_rel,
+                    std::memory_order_acquire))
+            {
+                if (pending == 1)
+                    m_IdleCondition.notify_all();
+                return;
+            }
+        }
+
+        // Defensive: avoid underflow if a completion races with shutdown edge cases.
+        // Keep waiters from blocking indefinitely.
+        m_IdleCondition.notify_all();
     }
 
     void JobSystem::WorkerMain(size_t workerIndex)
@@ -236,8 +251,7 @@ namespace Limitless::Concurrency
             auto job = TryAcquireJob(workerIndex);
             if (!job.has_value())
             {
-                if (m_ShutdownRequested.load(std::memory_order_acquire) &&
-                    m_PendingJobs.Value.load(std::memory_order_acquire) == 0)
+                if (m_ShutdownRequested.load(std::memory_order_acquire))
                 {
                     break;
                 }
@@ -248,8 +262,7 @@ namespace Limitless::Concurrency
                         m_PendingJobs.Value.load(std::memory_order_acquire) > 0;
                 });
 
-                if (m_ShutdownRequested.load(std::memory_order_acquire) &&
-                    m_PendingJobs.Value.load(std::memory_order_acquire) == 0)
+                if (m_ShutdownRequested.load(std::memory_order_acquire))
                 {
                     break;
                 }
