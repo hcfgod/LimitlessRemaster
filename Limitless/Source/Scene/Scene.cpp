@@ -848,4 +848,92 @@ namespace Limitless
         UpdateAnimation2DSystem(scene, deltaTime, dispatchFrame);
     }
 
+    bool Scene::PreviewAnimationClipOnEntity(entt::entity entity, const std::string& clipAssetKey, float previewTimeSeconds)
+    {
+        if (!IsValid(entity) || clipAssetKey.empty())
+            return false;
+
+        auto& registry = GetRegistry();
+        auto* animator = registry.try_get<AnimatorComponent>(entity);
+        if (!animator)
+            return false;
+
+        auto clipAsset = std::dynamic_pointer_cast<Assets::AnimationClipAsset>(
+            Assets::AssetManager::GetCachedByKey(clipAssetKey));
+        if (!clipAsset)
+            clipAsset = Assets::AnimationClipAsset::LoadBlocking(clipAssetKey);
+        if (!clipAsset)
+            return false;
+
+        const auto& clipData = clipAsset->GetData();
+        const float durationSeconds = std::max(0.0001f, clipData.DurationSeconds);
+        const float currentTime = std::clamp(previewTimeSeconds, 0.0f, durationSeconds);
+
+        const std::string previousSpriteTextureOverrideKey = animator->RuntimeSpriteTextureOverrideKey;
+        ResetAnimatorRuntimeOutput(*animator, false);
+
+        animator->RuntimeCurrentClipKey = clipAssetKey;
+        animator->RuntimeCurrentStateDurationSeconds = durationSeconds;
+        animator->RuntimePreviousStateTimeSeconds = currentTime;
+        animator->RuntimeStateTimeSeconds = currentTime;
+
+        if (const auto* spriteSubRect = SampleStepTrackKeyframe(clipData.SpriteSubRectTrack, currentTime))
+        {
+            animator->RuntimeHasSpriteSubRect = true;
+            animator->RuntimeSpriteUvMin = spriteSubRect->UvMin;
+            animator->RuntimeSpriteUvMax = spriteSubRect->UvMax;
+        }
+
+        if (const auto* spriteTexture = SampleStepTrackKeyframe(clipData.SpriteTextureTrack, currentTime))
+            animator->RuntimeSpriteTextureOverrideKey = spriteTexture->TextureKey;
+
+        if (animator->RuntimeSpriteTextureOverrideKey != previousSpriteTextureOverrideKey)
+        {
+            animator->RuntimeCachedSpriteTextureOverride.reset();
+            animator->RuntimeSpriteTextureOverrideLoadAttempted = false;
+        }
+
+        bool hasPositionSample = false;
+        const glm::vec3 sampledPosition = SampleVector3Track(clipData.PositionTrack, currentTime, hasPositionSample);
+        animator->RuntimeHasPosition = hasPositionSample;
+        animator->RuntimePosition = sampledPosition;
+
+        bool hasScaleSample = false;
+        const glm::vec3 sampledScale = SampleVector3Track(clipData.ScaleTrack, currentTime, hasScaleSample);
+        animator->RuntimeHasScale = hasScaleSample;
+        animator->RuntimeScale = sampledScale;
+
+        bool hasRotationSample = false;
+        const float sampledRotation = SampleFloatTrack(clipData.RotationZTrack, currentTime, hasRotationSample);
+        animator->RuntimeHasRotationZ = hasRotationSample;
+        animator->RuntimeRotationZDegrees = sampledRotation;
+
+        if (animator->ApplyToTransform)
+        {
+            if (auto* transform = registry.try_get<TransformComponent>(entity))
+            {
+                bool transformChanged = false;
+                if (animator->RuntimeHasPosition)
+                {
+                    transform->Position = animator->RuntimePosition;
+                    transformChanged = true;
+                }
+                if (animator->RuntimeHasScale)
+                {
+                    transform->Scale = animator->RuntimeScale;
+                    transformChanged = true;
+                }
+                if (animator->RuntimeHasRotationZ)
+                {
+                    transform->Rotation.z = animator->RuntimeRotationZDegrees;
+                    transformChanged = true;
+                }
+                if (transformChanged)
+                    MarkTransformDirty(entity);
+            }
+        }
+
+        return true;
+    }
+
 }

@@ -68,6 +68,7 @@ namespace Limitless
         void DrawConsolePanel();
         void DrawTilePalettePanelFrame();
         void DrawSpriteEditorPanel();
+        void ApplyAnimationTimelinePreviewToSelectedEntity();
 
         void EnsureSceneViewFramebuffer(uint32_t width, uint32_t height);
         void EnsureGameViewFramebuffer(uint32_t width, uint32_t height);

@@ -569,6 +569,8 @@ namespace Limitless
         if (m_PlayModeState != EditorPlayModeState::Play && m_Scene && m_Scene->IsReady())
             UpdateParticleEmitterSystem(m_Scene->GetRegistry(), deltaTime, true);
 
+        ApplyAnimationTimelinePreviewToSelectedEntity();
+
         ProcessPendingSceneTransitions();
         if (m_StartupAssetImportPending && (!m_Scene || m_Scene->IsReady()))
         {
@@ -1820,6 +1822,60 @@ namespace Limitless
     void EditorLayer::DrawAnimationTimelinePanel()
     {
         EditorAnimationTimelinePanel::Draw(m_ShowAnimationTimelinePanel, m_SelectedAnimationClipAssetKey, &m_EditorUndoService);
+    }
+
+    void EditorLayer::ApplyAnimationTimelinePreviewToSelectedEntity()
+    {
+        if (m_PlayModeState != EditorPlayModeState::Edit || !m_ShowAnimationTimelinePanel || !m_Scene || !m_Scene->IsReady())
+            return;
+
+        EditorAnimationTimelinePanel::ActivePreview preview{};
+        if (!EditorAnimationTimelinePanel::TryGetActivePreview(preview) || preview.ClipAssetKey.empty())
+            return;
+
+        auto& registry = m_Scene->GetRegistry();
+
+        if (m_SelectedEntity != entt::null && m_Scene->IsValid(m_SelectedEntity))
+        {
+            auto* animator = registry.try_get<AnimatorComponent>(m_SelectedEntity);
+            if (animator && animator->Enabled)
+            {
+                (void)m_Scene->PreviewAnimationClipOnEntity(m_SelectedEntity, preview.ClipAssetKey, preview.PreviewTimeSeconds);
+                return;
+            }
+        }
+
+        auto animatorView = registry.view<AnimatorComponent>();
+        for (entt::entity entity : animatorView)
+        {
+            auto& animator = animatorView.get<AnimatorComponent>(entity);
+            if (!animator.Enabled)
+                continue;
+
+            if (animator.DefaultClipKey == preview.ClipAssetKey ||
+                animator.RuntimeCurrentClipKey == preview.ClipAssetKey)
+            {
+                (void)m_Scene->PreviewAnimationClipOnEntity(entity, preview.ClipAssetKey, preview.PreviewTimeSeconds);
+                continue;
+            }
+
+            if (!animator.ControllerKey.empty())
+            {
+                if (!animator.CachedController)
+                    animator.CachedController = Assets::AnimatorControllerAsset::LoadBlocking(animator.ControllerKey);
+                if (animator.CachedController)
+                {
+                    for (const auto& state : animator.CachedController->GetData().States)
+                    {
+                        if (state.ClipKey == preview.ClipAssetKey)
+                        {
+                            (void)m_Scene->PreviewAnimationClipOnEntity(entity, preview.ClipAssetKey, preview.PreviewTimeSeconds);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     void EditorLayer::DrawAnimatorGraphPanel()

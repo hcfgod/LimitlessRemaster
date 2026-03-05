@@ -44,6 +44,8 @@ namespace Limitless::EditorAnimationTimelinePanel
             bool Loaded = false;
             bool LoadFailed = false;
             float PreviewTimeSeconds = 0.0f;
+            bool IsPlaying = false;
+            bool IsPaused = false;
             std::string StatusMessage;
             bool StatusIsError = false;
         };
@@ -988,10 +990,80 @@ namespace Limitless::EditorAnimationTimelinePanel
         DrawFloatField("Samples Per Second", samplesPerSecond, 0.25f);
         state.WorkingJson["SamplesPerSecond"] = std::max(1.0f, samplesPerSecond);
 
-        const float maxPreviewTime = state.WorkingJson.value("DurationSeconds", 1.0f);
+        const float maxPreviewTime = std::max(0.0001f, state.WorkingJson.value("DurationSeconds", 1.0f));
+        const bool clipLoops = state.WorkingJson.value("Loop", true);
+        const float previewSpeedMultiplier = 1.0f;
+
+        if (state.IsPlaying && !state.IsPaused)
+        {
+            const float frameDelta = ImGui::GetIO().DeltaTime * previewSpeedMultiplier;
+            state.PreviewTimeSeconds += frameDelta;
+            if (state.PreviewTimeSeconds >= maxPreviewTime)
+            {
+                if (clipLoops)
+                    state.PreviewTimeSeconds = std::fmod(state.PreviewTimeSeconds, maxPreviewTime);
+                else
+                {
+                    state.PreviewTimeSeconds = maxPreviewTime;
+                    state.IsPlaying = false;
+                    state.IsPaused = false;
+                }
+            }
+        }
+
         ImGui::SeparatorText("Preview");
-        ImGui::TextUnformatted("Preview Time");
-        ImGui::SliderFloat("##PreviewTime", &state.PreviewTimeSeconds, 0.0f, std::max(0.0001f, maxPreviewTime));
+
+        if (!state.IsPlaying)
+        {
+            if (ImGui::Button("Play##TimelinePlay", ImVec2(60.0f, 0.0f)))
+            {
+                state.IsPlaying = true;
+                state.IsPaused = false;
+                if (state.PreviewTimeSeconds >= maxPreviewTime - 0.001f)
+                    state.PreviewTimeSeconds = 0.0f;
+            }
+        }
+        else if (state.IsPaused)
+        {
+            if (ImGui::Button("Resume##TimelineResume", ImVec2(60.0f, 0.0f)))
+                state.IsPaused = false;
+        }
+        else
+        {
+            if (ImGui::Button("Pause##TimelinePause", ImVec2(60.0f, 0.0f)))
+                state.IsPaused = true;
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Stop##TimelineStop", ImVec2(60.0f, 0.0f)))
+        {
+            state.IsPlaying = false;
+            state.IsPaused = false;
+            state.PreviewTimeSeconds = 0.0f;
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("|<##TimelineRewind", ImVec2(30.0f, 0.0f)))
+        {
+            state.PreviewTimeSeconds = 0.0f;
+        }
+
+        ImGui::SameLine();
+        {
+            const float frameStep = 1.0f / std::max(1.0f, state.WorkingJson.value("SamplesPerSecond", 30.0f));
+            if (ImGui::Button(">|##TimelineStepFwd", ImVec2(30.0f, 0.0f)))
+            {
+                state.PreviewTimeSeconds = std::min(state.PreviewTimeSeconds + frameStep, maxPreviewTime);
+            }
+        }
+
+        ImGui::SliderFloat("##PreviewTime", &state.PreviewTimeSeconds, 0.0f, maxPreviewTime, "%.3f s");
+        if (ImGui::IsItemActive())
+        {
+            state.IsPlaying = false;
+            state.IsPaused = false;
+        }
+
         if (const json* sampledTexture = SampleStepJsonKeyframe(state.WorkingJson["SpriteTextureTrack"], state.PreviewTimeSeconds))
         {
             const std::string previewTextureKey = sampledTexture->contains("Texture") && (*sampledTexture)["Texture"].is_object()
@@ -1065,5 +1137,18 @@ namespace Limitless::EditorAnimationTimelinePanel
     {
         auto& state = GetTimelineEditorState();
         return ApplyPendingClipChanges(undoService, state, "Auto Save Animation Clip");
+    }
+
+    bool TryGetActivePreview(ActivePreview& outPreview)
+    {
+        auto& state = GetTimelineEditorState();
+        if (!state.Loaded || state.LoadFailed || state.LoadedAssetKey.empty())
+            return false;
+
+        outPreview.ClipAssetKey = state.LoadedAssetKey;
+        outPreview.PreviewTimeSeconds = std::max(0.0f, state.PreviewTimeSeconds);
+        outPreview.ClipDurationSeconds = std::max(0.0001f, state.WorkingJson.value("DurationSeconds", 1.0f));
+        outPreview.IsPlaying = state.IsPlaying && !state.IsPaused;
+        return true;
     }
 }
