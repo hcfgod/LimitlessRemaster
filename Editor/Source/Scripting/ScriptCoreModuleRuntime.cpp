@@ -1,4 +1,5 @@
 #include "ScriptCoreModuleRuntime.h"
+#include "IncrementalScriptCompiler.h"
 
 #include "Core/Debug/Log.h"
 #include "Core/Input/InputSystem.h"
@@ -906,5 +907,39 @@ namespace Limitless::ScriptCoreModuleRuntime
             else
                 markSourceRejected(sourcePath);
         }
+    }
+
+    void InitializeIncrementalCompiler()
+    {
+        const auto engineRoot = FindEngineWorkspaceRoot();
+        const auto projectRoot = GetOpenProjectRoot();
+        if (!engineRoot.has_value() || !projectRoot.has_value())
+        {
+            LT_INFO("ScriptCoreModuleRuntime: Cannot initialize incremental compiler — missing engine or project root.");
+            return;
+        }
+
+        auto& compiler = IncrementalScriptCompiler::GetInstance();
+        compiler.Initialize(engineRoot.value(), projectRoot.value());
+    }
+
+    void ShutdownIncrementalCompiler()
+    {
+        IncrementalScriptCompiler::GetInstance().Shutdown();
+    }
+
+    void SetAutoRecompileOnSave(bool enabled)
+    {
+        IncrementalScriptCompiler::GetInstance().SetAutoRecompileEnabled(enabled);
+    }
+
+    bool IsAutoRecompileOnSave()
+    {
+        return IncrementalScriptCompiler::GetInstance().IsAutoRecompileEnabled();
+    }
+
+    bool HasPendingScriptFileChanges()
+    {
+        return IncrementalScriptCompiler::GetInstance().HasPendingScriptChanges();
     }
 }

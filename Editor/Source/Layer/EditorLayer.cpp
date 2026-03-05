@@ -522,6 +522,7 @@ namespace Limitless
             m_SceneViewFramebuffer);
         DestroyGameViewPreviewCamera();
         m_GameViewFramebuffer.reset();
+        ScriptCoreModuleRuntime::ShutdownIncrementalCompiler();
         ScriptCoreModuleRuntime::Shutdown();
     }
 
@@ -534,6 +535,16 @@ namespace Limitless
             io.WantCaptureMouse,
             io.WantCaptureKeyboard || io.WantTextInput);
         ScriptCoreModuleRuntime::Update(m_PlayModeState);
+
+        // Auto-recompile: when the file watcher detects .cpp/.h saves in
+        // Assets/, trigger the full mirror + incremental build + DLL copy
+        // pipeline automatically so the user never has to click Build Scripts.
+        if (m_PlayModeState == EditorPlayModeState::Edit &&
+            ScriptCoreModuleRuntime::HasPendingScriptFileChanges())
+        {
+            BuildProjectScripts();
+        }
+
         ApplyProjectRenderSettings();
         const bool audioPlaybackAllowed =
             (m_PlayModeState == EditorPlayModeState::Play ||
@@ -764,6 +775,9 @@ namespace Limitless
             // default so Asset Diagnostics no longer reports a missing default scene.
             if (defaultSceneWasMissing && loadedScene && !m_CurrentSceneAssetKey.empty())
                 SetProjectDefaultSceneAssetKey(m_CurrentSceneAssetKey);
+
+            // Initialize incremental script compiler now that project root is available.
+            ScriptCoreModuleRuntime::InitializeIncrementalCompiler();
         }
 
         DrawMenuBar();

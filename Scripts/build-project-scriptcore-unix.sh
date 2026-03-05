@@ -1,13 +1,25 @@
 #!/usr/bin/env bash
 
+# --------------------------------------------------------------------------
+#  build-project-scriptcore-unix.sh
+#
+#  Incremental ScriptCore build.  Each .cpp is compiled to a separate .o and
+#  only recompiled when the source or one of its header dependencies has
+#  changed (tracked via -MMD / .d files).  All .o files are then linked into
+#  libScriptCore.so / .dylib.
+#
+#  Pass --clean to force a full rebuild.
+# --------------------------------------------------------------------------
+
 set -euo pipefail
 
 CONFIGURATION="Debug"
 PLATFORM="x64"
 PROJECT_ROOT=""
+FORCE_CLEAN=0
 
 print_usage() {
-    echo "Usage (preferred): $0 --config [Debug|Release|Dist] --platform [x64|ARM64] --project-root /path/to/project"
+    echo "Usage (preferred): $0 --config [Debug|Release|Dist] --platform [x64|ARM64] --project-root /path/to/project [--clean]"
     echo "Usage (legacy):    $0 [Debug|Release|Dist] [x64|ARM64] /path/to/project"
 }
 
@@ -26,6 +38,10 @@ if [[ $# -gt 0 && "$1" == --* ]]; then
             --project-root)
                 PROJECT_ROOT="${2:-}"
                 shift 2
+                ;;
+            --clean)
+                FORCE_CLEAN=1
+                shift
                 ;;
             --help|-h)
                 print_usage
@@ -75,12 +91,22 @@ fi
 BUILD_FOLDER="${CONFIG_LOWER}_${PLATFORM_LOWER}-${SYSTEM_NAME}-${PLATFORM}"
 OUTPUT_DIR="$TOOLCHAIN_ROOT/Build/$BUILD_FOLDER/Editor"
 INTERMEDIATE_DIR="$TOOLCHAIN_ROOT/Build/Intermediates/$BUILD_FOLDER/ProjectScriptCore"
+OBJ_DIR="$INTERMEDIATE_DIR/obj"
+DEP_DIR="$INTERMEDIATE_DIR/dep"
 SDK_INCLUDE_DIR="$TOOLCHAIN_ROOT/SDK/include"
 SDK_VENDOR_DIR="$TOOLCHAIN_ROOT/SDK/vendor"
 SDK_LIB_DIR="$TOOLCHAIN_ROOT/SDK/lib/$BUILD_FOLDER"
 
-mkdir -p "$OUTPUT_DIR" "$INTERMEDIATE_DIR"
+mkdir -p "$OUTPUT_DIR" "$INTERMEDIATE_DIR" "$OBJ_DIR" "$DEP_DIR"
 
+# --- Clean mode: wipe object and dep caches ---
+if [[ "$FORCE_CLEAN" -eq 1 ]]; then
+    echo "Incremental build: clean requested, wiping object cache..."
+    rm -rf "$OBJ_DIR" "$DEP_DIR"
+    mkdir -p "$OBJ_DIR" "$DEP_DIR"
+fi
+
+# --- Generate host glue source ---
 GLUE_CPP="$INTERMEDIATE_DIR/ScriptCoreHostGlue.cpp"
 cat > "$GLUE_CPP" <<'EOF'
 #include "ScriptCoreRegistration.h"
@@ -196,6 +222,7 @@ extern "C" LT_SCRIPTCORE_API void LT_SetScriptInstantiatePrefabBridge(Limitless:
 }
 EOF
 
+# --- Discover source files ---
 mapfile -t SOURCE_FILES < <(find "$GENERATED_DIR" -type f -name '*.cpp' ! -name 'ScriptCoreHostGlue.cpp')
 if [[ "$SYSTEM_NAME" == "macosx" ]]; then
     OUTPUT_EXTENSION="dylib"
@@ -206,9 +233,134 @@ else
 fi
 
 OUTPUT_LIB="$OUTPUT_DIR/libScriptCore.${OUTPUT_EXTENSION}"
-"$CXX_BIN" -shared -fPIC -std=c++20 -O2 \
-    -I"$SDK_INCLUDE_DIR" -I"$SDK_VENDOR_DIR" -I"$GENERATED_DIR" \
-    "$GLUE_CPP" "${SOURCE_FILES[@]}" \
+
+# --- Helper: convert a source path to a stable .o / .d filename ---
+safe_obj_name() {
+    local src_path="$1"
+    local rel_path="${src_path#"$GENERATED_DIR"/}"
+    # Replace path separators and spaces with underscores
+    local safe_name="${rel_path//\//_}"
+    safe_name="${safe_name// /_}"
+    echo "${safe_name%.cpp}.o"
+}
+
+# Common compiler flags
+COMMON_CXX_FLAGS=(-fPIC -std=c++20 -O2 -MMD -I"$SDK_INCLUDE_DIR" -I"$SDK_VENDOR_DIR" -I"$GENERATED_DIR")
+
+# -------------------------------------------------------------------------
+#  INCREMENTAL COMPILE
+#
+#  For each .cpp, check whether the .o needs rebuilding by comparing
+#  timestamps.  -MMD generates .d files alongside .o files that list
+#  header dependencies.  We parse these to detect header changes.
+# -------------------------------------------------------------------------
+
+echo "Building project ScriptCore module (incremental)..."
+
+compiled_count=0
+skipped_count=0
+failed_count=0
+obj_files=()
+
+# Compile the host glue (always — it's generated fresh each run)
+GLUE_OBJ="$OBJ_DIR/ScriptCoreHostGlue.o"
+GLUE_DEP="$DEP_DIR/ScriptCoreHostGlue.d"
+"$CXX_BIN" "${COMMON_CXX_FLAGS[@]}" -MF "$GLUE_DEP" -c "$GLUE_CPP" -o "$GLUE_OBJ"
+obj_files+=("$GLUE_OBJ")
+
+# needs_compile <source_path> <obj_path> <dep_path>
+# Returns 0 (true) if recompilation is needed, 1 (false) if up-to-date.
+needs_compile() {
+    local src="$1" obj="$2" dep="$3"
+
+    # No object file → must compile
+    [[ ! -f "$obj" ]] && return 0
+
+    # Source newer than object → must compile
+    [[ "$src" -nt "$obj" ]] && return 0
+
+    # No dep file → must compile (can't verify headers)
+    [[ ! -f "$dep" ]] && return 0
+
+    # Parse the .d file (Makefile format) and check each dependency
+    # The format is: target: dep1 dep2 dep3 ...  (possibly with line continuations)
+    local deps_text
+    deps_text=$(sed 's/\\$//' "$dep" | tr '\n' ' ' | sed 's/^[^:]*://')
+    local dep_file
+    for dep_file in $deps_text; do
+        # Skip empty tokens
+        [[ -z "$dep_file" ]] && continue
+        # If a dependency no longer exists or is newer → recompile
+        if [[ ! -f "$dep_file" ]] || [[ "$dep_file" -nt "$obj" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Compile each user script source
+for src in "${SOURCE_FILES[@]}"; do
+    obj_name="$(safe_obj_name "$src")"
+    obj_path="$OBJ_DIR/$obj_name"
+    dep_path="$DEP_DIR/${obj_name%.o}.d"
+    obj_files+=("$obj_path")
+
+    if needs_compile "$src" "$obj_path" "$dep_path"; then
+        if "$CXX_BIN" "${COMMON_CXX_FLAGS[@]}" -MF "$dep_path" -c "$src" -o "$obj_path"; then
+            compiled_count=$((compiled_count + 1))
+        else
+            echo "Error: compilation failed for $(basename "$src")"
+            failed_count=$((failed_count + 1))
+            rm -f "$obj_path" "$dep_path"
+        fi
+    else
+        skipped_count=$((skipped_count + 1))
+    fi
+done
+
+echo "Incremental compile: $compiled_count compiled, $skipped_count up-to-date, $failed_count failed."
+
+if [[ "$failed_count" -gt 0 ]]; then
+    echo "Error: Incremental compilation failed."
+    exit 1
+fi
+
+# Handle empty source list — create dummy translation unit
+if [[ "${#SOURCE_FILES[@]}" -eq 0 ]]; then
+    DUMMY_CPP="$INTERMEDIATE_DIR/DummyScriptCoreTranslationUnit.cpp"
+    echo "// Auto-generated fallback translation unit." > "$DUMMY_CPP"
+    DUMMY_OBJ="$OBJ_DIR/DummyScriptCoreTranslationUnit.o"
+    "$CXX_BIN" "${COMMON_CXX_FLAGS[@]}" -c "$DUMMY_CPP" -o "$DUMMY_OBJ"
+    obj_files+=("$DUMMY_OBJ")
+fi
+
+# --- Prune stale .o files whose source no longer exists ---
+pruned=0
+for existing_obj in "$OBJ_DIR"/*.o; do
+    [[ ! -f "$existing_obj" ]] && continue
+    is_expected=0
+    for expected_obj in "${obj_files[@]}"; do
+        if [[ "$existing_obj" == "$expected_obj" ]]; then
+            is_expected=1
+            break
+        fi
+    done
+    if [[ "$is_expected" -eq 0 ]]; then
+        rm -f "$existing_obj"
+        dep_counterpart="$DEP_DIR/$(basename "${existing_obj%.o}.d")"
+        rm -f "$dep_counterpart"
+        pruned=$((pruned + 1))
+    fi
+done
+if [[ "$pruned" -gt 0 ]]; then
+    echo "Pruned $pruned stale object file(s)."
+fi
+
+# --- Link all object files into shared library ---
+echo "Linking libScriptCore.${OUTPUT_EXTENSION}..."
+"$CXX_BIN" -shared -fPIC \
+    "${obj_files[@]}" \
     -L"$SDK_LIB_DIR" -lLimitless \
     -o "$OUTPUT_LIB"
 

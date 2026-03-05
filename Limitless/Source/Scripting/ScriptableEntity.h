@@ -268,6 +268,14 @@ namespace Limitless
         void SyncExposedField(const std::string& name, Entity& value) { value = GetExposedEntity(name, value); }
         void SyncExposedField(const std::string& name, Prefab& value) { value = GetExposedPrefab(name, value); }
 
+        void WriteBackExposedField(const std::string& name, float value) { SetExposedFloat(name, value); }
+        void WriteBackExposedField(const std::string& name, int32_t value) { SetExposedInteger(name, value); }
+        void WriteBackExposedField(const std::string& name, bool value) { SetExposedBoolean(name, value); }
+        void WriteBackExposedField(const std::string& name, const glm::vec3& value) { SetExposedVector3(name, value); }
+        void WriteBackExposedField(const std::string& name, const std::string& value) { SetExposedString(name, value); }
+        void WriteBackExposedField(const std::string& name, const Entity& value) { SetExposedEntity(name, value); }
+        void WriteBackExposedField(const std::string& name, const Prefab& value) { SetExposedPrefab(name, value); }
+
         bool Raycast2D(const glm::vec2& origin,
                        const glm::vec2& direction,
                        float maxDistance,
@@ -311,6 +319,7 @@ namespace Limitless
         uint32_t GetAliveParticleCount() const;
 
         virtual void OnSynchronizeExposedFields() {}
+        virtual void OnWriteBackExposedFields() {}
 
         virtual void OnCreate() {}
         virtual void OnFixedUpdate(float fixedDeltaTime) { (void)fixedDeltaTime; }
@@ -358,7 +367,80 @@ namespace Limitless
         LT_SYNC_EXPOSED_FIELD(FieldName);
 #define LT_END_AUTO_EXPOSED_FIELD_SYNC() \
     }
+#define LT_WRITEBACK_EXPOSED_FIELD(FieldName) WriteBackExposedField(#FieldName, FieldName)
+
 #define LT_SCRIPT_ACCESS_MASK(...) ::Limitless::ScriptAccess::Combine(__VA_ARGS__)
 #define LT_DECLARE_SCRIPT_ACCESS(ReadMaskExpr, WriteMaskExpr) \
     uint64_t GetDeclaredReadAccessMask() const override { return static_cast<uint64_t>(ReadMaskExpr); } \
     uint64_t GetDeclaredWriteAccessMask() const override { return static_cast<uint64_t>(WriteMaskExpr); }
+
+// ---------------------------------------------------------------------------
+// LT_EXPOSED_FIELDS(Field1, Field2, ...) — Unity-style bidirectional sync.
+// Generates both OnSynchronizeExposedFields (pull map → fields) and
+// OnWriteBackExposedFields (push fields → map) so that scripts can read and
+// write member variables directly instead of calling Get/SetExposed*.
+// Supports up to 32 fields.
+// ---------------------------------------------------------------------------
+#define LT_PP_CAT_IMPL_(a, b) a ## b
+#define LT_PP_CAT_(a, b) LT_PP_CAT_IMPL_(a, b)
+#define LT_PP_EXPAND_(...) __VA_ARGS__
+
+#define LT_PP_FE_1(M, x)       M(x)
+#define LT_PP_FE_2(M, x, ...)  M(x) LT_PP_EXPAND_(LT_PP_FE_1(M, __VA_ARGS__))
+#define LT_PP_FE_3(M, x, ...)  M(x) LT_PP_EXPAND_(LT_PP_FE_2(M, __VA_ARGS__))
+#define LT_PP_FE_4(M, x, ...)  M(x) LT_PP_EXPAND_(LT_PP_FE_3(M, __VA_ARGS__))
+#define LT_PP_FE_5(M, x, ...)  M(x) LT_PP_EXPAND_(LT_PP_FE_4(M, __VA_ARGS__))
+#define LT_PP_FE_6(M, x, ...)  M(x) LT_PP_EXPAND_(LT_PP_FE_5(M, __VA_ARGS__))
+#define LT_PP_FE_7(M, x, ...)  M(x) LT_PP_EXPAND_(LT_PP_FE_6(M, __VA_ARGS__))
+#define LT_PP_FE_8(M, x, ...)  M(x) LT_PP_EXPAND_(LT_PP_FE_7(M, __VA_ARGS__))
+#define LT_PP_FE_9(M, x, ...)  M(x) LT_PP_EXPAND_(LT_PP_FE_8(M, __VA_ARGS__))
+#define LT_PP_FE_10(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_9(M, __VA_ARGS__))
+#define LT_PP_FE_11(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_10(M, __VA_ARGS__))
+#define LT_PP_FE_12(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_11(M, __VA_ARGS__))
+#define LT_PP_FE_13(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_12(M, __VA_ARGS__))
+#define LT_PP_FE_14(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_13(M, __VA_ARGS__))
+#define LT_PP_FE_15(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_14(M, __VA_ARGS__))
+#define LT_PP_FE_16(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_15(M, __VA_ARGS__))
+#define LT_PP_FE_17(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_16(M, __VA_ARGS__))
+#define LT_PP_FE_18(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_17(M, __VA_ARGS__))
+#define LT_PP_FE_19(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_18(M, __VA_ARGS__))
+#define LT_PP_FE_20(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_19(M, __VA_ARGS__))
+#define LT_PP_FE_21(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_20(M, __VA_ARGS__))
+#define LT_PP_FE_22(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_21(M, __VA_ARGS__))
+#define LT_PP_FE_23(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_22(M, __VA_ARGS__))
+#define LT_PP_FE_24(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_23(M, __VA_ARGS__))
+#define LT_PP_FE_25(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_24(M, __VA_ARGS__))
+#define LT_PP_FE_26(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_25(M, __VA_ARGS__))
+#define LT_PP_FE_27(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_26(M, __VA_ARGS__))
+#define LT_PP_FE_28(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_27(M, __VA_ARGS__))
+#define LT_PP_FE_29(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_28(M, __VA_ARGS__))
+#define LT_PP_FE_30(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_29(M, __VA_ARGS__))
+#define LT_PP_FE_31(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_30(M, __VA_ARGS__))
+#define LT_PP_FE_32(M, x, ...) M(x) LT_PP_EXPAND_(LT_PP_FE_31(M, __VA_ARGS__))
+
+#define LT_PP_ARG_N_( \
+    _1,_2,_3,_4,_5,_6,_7,_8, \
+    _9,_10,_11,_12,_13,_14,_15,_16, \
+    _17,_18,_19,_20,_21,_22,_23,_24, \
+    _25,_26,_27,_28,_29,_30,_31,_32, N, ...) N
+
+#define LT_PP_NARG_(...) \
+    LT_PP_EXPAND_(LT_PP_ARG_N_(__VA_ARGS__, \
+    32,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17, \
+    16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1))
+
+#define LT_PP_FOR_EACH_N_(N, M, ...) LT_PP_EXPAND_(LT_PP_CAT_(LT_PP_FE_, N)(M, __VA_ARGS__))
+#define LT_PP_FOR_EACH_(M, ...) LT_PP_FOR_EACH_N_(LT_PP_NARG_(__VA_ARGS__), M, __VA_ARGS__)
+
+#define LT_SYNC_FIELD_ENTRY_(F)     SyncExposedField(#F, F);
+#define LT_WRITEBACK_FIELD_ENTRY_(F) WriteBackExposedField(#F, F);
+
+#define LT_EXPOSED_FIELDS(...) \
+    void OnSynchronizeExposedFields() override \
+    { \
+        LT_PP_FOR_EACH_(LT_SYNC_FIELD_ENTRY_, __VA_ARGS__) \
+    } \
+    void OnWriteBackExposedFields() override \
+    { \
+        LT_PP_FOR_EACH_(LT_WRITEBACK_FIELD_ENTRY_, __VA_ARGS__) \
+    }

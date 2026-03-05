@@ -148,11 +148,9 @@ class CameraFollowScript final : public Limitless::ScriptableEntity
 public:
     Limitless::Entity TargetEntity;
 
-protected:
-    LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()
-        LT_AUTO_EXPOSED_FIELD(TargetEntity)
-    LT_END_AUTO_EXPOSED_FIELD_SYNC()
+    LT_EXPOSED_FIELDS(TargetEntity)
 
+protected:
     void OnUpdate(float deltaTime) override
     {
         if (auto* targetTransform = TargetEntity.TryGetComponent<Limitless::TransformComponent>())
@@ -177,11 +175,9 @@ class WeaponAimScript final : public Limitless::ScriptableEntity
 public:
     Limitless::Entity TargetEntity;
 
-protected:
-    LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()
-        LT_AUTO_EXPOSED_FIELD(TargetEntity)
-    LT_END_AUTO_EXPOSED_FIELD_SYNC()
+    LT_EXPOSED_FIELDS(TargetEntity)
 
+protected:
     void OnCreate() override
     {
         // Script on the same entity.
@@ -322,9 +318,7 @@ public:
     Limitless::CoroutineHandle BlinkCoroutine{};
 
 protected:
-    LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()
-        LT_AUTO_EXPOSED_FIELD(BlinkIntervalSeconds)
-    LT_END_AUTO_EXPOSED_FIELD_SYNC()
+    LT_EXPOSED_FIELDS(BlinkIntervalSeconds)
 
     void OnCreate() override
     {
@@ -379,9 +373,7 @@ public:
     Limitless::Entity EnemyPrefab = "Assets/Prefabs/Enemy.prefab.json";
 
 protected:
-    LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()
-        LT_AUTO_EXPOSED_FIELD(EnemyPrefab)
-    LT_END_AUTO_EXPOSED_FIELD_SYNC()
+    LT_EXPOSED_FIELDS(EnemyPrefab)
 
     void OnCreate() override
     {
@@ -426,33 +418,39 @@ Each `Native Script` component automatically exposes supported `public` fields f
   - Drag prefab assets from the Project panel
   - Clear with `X`
 
-From script code, read/write these values with the field name:
+### Recommended: `LT_EXPOSED_FIELDS` (Unity-style bidirectional sync)
 
-- `GetExposedFloat`, `GetExposedInteger`, `GetExposedBoolean`, `GetExposedVector3`, `GetExposedString`, `GetExposedEntity`, `GetExposedPrefab`
-- `SetExposedFloat`, `SetExposedInteger`, `SetExposedBoolean`, `SetExposedVector3`, `SetExposedString`, `SetExposedEntity`, `SetExposedPrefab`
-- `LT_SYNC_EXPOSED_FIELD(FieldName)` for manual sync when needed
-- `LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()` / `LT_AUTO_EXPOSED_FIELD(FieldName)` / `LT_END_AUTO_EXPOSED_FIELD_SYNC()` to auto-sync fields in the background (recommended)
-
-Example:
+The preferred way to expose fields is `LT_EXPOSED_FIELDS(...)`. It provides **bidirectional sync**: inspector edits are pulled into your member variables before `OnUpdate`/`OnCreate`/`OnFixedUpdate`, and any changes your script makes to those variables are automatically pushed back to the inspector/serialization map afterward. Just read and write your fields directly — no `GetExposed*`/`SetExposed*` calls needed.
 
 ```cpp
-class DoorRotateScript final : public Limitless::ScriptableEntity
+class PlayerScript final : public Limitless::ScriptableEntity
 {
 public:
-    float RotationSpeed = 90.0f;
+    float CurrentHealth = 100.0f;
+    float MoveSpeed = 5.0f;
+    int Score = 0;
+    bool IsAlive = true;
+
+    LT_EXPOSED_FIELDS(CurrentHealth, MoveSpeed, Score, IsAlive)
 
 protected:
-    LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()
-        LT_AUTO_EXPOSED_FIELD(RotationSpeed)
-    LT_END_AUTO_EXPOSED_FIELD_SYNC()
-
     void OnUpdate(float deltaTime) override
     {
-        auto& transform = GetComponent<Limitless::TransformComponent>();
-        transform.Rotation.y += RotationSpeed * deltaTime;
+        // Read and write fields directly — changes sync automatically.
+        CurrentHealth -= 1.0f * deltaTime;
+        if (CurrentHealth <= 0.0f)
+            IsAlive = false;
+
+        if (IsAlive)
+        {
+            auto& transform = GetComponent<Limitless::TransformComponent>();
+            transform.Position.x += MoveSpeed * deltaTime;
+        }
     }
 };
 ```
+
+Supports up to 32 fields. All supported types work: `float`, `int32_t`, `bool`, `glm::vec3`, `std::string`, `Limitless::Entity`, `Limitless::Prefab`.
 
 Scene transition example:
 
@@ -464,21 +462,28 @@ class PortalScript final : public Limitless::ScriptableEntity
 public:
     std::string TargetScene = "Level02";
 
-protected:
-    LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()
-        LT_AUTO_EXPOSED_FIELD(TargetScene)
-    LT_END_AUTO_EXPOSED_FIELD_SYNC()
+    LT_EXPOSED_FIELDS(TargetScene)
 
+protected:
     void OnUpdate(float /*deltaTime*/) override
     {
         if (Limitless::InputSystem::IsKeyDown(Limitless::KeyCode::Enter))
         {
-            // Queue scene change to be applied safely after script updates finish.
             Limitless::SceneManager::LoadScene(TargetScene);
         }
     }
 };
 ```
+
+### Legacy: Manual Get/Set API
+
+The older explicit API still works for backward compatibility:
+
+- `GetExposedFloat`, `GetExposedInteger`, `GetExposedBoolean`, `GetExposedVector3`, `GetExposedString`, `GetExposedEntity`, `GetExposedPrefab`
+- `SetExposedFloat`, `SetExposedInteger`, `SetExposedBoolean`, `SetExposedVector3`, `SetExposedString`, `SetExposedEntity`, `SetExposedPrefab`
+- `LT_SYNC_EXPOSED_FIELD(FieldName)` for manual one-way sync (map → field)
+- `LT_WRITEBACK_EXPOSED_FIELD(FieldName)` for manual one-way writeback (field → map)
+- `LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC()` / `LT_AUTO_EXPOSED_FIELD(FieldName)` / `LT_END_AUTO_EXPOSED_FIELD_SYNC()` for one-way auto-sync (pull only)
 
 Legacy note:
 

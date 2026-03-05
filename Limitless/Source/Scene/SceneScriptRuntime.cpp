@@ -895,6 +895,7 @@ namespace Limitless
                     scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
                     scriptEntry->RuntimeInstance->OnUpdate(deltaTime);
                     Coroutine::TickOwner(*scriptEntry->RuntimeInstance, deltaTime);
+                    scriptEntry->RuntimeInstance->OnWriteBackExposedFields();
                 });
             }
             catch (const std::exception& exception)
@@ -1380,6 +1381,7 @@ namespace Limitless
                     executeWithDeferredEntityDestroy([&]() {
                         scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
                         scriptEntry->RuntimeInstance->OnCreate();
+                        scriptEntry->RuntimeInstance->OnWriteBackExposedFields();
                     });
                 }
                 catch (const std::exception& exception)
@@ -1870,6 +1872,7 @@ namespace Limitless
                 executeWithDeferredEntityDestroy([&]() {
                     scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
                     scriptEntry->RuntimeInstance->OnFixedUpdate(fixedDeltaTime);
+                    scriptEntry->RuntimeInstance->OnWriteBackExposedFields();
                 });
             }
             catch (const std::exception& exception)
@@ -2333,6 +2336,7 @@ namespace Limitless
                     executeWithDeferredEntityDestroy([&]() {
                         scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
                         scriptEntry->RuntimeInstance->OnCreate();
+                        scriptEntry->RuntimeInstance->OnWriteBackExposedFields();
                     });
                 }
                 catch (const std::exception& exception)
