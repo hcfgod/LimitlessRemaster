@@ -24,83 +24,66 @@ namespace Limitless
     /// Mutable UI state required by the Project panel across frames.
     struct EditorProjectPanelState
     {
-        EditorProjectFolderPopup FolderPopupPending = EditorProjectFolderPopup::None;
-        std::filesystem::path FolderPopupParent;
-        std::array<char, 256> FolderPopupBuffer{};
-        bool CreateFolderPopupOpen = false;
-        bool RenameFolderPopupOpen = false;
-
         // External OS drop import (Explorer/Finder -> Project panel).
         std::vector<std::filesystem::path> PendingExternalDropPaths;
-        std::filesystem::path HoveredFolderRelativePathForExternalDrop;
-
-        // Asset file rename popup state.
-        bool RenameAssetPopupPending = false;
-        bool RenameAssetPopupOpen = false;
-        std::filesystem::path RenameAssetRelativePath;
-        std::array<char, 256> RenameAssetBuffer{};
-        bool RenameAssetAsNativeScriptPair = false;
-
-        // Native script creation popup state.
-        bool CreateNativeScriptPopupPending = false;
-        bool CreateNativeScriptPopupOpen = false;
-        std::filesystem::path CreateNativeScriptParentRelativePath;
-        std::array<char, 256> CreateNativeScriptClassNameBuffer{};
-
-        // Material asset creation popup state.
-        bool CreateMaterialPopupPending = false;
-        bool CreateMaterialPopupOpen = false;
-        std::filesystem::path CreateMaterialParentRelativePath;
-        std::array<char, 256> CreateMaterialNameBuffer{};
-
-        // Tileset asset creation popup state.
-        bool CreateTilesetPopupPending = false;
-        bool CreateTilesetPopupOpen = false;
-        std::filesystem::path CreateTilesetParentRelativePath;
-        std::array<char, 256> CreateTilesetNameBuffer{};
-
-        // Audio mixer asset creation popup state.
-        bool CreateAudioMixerPopupPending = false;
-        bool CreateAudioMixerPopupOpen = false;
-        std::filesystem::path CreateAudioMixerParentRelativePath;
-        std::array<char, 256> CreateAudioMixerNameBuffer{};
-
-        // Input actions asset creation popup state.
-        bool CreateInputActionsPopupPending = false;
-        bool CreateInputActionsPopupOpen = false;
-        std::filesystem::path CreateInputActionsParentRelativePath;
-        std::array<char, 256> CreateInputActionsNameBuffer{};
-
-        // Animation clip asset creation popup state.
-        bool CreateAnimationClipPopupPending = false;
-        bool CreateAnimationClipPopupOpen = false;
-        std::filesystem::path CreateAnimationClipParentRelativePath;
-        std::array<char, 256> CreateAnimationClipNameBuffer{};
-
-        // Animator controller asset creation popup state.
-        bool CreateAnimatorControllerPopupPending = false;
-        bool CreateAnimatorControllerPopupOpen = false;
-        std::filesystem::path CreateAnimatorControllerParentRelativePath;
-        std::array<char, 256> CreateAnimatorControllerNameBuffer{};
-
-        // Tile palette asset creation popup state.
-        bool CreateTilePalettePopupPending = false;
-        bool CreateTilePalettePopupOpen = false;
-        std::filesystem::path CreateTilePaletteParentRelativePath;
-        std::array<char, 256> CreateTilePaletteNameBuffer{};
-
         // Multi-select state for Project assets (Ctrl/Shift click + multi-drag).
         std::vector<std::string> MultiSelectedAssetKeys;
-        std::string SelectionAnchorAssetKey;
-
         // Multi-select state for texture sub-sprites (virtual keys: "Texture.png#idx").
         std::vector<std::string> MultiSelectedSubSpriteKeys;
+
+        std::string SelectionAnchorAssetKey;
         std::string SubSpriteSelectionAnchorKey;
 
+        std::filesystem::path FolderPopupParent;
+        std::filesystem::path HoveredFolderRelativePathForExternalDrop;
+        std::filesystem::path RenameAssetRelativePath;
+        std::filesystem::path CreateNativeScriptParentRelativePath;
+        std::filesystem::path CreateMaterialParentRelativePath;
+        std::filesystem::path CreateTilesetParentRelativePath;
+        std::filesystem::path CreateAudioMixerParentRelativePath;
+        std::filesystem::path CreateInputActionsParentRelativePath;
+        std::filesystem::path CreateAnimationClipParentRelativePath;
+        std::filesystem::path CreateAnimatorControllerParentRelativePath;
+        std::filesystem::path CreateTilePaletteParentRelativePath;
+
         // Persisted expansion state for the Project tree.
-        bool AssetsRootExpanded = true;
         std::unordered_map<std::string, bool> ExpandedFolderState;
+        EditorProjectFolderPopup FolderPopupPending = EditorProjectFolderPopup::None;
+
+        bool CreateFolderPopupOpen = false;
+        bool RenameFolderPopupOpen = false;
+        bool RenameAssetPopupPending = false;
+        bool RenameAssetPopupOpen = false;
+        bool RenameAssetAsNativeScriptPair = false;
+        bool CreateNativeScriptPopupPending = false;
+        bool CreateNativeScriptPopupOpen = false;
+        bool CreateMaterialPopupPending = false;
+        bool CreateMaterialPopupOpen = false;
+        bool CreateTilesetPopupPending = false;
+        bool CreateTilesetPopupOpen = false;
+        bool CreateAudioMixerPopupPending = false;
+        bool CreateAudioMixerPopupOpen = false;
+        bool CreateInputActionsPopupPending = false;
+        bool CreateInputActionsPopupOpen = false;
+        bool CreateAnimationClipPopupPending = false;
+        bool CreateAnimationClipPopupOpen = false;
+        bool CreateAnimatorControllerPopupPending = false;
+        bool CreateAnimatorControllerPopupOpen = false;
+        bool CreateTilePalettePopupPending = false;
+        bool CreateTilePalettePopupOpen = false;
+        bool AssetsRootExpanded = true;
         bool TreeExpansionStateChanged = false;
+
+        std::array<char, 256> FolderPopupBuffer{};
+        std::array<char, 256> RenameAssetBuffer{};
+        std::array<char, 256> CreateNativeScriptClassNameBuffer{};
+        std::array<char, 256> CreateMaterialNameBuffer{};
+        std::array<char, 256> CreateTilesetNameBuffer{};
+        std::array<char, 256> CreateAudioMixerNameBuffer{};
+        std::array<char, 256> CreateInputActionsNameBuffer{};
+        std::array<char, 256> CreateAnimationClipNameBuffer{};
+        std::array<char, 256> CreateAnimatorControllerNameBuffer{};
+        std::array<char, 256> CreateTilePaletteNameBuffer{};
     };
 
     namespace EditorProjectPanel

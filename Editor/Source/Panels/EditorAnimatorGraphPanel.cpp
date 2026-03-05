@@ -912,12 +912,24 @@ namespace Limitless::EditorAnimatorGraphPanel
                         if (ox < 0.0f) ox += step;
                         if (oy < 0.0f) oy += step;
                         const ImU32 gridCol = IM_COL32(50, 50, 50, 255);
-                        for (float x = ox; x < canvasSize.x; x += step)
+                        const int verticalLineCount = static_cast<int>(std::ceil((canvasSize.x - ox) / step));
+                        for (int lineIndex = 0; lineIndex <= verticalLineCount; ++lineIndex)
+                        {
+                            const float x = ox + static_cast<float>(lineIndex) * step;
+                            if (x < 0.0f || x > canvasSize.x)
+                                continue;
                             dl->AddLine(ImVec2(canvasOrigin.x + x, canvasOrigin.y),
                                         ImVec2(canvasOrigin.x + x, canvasMax.y), gridCol);
-                        for (float y = oy; y < canvasSize.y; y += step)
+                        }
+                        const int horizontalLineCount = static_cast<int>(std::ceil((canvasSize.y - oy) / step));
+                        for (int lineIndex = 0; lineIndex <= horizontalLineCount; ++lineIndex)
+                        {
+                            const float y = oy + static_cast<float>(lineIndex) * step;
+                            if (y < 0.0f || y > canvasSize.y)
+                                continue;
                             dl->AddLine(ImVec2(canvasOrigin.x, canvasOrigin.y + y),
                                         ImVec2(canvasMax.x, canvasOrigin.y + y), gridCol);
+                        }
                     }
                 }
 

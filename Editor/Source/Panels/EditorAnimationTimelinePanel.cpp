@@ -1088,9 +1088,6 @@ namespace Limitless::EditorAnimationTimelinePanel
         // ---- Main area: property list + timeline ----
         ImGui::BeginChild("##DopesheetMain", ImVec2(0.0f, mainAreaHeight), ImGuiChildFlags_None);
         {
-            const ImVec2 mainOrigin = ImGui::GetCursorScreenPos();
-            const ImVec2 mainSize = ImGui::GetContentRegionAvail();
-
             // Property list (left)
             ImGui::BeginChild("##PropList", ImVec2(kPropertyListWidth, 0.0f), ImGuiChildFlags_Border);
             {
@@ -1676,9 +1673,11 @@ namespace Limitless::EditorAnimationTimelinePanel
                         const float endTime =
                             ScreenXToTime(tlMax.x, tlOrigin.x, state.TimelineScrollX, zoom);
 
-                        float t = std::floor(startTime / subInterval) * subInterval;
-                        for (; t <= endTime; t += subInterval)
+                        const int startTickIndex = static_cast<int>(std::floor(startTime / subInterval));
+                        const int endTickIndex = static_cast<int>(std::ceil(endTime / subInterval));
+                        for (int tickIndex = startTickIndex; tickIndex <= endTickIndex; ++tickIndex)
                         {
+                            const float t = static_cast<float>(tickIndex) * subInterval;
                             if (t < 0.0f) continue;
                             const float x = TimeToScreenX(t, tlOrigin.x, state.TimelineScrollX, zoom);
                             if (x < tlOrigin.x || x > tlMax.x) continue;
