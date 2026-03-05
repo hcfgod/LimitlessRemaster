@@ -70,7 +70,7 @@ namespace Limitless::Assets
             std::vector<SpriteTextureKeyframe> SpriteTextureTrack;
             std::vector<Vector3Keyframe> PositionTrack;
             std::vector<Vector3Keyframe> ScaleTrack;
-            std::vector<FloatKeyframe> RotationZTrack;
+            std::vector<Vector3Keyframe> RotationTrack;
             std::vector<EventKeyframe> EventTrack;
         };
 

@@ -1,9 +1,11 @@
 #include "Scene/Scene.h"
 #include "Scene/Components/PhysicsComponents.h"
+#include "Scene/Components/RenderingComponents.h"
 #include "Core/Concurrency/JobSystem.h"
 #include "Core/ConfigManager.h"
 
 #include <algorithm>
+#include <cmath>
 #include <deque>
 #include <limits>
 #include <unordered_map>
@@ -360,10 +362,27 @@ namespace Limitless
 
             TransformComponent localForRender = *transform;
             const auto* rigidbody = m_Registry.try_get<Rigidbody2DComponent>(*it);
+            const auto* animator = m_Registry.try_get<AnimatorComponent>(*it);
+            const bool animatorOverridesKinematic2DPose =
+                animator &&
+                animator->ApplyToTransform &&
+                (animator->RuntimeAppliedPositionOffset.x != 0.0f ||
+                 animator->RuntimeAppliedPositionOffset.y != 0.0f ||
+                 animator->RuntimeAppliedRotationOffset.z != 0.0f);
+            bool hasKinematicInterpolationDelta = false;
+            if (rigidbody)
+            {
+                const float angleDelta = WrapAngleRadians(rigidbody->RuntimeRenderCurrentAngleRadians - rigidbody->RuntimeRenderPreviousAngleRadians);
+                hasKinematicInterpolationDelta =
+                    glm::distance(rigidbody->RuntimeRenderPreviousPosition, rigidbody->RuntimeRenderCurrentPosition) > 0.0001f ||
+                    std::abs(angleDelta) > 0.0001f;
+            }
             if (rigidbody &&
                 rigidbody->RuntimeBodyCreated &&
                 rigidbody->Interpolate &&
-                rigidbody->Type == Rigidbody2DComponent::BodyType::Kinematic)
+                rigidbody->Type == Rigidbody2DComponent::BodyType::Kinematic &&
+                hasKinematicInterpolationDelta &&
+                !animatorOverridesKinematic2DPose)
             {
                 localForRender.Position.x = glm::mix(rigidbody->RuntimeRenderPreviousPosition.x, rigidbody->RuntimeRenderCurrentPosition.x, alpha);
                 localForRender.Position.y = glm::mix(rigidbody->RuntimeRenderPreviousPosition.y, rigidbody->RuntimeRenderCurrentPosition.y, alpha);

@@ -64,7 +64,7 @@ namespace Limitless::EditorAnimationTimelinePanel
             {"Sprite Texture",  "SpriteTextureTrack"},
             {"Position",        "PositionTrack"},
             {"Scale",           "ScaleTrack"},
-            {"Rotation Z",      "RotationZTrack"},
+            {"Rotation",        "RotationTrack"},
             {"Events",          "EventTrack"},
         };
 
@@ -403,8 +403,26 @@ namespace Limitless::EditorAnimationTimelinePanel
             ensureArray("SpriteTextureTrack");
             ensureArray("PositionTrack");
             ensureArray("ScaleTrack");
-            ensureArray("RotationZTrack");
             ensureArray("EventTrack");
+
+            if (root.contains("RotationZTrack") && root["RotationZTrack"].is_array() &&
+                (!root.contains("RotationTrack") || !root["RotationTrack"].is_array() || root["RotationTrack"].empty()))
+            {
+                json migrated = json::array();
+                for (const auto& kf : root["RotationZTrack"])
+                {
+                    if (!kf.is_object()) continue;
+                    const float z = kf.value("Value", 0.0f);
+                    migrated.push_back({
+                        {"TimeSeconds", kf.value("TimeSeconds", 0.0f)},
+                        {"Value", {0.0f, 0.0f, z}},
+                        {"Interpolation", kf.value("Interpolation", "Linear")}
+                    });
+                }
+                root["RotationTrack"] = std::move(migrated);
+                root.erase("RotationZTrack");
+            }
+            ensureArray("RotationTrack");
         }
 
         bool ApplyClipTextToDisk(const std::filesystem::path& path,
@@ -637,8 +655,8 @@ namespace Limitless::EditorAnimationTimelinePanel
             case 0: return {{"TimeSeconds", timeSeconds}, {"UvMin", {0.0f, 0.0f}}, {"UvMax", {1.0f, 1.0f}}};
             case 1: return {{"TimeSeconds", timeSeconds}, {"Texture", {{"key", ""}}}};
             case 2: return {{"TimeSeconds", timeSeconds}, {"Value", {0.0f, 0.0f, 0.0f}}, {"Interpolation", "Linear"}};
-            case 3: return {{"TimeSeconds", timeSeconds}, {"Value", {1.0f, 1.0f, 1.0f}}, {"Interpolation", "Linear"}};
-            case 4: return {{"TimeSeconds", timeSeconds}, {"Value", 0.0f}, {"Interpolation", "Linear"}};
+            case 3: return {{"TimeSeconds", timeSeconds}, {"Value", {0.0f, 0.0f, 0.0f}}, {"Interpolation", "Linear"}};
+            case 4: return {{"TimeSeconds", timeSeconds}, {"Value", {0.0f, 0.0f, 0.0f}}, {"Interpolation", "Linear"}};
             case 5: return {{"TimeSeconds", timeSeconds}, {"Name", "Event"}, {"StringPayload", ""}, {"FloatPayload", 0.0f}, {"IntegerPayload", 0}, {"BooleanPayload", false}};
             default: return {{"TimeSeconds", timeSeconds}};
             }
@@ -810,23 +828,9 @@ namespace Limitless::EditorAnimationTimelinePanel
             }
             case 2:
             case 3:
-            {
-                DrawVec3Field("Value", kf["Value"], 0.01f);
-                anyWidgetActive |= ImGui::IsItemActive();
-                int interpIdx = InterpolationIndexFromJson(kf);
-                const char* interpNames[] = {"Step", "Linear"};
-                if (ImGui::Combo("Interpolation", &interpIdx, interpNames, 2))
-                {
-                    kf["Interpolation"] = JsonInterpolationName(interpIdx);
-                    CommitUndoSnapshot(undoService, state, "Change Interpolation");
-                }
-                break;
-            }
             case 4:
             {
-                float val = kf.value("Value", 0.0f);
-                if (ImGui::DragFloat("Value", &val, 0.1f))
-                    kf["Value"] = val;
+                DrawVec3Field("Value", kf["Value"], pk.Track == 4 ? 0.1f : 0.01f);
                 anyWidgetActive |= ImGui::IsItemActive();
                 int interpIdx = InterpolationIndexFromJson(kf);
                 const char* interpNames[] = {"Step", "Linear"};

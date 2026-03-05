@@ -94,7 +94,7 @@ namespace Limitless::Assets
                 keyframe.TimeSeconds = clampTime(keyframe.TimeSeconds);
             for (auto& keyframe : data.ScaleTrack)
                 keyframe.TimeSeconds = clampTime(keyframe.TimeSeconds);
-            for (auto& keyframe : data.RotationZTrack)
+            for (auto& keyframe : data.RotationTrack)
                 keyframe.TimeSeconds = clampTime(keyframe.TimeSeconds);
             for (auto& keyframe : data.EventTrack)
                 keyframe.TimeSeconds = clampTime(keyframe.TimeSeconds);
@@ -104,7 +104,7 @@ namespace Limitless::Assets
             std::sort(data.SpriteTextureTrack.begin(), data.SpriteTextureTrack.end(), byTime);
             std::sort(data.PositionTrack.begin(), data.PositionTrack.end(), byTime);
             std::sort(data.ScaleTrack.begin(), data.ScaleTrack.end(), byTime);
-            std::sort(data.RotationZTrack.begin(), data.RotationZTrack.end(), byTime);
+            std::sort(data.RotationTrack.begin(), data.RotationTrack.end(), byTime);
             std::sort(data.EventTrack.begin(), data.EventTrack.end(), byTime);
         }
 
@@ -200,26 +200,43 @@ namespace Limitless::Assets
                     keyframe.Interpolation = ParseInterpolation(
                         keyframeJson.value("Interpolation", json(ToInterpolationName(AnimationClipAsset::InterpolationMode::Linear))),
                         AnimationClipAsset::InterpolationMode::Linear);
-                    const std::vector<float> value = ReadFloatArray(keyframeJson.value("Value", json::array()), {1.0f, 1.0f, 1.0f});
+                    const std::vector<float> value = ReadFloatArray(keyframeJson.value("Value", json::array()), {0.0f, 0.0f, 0.0f});
                     if (value.size() >= 3)
                         keyframe.Value = glm::vec3(value[0], value[1], value[2]);
                     data.ScaleTrack.push_back(std::move(keyframe));
                 }
             }
 
-            if (root.contains("RotationZTrack") && root["RotationZTrack"].is_array())
+            if (root.contains("RotationTrack") && root["RotationTrack"].is_array())
+            {
+                for (const auto& keyframeJson : root["RotationTrack"])
+                {
+                    if (!keyframeJson.is_object())
+                        continue;
+                    AnimationClipAsset::Vector3Keyframe keyframe{};
+                    keyframe.TimeSeconds = keyframeJson.value("TimeSeconds", 0.0f);
+                    keyframe.Interpolation = ParseInterpolation(
+                        keyframeJson.value("Interpolation", json(ToInterpolationName(AnimationClipAsset::InterpolationMode::Linear))),
+                        AnimationClipAsset::InterpolationMode::Linear);
+                    const std::vector<float> value = ReadFloatArray(keyframeJson.value("Value", json::array()), {0.0f, 0.0f, 0.0f});
+                    if (value.size() >= 3)
+                        keyframe.Value = glm::vec3(value[0], value[1], value[2]);
+                    data.RotationTrack.push_back(std::move(keyframe));
+                }
+            }
+            else if (root.contains("RotationZTrack") && root["RotationZTrack"].is_array())
             {
                 for (const auto& keyframeJson : root["RotationZTrack"])
                 {
                     if (!keyframeJson.is_object())
                         continue;
-                    AnimationClipAsset::FloatKeyframe keyframe{};
+                    AnimationClipAsset::Vector3Keyframe keyframe{};
                     keyframe.TimeSeconds = keyframeJson.value("TimeSeconds", 0.0f);
-                    keyframe.Value = keyframeJson.value("Value", 0.0f);
                     keyframe.Interpolation = ParseInterpolation(
                         keyframeJson.value("Interpolation", json(ToInterpolationName(AnimationClipAsset::InterpolationMode::Linear))),
                         AnimationClipAsset::InterpolationMode::Linear);
-                    data.RotationZTrack.push_back(std::move(keyframe));
+                    keyframe.Value = glm::vec3(0.0f, 0.0f, keyframeJson.value("Value", 0.0f));
+                    data.RotationTrack.push_back(std::move(keyframe));
                 }
             }
 
@@ -289,15 +306,7 @@ namespace Limitless::Assets
             root["PositionTrack"] = serializeVectorTrack(data.PositionTrack);
             root["ScaleTrack"] = serializeVectorTrack(data.ScaleTrack);
 
-            root["RotationZTrack"] = json::array();
-            for (const auto& keyframe : data.RotationZTrack)
-            {
-                root["RotationZTrack"].push_back({
-                    {"TimeSeconds", keyframe.TimeSeconds},
-                    {"Value", keyframe.Value},
-                    {"Interpolation", ToInterpolationName(keyframe.Interpolation)}
-                });
-            }
+            root["RotationTrack"] = serializeVectorTrack(data.RotationTrack);
 
             root["EventTrack"] = json::array();
             for (const auto& keyframe : data.EventTrack)

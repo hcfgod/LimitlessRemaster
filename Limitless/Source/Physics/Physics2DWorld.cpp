@@ -3,6 +3,7 @@
 #include "Core/ConfigManager.h"
 #include "Core/Debug/Log.h"
 #include "Scene/Scene.h"
+#include "Scene/Components/RenderingComponents.h"
 
 #include <algorithm>
 #include <bit>
@@ -616,8 +617,6 @@ namespace Limitless
 
             const bool hasValidRuntimeBody = rigidbody.RuntimeBodyCreated && b2Body_IsValid(rigidbody.RuntimeBodyId);
             bool shouldRebuildExistingRuntimeBody = false;
-            glm::vec2 previousRuntimePosition = rigidbody.RuntimePreviousPosition;
-            float previousRuntimeAngleRadians = rigidbody.RuntimePreviousAngleRadians;
             if (hasValidRuntimeBody)
             {
                 if (rigidbody.RuntimeWorldSlot != m_SceneWorldSlot)
@@ -717,14 +716,6 @@ namespace Limitless
             rigidbody.RuntimeRenderCurrentPosition = rigidbody.RuntimePreviousPosition;
             rigidbody.RuntimeRenderCurrentAngleRadians = rigidbody.RuntimePreviousAngleRadians;
             rigidbody.RuntimeLinearVelocity = glm::vec2(0.0f);
-
-            // Preserve kinematic authored motion continuity when a body is
-            // rebuilt due structural signature changes.
-            if (shouldRebuildExistingRuntimeBody && rigidbody.Type == Rigidbody2DComponent::BodyType::Kinematic)
-            {
-                rigidbody.RuntimePreviousPosition = previousRuntimePosition;
-                rigidbody.RuntimePreviousAngleRadians = previousRuntimeAngleRadians;
-            }
 
             // Preserve script-authored velocity writes made in the same frame as
             // body creation (for example, freshly instantiated projectiles).
@@ -936,8 +927,6 @@ namespace Limitless
             auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
             auto& transform = bodyView.get<TransformComponent>(entity);
             const auto* tag = registry.try_get<TagComponent>(entity);
-            const bool astroidTagged = tag && tag->Tag.rfind("Astroid", 0) == 0;
-            const bool debugAstroid = debugKinematicMotion && astroidTagged;
             const bool assignedToThisWorld = IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &rigidbody);
             if (!assignedToThisWorld)
                 continue;
@@ -945,46 +934,9 @@ namespace Limitless
                 continue;
 
             if (!rigidbody.RuntimeBodyCreated || !b2Body_IsValid(rigidbody.RuntimeBodyId))
-            {
-                if (debugAstroid)
-                {
-                    uint32_t& missingBodyFrameCount = s_AstroidMissingRuntimeBodyFrames[entity];
-                    ++missingBodyFrameCount;
-                    if (missingBodyFrameCount == 1u || (missingBodyFrameCount % 30u) == 0u)
-                    {
-                        LT_WARN("Physics2D kinematic debug: entity='{}' missing runtime body (frames={} assigned_to_world={} runtime_created={} runtime_valid={} world_slot={} expected_slot={})",
-                                tag->Tag,
-                                missingBodyFrameCount,
-                                assignedToThisWorld,
-                                rigidbody.RuntimeBodyCreated,
-                                b2Body_IsValid(rigidbody.RuntimeBodyId),
-                                rigidbody.RuntimeWorldSlot,
-                                m_SceneWorldSlot);
-                    }
-                }
                 continue;
-            }
-            if (debugAstroid)
-                s_AstroidMissingRuntimeBodyFrames.erase(entity);
 
             const b2BodyType expectedType = ToBox2DBodyType(rigidbody.Type);
-            if (debugAstroid && expectedType != b2_kinematicBody)
-            {
-                uint32_t& unexpectedTypeFrameCount = s_AstroidUnexpectedBodyTypeFrames[entity];
-                ++unexpectedTypeFrameCount;
-                if (unexpectedTypeFrameCount == 1u || (unexpectedTypeFrameCount % 30u) == 0u)
-                {
-                    LT_WARN("Physics2D kinematic debug: entity='{}' uses non-kinematic body type={} (frames={})",
-                            tag->Tag,
-                            static_cast<int>(rigidbody.Type),
-                            unexpectedTypeFrameCount);
-                }
-            }
-            else if (debugAstroid)
-            {
-                s_AstroidUnexpectedBodyTypeFrames.erase(entity);
-            }
-
             const bool hasPendingVelocityWrites =
                 rigidbody.RuntimeHasPendingLinearVelocity ||
                 rigidbody.RuntimeHasPendingLinearVelocityX ||
@@ -1003,6 +955,17 @@ namespace Limitless
             const Pose2D authoredWorldPose = GetEntityWorldPose2D(scene, entity, transform);
             glm::vec2 authoringPosition = authoredWorldPose.Position;
             float authoringAngleRadians = authoredWorldPose.AngleRadians;
+            if (const auto* animator = registry.try_get<AnimatorComponent>(entity);
+                animator && animator->ApplyToTransform)
+            {
+                if (animator->RuntimeHasPosition)
+                {
+                    authoringPosition.x += animator->RuntimePosition.x;
+                    authoringPosition.y += animator->RuntimePosition.y;
+                }
+                if (animator->RuntimeHasRotation)
+                    authoringAngleRadians = WrapAngleRadians(authoringAngleRadians + glm::radians(animator->RuntimeRotation.z));
+            }
             glm::vec2 snappedAuthoringPosition = authoringPosition;
             float snappedAuthoringAngleRadians = authoringAngleRadians;
             bool snappedTransformToRuntime = false;
@@ -1032,39 +995,6 @@ namespace Limitless
             const float angleDelta = WrapAngleRadians(authoringAngleRadians - runtimeAngleRadians);
             bool transformChangedByAuthoring = glm::length(positionDelta) > kTransformSnapEpsilon ||
                                                std::abs(angleDelta) > kTransformSnapEpsilon;
-            if (astroidTagged)
-            {
-                const bool runtimeNearOrigin = std::abs(runtimePosition.x) <= 0.05f && std::abs(runtimePosition.y) <= 0.05f;
-                const bool authoredFarFromRuntime = glm::length(positionDelta) >= 0.35f;
-                if (runtimeNearOrigin && authoredFarFromRuntime)
-                {
-                    uint32_t& mismatchFrames = s_AstroidOriginMismatchFrames[entity];
-                    ++mismatchFrames;
-                    if (mismatchFrames == 1u || (mismatchFrames % 30u) == 0u)
-                    {
-                        LT_WARN("Physics2D astroid anomaly: entity='{}' runtime_near_origin=1 mismatch_frames={} "
-                                "runtime_pos=({}, {}) authored_pos=({}, {}) delta=({}, {}) pending_velocity_writes={} "
-                                "transform_changed={} body_type={} awake={}",
-                                tag ? tag->Tag : "Entity",
-                                mismatchFrames,
-                                runtimePosition.x,
-                                runtimePosition.y,
-                                authoringPosition.x,
-                                authoringPosition.y,
-                                positionDelta.x,
-                                positionDelta.y,
-                                hasPendingVelocityWrites,
-                                transformChangedByAuthoring,
-                                static_cast<int>(rigidbody.Type),
-                                b2Body_IsAwake(rigidbody.RuntimeBodyId));
-                    }
-                }
-                else
-                {
-                    s_AstroidOriginMismatchFrames.erase(entity);
-                }
-            }
-
             // -----------------------------------------------------------
             // Fast path: skip sleeping dynamic bodies only when they have
             // no pending velocity writes and no authored transform delta.
@@ -1185,6 +1115,20 @@ namespace Limitless
                 {
                     if (!authoringChanged)
                     {
+                        const bool hasRuntimeLinearVelocity =
+                            std::abs(runtimeVelocity.x) > kTransformSnapEpsilon ||
+                            std::abs(runtimeVelocity.y) > kTransformSnapEpsilon;
+
+                        // Preserve non-zero runtime velocity when scripts already set kinematic velocity.
+                        // This avoids zeroing the body between multiple fixed substeps in one frame.
+                        if (hasRuntimeLinearVelocity)
+                        {
+                            rigidbody.RuntimeLinearVelocity = glm::vec2(runtimeVelocity.x, runtimeVelocity.y);
+                            rigidbody.RuntimePreviousPosition = authoringPosition;
+                            rigidbody.RuntimePreviousAngleRadians = authoringAngleRadians;
+                            continue;
+                        }
+
                         runtimeVelocity = { 0.0f, 0.0f };
                         b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, runtimeVelocity);
                         b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, 0.0f);
@@ -1220,29 +1164,6 @@ namespace Limitless
 
                 b2Body_SetLinearVelocity(rigidbody.RuntimeBodyId, runtimeVelocity);
                 b2Body_SetAngularVelocity(rigidbody.RuntimeBodyId, targetAngularVelocity);
-
-                if (debugKinematicMotion && debugAstroid)
-                {
-                    static std::unordered_map<entt::entity, uint32_t> s_KinematicStallFrameCounts;
-                    const bool hasRuntimeVelocity =
-                        std::abs(runtimeVelocity.x) > kTransformSnapEpsilon ||
-                        std::abs(runtimeVelocity.y) > kTransformSnapEpsilon;
-                    const bool appearsStalled = hasRuntimeVelocity && !authoringChanged;
-                    uint32_t& stallFrameCount = s_KinematicStallFrameCounts[entity];
-                    stallFrameCount = appearsStalled ? (stallFrameCount + 1u) : 0u;
-                    if (stallFrameCount > 0u && (stallFrameCount % 30u) == 0u)
-                    {
-                        LT_WARN("Physics2D kinematic debug: entity='{}' stalled_frames={} authoring_changed={} "
-                                "runtime_velocity=({}, {}) authored_delta=({}, {})",
-                                tag->Tag,
-                                stallFrameCount,
-                                authoringChanged,
-                                runtimeVelocity.x,
-                                runtimeVelocity.y,
-                                authoredPositionDelta.x,
-                                authoredPositionDelta.y);
-                    }
-                }
 
                 rigidbody.RuntimeLinearVelocity = glm::vec2(runtimeVelocity.x, runtimeVelocity.y);
                 rigidbody.RuntimePreviousPosition = authoringPosition;

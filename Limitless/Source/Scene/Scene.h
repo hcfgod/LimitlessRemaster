@@ -154,6 +154,7 @@ namespace Limitless
         void FixedUpdate(float fixedDeltaTime);
         void StepPhysics2D(float fixedDeltaTime);
         bool PreviewAnimationClipOnEntity(entt::entity entity, const std::string& clipAssetKey, float previewTimeSeconds);
+        void ClearAnimationPreviewOnAllEntities();
 
         void BeginLoadingState();
         void MarkSceneObjectsInitialized();

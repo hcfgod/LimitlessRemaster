@@ -581,7 +581,7 @@ namespace Limitless
             {"SpriteTextureTrack", nlohmann::json::array()},
             {"PositionTrack", nlohmann::json::array()},
             {"ScaleTrack", nlohmann::json::array()},
-            {"RotationZTrack", nlohmann::json::array()},
+            {"RotationTrack", nlohmann::json::array()},
             {"EventTrack", nlohmann::json::array()}
         };
 

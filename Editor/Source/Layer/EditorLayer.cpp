@@ -1834,7 +1834,15 @@ namespace Limitless
 
     void EditorLayer::ApplyAnimationTimelinePreviewToSelectedEntity()
     {
-        if (m_PlayModeState != EditorPlayModeState::Edit || !m_ShowAnimationTimelinePanel || !m_Scene || !m_Scene->IsReady())
+        if (m_PlayModeState != EditorPlayModeState::Edit || !m_Scene || !m_Scene->IsReady())
+            return;
+
+        // Always undo ALL previously-applied additive offsets first.
+        // This ensures stale offsets on previously-previewed entities (e.g. after
+        // entity selection change or panel close) are cleaned up every frame.
+        RestoreAnimationPreviewTransforms();
+
+        if (!m_ShowAnimationTimelinePanel)
             return;
 
         EditorAnimationTimelinePanel::ActivePreview preview{};
@@ -1883,6 +1891,38 @@ namespace Limitless
                     }
                 }
             }
+        }
+    }
+
+    void EditorLayer::RestoreAnimationPreviewTransforms()
+    {
+        if (!m_Scene)
+            return;
+
+        auto& registry = m_Scene->GetRegistry();
+        auto view = registry.view<AnimatorComponent, TransformComponent>();
+        for (entt::entity entity : view)
+        {
+            auto& animator = view.get<AnimatorComponent>(entity);
+            auto& transform = view.get<TransformComponent>(entity);
+
+            const bool hasOffset =
+                animator.RuntimeAppliedPositionOffset != glm::vec3(0.0f) ||
+                animator.RuntimeAppliedScaleOffset    != glm::vec3(0.0f) ||
+                animator.RuntimeAppliedRotationOffset != glm::vec3(0.0f);
+
+            if (!hasOffset)
+                continue;
+
+            transform.Position -= animator.RuntimeAppliedPositionOffset;
+            transform.Scale    -= animator.RuntimeAppliedScaleOffset;
+            transform.Rotation -= animator.RuntimeAppliedRotationOffset;
+
+            animator.RuntimeAppliedPositionOffset = glm::vec3(0.0f);
+            animator.RuntimeAppliedScaleOffset    = glm::vec3(0.0f);
+            animator.RuntimeAppliedRotationOffset = glm::vec3(0.0f);
+
+            m_Scene->MarkTransformDirty(entity);
         }
     }
 

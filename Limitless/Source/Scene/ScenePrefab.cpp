@@ -98,13 +98,16 @@ namespace Limitless
             {
                 animator.RuntimeCachedSpriteTextureOverride.reset();
                 animator.RuntimeSpriteTextureOverrideLoadAttempted = false;
+                animator.RuntimeAppliedPositionOffset = glm::vec3(0.0f);
+                animator.RuntimeAppliedScaleOffset = glm::vec3(0.0f);
+                animator.RuntimeAppliedRotationOffset = glm::vec3(0.0f);
             }
             animator.RuntimeHasPosition = false;
             animator.RuntimeHasScale = false;
-            animator.RuntimeHasRotationZ = false;
+            animator.RuntimeHasRotation = false;
             animator.RuntimePosition = glm::vec3(0.0f);
-            animator.RuntimeScale = glm::vec3(1.0f);
-            animator.RuntimeRotationZDegrees = 0.0f;
+            animator.RuntimeScale = glm::vec3(0.0f);
+            animator.RuntimeRotation = glm::vec3(0.0f);
         }
 
         // Keep clone/load runtime cleanup centralized so newly added components

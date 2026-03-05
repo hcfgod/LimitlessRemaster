@@ -95,13 +95,19 @@ namespace Limitless
         Assets::TextureAsset::Ptr RuntimeCachedSpriteTextureOverride;
         bool RuntimeSpriteTextureOverrideLoadAttempted = false;
 
-        // Runtime sampled transform output.
+        // Runtime sampled transform output (additive offsets applied on top of base transform).
         bool RuntimeHasPosition = false;
         bool RuntimeHasScale = false;
-        bool RuntimeHasRotationZ = false;
+        bool RuntimeHasRotation = false;
         glm::vec3 RuntimePosition = glm::vec3(0.0f);
-        glm::vec3 RuntimeScale = glm::vec3(1.0f);
-        float RuntimeRotationZDegrees = 0.0f;
+        glm::vec3 RuntimeScale = glm::vec3(0.0f);
+        glm::vec3 RuntimeRotation = glm::vec3(0.0f);
+
+        // Tracks the offsets currently baked into the TransformComponent so they
+        // can be undone before applying the next frame's sampled values.
+        glm::vec3 RuntimeAppliedPositionOffset = glm::vec3(0.0f);
+        glm::vec3 RuntimeAppliedScaleOffset = glm::vec3(0.0f);
+        glm::vec3 RuntimeAppliedRotationOffset = glm::vec3(0.0f);
 
         void SetBoolParameter(const std::string& name, bool value)
         {

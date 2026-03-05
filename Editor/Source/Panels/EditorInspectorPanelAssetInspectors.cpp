@@ -2226,7 +2226,7 @@ namespace Limitless::EditorInspectorPanel
         ImGui::BulletText("Sprite Texture Keys: %u", static_cast<uint32_t>(clipData.SpriteTextureTrack.size()));
         ImGui::BulletText("Position Keys: %u", static_cast<uint32_t>(clipData.PositionTrack.size()));
         ImGui::BulletText("Scale Keys: %u", static_cast<uint32_t>(clipData.ScaleTrack.size()));
-        ImGui::BulletText("Rotation Z Keys: %u", static_cast<uint32_t>(clipData.RotationZTrack.size()));
+        ImGui::BulletText("Rotation Keys: %u", static_cast<uint32_t>(clipData.RotationTrack.size()));
         ImGui::BulletText("Events: %u", static_cast<uint32_t>(clipData.EventTrack.size()));
         ImGui::Spacing();
         ImGui::TextDisabled("Edit detailed tracks in the Animation Timeline panel.");

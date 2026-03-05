@@ -146,6 +146,8 @@ namespace Limitless
                 return;
         }
 
+        RestoreAnimationPreviewTransforms();
+
         Audio::StopAudioSourcesInScene(m_Scene.get());
         Audio::StopAudioSourcesInScene(m_EditSceneStored.get());
         m_EditSceneStoredAssetKey = m_CurrentSceneAssetKey;

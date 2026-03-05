@@ -118,13 +118,16 @@ namespace Limitless
             {
                 animator.RuntimeCachedSpriteTextureOverride.reset();
                 animator.RuntimeSpriteTextureOverrideLoadAttempted = false;
+                animator.RuntimeAppliedPositionOffset = glm::vec3(0.0f);
+                animator.RuntimeAppliedScaleOffset = glm::vec3(0.0f);
+                animator.RuntimeAppliedRotationOffset = glm::vec3(0.0f);
             }
             animator.RuntimeHasPosition = false;
             animator.RuntimeHasScale = false;
-            animator.RuntimeHasRotationZ = false;
+            animator.RuntimeHasRotation = false;
             animator.RuntimePosition = glm::vec3(0.0f);
-            animator.RuntimeScale = glm::vec3(1.0f);
-            animator.RuntimeRotationZDegrees = 0.0f;
+            animator.RuntimeScale = glm::vec3(0.0f);
+            animator.RuntimeRotation = glm::vec3(0.0f);
         }
 
         bool TryResolveAnimatorControllerAsset(AnimatorComponent& animator)
@@ -476,6 +479,22 @@ namespace Limitless
                 eventReceiver->RuntimeDispatchFrame = dispatchFrame;
             }
 
+            // Always undo the previous frame's additive transform offset so the
+            // base transform (set by scripts / inspector) is restored before we
+            // sample new values.  Must run even when ApplyToTransform was just
+            // toggled off so the stale offset doesn't linger on the transform.
+            {
+                if (auto* transform = registry.try_get<TransformComponent>(entity))
+                {
+                    transform->Position -= animator->RuntimeAppliedPositionOffset;
+                    transform->Scale    -= animator->RuntimeAppliedScaleOffset;
+                    transform->Rotation -= animator->RuntimeAppliedRotationOffset;
+                }
+                animator->RuntimeAppliedPositionOffset = glm::vec3(0.0f);
+                animator->RuntimeAppliedScaleOffset    = glm::vec3(0.0f);
+                animator->RuntimeAppliedRotationOffset = glm::vec3(0.0f);
+            }
+
             const std::string previousSpriteTextureOverrideKey = animator->RuntimeSpriteTextureOverrideKey;
             ResetAnimatorRuntimeOutput(*animator, false);
 
@@ -634,31 +653,36 @@ namespace Limitless
             animator->RuntimeScale = sampledScale;
 
             bool hasRotationSample = false;
-            const float sampledRotation = SampleFloatTrack(clipData.RotationZTrack, currentTime, hasRotationSample);
-            animator->RuntimeHasRotationZ = hasRotationSample;
-            animator->RuntimeRotationZDegrees = sampledRotation;
+            const glm::vec3 sampledRotation = SampleVector3Track(clipData.RotationTrack, currentTime, hasRotationSample);
+            animator->RuntimeHasRotation = hasRotationSample;
+            animator->RuntimeRotation = sampledRotation;
 
             if (animator->ApplyToTransform)
             {
                 if (auto* transform = registry.try_get<TransformComponent>(entity))
                 {
-                    bool transformChanged = false;
-                    if (animator->RuntimeHasPosition)
+                    glm::vec3 posOffset = animator->RuntimeHasPosition ? animator->RuntimePosition : glm::vec3(0.0f);
+                    const glm::vec3 scaleOffset = animator->RuntimeHasScale ? animator->RuntimeScale : glm::vec3(0.0f);
+                    glm::vec3 rotOffset = animator->RuntimeHasRotation ? animator->RuntimeRotation : glm::vec3(0.0f);
+
+                    const auto* rigidbody = registry.try_get<Rigidbody2DComponent>(entity);
+                    const bool physicsOwns2DPose = rigidbody && rigidbody->RuntimeBodyCreated;
+                    if (physicsOwns2DPose)
                     {
-                        transform->Position = animator->RuntimePosition;
-                        transformChanged = true;
+                        posOffset.x = 0.0f;
+                        posOffset.y = 0.0f;
+                        rotOffset.z = 0.0f;
                     }
-                    if (animator->RuntimeHasScale)
-                    {
-                        transform->Scale = animator->RuntimeScale;
-                        transformChanged = true;
-                    }
-                    if (animator->RuntimeHasRotationZ)
-                    {
-                        transform->Rotation.z = animator->RuntimeRotationZDegrees;
-                        transformChanged = true;
-                    }
-                    if (transformChanged)
+
+                    transform->Position += posOffset;
+                    transform->Scale    += scaleOffset;
+                    transform->Rotation += rotOffset;
+
+                    animator->RuntimeAppliedPositionOffset = posOffset;
+                    animator->RuntimeAppliedScaleOffset    = scaleOffset;
+                    animator->RuntimeAppliedRotationOffset = rotOffset;
+
+                    if (posOffset != glm::vec3(0.0f) || scaleOffset != glm::vec3(0.0f) || rotOffset != glm::vec3(0.0f))
                         scene.MarkTransformDirty(entity);
                 }
             }
@@ -858,6 +882,20 @@ namespace Limitless
         if (!animator)
             return false;
 
+        // Always undo the previous preview's additive offset so the base
+        // transform is restored before we sample new values.
+        {
+            if (auto* transform = registry.try_get<TransformComponent>(entity))
+            {
+                transform->Position -= animator->RuntimeAppliedPositionOffset;
+                transform->Scale    -= animator->RuntimeAppliedScaleOffset;
+                transform->Rotation -= animator->RuntimeAppliedRotationOffset;
+            }
+            animator->RuntimeAppliedPositionOffset = glm::vec3(0.0f);
+            animator->RuntimeAppliedScaleOffset    = glm::vec3(0.0f);
+            animator->RuntimeAppliedRotationOffset = glm::vec3(0.0f);
+        }
+
         auto clipAsset = std::dynamic_pointer_cast<Assets::AnimationClipAsset>(
             Assets::AssetManager::GetCachedByKey(clipAssetKey));
         if (!clipAsset)
@@ -904,31 +942,27 @@ namespace Limitless
         animator->RuntimeScale = sampledScale;
 
         bool hasRotationSample = false;
-        const float sampledRotation = SampleFloatTrack(clipData.RotationZTrack, currentTime, hasRotationSample);
-        animator->RuntimeHasRotationZ = hasRotationSample;
-        animator->RuntimeRotationZDegrees = sampledRotation;
+        const glm::vec3 sampledRotation = SampleVector3Track(clipData.RotationTrack, currentTime, hasRotationSample);
+        animator->RuntimeHasRotation = hasRotationSample;
+        animator->RuntimeRotation = sampledRotation;
 
         if (animator->ApplyToTransform)
         {
             if (auto* transform = registry.try_get<TransformComponent>(entity))
             {
-                bool transformChanged = false;
-                if (animator->RuntimeHasPosition)
-                {
-                    transform->Position = animator->RuntimePosition;
-                    transformChanged = true;
-                }
-                if (animator->RuntimeHasScale)
-                {
-                    transform->Scale = animator->RuntimeScale;
-                    transformChanged = true;
-                }
-                if (animator->RuntimeHasRotationZ)
-                {
-                    transform->Rotation.z = animator->RuntimeRotationZDegrees;
-                    transformChanged = true;
-                }
-                if (transformChanged)
+                const glm::vec3 posOffset = animator->RuntimeHasPosition ? animator->RuntimePosition : glm::vec3(0.0f);
+                const glm::vec3 scaleOffset = animator->RuntimeHasScale ? animator->RuntimeScale : glm::vec3(0.0f);
+                const glm::vec3 rotOffset = animator->RuntimeHasRotation ? animator->RuntimeRotation : glm::vec3(0.0f);
+
+                transform->Position += posOffset;
+                transform->Scale    += scaleOffset;
+                transform->Rotation += rotOffset;
+
+                animator->RuntimeAppliedPositionOffset = posOffset;
+                animator->RuntimeAppliedScaleOffset    = scaleOffset;
+                animator->RuntimeAppliedRotationOffset = rotOffset;
+
+                if (posOffset != glm::vec3(0.0f) || scaleOffset != glm::vec3(0.0f) || rotOffset != glm::vec3(0.0f))
                     MarkTransformDirty(entity);
             }
         }
