@@ -951,8 +951,6 @@ namespace Limitless::EditorProjectPanel
                                 selectedTilesetAssetKey.clear();
                                 selectedAudioMixerAssetKey.clear();
                                 selectedInputActionsAssetKey.clear();
-                                selectedAnimationClipAssetKey.clear();
-                                selectedAnimatorControllerAssetKey.clear();
                                 selectedEntity = entt::null;
                                 cachedTextureAsset.reset();
                                 cachedMaterialAsset.reset();
@@ -995,8 +993,6 @@ namespace Limitless::EditorProjectPanel
                                         selectedTilesetAssetKey.clear();
                                         selectedAudioMixerAssetKey.clear();
                                         selectedInputActionsAssetKey.clear();
-                                        selectedAnimationClipAssetKey.clear();
-                                        selectedAnimatorControllerAssetKey.clear();
                                         selectedEntity = entt::null;
                                         cachedTextureAsset.reset();
                                         cachedMaterialAsset.reset();
@@ -1031,8 +1027,6 @@ namespace Limitless::EditorProjectPanel
                                     selectedTilesetAssetKey.clear();
                                     selectedAudioMixerAssetKey.clear();
                                     selectedInputActionsAssetKey.clear();
-                                    selectedAnimationClipAssetKey.clear();
-                                    selectedAnimatorControllerAssetKey.clear();
                                     selectedEntity = entt::null;
                                     cachedTextureAsset.reset();
                                     cachedMaterialAsset.reset();
@@ -1053,8 +1047,6 @@ namespace Limitless::EditorProjectPanel
                                     selectedTilesetAssetKey.clear();
                                     selectedAudioMixerAssetKey.clear();
                                     selectedInputActionsAssetKey.clear();
-                                    selectedAnimationClipAssetKey.clear();
-                                    selectedAnimatorControllerAssetKey.clear();
                                     selectedEntity = entt::null;
                                     cachedTextureAsset.reset();
                                     cachedMaterialAsset.reset();
@@ -1132,8 +1124,6 @@ namespace Limitless::EditorProjectPanel
                         selectedTilesetAssetKey.clear();
                         selectedAudioMixerAssetKey.clear();
                         selectedInputActionsAssetKey.clear();
-                        selectedAnimationClipAssetKey.clear();
-                        selectedAnimatorControllerAssetKey.clear();
                         selectedEntity = entt::null;
                         cachedTextureAsset.reset();
                         cachedMaterialAsset.reset();
@@ -1152,10 +1142,6 @@ namespace Limitless::EditorProjectPanel
                             selectedAudioMixerAssetKey = assetKey;
                         else if (isInputActions)
                             selectedInputActionsAssetKey = assetKey;
-                        else if (isAnimationClip)
-                            selectedAnimationClipAssetKey = assetKey;
-                        else if (isAnimatorController)
-                            selectedAnimatorControllerAssetKey = assetKey;
                     };
                     if (releasedOnItemWithoutDrag)
                     {
@@ -2087,8 +2073,6 @@ namespace Limitless::EditorProjectPanel
             selectedTilesetAssetKey.clear();
             selectedAudioMixerAssetKey.clear();
             selectedInputActionsAssetKey.clear();
-            selectedAnimationClipAssetKey.clear();
-            selectedAnimatorControllerAssetKey.clear();
             selectedEntity = entt::null;
             cachedTextureAsset.reset();
             cachedMaterialAsset.reset();

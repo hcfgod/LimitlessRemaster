@@ -152,7 +152,6 @@ namespace Limitless
         };
 
         Concurrency::LockFreeMPMCQueue<QueuedCommand, kQueueCapacity> m_Queue;
-        std::atomic<uint32_t> m_ApproxSize{0};
         std::atomic<uint64_t> m_TotalSubmitted{0};
         std::atomic<uint64_t> m_TotalProcessed{0};
 
@@ -162,10 +161,11 @@ namespace Limitless
         uint32_t FindOrAddDebugLabelIndex(const char* name);
 
         mutable std::mutex m_DebugLabelMutex;
-        std::atomic<uint32_t> m_DebugLabelCount{0};
         std::array<const char*, kMaxDebugLabels> m_DebugLabelNames{};
         std::array<std::atomic<uint64_t>, kMaxDebugLabels> m_DebugLabelSubmitted{};
         std::array<std::atomic<uint64_t>, kMaxDebugLabels> m_DebugLabelProcessed{};
+        std::atomic<uint32_t> m_ApproxSize{0};
+        std::atomic<uint32_t> m_DebugLabelCount{0};
     };
 }
 

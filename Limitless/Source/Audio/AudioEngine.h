@@ -137,20 +137,9 @@ namespace Limitless::Audio
         float ResolveMixerGroupReverbSend(const std::string& mixerGroup) const;
 
     private:
-        SDL_AudioStream* m_Stream = nullptr;
-        SDL_AudioSpec m_MixerSpec{};
-
-        std::atomic<float> m_MasterVolume{ 1.0f };
-        std::atomic<uint32_t> m_NextVoiceId{ 1u };
-
         Concurrency::LockFreeMPMCQueue<AudioCommand, 4096> m_CommandQueue;
+        SDL_AudioStream* m_Stream = nullptr;
         std::vector<Voice> m_Voices;
-        std::unordered_map<std::string, float> m_MixerGroupVolumes;
-        std::unordered_map<std::string, float> m_MixerGroupReverbSends;
-        mutable std::mutex m_PublicStateMutex;
-        std::unordered_map<uint32_t, std::shared_ptr<VoiceActivityState>> m_VoiceActivityById;
-        std::unordered_map<std::string, float> m_MixerGroupVolumeSnapshot;
-        std::unordered_map<std::string, float> m_MixerGroupReverbSendSnapshot;
 
         // Scratch buffer used by the audio callback (interleaved stereo float32).
         // This is preallocated to avoid per-callback allocations.
@@ -158,9 +147,20 @@ namespace Limitless::Audio
         std::vector<float> m_ReverbSendScratch;
         std::vector<float> m_ReverbDelayLeft;
         std::vector<float> m_ReverbDelayRight;
+
+        mutable std::mutex m_PublicStateMutex;
+        std::unordered_map<std::string, float> m_MixerGroupVolumes;
+        std::unordered_map<std::string, float> m_MixerGroupReverbSends;
+        std::unordered_map<uint32_t, std::shared_ptr<VoiceActivityState>> m_VoiceActivityById;
+        std::unordered_map<std::string, float> m_MixerGroupVolumeSnapshot;
+        std::unordered_map<std::string, float> m_MixerGroupReverbSendSnapshot;
+
+        std::atomic<float> m_MasterVolume{ 1.0f };
+        std::atomic<uint32_t> m_NextVoiceId{ 1u };
         uint32_t m_ReverbDelayCursor = 0;
         float m_ReverbFeedback = 0.62f;
         float m_ReverbWetMix = 0.18f;
+        SDL_AudioSpec m_MixerSpec{};
     };
 }
 

@@ -544,23 +544,50 @@ namespace Limitless
         Renderer(const Renderer&) = delete;
         Renderer& operator=(const Renderer&) = delete;
         
+        RenderResourceCommandQueue m_PrimaryResourceQueue;
+        RenderResourceCommandQueue m_ResourceQueue;
+
         GraphicsContext* m_GraphicsContext = nullptr; // Borrowed, not owned
         std::unique_ptr<RenderCommandQueue> m_RenderQueue;
-        bool m_Initialized = false;
 
         // Dedicated render thread model (OpenGL-friendly):
         // - Submission: any thread (RenderCommandQueue is MPMC)
         // - Execution/present: render thread owns "frame execution + SwapBuffers"
-        std::atomic<bool> m_RenderThreadEnabled{false};
-        std::atomic<bool> m_RenderThreadRunning{false};
-        std::atomic<bool> m_RenderThreadShutdown{false};
         std::thread m_RenderThread;
+
+        uint64_t m_FrameRequestedId = 0;
+        uint64_t m_FrameCompletedId = 0;
+        std::thread::id m_RenderThreadId{};
+
+        // Totals used to compute per-frame deltas.
+        uint64_t m_PrimaryProcessedTotalAtFrameStart = 0;
+        uint64_t m_SharedProcessedTotalAtFrameStart = 0;
+
+        // Optional OpenGL shared-context resource thread (multi-threaded GPU resource execution).
+        std::unique_ptr<RenderResourceThread> m_OpenGLResourceThread;
+
+        uint64_t m_FrameUploadFrameId = 0;
+
+        // Frame-local upload staging (reduces per-upload heap allocations).
+        FrameUploadAllocator m_FrameUploadAllocator;
+
+        FrameCommandArena m_FrameCommandArena;
 
         std::mutex m_RenderThreadMutex;
         std::condition_variable m_RenderThreadCV;
+
+        // Last-frame resource stats (written by render thread, read by others).
+        std::atomic<uint32_t> m_PrimaryProcessedLastFrame{0};
+        std::atomic<uint32_t> m_SharedProcessedLastFrame{0};
+        std::atomic<uint32_t> m_PrimaryApproxSizeLastFrame{0};
+        std::atomic<uint32_t> m_SharedApproxSizeLastFrame{0};
+
+        bool m_Initialized = false;
+        std::atomic<bool> m_RenderThreadEnabled{false};
+        std::atomic<bool> m_RenderThreadRunning{false};
+        std::atomic<bool> m_RenderThreadShutdown{false};
         bool m_FrameRequested = false;
-        uint64_t m_FrameRequestedId = 0;
-        uint64_t m_FrameCompletedId = 0;
+        std::atomic<bool> m_OpenGLResourceThreadEnabled{false};
 
         void StartRenderThread();
         void StopRenderThread();
@@ -574,29 +601,5 @@ namespace Limitless
         // synchronize before a resource is safe to use in the consumer context.
         // This must be called while an OpenGL context is current on the calling thread.
         static void SynchronizeOpenGLResourceWorkForCrossContextVisibility();
-
-        std::thread::id m_RenderThreadId{};
-        RenderResourceCommandQueue m_PrimaryResourceQueue;
-        RenderResourceCommandQueue m_ResourceQueue;
-
-        // Last-frame resource stats (written by render thread, read by others).
-        std::atomic<uint32_t> m_PrimaryProcessedLastFrame{0};
-        std::atomic<uint32_t> m_SharedProcessedLastFrame{0};
-        std::atomic<uint32_t> m_PrimaryApproxSizeLastFrame{0};
-        std::atomic<uint32_t> m_SharedApproxSizeLastFrame{0};
-
-        // Totals used to compute per-frame deltas.
-        uint64_t m_PrimaryProcessedTotalAtFrameStart = 0;
-        uint64_t m_SharedProcessedTotalAtFrameStart = 0;
-
-        // Optional OpenGL shared-context resource thread (multi-threaded GPU resource execution).
-        std::atomic<bool> m_OpenGLResourceThreadEnabled{false};
-        std::unique_ptr<RenderResourceThread> m_OpenGLResourceThread;
-
-        // Frame-local upload staging (reduces per-upload heap allocations).
-        FrameUploadAllocator m_FrameUploadAllocator;
-        uint64_t m_FrameUploadFrameId = 0;
-
-        FrameCommandArena m_FrameCommandArena;
     };
 } 

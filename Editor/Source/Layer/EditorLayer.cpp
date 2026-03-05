@@ -1531,6 +1531,9 @@ namespace Limitless
 
     void EditorLayer::DrawProjectPanel()
     {
+        const std::string prevClipKey = m_SelectedAnimationClipAssetKey;
+        const std::string prevControllerKey = m_SelectedAnimatorControllerAssetKey;
+
         EditorProjectPanel::Draw(
             m_ProjectPanelState,
             m_SelectedEntity,
@@ -1817,6 +1820,11 @@ namespace Limitless
 
         if (m_ProjectPanelState.TreeExpansionStateChanged)
             PersistProjectSessionState();
+
+        if (!m_SelectedAnimationClipAssetKey.empty() && m_SelectedAnimationClipAssetKey != prevClipKey)
+            m_ShowAnimationTimelinePanel = true;
+        if (!m_SelectedAnimatorControllerAssetKey.empty() && m_SelectedAnimatorControllerAssetKey != prevControllerKey)
+            m_ShowAnimatorGraphPanel = true;
     }
 
     void EditorLayer::DrawAnimationTimelinePanel()

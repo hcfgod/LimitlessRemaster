@@ -184,19 +184,6 @@ namespace Limitless
         void LoadDefaults();
         void ProcessJsonObject(const nlohmann::json& json, const std::string& prefix);
 
-        // Thread-safe data structures
-        mutable std::shared_mutex m_ConfigMutex;
-        std::unordered_map<std::string, ConfigValue> m_Config;
-        std::unordered_map<std::string, ConfigValidator> m_Validators;
-        std::unordered_map<std::string, std::vector<std::function<void(const std::string&, const ConfigValue&)>>> m_AsyncCallbacks;
-        std::unordered_map<std::string, std::vector<ConfigChangeCallback>> m_LegacyCallbacks;
-
-        // Async I/O integration
-        std::string m_ConfigFile;
-        std::atomic<bool> m_AsyncHotReloadEnabled{false};
-        std::atomic<bool> m_BatchUpdateActive{false};
-        std::vector<std::function<void()>> m_PendingCallbacks;
-
         // Lock-free queue for async callbacks
         Concurrency::LockFreeMPMCQueue<std::function<void()>, 1024> m_AsyncCallbackQueue;
 
@@ -210,13 +197,29 @@ namespace Limitless
 
         // Background processing
         std::thread m_AsyncCallbackThread;
-        std::atomic<bool> m_AsyncCallbackThreadStarted{false};
-        std::atomic<bool> m_Shutdown{false};
-        std::mutex m_AsyncCallbackMutex;
-        std::condition_variable m_AsyncCallbackCondition;
-        
+
         // File watching for hot reload
         std::unique_ptr<FileWatcher> m_FileWatcher;
+
+        std::vector<std::function<void()>> m_PendingCallbacks;
+
+        // Async I/O integration
+        std::string m_ConfigFile;
+
+        std::mutex m_AsyncCallbackMutex;
+        std::condition_variable m_AsyncCallbackCondition;
+
+        // Thread-safe data structures
+        mutable std::shared_mutex m_ConfigMutex;
+        std::unordered_map<std::string, ConfigValue> m_Config;
+        std::unordered_map<std::string, ConfigValidator> m_Validators;
+        std::unordered_map<std::string, std::vector<std::function<void(const std::string&, const ConfigValue&)>>> m_AsyncCallbacks;
+        std::unordered_map<std::string, std::vector<ConfigChangeCallback>> m_LegacyCallbacks;
+
+        std::atomic<bool> m_AsyncHotReloadEnabled{false};
+        std::atomic<bool> m_BatchUpdateActive{false};
+        std::atomic<bool> m_AsyncCallbackThreadStarted{false};
+        std::atomic<bool> m_Shutdown{false};
     };
 
     // Convenience function

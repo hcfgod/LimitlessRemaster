@@ -19,6 +19,10 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <limits>
+#include <map>
+#include <set>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -35,6 +39,49 @@ namespace Limitless::EditorAnimationTimelinePanel
         using json = nlohmann::json;
         constexpr const char* kSubSpritePayloadId = "SUB_SPRITE_KEY";
 
+        // Dopesheet visual constants
+        constexpr float kToolbarHeight = 30.0f;
+        constexpr float kMetadataRowHeight = 26.0f;
+        constexpr float kTrackRowHeight = 24.0f;
+        constexpr float kTimeRulerHeight = 22.0f;
+        constexpr float kPropertyListWidth = 160.0f;
+        constexpr float kPixelsPerSecond = 200.0f;
+        constexpr float kDiamondHalfSize = 5.0f;
+        constexpr float kMinTimelineZoom = 0.2f;
+        constexpr float kMaxTimelineZoom = 5.0f;
+        constexpr float kInspectorHeight = 180.0f;
+
+        constexpr int kTrackCount = 6;
+
+        struct TrackDef
+        {
+            const char* DisplayName;
+            const char* JsonKey;
+        };
+
+        constexpr TrackDef kTracks[kTrackCount] = {
+            {"Sprite Sub-Rect", "SpriteSubRectTrack"},
+            {"Sprite Texture",  "SpriteTextureTrack"},
+            {"Position",        "PositionTrack"},
+            {"Scale",           "ScaleTrack"},
+            {"Rotation Z",      "RotationZTrack"},
+            {"Events",          "EventTrack"},
+        };
+
+        struct KeyframeId
+        {
+            int Track = -1;
+            int Index = -1;
+
+            bool operator<(const KeyframeId& o) const
+            {
+                if (Track != o.Track) return Track < o.Track;
+                return Index < o.Index;
+            }
+            bool operator==(const KeyframeId& o) const { return Track == o.Track && Index == o.Index; }
+            bool operator!=(const KeyframeId& o) const { return !(*this == o); }
+        };
+
         struct TimelineEditorState
         {
             std::string LoadedAssetKey;
@@ -48,6 +95,66 @@ namespace Limitless::EditorAnimationTimelinePanel
             bool IsPaused = false;
             std::string StatusMessage;
             bool StatusIsError = false;
+
+            float TimelineZoom = 1.0f;
+            float TimelineScrollX = 0.0f;
+
+            std::set<KeyframeId> SelectedKeyframes;
+            KeyframeId PrimaryKeyframe;
+
+            bool IsDraggingPlayhead = false;
+            bool IsDraggingKeyframes = false;
+            float DragAnchorTime = 0.0f;
+            std::vector<std::pair<KeyframeId, float>> DragStartTimes;
+
+            int ContextMenuTrack = -1;
+            float ContextMenuTime = 0.0f;
+
+            struct ClipboardEntry
+            {
+                int Track = -1;
+                float RelativeTime = 0.0f;
+                json KeyframeData;
+            };
+            std::vector<ClipboardEntry> Clipboard;
+
+            bool PasteOverridePopupPending = false;
+            std::vector<ClipboardEntry> PendingPasteEntries;
+            float PendingPasteBaseTime = 0.0f;
+
+            bool IsSelected(int track, int index) const
+            {
+                return SelectedKeyframes.count({track, index}) > 0;
+            }
+
+            void SelectOnly(int track, int index)
+            {
+                SelectedKeyframes.clear();
+                SelectedKeyframes.insert({track, index});
+                PrimaryKeyframe = {track, index};
+            }
+
+            void ToggleSelect(int track, int index)
+            {
+                KeyframeId id{track, index};
+                if (SelectedKeyframes.count(id))
+                    SelectedKeyframes.erase(id);
+                else
+                    SelectedKeyframes.insert(id);
+                PrimaryKeyframe = id;
+            }
+
+            void AddToSelection(int track, int index)
+            {
+                SelectedKeyframes.insert({track, index});
+                PrimaryKeyframe = {track, index};
+            }
+
+            void ClearSelection()
+            {
+                SelectedKeyframes.clear();
+                PrimaryKeyframe = {-1, -1};
+            }
         };
 
         TimelineEditorState& GetTimelineEditorState()
@@ -55,6 +162,8 @@ namespace Limitless::EditorAnimationTimelinePanel
             static TimelineEditorState state;
             return state;
         }
+
+        // ---- Asset utility functions ----
 
         std::string JsonInterpolationName(int interpolationIndex)
         {
@@ -336,7 +445,6 @@ namespace Limitless::EditorAnimationTimelinePanel
             if (!undoService)
                 return applyCallback(afterText);
 
-            // Apply first so persisted asset state changes immediately; command stores undo/redo texts.
             if (!applyCallback(afterText))
                 return false;
 
@@ -405,26 +513,143 @@ namespace Limitless::EditorAnimationTimelinePanel
             });
         }
 
-        void DrawFloatField(const char* label, float& value, float speed = 0.01f)
+        // ---- Dopesheet helpers ----
+
+        float TimeToScreenX(float timeSeconds, float originX, float scrollX, float zoom)
         {
-            ImGui::TextUnformatted(label);
-            std::string widgetId = "##";
-            widgetId += label;
-            ImGui::DragFloat(widgetId.c_str(), &value, speed);
+            return originX + (timeSeconds * kPixelsPerSecond - scrollX) * zoom;
+        }
+
+        float ScreenXToTime(float screenX, float originX, float scrollX, float zoom)
+        {
+            return (((screenX - originX) / zoom) + scrollX) / kPixelsPerSecond;
+        }
+
+        float ComputeTickInterval(float zoom)
+        {
+            const float pixelsPerTick = 80.0f;
+            float secondsPerTick = pixelsPerTick / (kPixelsPerSecond * zoom);
+            if (secondsPerTick <= 0.0001f) secondsPerTick = 0.001f;
+
+            const float magnitude = std::pow(10.0f, std::floor(std::log10(secondsPerTick)));
+            const float normalized = secondsPerTick / magnitude;
+
+            if (normalized < 2.0f) return magnitude;
+            if (normalized < 5.0f) return magnitude * 2.0f;
+            return magnitude * 5.0f;
+        }
+
+        int ComputeSubdivisions(float zoom)
+        {
+            const float tickInterval = ComputeTickInterval(zoom);
+            const float tickPixels = tickInterval * kPixelsPerSecond * zoom;
+            if (tickPixels > 400.0f) return 10;
+            if (tickPixels > 200.0f) return 5;
+            if (tickPixels > 100.0f) return 4;
+            return 2;
+        }
+
+        float ComputeSnapInterval(float zoom)
+        {
+            const float tickInterval = ComputeTickInterval(zoom);
+            return tickInterval / static_cast<float>(ComputeSubdivisions(zoom));
+        }
+
+        float SnapTimeToGrid(float timeSeconds, float zoom)
+        {
+            const float snapInterval = ComputeSnapInterval(zoom);
+            return std::round(timeSeconds / snapInterval) * snapInterval;
+        }
+
+        bool CommitUndoSnapshot(EditorUndoService* undoService, TimelineEditorState& state, const char* label)
+        {
+            if (state.WorkingJson.dump() == state.AppliedJson.dump())
+                return true;
+            return ApplyPendingClipChanges(undoService, state, label);
+        }
+
+        void DrawDiamond(ImDrawList* dl, const ImVec2& center, float halfSize, ImU32 fillCol, ImU32 borderCol)
+        {
+            const ImVec2 top(center.x, center.y - halfSize);
+            const ImVec2 right(center.x + halfSize, center.y);
+            const ImVec2 bottom(center.x, center.y + halfSize);
+            const ImVec2 left(center.x - halfSize, center.y);
+            dl->AddQuadFilled(top, right, bottom, left, fillCol);
+            dl->AddQuad(top, right, bottom, left, borderCol, 1.0f);
+        }
+
+        void HandleSpriteTextureDrop(json& textureTrack, json& subRectTrack, float samplesPerSecond,
+                                     const ImGuiPayload* payload, const char* payloadType)
+        {
+            std::vector<DroppedSpriteEntry> droppedEntries;
+            if (std::strcmp(payloadType, kSubSpritePayloadId) == 0 ||
+                std::strcmp(payloadType, "ASSET_TEXTURE") == 0)
+            {
+                const char* key = static_cast<const char*>(payload->Data);
+                if (key && key[0])
+                {
+                    DroppedSpriteEntry entry;
+                    if (TryResolveDroppedSpriteEntry(key, entry))
+                        droppedEntries.push_back(std::move(entry));
+                }
+            }
+            else if (std::strcmp(payloadType, "ASSET_MULTI_KEYS") == 0)
+            {
+                const auto droppedKeys = FilterTextureAssetKeys(ParseAssetKeyListPayload(payload));
+                for (const auto& key : droppedKeys)
+                {
+                    DroppedSpriteEntry entry;
+                    if (TryResolveDroppedSpriteEntry(key, entry))
+                        droppedEntries.push_back(std::move(entry));
+                }
+            }
+
+            if (droppedEntries.empty()) return;
+
+            const float frameStep = 1.0f / std::max(1.0f, samplesPerSecond);
+            const float startTime = textureTrack.empty()
+                ? 0.0f
+                : (textureTrack.back().value("TimeSeconds", 0.0f) + frameStep);
+            bool subRectMutated = false;
+
+            for (size_t i = 0; i < droppedEntries.size(); ++i)
+            {
+                const float keyTime = startTime + static_cast<float>(i) * frameStep;
+                const auto& entry = droppedEntries[i];
+                textureTrack.push_back({
+                    {"TimeSeconds", keyTime},
+                    {"Texture", BuildTextureKeyframeTextureObject(entry)}
+                });
+                if (entry.HasSubRect)
+                {
+                    UpsertSubRectKeyframe(subRectTrack, keyTime, entry.UvMin, entry.UvMax);
+                    subRectMutated = true;
+                }
+            }
+            if (subRectMutated)
+                SortTrackByTime(subRectTrack);
+        }
+
+        json MakeDefaultKeyframe(int trackIndex, float timeSeconds)
+        {
+            switch (trackIndex)
+            {
+            case 0: return {{"TimeSeconds", timeSeconds}, {"UvMin", {0.0f, 0.0f}}, {"UvMax", {1.0f, 1.0f}}};
+            case 1: return {{"TimeSeconds", timeSeconds}, {"Texture", {{"key", ""}}}};
+            case 2: return {{"TimeSeconds", timeSeconds}, {"Value", {0.0f, 0.0f, 0.0f}}, {"Interpolation", "Linear"}};
+            case 3: return {{"TimeSeconds", timeSeconds}, {"Value", {1.0f, 1.0f, 1.0f}}, {"Interpolation", "Linear"}};
+            case 4: return {{"TimeSeconds", timeSeconds}, {"Value", 0.0f}, {"Interpolation", "Linear"}};
+            case 5: return {{"TimeSeconds", timeSeconds}, {"Name", "Event"}, {"StringPayload", ""}, {"FloatPayload", 0.0f}, {"IntegerPayload", 0}, {"BooleanPayload", false}};
+            default: return {{"TimeSeconds", timeSeconds}};
+            }
         }
 
         void DrawVec2Field(const char* label, json& valueArray, float speed = 0.01f)
         {
             if (!valueArray.is_array() || valueArray.size() != 2)
                 valueArray = json::array({0.0f, 0.0f});
-            float value[2] = {
-                valueArray[0].get<float>(),
-                valueArray[1].get<float>()
-            };
-            ImGui::TextUnformatted(label);
-            std::string widgetId = "##";
-            widgetId += label;
-            if (ImGui::DragFloat2(widgetId.c_str(), value, speed))
+            float value[2] = {valueArray[0].get<float>(), valueArray[1].get<float>()};
+            if (ImGui::DragFloat2(label, value, speed))
                 valueArray = json::array({value[0], value[1]});
         }
 
@@ -432,483 +657,252 @@ namespace Limitless::EditorAnimationTimelinePanel
         {
             if (!valueArray.is_array() || valueArray.size() != 3)
                 valueArray = json::array({0.0f, 0.0f, 0.0f});
-            float value[3] = {
-                valueArray[0].get<float>(),
-                valueArray[1].get<float>(),
-                valueArray[2].get<float>()
-            };
-            ImGui::TextUnformatted(label);
-            std::string widgetId = "##";
-            widgetId += label;
-            if (ImGui::DragFloat3(widgetId.c_str(), value, speed))
+            float value[3] = {valueArray[0].get<float>(), valueArray[1].get<float>(), valueArray[2].get<float>()};
+            if (ImGui::DragFloat3(label, value, speed))
                 valueArray = json::array({value[0], value[1], value[2]});
         }
 
-        void DrawSpriteSubRectTrack(json& trackArray)
+        void DrawKeyframeInspector(TimelineEditorState& state, EditorUndoService* undoService)
         {
-            ImGui::SeparatorText("Sprite Sub-Rect Track");
-            if (ImGui::Button("Add Sub-Rect Keyframe"))
+            const auto& pk = state.PrimaryKeyframe;
+            if (pk.Track < 0 || pk.Track >= kTrackCount || pk.Index < 0 || state.SelectedKeyframes.empty())
             {
-                trackArray.push_back({
-                    {"TimeSeconds", 0.0f},
-                    {"UvMin", {0.0f, 0.0f}},
-                    {"UvMax", {1.0f, 1.0f}}
-                });
+                ImGui::TextDisabled("Select a keyframe to edit its properties.");
+                return;
             }
 
-            int32_t removeIndex = -1;
-            for (size_t index = 0; index < trackArray.size(); ++index)
+            auto& trackArray = state.WorkingJson[kTracks[pk.Track].JsonKey];
+            if (!trackArray.is_array() || pk.Index >= static_cast<int>(trackArray.size()))
             {
-                auto& keyframe = trackArray[index];
-                ImGui::PushID(static_cast<int>(index));
-                const std::string header = "Sub-Rect Keyframe " + std::to_string(index);
-                if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
-                {
-                    float timeSeconds = keyframe.value("TimeSeconds", 0.0f);
-                    ImGui::TextUnformatted("Time (Seconds)");
-                    if (ImGui::DragFloat("##TimeSeconds", &timeSeconds, 0.01f))
-                        keyframe["TimeSeconds"] = std::max(0.0f, timeSeconds);
-
-                    DrawVec2Field("UV Min", keyframe["UvMin"], 0.001f);
-                    DrawVec2Field("UV Max", keyframe["UvMax"], 0.001f);
-                    if (ImGui::Button("Remove Keyframe"))
-                        removeIndex = static_cast<int32_t>(index);
-                    ImGui::TreePop();
-                }
-                ImGui::PopID();
+                state.ClearSelection();
+                ImGui::TextDisabled("Select a keyframe to edit its properties.");
+                return;
             }
 
-            if (removeIndex >= 0)
-                trackArray.erase(trackArray.begin() + removeIndex);
-            SortTrackByTime(trackArray);
-        }
+            auto& kf = trackArray[pk.Index];
+            const size_t selCount = state.SelectedKeyframes.size();
+            if (selCount > 1)
+                ImGui::Text("%s - Keyframe %d  (%d selected)", kTracks[pk.Track].DisplayName, pk.Index, static_cast<int>(selCount));
+            else
+                ImGui::Text("%s - Keyframe %d", kTracks[pk.Track].DisplayName, pk.Index);
 
-        void DrawSpriteTextureTrack(json& trackArray, json& subRectTrackArray, float samplesPerSecond)
-        {
-            ImGui::SeparatorText("Sprite Texture Track");
-            if (ImGui::Button("Add Texture Keyframe"))
+            static json s_InspectorPreSnapshot;
+            static bool s_InspectorWasActive = false;
+
+            bool anyWidgetActive = false;
+
+            float timeSeconds = kf.value("TimeSeconds", 0.0f);
+            if (ImGui::DragFloat("Time (s)", &timeSeconds, 0.001f, 0.0f, 0.0f, "%.4f"))
             {
-                trackArray.push_back({
-                    {"TimeSeconds", 0.0f},
-                    {"Texture", {{"key", ""}}}
-                });
+                kf["TimeSeconds"] = std::max(0.0f, timeSeconds);
+                SortTrackByTime(trackArray);
+                const float target = std::max(0.0f, timeSeconds);
+                for (int i = 0; i < static_cast<int>(trackArray.size()); ++i)
+                {
+                    if (std::abs(trackArray[i].value("TimeSeconds", -1.0f) - target) < 0.00001f)
+                    {
+                        state.SelectedKeyframes.erase(pk);
+                        state.PrimaryKeyframe = {pk.Track, i};
+                        state.SelectedKeyframes.insert(state.PrimaryKeyframe);
+                        break;
+                    }
+                }
             }
-            ImGui::SameLine();
-            ImGui::Button("Drop Textures Here##SpriteTextureTrackDropTarget", ImVec2(240.0f, 0.0f));
-            if (ImGui::BeginDragDropTarget())
+            anyWidgetActive |= ImGui::IsItemActive();
+
+            switch (pk.Track)
             {
-                std::vector<DroppedSpriteEntry> droppedEntries;
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSubSpritePayloadId))
-                {
-                    const char* key = static_cast<const char*>(payload->Data);
-                    if (key && key[0])
-                    {
-                        DroppedSpriteEntry entry;
-                        if (TryResolveDroppedSpriteEntry(key, entry))
-                            droppedEntries.push_back(std::move(entry));
-                    }
-                }
-                else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
-                {
-                    const char* key = static_cast<const char*>(payload->Data);
-                    if (key && key[0])
-                    {
-                        DroppedSpriteEntry entry;
-                        if (TryResolveDroppedSpriteEntry(key, entry))
-                            droppedEntries.push_back(std::move(entry));
-                    }
-                }
-                else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_MULTI_KEYS"))
-                {
-                    const std::vector<std::string> droppedKeys = FilterTextureAssetKeys(ParseAssetKeyListPayload(payload));
-                    droppedEntries.reserve(droppedKeys.size());
-                    for (const auto& key : droppedKeys)
-                    {
-                        DroppedSpriteEntry entry;
-                        if (TryResolveDroppedSpriteEntry(key, entry))
-                            droppedEntries.push_back(std::move(entry));
-                    }
-                }
-
-                if (!droppedEntries.empty())
-                {
-                    const float frameStepSeconds = 1.0f / std::max(1.0f, samplesPerSecond);
-                    const float startTime = trackArray.empty()
-                        ? 0.0f
-                        : (trackArray.back().value("TimeSeconds", 0.0f) + frameStepSeconds);
-                    bool subRectTrackMutated = false;
-
-                    for (size_t keyIndex = 0; keyIndex < droppedEntries.size(); ++keyIndex)
-                    {
-                        const float keyframeTime = startTime + static_cast<float>(keyIndex) * frameStepSeconds;
-                        const auto& entry = droppedEntries[keyIndex];
-                        trackArray.push_back({
-                            {"TimeSeconds", keyframeTime},
-                            {"Texture", BuildTextureKeyframeTextureObject(entry)}
-                        });
-                        if (entry.HasSubRect)
-                        {
-                            UpsertSubRectKeyframe(subRectTrackArray, keyframeTime, entry.UvMin, entry.UvMax);
-                            subRectTrackMutated = true;
-                        }
-                    }
-
-                    if (subRectTrackMutated)
-                        SortTrackByTime(subRectTrackArray);
-                }
-                ImGui::EndDragDropTarget();
-            }
-
-            int32_t removeIndex = -1;
-            for (size_t index = 0; index < trackArray.size(); ++index)
+            case 0:
+                DrawVec2Field("UV Min", kf["UvMin"], 0.001f);
+                anyWidgetActive |= ImGui::IsItemActive();
+                DrawVec2Field("UV Max", kf["UvMax"], 0.001f);
+                anyWidgetActive |= ImGui::IsItemActive();
+                break;
+            case 1:
             {
-                auto& keyframe = trackArray[index];
-                ImGui::PushID(static_cast<int>(index));
-                const std::string header = "Texture Keyframe " + std::to_string(index);
-                if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
+                if (!kf.contains("Texture") || !kf["Texture"].is_object())
+                    kf["Texture"] = json::object();
+                std::string texKey = kf["Texture"].value("key", std::string{});
+                const int32_t subIdx = kf["Texture"].value("subSpriteIndex", -1);
+                const std::string texLabel = texKey.empty()
+                    ? std::string("None")
+                    : (EditorAssetNaming::GetAssetDisplayNameFromAssetKey(texKey) +
+                       (subIdx >= 0 ? ("#" + std::to_string(subIdx)) : std::string{}));
+                ImGui::Text("Texture: %s", texLabel.c_str());
+
+                ImGui::Button((texLabel + "##InspTexSlot").c_str(),
+                    ImVec2(std::max(60.0f, ImGui::GetContentRegionAvail().x - 80.0f), 0.0f));
+                if (ImGui::BeginDragDropTarget())
                 {
-                    float timeSeconds = keyframe.value("TimeSeconds", 0.0f);
-                    ImGui::TextUnformatted("Time (Seconds)");
-                    if (ImGui::DragFloat("##TimeSeconds", &timeSeconds, 0.01f))
-                        keyframe["TimeSeconds"] = std::max(0.0f, timeSeconds);
-
-                    if (!keyframe.contains("Texture") || !keyframe["Texture"].is_object())
-                        keyframe["Texture"] = json::object();
-                    std::string textureKey = keyframe["Texture"].value("key", std::string{});
-                    const int32_t textureSubSpriteIndex = keyframe["Texture"].value("subSpriteIndex", -1);
-                    const std::string textureLabel = textureKey.empty()
-                        ? std::string("None")
-                        : (EditorAssetNaming::GetAssetDisplayNameFromAssetKey(textureKey) +
-                           (textureSubSpriteIndex >= 0 ? ("#" + std::to_string(textureSubSpriteIndex)) : std::string{}));
-
-                    ImGui::AlignTextToFramePadding();
-                    ImGui::Text("Texture");
-                    ImGui::Button((textureLabel + "##TextureKeyframeSlot").c_str(),
-                                  ImVec2(std::max(60.0f, ImGui::GetContentRegionAvail().x - 120.0f), 0.0f));
-                    if (ImGui::BeginDragDropTarget())
+                    if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kSubSpritePayloadId))
                     {
-                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSubSpritePayloadId))
+                        const char* key = static_cast<const char*>(p->Data);
+                        if (key && key[0])
                         {
-                            const char* key = static_cast<const char*>(payload->Data);
-                            if (key && key[0])
+                            DroppedSpriteEntry entry;
+                            if (TryResolveDroppedSpriteEntry(key, entry))
                             {
-                                DroppedSpriteEntry entry;
-                                if (TryResolveDroppedSpriteEntry(key, entry))
+                                kf["Texture"]["key"] = entry.TextureKey;
+                                if (entry.SubSpriteIndex >= 0) kf["Texture"]["subSpriteIndex"] = entry.SubSpriteIndex;
+                                else kf["Texture"].erase("subSpriteIndex");
+                                if (entry.HasSubRect)
                                 {
-                                    if (textureKey != entry.TextureKey)
-                                    {
-                                        textureKey = entry.TextureKey;
-                                        keyframe["Texture"]["key"] = textureKey;
-                                    }
-                                    if (entry.SubSpriteIndex >= 0)
-                                        keyframe["Texture"]["subSpriteIndex"] = entry.SubSpriteIndex;
-                                    else
-                                        keyframe["Texture"].erase("subSpriteIndex");
-                                    if (entry.HasSubRect)
-                                    {
-                                        UpsertSubRectKeyframe(
-                                            subRectTrackArray,
-                                            keyframe.value("TimeSeconds", 0.0f),
-                                            entry.UvMin,
-                                            entry.UvMax);
-                                        SortTrackByTime(subRectTrackArray);
-                                    }
+                                    UpsertSubRectKeyframe(state.WorkingJson["SpriteSubRectTrack"],
+                                        kf.value("TimeSeconds", 0.0f), entry.UvMin, entry.UvMax);
+                                    SortTrackByTime(state.WorkingJson["SpriteSubRectTrack"]);
                                 }
+                                CommitUndoSnapshot(undoService, state, "Change Keyframe Texture");
                             }
                         }
-                        else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
-                        {
-                            const char* key = static_cast<const char*>(payload->Data);
-                            if (key && key[0])
-                            {
-                                DroppedSpriteEntry entry;
-                                if (TryResolveDroppedSpriteEntry(key, entry))
-                                {
-                                    if (textureKey != entry.TextureKey)
-                                    {
-                                        textureKey = entry.TextureKey;
-                                        keyframe["Texture"]["key"] = textureKey;
-                                    }
-                                    if (entry.SubSpriteIndex >= 0)
-                                        keyframe["Texture"]["subSpriteIndex"] = entry.SubSpriteIndex;
-                                    else
-                                        keyframe["Texture"].erase("subSpriteIndex");
-                                    if (entry.HasSubRect)
-                                    {
-                                        UpsertSubRectKeyframe(
-                                            subRectTrackArray,
-                                            keyframe.value("TimeSeconds", 0.0f),
-                                            entry.UvMin,
-                                            entry.UvMax);
-                                        SortTrackByTime(subRectTrackArray);
-                                    }
-                                }
-                            }
-                        }
-                        else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_MULTI_KEYS"))
-                        {
-                            const std::vector<std::string> droppedKeys = FilterTextureAssetKeys(ParseAssetKeyListPayload(payload));
-                            std::vector<DroppedSpriteEntry> droppedEntries;
-                            droppedEntries.reserve(droppedKeys.size());
-                            for (const auto& key : droppedKeys)
-                            {
-                                DroppedSpriteEntry entry;
-                                if (TryResolveDroppedSpriteEntry(key, entry))
-                                    droppedEntries.push_back(std::move(entry));
-                            }
-
-                            if (!droppedEntries.empty())
-                            {
-                                const float frameStepSeconds = 1.0f / std::max(1.0f, samplesPerSecond);
-                                const float startTime = keyframe.value("TimeSeconds", 0.0f);
-                                bool subRectTrackMutated = false;
-
-                                keyframe["Texture"]["key"] = droppedEntries.front().TextureKey;
-                                if (droppedEntries.front().SubSpriteIndex >= 0)
-                                    keyframe["Texture"]["subSpriteIndex"] = droppedEntries.front().SubSpriteIndex;
-                                else
-                                    keyframe["Texture"].erase("subSpriteIndex");
-                                if (droppedEntries.front().HasSubRect)
-                                {
-                                    UpsertSubRectKeyframe(subRectTrackArray, startTime, droppedEntries.front().UvMin, droppedEntries.front().UvMax);
-                                    subRectTrackMutated = true;
-                                }
-
-                                for (size_t keyIndex = 1; keyIndex < droppedEntries.size(); ++keyIndex)
-                                {
-                                    const float keyframeTime = startTime + static_cast<float>(keyIndex) * frameStepSeconds;
-                                    const auto& entry = droppedEntries[keyIndex];
-                                    trackArray.push_back({
-                                        {"TimeSeconds", keyframeTime},
-                                        {"Texture", BuildTextureKeyframeTextureObject(entry)}
-                                    });
-                                    if (entry.HasSubRect)
-                                    {
-                                        UpsertSubRectKeyframe(subRectTrackArray, keyframeTime, entry.UvMin, entry.UvMax);
-                                        subRectTrackMutated = true;
-                                    }
-                                }
-
-                                if (subRectTrackMutated)
-                                    SortTrackByTime(subRectTrackArray);
-                            }
-                        }
-                        ImGui::EndDragDropTarget();
                     }
-
-                    ImGui::SameLine();
-                    if (ImGui::Button("...##TextureKeyframePicker"))
-                        ImGui::OpenPopup("TextureKeyframePickerPopup");
-                    if (ImGui::BeginPopup("TextureKeyframePickerPopup"))
+                    else if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("ASSET_TEXTURE"))
                     {
-                        if (ImGui::Selectable("None##TextureKeyframePickerNone"))
+                        const char* key = static_cast<const char*>(p->Data);
+                        if (key && key[0])
                         {
-                            textureKey.clear();
-                            keyframe["Texture"]["key"] = "";
-                            keyframe["Texture"].erase("subSpriteIndex");
+                            DroppedSpriteEntry entry;
+                            if (TryResolveDroppedSpriteEntry(key, entry))
+                            {
+                                kf["Texture"]["key"] = entry.TextureKey;
+                                if (entry.SubSpriteIndex >= 0) kf["Texture"]["subSpriteIndex"] = entry.SubSpriteIndex;
+                                else kf["Texture"].erase("subSpriteIndex");
+                                if (entry.HasSubRect)
+                                {
+                                    UpsertSubRectKeyframe(state.WorkingJson["SpriteSubRectTrack"],
+                                        kf.value("TimeSeconds", 0.0f), entry.UvMin, entry.UvMax);
+                                    SortTrackByTime(state.WorkingJson["SpriteSubRectTrack"]);
+                                }
+                                CommitUndoSnapshot(undoService, state, "Change Keyframe Texture");
+                            }
+                        }
+                    }
+                    ImGui::EndDragDropTarget();
+                }
+
+                ImGui::SameLine();
+                if (ImGui::Button("...##InspTexPicker"))
+                    ImGui::OpenPopup("InspTexPickerPopup");
+                if (ImGui::BeginPopup("InspTexPickerPopup"))
+                {
+                    if (ImGui::Selectable("None##InspTexNone"))
+                    {
+                        kf["Texture"]["key"] = "";
+                        kf["Texture"].erase("subSpriteIndex");
+                        CommitUndoSnapshot(undoService, state, "Clear Keyframe Texture");
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::Separator();
+                    const auto texKeys = BuildTexturePickerKeys();
+                    for (const auto& key : texKeys)
+                    {
+                        const std::string display = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(key);
+                        if (ImGui::Selectable((display + "##InspTex_" + key).c_str(), texKey == key))
+                        {
+                            kf["Texture"]["key"] = key;
+                            kf["Texture"].erase("subSpriteIndex");
+                            CommitUndoSnapshot(undoService, state, "Change Keyframe Texture");
                             ImGui::CloseCurrentPopup();
                         }
-                        ImGui::Separator();
-
-                        const std::vector<std::string> textureKeys = BuildTexturePickerKeys();
-                        for (const auto& key : textureKeys)
-                        {
-                            const bool isSelected = (textureKey == key);
-                            const std::string display = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(key);
-                            if (ImGui::Selectable((display + "##TextureKeyframePicker_" + key).c_str(), isSelected))
-                            {
-                                textureKey = key;
-                                keyframe["Texture"]["key"] = textureKey;
-                                keyframe["Texture"].erase("subSpriteIndex");
-                                ImGui::CloseCurrentPopup();
-                            }
-                            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-                                ImGui::SetTooltip("%s", key.c_str());
-                        }
-                        ImGui::EndPopup();
                     }
+                    ImGui::EndPopup();
+                }
+                break;
+            }
+            case 2:
+            case 3:
+            {
+                DrawVec3Field("Value", kf["Value"], 0.01f);
+                anyWidgetActive |= ImGui::IsItemActive();
+                int interpIdx = InterpolationIndexFromJson(kf);
+                const char* interpNames[] = {"Step", "Linear"};
+                if (ImGui::Combo("Interpolation", &interpIdx, interpNames, 2))
+                {
+                    kf["Interpolation"] = JsonInterpolationName(interpIdx);
+                    CommitUndoSnapshot(undoService, state, "Change Interpolation");
+                }
+                break;
+            }
+            case 4:
+            {
+                float val = kf.value("Value", 0.0f);
+                if (ImGui::DragFloat("Value", &val, 0.1f))
+                    kf["Value"] = val;
+                anyWidgetActive |= ImGui::IsItemActive();
+                int interpIdx = InterpolationIndexFromJson(kf);
+                const char* interpNames[] = {"Step", "Linear"};
+                if (ImGui::Combo("Interpolation", &interpIdx, interpNames, 2))
+                {
+                    kf["Interpolation"] = JsonInterpolationName(interpIdx);
+                    CommitUndoSnapshot(undoService, state, "Change Interpolation");
+                }
+                break;
+            }
+            case 5:
+            {
+                std::array<char, 128> nameBuf{};
+                std::snprintf(nameBuf.data(), nameBuf.size(), "%s", kf.value("Name", std::string{}).c_str());
+                if (ImGui::InputText("Event Name", nameBuf.data(), nameBuf.size()))
+                    kf["Name"] = std::string(nameBuf.data());
+                anyWidgetActive |= ImGui::IsItemActive();
 
-                    ImGui::SameLine();
-                    if (ImGui::Button("X##ClearTextureKeyframe"))
+                std::array<char, 256> strBuf{};
+                std::snprintf(strBuf.data(), strBuf.size(), "%s", kf.value("StringPayload", std::string{}).c_str());
+                if (ImGui::InputText("String", strBuf.data(), strBuf.size()))
+                    kf["StringPayload"] = std::string(strBuf.data());
+                anyWidgetActive |= ImGui::IsItemActive();
+
+                float fp = kf.value("FloatPayload", 0.0f);
+                if (ImGui::DragFloat("Float", &fp, 0.01f))
+                    kf["FloatPayload"] = fp;
+                anyWidgetActive |= ImGui::IsItemActive();
+
+                int ip = kf.value("IntegerPayload", 0);
+                if (ImGui::DragInt("Integer", &ip))
+                    kf["IntegerPayload"] = ip;
+                anyWidgetActive |= ImGui::IsItemActive();
+
+                bool bp = kf.value("BooleanPayload", false);
+                if (ImGui::Checkbox("Boolean", &bp))
+                {
+                    kf["BooleanPayload"] = bp;
+                    CommitUndoSnapshot(undoService, state, "Change Event Boolean");
+                }
+                break;
+            }
+            default: break;
+            }
+
+            if (!s_InspectorWasActive && anyWidgetActive)
+                s_InspectorPreSnapshot = state.AppliedJson;
+            if (s_InspectorWasActive && !anyWidgetActive)
+            {
+                json savedApplied = state.AppliedJson;
+                state.AppliedJson = s_InspectorPreSnapshot;
+                CommitUndoSnapshot(undoService, state, "Edit Keyframe Property");
+                s_InspectorPreSnapshot = json::object();
+            }
+            s_InspectorWasActive = anyWidgetActive;
+
+            const char* delLabel = selCount > 1 ? "Delete Selected Keyframes" : "Delete Keyframe";
+            if (ImGui::Button(delLabel))
+            {
+                std::map<int, std::vector<int>> byTrack;
+                for (const auto& sel : state.SelectedKeyframes)
+                    byTrack[sel.Track].push_back(sel.Index);
+                for (auto& [t, indices] : byTrack)
+                {
+                    std::sort(indices.rbegin(), indices.rend());
+                    auto& arr = state.WorkingJson[kTracks[t].JsonKey];
+                    if (!arr.is_array()) continue;
+                    for (int idx : indices)
                     {
-                        textureKey.clear();
-                        keyframe["Texture"]["key"] = "";
-                        keyframe["Texture"].erase("subSpriteIndex");
+                        if (idx < static_cast<int>(arr.size()))
+                            arr.erase(arr.begin() + idx);
                     }
-
-                    if (ImGui::Button("Remove Keyframe"))
-                        removeIndex = static_cast<int32_t>(index);
-                    ImGui::TreePop();
                 }
-                ImGui::PopID();
+                state.ClearSelection();
+                CommitUndoSnapshot(undoService, state, "Delete Keyframes");
             }
-
-            if (removeIndex >= 0)
-                trackArray.erase(trackArray.begin() + removeIndex);
-            SortTrackByTime(trackArray);
-        }
-
-        void DrawVector3Track(const char* title, json& trackArray)
-        {
-            ImGui::SeparatorText(title);
-            if (ImGui::Button((std::string("Add ") + title + " Keyframe").c_str()))
-            {
-                trackArray.push_back({
-                    {"TimeSeconds", 0.0f},
-                    {"Value", {0.0f, 0.0f, 0.0f}},
-                    {"Interpolation", "Linear"}
-                });
-            }
-
-            int32_t removeIndex = -1;
-            for (size_t index = 0; index < trackArray.size(); ++index)
-            {
-                auto& keyframe = trackArray[index];
-                ImGui::PushID(static_cast<int>(index));
-                const std::string header = std::string(title) + " Keyframe " + std::to_string(index);
-                if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
-                {
-                    float timeSeconds = keyframe.value("TimeSeconds", 0.0f);
-                    ImGui::TextUnformatted("Time (Seconds)");
-                    if (ImGui::DragFloat("##TimeSeconds", &timeSeconds, 0.01f))
-                        keyframe["TimeSeconds"] = std::max(0.0f, timeSeconds);
-
-                    DrawVec3Field("Value", keyframe["Value"], 0.01f);
-
-                    int interpolationIndex = InterpolationIndexFromJson(keyframe);
-                    const char* interpolationNames[] = {"Step", "Linear"};
-                    ImGui::TextUnformatted("Interpolation");
-                    if (ImGui::Combo("##Interpolation", &interpolationIndex, interpolationNames, 2))
-                        keyframe["Interpolation"] = JsonInterpolationName(interpolationIndex);
-
-                    if (ImGui::Button("Remove Keyframe"))
-                        removeIndex = static_cast<int32_t>(index);
-                    ImGui::TreePop();
-                }
-                ImGui::PopID();
-            }
-
-            if (removeIndex >= 0)
-                trackArray.erase(trackArray.begin() + removeIndex);
-            SortTrackByTime(trackArray);
-        }
-
-        void DrawFloatTrack(json& trackArray)
-        {
-            ImGui::SeparatorText("Rotation Z Track");
-            if (ImGui::Button("Add Rotation Keyframe"))
-            {
-                trackArray.push_back({
-                    {"TimeSeconds", 0.0f},
-                    {"Value", 0.0f},
-                    {"Interpolation", "Linear"}
-                });
-            }
-
-            int32_t removeIndex = -1;
-            for (size_t index = 0; index < trackArray.size(); ++index)
-            {
-                auto& keyframe = trackArray[index];
-                ImGui::PushID(static_cast<int>(index));
-                const std::string header = "Rotation Keyframe " + std::to_string(index);
-                if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
-                {
-                    float timeSeconds = keyframe.value("TimeSeconds", 0.0f);
-                    ImGui::TextUnformatted("Time (Seconds)");
-                    if (ImGui::DragFloat("##TimeSeconds", &timeSeconds, 0.01f))
-                        keyframe["TimeSeconds"] = std::max(0.0f, timeSeconds);
-
-                    float value = keyframe.value("Value", 0.0f);
-                    ImGui::TextUnformatted("Value");
-                    if (ImGui::DragFloat("##Value", &value, 0.1f))
-                        keyframe["Value"] = value;
-
-                    int interpolationIndex = InterpolationIndexFromJson(keyframe);
-                    const char* interpolationNames[] = {"Step", "Linear"};
-                    ImGui::TextUnformatted("Interpolation");
-                    if (ImGui::Combo("##Interpolation", &interpolationIndex, interpolationNames, 2))
-                        keyframe["Interpolation"] = JsonInterpolationName(interpolationIndex);
-
-                    if (ImGui::Button("Remove Keyframe"))
-                        removeIndex = static_cast<int32_t>(index);
-                    ImGui::TreePop();
-                }
-                ImGui::PopID();
-            }
-
-            if (removeIndex >= 0)
-                trackArray.erase(trackArray.begin() + removeIndex);
-            SortTrackByTime(trackArray);
-        }
-
-        void DrawEventTrack(json& trackArray)
-        {
-            ImGui::SeparatorText("Event Track");
-            if (ImGui::Button("Add Event Keyframe"))
-            {
-                trackArray.push_back({
-                    {"TimeSeconds", 0.0f},
-                    {"Name", "Event"},
-                    {"StringPayload", ""},
-                    {"FloatPayload", 0.0f},
-                    {"IntegerPayload", 0},
-                    {"BooleanPayload", false}
-                });
-            }
-
-            int32_t removeIndex = -1;
-            for (size_t index = 0; index < trackArray.size(); ++index)
-            {
-                auto& keyframe = trackArray[index];
-                ImGui::PushID(static_cast<int>(index));
-                const std::string header = "Event Keyframe " + std::to_string(index);
-                if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen))
-                {
-                    float timeSeconds = keyframe.value("TimeSeconds", 0.0f);
-                    ImGui::TextUnformatted("Time (Seconds)");
-                    if (ImGui::DragFloat("##TimeSeconds", &timeSeconds, 0.01f))
-                        keyframe["TimeSeconds"] = std::max(0.0f, timeSeconds);
-
-                    std::array<char, 128> nameBuffer{};
-                    std::snprintf(nameBuffer.data(), nameBuffer.size(), "%s", keyframe.value("Name", std::string{}).c_str());
-                    ImGui::TextUnformatted("Event Name");
-                    if (ImGui::InputText("##EventName", nameBuffer.data(), nameBuffer.size()))
-                        keyframe["Name"] = std::string(nameBuffer.data());
-
-                    std::array<char, 256> stringPayloadBuffer{};
-                    std::snprintf(stringPayloadBuffer.data(),
-                                  stringPayloadBuffer.size(),
-                                  "%s",
-                                  keyframe.value("StringPayload", std::string{}).c_str());
-                    ImGui::TextUnformatted("String Payload");
-                    if (ImGui::InputText("##StringPayload", stringPayloadBuffer.data(), stringPayloadBuffer.size()))
-                        keyframe["StringPayload"] = std::string(stringPayloadBuffer.data());
-
-                    float floatPayload = keyframe.value("FloatPayload", 0.0f);
-                    ImGui::TextUnformatted("Float Payload");
-                    if (ImGui::DragFloat("##FloatPayload", &floatPayload, 0.01f))
-                        keyframe["FloatPayload"] = floatPayload;
-
-                    int integerPayload = keyframe.value("IntegerPayload", 0);
-                    ImGui::TextUnformatted("Integer Payload");
-                    if (ImGui::DragInt("##IntegerPayload", &integerPayload))
-                        keyframe["IntegerPayload"] = integerPayload;
-
-                    bool booleanPayload = keyframe.value("BooleanPayload", false);
-                    ImGui::TextUnformatted("Boolean Payload");
-                    if (ImGui::Checkbox("##BooleanPayload", &booleanPayload))
-                        keyframe["BooleanPayload"] = booleanPayload;
-
-                    if (ImGui::Button("Remove Keyframe"))
-                        removeIndex = static_cast<int32_t>(index);
-                    ImGui::TreePop();
-                }
-                ImGui::PopID();
-            }
-
-            if (removeIndex >= 0)
-                trackArray.erase(trackArray.begin() + removeIndex);
-            SortTrackByTime(trackArray);
         }
     }
 
@@ -956,12 +950,6 @@ namespace Limitless::EditorAnimationTimelinePanel
             }
         }
 
-        ImGui::Text("Clip: %s", EditorAssetNaming::GetAssetDisplayNameFromAssetKey(animationClipAssetKey).c_str());
-        ImGui::TextDisabled("Asset Key: %s", animationClipAssetKey.c_str());
-        if (!state.ResolvedPath.empty())
-            ImGui::TextDisabled("Path: %s", state.ResolvedPath.string().c_str());
-        ImGui::Separator();
-
         if (state.LoadFailed || !state.Loaded)
         {
             ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", state.StatusMessage.c_str());
@@ -971,33 +959,14 @@ namespace Limitless::EditorAnimationTimelinePanel
 
         EnsureClipSchemaDefaults(state.WorkingJson);
 
-        std::array<char, 256> clipNameBuffer{};
-        std::snprintf(clipNameBuffer.data(), clipNameBuffer.size(), "%s", state.WorkingJson.value("Name", std::string{}).c_str());
-        ImGui::TextUnformatted("Name");
-        if (ImGui::InputText("##TimelineClipName", clipNameBuffer.data(), clipNameBuffer.size()))
-            state.WorkingJson["Name"] = std::string(clipNameBuffer.data());
-
-        bool loop = state.WorkingJson.value("Loop", true);
-        ImGui::TextUnformatted("Loop");
-        if (ImGui::Checkbox("##TimelineLoop", &loop))
-            state.WorkingJson["Loop"] = loop;
-
-        float durationSeconds = state.WorkingJson.value("DurationSeconds", 1.0f);
-        DrawFloatField("Duration (Seconds)", durationSeconds, 0.01f);
-        state.WorkingJson["DurationSeconds"] = std::max(0.0001f, durationSeconds);
-
-        float samplesPerSecond = state.WorkingJson.value("SamplesPerSecond", 30.0f);
-        DrawFloatField("Samples Per Second", samplesPerSecond, 0.25f);
-        state.WorkingJson["SamplesPerSecond"] = std::max(1.0f, samplesPerSecond);
-
         const float maxPreviewTime = std::max(0.0001f, state.WorkingJson.value("DurationSeconds", 1.0f));
         const bool clipLoops = state.WorkingJson.value("Loop", true);
-        const float previewSpeedMultiplier = 1.0f;
+        const float samplesPerSecond = state.WorkingJson.value("SamplesPerSecond", 30.0f);
 
+        // Auto-advance playback
         if (state.IsPlaying && !state.IsPaused)
         {
-            const float frameDelta = ImGui::GetIO().DeltaTime * previewSpeedMultiplier;
-            state.PreviewTimeSeconds += frameDelta;
+            state.PreviewTimeSeconds += ImGui::GetIO().DeltaTime;
             if (state.PreviewTimeSeconds >= maxPreviewTime)
             {
                 if (clipLoops)
@@ -1011,88 +980,857 @@ namespace Limitless::EditorAnimationTimelinePanel
             }
         }
 
-        ImGui::SeparatorText("Preview");
-
-        if (!state.IsPlaying)
+        // ---- Toolbar ----
         {
-            if (ImGui::Button("Play##TimelinePlay", ImVec2(60.0f, 0.0f)))
+            if (ImGui::Button("|<##Rewind", ImVec2(28, 0)))
+                state.PreviewTimeSeconds = 0.0f;
+
+            ImGui::SameLine();
+            const float frameStep = 1.0f / std::max(1.0f, samplesPerSecond);
+            if (ImGui::Button("<##StepBack", ImVec2(28, 0)))
+                state.PreviewTimeSeconds = std::max(0.0f, state.PreviewTimeSeconds - frameStep);
+
+            ImGui::SameLine();
+            if (!state.IsPlaying || state.IsPaused)
             {
-                state.IsPlaying = true;
+                if (ImGui::Button("Play##Transport", ImVec2(50, 0)))
+                {
+                    state.IsPlaying = true;
+                    state.IsPaused = false;
+                    if (state.PreviewTimeSeconds >= maxPreviewTime - 0.001f)
+                        state.PreviewTimeSeconds = 0.0f;
+                }
+            }
+            else
+            {
+                if (ImGui::Button("Pause##Transport", ImVec2(50, 0)))
+                    state.IsPaused = true;
+            }
+
+            ImGui::SameLine();
+            if (ImGui::Button(">##StepFwd", ImVec2(28, 0)))
+                state.PreviewTimeSeconds += frameStep;
+
+            ImGui::SameLine();
+            if (ImGui::Button(">|##GoEnd", ImVec2(28, 0)))
+                state.PreviewTimeSeconds = maxPreviewTime;
+
+            ImGui::SameLine();
+            if (ImGui::Button("Stop##Transport", ImVec2(40, 0)))
+            {
+                state.IsPlaying = false;
                 state.IsPaused = false;
-                if (state.PreviewTimeSeconds >= maxPreviewTime - 0.001f)
-                    state.PreviewTimeSeconds = 0.0f;
+                state.PreviewTimeSeconds = 0.0f;
+            }
+
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(80.0f);
+            if (ImGui::DragFloat("##Time", &state.PreviewTimeSeconds, 0.001f, 0.0f, 0.0f, "%.3f s"))
+            {
+                if (state.PreviewTimeSeconds < 0.0f) state.PreviewTimeSeconds = 0.0f;
+                state.IsPlaying = false;
+                state.IsPaused = false;
+            }
+
+            ImGui::SameLine();
+            const int currentFrame = static_cast<int>(state.PreviewTimeSeconds * samplesPerSecond);
+            ImGui::Text("F:%d", currentFrame);
+        }
+
+        // ---- Metadata row ----
+        {
+            std::array<char, 128> nameBuf{};
+            std::snprintf(nameBuf.data(), nameBuf.size(), "%s", state.WorkingJson.value("Name", std::string{}).c_str());
+            ImGui::SetNextItemWidth(120.0f);
+            if (ImGui::InputText("##ClipName", nameBuf.data(), nameBuf.size()))
+                state.WorkingJson["Name"] = std::string(nameBuf.data());
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                CommitUndoSnapshot(undoService, state, "Rename Clip");
+
+            ImGui::SameLine();
+            float dur = state.WorkingJson.value("DurationSeconds", 1.0f);
+            ImGui::SetNextItemWidth(70.0f);
+            if (ImGui::DragFloat("Dur##Duration", &dur, 0.01f, 0.0001f, 0.0f, "%.3f"))
+                state.WorkingJson["DurationSeconds"] = std::max(0.0001f, dur);
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                CommitUndoSnapshot(undoService, state, "Change Clip Duration");
+
+            ImGui::SameLine();
+            float sps = state.WorkingJson.value("SamplesPerSecond", 30.0f);
+            ImGui::SetNextItemWidth(60.0f);
+            if (ImGui::DragFloat("SPS##Samples", &sps, 0.25f, 1.0f, 0.0f, "%.0f"))
+                state.WorkingJson["SamplesPerSecond"] = std::max(1.0f, sps);
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                CommitUndoSnapshot(undoService, state, "Change Samples Per Second");
+
+            ImGui::SameLine();
+            bool loop = state.WorkingJson.value("Loop", true);
+            if (ImGui::Checkbox("Loop", &loop))
+            {
+                state.WorkingJson["Loop"] = loop;
+                CommitUndoSnapshot(undoService, state, "Toggle Loop");
             }
         }
-        else if (state.IsPaused)
-        {
-            if (ImGui::Button("Resume##TimelineResume", ImVec2(60.0f, 0.0f)))
-                state.IsPaused = false;
-        }
-        else
-        {
-            if (ImGui::Button("Pause##TimelinePause", ImVec2(60.0f, 0.0f)))
-                state.IsPaused = true;
-        }
 
-        ImGui::SameLine();
-        if (ImGui::Button("Stop##TimelineStop", ImVec2(60.0f, 0.0f)))
-        {
-            state.IsPlaying = false;
-            state.IsPaused = false;
-            state.PreviewTimeSeconds = 0.0f;
-        }
+        ImGui::Separator();
 
-        ImGui::SameLine();
-        if (ImGui::Button("|<##TimelineRewind", ImVec2(30.0f, 0.0f)))
-        {
-            state.PreviewTimeSeconds = 0.0f;
-        }
+        // Calculate layout
+        const float footerHeight = 60.0f;
+        const float inspectorReserve = kInspectorHeight + 8.0f;
+        const float mainAreaHeight = std::max(80.0f,
+            ImGui::GetContentRegionAvail().y - footerHeight - inspectorReserve);
+        const float totalTracksHeight = kTrackCount * kTrackRowHeight;
 
-        ImGui::SameLine();
+        // ---- Main area: property list + timeline ----
+        ImGui::BeginChild("##DopesheetMain", ImVec2(0.0f, mainAreaHeight), ImGuiChildFlags_None);
         {
-            const float frameStep = 1.0f / std::max(1.0f, state.WorkingJson.value("SamplesPerSecond", 30.0f));
-            if (ImGui::Button(">|##TimelineStepFwd", ImVec2(30.0f, 0.0f)))
+            const ImVec2 mainOrigin = ImGui::GetCursorScreenPos();
+            const ImVec2 mainSize = ImGui::GetContentRegionAvail();
+
+            // Property list (left)
+            ImGui::BeginChild("##PropList", ImVec2(kPropertyListWidth, 0.0f), ImGuiChildFlags_Border);
             {
-                state.PreviewTimeSeconds = std::min(state.PreviewTimeSeconds + frameStep, maxPreviewTime);
+                // Empty header row aligned with time ruler
+                ImGui::Dummy(ImVec2(0.0f, kTimeRulerHeight));
+                ImGui::Separator();
+
+                for (int t = 0; t < kTrackCount; ++t)
+                {
+                    const auto& trackArr = state.WorkingJson[kTracks[t].JsonKey];
+                    const size_t kfCount = trackArr.is_array() ? trackArr.size() : 0;
+
+                    ImGui::PushID(t);
+
+                    char label[128];
+                    std::snprintf(label, sizeof(label), "%s (%zu)", kTracks[t].DisplayName, kfCount);
+
+                    bool hasTrackSelected = false;
+                    for (const auto& sel : state.SelectedKeyframes)
+                        if (sel.Track == t) { hasTrackSelected = true; break; }
+                    if (ImGui::Selectable(label, hasTrackSelected, 0, ImVec2(0.0f, kTrackRowHeight - 2.0f)))
+                    {
+                        state.ClearSelection();
+                    }
+
+                    // Sprite Texture track: drop target for textures
+                    if (t == 1 && ImGui::BeginDragDropTarget())
+                    {
+                        const char* payloadTypes[] = {kSubSpritePayloadId, "ASSET_TEXTURE", "ASSET_MULTI_KEYS"};
+                        for (const char* ptype : payloadTypes)
+                        {
+                            if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(ptype))
+                            {
+                                HandleSpriteTextureDrop(
+                                    state.WorkingJson["SpriteTextureTrack"],
+                                    state.WorkingJson["SpriteSubRectTrack"],
+                                    samplesPerSecond, p, ptype);
+                                SortTrackByTime(state.WorkingJson["SpriteTextureTrack"]);
+                                CommitUndoSnapshot(undoService, state, "Drop Sprite Texture");
+                                break;
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+
+                    ImGui::PopID();
+                }
             }
-        }
+            ImGui::EndChild();
 
-        ImGui::SliderFloat("##PreviewTime", &state.PreviewTimeSeconds, 0.0f, maxPreviewTime, "%.3f s");
-        if (ImGui::IsItemActive())
+            ImGui::SameLine();
+
+            // Timeline (right)
+            ImGui::BeginChild("##Timeline", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Border,
+                ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+            {
+                const ImVec2 tlOrigin = ImGui::GetCursorScreenPos();
+                const ImVec2 tlSize = ImGui::GetContentRegionAvail();
+
+                if (tlSize.x > 1.0f && tlSize.y > 1.0f)
+                {
+                    ImGui::InvisibleButton("##tlCanvas", tlSize);
+                    const bool tlHovered = ImGui::IsItemHovered();
+                    const ImVec2 mouseScreen = ImGui::GetIO().MousePos;
+
+                    // Drag-drop textures onto the timeline canvas to auto-create keyframes
+                    if (ImGui::BeginDragDropTarget())
+                    {
+                        const float dropTime = std::max(0.0f,
+                            SnapTimeToGrid(
+                                ScreenXToTime(mouseScreen.x, tlOrigin.x, state.TimelineScrollX, state.TimelineZoom),
+                                state.TimelineZoom));
+                        const char* payloadTypes[] = {kSubSpritePayloadId, "ASSET_TEXTURE", "ASSET_MULTI_KEYS"};
+                        for (const char* ptype : payloadTypes)
+                        {
+                            if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(ptype))
+                            {
+                                auto& texTrack = state.WorkingJson["SpriteTextureTrack"];
+                                auto& subRectTrack = state.WorkingJson["SpriteSubRectTrack"];
+
+                                std::vector<DroppedSpriteEntry> droppedEntries;
+                                if (std::strcmp(ptype, kSubSpritePayloadId) == 0 ||
+                                    std::strcmp(ptype, "ASSET_TEXTURE") == 0)
+                                {
+                                    const char* key = static_cast<const char*>(p->Data);
+                                    if (key && key[0])
+                                    {
+                                        DroppedSpriteEntry entry;
+                                        if (TryResolveDroppedSpriteEntry(key, entry))
+                                            droppedEntries.push_back(std::move(entry));
+                                    }
+                                }
+                                else if (std::strcmp(ptype, "ASSET_MULTI_KEYS") == 0)
+                                {
+                                    const auto droppedKeys = FilterTextureAssetKeys(ParseAssetKeyListPayload(p));
+                                    for (const auto& key : droppedKeys)
+                                    {
+                                        DroppedSpriteEntry entry;
+                                        if (TryResolveDroppedSpriteEntry(key, entry))
+                                            droppedEntries.push_back(std::move(entry));
+                                    }
+                                }
+
+                                if (!droppedEntries.empty())
+                                {
+                                    const float frameStep = 1.0f / std::max(1.0f, samplesPerSecond);
+                                    for (size_t i = 0; i < droppedEntries.size(); ++i)
+                                    {
+                                        const float keyTime = dropTime + static_cast<float>(i) * frameStep;
+                                        const auto& entry = droppedEntries[i];
+                                        texTrack.push_back({
+                                            {"TimeSeconds", keyTime},
+                                            {"Texture", BuildTextureKeyframeTextureObject(entry)}
+                                        });
+                                        if (entry.HasSubRect)
+                                        {
+                                            UpsertSubRectKeyframe(subRectTrack, keyTime, entry.UvMin, entry.UvMax);
+                                        }
+                                    }
+                                    SortTrackByTime(texTrack);
+                                    SortTrackByTime(subRectTrack);
+                                    CommitUndoSnapshot(undoService, state, "Drop Textures On Timeline");
+                                }
+                                break;
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+
+                    // Zoom with scroll wheel
+                    if (tlHovered && std::abs(ImGui::GetIO().MouseWheel) > 0.0f)
+                    {
+                        const float oldZoom = state.TimelineZoom;
+                        state.TimelineZoom = std::clamp(
+                            state.TimelineZoom * (1.0f + ImGui::GetIO().MouseWheel * 0.1f),
+                            kMinTimelineZoom, kMaxTimelineZoom);
+                        const float mouseRelX = mouseScreen.x - tlOrigin.x;
+                        state.TimelineScrollX += mouseRelX * (1.0f / state.TimelineZoom - 1.0f / oldZoom);
+                    }
+
+                    // Pan with middle mouse
+                    if (tlHovered && ImGui::IsMouseDown(ImGuiMouseButton_Middle))
+                    {
+                        state.TimelineScrollX -= ImGui::GetIO().MouseDelta.x / state.TimelineZoom;
+                    }
+
+                    const float rulerTop = tlOrigin.y;
+                    const float tracksTop = rulerTop + kTimeRulerHeight;
+                    const float zoom = state.TimelineZoom;
+
+                    // Playhead dragging on ruler
+                    const bool mouseInRuler = mouseScreen.y >= rulerTop &&
+                        mouseScreen.y < tracksTop &&
+                        mouseScreen.x >= tlOrigin.x &&
+                        mouseScreen.x <= tlOrigin.x + tlSize.x;
+
+                    if (mouseInRuler && tlHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                    {
+                        state.IsDraggingPlayhead = true;
+                        state.PreviewTimeSeconds = std::max(
+                            ScreenXToTime(mouseScreen.x, tlOrigin.x, state.TimelineScrollX, zoom),
+                            0.0f);
+                        state.IsPlaying = false;
+                        state.IsPaused = false;
+                    }
+
+                    if (state.IsDraggingPlayhead)
+                    {
+                        if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
+                        {
+                            state.PreviewTimeSeconds = std::max(
+                                ScreenXToTime(mouseScreen.x, tlOrigin.x, state.TimelineScrollX, zoom),
+                                0.0f);
+                        }
+                        else
+                        {
+                            state.IsDraggingPlayhead = false;
+                        }
+                    }
+
+                    // Keyframe interaction (click in tracks area)
+                    const bool mouseInTracks = mouseScreen.y >= tracksTop &&
+                        mouseScreen.y < tracksTop + totalTracksHeight &&
+                        mouseScreen.x >= tlOrigin.x &&
+                        mouseScreen.x <= tlOrigin.x + tlSize.x;
+
+                    if (mouseInTracks && tlHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+                        !state.IsDraggingPlayhead)
+                    {
+                        const int trackHit = static_cast<int>((mouseScreen.y - tracksTop) / kTrackRowHeight);
+                        int kfHit = -1;
+
+                        if (trackHit >= 0 && trackHit < kTrackCount)
+                        {
+                            const auto& trackArr = state.WorkingJson[kTracks[trackHit].JsonKey];
+                            if (trackArr.is_array())
+                            {
+                                for (int k = 0; k < static_cast<int>(trackArr.size()); ++k)
+                                {
+                                    const float kfTime = trackArr[k].value("TimeSeconds", 0.0f);
+                                    const float kfX = TimeToScreenX(kfTime, tlOrigin.x, state.TimelineScrollX, zoom);
+                                    if (std::abs(mouseScreen.x - kfX) <= kDiamondHalfSize + 3.0f)
+                                    {
+                                        kfHit = k;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (kfHit >= 0)
+                        {
+                            const bool ctrl = ImGui::GetIO().KeyCtrl;
+                            const bool shift = ImGui::GetIO().KeyShift;
+
+                            if (ctrl)
+                                state.ToggleSelect(trackHit, kfHit);
+                            else if (shift)
+                                state.AddToSelection(trackHit, kfHit);
+                            else if (!state.IsSelected(trackHit, kfHit))
+                                state.SelectOnly(trackHit, kfHit);
+                            else
+                                state.PrimaryKeyframe = {trackHit, kfHit};
+
+                            state.IsDraggingKeyframes = true;
+                            state.DragAnchorTime =
+                                state.WorkingJson[kTracks[trackHit].JsonKey][kfHit].value("TimeSeconds", 0.0f);
+                            state.DragStartTimes.clear();
+                            for (const auto& sel : state.SelectedKeyframes)
+                            {
+                                const auto& arr = state.WorkingJson[kTracks[sel.Track].JsonKey];
+                                if (arr.is_array() && sel.Index < static_cast<int>(arr.size()))
+                                    state.DragStartTimes.push_back({sel, arr[sel.Index].value("TimeSeconds", 0.0f)});
+                            }
+                        }
+                        else
+                        {
+                            state.ClearSelection();
+                        }
+                    }
+
+                    // Multi-keyframe dragging with snap-to-grid
+                    if (state.IsDraggingKeyframes && !state.SelectedKeyframes.empty())
+                    {
+                        if (ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+                            ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f))
+                        {
+                            const float cursorTime = ScreenXToTime(mouseScreen.x, tlOrigin.x, state.TimelineScrollX, zoom);
+                            const float snappedCursor = SnapTimeToGrid(cursorTime, zoom);
+                            const float snappedAnchor = SnapTimeToGrid(state.DragAnchorTime, zoom);
+                            const float delta = snappedCursor - snappedAnchor;
+
+                            for (const auto& [kfId, origTime] : state.DragStartTimes)
+                            {
+                                auto& trackArr = state.WorkingJson[kTracks[kfId.Track].JsonKey];
+                                if (trackArr.is_array() && kfId.Index < static_cast<int>(trackArr.size()))
+                                {
+                                    const float rawTime = origTime + delta;
+                                    const float newTime = std::max(SnapTimeToGrid(rawTime, zoom), 0.0f);
+                                    trackArr[kfId.Index]["TimeSeconds"] = newTime;
+                                }
+                            }
+                        }
+                        else if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+                        {
+                            std::set<int> affectedTracks;
+                            for (const auto& sel : state.SelectedKeyframes)
+                                affectedTracks.insert(sel.Track);
+
+                            for (int t : affectedTracks)
+                            {
+                                auto& trackArr = state.WorkingJson[kTracks[t].JsonKey];
+                                SortTrackByTime(trackArr);
+                            }
+
+                            std::set<KeyframeId> newSelection;
+                            KeyframeId newPrimary = {-1, -1};
+                            for (const auto& [kfId, origTime] : state.DragStartTimes)
+                            {
+                                auto& trackArr = state.WorkingJson[kTracks[kfId.Track].JsonKey];
+                                if (!trackArr.is_array()) continue;
+                                const float cursorTime = ScreenXToTime(mouseScreen.x, tlOrigin.x, state.TimelineScrollX, zoom);
+                                const float snappedCursor = SnapTimeToGrid(cursorTime, zoom);
+                                const float snappedAnchor = SnapTimeToGrid(state.DragAnchorTime, zoom);
+                                const float rawTime = origTime + (snappedCursor - snappedAnchor);
+                                const float target = std::max(SnapTimeToGrid(rawTime, zoom), 0.0f);
+                                for (int i = 0; i < static_cast<int>(trackArr.size()); ++i)
+                                {
+                                    if (std::abs(trackArr[i].value("TimeSeconds", -1.0f) - target) < 0.00001f)
+                                    {
+                                        newSelection.insert({kfId.Track, i});
+                                        if (kfId == state.PrimaryKeyframe)
+                                            newPrimary = {kfId.Track, i};
+                                        break;
+                                    }
+                                }
+                            }
+
+                            state.SelectedKeyframes = newSelection;
+                            if (newPrimary.Track >= 0)
+                                state.PrimaryKeyframe = newPrimary;
+                            else if (!newSelection.empty())
+                                state.PrimaryKeyframe = *newSelection.begin();
+
+                            state.IsDraggingKeyframes = false;
+                            state.DragStartTimes.clear();
+
+                            CommitUndoSnapshot(undoService, state, "Move Keyframes");
+                        }
+                    }
+
+                    // Delete key removes selected keyframes
+                    if (tlHovered && !state.SelectedKeyframes.empty() &&
+                        ImGui::IsKeyPressed(ImGuiKey_Delete, false))
+                    {
+                        std::map<int, std::vector<int>> byTrack;
+                        for (const auto& sel : state.SelectedKeyframes)
+                            byTrack[sel.Track].push_back(sel.Index);
+                        for (auto& [t, indices] : byTrack)
+                        {
+                            std::sort(indices.rbegin(), indices.rend());
+                            auto& arr = state.WorkingJson[kTracks[t].JsonKey];
+                            if (!arr.is_array()) continue;
+                            for (int idx : indices)
+                            {
+                                if (idx < static_cast<int>(arr.size()))
+                                    arr.erase(arr.begin() + idx);
+                            }
+                        }
+                        state.ClearSelection();
+                        CommitUndoSnapshot(undoService, state, "Delete Keyframes");
+                    }
+
+                    // Ctrl+C: copy selected keyframes
+                    if (tlHovered && !state.SelectedKeyframes.empty() &&
+                        ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C, false))
+                    {
+                        state.Clipboard.clear();
+                        float earliestTime = std::numeric_limits<float>::max();
+                        for (const auto& sel : state.SelectedKeyframes)
+                        {
+                            const auto& arr = state.WorkingJson[kTracks[sel.Track].JsonKey];
+                            if (arr.is_array() && sel.Index < static_cast<int>(arr.size()))
+                            {
+                                const float t = arr[sel.Index].value("TimeSeconds", 0.0f);
+                                if (t < earliestTime) earliestTime = t;
+                            }
+                        }
+                        for (const auto& sel : state.SelectedKeyframes)
+                        {
+                            const auto& arr = state.WorkingJson[kTracks[sel.Track].JsonKey];
+                            if (arr.is_array() && sel.Index < static_cast<int>(arr.size()))
+                            {
+                                TimelineEditorState::ClipboardEntry entry;
+                                entry.Track = sel.Track;
+                                entry.RelativeTime = arr[sel.Index].value("TimeSeconds", 0.0f) - earliestTime;
+                                entry.KeyframeData = arr[sel.Index];
+                                state.Clipboard.push_back(std::move(entry));
+                            }
+                        }
+                        state.StatusMessage = "Copied " + std::to_string(state.Clipboard.size()) + " keyframe(s).";
+                        state.StatusIsError = false;
+                    }
+
+                    // Ctrl+V: paste keyframes at playhead position
+                    if (tlHovered && !state.Clipboard.empty() &&
+                        ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V, false))
+                    {
+                        const float pasteBase = SnapTimeToGrid(state.PreviewTimeSeconds, zoom);
+
+                        bool anyConflict = false;
+                        for (const auto& clipEntry : state.Clipboard)
+                        {
+                            if (clipEntry.Track < 0 || clipEntry.Track >= kTrackCount) continue;
+                            const auto& arr = state.WorkingJson[kTracks[clipEntry.Track].JsonKey];
+                            if (!arr.is_array()) continue;
+                            const float desiredTime = SnapTimeToGrid(pasteBase + clipEntry.RelativeTime, zoom);
+                            for (const auto& existing : arr)
+                            {
+                                if (std::abs(existing.value("TimeSeconds", -1.0f) - desiredTime) < 0.00001f)
+                                {
+                                    anyConflict = true;
+                                    break;
+                                }
+                            }
+                            if (anyConflict) break;
+                        }
+
+                        if (anyConflict)
+                        {
+                            state.PendingPasteEntries = state.Clipboard;
+                            state.PendingPasteBaseTime = pasteBase;
+                            state.PasteOverridePopupPending = true;
+                        }
+                        else
+                        {
+                            state.ClearSelection();
+                            for (const auto& clipEntry : state.Clipboard)
+                            {
+                                if (clipEntry.Track < 0 || clipEntry.Track >= kTrackCount) continue;
+                                auto& arr = state.WorkingJson[kTracks[clipEntry.Track].JsonKey];
+                                if (!arr.is_array()) arr = json::array();
+
+                                json newKf = clipEntry.KeyframeData;
+                                newKf["TimeSeconds"] = SnapTimeToGrid(pasteBase + clipEntry.RelativeTime, zoom);
+                                arr.push_back(newKf);
+                                SortTrackByTime(arr);
+
+                                const float ft = newKf["TimeSeconds"].get<float>();
+                                for (int i = 0; i < static_cast<int>(arr.size()); ++i)
+                                {
+                                    if (std::abs(arr[i].value("TimeSeconds", -1.0f) - ft) < 0.00001f)
+                                    {
+                                        state.AddToSelection(clipEntry.Track, i);
+                                        break;
+                                    }
+                                }
+                            }
+                            CommitUndoSnapshot(undoService, state, "Paste Keyframes");
+                            state.StatusMessage = "Pasted " + std::to_string(state.Clipboard.size()) + " keyframe(s).";
+                            state.StatusIsError = false;
+                        }
+                    }
+
+                    // Paste override confirmation popup
+                    if (state.PasteOverridePopupPending)
+                    {
+                        ImGui::OpenPopup("##PasteOverride");
+                        state.PasteOverridePopupPending = false;
+                    }
+                    if (ImGui::BeginPopupModal("##PasteOverride", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar))
+                    {
+                        ImGui::Text("Pasting here will overwrite existing keyframes.");
+                        ImGui::Text("Do you want to replace them?");
+                        ImGui::Separator();
+
+                        if (ImGui::Button("Replace", ImVec2(100, 0)))
+                        {
+                            state.ClearSelection();
+                            for (const auto& clipEntry : state.PendingPasteEntries)
+                            {
+                                if (clipEntry.Track < 0 || clipEntry.Track >= kTrackCount) continue;
+                                auto& arr = state.WorkingJson[kTracks[clipEntry.Track].JsonKey];
+                                if (!arr.is_array()) arr = json::array();
+
+                                const float desiredTime = SnapTimeToGrid(state.PendingPasteBaseTime + clipEntry.RelativeTime, zoom);
+
+                                for (int i = static_cast<int>(arr.size()) - 1; i >= 0; --i)
+                                {
+                                    if (std::abs(arr[i].value("TimeSeconds", -1.0f) - desiredTime) < 0.00001f)
+                                    {
+                                        arr.erase(arr.begin() + i);
+                                        break;
+                                    }
+                                }
+
+                                json newKf = clipEntry.KeyframeData;
+                                newKf["TimeSeconds"] = desiredTime;
+                                arr.push_back(newKf);
+                                SortTrackByTime(arr);
+
+                                for (int i = 0; i < static_cast<int>(arr.size()); ++i)
+                                {
+                                    if (std::abs(arr[i].value("TimeSeconds", -1.0f) - desiredTime) < 0.00001f)
+                                    {
+                                        state.AddToSelection(clipEntry.Track, i);
+                                        break;
+                                    }
+                                }
+                            }
+                            state.PendingPasteEntries.clear();
+                            CommitUndoSnapshot(undoService, state, "Paste Keyframes (Replace)");
+                            state.StatusMessage = "Pasted and replaced keyframe(s).";
+                            state.StatusIsError = false;
+                            ImGui::CloseCurrentPopup();
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Button("Cancel", ImVec2(100, 0)))
+                        {
+                            state.PendingPasteEntries.clear();
+                            ImGui::CloseCurrentPopup();
+                        }
+                        ImGui::EndPopup();
+                    }
+
+                    // Right-click: add/delete keyframe (capture position at click time)
+                    if (mouseInTracks && tlHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+                    {
+                        state.ContextMenuTrack = static_cast<int>((mouseScreen.y - tracksTop) / kTrackRowHeight);
+                        state.ContextMenuTime = std::max(0.0f,
+                            SnapTimeToGrid(
+                                ScreenXToTime(mouseScreen.x, tlOrigin.x, state.TimelineScrollX, zoom),
+                                zoom));
+                        ImGui::OpenPopup("##TrackCtx");
+                    }
+
+                    if (ImGui::BeginPopup("##TrackCtx"))
+                    {
+                        const int ctxTrack = state.ContextMenuTrack;
+                        const float ctxTime = state.ContextMenuTime;
+
+                        if (ctxTrack >= 0 && ctxTrack < kTrackCount)
+                        {
+                            ImGui::Text("%s", kTracks[ctxTrack].DisplayName);
+                            ImGui::Separator();
+                            if (ImGui::MenuItem("Add Keyframe"))
+                            {
+                                auto& trackArr = state.WorkingJson[kTracks[ctxTrack].JsonKey];
+                                trackArr.push_back(MakeDefaultKeyframe(ctxTrack, ctxTime));
+                                SortTrackByTime(trackArr);
+                                for (int i = 0; i < static_cast<int>(trackArr.size()); ++i)
+                                {
+                                    if (std::abs(trackArr[i].value("TimeSeconds", -1.0f) - ctxTime) < 0.0001f)
+                                    {
+                                        state.SelectOnly(ctxTrack, i);
+                                        break;
+                                    }
+                                }
+                                CommitUndoSnapshot(undoService, state, "Add Keyframe");
+                            }
+                            if (!state.SelectedKeyframes.empty())
+                            {
+                                const size_t selCount = state.SelectedKeyframes.size();
+                                const char* delLabel = selCount > 1 ? "Delete Selected Keyframes" : "Delete Selected Keyframe";
+                                if (ImGui::MenuItem(delLabel))
+                                {
+                                    std::map<int, std::vector<int>> byTrack;
+                                    for (const auto& sel : state.SelectedKeyframes)
+                                        byTrack[sel.Track].push_back(sel.Index);
+                                    for (auto& [t2, indices] : byTrack)
+                                    {
+                                        std::sort(indices.rbegin(), indices.rend());
+                                        auto& arr = state.WorkingJson[kTracks[t2].JsonKey];
+                                        if (!arr.is_array()) continue;
+                                        for (int idx : indices)
+                                        {
+                                            if (idx < static_cast<int>(arr.size()))
+                                                arr.erase(arr.begin() + idx);
+                                        }
+                                    }
+                                    state.ClearSelection();
+                                    CommitUndoSnapshot(undoService, state, "Delete Keyframes");
+                                }
+                            }
+                        }
+                        ImGui::EndPopup();
+                    }
+
+                    // ---- Render timeline ----
+                    ImDrawList* dl = ImGui::GetWindowDrawList();
+                    const ImVec2 tlMax(tlOrigin.x + tlSize.x, tlOrigin.y + tlSize.y);
+                    dl->PushClipRect(tlOrigin, tlMax, true);
+
+                    // Background
+                    dl->AddRectFilled(tlOrigin, tlMax, IM_COL32(40, 40, 40, 255));
+
+                    // Track row backgrounds (alternating)
+                    for (int t = 0; t < kTrackCount; ++t)
+                    {
+                        const float rowY = tracksTop + t * kTrackRowHeight;
+                        const ImU32 rowCol = (t % 2 == 0)
+                            ? IM_COL32(45, 45, 45, 255)
+                            : IM_COL32(50, 50, 50, 255);
+                        dl->AddRectFilled(
+                            ImVec2(tlOrigin.x, rowY),
+                            ImVec2(tlMax.x, rowY + kTrackRowHeight),
+                            rowCol);
+                    }
+
+                    // Time ruler background
+                    dl->AddRectFilled(
+                        ImVec2(tlOrigin.x, rulerTop),
+                        ImVec2(tlMax.x, tracksTop),
+                        IM_COL32(55, 55, 55, 255));
+
+                    // Time ruler ticks and labels
+                    {
+                        const float tickInterval = ComputeTickInterval(zoom);
+                        const int subdivs = ComputeSubdivisions(zoom);
+                        const float subInterval = tickInterval / static_cast<float>(subdivs);
+                        const float startTime = std::max(0.0f,
+                            ScreenXToTime(tlOrigin.x, tlOrigin.x, state.TimelineScrollX, zoom));
+                        const float endTime =
+                            ScreenXToTime(tlMax.x, tlOrigin.x, state.TimelineScrollX, zoom);
+
+                        float t = std::floor(startTime / subInterval) * subInterval;
+                        for (; t <= endTime; t += subInterval)
+                        {
+                            if (t < 0.0f) continue;
+                            const float x = TimeToScreenX(t, tlOrigin.x, state.TimelineScrollX, zoom);
+                            if (x < tlOrigin.x || x > tlMax.x) continue;
+
+                            const bool isMajor = std::abs(std::fmod(t, tickInterval)) < subInterval * 0.1f;
+                            const float halfInterval = tickInterval * 0.5f;
+                            const bool isHalf = !isMajor &&
+                                std::abs(std::fmod(t + halfInterval * 0.5f, halfInterval)) < subInterval * 0.1f;
+
+                            if (isMajor)
+                            {
+                                dl->AddLine(
+                                    ImVec2(x, rulerTop + 2.0f),
+                                    ImVec2(x, tracksTop),
+                                    IM_COL32(180, 180, 180, 255));
+
+                                char tickLabel[32];
+                                if (tickInterval >= 1.0f)
+                                    std::snprintf(tickLabel, sizeof(tickLabel), "%.0fs", t);
+                                else if (tickInterval >= 0.1f)
+                                    std::snprintf(tickLabel, sizeof(tickLabel), "%.1fs", t);
+                                else if (tickInterval >= 0.01f)
+                                    std::snprintf(tickLabel, sizeof(tickLabel), "%.2fs", t);
+                                else
+                                    std::snprintf(tickLabel, sizeof(tickLabel), "%.3fs", t);
+                                dl->AddText(ImVec2(x + 2.0f, rulerTop + 1.0f),
+                                    IM_COL32(200, 200, 200, 255), tickLabel);
+
+                                dl->AddLine(
+                                    ImVec2(x, tracksTop),
+                                    ImVec2(x, tracksTop + totalTracksHeight),
+                                    IM_COL32(60, 60, 60, 255));
+                            }
+                            else if (isHalf)
+                            {
+                                dl->AddLine(
+                                    ImVec2(x, rulerTop + kTimeRulerHeight * 0.45f),
+                                    ImVec2(x, tracksTop),
+                                    IM_COL32(120, 120, 120, 200));
+                                dl->AddLine(
+                                    ImVec2(x, tracksTop),
+                                    ImVec2(x, tracksTop + totalTracksHeight),
+                                    IM_COL32(48, 48, 48, 200));
+                            }
+                            else
+                            {
+                                dl->AddLine(
+                                    ImVec2(x, rulerTop + kTimeRulerHeight * 0.65f),
+                                    ImVec2(x, tracksTop),
+                                    IM_COL32(90, 90, 90, 150));
+                                dl->AddLine(
+                                    ImVec2(x, tracksTop),
+                                    ImVec2(x, tracksTop + totalTracksHeight),
+                                    IM_COL32(44, 44, 44, 120));
+                            }
+                        }
+                    }
+
+                    // Duration end marker and grayed-out beyond-duration area
+                    {
+                        const float durX = TimeToScreenX(maxPreviewTime, tlOrigin.x, state.TimelineScrollX, zoom);
+                        if (durX < tlMax.x)
+                        {
+                            const float grayLeft = std::max(durX, tlOrigin.x);
+                            dl->AddRectFilled(
+                                ImVec2(grayLeft, rulerTop),
+                                ImVec2(tlMax.x, tracksTop),
+                                IM_COL32(0, 0, 0, 50));
+                            dl->AddRectFilled(
+                                ImVec2(grayLeft, tracksTop),
+                                ImVec2(tlMax.x, tracksTop + totalTracksHeight),
+                                IM_COL32(0, 0, 0, 80));
+                        }
+                        if (durX >= tlOrigin.x && durX <= tlMax.x)
+                        {
+                            dl->AddLine(
+                                ImVec2(durX, rulerTop),
+                                ImVec2(durX, tracksTop + totalTracksHeight),
+                                IM_COL32(200, 80, 80, 160), 2.0f);
+                        }
+                    }
+
+                    // Keyframe diamonds (dimmed if beyond duration)
+                    for (int t = 0; t < kTrackCount; ++t)
+                    {
+                        const float rowCenterY = tracksTop + t * kTrackRowHeight + kTrackRowHeight * 0.5f;
+                        const auto& trackArr = state.WorkingJson[kTracks[t].JsonKey];
+                        if (!trackArr.is_array()) continue;
+
+                        for (int k = 0; k < static_cast<int>(trackArr.size()); ++k)
+                        {
+                            const float kfTime = trackArr[k].value("TimeSeconds", 0.0f);
+                            const float kfX = TimeToScreenX(kfTime, tlOrigin.x, state.TimelineScrollX, zoom);
+                            if (kfX < tlOrigin.x - kDiamondHalfSize || kfX > tlMax.x + kDiamondHalfSize)
+                                continue;
+
+                            const bool isSelected = state.IsSelected(t, k);
+                            const bool beyondDuration = kfTime > maxPreviewTime;
+
+                            ImU32 fillCol, borderCol;
+                            if (isSelected)
+                            {
+                                fillCol = beyondDuration ? IM_COL32(180, 150, 40, 180) : IM_COL32(255, 210, 50, 255);
+                                borderCol = beyondDuration ? IM_COL32(180, 180, 180, 180) : IM_COL32(255, 255, 255, 255);
+                            }
+                            else
+                            {
+                                fillCol = beyondDuration ? IM_COL32(90, 130, 180, 140) : IM_COL32(130, 190, 255, 255);
+                                borderCol = beyondDuration ? IM_COL32(60, 80, 120, 140) : IM_COL32(80, 120, 180, 255);
+                            }
+
+                            DrawDiamond(dl, ImVec2(kfX, rowCenterY), kDiamondHalfSize, fillCol, borderCol);
+                        }
+                    }
+
+                    // Playhead
+                    {
+                        const float phX = TimeToScreenX(state.PreviewTimeSeconds, tlOrigin.x, state.TimelineScrollX, zoom);
+                        if (phX >= tlOrigin.x && phX <= tlMax.x)
+                        {
+                            dl->AddTriangleFilled(
+                                ImVec2(phX, rulerTop + 2.0f),
+                                ImVec2(phX - 6.0f, tracksTop),
+                                ImVec2(phX + 6.0f, tracksTop),
+                                IM_COL32(255, 40, 40, 255));
+
+                            dl->AddLine(
+                                ImVec2(phX, tracksTop),
+                                ImVec2(phX, tracksTop + totalTracksHeight),
+                                IM_COL32(255, 40, 40, 255), 1.5f);
+                        }
+                    }
+
+                    // Separator between ruler and tracks
+                    dl->AddLine(
+                        ImVec2(tlOrigin.x, tracksTop),
+                        ImVec2(tlMax.x, tracksTop),
+                        IM_COL32(80, 80, 80, 255));
+
+                    dl->PopClipRect();
+                }
+            }
+            ImGui::EndChild();
+        }
+        ImGui::EndChild();
+
+        // ---- Keyframe Inspector ----
+        ImGui::Separator();
+        ImGui::BeginChild("##KfInspector", ImVec2(0.0f, kInspectorHeight), ImGuiChildFlags_Border);
         {
-            state.IsPlaying = false;
-            state.IsPaused = false;
+            ImGui::SeparatorText("Keyframe Inspector");
+            DrawKeyframeInspector(state, undoService);
         }
+        ImGui::EndChild();
 
-        if (const json* sampledTexture = SampleStepJsonKeyframe(state.WorkingJson["SpriteTextureTrack"], state.PreviewTimeSeconds))
-        {
-            const std::string previewTextureKey = sampledTexture->contains("Texture") && (*sampledTexture)["Texture"].is_object()
-                ? (*sampledTexture)["Texture"].value("key", std::string{})
-                : sampledTexture->value("TextureKey", std::string{});
-            const int32_t previewSubSpriteIndex = sampledTexture->contains("Texture") && (*sampledTexture)["Texture"].is_object()
-                ? (*sampledTexture)["Texture"].value("subSpriteIndex", -1)
-                : -1;
-            const std::string previewTextureLabel = previewTextureKey.empty()
-                ? std::string("None")
-                : (EditorAssetNaming::GetAssetDisplayNameFromAssetKey(previewTextureKey) +
-                   (previewSubSpriteIndex >= 0 ? ("#" + std::to_string(previewSubSpriteIndex)) : std::string{}));
-            ImGui::Text("Preview Texture: %s", previewTextureLabel.c_str());
-        }
-        else
-        {
-            ImGui::TextDisabled("Preview Texture: none");
-        }
-
-        DrawSpriteSubRectTrack(state.WorkingJson["SpriteSubRectTrack"]);
-        DrawSpriteTextureTrack(
-            state.WorkingJson["SpriteTextureTrack"],
-            state.WorkingJson["SpriteSubRectTrack"],
-            state.WorkingJson.value("SamplesPerSecond", 30.0f));
-        DrawVector3Track("Position Track", state.WorkingJson["PositionTrack"]);
-        DrawVector3Track("Scale Track", state.WorkingJson["ScaleTrack"]);
-        DrawFloatTrack(state.WorkingJson["RotationZTrack"]);
-        DrawEventTrack(state.WorkingJson["EventTrack"]);
-
+        // ---- Footer ----
         const bool hasUnsavedChanges = (state.WorkingJson.dump() != state.AppliedJson.dump());
         ImGui::Separator();
         ImGui::BeginDisabled(!hasUnsavedChanges);
@@ -1100,7 +1838,6 @@ namespace Limitless::EditorAnimationTimelinePanel
         {
             if (ApplyPendingClipChanges(undoService, state, "Edit Animation Clip"))
             {
-                // State updated by ApplyPendingClipChanges.
             }
             else
             {
