@@ -3,6 +3,7 @@
 #include "Assets/AssetLoadProgress.h"
 #include "Assets/LoadingScreen.h"
 #include "Editor/EditorCameraController.h"
+#include "EditorScenePanel.h"
 #include "Graphics/Camera/Camera.h"
 #include "Graphics/Camera/OrthographicCamera2D.h"
 #include "Graphics/Camera/PerspectiveCamera3D.h"
@@ -25,6 +26,7 @@
 #include <unordered_map>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace Limitless::EditorViewportPanel
 {
@@ -1280,6 +1282,950 @@ namespace Limitless::EditorViewportPanel
             return hasHoveredCell;
         }
 
+        // -----------------------------------------------------------------
+        // Selection highlight (wireframe outline for selected entities)
+        // -----------------------------------------------------------------
+
+        void DrawSelectionHighlight(ImDrawList* drawList,
+                                    Scene& scene,
+                                    const Camera& camera,
+                                    entt::entity entity,
+                                    const ImVec2& viewportMin,
+                                    float viewportWidth,
+                                    float viewportHeight,
+                                    ImU32 color)
+        {
+            if (!scene.IsValid(entity))
+                return;
+            auto& registry = scene.GetRegistry();
+            if (!registry.try_get<TransformComponent>(entity))
+                return;
+
+            const glm::mat4 model = scene.GetWorldTransformMatrix(entity);
+            std::array<ImVec2, 4> projected{};
+            bool valid = true;
+            for (size_t i = 0; i < 4; ++i)
+            {
+                const glm::vec4 world = model * kQuadLocalPositions[i];
+                if (!WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(world), projected[i]))
+                {
+                    valid = false;
+                    break;
+                }
+            }
+            if (!valid)
+                return;
+
+            for (int i = 0; i < 4; ++i)
+                drawList->AddLine(projected[i], projected[(i + 1) % 4], color, 1.5f);
+        }
+
+        // -----------------------------------------------------------------
+        // Transform gizmo constants
+        // -----------------------------------------------------------------
+
+        constexpr float kGizmoAxisLength = 80.0f;
+        constexpr float kGizmoArrowSize = 10.0f;
+        constexpr float kGizmoHandleRadius = 7.0f;
+        constexpr float kGizmoHitRadius = 12.0f;
+        constexpr float kGizmoPlaneHandleSize = 22.0f;
+        constexpr float kGizmoRotateRadius = 60.0f;
+        constexpr float kGizmoScaleBoxSize = 6.0f;
+        constexpr ImU32 kGizmoColorX = IM_COL32(230, 60, 60, 255);
+        constexpr ImU32 kGizmoColorY = IM_COL32(80, 200, 60, 255);
+        constexpr ImU32 kGizmoColorZ = IM_COL32(60, 120, 230, 255);
+        constexpr ImU32 kGizmoColorXY = IM_COL32(255, 220, 60, 180);
+        constexpr ImU32 kGizmoColorActive = IM_COL32(255, 220, 60, 255);
+        constexpr ImU32 kGizmoColorRotateRing = IM_COL32(120, 180, 255, 200);
+
+        ImU32 AxisColor(int axis, int activeAxis)
+        {
+            if (axis == activeAxis) return kGizmoColorActive;
+            switch (axis)
+            {
+                case 0: return kGizmoColorX;
+                case 1: return kGizmoColorY;
+                case 2: return kGizmoColorZ;
+                default: return IM_COL32(200, 200, 200, 255);
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // Transform gizmo drawing and interaction
+        // -----------------------------------------------------------------
+
+        bool DrawAndHandleTransformGizmos(ImDrawList* drawList,
+                                          Scene& scene,
+                                          const Camera& camera,
+                                          entt::entity selectedEntity,
+                                          const std::vector<entt::entity>& multiSelectedEntities,
+                                          const ImVec2& viewportMin,
+                                          const ImVec2& viewportMax,
+                                          float viewportWidth,
+                                          float viewportHeight,
+                                          EditorPlayModeState playModeState,
+                                          EditorUndoService* undoService,
+                                          TransformGizmoState& gizmoState)
+        {
+            if (!drawList || gizmoState.Mode == TransformGizmoMode::None)
+                return false;
+            if (selectedEntity == entt::null || !scene.IsValid(selectedEntity))
+            {
+                if (gizmoState.DragActive)
+                {
+                    if (undoService) undoService->CancelInteractiveSceneMutation();
+                    gizmoState.DragActive = false;
+                }
+                return false;
+            }
+
+            auto& registry = scene.GetRegistry();
+            auto* transform = registry.try_get<TransformComponent>(selectedEntity);
+            if (!transform)
+                return false;
+
+            const bool canEdit = playModeState == EditorPlayModeState::Edit;
+            const ImVec2 mousePos = ImGui::GetMousePos();
+            const bool mouseInViewport = mousePos.x >= viewportMin.x && mousePos.x <= viewportMax.x &&
+                                         mousePos.y >= viewportMin.y && mousePos.y <= viewportMax.y;
+
+            // Compute gizmo origin in screen space from entity world position
+            const glm::mat4 worldTransform = scene.GetWorldTransformMatrix(selectedEntity);
+            const glm::vec3 entityWorldPos = glm::vec3(worldTransform[3]);
+            ImVec2 originScreen{};
+            if (!WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, entityWorldPos, originScreen))
+                return false;
+
+            // Compute screen-space scale factor so gizmo stays a consistent size
+            // regardless of camera zoom/distance.
+            float pixelsPerUnit = 1.0f;
+            {
+                const glm::vec3 offsetPoint = entityWorldPos + glm::vec3(1.0f, 0.0f, 0.0f);
+                ImVec2 offsetScreen{};
+                if (WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, offsetPoint, offsetScreen))
+                {
+                    const float dx = offsetScreen.x - originScreen.x;
+                    const float dy = offsetScreen.y - originScreen.y;
+                    pixelsPerUnit = std::sqrt(dx * dx + dy * dy);
+                }
+            }
+            if (pixelsPerUnit < 0.001f)
+                return false;
+
+            // Axis endpoints in screen space
+            auto axisEndpoint = [&](int axis) -> ImVec2 {
+                glm::vec3 worldEnd = entityWorldPos;
+                const float worldLength = kGizmoAxisLength / pixelsPerUnit;
+                if (axis == 0) worldEnd.x += worldLength;
+                else if (axis == 1) worldEnd.y += worldLength;
+                else worldEnd.z += worldLength;
+                ImVec2 screen{};
+                if (!WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, worldEnd, screen))
+                    return ImVec2(originScreen.x + (axis == 0 ? kGizmoAxisLength : 0.0f),
+                                  originScreen.y - (axis == 1 ? kGizmoAxisLength : 0.0f));
+                return screen;
+            };
+
+            // If the selected entity changed mid-drag, abort
+            if (gizmoState.DragActive && gizmoState.DragEntity != selectedEntity)
+            {
+                if (undoService) undoService->CancelInteractiveSceneMutation();
+                gizmoState.DragActive = false;
+            }
+
+            const int activeAxis = gizmoState.DragActive ? gizmoState.DragAxis : -1;
+
+            // ---- TRANSLATE GIZMO ----
+            if (gizmoState.Mode == TransformGizmoMode::Translate)
+            {
+                const ImVec2 xEnd = axisEndpoint(0);
+                const ImVec2 yEnd = axisEndpoint(1);
+
+                // Draw axes
+                drawList->AddLine(originScreen, xEnd, AxisColor(0, activeAxis), 2.5f);
+                drawList->AddLine(originScreen, yEnd, AxisColor(1, activeAxis), 2.5f);
+
+                // Draw arrowheads
+                {
+                    const float dxX = xEnd.x - originScreen.x;
+                    const float dyX = xEnd.y - originScreen.y;
+                    const float lenX = std::sqrt(dxX * dxX + dyX * dyX);
+                    if (lenX > 1.0f)
+                    {
+                        const float nx = dxX / lenX;
+                        const float ny = dyX / lenX;
+                        const ImVec2 tip = xEnd;
+                        const ImVec2 base1(tip.x - nx * kGizmoArrowSize - ny * kGizmoArrowSize * 0.4f,
+                                           tip.y - ny * kGizmoArrowSize + nx * kGizmoArrowSize * 0.4f);
+                        const ImVec2 base2(tip.x - nx * kGizmoArrowSize + ny * kGizmoArrowSize * 0.4f,
+                                           tip.y - ny * kGizmoArrowSize - nx * kGizmoArrowSize * 0.4f);
+                        drawList->AddTriangleFilled(tip, base1, base2, AxisColor(0, activeAxis));
+                    }
+                }
+                {
+                    const float dxY = yEnd.x - originScreen.x;
+                    const float dyY = yEnd.y - originScreen.y;
+                    const float lenY = std::sqrt(dxY * dxY + dyY * dyY);
+                    if (lenY > 1.0f)
+                    {
+                        const float nx = dxY / lenY;
+                        const float ny = dyY / lenY;
+                        const ImVec2 tip = yEnd;
+                        const ImVec2 base1(tip.x - nx * kGizmoArrowSize - ny * kGizmoArrowSize * 0.4f,
+                                           tip.y - ny * kGizmoArrowSize + nx * kGizmoArrowSize * 0.4f);
+                        const ImVec2 base2(tip.x - nx * kGizmoArrowSize + ny * kGizmoArrowSize * 0.4f,
+                                           tip.y - ny * kGizmoArrowSize - nx * kGizmoArrowSize * 0.4f);
+                        drawList->AddTriangleFilled(tip, base1, base2, AxisColor(1, activeAxis));
+                    }
+                }
+
+                // XY plane handle (small square at offset)
+                const float planeOffset = kGizmoPlaneHandleSize;
+                const ImVec2 planeCorner(originScreen.x + planeOffset, originScreen.y - planeOffset);
+                drawList->AddRectFilled(
+                    ImVec2(originScreen.x + planeOffset * 0.3f, originScreen.y - planeOffset * 0.3f),
+                    planeCorner,
+                    activeAxis == 3 ? kGizmoColorActive : kGizmoColorXY);
+
+                // Hit testing for translate handles
+                int hoveredAxis = -1;
+                if (canEdit && mouseInViewport && !gizmoState.DragActive)
+                {
+                    // Check XY plane handle first (axis=3 means XY plane)
+                    const ImVec2 planeMin(originScreen.x + planeOffset * 0.3f, originScreen.y - planeOffset);
+                    const ImVec2 planeMax(originScreen.x + planeOffset, originScreen.y - planeOffset * 0.3f);
+                    if (mousePos.x >= planeMin.x && mousePos.x <= planeMax.x &&
+                        mousePos.y >= planeMin.y && mousePos.y <= planeMax.y)
+                    {
+                        hoveredAxis = 3; // XY plane
+                    }
+
+                    // Check X axis
+                    if (hoveredAxis < 0)
+                    {
+                        const float dx = xEnd.x - originScreen.x;
+                        const float dy = xEnd.y - originScreen.y;
+                        const float len = std::sqrt(dx * dx + dy * dy);
+                        if (len > 1.0f)
+                        {
+                            const float t = std::clamp(((mousePos.x - originScreen.x) * dx + (mousePos.y - originScreen.y) * dy) / (len * len), 0.0f, 1.0f);
+                            const float closestX = originScreen.x + t * dx;
+                            const float closestY = originScreen.y + t * dy;
+                            const float dist = std::sqrt((mousePos.x - closestX) * (mousePos.x - closestX) + (mousePos.y - closestY) * (mousePos.y - closestY));
+                            if (dist <= kGizmoHitRadius)
+                                hoveredAxis = 0;
+                        }
+                    }
+
+                    // Check Y axis
+                    if (hoveredAxis < 0)
+                    {
+                        const float dx = yEnd.x - originScreen.x;
+                        const float dy = yEnd.y - originScreen.y;
+                        const float len = std::sqrt(dx * dx + dy * dy);
+                        if (len > 1.0f)
+                        {
+                            const float t = std::clamp(((mousePos.x - originScreen.x) * dx + (mousePos.y - originScreen.y) * dy) / (len * len), 0.0f, 1.0f);
+                            const float closestX = originScreen.x + t * dx;
+                            const float closestY = originScreen.y + t * dy;
+                            const float dist = std::sqrt((mousePos.x - closestX) * (mousePos.x - closestX) + (mousePos.y - closestY) * (mousePos.y - closestY));
+                            if (dist <= kGizmoHitRadius)
+                                hoveredAxis = 1;
+                        }
+                    }
+                }
+
+                if (hoveredAxis >= 0)
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+
+                // Begin drag
+                if (hoveredAxis >= 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                {
+                    if (undoService)
+                        undoService->BeginInteractiveSceneMutation();
+                    gizmoState.DragActive = true;
+                    gizmoState.DragAxis = hoveredAxis;
+                    gizmoState.DragEntity = selectedEntity;
+                    gizmoState.DragStartEntityPosition = transform->Position;
+
+                    glm::vec3 mouseWorld{};
+                    TryComputeDropWorldPosition(camera, viewportMin, viewportMax, mousePos, mouseWorld);
+                    gizmoState.DragStartWorldPosition = mouseWorld;
+
+                    // Snapshot multi-selection positions
+                    gizmoState.DragEntities.clear();
+                    gizmoState.DragStartPositions.clear();
+                    for (entt::entity e : multiSelectedEntities)
+                    {
+                        if (e != selectedEntity && scene.IsValid(e))
+                        {
+                            auto* t = registry.try_get<TransformComponent>(e);
+                            if (t)
+                            {
+                                gizmoState.DragEntities.push_back(e);
+                                gizmoState.DragStartPositions.push_back(t->Position);
+                            }
+                        }
+                    }
+                }
+
+                // Continue drag
+                if (gizmoState.DragActive && gizmoState.DragEntity == selectedEntity &&
+                    gizmoState.Mode == TransformGizmoMode::Translate)
+                {
+                    glm::vec3 currentMouseWorld{};
+                    if (TryComputeDropWorldPosition(camera, viewportMin, viewportMax, mousePos, currentMouseWorld))
+                    {
+                        glm::vec3 delta = currentMouseWorld - gizmoState.DragStartWorldPosition;
+                        if (gizmoState.DragAxis == 0) delta.y = 0.0f; // X only
+                        else if (gizmoState.DragAxis == 1) delta.x = 0.0f; // Y only
+                        // axis==3 means XY plane, keep both
+
+                        transform->Position = gizmoState.DragStartEntityPosition + delta;
+                        scene.MarkTransformDirty(selectedEntity);
+
+                        // Apply same delta to multi-selected entities
+                        for (size_t i = 0; i < gizmoState.DragEntities.size(); ++i)
+                        {
+                            entt::entity e = gizmoState.DragEntities[i];
+                            if (!scene.IsValid(e)) continue;
+                            auto* t = registry.try_get<TransformComponent>(e);
+                            if (t)
+                            {
+                                t->Position = gizmoState.DragStartPositions[i] + delta;
+                                scene.MarkTransformDirty(e);
+                            }
+                        }
+                    }
+
+                    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+                    {
+                        if (undoService)
+                            (void)undoService->CommitInteractiveSceneMutation("Move Entity");
+                        gizmoState.DragActive = false;
+                    }
+                }
+            }
+            // ---- ROTATE GIZMO (3-axis) ----
+            else if (gizmoState.Mode == TransformGizmoMode::Rotate)
+            {
+                constexpr int kRingSegments = 64;
+                const float worldRadius = kGizmoRotateRadius / pixelsPerUnit;
+
+                // Project a world-space circle (ring) to screen and draw it.
+                // axis: 0=X (ring in YZ plane), 1=Y (ring in XZ plane), 2=Z (ring in XY plane)
+                auto projectAndDrawRing = [&](int axis, ImU32 color, float thickness,
+                                              std::array<ImVec2, kRingSegments>& outScreenPoints,
+                                              int& outValidCount)
+                {
+                    outValidCount = 0;
+                    ImVec2 prevScreen{};
+                    bool prevValid = false;
+                    for (int seg = 0; seg <= kRingSegments; ++seg)
+                    {
+                        const float angle = (static_cast<float>(seg % kRingSegments) / static_cast<float>(kRingSegments)) * 6.2831853f;
+                        const float ca = std::cos(angle);
+                        const float sa = std::sin(angle);
+                        glm::vec3 worldPt = entityWorldPos;
+                        if (axis == 0) { worldPt.y += ca * worldRadius; worldPt.z += sa * worldRadius; }
+                        else if (axis == 1) { worldPt.x += ca * worldRadius; worldPt.z += sa * worldRadius; }
+                        else { worldPt.x += ca * worldRadius; worldPt.y += sa * worldRadius; }
+
+                        ImVec2 screenPt{};
+                        const bool valid = WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, worldPt, screenPt);
+                        if (valid && seg < kRingSegments)
+                        {
+                            outScreenPoints[outValidCount] = screenPt;
+                            outValidCount++;
+                        }
+                        if (valid && prevValid && seg > 0)
+                            drawList->AddLine(prevScreen, screenPt, color, thickness);
+                        prevScreen = screenPt;
+                        prevValid = valid;
+                    }
+                };
+
+                // Compute closest distance from mouse to a ring's projected points
+                auto ringDistanceToMouse = [&](const std::array<ImVec2, kRingSegments>& pts, int count) -> float
+                {
+                    float minDist = std::numeric_limits<float>::max();
+                    for (int i = 0; i < count; ++i)
+                    {
+                        const int j = (i + 1) % count;
+                        const ImVec2& a = pts[i];
+                        const ImVec2& b = pts[j];
+                        const float abx = b.x - a.x;
+                        const float aby = b.y - a.y;
+                        const float lenSq = abx * abx + aby * aby;
+                        float t = 0.0f;
+                        if (lenSq > 0.001f)
+                            t = std::clamp(((mousePos.x - a.x) * abx + (mousePos.y - a.y) * aby) / lenSq, 0.0f, 1.0f);
+                        const float cx = a.x + t * abx;
+                        const float cy = a.y + t * aby;
+                        const float dist = std::sqrt((mousePos.x - cx) * (mousePos.x - cx) + (mousePos.y - cy) * (mousePos.y - cy));
+                        minDist = std::min(minDist, dist);
+                    }
+                    return minDist;
+                };
+
+                // Draw all 3 rings
+                constexpr ImU32 kRingColors[3] = { kGizmoColorX, kGizmoColorY, kGizmoColorZ };
+                const char* kAxisLabels[3] = { "X", "Y", "Z" };
+                std::array<ImVec2, kRingSegments> ringPts[3]{};
+                int ringCounts[3] = {};
+
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    const ImU32 color = (activeAxis == axis) ? kGizmoColorActive : kRingColors[axis];
+                    const float thickness = (activeAxis == axis) ? 3.0f : 2.0f;
+                    projectAndDrawRing(axis, color, thickness, ringPts[axis], ringCounts[axis]);
+                }
+
+                // Draw angle indicator line for each axis
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    const float angleRad = glm::radians(transform->Rotation[axis]);
+                    const float ca = std::cos(angleRad);
+                    const float sa = std::sin(angleRad);
+                    glm::vec3 indicatorWorld = entityWorldPos;
+                    if (axis == 0) { indicatorWorld.y += ca * worldRadius; indicatorWorld.z += sa * worldRadius; }
+                    else if (axis == 1) { indicatorWorld.x += ca * worldRadius; indicatorWorld.z += sa * worldRadius; }
+                    else { indicatorWorld.x += ca * worldRadius; indicatorWorld.y += sa * worldRadius; }
+
+                    ImVec2 indicatorScreen{};
+                    if (WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, indicatorWorld, indicatorScreen))
+                    {
+                        drawList->AddLine(originScreen, indicatorScreen,
+                            (activeAxis == axis) ? kGizmoColorActive : kRingColors[axis], 1.2f);
+                        drawList->AddCircleFilled(indicatorScreen, 3.0f, kRingColors[axis]);
+                    }
+                }
+
+                // Center dot
+                drawList->AddCircleFilled(originScreen, 3.0f, IM_COL32(200, 200, 200, 200));
+
+                // Hit test all 3 rings — pick the closest one within threshold
+                int hoveredAxis = -1;
+                if (canEdit && mouseInViewport && !gizmoState.DragActive)
+                {
+                    float bestDist = kGizmoHitRadius + 1.0f;
+                    for (int axis = 0; axis < 3; ++axis)
+                    {
+                        if (ringCounts[axis] < 3) continue;
+                        const float dist = ringDistanceToMouse(ringPts[axis], ringCounts[axis]);
+                        if (dist <= kGizmoHitRadius && dist < bestDist)
+                        {
+                            bestDist = dist;
+                            hoveredAxis = axis;
+                        }
+                    }
+                }
+
+                if (hoveredAxis >= 0)
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+
+                // Begin drag
+                if (hoveredAxis >= 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                {
+                    if (undoService)
+                        undoService->BeginInteractiveSceneMutation();
+                    gizmoState.DragActive = true;
+                    gizmoState.DragAxis = hoveredAxis;
+                    gizmoState.DragEntity = selectedEntity;
+                    gizmoState.DragStartEntityRotation = transform->Rotation;
+                    const float dx = mousePos.x - originScreen.x;
+                    const float dy = -(mousePos.y - originScreen.y);
+                    gizmoState.DragStartAngle = std::atan2(dy, dx);
+
+                    // Snapshot multi-selection rotations
+                    gizmoState.DragEntities.clear();
+                    gizmoState.DragStartRotations.clear();
+                    for (entt::entity e : multiSelectedEntities)
+                    {
+                        if (e != selectedEntity && scene.IsValid(e))
+                        {
+                            auto* t = registry.try_get<TransformComponent>(e);
+                            if (t)
+                            {
+                                gizmoState.DragEntities.push_back(e);
+                                gizmoState.DragStartRotations.push_back(t->Rotation);
+                            }
+                        }
+                    }
+                }
+
+                // Continue drag
+                if (gizmoState.DragActive && gizmoState.DragEntity == selectedEntity &&
+                    gizmoState.Mode == TransformGizmoMode::Rotate)
+                {
+                    const float dx = mousePos.x - originScreen.x;
+                    const float dy = -(mousePos.y - originScreen.y);
+                    const float currentAngle = std::atan2(dy, dx);
+                    const float angleDelta = glm::degrees(currentAngle - gizmoState.DragStartAngle);
+
+                    const int dragAxis = gizmoState.DragAxis;
+                    transform->Rotation[dragAxis] = gizmoState.DragStartEntityRotation[dragAxis] + angleDelta;
+                    scene.MarkTransformDirty(selectedEntity);
+
+                    // Apply same rotation delta to multi-selected
+                    for (size_t i = 0; i < gizmoState.DragEntities.size(); ++i)
+                    {
+                        entt::entity e = gizmoState.DragEntities[i];
+                        if (!scene.IsValid(e)) continue;
+                        auto* t = registry.try_get<TransformComponent>(e);
+                        if (t)
+                        {
+                            t->Rotation[dragAxis] = gizmoState.DragStartRotations[i][dragAxis] + angleDelta;
+                            scene.MarkTransformDirty(e);
+                        }
+                    }
+
+                    // Draw angle feedback
+                    char angleBuf[48]{};
+                    std::snprintf(angleBuf, sizeof(angleBuf), "%s: %.1f deg", kAxisLabels[dragAxis], angleDelta);
+                    drawList->AddText(ImVec2(originScreen.x + kGizmoRotateRadius + 12.0f, originScreen.y - 10.0f),
+                                     kRingColors[dragAxis], angleBuf);
+
+                    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+                    {
+                        if (undoService)
+                            (void)undoService->CommitInteractiveSceneMutation("Rotate Entity");
+                        gizmoState.DragActive = false;
+                    }
+                }
+            }
+            // ---- SCALE GIZMO ----
+            else if (gizmoState.Mode == TransformGizmoMode::Scale)
+            {
+                const ImVec2 xEnd = axisEndpoint(0);
+                const ImVec2 yEnd = axisEndpoint(1);
+
+                // Draw axes
+                drawList->AddLine(originScreen, xEnd, AxisColor(0, activeAxis), 2.5f);
+                drawList->AddLine(originScreen, yEnd, AxisColor(1, activeAxis), 2.5f);
+
+                // Draw scale boxes at endpoints
+                drawList->AddRectFilled(
+                    ImVec2(xEnd.x - kGizmoScaleBoxSize, xEnd.y - kGizmoScaleBoxSize),
+                    ImVec2(xEnd.x + kGizmoScaleBoxSize, xEnd.y + kGizmoScaleBoxSize),
+                    AxisColor(0, activeAxis));
+                drawList->AddRectFilled(
+                    ImVec2(yEnd.x - kGizmoScaleBoxSize, yEnd.y - kGizmoScaleBoxSize),
+                    ImVec2(yEnd.x + kGizmoScaleBoxSize, yEnd.y + kGizmoScaleBoxSize),
+                    AxisColor(1, activeAxis));
+
+                // Center uniform scale handle
+                drawList->AddRectFilled(
+                    ImVec2(originScreen.x - kGizmoScaleBoxSize, originScreen.y - kGizmoScaleBoxSize),
+                    ImVec2(originScreen.x + kGizmoScaleBoxSize, originScreen.y + kGizmoScaleBoxSize),
+                    activeAxis == 3 ? kGizmoColorActive : IM_COL32(200, 200, 200, 220));
+
+                // Hit test
+                int hoveredAxis = -1;
+                if (canEdit && mouseInViewport && !gizmoState.DragActive)
+                {
+                    // Center (uniform scale, axis=3)
+                    if (IsMouseNearPoint(mousePos, originScreen, kGizmoScaleBoxSize + 4.0f))
+                        hoveredAxis = 3;
+
+                    // X endpoint
+                    if (hoveredAxis < 0 && IsMouseNearPoint(mousePos, xEnd, kGizmoScaleBoxSize + 4.0f))
+                        hoveredAxis = 0;
+
+                    // Y endpoint
+                    if (hoveredAxis < 0 && IsMouseNearPoint(mousePos, yEnd, kGizmoScaleBoxSize + 4.0f))
+                        hoveredAxis = 1;
+                }
+
+                if (hoveredAxis >= 0)
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+
+                // Begin drag
+                if (hoveredAxis >= 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                {
+                    if (undoService)
+                        undoService->BeginInteractiveSceneMutation();
+                    gizmoState.DragActive = true;
+                    gizmoState.DragAxis = hoveredAxis;
+                    gizmoState.DragEntity = selectedEntity;
+                    gizmoState.DragStartEntityScale = transform->Scale;
+
+                    glm::vec3 mouseWorld{};
+                    TryComputeDropWorldPosition(camera, viewportMin, viewportMax, mousePos, mouseWorld);
+                    gizmoState.DragStartWorldPosition = mouseWorld;
+
+                    // Snapshot multi-selection scales
+                    gizmoState.DragEntities.clear();
+                    gizmoState.DragStartScales.clear();
+                    for (entt::entity e : multiSelectedEntities)
+                    {
+                        if (e != selectedEntity && scene.IsValid(e))
+                        {
+                            auto* t = registry.try_get<TransformComponent>(e);
+                            if (t)
+                            {
+                                gizmoState.DragEntities.push_back(e);
+                                gizmoState.DragStartScales.push_back(t->Scale);
+                            }
+                        }
+                    }
+                }
+
+                // Continue drag
+                if (gizmoState.DragActive && gizmoState.DragEntity == selectedEntity &&
+                    gizmoState.Mode == TransformGizmoMode::Scale)
+                {
+                    glm::vec3 currentMouseWorld{};
+                    if (TryComputeDropWorldPosition(camera, viewportMin, viewportMax, mousePos, currentMouseWorld))
+                    {
+                        const glm::vec3 startOffset = gizmoState.DragStartWorldPosition - entityWorldPos;
+                        const glm::vec3 currentOffset = currentMouseWorld - entityWorldPos;
+
+                        auto safeDiv = [](float a, float b) -> float {
+                            return std::abs(b) > 0.001f ? a / b : 1.0f;
+                        };
+
+                        glm::vec3 scaleFactor(1.0f);
+                        if (gizmoState.DragAxis == 0)
+                            scaleFactor.x = safeDiv(currentOffset.x, startOffset.x);
+                        else if (gizmoState.DragAxis == 1)
+                            scaleFactor.y = safeDiv(currentOffset.y, startOffset.y);
+                        else // uniform
+                        {
+                            const float startDist = glm::length(glm::vec2(startOffset));
+                            const float currentDist = glm::length(glm::vec2(currentOffset));
+                            const float uniformFactor = (startDist > 0.001f) ? currentDist / startDist : 1.0f;
+                            scaleFactor = glm::vec3(uniformFactor);
+                        }
+
+                        transform->Scale = gizmoState.DragStartEntityScale * scaleFactor;
+                        scene.MarkTransformDirty(selectedEntity);
+
+                        for (size_t i = 0; i < gizmoState.DragEntities.size(); ++i)
+                        {
+                            entt::entity e = gizmoState.DragEntities[i];
+                            if (!scene.IsValid(e)) continue;
+                            auto* t = registry.try_get<TransformComponent>(e);
+                            if (t)
+                            {
+                                t->Scale = gizmoState.DragStartScales[i] * scaleFactor;
+                                scene.MarkTransformDirty(e);
+                            }
+                        }
+                    }
+
+                    if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+                    {
+                        if (undoService)
+                            (void)undoService->CommitInteractiveSceneMutation("Scale Entity");
+                        gizmoState.DragActive = false;
+                    }
+                }
+            }
+
+            // Cancel on Escape
+            if (gizmoState.DragActive && ImGui::IsKeyPressed(ImGuiKey_Escape))
+            {
+                if (undoService)
+                    undoService->CancelInteractiveSceneMutation();
+                gizmoState.DragActive = false;
+            }
+
+            // Abort if mouse released unexpectedly
+            if (gizmoState.DragActive && !ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            {
+                if (undoService)
+                    (void)undoService->CommitInteractiveSceneMutation("Transform Entity");
+                gizmoState.DragActive = false;
+            }
+
+            return gizmoState.DragActive;
+        }
+
+        // -----------------------------------------------------------------
+        // Keyboard shortcuts for gizmo mode switching (Unity-style W/E/R/Q)
+        // -----------------------------------------------------------------
+
+        void HandleGizmoKeyboardShortcuts(TransformGizmoState& gizmoState, bool viewportFocused)
+        {
+            if (!viewportFocused)
+                return;
+            if (gizmoState.DragActive)
+                return;
+
+            // Don't capture shortcuts when typing in an input field
+            if (ImGui::GetIO().WantTextInput)
+                return;
+
+            if (ImGui::IsKeyPressed(ImGuiKey_Q, false))
+                gizmoState.Mode = TransformGizmoMode::None;
+            else if (ImGui::IsKeyPressed(ImGuiKey_W, false))
+                gizmoState.Mode = TransformGizmoMode::Translate;
+            else if (ImGui::IsKeyPressed(ImGuiKey_E, false))
+                gizmoState.Mode = TransformGizmoMode::Rotate;
+            else if (ImGui::IsKeyPressed(ImGuiKey_R, false))
+                gizmoState.Mode = TransformGizmoMode::Scale;
+        }
+
+        // -----------------------------------------------------------------
+        // Scene view entity picking and multi-selection
+        // -----------------------------------------------------------------
+
+        void HandleSceneViewPicking(Scene& scene,
+                                    const Camera& camera,
+                                    entt::entity& selectedEntity,
+                                    EditorScenePanelState* scenePanelState,
+                                    const ImVec2& viewportMin,
+                                    const ImVec2& viewportMax,
+                                    float viewportWidth,
+                                    float viewportHeight,
+                                    bool sceneViewHovered,
+                                    TransformGizmoState* gizmoState)
+        {
+            if (!sceneViewHovered)
+                return;
+            if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                return;
+            // Don't pick if a gizmo drag just started or is active
+            if (gizmoState && gizmoState->DragActive)
+                return;
+
+            const ImVec2 mousePos = ImGui::GetMousePos();
+            if (mousePos.x < viewportMin.x || mousePos.x > viewportMax.x ||
+                mousePos.y < viewportMin.y || mousePos.y > viewportMax.y)
+                return;
+
+            // Don't pick if right mouse button is held (camera control)
+            if (ImGui::GetIO().MouseDown[ImGuiMouseButton_Right])
+                return;
+
+            const auto picked = PickTopmostSpriteEntityAtPoint(
+                scene, camera, viewportMin, viewportWidth, viewportHeight, mousePos);
+
+            const ImGuiIO& io = ImGui::GetIO();
+            const bool ctrlHeld = io.KeyCtrl || io.KeySuper;
+
+            if (picked.has_value())
+            {
+                const entt::entity pickedEntity = *picked;
+
+                if (ctrlHeld && scenePanelState)
+                {
+                    // Toggle selection
+                    auto& multi = scenePanelState->MultiSelectedEntities;
+                    auto it = std::find(multi.begin(), multi.end(), pickedEntity);
+                    if (it != multi.end())
+                    {
+                        multi.erase(it);
+                        if (selectedEntity == pickedEntity)
+                            selectedEntity = multi.empty() ? entt::null : multi.back();
+                    }
+                    else
+                    {
+                        multi.push_back(pickedEntity);
+                        selectedEntity = pickedEntity;
+                    }
+                    scenePanelState->SelectionAnchorEntity = pickedEntity;
+                }
+                else
+                {
+                    // Single select
+                    selectedEntity = pickedEntity;
+                    if (scenePanelState)
+                    {
+                        scenePanelState->MultiSelectedEntities.clear();
+                        scenePanelState->MultiSelectedEntities.push_back(pickedEntity);
+                        scenePanelState->SelectionAnchorEntity = pickedEntity;
+                    }
+                }
+            }
+            else if (!ctrlHeld)
+            {
+                // Clicked empty space: deselect
+                selectedEntity = entt::null;
+                if (scenePanelState)
+                {
+                    scenePanelState->MultiSelectedEntities.clear();
+                    scenePanelState->SelectionAnchorEntity = entt::null;
+                }
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // Box (marquee) selection
+        // -----------------------------------------------------------------
+
+        void HandleBoxSelection(ImDrawList* drawList,
+                                Scene& scene,
+                                const Camera& camera,
+                                entt::entity& selectedEntity,
+                                EditorScenePanelState* scenePanelState,
+                                const ImVec2& viewportMin,
+                                const ImVec2& viewportMax,
+                                float viewportWidth,
+                                float viewportHeight,
+                                bool sceneViewHovered,
+                                TransformGizmoState* gizmoState)
+        {
+            if (!gizmoState || !scenePanelState)
+                return;
+
+            // Don't start box select during gizmo drag or RMB look
+            if (gizmoState->DragActive)
+                return;
+            if (ImGui::GetIO().MouseDown[ImGuiMouseButton_Right])
+            {
+                gizmoState->BoxSelectActive = false;
+                return;
+            }
+
+            const ImVec2 mousePos = ImGui::GetMousePos();
+
+            // Begin box select on left mouse down while holding no gizmo
+            if (sceneViewHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+                !gizmoState->DragActive)
+            {
+                // Only start box select if we didn't hit a gizmo handle or an entity
+                // (picking and gizmo begin happen before this, so if DragActive is false
+                //  and we got here, it means no gizmo was engaged this frame)
+                // We use a delayed approach: mark start position, and only activate
+                // box select if the mouse moves a minimum distance.
+                gizmoState->BoxSelectStart = glm::vec2(mousePos.x, mousePos.y);
+            }
+
+            // Activate box select after minimum drag distance (only while hovering viewport)
+            if (!gizmoState->BoxSelectActive && sceneViewHovered && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            {
+                const float dx = mousePos.x - gizmoState->BoxSelectStart.x;
+                const float dy = mousePos.y - gizmoState->BoxSelectStart.y;
+                if (dx * dx + dy * dy > 25.0f) // 5px threshold
+                    gizmoState->BoxSelectActive = true;
+            }
+
+            // Draw box and compute selection on release
+            if (gizmoState->BoxSelectActive)
+            {
+                const ImVec2 boxMin(std::min(gizmoState->BoxSelectStart.x, mousePos.x),
+                                    std::min(gizmoState->BoxSelectStart.y, mousePos.y));
+                const ImVec2 boxMax(std::max(gizmoState->BoxSelectStart.x, mousePos.x),
+                                    std::max(gizmoState->BoxSelectStart.y, mousePos.y));
+
+                drawList->AddRect(boxMin, boxMax, IM_COL32(100, 180, 255, 220), 0.0f, 0, 1.5f);
+                drawList->AddRectFilled(boxMin, boxMax, IM_COL32(100, 180, 255, 40));
+
+                if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+                {
+                    gizmoState->BoxSelectActive = false;
+
+                    // Find all sprite entities whose centers fall within the box
+                    auto& registry = scene.GetRegistry();
+                    auto view = registry.view<TransformComponent, SpriteComponent>();
+
+                    const ImGuiIO& io = ImGui::GetIO();
+                    const bool ctrlHeld = io.KeyCtrl || io.KeySuper;
+
+                    if (!ctrlHeld)
+                    {
+                        scenePanelState->MultiSelectedEntities.clear();
+                        selectedEntity = entt::null;
+                    }
+
+                    for (entt::entity entity : view)
+                    {
+                        const glm::mat4 model = scene.GetWorldTransformMatrix(entity);
+                        const glm::vec3 worldPos = glm::vec3(model[3]);
+                        ImVec2 screenPos{};
+                        if (!WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, worldPos, screenPos))
+                            continue;
+
+                        if (screenPos.x >= boxMin.x && screenPos.x <= boxMax.x &&
+                            screenPos.y >= boxMin.y && screenPos.y <= boxMax.y)
+                        {
+                            auto& multi = scenePanelState->MultiSelectedEntities;
+                            if (std::find(multi.begin(), multi.end(), entity) == multi.end())
+                                multi.push_back(entity);
+                            selectedEntity = entity;
+                        }
+                    }
+
+                    if (!scenePanelState->MultiSelectedEntities.empty())
+                    {
+                        selectedEntity = scenePanelState->MultiSelectedEntities.back();
+                        scenePanelState->SelectionAnchorEntity = selectedEntity;
+                    }
+                }
+            }
+
+            // Cancel on escape or right click
+            if (gizmoState->BoxSelectActive && (ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)))
+                gizmoState->BoxSelectActive = false;
+        }
+
+        // -----------------------------------------------------------------
+        // Gizmo mode toolbar overlay
+        // -----------------------------------------------------------------
+
+        void DrawGizmoToolbar(ImDrawList* drawList,
+                              const ImVec2& viewportMin,
+                              const ImVec2& viewportMax,
+                              TransformGizmoState& gizmoState)
+        {
+            (void)viewportMax;
+            const float buttonSize = 28.0f;
+            const float padding = 4.0f;
+            const float toolbarWidth = buttonSize * 4 + padding * 5;
+            const float toolbarHeight = buttonSize + padding * 2;
+            const ImVec2 toolbarMin(viewportMin.x + 10.0f, viewportMin.y + 10.0f);
+            const ImVec2 toolbarMax(toolbarMin.x + toolbarWidth, toolbarMin.y + toolbarHeight);
+
+            drawList->AddRectFilled(toolbarMin, toolbarMax, IM_COL32(30, 30, 35, 210), 5.0f);
+            drawList->AddRect(toolbarMin, toolbarMax, IM_COL32(255, 255, 255, 30), 5.0f);
+
+            struct ToolButton
+            {
+                const char* Label;
+                const char* Shortcut;
+                TransformGizmoMode Mode;
+            };
+
+            const ToolButton buttons[] = {
+                {"Q", "Q", TransformGizmoMode::None},
+                {"W", "W", TransformGizmoMode::Translate},
+                {"E", "E", TransformGizmoMode::Rotate},
+                {"R", "R", TransformGizmoMode::Scale},
+            };
+
+            for (int i = 0; i < 4; ++i)
+            {
+                const float x = toolbarMin.x + padding + static_cast<float>(i) * (buttonSize + padding);
+                const float y = toolbarMin.y + padding;
+                const ImVec2 btnMin(x, y);
+                const ImVec2 btnMax(x + buttonSize, y + buttonSize);
+
+                const bool isActive = gizmoState.Mode == buttons[i].Mode;
+                const ImU32 btnColor = isActive ? IM_COL32(80, 140, 220, 220) : IM_COL32(55, 55, 60, 180);
+                const ImU32 btnHoverColor = isActive ? IM_COL32(90, 155, 240, 240) : IM_COL32(70, 70, 78, 200);
+
+                const ImVec2 mousePos = ImGui::GetMousePos();
+                const bool hovered = mousePos.x >= btnMin.x && mousePos.x <= btnMax.x &&
+                                     mousePos.y >= btnMin.y && mousePos.y <= btnMax.y;
+
+                drawList->AddRectFilled(btnMin, btnMax, hovered ? btnHoverColor : btnColor, 3.0f);
+                if (isActive)
+                    drawList->AddRect(btnMin, btnMax, IM_COL32(130, 190, 255, 255), 3.0f, 0, 1.5f);
+
+                const ImVec2 textSize = ImGui::CalcTextSize(buttons[i].Label);
+                drawList->AddText(
+                    ImVec2(btnMin.x + (buttonSize - textSize.x) * 0.5f,
+                           btnMin.y + (buttonSize - textSize.y) * 0.5f),
+                    IM_COL32(235, 240, 250, 255),
+                    buttons[i].Label);
+
+                if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                    gizmoState.Mode = buttons[i].Mode;
+            }
+        }
+
         void DrawSelectedPhysicsOverlays(ImDrawList* drawList,
                                          Scene& scene,
                                          const Camera& camera,
@@ -1337,7 +2283,10 @@ namespace Limitless::EditorViewportPanel
               std::string& selectedNativeScriptAssetKey,
               bool showFpsOverlay,
               TilemapEditorState* tilemapEditorState,
-              bool showMissingGameplayCameraOverlay)
+              bool showMissingGameplayCameraOverlay,
+              TransformGizmoState* gizmoState,
+              EditorScenePanelState* scenePanelState,
+              bool showGizmoToolbar)
     {
         (void)editorCameraController;
         sceneViewRectValid = false;
@@ -1557,7 +2506,81 @@ namespace Limitless::EditorViewportPanel
                             }
                         }
                     }
+
+                    // --- Selection highlights for all multi-selected entities ---
+                    if (scenePanelState)
+                    {
+                        for (entt::entity entity : scenePanelState->MultiSelectedEntities)
+                        {
+                            const ImU32 highlightColor = (entity == selectedEntity)
+                                ? IM_COL32(255, 180, 50, 220)
+                                : IM_COL32(100, 180, 255, 180);
+                            DrawSelectionHighlight(drawList, *scene, *sceneViewCamera, entity,
+                                                   viewportMin, static_cast<float>(sceneWidth), static_cast<float>(sceneHeight),
+                                                   highlightColor);
+                        }
+                    }
+                    else if (selectedEntity != entt::null)
+                    {
+                        DrawSelectionHighlight(drawList, *scene, *sceneViewCamera, selectedEntity,
+                                               viewportMin, static_cast<float>(sceneWidth), static_cast<float>(sceneHeight),
+                                               IM_COL32(255, 180, 50, 220));
+                    }
+
+                    // --- Transform gizmos ---
+                    bool gizmoCapturedInput = false;
+                    if (gizmoState)
+                    {
+                        static const std::vector<entt::entity> kEmptyEntities;
+                        const std::vector<entt::entity>& multiEntities = scenePanelState
+                            ? scenePanelState->MultiSelectedEntities
+                            : kEmptyEntities;
+                        gizmoCapturedInput = DrawAndHandleTransformGizmos(drawList,
+                            *scene,
+                            *sceneViewCamera,
+                            selectedEntity,
+                            multiEntities,
+                            viewportMin,
+                            viewportMax,
+                            static_cast<float>(sceneWidth),
+                            static_cast<float>(sceneHeight),
+                            playModeState,
+                            undoService,
+                            *gizmoState);
+                    }
+
+                    // --- Scene view entity picking (click to select) ---
+                    if (!gizmoCapturedInput && scene && sceneViewCamera)
+                    {
+                        HandleSceneViewPicking(*scene, *sceneViewCamera, selectedEntity, scenePanelState,
+                                               viewportMin, viewportMax,
+                                               static_cast<float>(sceneWidth), static_cast<float>(sceneHeight),
+                                               sceneViewHovered, gizmoState);
+                    }
+
+                    // --- Box (marquee) selection ---
+                    if (!gizmoCapturedInput && scene && sceneViewCamera)
+                    {
+                        HandleBoxSelection(drawList, *scene, *sceneViewCamera, selectedEntity, scenePanelState,
+                                           viewportMin, viewportMax,
+                                           static_cast<float>(sceneWidth), static_cast<float>(sceneHeight),
+                                           sceneViewHovered, gizmoState);
+                    }
+
+                    // --- Gizmo mode toolbar overlay ---
+                    if (gizmoState && showGizmoToolbar)
+                    {
+                        // Position toolbar so it doesn't overlap FPS overlay
+                        const ImVec2 toolbarViewportMin = showFpsOverlay
+                            ? ImVec2(viewportMin.x, viewportMin.y + 145.0f)
+                            : viewportMin;
+                        DrawGizmoToolbar(drawList, toolbarViewportMin, viewportMax, *gizmoState);
+                    }
                 }
+
+                // --- Keyboard shortcuts for gizmo mode (W/E/R/Q) ---
+                if (gizmoState)
+                    HandleGizmoKeyboardShortcuts(*gizmoState, sceneViewFocused || sceneViewHovered);
 
                 if (ImGui::BeginDragDropTarget())
                 {

@@ -219,6 +219,7 @@ namespace Limitless
         bool m_ShowPhysicsDiagnosticsWindow = true;
         bool m_ShowConsoleWindow = true;
         bool m_ShowEditorFpsOverlay = true;
+        bool m_ShowGizmoToolbar = true;
         bool m_ShowPerformancePanel = false;
         bool m_ShowAnimationTimelinePanel = true;
         bool m_ShowAnimatorGraphPanel = true;
@@ -265,6 +266,7 @@ namespace Limitless
         std::unordered_set<std::string> m_ActiveSceneMaterialPrewarmKeys;
         EditorBuildSettingsPanel::EditorBuildSettingsPanelState m_BuildSettingsPanelState;
         EditorViewportPanel::TilemapEditorState m_TilemapEditorState{};
+        EditorViewportPanel::TransformGizmoState m_TransformGizmoState{};
         EditorSpriteEditor::SpriteEditorState m_SpriteEditorState{};
         EditorTilePalettePanel::TilePaletteState m_TilePaletteState{};
     };

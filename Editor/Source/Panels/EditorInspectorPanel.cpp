@@ -36,7 +36,8 @@ namespace Limitless::EditorInspectorPanel
         ImGui::Begin("Inspector");
 
         static entt::entity animationPanelSelectionOwner = entt::null;
-        if (scene && selectedEntity != entt::null && scene->IsValid(selectedEntity))
+        const bool hasValidSelectedEntity = scene && selectedEntity != entt::null && scene->IsValid(selectedEntity);
+        if (hasValidSelectedEntity)
         {
             selectedInputActionsAssetKey.clear();
             selectedAudioMixerAssetKey.clear();
@@ -61,7 +62,35 @@ namespace Limitless::EditorInspectorPanel
             animationPanelSelectionOwner = entt::null;
         }
 
-        if (!selectedInputActionsAssetKey.empty())
+        if (hasValidSelectedEntity)
+        {
+            auto& registry = scene->GetRegistry();
+            PendingEntityComponentRemovals pendingRemovals{};
+            bool removeNativeScriptComponent = false;
+            DrawStandardEntityComponentSections(
+                scene,
+                registry,
+                selectedEntity,
+                texturePayloadId,
+                audioPayloadId,
+                materialPayloadId,
+                fontPayloadId,
+                selectedAnimationClipAssetKey,
+                selectedAnimatorControllerAssetKey,
+                pendingRemovals,
+                undoService);
+
+            DrawNativeScriptComponentSection(scene, registry, selectedEntity, undoService, removeNativeScriptComponent);
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            DrawAddComponentPopup(scene, registry, selectedEntity, undoService);
+
+            ApplyPendingEntityComponentRemovals(scene, registry, selectedEntity, pendingRemovals, removeNativeScriptComponent, undoService);
+        }
+        else if (!selectedInputActionsAssetKey.empty())
         {
             DrawInputActionsAssetInspector(selectedInputActionsAssetKey);
         }
@@ -93,40 +122,12 @@ namespace Limitless::EditorInspectorPanel
         {
             DrawPrefabAssetInspector(selectedPrefabAssetKey);
         }
-        else if (!scene || selectedEntity == entt::null || !scene->IsValid(selectedEntity))
+        else
         {
             ImGui::Text("Select an object to edit.");
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Text("No selection.");
-        }
-        else
-        {
-            auto& registry = scene->GetRegistry();
-            PendingEntityComponentRemovals pendingRemovals{};
-            bool removeNativeScriptComponent = false;
-            DrawStandardEntityComponentSections(
-                scene,
-                registry,
-                selectedEntity,
-                texturePayloadId,
-                audioPayloadId,
-                materialPayloadId,
-                fontPayloadId,
-                selectedAnimationClipAssetKey,
-                selectedAnimatorControllerAssetKey,
-                pendingRemovals,
-                undoService);
-
-            DrawNativeScriptComponentSection(scene, registry, selectedEntity, undoService, removeNativeScriptComponent);
-
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-
-            DrawAddComponentPopup(scene, registry, selectedEntity, undoService);
-
-            ApplyPendingEntityComponentRemovals(scene, registry, selectedEntity, pendingRemovals, removeNativeScriptComponent, undoService);
         }
 
         ImGui::End();

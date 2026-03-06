@@ -6,6 +6,8 @@
 #include "Assets/TextureAsset.h"
 #include "Graphics/Font.h"
 
+#include "Scripting/ScriptEvent.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <glm/glm.hpp>
@@ -215,6 +217,12 @@ namespace Limitless
         std::string OnHoverEnterEvent;
         std::string OnHoverExitEvent;
         std::string OnPressedEvent;
+
+        // Runtime delegate events (not serialized — subscribers are runtime-only).
+        ScriptEvent<> OnClicked;
+        ScriptEvent<> OnHoverEnter;
+        ScriptEvent<> OnHoverExit;
+        ScriptEvent<> OnPressed;
     };
 
     /// Minimal slider state and value range.
@@ -233,6 +241,9 @@ namespace Limitless
         bool RuntimeDragging = false;
         bool RuntimeValueChangedThisFrame = false;
         std::string OnValueChangedEvent;
+
+        // Runtime delegate event (not serialized — subscribers are runtime-only).
+        ScriptEvent<float> OnValueChanged;
     };
 
     /// Optional material reference (Unity-style).

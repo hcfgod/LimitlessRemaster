@@ -66,12 +66,17 @@ namespace Limitless
                 uiButton->RuntimeHoverExitedThisFrame = false;
                 uiButton->RuntimePressedThisFrame = false;
                 uiButton->RuntimeClickedThisFrame = false;
+                uiButton->OnClicked.Clear();
+                uiButton->OnHoverEnter.Clear();
+                uiButton->OnHoverExit.Clear();
+                uiButton->OnPressed.Clear();
             }
 
             if (auto* uiSlider = registry.try_get<UISliderComponent>(entity))
             {
                 uiSlider->RuntimeDragging = false;
                 uiSlider->RuntimeValueChangedThisFrame = false;
+                uiSlider->OnValueChanged.Clear();
             }
 
             if (auto* directionalLight = registry.try_get<DirectionalLight2DComponent>(entity))
@@ -300,6 +305,10 @@ namespace Limitless
                 destinationButton.RuntimeHoverExitedThisFrame = false;
                 destinationButton.RuntimePressedThisFrame = false;
                 destinationButton.RuntimeClickedThisFrame = false;
+                destinationButton.OnClicked.Clear();
+                destinationButton.OnHoverEnter.Clear();
+                destinationButton.OnHoverExit.Clear();
+                destinationButton.OnPressed.Clear();
             }
 
             if (const auto* uiSlider = sourceRegistry.try_get<UISliderComponent>(sourceEntity))
@@ -308,6 +317,7 @@ namespace Limitless
                 destinationSlider.Value = std::clamp(destinationSlider.Value, destinationSlider.MinValue, destinationSlider.MaxValue);
                 destinationSlider.RuntimeDragging = false;
                 destinationSlider.RuntimeValueChangedThisFrame = false;
+                destinationSlider.OnValueChanged.Clear();
             }
 
             if (const auto* grid2D = sourceRegistry.try_get<Grid2DComponent>(sourceEntity))

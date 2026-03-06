@@ -19,10 +19,44 @@ namespace Limitless
     class EditorUndoService;
     class Framebuffer;
     class Scene;
+    struct EditorScenePanelState;
 }
 
 namespace Limitless::EditorViewportPanel
 {
+    enum class TransformGizmoMode : uint8_t
+    {
+        None      = 0,
+        Translate = 1,
+        Rotate    = 2,
+        Scale     = 3
+    };
+
+    struct TransformGizmoState
+    {
+        TransformGizmoMode Mode = TransformGizmoMode::Translate;
+
+        // Drag state
+        bool DragActive = false;
+        int  DragAxis = -1; // 0=X, 1=Y, 2=Z (or -1 for XY plane / none)
+        glm::vec3 DragStartWorldPosition = glm::vec3(0.0f);
+        glm::vec3 DragStartEntityPosition = glm::vec3(0.0f);
+        glm::vec3 DragStartEntityRotation = glm::vec3(0.0f);
+        glm::vec3 DragStartEntityScale = glm::vec3(1.0f);
+        float DragStartAngle = 0.0f;
+        entt::entity DragEntity = entt::null;
+
+        // Multi-entity drag snapshots
+        std::vector<entt::entity> DragEntities;
+        std::vector<glm::vec3> DragStartPositions;
+        std::vector<glm::vec3> DragStartRotations;
+        std::vector<glm::vec3> DragStartScales;
+
+        // Box selection
+        bool BoxSelectActive = false;
+        glm::vec2 BoxSelectStart = glm::vec2(0.0f, 0.0f);
+    };
+
     enum class TilemapPaintMode : uint8_t
     {
         Single = 0,
@@ -122,5 +156,8 @@ namespace Limitless::EditorViewportPanel
               std::string& selectedNativeScriptAssetKey,
               bool showFpsOverlay,
               TilemapEditorState* tilemapEditorState,
-              bool showMissingGameplayCameraOverlay);
+              bool showMissingGameplayCameraOverlay,
+              TransformGizmoState* gizmoState,
+              EditorScenePanelState* scenePanelState,
+              bool showGizmoToolbar);
 }

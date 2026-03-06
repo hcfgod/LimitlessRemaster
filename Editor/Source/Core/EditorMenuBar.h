@@ -13,6 +13,7 @@ namespace Limitless::EditorMenuBar
               bool& showPhysicsDiagnosticsWindow,
               bool& showConsoleWindow,
               bool& showEditorFpsOverlay,
+              bool& showGizmoToolbar,
               bool& showPerformancePanel,
               bool& showAnimationTimelinePanel,
               bool& showAnimatorGraphPanel,

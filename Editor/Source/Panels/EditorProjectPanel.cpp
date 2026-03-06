@@ -102,7 +102,84 @@ namespace Limitless::EditorProjectPanel
             std::chrono::steady_clock::time_point LoadTime = {};
         };
         std::unordered_map<std::string, SpriteSettingsCacheEntry> gSpriteSettingsCache;
+        std::string gProjectSearchFilterLower;
+        std::unordered_map<std::string, bool> gProjectSearchMatchCache;
         constexpr std::chrono::milliseconds kSpriteSettingsCacheLifetime(2000);
+
+        struct AssetTypeBadgeInfo
+        {
+            const char* Label;
+            ImU32 FillColor;
+            ImU32 BorderColor;
+            ImU32 TextColor;
+        };
+
+        constexpr AssetTypeBadgeInfo kBadgeFolder          = { "FLD", IM_COL32( 55, 120, 190, 255), IM_COL32(100, 170, 240, 255), IM_COL32(230, 245, 255, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeTexture         = { "TEX", IM_COL32( 45, 145,  70, 255), IM_COL32( 90, 200, 120, 255), IM_COL32(230, 255, 235, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeScene           = { "SCN", IM_COL32(185, 120,  30, 255), IM_COL32(235, 175,  65, 255), IM_COL32(255, 245, 225, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeMaterial        = { "MAT", IM_COL32(120,  60, 175, 255), IM_COL32(170, 110, 225, 255), IM_COL32(240, 230, 255, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeAudio           = { "SND", IM_COL32(170,  50, 120, 255), IM_COL32(220, 100, 170, 255), IM_COL32(255, 230, 245, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeFont            = { "FNT", IM_COL32( 40, 140, 150, 255), IM_COL32( 80, 195, 200, 255), IM_COL32(225, 250, 252, 255) };
+        constexpr AssetTypeBadgeInfo kBadgePrefab          = { "PFB", IM_COL32( 58, 125, 198, 255), IM_COL32(120, 190, 255, 255), IM_COL32(235, 245, 255, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeScript          = { "CPP", IM_COL32(165, 145,  35, 255), IM_COL32(215, 200,  80, 255), IM_COL32(255, 252, 225, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeShader          = { "SHD", IM_COL32( 30, 150, 180, 255), IM_COL32( 70, 200, 230, 255), IM_COL32(225, 250, 255, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeAudioMixer      = { "MIX", IM_COL32(155,  55, 140, 255), IM_COL32(210, 110, 195, 255), IM_COL32(255, 230, 250, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeInputActions    = { "INP", IM_COL32( 70, 155,  50, 255), IM_COL32(120, 210, 100, 255), IM_COL32(235, 255, 230, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeAnimationClip   = { "ANI", IM_COL32(190,  65,  55, 255), IM_COL32(240, 115, 105, 255), IM_COL32(255, 232, 230, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeAnimController  = { "ACT", IM_COL32(175,  45,  70, 255), IM_COL32(230,  95, 120, 255), IM_COL32(255, 230, 235, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeSubSprite       = { "SUB", IM_COL32( 80, 130,  80, 255), IM_COL32(130, 185, 130, 255), IM_COL32(235, 255, 235, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeTileset         = { "TLS", IM_COL32(140, 110,  50, 255), IM_COL32(195, 165,  90, 255), IM_COL32(255, 248, 230, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeUnknown         = { "---", IM_COL32( 90,  90, 100, 255), IM_COL32(140, 140, 155, 255), IM_COL32(220, 220, 230, 255) };
+
+        void DrawAssetTypeBadge(const AssetTypeBadgeInfo& badge, float indentScreenX)
+        {
+            const ImVec2 itemMin = ImGui::GetItemRectMin();
+            const ImVec2 itemMax = ImGui::GetItemRectMax();
+            const ImVec2 textSize = ImGui::CalcTextSize(badge.Label);
+            const float padX = 5.0f;
+            const float padY = 2.0f;
+            const float pillW = textSize.x + padX * 2.0f;
+            const float pillH = textSize.y + padY * 2.0f;
+            const float rowCenterY = itemMin.y + (itemMax.y - itemMin.y) * 0.5f;
+            const float labelStartX = indentScreenX + ImGui::GetTreeNodeToLabelSpacing();
+            const ImVec2 pillMin(labelStartX, rowCenterY - pillH * 0.5f);
+            const ImVec2 pillMax(pillMin.x + pillW, pillMin.y + pillH);
+            const ImVec2 textPos(pillMin.x + padX, pillMin.y + padY);
+
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            drawList->AddRectFilled(pillMin, pillMax, badge.FillColor, 4.0f);
+            drawList->AddRect(pillMin, pillMax, badge.BorderColor, 4.0f, 0, 1.0f);
+            drawList->AddText(textPos, badge.TextColor, badge.Label);
+        }
+
+        std::string BadgePadLabel(const std::string& label)
+        {
+            const float badgeWidth = ImGui::CalcTextSize("XXX").x + 14.0f;
+            const float spaceWidth = ImGui::CalcTextSize(" ").x;
+            const int numSpaces = static_cast<int>(badgeWidth / spaceWidth) + 2;
+            return std::string(static_cast<size_t>(numSpaces), ' ') + label;
+        }
+
+        const AssetTypeBadgeInfo& ResolveAssetBadge(
+            bool isTexture, bool isScene, bool isMaterial, bool isAudioMixer,
+            bool isInputActions, bool isAnimationClip, bool isAnimatorController,
+            bool isPrefab, bool isShader, bool isAudio, bool isFont,
+            bool isNativeScriptFile)
+        {
+            if (isTexture)             return kBadgeTexture;
+            if (isScene)               return kBadgeScene;
+            if (isMaterial)            return kBadgeMaterial;
+            if (isAudioMixer)          return kBadgeAudioMixer;
+            if (isInputActions)        return kBadgeInputActions;
+            if (isAnimationClip)       return kBadgeAnimationClip;
+            if (isAnimatorController)  return kBadgeAnimController;
+            if (isPrefab)              return kBadgePrefab;
+            if (isShader)              return kBadgeShader;
+            if (isAudio)               return kBadgeAudio;
+            if (isFont)                return kBadgeFont;
+            if (isNativeScriptFile)    return kBadgeScript;
+            return kBadgeUnknown;
+        }
 
         const Assets::SpriteImportSettings& GetCachedSpriteImportSettings(const std::string& textureAssetKey)
         {
@@ -708,6 +785,59 @@ namespace Limitless::EditorProjectPanel
             return EditorAssetNaming::GetAssetDisplayNameFromPath(path);
         }
 
+        bool MatchesProjectSearchFilter(const std::string& value)
+        {
+            if (gProjectSearchFilterLower.empty())
+                return true;
+            return ToLowerAscii(value).find(gProjectSearchFilterLower) != std::string::npos;
+        }
+
+        bool EntryMatchesProjectSearchFilter(const ProjectAssetTreeEntry& entry, const std::string& displayName)
+        {
+            if (gProjectSearchFilterLower.empty())
+                return true;
+
+            return MatchesProjectSearchFilter(displayName) ||
+                   MatchesProjectSearchFilter(entry.FileName) ||
+                   MatchesProjectSearchFilter(entry.AssetKey);
+        }
+
+        bool DirectoryContainsProjectSearchMatch(const std::filesystem::path& assetsDirectory, const std::filesystem::path& relativePath)
+        {
+            if (gProjectSearchFilterLower.empty())
+                return true;
+
+            const std::string cacheKey = relativePath.generic_string();
+            if (const auto cachedIt = gProjectSearchMatchCache.find(cacheKey); cachedIt != gProjectSearchMatchCache.end())
+                return cachedIt->second;
+
+            const std::vector<ProjectAssetTreeEntry>& entries = GetCachedProjectDirectoryEntries(assetsDirectory, relativePath);
+            for (const ProjectAssetTreeEntry& entry : entries)
+            {
+                if (entry.IsDirectory)
+                {
+                    if (MatchesProjectSearchFilter(entry.FileName) || DirectoryContainsProjectSearchMatch(assetsDirectory, entry.RelativePath))
+                    {
+                        gProjectSearchMatchCache[cacheKey] = true;
+                        return true;
+                    }
+                    continue;
+                }
+
+                const std::string displayName = IsNativeScriptExtensionLower(entry.LowerExtension)
+                    ? BuildScriptAssetDisplayName(entry.AbsolutePath)
+                    : GetAssetDisplayName(entry.AbsolutePath);
+                if (EntryMatchesProjectSearchFilter(entry, displayName))
+                {
+                    gProjectSearchMatchCache[cacheKey] = true;
+                    return true;
+                }
+            }
+
+            gProjectSearchMatchCache[cacheKey] = false;
+            return false;
+        }
+
         void DrawAssetTree(const std::filesystem::path& assetsDirectory,
                            const std::filesystem::path& relativePath,
                            EditorProjectPanelState& state,
@@ -784,22 +914,38 @@ namespace Limitless::EditorProjectPanel
                 const bool isDirectory = entry.IsDirectory;
                 const std::string& assetKey = entry.AssetKey;
                 const std::filesystem::path& entryRelativePath = entry.RelativePath;
+                const bool searchActive = !gProjectSearchFilterLower.empty();
 
                 if (isDirectory)
                 {
+                    if (searchActive && !MatchesProjectSearchFilter(fileName) && !DirectoryContainsProjectSearchMatch(assetsDirectory, entryRelativePath))
+                        continue;
+
                     const std::string folderStateKey = entryRelativePath.generic_string();
                     bool folderExpanded = true;
-                    if (const auto expandedStateIt = state.ExpandedFolderState.find(folderStateKey);
-                        expandedStateIt != state.ExpandedFolderState.end())
+                    if (!searchActive)
                     {
-                        folderExpanded = expandedStateIt->second;
+                        if (const auto expandedStateIt = state.ExpandedFolderState.find(folderStateKey);
+                            expandedStateIt != state.ExpandedFolderState.end())
+                        {
+                            folderExpanded = expandedStateIt->second;
+                        }
+                    }
+                    else
+                    {
+                        folderExpanded = true;
                     }
                     const bool previousFolderExpanded = folderExpanded;
                     ImGui::SetNextItemOpen(folderExpanded, ImGuiCond_Always);
-                    const bool nodeOpen = ImGui::TreeNodeEx(fileName.c_str(), ImGuiTreeNodeFlags_None);
-                    state.ExpandedFolderState[folderStateKey] = nodeOpen;
-                    if (nodeOpen != previousFolderExpanded)
-                        state.TreeExpansionStateChanged = true;
+                    const float folderIndentX = ImGui::GetCursorScreenPos().x;
+                    const bool nodeOpen = ImGui::TreeNodeEx(BadgePadLabel(fileName).c_str(), ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_FramePadding);
+                    DrawAssetTypeBadge(kBadgeFolder, folderIndentX);
+                    if (!searchActive)
+                    {
+                        state.ExpandedFolderState[folderStateKey] = nodeOpen;
+                        if (nodeOpen != previousFolderExpanded)
+                            state.TreeExpansionStateChanged = true;
+                    }
                     if (ImGui::IsItemHovered(ImGuiHoveredFlags_RectOnly))
                     {
                         state.HoveredFolderRelativePathForExternalDrop = entryRelativePath;
@@ -981,16 +1127,21 @@ namespace Limitless::EditorProjectPanel
                         {
                             renderedScriptBasePaths.insert(scriptBaseKey);
                             const std::string scriptBaseName = scriptBaseRelativePath.stem().string();
-                            const std::string scriptNodeLabel = scriptBaseName + " [Native Script]###ScriptPair_" + scriptBaseKey;
+                            if (searchActive && !MatchesProjectSearchFilter(scriptBaseName))
+                                continue;
+
+                            const std::string scriptNodeLabel = BadgePadLabel(scriptBaseName + " [Native Script]") + "###ScriptPair_" + scriptBaseKey;
                             const std::string sourceAssetKey = "Assets/" + sourceRelativePath.generic_string();
                             const std::string headerAssetKey = "Assets/" + headerRelativePath.generic_string();
                             const bool scriptPairSelected =
                                 (selectedNativeScriptAssetKey == sourceAssetKey) ||
                                 (selectedNativeScriptAssetKey == headerAssetKey);
                             const ImGuiTreeNodeFlags scriptPairFlags = scriptPairSelected
-                                ? (ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Selected)
-                                : ImGuiTreeNodeFlags_DefaultOpen;
+                                ? (ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Selected | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_FramePadding)
+                                : (ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_FramePadding);
+                            const float scriptPairIndentX = ImGui::GetCursorScreenPos().x;
                             const bool scriptNodeOpen = ImGui::TreeNodeEx(scriptNodeLabel.c_str(), scriptPairFlags);
+                            DrawAssetTypeBadge(kBadgeScript, scriptPairIndentX);
 
                             const bool selectedScriptPairWithoutDrag =
                                 ImGui::IsItemHovered() &&
@@ -1062,8 +1213,8 @@ namespace Limitless::EditorProjectPanel
 
                             if (scriptNodeOpen)
                             {
-                                const std::string headerItemLabel = scriptBaseName + " [.h Header]###ScriptPairHeader_" + scriptBaseKey;
-                                const std::string sourceItemLabel = scriptBaseName + " [.cpp Source]###ScriptPairSource_" + scriptBaseKey;
+                                const std::string headerItemLabel = BadgePadLabel(scriptBaseName + " [.h Header]") + "###ScriptPairHeader_" + scriptBaseKey;
+                                const std::string sourceItemLabel = BadgePadLabel(scriptBaseName + " [.cpp Source]") + "###ScriptPairSource_" + scriptBaseKey;
                                 const ImGuiTreeNodeFlags headerItemFlags =
                                     ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
                                     ((selectedNativeScriptAssetKey == headerAssetKey) ? ImGuiTreeNodeFlags_Selected : ImGuiTreeNodeFlags_None);
@@ -1071,7 +1222,9 @@ namespace Limitless::EditorProjectPanel
                                     ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
                                     ((selectedNativeScriptAssetKey == sourceAssetKey) ? ImGuiTreeNodeFlags_Selected : ImGuiTreeNodeFlags_None);
 
+                                const float headerIndentX = ImGui::GetCursorScreenPos().x;
                                 ImGui::TreeNodeEx(headerItemLabel.c_str(), headerItemFlags);
+                                DrawAssetTypeBadge(kBadgeScript, headerIndentX);
                                 if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0) && (ImGui::GetDragDropPayload() == nullptr))
                                 {
                                     state.MultiSelectedAssetKeys.clear();
@@ -1091,7 +1244,9 @@ namespace Limitless::EditorProjectPanel
                                 if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
                                     onNativeScriptAssetActivated(headerAssetKey);
 
+                                const float sourceIndentX = ImGui::GetCursorScreenPos().x;
                                 ImGui::TreeNodeEx(sourceItemLabel.c_str(), sourceItemFlags);
+                                DrawAssetTypeBadge(kBadgeScript, sourceIndentX);
                                 if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(0) && (ImGui::GetDragDropPayload() == nullptr))
                                 {
                                     state.MultiSelectedAssetKeys.clear();
@@ -1139,7 +1294,10 @@ namespace Limitless::EditorProjectPanel
                     const std::string displayName = isNativeScriptFile
                         ? BuildScriptAssetDisplayName(entry.AbsolutePath)
                         : GetAssetDisplayName(entry.AbsolutePath);
-                    const std::string treeLabel = displayName + "###" + fileName;
+                    if (searchActive && !EntryMatchesProjectSearchFilter(entry, displayName))
+                        continue;
+
+                    const std::string treeLabel = BadgePadLabel(displayName) + "###" + fileName;
 
                     // Check if this texture has sub-sprites so we can render it as an expandable parent.
                     const bool hasSubSprites = isTexture && [&]() {
@@ -1148,8 +1306,8 @@ namespace Limitless::EditorProjectPanel
                                !spriteSets.SubSprites.empty();
                     }();
 
-                    const ImGuiTreeNodeFlags leafFlags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
-                    const ImGuiTreeNodeFlags expandableFlags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow;
+                    const ImGuiTreeNodeFlags leafFlags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_FramePadding;
+                    const ImGuiTreeNodeFlags expandableFlags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_FramePadding;
                     const ImGuiTreeNodeFlags flags = hasSubSprites ? expandableFlags : leafFlags;
                     std::string selectedTextureParentKey;
                     int32_t selectedTextureSubIndex = -1;
@@ -1167,7 +1325,9 @@ namespace Limitless::EditorProjectPanel
                         (isNativeScriptFile && (selectedNativeScriptAssetKey == assetKey)) ||
                         (isPrefab && (selectedPrefabAssetKey == assetKey));
                     const bool isMultiSelected = std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), assetKey) != state.MultiSelectedAssetKeys.end();
+                    const float assetIndentX = ImGui::GetCursorScreenPos().x;
                     const bool treeNodeOpen = ImGui::TreeNodeEx(treeLabel.c_str(), (isPrimarySelected || isMultiSelected) ? (flags | ImGuiTreeNodeFlags_Selected) : flags);
+                    DrawAssetTypeBadge(ResolveAssetBadge(isTexture, isScene, isMaterial, isAudioMixer, isInputActions, isAnimationClip, isAnimatorController, isPrefab, isShader, isAudio, isFont, isNativeScriptFile), assetIndentX);
 
                     const bool releasedOnItemWithoutDrag =
                         ImGui::IsItemHovered() &&
@@ -1459,15 +1619,17 @@ namespace Limitless::EditorProjectPanel
                         for (size_t subIdx = 0; subIdx < spriteSettings.SubSprites.size(); ++subIdx)
                         {
                             const auto& sub = spriteSettings.SubSprites[subIdx];
-                            const std::string subLabel = sub.Name + "###sub_" + assetKey + "_" + std::to_string(subIdx);
+                            const std::string subLabel = BadgePadLabel(sub.Name) + "###sub_" + assetKey + "_" + std::to_string(subIdx);
                             const std::string subSpriteKey = assetKey + "#" + std::to_string(subIdx);
                             const ImGuiTreeNodeFlags subFlags =
                                 ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen |
-                                ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Bullet;
+                                ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_Bullet | ImGuiTreeNodeFlags_FramePadding;
                             const bool subSpriteIsMultiSelected =
                                 std::find(state.MultiSelectedSubSpriteKeys.begin(), state.MultiSelectedSubSpriteKeys.end(), subSpriteKey) != state.MultiSelectedSubSpriteKeys.end();
 
+                            const float subIndentX = ImGui::GetCursorScreenPos().x;
                             ImGui::TreeNodeEx(subLabel.c_str(), subSpriteIsMultiSelected ? (subFlags | ImGuiTreeNodeFlags_Selected) : subFlags);
+                            DrawAssetTypeBadge(kBadgeSubSprite, subIndentX);
 
                             const bool releasedOnSubSpriteWithoutDrag =
                                 ImGui::IsItemHovered() &&
@@ -2105,6 +2267,8 @@ namespace Limitless::EditorProjectPanel
         ImGui::Begin("Project");
         state.TreeExpansionStateChanged = false;
         state.HoveredFolderRelativePathForExternalDrop.clear();
+        gProjectSearchFilterLower = ToLowerAscii(std::string(state.SearchBuffer.data()));
+        gProjectSearchMatchCache.clear();
 
         const auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
         if (rootResult.IsFailure())
@@ -2139,6 +2303,10 @@ namespace Limitless::EditorProjectPanel
             state.MultiSelectedSubSpriteKeys.clear();
             state.SubSpriteSelectionAnchorKey.clear();
         };
+
+        const size_t selectedCount = !state.MultiSelectedSubSpriteKeys.empty()
+            ? state.MultiSelectedSubSpriteKeys.size()
+            : state.MultiSelectedAssetKeys.size();
 
         if (ImGui::BeginPopupContextWindow("ProjectContext", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
         {
@@ -2195,12 +2363,81 @@ namespace Limitless::EditorProjectPanel
             ImGui::EndPopup();
         }
 
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 6.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 6.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 18.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 8.0f);
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.10f, 0.15f, 0.92f));
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.20f, 0.26f, 0.36f, 0.85f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.10f, 0.13f, 0.18f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.13f, 0.17f, 0.24f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.16f, 0.22f, 0.32f, 0.55f));
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.24f, 0.33f, 0.48f, 0.75f));
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.27f, 0.38f, 0.56f, 0.95f));
+
+        if (ImGui::BeginChild("##ProjectToolbar", ImVec2(0.0f, 86.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
+        {
+            ImGui::TextUnformatted("Project Assets");
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.55f, 0.72f, 0.98f, 1.0f), "(%zu selected)", selectedCount);
+
+            ImGui::TextColored(ImVec4(0.63f, 0.68f, 0.78f, 1.0f),
+                               gProjectSearchFilterLower.empty() ? "Organize, rename, drag, and right-click to manage assets." : "Filter active: showing matching assets and folders.");
+
+            if (ImGui::Button("Refresh"))
+                InvalidateProjectDirectoryCache();
+            ImGui::SameLine();
+            if (ImGui::Button("Collapse Folders"))
+            {
+                for (auto& [folderKey, expanded] : state.ExpandedFolderState)
+                {
+                    (void)folderKey;
+                    expanded = false;
+                }
+                state.AssetsRootExpanded = true;
+                state.TreeExpansionStateChanged = true;
+            }
+            ImGui::SameLine();
+            if (gProjectSearchFilterLower.empty())
+                ImGui::SetNextItemWidth(-1.0f);
+            else
+                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 70.0f);
+            ImGui::InputTextWithHint("##ProjectSearch", "Filter assets by name or path...", state.SearchBuffer.data(), state.SearchBuffer.size());
+            if (!gProjectSearchFilterLower.empty())
+            {
+                ImGui::SameLine();
+                if (ImGui::Button("Clear"))
+                {
+                    state.SearchBuffer[0] = '\0';
+                    gProjectSearchFilterLower.clear();
+                    gProjectSearchMatchCache.clear();
+                }
+            }
+        }
+        ImGui::EndChild();
+
+        ImGui::Spacing();
+
+        ImGui::BeginChild("##ProjectTreeRegion", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
+
         const bool previousAssetsRootExpanded = state.AssetsRootExpanded;
-        ImGui::SetNextItemOpen(state.AssetsRootExpanded, ImGuiCond_Always);
-        const bool assetsRootOpen = ImGui::TreeNodeEx("Assets", ImGuiTreeNodeFlags_None);
-        state.AssetsRootExpanded = assetsRootOpen;
-        if (state.AssetsRootExpanded != previousAssetsRootExpanded)
-            state.TreeExpansionStateChanged = true;
+        const bool searchActive = !gProjectSearchFilterLower.empty();
+        const bool shouldShowAssetsRoot = !searchActive || MatchesProjectSearchFilter("Assets") || DirectoryContainsProjectSearchMatch(assetsDirectory, "");
+        bool assetsRootOpen = false;
+        if (shouldShowAssetsRoot)
+        {
+            ImGui::SetNextItemOpen(searchActive ? true : state.AssetsRootExpanded, ImGuiCond_Always);
+            const float assetsRootIndentX = ImGui::GetCursorScreenPos().x;
+            assetsRootOpen = ImGui::TreeNodeEx(BadgePadLabel("Assets").c_str(), ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_FramePadding);
+            DrawAssetTypeBadge(kBadgeFolder, assetsRootIndentX);
+            if (!searchActive)
+            {
+                state.AssetsRootExpanded = assetsRootOpen;
+                if (state.AssetsRootExpanded != previousAssetsRootExpanded)
+                    state.TreeExpansionStateChanged = true;
+            }
+        }
         if (assetsRootOpen)
         {
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_RectOnly))
@@ -2340,6 +2577,12 @@ namespace Limitless::EditorProjectPanel
                           onNativeScriptAssetActivated);
             ImGui::TreePop();
         }
+        else if (searchActive)
+        {
+            ImGui::TextColored(ImVec4(0.78f, 0.82f, 0.90f, 1.0f), "No assets match the current filter.");
+        }
+
+        ImGui::EndChild();
 
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
         {
@@ -2383,6 +2626,9 @@ namespace Limitless::EditorProjectPanel
             onCreateAnimationClipRequested,
             onCreateAnimatorControllerRequested,
             onAssetRenamed);
+        ImGui::PopStyleColor(7);
+        ImGui::PopStyleVar(5);
+        gProjectSearchMatchCache.clear();
         ImGui::End();
     }
 }

@@ -500,6 +500,7 @@ namespace Limitless
                         {
                             try
                             {
+                                scriptEntry.RuntimeInstance->UnsubscribeAllScriptEvents();
                                 scriptEntry.RuntimeInstance->OnDestroy();
                             }
                             catch (const std::exception& exception)
@@ -1528,42 +1529,119 @@ namespace Limitless
             }
         }
 
-        // Dispatch UIButton click events to all active scripts.
+        // Dispatch UI component delegate events (ScriptEvent).
         {
             auto buttonView = m_Registry.view<UIButtonComponent>();
             for (entt::entity buttonEntity : buttonView)
             {
-                const auto& button = buttonView.get<UIButtonComponent>(buttonEntity);
-                if (!button.RuntimeClickedThisFrame)
-                    continue;
+                auto& button = buttonView.get<UIButtonComponent>(buttonEntity);
                 if (!IsEntityEnabledInHierarchy(buttonEntity))
                     continue;
 
-                const Entity buttonWrapper(&m_Registry, buttonEntity);
-                for (const auto& scriptSlot : scriptSlots)
+                if (button.RuntimeClickedThisFrame && button.OnClicked.HasSubscribers())
                 {
-                    const entt::entity scriptEntity = scriptSlot.first;
-                    const size_t scriptIndex = scriptSlot.second;
-                    NativeScriptEntry* scriptEntry = tryGetScriptEntry(scriptEntity, scriptIndex);
-                    if (!scriptEntry || !scriptEntry->RuntimeInstance || !scriptEntry->RuntimeInitialized)
-                        continue;
-                    if (!scriptEntry->Enabled || scriptEntry->ScriptClassName.empty() || !IsEntityEnabledInHierarchy(scriptEntity))
-                        continue;
-
                     try
                     {
-                        executeWithDeferredEntityDestroy([&]() {
-                            scriptEntry->RuntimeInstance->DispatchUIButtonClicked(buttonWrapper);
-                        });
+                        executeWithDeferredEntityDestroy([&]() { button.OnClicked.Invoke(); });
                     }
                     catch (const std::exception& exception)
                     {
-                        handleScriptCallbackFailure(scriptEntity, scriptIndex, "OnUIButtonClicked", exception.what());
+                        const auto* tag = m_Registry.try_get<TagComponent>(buttonEntity);
+                        LT_ERROR("UIButtonComponent.OnClicked on entity '{}' threw: {}", tag ? tag->Tag : "Entity", exception.what());
                     }
-                    catch (...)
+                    catch (...) {}
+                }
+                if (button.RuntimeHoverEnteredThisFrame && button.OnHoverEnter.HasSubscribers())
+                {
+                    try
                     {
-                        handleScriptCallbackFailure(scriptEntity, scriptIndex, "OnUIButtonClicked", "non-standard exception");
+                        executeWithDeferredEntityDestroy([&]() { button.OnHoverEnter.Invoke(); });
                     }
+                    catch (const std::exception& exception)
+                    {
+                        const auto* tag = m_Registry.try_get<TagComponent>(buttonEntity);
+                        LT_ERROR("UIButtonComponent.OnHoverEnter on entity '{}' threw: {}", tag ? tag->Tag : "Entity", exception.what());
+                    }
+                    catch (...) {}
+                }
+                if (button.RuntimeHoverExitedThisFrame && button.OnHoverExit.HasSubscribers())
+                {
+                    try
+                    {
+                        executeWithDeferredEntityDestroy([&]() { button.OnHoverExit.Invoke(); });
+                    }
+                    catch (const std::exception& exception)
+                    {
+                        const auto* tag = m_Registry.try_get<TagComponent>(buttonEntity);
+                        LT_ERROR("UIButtonComponent.OnHoverExit on entity '{}' threw: {}", tag ? tag->Tag : "Entity", exception.what());
+                    }
+                    catch (...) {}
+                }
+                if (button.RuntimePressedThisFrame && button.OnPressed.HasSubscribers())
+                {
+                    try
+                    {
+                        executeWithDeferredEntityDestroy([&]() { button.OnPressed.Invoke(); });
+                    }
+                    catch (const std::exception& exception)
+                    {
+                        const auto* tag = m_Registry.try_get<TagComponent>(buttonEntity);
+                        LT_ERROR("UIButtonComponent.OnPressed on entity '{}' threw: {}", tag ? tag->Tag : "Entity", exception.what());
+                    }
+                    catch (...) {}
+                }
+
+                /// Deprecated: Legacy shim: also broadcast OnUIButtonClicked to all scripts (deprecated).
+                if (button.RuntimeClickedThisFrame)
+                {
+                    const Entity buttonWrapper(&m_Registry, buttonEntity);
+                    for (const auto& scriptSlot : scriptSlots)
+                    {
+                        const entt::entity scriptEntity = scriptSlot.first;
+                        const size_t scriptIndex = scriptSlot.second;
+                        NativeScriptEntry* scriptEntry = tryGetScriptEntry(scriptEntity, scriptIndex);
+                        if (!scriptEntry || !scriptEntry->RuntimeInstance || !scriptEntry->RuntimeInitialized)
+                            continue;
+                        if (!scriptEntry->Enabled || scriptEntry->ScriptClassName.empty() || !IsEntityEnabledInHierarchy(scriptEntity))
+                            continue;
+
+                        try
+                        {
+                            executeWithDeferredEntityDestroy([&]() {
+                                scriptEntry->RuntimeInstance->DispatchUIButtonClicked(buttonWrapper);
+                            });
+                        }
+                        catch (const std::exception& exception)
+                        {
+                            handleScriptCallbackFailure(scriptEntity, scriptIndex, "OnUIButtonClicked", exception.what());
+                        }
+                        catch (...)
+                        {
+                            handleScriptCallbackFailure(scriptEntity, scriptIndex, "OnUIButtonClicked", "non-standard exception");
+                        }
+                    }
+                }
+            }
+
+            auto sliderView = m_Registry.view<UISliderComponent>();
+            for (entt::entity sliderEntity : sliderView)
+            {
+                auto& slider = sliderView.get<UISliderComponent>(sliderEntity);
+                if (!IsEntityEnabledInHierarchy(sliderEntity))
+                    continue;
+
+                if (slider.RuntimeValueChangedThisFrame && slider.OnValueChanged.HasSubscribers())
+                {
+                    try
+                    {
+                        executeWithDeferredEntityDestroy([&]() { slider.OnValueChanged.Invoke(slider.Value); });
+                    }
+                    catch (const std::exception& exception)
+                    {
+                        const auto* tag = m_Registry.try_get<TagComponent>(sliderEntity);
+                        LT_ERROR("UISliderComponent.OnValueChanged on entity '{}' threw: {}", tag ? tag->Tag : "Entity", exception.what());
+                    }
+                    catch (...) {}
                 }
             }
         }
@@ -2340,6 +2418,7 @@ namespace Limitless
                         try
                         {
                             executeWithDeferredEntityDestroy([&]() {
+                                scriptEntry->RuntimeInstance->UnsubscribeAllScriptEvents();
                                 scriptEntry->RuntimeInstance->OnDestroy();
                             });
                         }

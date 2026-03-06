@@ -908,6 +908,7 @@ namespace Limitless
             m_ShowPhysicsDiagnosticsWindow,
             m_ShowConsoleWindow,
             m_ShowEditorFpsOverlay,
+            m_ShowGizmoToolbar,
             m_ShowPerformancePanel,
             m_ShowAnimationTimelinePanel,
             m_ShowAnimatorGraphPanel,
@@ -1484,7 +1485,10 @@ namespace Limitless
             m_SelectedNativeScriptAssetKey,
             m_ShowEditorFpsOverlay,
             &m_TilemapEditorState,
-            missingGameplayCamera);
+            missingGameplayCamera,
+            &m_TransformGizmoState,
+            &m_ScenePanelState,
+            m_ShowGizmoToolbar);
     }
 
     void EditorLayer::DrawScenePanel()

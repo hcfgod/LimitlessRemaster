@@ -5,8 +5,10 @@
 #include "Scene/Entity.h"
 #include "Scene/SceneSystemScheduler.h"
 #include "Scripting/CoroutineTypes.h"
+#include "Scripting/ScriptEvent.h"
 #include "Scripting/ScriptProperty.h"
 
+#include <functional>
 #include <glm/glm.hpp>
 #include <stdexcept>
 #include <string>
@@ -239,6 +241,17 @@ namespace Limitless
         void DispatchTriggerExit(const Entity& other) { OnTriggerExit(other); }
         void DispatchUIButtonClicked(const Entity& buttonEntity) { OnUIButtonClicked(buttonEntity); }
 
+        /// Unsubscribe all ScriptEvent subscriptions made via Subscribe().
+        /// Called automatically by the runtime before OnDestroy.
+        void UnsubscribeAllScriptEvents()
+        {
+            for (auto& unsub : m_EventUnsubscribeActions)
+            {
+                if (unsub) unsub();
+            }
+            m_EventUnsubscribeActions.clear();
+        }
+
         // Optional class-level declaration for parallel compatibility scheduling.
         // If a NativeScriptEntry has no authored masks, runtime will use these defaults.
         virtual uint64_t GetDeclaredReadAccessMask() const { return ScriptAccess::None; }
@@ -334,6 +347,15 @@ namespace Limitless
         virtual void OnUIButtonClicked(const Entity& buttonEntity) { (void)buttonEntity; }
         virtual void OnDestroy() {}
 
+        /// Subscribe to a ScriptEvent with automatic unsubscription when this script is destroyed.
+        /// Usage:  Subscribe(button.OnClicked, [this]() { HandleClick(); });
+        template<typename... Args>
+        void Subscribe(ScriptEvent<Args...>& event, typename ScriptEvent<Args...>::CallbackType callback)
+        {
+            auto token = event += std::move(callback);
+            m_EventUnsubscribeActions.push_back([&event, token]() { event -= token; });
+        }
+
     private:
         bool HasPendingExposedPropertySync() const
         {
@@ -367,6 +389,7 @@ namespace Limitless
         std::vector<CoroutineState> m_ActiveCoroutines;
         std::vector<CoroutineState> m_PendingCoroutineStarts;
         std::vector<CoroutineHandle> m_PendingCoroutineStops;
+        std::vector<std::function<void()>> m_EventUnsubscribeActions;
         uint64_t m_NextCoroutineIdentifier = 1;
         bool m_IsAdvancingCoroutines = false;
 

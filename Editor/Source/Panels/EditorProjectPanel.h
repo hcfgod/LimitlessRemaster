@@ -76,6 +76,7 @@ namespace Limitless
 
         std::array<char, 256> FolderPopupBuffer{};
         std::array<char, 256> RenameAssetBuffer{};
+        std::array<char, 256> SearchBuffer{};
         std::array<char, 256> CreateNativeScriptClassNameBuffer{};
         std::array<char, 256> CreateMaterialNameBuffer{};
         std::array<char, 256> CreateTilesetNameBuffer{};

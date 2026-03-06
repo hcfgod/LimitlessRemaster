@@ -140,12 +140,17 @@ namespace Limitless
                 uiButton->RuntimeHoverExitedThisFrame = false;
                 uiButton->RuntimePressedThisFrame = false;
                 uiButton->RuntimeClickedThisFrame = false;
+                uiButton->OnClicked.Clear();
+                uiButton->OnHoverEnter.Clear();
+                uiButton->OnHoverExit.Clear();
+                uiButton->OnPressed.Clear();
             }
 
             if (auto* uiSlider = registry.try_get<UISliderComponent>(entity))
             {
                 uiSlider->RuntimeDragging = false;
                 uiSlider->RuntimeValueChangedThisFrame = false;
+                uiSlider->OnValueChanged.Clear();
             }
 
             if (auto* directionalLight = registry.try_get<DirectionalLight2DComponent>(entity))
