@@ -237,6 +237,7 @@ namespace Limitless
         void DispatchTriggerEnter(const Entity& other) { OnTriggerEnter(other); }
         void DispatchTriggerStay(const Entity& other) { OnTriggerStay(other); }
         void DispatchTriggerExit(const Entity& other) { OnTriggerExit(other); }
+        void DispatchUIButtonClicked(const Entity& buttonEntity) { OnUIButtonClicked(buttonEntity); }
 
         // Optional class-level declaration for parallel compatibility scheduling.
         // If a NativeScriptEntry has no authored masks, runtime will use these defaults.
@@ -260,13 +261,13 @@ namespace Limitless
         void SetExposedEntity(const std::string& name, const Entity& value);
         void SetExposedPrefab(const std::string& name, const Prefab& value);
 
-        void SyncExposedField(const std::string& name, float& value) { value = GetExposedFloat(name, value); }
-        void SyncExposedField(const std::string& name, int32_t& value) { value = GetExposedInteger(name, value); }
-        void SyncExposedField(const std::string& name, bool& value) { value = GetExposedBoolean(name, value); }
-        void SyncExposedField(const std::string& name, glm::vec3& value) { value = GetExposedVector3(name, value); }
-        void SyncExposedField(const std::string& name, std::string& value) { value = GetExposedString(name, value); }
-        void SyncExposedField(const std::string& name, Entity& value) { value = GetExposedEntity(name, value); }
-        void SyncExposedField(const std::string& name, Prefab& value) { value = GetExposedPrefab(name, value); }
+        void SyncExposedField(const std::string& name, float& value) { if (HasPendingExposedPropertySync()) value = GetExposedFloat(name, value); }
+        void SyncExposedField(const std::string& name, int32_t& value) { if (HasPendingExposedPropertySync()) value = GetExposedInteger(name, value); }
+        void SyncExposedField(const std::string& name, bool& value) { if (HasPendingExposedPropertySync()) value = GetExposedBoolean(name, value); }
+        void SyncExposedField(const std::string& name, glm::vec3& value) { if (HasPendingExposedPropertySync()) value = GetExposedVector3(name, value); }
+        void SyncExposedField(const std::string& name, std::string& value) { if (HasPendingExposedPropertySync()) value = GetExposedString(name, value); }
+        void SyncExposedField(const std::string& name, Entity& value) { if (HasPendingExposedPropertySync()) value = GetExposedEntity(name, value); }
+        void SyncExposedField(const std::string& name, Prefab& value) { if (HasPendingExposedPropertySync()) value = GetExposedPrefab(name, value); }
 
         void WriteBackExposedField(const std::string& name, float value) { SetExposedFloat(name, value); }
         void WriteBackExposedField(const std::string& name, int32_t value) { SetExposedInteger(name, value); }
@@ -330,9 +331,22 @@ namespace Limitless
         virtual void OnTriggerEnter(const Entity& other) { (void)other; }
         virtual void OnTriggerStay(const Entity& other) { (void)other; }
         virtual void OnTriggerExit(const Entity& other) { (void)other; }
+        virtual void OnUIButtonClicked(const Entity& buttonEntity) { (void)buttonEntity; }
         virtual void OnDestroy() {}
 
     private:
+        bool HasPendingExposedPropertySync() const
+        {
+            return m_ExposedPropertiesRevision != nullptr &&
+                   m_LastSynchronizedExposedPropertiesRevision != *m_ExposedPropertiesRevision;
+        }
+
+        void MarkExposedPropertySyncComplete()
+        {
+            if (m_ExposedPropertiesRevision != nullptr)
+                m_LastSynchronizedExposedPropertiesRevision = *m_ExposedPropertiesRevision;
+        }
+
         struct CoroutineState final
         {
             CoroutineHandle Handle{};
@@ -348,6 +362,8 @@ namespace Limitless
         entt::registry* m_Registry = nullptr;
         entt::entity m_EntityHandle = entt::null;
         std::unordered_map<std::string, ScriptPropertyValue>* m_ExposedProperties = nullptr;
+        uint64_t* m_ExposedPropertiesRevision = nullptr;
+        uint64_t m_LastSynchronizedExposedPropertiesRevision = 0;
         std::vector<CoroutineState> m_ActiveCoroutines;
         std::vector<CoroutineState> m_PendingCoroutineStarts;
         std::vector<CoroutineHandle> m_PendingCoroutineStops;

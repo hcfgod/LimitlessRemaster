@@ -2,7 +2,7 @@
     "logging": {
         "app_level": "debug",
         "console_enabled": true,
-        "core_level": "info",
+        "core_level": "debug",
         "directory": "logs",
         "file_enabled": true,
         "level": "info",

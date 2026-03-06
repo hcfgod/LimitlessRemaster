@@ -123,6 +123,7 @@ namespace Limitless
                   const std::function<void(const std::string&)>& onPrefabInstantiated,
                   const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
                   const std::function<void(const std::string&, const std::string&)>& onAssetRenamed,
+                  const std::function<bool(const std::vector<std::string>&)>& onDeleteSceneAssetsRequested,
                   const std::function<void(const std::string&)>& onNativeScriptAssetActivated);
     }
 }

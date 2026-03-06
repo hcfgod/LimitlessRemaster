@@ -14,6 +14,7 @@
 #include "Project/BuildSettings.h"
 #include "Project/ProjectManager.h"
 #include "Scene/Components/CoreComponents.h"
+#include "Physics/Physics2DQueries.h"
 #include "Scene/Scene.h"
 #include "Scripting/NativeScriptRegistry.h"
 
@@ -463,6 +464,12 @@ namespace Limitless
         }
 
         m_Scene = std::move(sceneResult.GetValue());
+
+        // The old scene destructor sets Physics2DQueries active scene to nullptr.
+        // Restore it immediately so bridge callbacks resolve to the new scene even
+        // before the first Scene::Update (mirrors GameLayer::LoadScene behaviour).
+        Physics2DQueries::SetActiveSceneForScriptQueries(m_Scene.get());
+
         m_Scene->BeginLoadingState();
         m_Scene->MarkSceneObjectsInitialized();
         ApplyProjectPhysics2DSettingsToScenes();

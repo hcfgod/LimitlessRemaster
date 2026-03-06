@@ -27,6 +27,7 @@ namespace Limitless
         uint64_t DeclaredReadAccessMask = 0;
         uint64_t DeclaredWriteAccessMask = 0;
         std::unordered_map<std::string, ScriptPropertyValue> ExposedProperties;
+        uint64_t RuntimeExposedPropertiesRevision = 1;
 
         // Runtime-only state (not serialized).
         std::unique_ptr<ScriptableEntity> RuntimeInstance;
@@ -47,6 +48,7 @@ namespace Limitless
               DeclaredReadAccessMask(other.DeclaredReadAccessMask),
               DeclaredWriteAccessMask(other.DeclaredWriteAccessMask),
               ExposedProperties(other.ExposedProperties),
+              RuntimeExposedPropertiesRevision(1),
               RuntimeInstance(nullptr),
               RuntimeInitialized(false),
               RuntimeUpdateCount(0),
@@ -68,6 +70,7 @@ namespace Limitless
             DeclaredReadAccessMask = other.DeclaredReadAccessMask;
             DeclaredWriteAccessMask = other.DeclaredWriteAccessMask;
             ExposedProperties = other.ExposedProperties;
+            RuntimeExposedPropertiesRevision = 1;
             RuntimeInstance.reset();
             RuntimeInitialized = false;
             RuntimeUpdateCount = 0;

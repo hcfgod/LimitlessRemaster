@@ -34,6 +34,7 @@
 #include "Graphics/Lighting2DRenderer.h"
 #include "Graphics/Renderer2D.h"
 #include "ImGui/ImGuiLayer.h"
+#include "Project/BuildSettings.h"
 #include "Project/ProjectManager.h"
 #include "Project/ProjectSettings.h"
 #include "Scene/Components/CoreComponents.h"
@@ -50,8 +51,10 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <sstream>
+#include <unordered_set>
 #include <vector>
 
 namespace Limitless
@@ -1640,6 +1643,84 @@ namespace Limitless
                 // asset currently in use gets renamed from the Project panel.
                 if (auto& projectManager = Project::ProjectManager::GetInstance(); projectManager.HasOpenProject())
                 {
+                    std::string renamedAssetGuid;
+                    if (const auto renamedRecord = Assets::AssetDatabase::GetInstance().FindByKey(newAssetKey);
+                        renamedRecord.IsSuccess())
+                    {
+                        renamedAssetGuid = renamedRecord.GetValue().Guid;
+                    }
+
+                    const auto updateBuildSceneEntriesForRename =
+                        [&oldAssetKey, &newAssetKey, &renamedAssetGuid](Project::BuildSettings& settings) -> bool
+                    {
+                        bool updatedAny = false;
+                        for (auto& sceneEntry : settings.BuildScenes)
+                        {
+                            const bool matchedByKey = (sceneEntry.Key == oldAssetKey);
+                            const bool matchedByGuid =
+                                !renamedAssetGuid.empty() &&
+                                !sceneEntry.Guid.empty() &&
+                                sceneEntry.Guid == renamedAssetGuid;
+                            if (!matchedByKey && !matchedByGuid)
+                                continue;
+
+                            if (sceneEntry.Key != newAssetKey)
+                            {
+                                sceneEntry.Key = newAssetKey;
+                                updatedAny = true;
+                            }
+
+                            if (!renamedAssetGuid.empty() && sceneEntry.Guid != renamedAssetGuid)
+                            {
+                                sceneEntry.Guid = renamedAssetGuid;
+                                updatedAny = true;
+                            }
+                        }
+
+                        return updatedAny;
+                    };
+
+                    if (m_BuildSettingsPanelState.SettingsLoaded)
+                    {
+                        if (updateBuildSceneEntriesForRename(m_BuildSettingsPanelState.Settings))
+                        {
+                            const auto saveBuildSettingsResult = Project::SaveBuildSettings(projectManager.GetProjectRoot(), m_BuildSettingsPanelState.Settings);
+                            if (saveBuildSettingsResult.IsFailure())
+                            {
+                                LT_WARN("Failed to update build settings scenes after rename '{}' -> '{}': {}",
+                                    oldAssetKey,
+                                    newAssetKey,
+                                    saveBuildSettingsResult.GetError().GetErrorMessage());
+                            }
+                        }
+                    }
+                    else
+                    {
+                        const auto loadBuildSettingsResult = Project::LoadBuildSettings(projectManager.GetProjectRoot());
+                        if (loadBuildSettingsResult.IsFailure())
+                        {
+                            LT_WARN("Failed to load build settings while processing rename '{}' -> '{}': {}",
+                                oldAssetKey,
+                                newAssetKey,
+                                loadBuildSettingsResult.GetError().GetErrorMessage());
+                        }
+                        else
+                        {
+                            Project::BuildSettings settings = loadBuildSettingsResult.GetValue();
+                            if (updateBuildSceneEntriesForRename(settings))
+                            {
+                                const auto saveBuildSettingsResult = Project::SaveBuildSettings(projectManager.GetProjectRoot(), settings);
+                                if (saveBuildSettingsResult.IsFailure())
+                                {
+                                    LT_WARN("Failed to persist build settings scenes after rename '{}' -> '{}': {}",
+                                        oldAssetKey,
+                                        newAssetKey,
+                                        saveBuildSettingsResult.GetError().GetErrorMessage());
+                                }
+                            }
+                        }
+                    }
+
                     if (const auto definition = projectManager.GetProjectDefinition();
                         definition.has_value() && definition->DefaultScene.Key == oldAssetKey)
                     {
@@ -1827,6 +1908,260 @@ namespace Limitless
                         LT_WARN("Asset rename updated scene references but failed to auto-save '{}'.", m_CurrentSceneAssetKey);
                     }
                 }
+            },
+            [this](const std::vector<std::string>& sceneAssetKeys) -> bool {
+                if (sceneAssetKeys.empty())
+                    return false;
+
+                auto& projectManager = Project::ProjectManager::GetInstance();
+                if (!projectManager.HasOpenProject())
+                    return false;
+
+                const std::filesystem::path projectRoot = projectManager.GetProjectRoot();
+                if (projectRoot.empty())
+                    return false;
+
+                struct DeletedSceneAssetSnapshot
+                {
+                    std::string AssetKey;
+                    std::string Guid;
+                    std::filesystem::path AssetPath;
+                    std::filesystem::path MetaPath;
+                    std::vector<uint8_t> AssetBytes;
+                    std::vector<uint8_t> MetaBytes;
+                    bool HadMeta = false;
+                };
+
+                struct SceneDeleteUndoState
+                {
+                    std::filesystem::path ProjectRoot;
+                    bool BuildSettingsWereLoaded = false;
+                    bool BuildSettingsChanged = false;
+                    std::vector<DeletedSceneAssetSnapshot> Snapshots;
+                    Project::BuildSettings BuildSettingsBefore;
+                    Project::BuildSettings BuildSettingsAfter;
+                };
+
+                const auto readBinaryFile = [](const std::filesystem::path& filePath, std::vector<uint8_t>& outBytes) -> bool {
+                    std::ifstream inputStream(filePath, std::ios::in | std::ios::binary);
+                    if (!inputStream.is_open())
+                        return false;
+
+                    inputStream.seekg(0, std::ios::end);
+                    const std::streamoff size = inputStream.tellg();
+                    if (size < 0)
+                        return false;
+
+                    outBytes.resize(static_cast<size_t>(size));
+                    inputStream.seekg(0, std::ios::beg);
+                    if (size > 0 && !inputStream.read(reinterpret_cast<char*>(outBytes.data()), size))
+                        return false;
+                    return true;
+                };
+
+                const auto writeBinaryFile = [](const std::filesystem::path& filePath, const std::vector<uint8_t>& bytes) -> bool {
+                    std::error_code directoryError;
+                    if (filePath.has_parent_path())
+                        std::filesystem::create_directories(filePath.parent_path(), directoryError);
+                    if (directoryError)
+                        return false;
+
+                    std::ofstream outputStream(filePath, std::ios::out | std::ios::binary | std::ios::trunc);
+                    if (!outputStream.is_open())
+                        return false;
+                    if (!bytes.empty())
+                        outputStream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+                    return outputStream.good();
+                };
+
+                auto isSceneAssetKey = [](const std::string& assetKey) -> bool {
+                    if (assetKey.rfind("Assets/", 0) != 0)
+                        return false;
+                    std::string lowerKey = assetKey;
+                    std::transform(lowerKey.begin(), lowerKey.end(), lowerKey.begin(), [](unsigned char character) {
+                        return static_cast<char>(std::tolower(character));
+                    });
+                    return lowerKey.ends_with(".scene.json");
+                };
+
+                std::vector<DeletedSceneAssetSnapshot> snapshots;
+                snapshots.reserve(sceneAssetKeys.size());
+                std::unordered_set<std::string> deduplicatedSceneKeys;
+                deduplicatedSceneKeys.reserve(sceneAssetKeys.size());
+                for (const std::string& assetKey : sceneAssetKeys)
+                {
+                    if (!isSceneAssetKey(assetKey) || !deduplicatedSceneKeys.insert(assetKey).second)
+                        continue;
+
+                    const auto resolveResult = Assets::ResolveAssetKeyToPath(assetKey);
+                    if (resolveResult.IsFailure())
+                        continue;
+
+                    const std::filesystem::path scenePath = resolveResult.GetValue();
+                    std::error_code existsError;
+                    if (!std::filesystem::exists(scenePath, existsError) ||
+                        !std::filesystem::is_regular_file(scenePath, existsError))
+                    {
+                        continue;
+                    }
+
+                    DeletedSceneAssetSnapshot snapshot;
+                    snapshot.AssetKey = assetKey;
+                    snapshot.AssetPath = scenePath;
+                    snapshot.MetaPath = scenePath.parent_path() / (scenePath.filename().string() + ".meta");
+
+                    if (!readBinaryFile(scenePath, snapshot.AssetBytes))
+                    {
+                        LT_WARN("Failed to capture scene file '{}' for undoable delete.", scenePath.string());
+                        return false;
+                    }
+
+                    if (const auto sceneRecord = Assets::AssetDatabase::GetInstance().FindByKey(assetKey);
+                        sceneRecord.IsSuccess())
+                    {
+                        snapshot.Guid = sceneRecord.GetValue().Guid;
+                    }
+
+                    std::error_code metaExistsError;
+                    snapshot.HadMeta = std::filesystem::exists(snapshot.MetaPath, metaExistsError);
+                    if (snapshot.HadMeta)
+                    {
+                        if (!readBinaryFile(snapshot.MetaPath, snapshot.MetaBytes))
+                        {
+                            LT_WARN("Failed to capture scene meta file '{}' for undoable delete.", snapshot.MetaPath.string());
+                            return false;
+                        }
+                    }
+
+                    snapshots.push_back(std::move(snapshot));
+                }
+
+                if (snapshots.empty())
+                    return false;
+
+                const bool buildSettingsWereLoaded = m_BuildSettingsPanelState.SettingsLoaded;
+                Project::BuildSettings buildSettingsBefore;
+                if (buildSettingsWereLoaded)
+                {
+                    buildSettingsBefore = m_BuildSettingsPanelState.Settings;
+                }
+                else
+                {
+                    const auto loadBuildSettingsResult = Project::LoadBuildSettings(projectRoot);
+                    if (loadBuildSettingsResult.IsFailure())
+                    {
+                        LT_WARN("Failed to load build settings before scene delete: {}",
+                            loadBuildSettingsResult.GetError().GetErrorMessage());
+                        return false;
+                    }
+                    buildSettingsBefore = loadBuildSettingsResult.GetValue();
+                }
+
+                std::unordered_set<std::string> deletedSceneKeySet;
+                std::unordered_set<std::string> deletedSceneGuidSet;
+                deletedSceneKeySet.reserve(snapshots.size());
+                deletedSceneGuidSet.reserve(snapshots.size());
+                for (const auto& snapshot : snapshots)
+                {
+                    deletedSceneKeySet.insert(snapshot.AssetKey);
+                    if (!snapshot.Guid.empty())
+                        deletedSceneGuidSet.insert(snapshot.Guid);
+                }
+
+                Project::BuildSettings buildSettingsAfter = buildSettingsBefore;
+                bool buildSettingsChanged = false;
+                auto& buildSceneEntries = buildSettingsAfter.BuildScenes;
+                const auto removeIt = std::remove_if(buildSceneEntries.begin(), buildSceneEntries.end(),
+                    [&deletedSceneKeySet, &deletedSceneGuidSet, &buildSettingsChanged](const Project::BuildSceneEntry& sceneEntry) {
+                        const bool matchedByKey = deletedSceneKeySet.find(sceneEntry.Key) != deletedSceneKeySet.end();
+                        const bool matchedByGuid =
+                            !sceneEntry.Guid.empty() &&
+                            deletedSceneGuidSet.find(sceneEntry.Guid) != deletedSceneGuidSet.end();
+                        if (matchedByKey || matchedByGuid)
+                            buildSettingsChanged = true;
+                        return matchedByKey || matchedByGuid;
+                    });
+                buildSceneEntries.erase(removeIt, buildSceneEntries.end());
+
+                auto undoState = std::make_shared<SceneDeleteUndoState>();
+                undoState->ProjectRoot = projectRoot;
+                undoState->BuildSettingsWereLoaded = buildSettingsWereLoaded;
+                undoState->BuildSettingsChanged = buildSettingsChanged;
+                undoState->Snapshots = snapshots;
+                undoState->BuildSettingsBefore = buildSettingsBefore;
+                undoState->BuildSettingsAfter = buildSettingsAfter;
+
+                const auto applyBuildSettings =
+                    [this, undoState](const Project::BuildSettings& settings) -> bool {
+                    if (undoState->BuildSettingsWereLoaded)
+                        m_BuildSettingsPanelState.Settings = settings;
+
+                    const auto saveBuildSettingsResult = Project::SaveBuildSettings(undoState->ProjectRoot, settings);
+                    if (saveBuildSettingsResult.IsFailure())
+                    {
+                        LT_WARN("Failed to save build settings after scene delete/restore: {}",
+                            saveBuildSettingsResult.GetError().GetErrorMessage());
+                        return false;
+                    }
+                    return true;
+                };
+
+                const auto performDelete =
+                    [undoState, applyBuildSettings]() -> bool {
+                    for (const auto& snapshot : undoState->Snapshots)
+                    {
+                        std::error_code removeError;
+                        if (std::filesystem::exists(snapshot.AssetPath, removeError))
+                        {
+                            if (!std::filesystem::remove(snapshot.AssetPath, removeError) || removeError)
+                                return false;
+                        }
+
+                        removeError.clear();
+                        if (snapshot.HadMeta && std::filesystem::exists(snapshot.MetaPath, removeError))
+                            std::filesystem::remove(snapshot.MetaPath, removeError);
+                        if (removeError)
+                            return false;
+                    }
+
+                    (void)Assets::AssetImportPipeline::ReimportChanged(true);
+                    if (undoState->BuildSettingsChanged && !applyBuildSettings(undoState->BuildSettingsAfter))
+                        return false;
+
+                    return true;
+                };
+
+                const auto performRestore =
+                    [undoState, applyBuildSettings, writeBinaryFile]() -> bool {
+                    for (const auto& snapshot : undoState->Snapshots)
+                    {
+                        if (!writeBinaryFile(snapshot.AssetPath, snapshot.AssetBytes))
+                            return false;
+                        if (snapshot.HadMeta && !writeBinaryFile(snapshot.MetaPath, snapshot.MetaBytes))
+                            return false;
+                    }
+
+                    (void)Assets::AssetImportPipeline::ReimportChanged(true);
+                    if (undoState->BuildSettingsChanged && !applyBuildSettings(undoState->BuildSettingsBefore))
+                        return false;
+
+                    return true;
+                };
+
+                if (!performDelete())
+                    return false;
+
+                const std::string commandLabel = (undoState->Snapshots.size() == 1)
+                    ? "Delete Scene Asset"
+                    : "Delete Scene Assets";
+                if (!m_EditorUndoService.ExecuteLambdaCommand(commandLabel,
+                        [performRestore]() mutable { return performRestore(); },
+                        [performDelete]() mutable { return performDelete(); }))
+                {
+                    LT_WARN("Scene delete completed but failed to register undo command.");
+                }
+
+                return true;
             },
             [this](const std::string& scriptAssetKey) {
                 (void)EditorInspectorPanel::OpenNativeScriptEditorForAssetKey(scriptAssetKey);

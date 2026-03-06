@@ -31,10 +31,12 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -267,6 +269,84 @@ namespace Limitless
 #else
             return "libScriptCore.so";
 #endif
+        }
+
+        std::string NormalizeSlashes(std::string text)
+        {
+            std::replace(text.begin(), text.end(), '\\', '/');
+            return text;
+        }
+
+        std::string ToLower(std::string text)
+        {
+            std::transform(text.begin(), text.end(), text.begin(), [](unsigned char ch) {
+                return static_cast<char>(std::tolower(ch));
+            });
+            return text;
+        }
+
+        bool EndsWithCaseInsensitive(const std::string& text, std::string_view suffix)
+        {
+            if (text.size() < suffix.size())
+                return false;
+
+            const size_t offset = text.size() - suffix.size();
+            for (size_t index = 0; index < suffix.size(); ++index)
+            {
+                const char left = static_cast<char>(std::tolower(static_cast<unsigned char>(text[offset + index])));
+                const char right = static_cast<char>(std::tolower(static_cast<unsigned char>(suffix[index])));
+                if (left != right)
+                    return false;
+            }
+            return true;
+        }
+
+        bool StartsWithCaseInsensitive(const std::string& text, std::string_view prefix)
+        {
+            if (text.size() < prefix.size())
+                return false;
+
+            for (size_t index = 0; index < prefix.size(); ++index)
+            {
+                const char left = static_cast<char>(std::tolower(static_cast<unsigned char>(text[index])));
+                const char right = static_cast<char>(std::tolower(static_cast<unsigned char>(prefix[index])));
+                if (left != right)
+                    return false;
+            }
+            return true;
+        }
+
+        std::string CanonicalizeSceneKeyForComparison(const std::string& sceneIdentifier)
+        {
+            std::string canonical = NormalizeSlashes(sceneIdentifier);
+            if (canonical.empty())
+                return canonical;
+
+            const bool isPathLike = canonical.find('/') != std::string::npos;
+            if (isPathLike && !StartsWithCaseInsensitive(canonical, "Assets/"))
+                canonical = "Assets/" + canonical;
+
+            if (isPathLike)
+            {
+                if (!EndsWithCaseInsensitive(canonical, ".scene.json"))
+                {
+                    if (EndsWithCaseInsensitive(canonical, ".scene"))
+                        canonical += ".json";
+                    else
+                        canonical += ".scene.json";
+                }
+            }
+
+            return canonical;
+        }
+
+        std::string ExtractSceneNameStem(const std::string& sceneIdentifier)
+        {
+            const std::filesystem::path scenePath(NormalizeSlashes(sceneIdentifier));
+            std::string stem = scenePath.stem().string();
+            if (EndsWithCaseInsensitive(stem, ".scene"))
+                stem.resize(stem.size() - std::string_view(".scene").size());
+            return stem;
         }
 
         void ApplyRuntimeProjectSettingsFromBundle()
@@ -788,34 +868,29 @@ namespace Limitless
             return;
         }
 
-        // Try to match the scene identifier to a build scene key.
-        std::string targetKey = transition->SceneIdentifier;
+        const std::string requestedIdentifier = transition->SceneIdentifier;
+        const std::string requestedCanonicalKey = CanonicalizeSceneKeyForComparison(requestedIdentifier);
+        const std::string requestedCanonicalKeyLower = ToLower(requestedCanonicalKey);
+        const std::string requestedStemLower = ToLower(ExtractSceneNameStem(requestedIdentifier));
 
-        // Direct match check.
-        auto matchIt = std::find(m_BuildScenes.begin(), m_BuildScenes.end(), targetKey);
-        if (matchIt != m_BuildScenes.end())
-        {
-            LoadScene(targetKey);
-            return;
-        }
-
-        // Try matching by scene name (without path/extension).
+        // Match the requested scene against build settings entries in a forgiving
+        // way (slash/case/extension differences) while still requiring the scene
+        // to be present in the build scene list.
         for (const auto& buildSceneKey : m_BuildScenes)
         {
-            std::filesystem::path scenePath(buildSceneKey);
-            std::string stem = scenePath.stem().string();
-            // Remove .scene suffix if present (e.g. "Level01.scene" -> "Level01").
-            if (stem.size() > 6 && stem.substr(stem.size() - 6) == ".scene")
-                stem = stem.substr(0, stem.size() - 6);
+            const std::string buildCanonicalKey = CanonicalizeSceneKeyForComparison(buildSceneKey);
+            const std::string buildCanonicalKeyLower = ToLower(buildCanonicalKey);
+            const std::string buildStemLower = ToLower(ExtractSceneNameStem(buildSceneKey));
 
-            if (stem == targetKey || buildSceneKey.find(targetKey) != std::string::npos)
+            if ((!requestedCanonicalKeyLower.empty() && buildCanonicalKeyLower == requestedCanonicalKeyLower) ||
+                (!requestedStemLower.empty() && buildStemLower == requestedStemLower))
             {
                 LoadScene(buildSceneKey);
                 return;
             }
         }
 
-        LT_WARN("GameLayer: scene '{}' not found in build scenes list.", targetKey);
+        LT_WARN("GameLayer: scene '{}' not found in build scenes list.", requestedIdentifier);
     }
 
     // -------------------------------------------------------------------------

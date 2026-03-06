@@ -893,9 +893,11 @@ namespace Limitless
             {
                 executeWithDeferredEntityDestroy([&]() {
                     scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
+                    scriptEntry->RuntimeInstance->MarkExposedPropertySyncComplete();
                     scriptEntry->RuntimeInstance->OnUpdate(deltaTime);
                     Coroutine::TickOwner(*scriptEntry->RuntimeInstance, deltaTime);
                     scriptEntry->RuntimeInstance->OnWriteBackExposedFields();
+                    scriptEntry->RuntimeInstance->MarkExposedPropertySyncComplete();
                 });
             }
             catch (const std::exception& exception)
@@ -1259,6 +1261,7 @@ namespace Limitless
                     scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
                     scriptEntry->RuntimeInstance->m_EntityHandle = entity;
                     scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+                    scriptEntry->RuntimeInstance->m_ExposedPropertiesRevision = &scriptEntry->RuntimeExposedPropertiesRevision;
                     scriptEntry->RuntimeInitialized = false;
                     scriptEntry->RuntimeUpdateCount = 0;
                     scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
@@ -1274,6 +1277,7 @@ namespace Limitless
                 scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
                 scriptEntry->RuntimeInstance->m_EntityHandle = entity;
                 scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+                scriptEntry->RuntimeInstance->m_ExposedPropertiesRevision = &scriptEntry->RuntimeExposedPropertiesRevision;
             }
         }
 
@@ -1345,6 +1349,7 @@ namespace Limitless
                     scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
                     scriptEntry->RuntimeInstance->m_EntityHandle = entity;
                     scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+                    scriptEntry->RuntimeInstance->m_ExposedPropertiesRevision = &scriptEntry->RuntimeExposedPropertiesRevision;
                     scriptEntry->RuntimeInitialized = false;
                     scriptEntry->RuntimeUpdateCount = 0;
                     scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
@@ -1373,6 +1378,7 @@ namespace Limitless
             scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
             scriptEntry->RuntimeInstance->m_EntityHandle = entity;
             scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+            scriptEntry->RuntimeInstance->m_ExposedPropertiesRevision = &scriptEntry->RuntimeExposedPropertiesRevision;
 
             if (!scriptEntry->RuntimeInitialized)
             {
@@ -1380,8 +1386,10 @@ namespace Limitless
                 {
                     executeWithDeferredEntityDestroy([&]() {
                         scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
+                        scriptEntry->RuntimeInstance->MarkExposedPropertySyncComplete();
                         scriptEntry->RuntimeInstance->OnCreate();
                         scriptEntry->RuntimeInstance->OnWriteBackExposedFields();
+                        scriptEntry->RuntimeInstance->MarkExposedPropertySyncComplete();
                     });
                 }
                 catch (const std::exception& exception)
@@ -1517,6 +1525,83 @@ namespace Limitless
                 }
 
                 pendingIndices = std::move(nextPendingIndices);
+            }
+        }
+
+        // Dispatch UIButton click events to all active scripts.
+        {
+            auto buttonView = m_Registry.view<UIButtonComponent>();
+            for (entt::entity buttonEntity : buttonView)
+            {
+                const auto& button = buttonView.get<UIButtonComponent>(buttonEntity);
+                if (!button.RuntimeClickedThisFrame)
+                    continue;
+                if (!IsEntityEnabledInHierarchy(buttonEntity))
+                    continue;
+
+                const Entity buttonWrapper(&m_Registry, buttonEntity);
+                for (const auto& scriptSlot : scriptSlots)
+                {
+                    const entt::entity scriptEntity = scriptSlot.first;
+                    const size_t scriptIndex = scriptSlot.second;
+                    NativeScriptEntry* scriptEntry = tryGetScriptEntry(scriptEntity, scriptIndex);
+                    if (!scriptEntry || !scriptEntry->RuntimeInstance || !scriptEntry->RuntimeInitialized)
+                        continue;
+                    if (!scriptEntry->Enabled || scriptEntry->ScriptClassName.empty() || !IsEntityEnabledInHierarchy(scriptEntity))
+                        continue;
+
+                    try
+                    {
+                        executeWithDeferredEntityDestroy([&]() {
+                            scriptEntry->RuntimeInstance->DispatchUIButtonClicked(buttonWrapper);
+                        });
+                    }
+                    catch (const std::exception& exception)
+                    {
+                        handleScriptCallbackFailure(scriptEntity, scriptIndex, "OnUIButtonClicked", exception.what());
+                    }
+                    catch (...)
+                    {
+                        handleScriptCallbackFailure(scriptEntity, scriptIndex, "OnUIButtonClicked", "non-standard exception");
+                    }
+                }
+            }
+        }
+
+        // Final frame writeback pass:
+        // scripts can mutate fields on other scripts outside those scripts' own
+        // callbacks (for example via direct method calls). Persist those field
+        // values back to exposed properties before the next frame sync.
+        for (const auto& scriptSlot : scriptSlots)
+        {
+            const entt::entity entity = scriptSlot.first;
+            const size_t scriptIndex = scriptSlot.second;
+            NativeScriptEntry* scriptEntry = tryGetScriptEntry(entity, scriptIndex);
+            if (!scriptEntry || !scriptEntry->RuntimeInstance || !scriptEntry->RuntimeInitialized)
+                continue;
+            if (!scriptEntry->Enabled || scriptEntry->ScriptClassName.empty() || !IsEntityEnabledInHierarchy(entity))
+                continue;
+
+            scriptEntry->RuntimeInstance->m_Scene = this;
+            scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
+            scriptEntry->RuntimeInstance->m_EntityHandle = entity;
+            scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+            scriptEntry->RuntimeInstance->m_ExposedPropertiesRevision = &scriptEntry->RuntimeExposedPropertiesRevision;
+
+            try
+            {
+                executeWithDeferredEntityDestroy([&]() {
+                    scriptEntry->RuntimeInstance->OnWriteBackExposedFields();
+                    scriptEntry->RuntimeInstance->MarkExposedPropertySyncComplete();
+                });
+            }
+            catch (const std::exception& exception)
+            {
+                handleScriptCallbackFailure(entity, scriptIndex, "OnWriteBackExposedFields", exception.what());
+            }
+            catch (...)
+            {
+                handleScriptCallbackFailure(entity, scriptIndex, "OnWriteBackExposedFields", "non-standard exception");
             }
         }
 
@@ -1871,8 +1956,10 @@ namespace Limitless
             {
                 executeWithDeferredEntityDestroy([&]() {
                     scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
+                    scriptEntry->RuntimeInstance->MarkExposedPropertySyncComplete();
                     scriptEntry->RuntimeInstance->OnFixedUpdate(fixedDeltaTime);
                     scriptEntry->RuntimeInstance->OnWriteBackExposedFields();
+                    scriptEntry->RuntimeInstance->MarkExposedPropertySyncComplete();
                 });
             }
             catch (const std::exception& exception)
@@ -2216,6 +2303,7 @@ namespace Limitless
                     scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
                     scriptEntry->RuntimeInstance->m_EntityHandle = entity;
                     scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+                    scriptEntry->RuntimeInstance->m_ExposedPropertiesRevision = &scriptEntry->RuntimeExposedPropertiesRevision;
                     scriptEntry->RuntimeInitialized = false;
                     scriptEntry->RuntimeUpdateCount = 0;
                     scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
@@ -2231,6 +2319,7 @@ namespace Limitless
                 scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
                 scriptEntry->RuntimeInstance->m_EntityHandle = entity;
                 scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+                scriptEntry->RuntimeInstance->m_ExposedPropertiesRevision = &scriptEntry->RuntimeExposedPropertiesRevision;
             }
         }
 
@@ -2302,6 +2391,7 @@ namespace Limitless
                     scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
                     scriptEntry->RuntimeInstance->m_EntityHandle = entity;
                     scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+                    scriptEntry->RuntimeInstance->m_ExposedPropertiesRevision = &scriptEntry->RuntimeExposedPropertiesRevision;
                     scriptEntry->RuntimeInitialized = false;
                     scriptEntry->RuntimeUpdateCount = 0;
                     scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
@@ -2328,6 +2418,7 @@ namespace Limitless
             scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
             scriptEntry->RuntimeInstance->m_EntityHandle = entity;
             scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+            scriptEntry->RuntimeInstance->m_ExposedPropertiesRevision = &scriptEntry->RuntimeExposedPropertiesRevision;
 
             if (!scriptEntry->RuntimeInitialized)
             {
@@ -2335,8 +2426,10 @@ namespace Limitless
                 {
                     executeWithDeferredEntityDestroy([&]() {
                         scriptEntry->RuntimeInstance->OnSynchronizeExposedFields();
+                        scriptEntry->RuntimeInstance->MarkExposedPropertySyncComplete();
                         scriptEntry->RuntimeInstance->OnCreate();
                         scriptEntry->RuntimeInstance->OnWriteBackExposedFields();
+                        scriptEntry->RuntimeInstance->MarkExposedPropertySyncComplete();
                     });
                 }
                 catch (const std::exception& exception)
@@ -2472,6 +2565,41 @@ namespace Limitless
                 }
 
                 pendingIndices = std::move(nextPendingIndices);
+            }
+        }
+
+        // Final frame writeback pass mirrors Update(). This preserves cross-script
+        // field mutations made outside a script's own fixed-update callback.
+        for (const auto& scriptSlot : scriptSlots)
+        {
+            const entt::entity entity = scriptSlot.first;
+            const size_t scriptIndex = scriptSlot.second;
+            NativeScriptEntry* scriptEntry = tryGetScriptEntry(entity, scriptIndex);
+            if (!scriptEntry || !scriptEntry->RuntimeInstance || !scriptEntry->RuntimeInitialized)
+                continue;
+            if (!scriptEntry->Enabled || scriptEntry->ScriptClassName.empty() || !IsEntityEnabledInHierarchy(entity))
+                continue;
+
+            scriptEntry->RuntimeInstance->m_Scene = this;
+            scriptEntry->RuntimeInstance->m_Registry = &m_Registry;
+            scriptEntry->RuntimeInstance->m_EntityHandle = entity;
+            scriptEntry->RuntimeInstance->m_ExposedProperties = &scriptEntry->ExposedProperties;
+            scriptEntry->RuntimeInstance->m_ExposedPropertiesRevision = &scriptEntry->RuntimeExposedPropertiesRevision;
+
+            try
+            {
+                executeWithDeferredEntityDestroy([&]() {
+                    scriptEntry->RuntimeInstance->OnWriteBackExposedFields();
+                    scriptEntry->RuntimeInstance->MarkExposedPropertySyncComplete();
+                });
+            }
+            catch (const std::exception& exception)
+            {
+                handleScriptCallbackFailure(entity, scriptIndex, "OnWriteBackExposedFields", exception.what());
+            }
+            catch (...)
+            {
+                handleScriptCallbackFailure(entity, scriptIndex, "OnWriteBackExposedFields", "non-standard exception");
             }
         }
 

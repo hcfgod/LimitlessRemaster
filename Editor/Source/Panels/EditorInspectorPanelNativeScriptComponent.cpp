@@ -469,9 +469,13 @@ namespace Limitless::EditorInspectorPanel
                     }
                     else if (!syncedFromScript)
                     {
-                        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", fieldSyncError.c_str());
-                        ImGui::TextDisabled("Supported public field types: float, int/int32_t, bool, glm::vec3, std::string, Limitless::Entity.");
-                        ImGui::TextDisabled("Legacy (deprecated): Limitless::Prefab / Limitless::ScriptPrefabReference.");
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.45f, 0.45f, 1.0f));
+                        ImGui::TextWrapped("%s", fieldSyncError.c_str());
+                        ImGui::PopStyleColor();
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                        ImGui::TextWrapped("Supported public field types: float, int/int32_t, bool, glm::vec3, std::string, Limitless::Entity.");
+                        ImGui::TextWrapped("Legacy (deprecated): Limitless::Prefab / Limitless::ScriptPrefabReference.");
+                        ImGui::PopStyleColor();
                     }
                     else if (declaredFieldNames.empty())
                     {

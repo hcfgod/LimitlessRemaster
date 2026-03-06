@@ -1449,6 +1449,32 @@ namespace Limitless::EditorInspectorPanel
 
             if (tryDirectory(authoringDirectory))
                 return true;
+
+            // Recursive fallback: search entire Assets tree for matching .h/.cpp pairs.
+            if (const auto assetsRoot = GetOpenedProjectAssetsRoot(); assetsRoot.has_value())
+            {
+                std::error_code ec;
+                for (const auto& entry : std::filesystem::recursive_directory_iterator(
+                         assetsRoot.value(), std::filesystem::directory_options::skip_permission_denied, ec))
+                {
+                    if (!entry.is_regular_file())
+                        continue;
+                    if (entry.path().stem().string() != className)
+                        continue;
+                    if (entry.path().extension() != ".h")
+                        continue;
+
+                    const std::filesystem::path candidateSourcePath =
+                        entry.path().parent_path() / (className + ".cpp");
+                    if (std::filesystem::exists(candidateSourcePath))
+                    {
+                        outHeaderPath = entry.path();
+                        outSourcePath = candidateSourcePath;
+                        return true;
+                    }
+                }
+            }
+
             return false;
         }
 

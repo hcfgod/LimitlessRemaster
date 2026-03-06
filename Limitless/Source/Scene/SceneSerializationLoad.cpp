@@ -927,6 +927,7 @@ namespace Limitless
                 }
             }
             outScriptEntry.RuntimeInitialized = false;
+            outScriptEntry.RuntimeExposedPropertiesRevision = 1;
             outScriptEntry.RuntimeInstance.reset();
             outScriptEntry.RuntimeUpdateCount = 0;
             outScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;

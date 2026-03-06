@@ -608,7 +608,36 @@ namespace Limitless
             }
         }
 
-        void RenderCanvasUiPass(Scene& scene, const Camera& camera, uint32_t width, uint32_t height)
+        enum class CanvasUiRenderPhase
+        {
+            All = 0,
+            ScreenSpaceOnly,
+            WorldSpaceNegativeSortOrderOnly,
+            WorldSpaceNonNegativeSortOrderOnly
+        };
+
+        bool ShouldRenderCanvasForPhase(const CanvasComponent& canvas, CanvasUiRenderPhase phase)
+        {
+            switch (phase)
+            {
+                case CanvasUiRenderPhase::All:
+                    return true;
+                case CanvasUiRenderPhase::ScreenSpaceOnly:
+                    return canvas.Mode == CanvasComponent::RenderMode::ScreenSpace;
+                case CanvasUiRenderPhase::WorldSpaceNegativeSortOrderOnly:
+                    return canvas.Mode == CanvasComponent::RenderMode::WorldSpace && canvas.SortOrder <= 0;
+                case CanvasUiRenderPhase::WorldSpaceNonNegativeSortOrderOnly:
+                    return canvas.Mode == CanvasComponent::RenderMode::WorldSpace && canvas.SortOrder > 0;
+                default:
+                    return true;
+            }
+        }
+
+        void RenderCanvasUiPass(Scene& scene,
+                                const Camera& camera,
+                                uint32_t width,
+                                uint32_t height,
+                                CanvasUiRenderPhase phase = CanvasUiRenderPhase::All)
         {
             if (width == 0 || height == 0)
                 return;
@@ -619,8 +648,14 @@ namespace Limitless
             std::vector<entt::entity> canvases;
             for (entt::entity entity : canvasView)
             {
-                if (scene.IsEntityEnabledInHierarchy(entity))
-                    canvases.push_back(entity);
+                if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
+
+                const auto& canvas = canvasView.get<CanvasComponent>(entity);
+                if (!ShouldRenderCanvasForPhase(canvas, phase))
+                    continue;
+
+                canvases.push_back(entity);
             }
 
             std::sort(canvases.begin(), canvases.end(), [&registry](entt::entity left, entt::entity right) {
@@ -649,7 +684,7 @@ namespace Limitless
                 }
                 else
                 {
-                    Renderer2D::Default().BeginScene(camera);
+                    Renderer2D::Default().BeginScene(camera.GetViewProjectionMatrix(), false);
                 }
 
                 std::vector<entt::entity> uiEntities;
@@ -1449,8 +1484,24 @@ namespace Limitless
         if (!renderer.IsInitialized())
             return;
 
-        const bool renderedWithLighting = Lighting2DRenderer::Default().RenderToViewport(scene, camera, framebuffer, width, height, [&scene, &camera]() {
+        auto renderWorldAndWorldSpaceCanvasPasses = [&]() {
+            RenderCanvasUiPass(scene,
+                               camera,
+                               width,
+                               height,
+                               CanvasUiRenderPhase::WorldSpaceNegativeSortOrderOnly);
+
             SceneRenderer::Render(scene, camera);
+
+            RenderCanvasUiPass(scene,
+                               camera,
+                               width,
+                               height,
+                               CanvasUiRenderPhase::WorldSpaceNonNegativeSortOrderOnly);
+        };
+
+        const bool renderedWithLighting = Lighting2DRenderer::Default().RenderToViewport(scene, camera, framebuffer, width, height, [&]() {
+            renderWorldAndWorldSpaceCanvasPasses();
         });
 
         if (!renderedWithLighting)
@@ -1471,9 +1522,14 @@ namespace Limitless
                 fallbackClearColor.b,
                 fallbackClearColor.a));
 
-            Render(scene, camera);
+            renderWorldAndWorldSpaceCanvasPasses();
         }
-        RenderCanvasUiPass(scene, camera, width, height);
+
+        RenderCanvasUiPass(scene,
+                           camera,
+                           width,
+                           height,
+                           CanvasUiRenderPhase::ScreenSpaceOnly);
 
         renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(nullptr));
     }

@@ -596,6 +596,63 @@ namespace Limitless::EditorProjectPanel
             return removedAny;
         }
 
+        bool DeleteAssetKeysInAssets(const std::filesystem::path& assetsDirectory, const std::vector<std::string>& assetKeys);
+
+        bool IsSceneAssetKey(const std::string& assetKey)
+        {
+            if (assetKey.rfind("Assets/", 0) != 0)
+                return false;
+            const std::string lowerKey = ToLowerAscii(assetKey);
+            return lowerKey.ends_with(".scene.json");
+        }
+
+        bool DeleteAssetKeysWithSceneHandling(
+            const std::filesystem::path& assetsDirectory,
+            const std::vector<std::string>& assetKeys,
+            const std::function<bool(const std::vector<std::string>&)>& onDeleteSceneAssetsRequested)
+        {
+            if (assetKeys.empty())
+                return false;
+
+            std::vector<std::string> deduplicatedSceneKeys;
+            std::vector<std::string> deduplicatedNonSceneKeys;
+            std::unordered_set<std::string> deduplicatedKeys;
+            deduplicatedKeys.reserve(assetKeys.size());
+
+            for (const std::string& assetKey : assetKeys)
+            {
+                if (assetKey.empty() || !deduplicatedKeys.insert(assetKey).second)
+                    continue;
+
+                std::string textureKey;
+                int32_t subSpriteIndex = -1;
+                if (Assets::TryParseSubSpriteAssetKey(assetKey, textureKey, subSpriteIndex))
+                    continue;
+
+                if (IsSceneAssetKey(assetKey))
+                    deduplicatedSceneKeys.push_back(assetKey);
+                else
+                    deduplicatedNonSceneKeys.push_back(assetKey);
+            }
+
+            bool removedAny = false;
+            if (!deduplicatedSceneKeys.empty())
+            {
+                if (onDeleteSceneAssetsRequested)
+                    removedAny |= onDeleteSceneAssetsRequested(deduplicatedSceneKeys);
+                else
+                    removedAny |= DeleteAssetKeysInAssets(assetsDirectory, deduplicatedSceneKeys);
+            }
+
+            if (!deduplicatedNonSceneKeys.empty())
+                removedAny |= DeleteAssetKeysInAssets(assetsDirectory, deduplicatedNonSceneKeys);
+
+            if (removedAny)
+                InvalidateProjectDirectoryCache();
+
+            return removedAny;
+        }
+
         bool DeleteAssetKeysInAssets(const std::filesystem::path& assetsDirectory, const std::vector<std::string>& assetKeys)
         {
             bool removedAny = false;
@@ -687,6 +744,7 @@ namespace Limitless::EditorProjectPanel
                            const std::function<void(const std::string&)>& onPrefabInstantiated,
                            const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
                            const std::function<void(const std::string&, const std::string&)>& onAssetRenamed,
+                           const std::function<bool(const std::vector<std::string>&)>& onDeleteSceneAssetsRequested,
                            const std::function<void(const std::string&)>& onNativeScriptAssetActivated)
         {
             const std::filesystem::path currentDirectory = assetsDirectory / relativePath;
@@ -898,6 +956,7 @@ namespace Limitless::EditorProjectPanel
                                       onPrefabInstantiated,
                                       onSetDefaultSceneRequested,
                                       onAssetRenamed,
+                                      onDeleteSceneAssetsRequested,
                                       onNativeScriptAssetActivated);
                         ImGui::TreePop();
                     }
@@ -976,8 +1035,8 @@ namespace Limitless::EditorProjectPanel
                                         state.MultiSelectedAssetKeys.size() > 1 &&
                                         std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), sourceAssetKey) != state.MultiSelectedAssetKeys.end();
                                     const bool removed = deleteMultiSelection
-                                        ? DeleteAssetKeysInAssets(assetsDirectory, state.MultiSelectedAssetKeys)
-                                        : DeleteAssetKeysInAssets(assetsDirectory, { sourceAssetKey });
+                                        ? DeleteAssetKeysWithSceneHandling(assetsDirectory, state.MultiSelectedAssetKeys, onDeleteSceneAssetsRequested)
+                                        : DeleteAssetKeysWithSceneHandling(assetsDirectory, { sourceAssetKey }, onDeleteSceneAssetsRequested);
                                     if (removed)
                                     {
                                         state.MultiSelectedAssetKeys.clear();
@@ -1324,8 +1383,8 @@ namespace Limitless::EditorProjectPanel
                                 state.MultiSelectedAssetKeys.size() > 1 &&
                                 std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), assetKey) != state.MultiSelectedAssetKeys.end();
                             const bool removed = deleteMultiSelection
-                                ? DeleteAssetKeysInAssets(assetsDirectory, state.MultiSelectedAssetKeys)
-                                : DeleteAssetKeysInAssets(assetsDirectory, { assetKey });
+                                ? DeleteAssetKeysWithSceneHandling(assetsDirectory, state.MultiSelectedAssetKeys, onDeleteSceneAssetsRequested)
+                                : DeleteAssetKeysWithSceneHandling(assetsDirectory, { assetKey }, onDeleteSceneAssetsRequested);
                             if (removed)
                             {
                                 state.MultiSelectedAssetKeys.clear();
@@ -2040,6 +2099,7 @@ namespace Limitless::EditorProjectPanel
               const std::function<void(const std::string&)>& onPrefabInstantiated,
               const std::function<void(const std::string&)>& onSetDefaultSceneRequested,
               const std::function<void(const std::string&, const std::string&)>& onAssetRenamed,
+              const std::function<bool(const std::vector<std::string>&)>& onDeleteSceneAssetsRequested,
               const std::function<void(const std::string&)>& onNativeScriptAssetActivated)
     {
         ImGui::Begin("Project");
@@ -2276,6 +2336,7 @@ namespace Limitless::EditorProjectPanel
                           onPrefabInstantiated,
                           onSetDefaultSceneRequested,
                           onAssetRenamed,
+                          onDeleteSceneAssetsRequested,
                           onNativeScriptAssetActivated);
             ImGui::TreePop();
         }
@@ -2291,7 +2352,7 @@ namespace Limitless::EditorProjectPanel
                 ImGui::IsKeyPressed(ImGuiKey_Delete, false) &&
                 !state.MultiSelectedAssetKeys.empty())
             {
-                if (DeleteAssetKeysInAssets(assetsDirectory, state.MultiSelectedAssetKeys))
+                if (DeleteAssetKeysWithSceneHandling(assetsDirectory, state.MultiSelectedAssetKeys, onDeleteSceneAssetsRequested))
                     clearProjectAssetSelection();
             }
         }

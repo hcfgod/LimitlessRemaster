@@ -522,32 +522,152 @@ namespace Limitless
 
     void ScriptableEntity::SetExposedFloat(const std::string& name, float value)
     {
-        if (m_ExposedProperties)
+        if (!m_ExposedProperties)
+            return;
+
+        bool changed = false;
+        const auto found = m_ExposedProperties->find(name);
+        if (found == m_ExposedProperties->end())
+        {
             (*m_ExposedProperties)[name] = value;
+            changed = true;
+        }
+        else if (auto* existing = std::get_if<float>(&found->second))
+        {
+            if (*existing != value)
+            {
+                *existing = value;
+                changed = true;
+            }
+        }
+        else
+        {
+            found->second = value;
+            changed = true;
+        }
+
+        if (changed && m_ExposedPropertiesRevision)
+            ++(*m_ExposedPropertiesRevision);
     }
 
     void ScriptableEntity::SetExposedInteger(const std::string& name, int32_t value)
     {
-        if (m_ExposedProperties)
+        if (!m_ExposedProperties)
+            return;
+
+        bool changed = false;
+        const auto found = m_ExposedProperties->find(name);
+        if (found == m_ExposedProperties->end())
+        {
             (*m_ExposedProperties)[name] = value;
+            changed = true;
+        }
+        else if (auto* existing = std::get_if<int32_t>(&found->second))
+        {
+            if (*existing != value)
+            {
+                *existing = value;
+                changed = true;
+            }
+        }
+        else
+        {
+            found->second = value;
+            changed = true;
+        }
+
+        if (changed && m_ExposedPropertiesRevision)
+            ++(*m_ExposedPropertiesRevision);
     }
 
     void ScriptableEntity::SetExposedBoolean(const std::string& name, bool value)
     {
-        if (m_ExposedProperties)
+        if (!m_ExposedProperties)
+            return;
+
+        bool changed = false;
+        const auto found = m_ExposedProperties->find(name);
+        if (found == m_ExposedProperties->end())
+        {
             (*m_ExposedProperties)[name] = value;
+            changed = true;
+        }
+        else if (auto* existing = std::get_if<bool>(&found->second))
+        {
+            if (*existing != value)
+            {
+                *existing = value;
+                changed = true;
+            }
+        }
+        else
+        {
+            found->second = value;
+            changed = true;
+        }
+
+        if (changed && m_ExposedPropertiesRevision)
+            ++(*m_ExposedPropertiesRevision);
     }
 
     void ScriptableEntity::SetExposedVector3(const std::string& name, const glm::vec3& value)
     {
-        if (m_ExposedProperties)
+        if (!m_ExposedProperties)
+            return;
+
+        bool changed = false;
+        const auto found = m_ExposedProperties->find(name);
+        if (found == m_ExposedProperties->end())
+        {
             (*m_ExposedProperties)[name] = value;
+            changed = true;
+        }
+        else if (auto* existing = std::get_if<glm::vec3>(&found->second))
+        {
+            if (existing->x != value.x || existing->y != value.y || existing->z != value.z)
+            {
+                *existing = value;
+                changed = true;
+            }
+        }
+        else
+        {
+            found->second = value;
+            changed = true;
+        }
+
+        if (changed && m_ExposedPropertiesRevision)
+            ++(*m_ExposedPropertiesRevision);
     }
 
     void ScriptableEntity::SetExposedString(const std::string& name, const std::string& value)
     {
-        if (m_ExposedProperties)
+        if (!m_ExposedProperties)
+            return;
+
+        bool changed = false;
+        const auto found = m_ExposedProperties->find(name);
+        if (found == m_ExposedProperties->end())
+        {
             (*m_ExposedProperties)[name] = value;
+            changed = true;
+        }
+        else if (auto* existing = std::get_if<std::string>(&found->second))
+        {
+            if (*existing != value)
+            {
+                *existing = value;
+                changed = true;
+            }
+        }
+        else
+        {
+            found->second = value;
+            changed = true;
+        }
+
+        if (changed && m_ExposedPropertiesRevision)
+            ++(*m_ExposedPropertiesRevision);
     }
 
     void ScriptableEntity::SetExposedEntity(const std::string& name, const Entity& value)
@@ -565,14 +685,60 @@ namespace Limitless
             if (const auto* tagComponent = m_Registry->try_get<TagComponent>(value.GetHandle()))
                 entityReference.Tag = tagComponent->Tag;
         }
-        (*m_ExposedProperties)[name] = std::move(entityReference);
+
+        bool changed = false;
+        const auto found = m_ExposedProperties->find(name);
+        if (found == m_ExposedProperties->end())
+        {
+            (*m_ExposedProperties)[name] = std::move(entityReference);
+            changed = true;
+        }
+        else if (auto* existing = std::get_if<ScriptEntityReference>(&found->second))
+        {
+            if (existing->Tag != entityReference.Tag || existing->PrefabAssetKey != entityReference.PrefabAssetKey)
+            {
+                *existing = std::move(entityReference);
+                changed = true;
+            }
+        }
+        else
+        {
+            found->second = std::move(entityReference);
+            changed = true;
+        }
+
+        if (changed && m_ExposedPropertiesRevision)
+            ++(*m_ExposedPropertiesRevision);
     }
 
     void ScriptableEntity::SetExposedPrefab(const std::string& name, const Prefab& value)
     {
         if (!m_ExposedProperties)
             return;
-        (*m_ExposedProperties)[name] = value;
+
+        bool changed = false;
+        const auto found = m_ExposedProperties->find(name);
+        if (found == m_ExposedProperties->end())
+        {
+            (*m_ExposedProperties)[name] = value;
+            changed = true;
+        }
+        else if (auto* existing = std::get_if<Prefab>(&found->second))
+        {
+            if (existing->AssetKey != value.AssetKey)
+            {
+                *existing = value;
+                changed = true;
+            }
+        }
+        else
+        {
+            found->second = value;
+            changed = true;
+        }
+
+        if (changed && m_ExposedPropertiesRevision)
+            ++(*m_ExposedPropertiesRevision);
     }
 
     bool ScriptableEntity::Raycast2D(const glm::vec2& origin,
