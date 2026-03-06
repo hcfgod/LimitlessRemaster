@@ -531,6 +531,8 @@ namespace Limitless
 
     void EditorLayer::OnUpdate(float deltaTime)
     {
+        ProcessPendingPlayModeTransition();
+
         const ImGuiIO& io = ImGui::GetIO();
         ScriptCoreModuleRuntime::SetGameplayInputRoutingState(
             m_GameViewFocused,
@@ -973,10 +975,10 @@ namespace Limitless
             m_EditorUndoService.CanRedo(),
             m_EditorUndoService.GetUndoLabel(),
             m_EditorUndoService.GetRedoLabel(),
-            [this]() { EnterPlayMode(); },
-            [this]() { EnterSimulateMode(); },
-            [this]() { ExitPlayMode(); },
-            [this]() { TogglePausePlayMode(); },
+            [this]() { RequestPlayModeTransition(PendingPlayModeTransition::EnterPlay); },
+            [this]() { RequestPlayModeTransition(PendingPlayModeTransition::EnterSimulate); },
+            [this]() { RequestPlayModeTransition(PendingPlayModeTransition::Exit); },
+            [this]() { RequestPlayModeTransition(PendingPlayModeTransition::TogglePause); },
             isEditingPrefabAsset,
             isEditingPrefabAsset
                 ? SceneDisplayNameFromFileName(std::filesystem::path(m_CurrentSceneAssetKey).filename().string())
@@ -1799,6 +1801,7 @@ namespace Limitless
                             audioSource.AudioClipKey = newAssetKey;
                             audioSource.RuntimeVoiceId = 0;
                             audioSource.RuntimePlaybackStarted = false;
+                            audioSource.RuntimePlayOnStartConsumed = false;
                             audioSource.RuntimeHasPreviousWorldPosition = false;
                             audioSource.RuntimePreviousWorldPosition = glm::vec3(0.0f);
                             updatedAnyAudioReference = true;

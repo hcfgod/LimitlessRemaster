@@ -55,6 +55,15 @@ namespace Limitless
         void OnWindowResize(Events::WindowResizeEvent& event) override;
 
     private:
+        enum class PendingPlayModeTransition : uint8_t
+        {
+            None = 0,
+            EnterPlay,
+            EnterSimulate,
+            Exit,
+            TogglePause
+        };
+
         void DrawMenuBar();
         void ResetLayoutToDefault();
         void DrawViewportPanel();
@@ -75,6 +84,8 @@ namespace Limitless
         void EnsureGameViewFramebuffer(uint32_t width, uint32_t height);
         Camera* ResolveGameViewCamera(uint32_t viewportWidthPixels, uint32_t viewportHeightPixels, bool& outMissingGameplayCamera);
         void DestroyGameViewPreviewCamera();
+        void RequestPlayModeTransition(PendingPlayModeTransition transition);
+        void ProcessPendingPlayModeTransition();
         void EnterPlayMode();
         void EnterSimulateMode();
         void ExitPlayMode();
@@ -158,6 +169,7 @@ namespace Limitless
         std::unique_ptr<Scene> m_Scene;
         /// Stored edit-scene while in Play/Pause. On Stop, we restore this instance.
         std::unique_ptr<Scene> m_EditSceneStored;
+        PendingPlayModeTransition m_PendingPlayModeTransition = PendingPlayModeTransition::None;
         EditorPlayModeState m_PlayModeState = EditorPlayModeState::Edit;
         bool m_PlayModeMissingGameplayCamera = false;
         bool m_ScriptSafeModeActive = false;

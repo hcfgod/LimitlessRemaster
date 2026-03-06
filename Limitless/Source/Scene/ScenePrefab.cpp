@@ -178,6 +178,7 @@ namespace Limitless
             {
                 audioSource->RuntimeVoiceId = 0;
                 audioSource->RuntimePlaybackStarted = false;
+                audioSource->RuntimePlayOnStartConsumed = false;
                 audioSource->RuntimeHasPreviousWorldPosition = false;
                 audioSource->RuntimePreviousWorldPosition = glm::vec3(0.0f);
             }
@@ -415,6 +416,7 @@ namespace Limitless
                     destinationAudio.AttenuationCurveKey = sourceAudio->AttenuationCurveKey;
                     destinationAudio.RuntimeVoiceId = 0;
                     destinationAudio.RuntimePlaybackStarted = false;
+                    destinationAudio.RuntimePlayOnStartConsumed = false;
                     destinationAudio.RuntimeHasPreviousWorldPosition = false;
                     destinationAudio.RuntimePreviousWorldPosition = glm::vec3(0.0f);
                 }

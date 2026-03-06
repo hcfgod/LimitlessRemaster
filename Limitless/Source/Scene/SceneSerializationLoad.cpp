@@ -105,6 +105,7 @@ namespace Limitless
             {
                 audioSource->RuntimeVoiceId = 0;
                 audioSource->RuntimePlaybackStarted = false;
+                audioSource->RuntimePlayOnStartConsumed = false;
                 audioSource->RuntimeHasPreviousWorldPosition = false;
                 audioSource->RuntimePreviousWorldPosition = glm::vec3(0.0f);
             }
@@ -703,7 +704,9 @@ namespace Limitless
 
                 auto cellSize = grid2DJson.value("CellSize", std::vector<float>{ grid2D.CellSize.x, grid2D.CellSize.y });
                 if (cellSize.size() >= 2)
-                    grid2D.CellSize = glm::vec2(std::max(0.001f, cellSize[0]), std::max(0.001f, cellSize[1]));
+                    grid2D.CellSize = glm::vec2(
+                        std::max(0.001f, cellSize[0]),
+                        std::max(0.001f, cellSize[1]));
 
                 auto cellGap = grid2DJson.value("CellGap", std::vector<float>{ grid2D.CellGap.x, grid2D.CellGap.y });
                 if (cellGap.size() >= 2)
@@ -820,6 +823,7 @@ namespace Limitless
 
                 audioSource.RuntimeVoiceId = 0;
                 audioSource.RuntimePlaybackStarted = false;
+                audioSource.RuntimePlayOnStartConsumed = false;
                 audioSource.RuntimeHasPreviousWorldPosition = false;
                 audioSource.RuntimePreviousWorldPosition = glm::vec3(0.0f);
             }

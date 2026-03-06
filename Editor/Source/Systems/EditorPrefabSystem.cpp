@@ -263,6 +263,7 @@ namespace Limitless::EditorPrefabSystem
                     destinationAudio.AttenuationCurveKey = sourceAudio->AttenuationCurveKey;
                     destinationAudio.RuntimeVoiceId = 0;
                     destinationAudio.RuntimePlaybackStarted = false;
+                    destinationAudio.RuntimePlayOnStartConsumed = false;
                     destinationAudio.RuntimeHasPreviousWorldPosition = false;
                     destinationAudio.RuntimePreviousWorldPosition = glm::vec3(0.0f);
                 }

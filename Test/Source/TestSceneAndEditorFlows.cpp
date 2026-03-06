@@ -2418,6 +2418,7 @@ TEST_SUITE("Scene And Editor Flows")
         audio.AttenuationCurveKey = "Assets/Audio/Curves/UiNearToFar.curve.json";
         audio.RuntimeVoiceId = 99;
         audio.RuntimePlaybackStarted = true;
+        audio.RuntimePlayOnStartConsumed = true;
         audio.RuntimeHasPreviousWorldPosition = true;
         audio.RuntimePreviousWorldPosition = { -2.0f, 1.0f, 0.5f };
 
@@ -2510,6 +2511,7 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(clonedAudio.AttenuationCurveKey == "Assets/Audio/Curves/UiNearToFar.curve.json");
         CHECK(clonedAudio.RuntimeVoiceId == 0);
         CHECK(clonedAudio.RuntimePlaybackStarted == false);
+        CHECK(clonedAudio.RuntimePlayOnStartConsumed == false);
         CHECK(clonedAudio.RuntimeHasPreviousWorldPosition == false);
         CHECK(clonedAudio.RuntimePreviousWorldPosition.x == doctest::Approx(0.0f));
         CHECK(clonedAudio.RuntimePreviousWorldPosition.y == doctest::Approx(0.0f));
@@ -2758,6 +2760,11 @@ TEST_SUITE("Scene And Editor Flows")
         audioSource.DirectionalOuterAngleDegrees = 180.0f;
         audioSource.DirectionalOuterVolume = 0.4f;
         audioSource.AttenuationCurveKey = "Assets/Audio/Curves/MusicDistance.curve.json";
+        audioSource.RuntimeVoiceId = 99;
+        audioSource.RuntimePlaybackStarted = true;
+        audioSource.RuntimePlayOnStartConsumed = true;
+        audioSource.RuntimeHasPreviousWorldPosition = true;
+        audioSource.RuntimePreviousWorldPosition = { -2.0f, 1.0f, 0.5f };
 
         auto& nativeScripts = registry.emplace<Limitless::NativeScriptComponent>(hud);
         nativeScripts.Scripts.emplace_back();
@@ -2877,6 +2884,7 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(loadedAudioSource.AttenuationCurveKey == "Assets/Audio/Curves/MusicDistance.curve.json");
         CHECK(loadedAudioSource.RuntimeVoiceId == 0);
         CHECK(loadedAudioSource.RuntimePlaybackStarted == false);
+        CHECK(loadedAudioSource.RuntimePlayOnStartConsumed == false);
         CHECK(loadedAudioSource.RuntimeHasPreviousWorldPosition == false);
 
         REQUIRE(loadedRegistry.all_of<Limitless::NativeScriptComponent>(loadedHud));

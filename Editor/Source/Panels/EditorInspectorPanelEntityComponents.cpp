@@ -7,6 +7,7 @@
 #include "Assets/TextureAssetImporter.h"
 #include "Assets/AssetTypes.h"
 #include "Assets/AudioClipAsset.h"
+#include "Audio/SceneAudioSystem.h"
 #include "Project/ProjectManager.h"
 #include "Scene/ParticleEmitterSystem.h"
 #include "Undo/EditorUndoService.h"
@@ -1732,6 +1733,7 @@ namespace Limitless::EditorInspectorPanel
                     audioSource->AudioClipKey = key;
                     audioSource->RuntimeVoiceId = 0;
                     audioSource->RuntimePlaybackStarted = false;
+                    audioSource->RuntimePlayOnStartConsumed = false;
                     audioSource->RuntimeHasPreviousWorldPosition = false;
                     audioSource->RuntimePreviousWorldPosition = glm::vec3(0.0f);
                 };
@@ -2005,14 +2007,57 @@ namespace Limitless::EditorInspectorPanel
                             auto clipAsset = Assets::AudioClipAsset::LoadBlocking(audioSource->AudioClipKey);
                             if (clipAsset && clipAsset->GetClip())
                             {
-                                const float volume = audioSource->Muted ? 0.0f : audioSource->Volume;
+                                float volume = audioSource->Muted ? 0.0f : std::max(0.0f, audioSource->Volume);
+                                float pan = 0.0f;
+                                float pitch = std::max(0.01f, audioSource->Pitch);
+
+                                if (scene && scene->IsValid(selectedEntity))
+                                {
+                                    scene->UpdateTransforms();
+                                    const glm::mat4 worldTransform = scene->GetWorldTransformMatrix(selectedEntity);
+                                    const glm::vec3 sourcePosition3D(worldTransform[3][0], worldTransform[3][1], worldTransform[3][2]);
+
+                                    if (audioSource->Space == AudioSourceComponent::PlaybackSpace::Spatial2D)
+                                    {
+                                        const Audio::AudioListenerPositions2D listenerPositions = Audio::CollectAudioListenerPositions2D(*scene);
+                                        const Audio::AudioSpatialMix2D spatialMix2D = Audio::ComputeAudioSpatialMix2D(
+                                            *audioSource,
+                                            glm::vec2(sourcePosition3D.x, sourcePosition3D.y),
+                                            listenerPositions);
+                                        volume *= spatialMix2D.Gain;
+                                        pan = spatialMix2D.Pan;
+                                    }
+                                    else if (audioSource->Space == AudioSourceComponent::PlaybackSpace::Spatial3D)
+                                    {
+                                        glm::vec3 sourceForward(-worldTransform[2][0], -worldTransform[2][1], -worldTransform[2][2]);
+                                        const float sourceForwardLengthSquared = glm::dot(sourceForward, sourceForward);
+                                        if (sourceForwardLengthSquared > 0.000001f)
+                                            sourceForward /= std::sqrt(sourceForwardLengthSquared);
+                                        else
+                                            sourceForward = glm::vec3(0.0f, 0.0f, -1.0f);
+
+                                        const Audio::AudioListenerStates3D listenerStates3D = Audio::CollectAudioListenerStates3D(*scene, 0.0f);
+                                        const Audio::AudioSpatialMix3D spatialMix3D = Audio::ComputeAudioSpatialMix3D(
+                                            *audioSource,
+                                            sourcePosition3D,
+                                            sourceForward,
+                                            glm::vec3(0.0f),
+                                            listenerStates3D);
+                                        volume *= spatialMix3D.Gain;
+                                        pan = spatialMix3D.Pan;
+                                        pitch *= spatialMix3D.PitchMultiplier;
+                                    }
+                                }
+
+                                pan = std::clamp(pan, -1.0f, 1.0f);
+                                pitch = std::max(0.01f, pitch);
                                 audioSource->RuntimeVoiceId = Audio::AudioEngine::GetInstance().PlayClip(
                                     clipAsset->GetClip(),
                                     volume,
                                     audioSource->Loop,
                                     audioSource->MixerGroup,
-                                    0.0f,
-                                    audioSource->Pitch);
+                                    pan,
+                                    pitch);
                                 audioSource->RuntimePlaybackStarted = (audioSource->RuntimeVoiceId != 0);
                             }
                         }

@@ -385,6 +385,7 @@ namespace Limitless::Audio
                     AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
                 audioSource.RuntimeVoiceId = 0;
                 audioSource.RuntimePlaybackStarted = false;
+                audioSource.RuntimePlayOnStartConsumed = false;
                 audioSource.RuntimeHasPreviousWorldPosition = false;
                 audioSource.RuntimePreviousWorldPosition = glm::vec3(0.0f);
                 continue;
@@ -432,7 +433,10 @@ namespace Limitless::Audio
                 audioSource.PlayOnStart &&
                 !audioSource.AudioClipKey.empty();
 
-            if (shouldPlayOnStart && !audioSource.RuntimePlaybackStarted)
+            if (!shouldPlayOnStart)
+                audioSource.RuntimePlayOnStartConsumed = false;
+
+            if (shouldPlayOnStart && !audioSource.RuntimePlayOnStartConsumed)
             {
                 auto clipAsset = Assets::AudioClipAsset::LoadBlocking(audioSource.AudioClipKey);
                 if (clipAsset && clipAsset->GetClip())
@@ -445,6 +449,7 @@ namespace Limitless::Audio
                         runtimePan,
                         runtimePitch);
                     audioSource.RuntimePlaybackStarted = (audioSource.RuntimeVoiceId != 0);
+                    audioSource.RuntimePlayOnStartConsumed = (audioSource.RuntimeVoiceId != 0);
                 }
             }
             else if (shouldPlayOnStart && audioSource.RuntimeVoiceId != 0)
@@ -461,6 +466,7 @@ namespace Limitless::Audio
                 AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
                 audioSource.RuntimeVoiceId = 0;
                 audioSource.RuntimePlaybackStarted = false;
+                audioSource.RuntimePlayOnStartConsumed = false;
             }
         }
     }
@@ -487,6 +493,7 @@ namespace Limitless::Audio
                 AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
             audioSource.RuntimeVoiceId = 0;
             audioSource.RuntimePlaybackStarted = false;
+            audioSource.RuntimePlayOnStartConsumed = false;
             audioSource.RuntimeHasPreviousWorldPosition = false;
             audioSource.RuntimePreviousWorldPosition = glm::vec3(0.0f);
         }

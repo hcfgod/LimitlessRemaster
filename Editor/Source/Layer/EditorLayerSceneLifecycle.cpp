@@ -261,6 +261,39 @@ namespace Limitless
         DestroyGameViewPreviewCamera();
     }
 
+    void EditorLayer::RequestPlayModeTransition(PendingPlayModeTransition transition)
+    {
+        if (transition == PendingPlayModeTransition::None)
+            return;
+
+        m_PendingPlayModeTransition = transition;
+    }
+
+    void EditorLayer::ProcessPendingPlayModeTransition()
+    {
+        const PendingPlayModeTransition transition = m_PendingPlayModeTransition;
+        m_PendingPlayModeTransition = PendingPlayModeTransition::None;
+
+        switch (transition)
+        {
+            case PendingPlayModeTransition::EnterPlay:
+                EnterPlayMode();
+                break;
+            case PendingPlayModeTransition::EnterSimulate:
+                EnterSimulateMode();
+                break;
+            case PendingPlayModeTransition::Exit:
+                ExitPlayMode();
+                break;
+            case PendingPlayModeTransition::TogglePause:
+                TogglePausePlayMode();
+                break;
+            case PendingPlayModeTransition::None:
+            default:
+                break;
+        }
+    }
+
     void EditorLayer::TogglePausePlayMode()
     {
         EditorPlayMode::TogglePause(m_PlayModeState);
