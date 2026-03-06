@@ -274,6 +274,12 @@ namespace Limitless
                    before.UsePrimaryCameraPosition != after.UsePrimaryCameraPosition;
         }
 
+        bool HasAudioListener3DChangedForAccessValidation(const AudioListener3DComponent& before, const AudioListener3DComponent& after)
+        {
+            return before.Enabled != after.Enabled ||
+                   before.UsePrimaryCameraTransform != after.UsePrimaryCameraTransform;
+        }
+
         bool HasAudioSourceChangedForAccessValidation(const AudioSourceComponent& before, const AudioSourceComponent& after)
         {
             return before.AudioClipKey != after.AudioClipKey ||
@@ -287,7 +293,13 @@ namespace Limitless
                    std::abs(after.SpatialMinDistance - before.SpatialMinDistance) > kScriptTransformDirtyEpsilon ||
                    std::abs(after.SpatialMaxDistance - before.SpatialMaxDistance) > kScriptTransformDirtyEpsilon ||
                    std::abs(after.SpatialRolloffExponent - before.SpatialRolloffExponent) > kScriptTransformDirtyEpsilon ||
+                   before.SpatialRolloffMode != after.SpatialRolloffMode ||
                    std::abs(after.StereoPanStrength - before.StereoPanStrength) > kScriptTransformDirtyEpsilon ||
+                   std::abs(after.DopplerFactor - before.DopplerFactor) > kScriptTransformDirtyEpsilon ||
+                   before.EnableDirectionalAttenuation != after.EnableDirectionalAttenuation ||
+                   std::abs(after.DirectionalInnerAngleDegrees - before.DirectionalInnerAngleDegrees) > kScriptTransformDirtyEpsilon ||
+                   std::abs(after.DirectionalOuterAngleDegrees - before.DirectionalOuterAngleDegrees) > kScriptTransformDirtyEpsilon ||
+                   std::abs(after.DirectionalOuterVolume - before.DirectionalOuterVolume) > kScriptTransformDirtyEpsilon ||
                    before.AttenuationCurveKey != after.AttenuationCurveKey;
         }
 
@@ -721,6 +733,8 @@ namespace Limitless
             bool hadShadowOccluderBeforeUpdate = false;
             AudioListener2DComponent audioListenerBeforeUpdate{};
             bool hadAudioListenerBeforeUpdate = false;
+            AudioListener3DComponent audioListener3DBeforeUpdate{};
+            bool hadAudioListener3DBeforeUpdate = false;
             AudioSourceComponent audioSourceBeforeUpdate{};
             bool hadAudioSourceBeforeUpdate = false;
             CameraComponent cameraBeforeUpdate{};
@@ -847,6 +861,11 @@ namespace Limitless
                 {
                     audioListenerBeforeUpdate = *audioListener;
                     hadAudioListenerBeforeUpdate = true;
+                }
+                if (auto* audioListener3D = m_Registry.try_get<AudioListener3DComponent>(entity))
+                {
+                    audioListener3DBeforeUpdate = *audioListener3D;
+                    hadAudioListener3DBeforeUpdate = true;
                 }
                 if (auto* audioSource = m_Registry.try_get<AudioSourceComponent>(entity))
                 {
@@ -1103,6 +1122,15 @@ namespace Limitless
                 if (hadAudioListenerBeforeUpdate != hasAudioListenerAfterUpdate ||
                     (hadAudioListenerBeforeUpdate && audioListenerAfterUpdate &&
                      HasAudioListener2DChangedForAccessValidation(audioListenerBeforeUpdate, *audioListenerAfterUpdate)))
+                {
+                    observedWriteMask |= ToAccessMask(SceneSystemAccessComponent::Audio);
+                }
+
+                const auto* audioListener3DAfterUpdate = m_Registry.try_get<AudioListener3DComponent>(entity);
+                const bool hasAudioListener3DAfterUpdate = audioListener3DAfterUpdate != nullptr;
+                if (hadAudioListener3DBeforeUpdate != hasAudioListener3DAfterUpdate ||
+                    (hadAudioListener3DBeforeUpdate && audioListener3DAfterUpdate &&
+                     HasAudioListener3DChangedForAccessValidation(audioListener3DBeforeUpdate, *audioListener3DAfterUpdate)))
                 {
                     observedWriteMask |= ToAccessMask(SceneSystemAccessComponent::Audio);
                 }
@@ -1867,6 +1895,8 @@ namespace Limitless
             bool hadShadowOccluderBeforeFixedUpdate = false;
             AudioListener2DComponent audioListenerBeforeFixedUpdate{};
             bool hadAudioListenerBeforeFixedUpdate = false;
+            AudioListener3DComponent audioListener3DBeforeFixedUpdate{};
+            bool hadAudioListener3DBeforeFixedUpdate = false;
             AudioSourceComponent audioSourceBeforeFixedUpdate{};
             bool hadAudioSourceBeforeFixedUpdate = false;
             CameraComponent cameraBeforeFixedUpdate{};
@@ -1987,6 +2017,11 @@ namespace Limitless
                 {
                     audioListenerBeforeFixedUpdate = *audioListener;
                     hadAudioListenerBeforeFixedUpdate = true;
+                }
+                if (auto* audioListener3D = m_Registry.try_get<AudioListener3DComponent>(entity))
+                {
+                    audioListener3DBeforeFixedUpdate = *audioListener3D;
+                    hadAudioListener3DBeforeFixedUpdate = true;
                 }
                 if (auto* audioSource = m_Registry.try_get<AudioSourceComponent>(entity))
                 {
@@ -2237,6 +2272,15 @@ namespace Limitless
                 if (hadAudioListenerBeforeFixedUpdate != hasAudioListenerAfterFixedUpdate ||
                     (hadAudioListenerBeforeFixedUpdate && audioListenerAfterFixedUpdate &&
                      HasAudioListener2DChangedForAccessValidation(audioListenerBeforeFixedUpdate, *audioListenerAfterFixedUpdate)))
+                {
+                    observedWriteMask |= ToAccessMask(SceneSystemAccessComponent::Audio);
+                }
+
+                const auto* audioListener3DAfterFixedUpdate = m_Registry.try_get<AudioListener3DComponent>(entity);
+                const bool hasAudioListener3DAfterFixedUpdate = audioListener3DAfterFixedUpdate != nullptr;
+                if (hadAudioListener3DBeforeFixedUpdate != hasAudioListener3DAfterFixedUpdate ||
+                    (hadAudioListener3DBeforeFixedUpdate && audioListener3DAfterFixedUpdate &&
+                     HasAudioListener3DChangedForAccessValidation(audioListener3DBeforeFixedUpdate, *audioListener3DAfterFixedUpdate)))
                 {
                     observedWriteMask |= ToAccessMask(SceneSystemAccessComponent::Audio);
                 }

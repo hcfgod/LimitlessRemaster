@@ -553,8 +553,6 @@ namespace Limitless
             (m_PlayModeState == EditorPlayModeState::Play ||
              m_PlayModeState == EditorPlayModeState::Simulate ||
              m_PlayModeState == EditorPlayModeState::Pause);
-        Audio::UpdateSceneAudioSources(m_Scene.get(), audioPlaybackAllowed);
-        ApplyProjectAudioSettings();
 
         if (m_ProjectSettingsPanelState.Loaded)
         {
@@ -582,6 +580,9 @@ namespace Limitless
         // Pass editModePreview=true to prevent PlayOnStart from auto-triggering.
         if (m_PlayModeState != EditorPlayModeState::Play && m_Scene && m_Scene->IsReady())
             UpdateParticleEmitterSystem(m_Scene->GetRegistry(), deltaTime, true);
+
+        Audio::UpdateSceneAudioSources(m_Scene.get(), deltaTime, audioPlaybackAllowed);
+        ApplyProjectAudioSettings();
 
         ApplyAnimationTimelinePreviewToSelectedEntity();
 
@@ -1798,6 +1799,8 @@ namespace Limitless
                             audioSource.AudioClipKey = newAssetKey;
                             audioSource.RuntimeVoiceId = 0;
                             audioSource.RuntimePlaybackStarted = false;
+                            audioSource.RuntimeHasPreviousWorldPosition = false;
+                            audioSource.RuntimePreviousWorldPosition = glm::vec3(0.0f);
                             updatedAnyAudioReference = true;
                         }
                     }

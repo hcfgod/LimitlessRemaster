@@ -23,6 +23,7 @@ namespace Limitless::EditorInspectorPanel
         bool RemoveSpriteComponent = false;
         bool RemoveCameraComponent = false;
         bool RemoveAudioListener2DComponent = false;
+        bool RemoveAudioListener3DComponent = false;
         bool RemoveMaterialComponent = false;
         bool RemoveAudioSourceComponent = false;
         bool RemoveRigidbody2DComponent = false;

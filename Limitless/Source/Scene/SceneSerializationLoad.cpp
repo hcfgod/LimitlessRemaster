@@ -95,10 +95,18 @@ namespace Limitless
                 shadowOccluder->RuntimeGeometryRevision = 0;
             }
 
+            if (auto* audioListener3D = registry.try_get<AudioListener3DComponent>(entity))
+            {
+                audioListener3D->RuntimeHasPreviousWorldPosition = false;
+                audioListener3D->RuntimePreviousWorldPosition = glm::vec3(0.0f);
+            }
+
             if (auto* audioSource = registry.try_get<AudioSourceComponent>(entity))
             {
                 audioSource->RuntimeVoiceId = 0;
                 audioSource->RuntimePlaybackStarted = false;
+                audioSource->RuntimeHasPreviousWorldPosition = false;
+                audioSource->RuntimePreviousWorldPosition = glm::vec3(0.0f);
             }
 
             if (auto* rigidbody2D = registry.try_get<Rigidbody2DComponent>(entity))
@@ -754,6 +762,16 @@ namespace Limitless
                 audioListener.UsePrimaryCameraPosition = audioListenerJson.value("UsePrimaryCameraPosition", true);
             }
 
+            if (entry.contains("AudioListener3D") && entry["AudioListener3D"].is_object())
+            {
+                const auto& audioListener3DJson = entry["AudioListener3D"];
+                auto& audioListener3D = scene->GetRegistry().emplace<AudioListener3DComponent>(entity);
+                audioListener3D.Enabled = audioListener3DJson.value("Enabled", true);
+                audioListener3D.UsePrimaryCameraTransform = audioListener3DJson.value("UsePrimaryCameraTransform", true);
+                audioListener3D.RuntimeHasPreviousWorldPosition = false;
+                audioListener3D.RuntimePreviousWorldPosition = glm::vec3(0.0f);
+            }
+
             if (entry.contains("AudioSource"))
             {
                 const auto& audioSourceJson = entry["AudioSource"];
@@ -766,6 +784,14 @@ namespace Limitless
 
                 if (audioSourceJson.is_object())
                 {
+                    auto parseRolloffMode = [](const std::string& modeName) {
+                        if (modeName == "Linear")
+                            return AudioSourceComponent::RolloffMode::Linear;
+                        if (modeName == "Inverse")
+                            return AudioSourceComponent::RolloffMode::Inverse;
+                        return AudioSourceComponent::RolloffMode::SmoothStep;
+                    };
+
                     audioSource.Volume = audioSourceJson.value("Volume", 1.0f);
                     if (audioSource.Volume < 0.0f)
                         audioSource.Volume = 0.0f;
@@ -782,12 +808,20 @@ namespace Limitless
                     audioSource.SpatialMinDistance = std::max(0.001f, audioSourceJson.value("SpatialMinDistance", 1.0f));
                     audioSource.SpatialMaxDistance = std::max(audioSource.SpatialMinDistance, audioSourceJson.value("SpatialMaxDistance", 20.0f));
                     audioSource.SpatialRolloffExponent = std::max(0.01f, audioSourceJson.value("SpatialRolloffExponent", 1.0f));
+                    audioSource.SpatialRolloffMode = parseRolloffMode(audioSourceJson.value("SpatialRolloffMode", std::string("Linear")));
                     audioSource.StereoPanStrength = std::clamp(audioSourceJson.value("StereoPanStrength", 1.0f), 0.0f, 1.0f);
+                    audioSource.DopplerFactor = std::max(0.0f, audioSourceJson.value("DopplerFactor", 1.0f));
+                    audioSource.EnableDirectionalAttenuation = audioSourceJson.value("EnableDirectionalAttenuation", false);
+                    audioSource.DirectionalInnerAngleDegrees = std::clamp(audioSourceJson.value("DirectionalInnerAngleDegrees", 360.0f), 0.0f, 360.0f);
+                    audioSource.DirectionalOuterAngleDegrees = std::clamp(audioSourceJson.value("DirectionalOuterAngleDegrees", 360.0f), 0.0f, 360.0f);
+                    audioSource.DirectionalOuterVolume = std::clamp(audioSourceJson.value("DirectionalOuterVolume", 1.0f), 0.0f, 1.0f);
                     audioSource.AttenuationCurveKey = audioSourceJson.value("AttenuationCurveKey", std::string{});
                 }
 
                 audioSource.RuntimeVoiceId = 0;
                 audioSource.RuntimePlaybackStarted = false;
+                audioSource.RuntimeHasPreviousWorldPosition = false;
+                audioSource.RuntimePreviousWorldPosition = glm::vec3(0.0f);
             }
         }
 

@@ -43,7 +43,7 @@ namespace Limitless::EditorInspectorPanel
             AccessMaskUiEntry{ "Rendering2D", SceneSystemAccessComponent::Rendering2D, "Sprite/Material and render-facing 2D data" },
             AccessMaskUiEntry{ "Lighting2D", SceneSystemAccessComponent::Lighting2D, "DirectionalLight2D/PointLight2D/ShadowOccluder2D" },
             AccessMaskUiEntry{ "UI", SceneSystemAccessComponent::UI, "Canvas/RectTransform/UI components" },
-            AccessMaskUiEntry{ "Audio", SceneSystemAccessComponent::Audio, "AudioListener2D/AudioSource" },
+            AccessMaskUiEntry{ "Audio", SceneSystemAccessComponent::Audio, "AudioListener2D/AudioListener3D/AudioSource" },
             AccessMaskUiEntry{ "Camera", SceneSystemAccessComponent::Camera, "CameraComponent" },
             AccessMaskUiEntry{ "Tilemap", SceneSystemAccessComponent::Tilemap, "Grid2D/TilemapLayer components" },
             AccessMaskUiEntry{ "Metadata", SceneSystemAccessComponent::Metadata, "Tag/prefab metadata and related bookkeeping" }

@@ -220,6 +220,7 @@ namespace Limitless::SceneSerialization
     {
         switch (space)
         {
+            case AudioSourceComponent::PlaybackSpace::Spatial3D: return "Spatial3D";
             case AudioSourceComponent::PlaybackSpace::Spatial2D: return "Spatial2D";
             case AudioSourceComponent::PlaybackSpace::Global:
             default: return "Global";
@@ -228,6 +229,8 @@ namespace Limitless::SceneSerialization
 
     AudioSourceComponent::PlaybackSpace ParseAudioPlaybackSpaceName(const std::string& spaceName)
     {
+        if (spaceName == "Spatial3D")
+            return AudioSourceComponent::PlaybackSpace::Spatial3D;
         if (spaceName == "Spatial2D")
             return AudioSourceComponent::PlaybackSpace::Spatial2D;
         return AudioSourceComponent::PlaybackSpace::Global;

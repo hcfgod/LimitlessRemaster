@@ -278,6 +278,9 @@ namespace Limitless::EditorInspectorPanel
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AudioListener2D))
             DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AudioListener3D))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
+
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AudioSource))
             DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
@@ -388,6 +391,9 @@ namespace Limitless::EditorInspectorPanel
 
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AudioListener2D))
             ApplyPendingRemoval(*entry, pendingRemovals.RemoveAudioListener2DComponent, registry, selectedEntity, undoService);
+
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AudioListener3D))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveAudioListener3DComponent, registry, selectedEntity, undoService);
 
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AudioSource))
             ApplyPendingRemoval(*entry, pendingRemovals.RemoveAudioSourceComponent, registry, selectedEntity, undoService);

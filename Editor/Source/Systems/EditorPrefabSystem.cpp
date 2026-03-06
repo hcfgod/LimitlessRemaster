@@ -232,6 +232,13 @@ namespace Limitless::EditorPrefabSystem
                 if (const auto* sourceAudioListener = sourceRegistry.try_get<AudioListener2DComponent>(sourceEntity))
                     destinationRegistry.emplace<AudioListener2DComponent>(destinationEntity, *sourceAudioListener);
 
+                if (const auto* sourceAudioListener3D = sourceRegistry.try_get<AudioListener3DComponent>(sourceEntity))
+                {
+                    auto& destinationAudioListener3D = destinationRegistry.emplace<AudioListener3DComponent>(destinationEntity, *sourceAudioListener3D);
+                    destinationAudioListener3D.RuntimeHasPreviousWorldPosition = false;
+                    destinationAudioListener3D.RuntimePreviousWorldPosition = glm::vec3(0.0f);
+                }
+
                 if (const auto* sourceAudio = sourceRegistry.try_get<AudioSourceComponent>(sourceEntity))
                 {
                     auto& destinationAudio = destinationRegistry.emplace<AudioSourceComponent>(destinationEntity);
@@ -247,9 +254,17 @@ namespace Limitless::EditorPrefabSystem
                     destinationAudio.SpatialMaxDistance = sourceAudio->SpatialMaxDistance;
                     destinationAudio.SpatialRolloffExponent = sourceAudio->SpatialRolloffExponent;
                     destinationAudio.StereoPanStrength = sourceAudio->StereoPanStrength;
+                    destinationAudio.SpatialRolloffMode = sourceAudio->SpatialRolloffMode;
+                    destinationAudio.DopplerFactor = sourceAudio->DopplerFactor;
+                    destinationAudio.EnableDirectionalAttenuation = sourceAudio->EnableDirectionalAttenuation;
+                    destinationAudio.DirectionalInnerAngleDegrees = sourceAudio->DirectionalInnerAngleDegrees;
+                    destinationAudio.DirectionalOuterAngleDegrees = sourceAudio->DirectionalOuterAngleDegrees;
+                    destinationAudio.DirectionalOuterVolume = sourceAudio->DirectionalOuterVolume;
                     destinationAudio.AttenuationCurveKey = sourceAudio->AttenuationCurveKey;
                     destinationAudio.RuntimeVoiceId = 0;
                     destinationAudio.RuntimePlaybackStarted = false;
+                    destinationAudio.RuntimeHasPreviousWorldPosition = false;
+                    destinationAudio.RuntimePreviousWorldPosition = glm::vec3(0.0f);
                 }
 
                 if (const auto* sourceScripts = sourceRegistry.try_get<NativeScriptComponent>(sourceEntity))

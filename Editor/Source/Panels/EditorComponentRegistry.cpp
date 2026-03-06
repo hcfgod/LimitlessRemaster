@@ -145,6 +145,15 @@ namespace Limitless::EditorInspectorPanel
             &RemoveComponent<AudioListener2DComponent>
         };
 
+        const ComponentRegistryEntry kAudioListener3DEntry{
+            "Audio Listener 3D",
+            "Add Audio Listener 3D Component",
+            "Remove Audio Listener 3D Component",
+            &HasComponent<AudioListener3DComponent>,
+            &AddComponent<AudioListener3DComponent>,
+            &RemoveComponent<AudioListener3DComponent>
+        };
+
         const ComponentRegistryEntry kRigidbody2DEntry{
             "Rigidbody 2D",
             "Add Rigidbody2D Component",
@@ -350,6 +359,8 @@ namespace Limitless::EditorInspectorPanel
         {
             case ComponentRegistryKey::AudioListener2D:
                 return &kAudioListener2DEntry;
+            case ComponentRegistryKey::AudioListener3D:
+                return &kAudioListener3DEntry;
             case ComponentRegistryKey::Rigidbody2D:
                 return &kRigidbody2DEntry;
             case ComponentRegistryKey::BoxCollider2D:

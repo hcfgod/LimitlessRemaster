@@ -1510,6 +1510,41 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
+        if (auto* audioListener3D = registry.try_get<AudioListener3DComponent>(selectedEntity))
+        {
+            const bool listener3DOpen = ImGui::TreeNodeEx("Audio Listener 3D", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("AudioListener3DComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##AudioListener3DComponentOptionsButton"))
+                ImGui::OpenPopup("AudioListener3DComponentOptions");
+
+            if (ImGui::BeginPopup("AudioListener3DComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveAudioListener3DComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (listener3DOpen)
+            {
+                ImGui::TextUnformatted("Enabled");
+                ImGui::Checkbox("##AudioListener3DEnabled", &audioListener3D->Enabled);
+                TrackInteractiveMemberMutation<AudioListener3DComponent>(
+                    undoService, "Edit Audio Listener 3D Enabled", selectedEntity, &AudioListener3DComponent::Enabled, audioListener3D->Enabled);
+                ImGui::TextUnformatted("Use Primary Camera Transform");
+                ImGui::Checkbox("##AudioListener3DUsePrimaryCameraTransform", &audioListener3D->UsePrimaryCameraTransform);
+                TrackInteractiveMemberMutation<AudioListener3DComponent>(
+                    undoService,
+                    "Edit Audio Listener 3D Camera Follow",
+                    selectedEntity,
+                    &AudioListener3DComponent::UsePrimaryCameraTransform,
+                    audioListener3D->UsePrimaryCameraTransform);
+                ImGui::TextDisabled("When enabled, spatial 3D sources use this listener or the primary camera transform.");
+                ImGui::TreePop();
+            }
+        }
+
         if (auto* grid2D = registry.try_get<Grid2DComponent>(selectedEntity))
         {
             const bool grid2DOpen = ImGui::TreeNodeEx("Grid 2D", ImGuiTreeNodeFlags_DefaultOpen);
@@ -1697,6 +1732,8 @@ namespace Limitless::EditorInspectorPanel
                     audioSource->AudioClipKey = key;
                     audioSource->RuntimeVoiceId = 0;
                     audioSource->RuntimePlaybackStarted = false;
+                    audioSource->RuntimeHasPreviousWorldPosition = false;
+                    audioSource->RuntimePreviousWorldPosition = glm::vec3(0.0f);
                 };
 
                 const std::string clipLabel = audioSource->AudioClipKey.empty()
@@ -1776,9 +1813,9 @@ namespace Limitless::EditorInspectorPanel
                     undoService, "Edit Audio Pitch", selectedEntity, &AudioSourceComponent::Pitch, audioSource->Pitch);
 
                 int playbackSpaceIndex = static_cast<int>(audioSource->Space);
-                const char* playbackSpaceNames[] = { "Global", "Spatial 2D" };
+                const char* playbackSpaceNames[] = { "Global", "Spatial 2D", "Spatial 3D" };
                 ImGui::TextUnformatted("Playback Space");
-                if (ImGui::Combo("##AudioSourcePlaybackSpace", &playbackSpaceIndex, playbackSpaceNames, 2))
+                if (ImGui::Combo("##AudioSourcePlaybackSpace", &playbackSpaceIndex, playbackSpaceNames, 3))
                     audioSource->Space = static_cast<AudioSourceComponent::PlaybackSpace>(playbackSpaceIndex);
                 TrackInteractiveMemberMutation<AudioSourceComponent>(
                     undoService, "Edit Audio Playback Space", selectedEntity, &AudioSourceComponent::Space, audioSource->Space);
@@ -1793,7 +1830,8 @@ namespace Limitless::EditorInspectorPanel
                 TrackInteractiveMemberMutation<AudioSourceComponent>(
                     undoService, "Edit Audio Mixer Group", selectedEntity, &AudioSourceComponent::MixerGroup, audioSource->MixerGroup);
 
-                if (audioSource->Space == AudioSourceComponent::PlaybackSpace::Spatial2D)
+                if (audioSource->Space == AudioSourceComponent::PlaybackSpace::Spatial2D ||
+                    audioSource->Space == AudioSourceComponent::PlaybackSpace::Spatial3D)
                 {
                     ImGui::TextUnformatted("Min Distance");
                     ImGui::DragFloat("##AudioSourceSpatialMinDistance", &audioSource->SpatialMinDistance, 0.01f, 0.001f, 10000.0f, "%.3f");
@@ -1825,6 +1863,45 @@ namespace Limitless::EditorInspectorPanel
                         &AudioSourceComponent::SpatialRolloffExponent,
                         audioSource->SpatialRolloffExponent);
 
+                    int rolloffModeIndex = 0;
+                    switch (audioSource->SpatialRolloffMode)
+                    {
+                        case AudioSourceComponent::RolloffMode::SmoothStep:
+                            rolloffModeIndex = 1;
+                            break;
+                        case AudioSourceComponent::RolloffMode::Inverse:
+                            rolloffModeIndex = 2;
+                            break;
+                        case AudioSourceComponent::RolloffMode::Linear:
+                        default:
+                            rolloffModeIndex = 0;
+                            break;
+                    }
+                    const char* rolloffModeNames[] = { "Linear", "SmoothStep", "Inverse" };
+                    ImGui::TextUnformatted("Rolloff Mode");
+                    if (ImGui::Combo("##AudioSourceSpatialRolloffMode", &rolloffModeIndex, rolloffModeNames, 3))
+                    {
+                        switch (rolloffModeIndex)
+                        {
+                            case 1:
+                                audioSource->SpatialRolloffMode = AudioSourceComponent::RolloffMode::SmoothStep;
+                                break;
+                            case 2:
+                                audioSource->SpatialRolloffMode = AudioSourceComponent::RolloffMode::Inverse;
+                                break;
+                            case 0:
+                            default:
+                                audioSource->SpatialRolloffMode = AudioSourceComponent::RolloffMode::Linear;
+                                break;
+                        }
+                    }
+                    TrackInteractiveMemberMutation<AudioSourceComponent>(
+                        undoService,
+                        "Edit Audio Spatial Rolloff Mode",
+                        selectedEntity,
+                        &AudioSourceComponent::SpatialRolloffMode,
+                        audioSource->SpatialRolloffMode);
+
                     ImGui::TextUnformatted("Stereo Pan Strength");
                     ImGui::SliderFloat("##AudioSourceStereoPanStrength", &audioSource->StereoPanStrength, 0.0f, 1.0f, "%.2f");
                     audioSource->StereoPanStrength = std::clamp(audioSource->StereoPanStrength, 0.0f, 1.0f);
@@ -1846,6 +1923,61 @@ namespace Limitless::EditorInspectorPanel
                         selectedEntity,
                         &AudioSourceComponent::AttenuationCurveKey,
                         audioSource->AttenuationCurveKey);
+
+                    if (audioSource->Space == AudioSourceComponent::PlaybackSpace::Spatial3D)
+                    {
+                        ImGui::TextUnformatted("Doppler Factor");
+                        ImGui::DragFloat("##AudioSourceDopplerFactor", &audioSource->DopplerFactor, 0.01f, 0.0f, 8.0f, "%.2f");
+                        audioSource->DopplerFactor = std::max(0.0f, audioSource->DopplerFactor);
+                        TrackInteractiveMemberMutation<AudioSourceComponent>(
+                            undoService,
+                            "Edit Audio Doppler Factor",
+                            selectedEntity,
+                            &AudioSourceComponent::DopplerFactor,
+                            audioSource->DopplerFactor);
+
+                        ImGui::TextUnformatted("Enable Directional Attenuation");
+                        ImGui::Checkbox("##AudioSourceEnableDirectionalAttenuation", &audioSource->EnableDirectionalAttenuation);
+                        TrackInteractiveMemberMutation<AudioSourceComponent>(
+                            undoService,
+                            "Edit Audio Directional Attenuation Enabled",
+                            selectedEntity,
+                            &AudioSourceComponent::EnableDirectionalAttenuation,
+                            audioSource->EnableDirectionalAttenuation);
+
+                        if (audioSource->EnableDirectionalAttenuation)
+                        {
+                            ImGui::TextUnformatted("Inner Angle Degrees");
+                            ImGui::DragFloat("##AudioSourceDirectionalInnerAngleDegrees", &audioSource->DirectionalInnerAngleDegrees, 0.25f, 0.0f, 360.0f, "%.1f");
+                            audioSource->DirectionalInnerAngleDegrees = std::clamp(audioSource->DirectionalInnerAngleDegrees, 0.0f, 360.0f);
+                            TrackInteractiveMemberMutation<AudioSourceComponent>(
+                                undoService,
+                                "Edit Audio Directional Inner Angle",
+                                selectedEntity,
+                                &AudioSourceComponent::DirectionalInnerAngleDegrees,
+                                audioSource->DirectionalInnerAngleDegrees);
+
+                            ImGui::TextUnformatted("Outer Angle Degrees");
+                            ImGui::DragFloat("##AudioSourceDirectionalOuterAngleDegrees", &audioSource->DirectionalOuterAngleDegrees, 0.25f, 0.0f, 360.0f, "%.1f");
+                            audioSource->DirectionalOuterAngleDegrees = std::clamp(audioSource->DirectionalOuterAngleDegrees, audioSource->DirectionalInnerAngleDegrees, 360.0f);
+                            TrackInteractiveMemberMutation<AudioSourceComponent>(
+                                undoService,
+                                "Edit Audio Directional Outer Angle",
+                                selectedEntity,
+                                &AudioSourceComponent::DirectionalOuterAngleDegrees,
+                                audioSource->DirectionalOuterAngleDegrees);
+
+                            ImGui::TextUnformatted("Outer Volume");
+                            ImGui::SliderFloat("##AudioSourceDirectionalOuterVolume", &audioSource->DirectionalOuterVolume, 0.0f, 1.0f, "%.2f");
+                            audioSource->DirectionalOuterVolume = std::clamp(audioSource->DirectionalOuterVolume, 0.0f, 1.0f);
+                            TrackInteractiveMemberMutation<AudioSourceComponent>(
+                                undoService,
+                                "Edit Audio Directional Outer Volume",
+                                selectedEntity,
+                                &AudioSourceComponent::DirectionalOuterVolume,
+                                audioSource->DirectionalOuterVolume);
+                        }
+                    }
                 }
 
                 if (audioSource->RuntimeVoiceId != 0 &&

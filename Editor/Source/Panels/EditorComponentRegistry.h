@@ -30,7 +30,8 @@ namespace Limitless::EditorInspectorPanel
         UIImage = 19,
         UIPanel = 20,
         UIText = 21,
-        UIButton = 22
+        UIButton = 22,
+        AudioListener3D = 23
     };
 
     struct ComponentRegistryEntry

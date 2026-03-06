@@ -94,10 +94,18 @@ namespace Limitless
                 shadowOccluder->RuntimeGeometryRevision = 0;
             }
 
+            if (auto* audioListener3D = registry.try_get<AudioListener3DComponent>(entity))
+            {
+                audioListener3D->RuntimeHasPreviousWorldPosition = false;
+                audioListener3D->RuntimePreviousWorldPosition = glm::vec3(0.0f);
+            }
+
             if (auto* audioSource = registry.try_get<AudioSourceComponent>(entity))
             {
                 audioSource->RuntimeVoiceId = 0;
                 audioSource->RuntimePlaybackStarted = false;
+                audioSource->RuntimeHasPreviousWorldPosition = false;
+                audioSource->RuntimePreviousWorldPosition = glm::vec3(0.0f);
             }
 
             if (auto* rigidbody2D = registry.try_get<Rigidbody2DComponent>(entity))
@@ -342,6 +350,13 @@ namespace Limitless
                 destinationRegistry.emplace<AudioListener2DComponent>(destinationEntity, *audioListener);
             }
 
+            if (const auto* audioListener3D = sourceRegistry.try_get<AudioListener3DComponent>(sourceEntity))
+            {
+                auto& destinationAudioListener3D = destinationRegistry.emplace<AudioListener3DComponent>(destinationEntity, *audioListener3D);
+                destinationAudioListener3D.RuntimeHasPreviousWorldPosition = false;
+                destinationAudioListener3D.RuntimePreviousWorldPosition = glm::vec3(0.0f);
+            }
+
             if (const auto* rigidbody2D = sourceRegistry.try_get<Rigidbody2DComponent>(sourceEntity))
             {
                 auto& destinationRigidbody2D = destinationRegistry.emplace<Rigidbody2DComponent>(destinationEntity, *rigidbody2D);
@@ -402,9 +417,17 @@ namespace Limitless
                 destinationAudioSource.SpatialMaxDistance = audioSource->SpatialMaxDistance;
                 destinationAudioSource.SpatialRolloffExponent = audioSource->SpatialRolloffExponent;
                 destinationAudioSource.StereoPanStrength = audioSource->StereoPanStrength;
+                destinationAudioSource.SpatialRolloffMode = audioSource->SpatialRolloffMode;
+                destinationAudioSource.DopplerFactor = audioSource->DopplerFactor;
+                destinationAudioSource.EnableDirectionalAttenuation = audioSource->EnableDirectionalAttenuation;
+                destinationAudioSource.DirectionalInnerAngleDegrees = audioSource->DirectionalInnerAngleDegrees;
+                destinationAudioSource.DirectionalOuterAngleDegrees = audioSource->DirectionalOuterAngleDegrees;
+                destinationAudioSource.DirectionalOuterVolume = audioSource->DirectionalOuterVolume;
                 destinationAudioSource.AttenuationCurveKey = audioSource->AttenuationCurveKey;
                 destinationAudioSource.RuntimeVoiceId = 0;
                 destinationAudioSource.RuntimePlaybackStarted = false;
+                destinationAudioSource.RuntimeHasPreviousWorldPosition = false;
+                destinationAudioSource.RuntimePreviousWorldPosition = glm::vec3(0.0f);
             }
 
             if (const auto* nativeScript = sourceRegistry.try_get<NativeScriptComponent>(sourceEntity))

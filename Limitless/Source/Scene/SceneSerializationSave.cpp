@@ -378,8 +378,31 @@ namespace Limitless
                 };
             }
 
+            if (const auto* audioListener3D = registry.try_get<AudioListener3DComponent>(entity))
+            {
+                entry["AudioListener3D"] = {
+                    { "Enabled", audioListener3D->Enabled },
+                    { "UsePrimaryCameraTransform", audioListener3D->UsePrimaryCameraTransform }
+                };
+            }
+
             if (const auto* audioSource = registry.try_get<AudioSourceComponent>(entity))
             {
+                const char* rolloffModeName = "SmoothStep";
+                switch (audioSource->SpatialRolloffMode)
+                {
+                    case AudioSourceComponent::RolloffMode::Linear:
+                        rolloffModeName = "Linear";
+                        break;
+                    case AudioSourceComponent::RolloffMode::Inverse:
+                        rolloffModeName = "Inverse";
+                        break;
+                    case AudioSourceComponent::RolloffMode::SmoothStep:
+                    default:
+                        rolloffModeName = "SmoothStep";
+                        break;
+                }
+
                 entry["AudioSource"] = {
                     { "AudioClip", SceneSerialization::MakeAssetReferenceJson(audioSource->AudioClipKey, Assets::AssetType::AudioClip) },
                     { "Volume", audioSource->Volume },
@@ -392,7 +415,13 @@ namespace Limitless
                     { "SpatialMinDistance", audioSource->SpatialMinDistance },
                     { "SpatialMaxDistance", audioSource->SpatialMaxDistance },
                     { "SpatialRolloffExponent", audioSource->SpatialRolloffExponent },
+                    { "SpatialRolloffMode", rolloffModeName },
                     { "StereoPanStrength", audioSource->StereoPanStrength },
+                    { "DopplerFactor", audioSource->DopplerFactor },
+                    { "EnableDirectionalAttenuation", audioSource->EnableDirectionalAttenuation },
+                    { "DirectionalInnerAngleDegrees", audioSource->DirectionalInnerAngleDegrees },
+                    { "DirectionalOuterAngleDegrees", audioSource->DirectionalOuterAngleDegrees },
+                    { "DirectionalOuterVolume", audioSource->DirectionalOuterVolume },
                     { "AttenuationCurveKey", audioSource->AttenuationCurveKey }
                 };
             }

@@ -578,10 +578,10 @@ namespace Limitless
 
     void GameLayer::OnUpdate(float deltaTime)
     {
-        Audio::UpdateSceneAudioSources(m_Scene.get());
-
         if (m_Scene && m_Scene->IsReady())
             m_Scene->Update(deltaTime);
+
+        Audio::UpdateSceneAudioSources(m_Scene.get(), deltaTime);
 
         ProcessPendingSceneTransitions();
     }
