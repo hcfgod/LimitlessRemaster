@@ -216,6 +216,24 @@ namespace Limitless
                 circleCollider2D->RuntimeShapeCreated = false;
             }
 
+            if (auto* polygonCollider2D = registry.try_get<PolygonCollider2DComponent>(entity))
+            {
+                polygonCollider2D->RuntimeShapeId = kNullPhysics2DShape;
+                polygonCollider2D->RuntimeShapeCreated = false;
+            }
+
+            if (auto* edgeCollider2D = registry.try_get<EdgeCollider2DComponent>(entity))
+            {
+                edgeCollider2D->RuntimeShapeId = kNullPhysics2DShape;
+                edgeCollider2D->RuntimeShapeCreated = false;
+            }
+
+            if (auto* capsuleCollider2D = registry.try_get<CapsuleCollider2DComponent>(entity))
+            {
+                capsuleCollider2D->RuntimeShapeId = kNullPhysics2DShape;
+                capsuleCollider2D->RuntimeShapeCreated = false;
+            }
+
             if (auto* joint2D = registry.try_get<Joint2DComponent>(entity))
             {
                 joint2D->RuntimeJointId = kNullPhysics2DJoint;
@@ -429,6 +447,15 @@ namespace Limitless
 
                 if (const auto* sourceCircleCollider2D = sourceRegistry.try_get<CircleCollider2DComponent>(sourceEntity))
                     destinationRegistry.emplace<CircleCollider2DComponent>(destinationEntity, *sourceCircleCollider2D);
+
+                if (const auto* sourcePolygonCollider2D = sourceRegistry.try_get<PolygonCollider2DComponent>(sourceEntity))
+                    destinationRegistry.emplace<PolygonCollider2DComponent>(destinationEntity, *sourcePolygonCollider2D);
+
+                if (const auto* sourceEdgeCollider2D = sourceRegistry.try_get<EdgeCollider2DComponent>(sourceEntity))
+                    destinationRegistry.emplace<EdgeCollider2DComponent>(destinationEntity, *sourceEdgeCollider2D);
+
+                if (const auto* sourceCapsuleCollider2D = sourceRegistry.try_get<CapsuleCollider2DComponent>(sourceEntity))
+                    destinationRegistry.emplace<CapsuleCollider2DComponent>(destinationEntity, *sourceCapsuleCollider2D);
 
                 if (const auto* sourceJoint2D = sourceRegistry.try_get<Joint2DComponent>(sourceEntity))
                     destinationRegistry.emplace<Joint2DComponent>(destinationEntity, *sourceJoint2D);

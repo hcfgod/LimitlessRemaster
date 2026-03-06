@@ -101,6 +101,45 @@ namespace Limitless::EditorInspectorPanel
             });
         }
 
+        template<typename TComponent, typename TValue>
+        void ExecuteVectorMemberMutation(EditorUndoService* undoService,
+                                         const char* label,
+                                         entt::entity entity,
+                                         std::vector<TValue> TComponent::* member,
+                                         const std::vector<TValue>& beforeValue,
+                                         const std::vector<TValue>& afterValue)
+        {
+            if (!undoService || !label)
+                return;
+
+            (void)undoService->ExecuteLambdaCommand(
+                label,
+                [undoService, entity, member, beforeValue]() {
+                    Scene* activeScene = undoService ? undoService->GetActiveScene() : nullptr;
+                    if (!activeScene || !activeScene->IsValid(entity))
+                        return false;
+
+                    auto* component = activeScene->GetRegistry().try_get<TComponent>(entity);
+                    if (!component)
+                        return false;
+
+                    component->*member = beforeValue;
+                    return true;
+                },
+                [undoService, entity, member, afterValue]() {
+                    Scene* activeScene = undoService ? undoService->GetActiveScene() : nullptr;
+                    if (!activeScene || !activeScene->IsValid(entity))
+                        return false;
+
+                    auto* component = activeScene->GetRegistry().try_get<TComponent>(entity);
+                    if (!component)
+                        return false;
+
+                    component->*member = afterValue;
+                    return true;
+                });
+        }
+
         constexpr const char* kSubSpritePayloadId = "SUB_SPRITE_KEY";
 
         struct SpriteDropAssignment
@@ -2330,6 +2369,244 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::InputScalar("##CircleColliderMaskBits", ImGuiDataType_U64, &circleCollider2D->CollisionMask);
                 TrackInteractiveMemberMutation<CircleCollider2DComponent>(
                     undoService, "Edit CircleCollider2D Mask", selectedEntity, &CircleCollider2DComponent::CollisionMask, circleCollider2D->CollisionMask);
+
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* polygonCollider2D = registry.try_get<PolygonCollider2DComponent>(selectedEntity))
+        {
+            const bool polygonColliderOpen = ImGui::TreeNodeEx("Polygon Collider 2D", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("PolygonCollider2DComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##PolygonCollider2DComponentOptionsButton"))
+                ImGui::OpenPopup("PolygonCollider2DComponentOptions");
+
+            if (ImGui::BeginPopup("PolygonCollider2DComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemovePolygonCollider2DComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (polygonColliderOpen)
+            {
+                ImGui::TextUnformatted("Offset");
+                ImGui::DragFloat2("##PolygonColliderOffset", &polygonCollider2D->Offset.x, 0.01f);
+                TrackInteractiveMemberMutation<PolygonCollider2DComponent>(
+                    undoService, "Edit PolygonCollider2D Offset", selectedEntity, &PolygonCollider2DComponent::Offset, polygonCollider2D->Offset);
+
+                if (ImGui::Button("Add Point##PolygonCollider2D"))
+                {
+                    if (polygonCollider2D->Points.size() < kPhysics2DPolygonMaxPoints)
+                    {
+                        const std::vector<glm::vec2> beforePoints = polygonCollider2D->Points;
+                        const glm::vec2 newPoint = polygonCollider2D->Points.empty()
+                            ? glm::vec2(0.0f)
+                            : (polygonCollider2D->Points.back() + glm::vec2(0.5f, 0.0f));
+                        polygonCollider2D->Points.push_back(newPoint);
+                        const std::vector<glm::vec2> afterPoints = polygonCollider2D->Points;
+                        ExecuteVectorMemberMutation<PolygonCollider2DComponent, glm::vec2>(
+                            undoService,
+                            "Add Polygon Collider Point",
+                            selectedEntity,
+                            &PolygonCollider2DComponent::Points,
+                            beforePoints,
+                            afterPoints);
+                    }
+                }
+                if (polygonCollider2D->Points.size() >= kPhysics2DPolygonMaxPoints)
+                    ImGui::TextDisabled("Maximum %d points", static_cast<int>(kPhysics2DPolygonMaxPoints));
+
+                int removePolygonPointIndex = -1;
+                for (size_t pointIndex = 0; pointIndex < polygonCollider2D->Points.size(); ++pointIndex)
+                {
+                    ImGui::PushID(static_cast<int>(pointIndex));
+                    ImGui::TextUnformatted("Point");
+                    ImGui::DragFloat2("##PolygonColliderPoint", &polygonCollider2D->Points[pointIndex].x, 0.01f, -10000.0f, 10000.0f, "%.3f");
+                    TrackInteractiveValueMutation(
+                        undoService,
+                        "Edit Polygon Collider Point",
+                        polygonCollider2D->Points[pointIndex],
+                        [undoService, selectedEntity, pointIndex](const glm::vec2& value) {
+                            if (!undoService)
+                                return false;
+                            Scene* activeScene = undoService->GetActiveScene();
+                            if (!activeScene || !activeScene->IsValid(selectedEntity))
+                                return false;
+                            auto* activePolygonCollider2D = activeScene->GetRegistry().try_get<PolygonCollider2DComponent>(selectedEntity);
+                            if (!activePolygonCollider2D || pointIndex >= activePolygonCollider2D->Points.size())
+                                return false;
+                            activePolygonCollider2D->Points[pointIndex] = value;
+                            return true;
+                        });
+                    ImGui::SameLine();
+                    if (ImGui::Button("X##PolygonColliderPointRemove"))
+                        removePolygonPointIndex = static_cast<int>(pointIndex);
+                    ImGui::PopID();
+                }
+
+                if (removePolygonPointIndex >= 0 && removePolygonPointIndex < static_cast<int>(polygonCollider2D->Points.size()))
+                {
+                    const std::vector<glm::vec2> beforePoints = polygonCollider2D->Points;
+                    polygonCollider2D->Points.erase(polygonCollider2D->Points.begin() + removePolygonPointIndex);
+                    const std::vector<glm::vec2> afterPoints = polygonCollider2D->Points;
+                    ExecuteVectorMemberMutation<PolygonCollider2DComponent, glm::vec2>(
+                        undoService,
+                        "Remove Polygon Collider Point",
+                        selectedEntity,
+                        &PolygonCollider2DComponent::Points,
+                        beforePoints,
+                        afterPoints);
+                }
+
+                ImGui::TextUnformatted("Density");
+                ImGui::DragFloat("##PolygonColliderDensity", &polygonCollider2D->Density, 0.01f, 0.0f, 1000.0f);
+                TrackInteractiveMemberMutation<PolygonCollider2DComponent>(
+                    undoService, "Edit PolygonCollider2D Density", selectedEntity, &PolygonCollider2DComponent::Density, polygonCollider2D->Density);
+                ImGui::TextUnformatted("Friction");
+                ImGui::DragFloat("##PolygonColliderFriction", &polygonCollider2D->Friction, 0.01f, 0.0f, 1.0f);
+                TrackInteractiveMemberMutation<PolygonCollider2DComponent>(
+                    undoService, "Edit PolygonCollider2D Friction", selectedEntity, &PolygonCollider2DComponent::Friction, polygonCollider2D->Friction);
+                ImGui::TextUnformatted("Restitution");
+                ImGui::DragFloat("##PolygonColliderRestitution", &polygonCollider2D->Restitution, 0.01f, 0.0f, 1.0f);
+                TrackInteractiveMemberMutation<PolygonCollider2DComponent>(
+                    undoService, "Edit PolygonCollider2D Restitution", selectedEntity, &PolygonCollider2DComponent::Restitution, polygonCollider2D->Restitution);
+                ImGui::TextUnformatted("Is Sensor");
+                ImGui::Checkbox("##PolygonColliderIsSensor", &polygonCollider2D->IsSensor);
+                TrackInteractiveMemberMutation<PolygonCollider2DComponent>(
+                    undoService, "Edit PolygonCollider2D Sensor", selectedEntity, &PolygonCollider2DComponent::IsSensor, polygonCollider2D->IsSensor);
+                ImGui::TextUnformatted("Layer Bits");
+                ImGui::InputScalar("##PolygonColliderLayerBits", ImGuiDataType_U64, &polygonCollider2D->CollisionLayer);
+                TrackInteractiveMemberMutation<PolygonCollider2DComponent>(
+                    undoService, "Edit PolygonCollider2D Layer", selectedEntity, &PolygonCollider2DComponent::CollisionLayer, polygonCollider2D->CollisionLayer);
+                ImGui::TextUnformatted("Mask Bits");
+                ImGui::InputScalar("##PolygonColliderMaskBits", ImGuiDataType_U64, &polygonCollider2D->CollisionMask);
+                TrackInteractiveMemberMutation<PolygonCollider2DComponent>(
+                    undoService, "Edit PolygonCollider2D Mask", selectedEntity, &PolygonCollider2DComponent::CollisionMask, polygonCollider2D->CollisionMask);
+
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* edgeCollider2D = registry.try_get<EdgeCollider2DComponent>(selectedEntity))
+        {
+            const bool edgeColliderOpen = ImGui::TreeNodeEx("Edge Collider 2D", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("EdgeCollider2DComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##EdgeCollider2DComponentOptionsButton"))
+                ImGui::OpenPopup("EdgeCollider2DComponentOptions");
+
+            if (ImGui::BeginPopup("EdgeCollider2DComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveEdgeCollider2DComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (edgeColliderOpen)
+            {
+                ImGui::TextUnformatted("Offset");
+                ImGui::DragFloat2("##EdgeColliderOffset", &edgeCollider2D->Offset.x, 0.01f);
+                TrackInteractiveMemberMutation<EdgeCollider2DComponent>(
+                    undoService, "Edit EdgeCollider2D Offset", selectedEntity, &EdgeCollider2DComponent::Offset, edgeCollider2D->Offset);
+                ImGui::TextUnformatted("Point A");
+                ImGui::DragFloat2("##EdgeColliderPointA", &edgeCollider2D->PointA.x, 0.01f);
+                TrackInteractiveMemberMutation<EdgeCollider2DComponent>(
+                    undoService, "Edit EdgeCollider2D Point A", selectedEntity, &EdgeCollider2DComponent::PointA, edgeCollider2D->PointA);
+                ImGui::TextUnformatted("Point B");
+                ImGui::DragFloat2("##EdgeColliderPointB", &edgeCollider2D->PointB.x, 0.01f);
+                TrackInteractiveMemberMutation<EdgeCollider2DComponent>(
+                    undoService, "Edit EdgeCollider2D Point B", selectedEntity, &EdgeCollider2DComponent::PointB, edgeCollider2D->PointB);
+                ImGui::TextUnformatted("Friction");
+                ImGui::DragFloat("##EdgeColliderFriction", &edgeCollider2D->Friction, 0.01f, 0.0f, 1.0f);
+                TrackInteractiveMemberMutation<EdgeCollider2DComponent>(
+                    undoService, "Edit EdgeCollider2D Friction", selectedEntity, &EdgeCollider2DComponent::Friction, edgeCollider2D->Friction);
+                ImGui::TextUnformatted("Restitution");
+                ImGui::DragFloat("##EdgeColliderRestitution", &edgeCollider2D->Restitution, 0.01f, 0.0f, 1.0f);
+                TrackInteractiveMemberMutation<EdgeCollider2DComponent>(
+                    undoService, "Edit EdgeCollider2D Restitution", selectedEntity, &EdgeCollider2DComponent::Restitution, edgeCollider2D->Restitution);
+                ImGui::TextUnformatted("Is Sensor");
+                ImGui::Checkbox("##EdgeColliderIsSensor", &edgeCollider2D->IsSensor);
+                TrackInteractiveMemberMutation<EdgeCollider2DComponent>(
+                    undoService, "Edit EdgeCollider2D Sensor", selectedEntity, &EdgeCollider2DComponent::IsSensor, edgeCollider2D->IsSensor);
+                ImGui::TextUnformatted("Layer Bits");
+                ImGui::InputScalar("##EdgeColliderLayerBits", ImGuiDataType_U64, &edgeCollider2D->CollisionLayer);
+                TrackInteractiveMemberMutation<EdgeCollider2DComponent>(
+                    undoService, "Edit EdgeCollider2D Layer", selectedEntity, &EdgeCollider2DComponent::CollisionLayer, edgeCollider2D->CollisionLayer);
+                ImGui::TextUnformatted("Mask Bits");
+                ImGui::InputScalar("##EdgeColliderMaskBits", ImGuiDataType_U64, &edgeCollider2D->CollisionMask);
+                TrackInteractiveMemberMutation<EdgeCollider2DComponent>(
+                    undoService, "Edit EdgeCollider2D Mask", selectedEntity, &EdgeCollider2DComponent::CollisionMask, edgeCollider2D->CollisionMask);
+
+                ImGui::TreePop();
+            }
+        }
+
+        if (auto* capsuleCollider2D = registry.try_get<CapsuleCollider2DComponent>(selectedEntity))
+        {
+            const bool capsuleColliderOpen = ImGui::TreeNodeEx("Capsule Collider 2D", ImGuiTreeNodeFlags_DefaultOpen);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup("CapsuleCollider2DComponentOptions");
+            ImGui::SameLine();
+            if (ImGui::Button("...##CapsuleCollider2DComponentOptionsButton"))
+                ImGui::OpenPopup("CapsuleCollider2DComponentOptions");
+
+            if (ImGui::BeginPopup("CapsuleCollider2DComponentOptions"))
+            {
+                if (ImGui::MenuItem("Remove Component"))
+                    pendingRemovals.RemoveCapsuleCollider2DComponent = true;
+                ImGui::EndPopup();
+            }
+
+            if (capsuleColliderOpen)
+            {
+                ImGui::TextUnformatted("Offset");
+                ImGui::DragFloat2("##CapsuleColliderOffset", &capsuleCollider2D->Offset.x, 0.01f);
+                TrackInteractiveMemberMutation<CapsuleCollider2DComponent>(
+                    undoService, "Edit CapsuleCollider2D Offset", selectedEntity, &CapsuleCollider2DComponent::Offset, capsuleCollider2D->Offset);
+                ImGui::TextUnformatted("Size");
+                ImGui::DragFloat2("##CapsuleColliderSize", &capsuleCollider2D->Size.x, 0.01f, 0.001f, 1000.0f);
+                capsuleCollider2D->Size = glm::max(capsuleCollider2D->Size, glm::vec2(0.001f));
+                TrackInteractiveMemberMutation<CapsuleCollider2DComponent>(
+                    undoService, "Edit CapsuleCollider2D Size", selectedEntity, &CapsuleCollider2DComponent::Size, capsuleCollider2D->Size);
+                int capsuleDirection = capsuleCollider2D->Direction == CapsuleCollider2DComponent::Orientation::Horizontal ? 1 : 0;
+                const char* capsuleDirectionNames[] = { "Vertical", "Horizontal" };
+                ImGui::TextUnformatted("Direction");
+                if (ImGui::Combo("##CapsuleColliderDirection", &capsuleDirection, capsuleDirectionNames, 2))
+                {
+                    capsuleCollider2D->Direction = capsuleDirection == 1
+                        ? CapsuleCollider2DComponent::Orientation::Horizontal
+                        : CapsuleCollider2DComponent::Orientation::Vertical;
+                }
+                TrackInteractiveMemberMutation<CapsuleCollider2DComponent>(
+                    undoService, "Edit CapsuleCollider2D Direction", selectedEntity, &CapsuleCollider2DComponent::Direction, capsuleCollider2D->Direction);
+                ImGui::TextUnformatted("Density");
+                ImGui::DragFloat("##CapsuleColliderDensity", &capsuleCollider2D->Density, 0.01f, 0.0f, 1000.0f);
+                TrackInteractiveMemberMutation<CapsuleCollider2DComponent>(
+                    undoService, "Edit CapsuleCollider2D Density", selectedEntity, &CapsuleCollider2DComponent::Density, capsuleCollider2D->Density);
+                ImGui::TextUnformatted("Friction");
+                ImGui::DragFloat("##CapsuleColliderFriction", &capsuleCollider2D->Friction, 0.01f, 0.0f, 1.0f);
+                TrackInteractiveMemberMutation<CapsuleCollider2DComponent>(
+                    undoService, "Edit CapsuleCollider2D Friction", selectedEntity, &CapsuleCollider2DComponent::Friction, capsuleCollider2D->Friction);
+                ImGui::TextUnformatted("Restitution");
+                ImGui::DragFloat("##CapsuleColliderRestitution", &capsuleCollider2D->Restitution, 0.01f, 0.0f, 1.0f);
+                TrackInteractiveMemberMutation<CapsuleCollider2DComponent>(
+                    undoService, "Edit CapsuleCollider2D Restitution", selectedEntity, &CapsuleCollider2DComponent::Restitution, capsuleCollider2D->Restitution);
+                ImGui::TextUnformatted("Is Sensor");
+                ImGui::Checkbox("##CapsuleColliderIsSensor", &capsuleCollider2D->IsSensor);
+                TrackInteractiveMemberMutation<CapsuleCollider2DComponent>(
+                    undoService, "Edit CapsuleCollider2D Sensor", selectedEntity, &CapsuleCollider2DComponent::IsSensor, capsuleCollider2D->IsSensor);
+                ImGui::TextUnformatted("Layer Bits");
+                ImGui::InputScalar("##CapsuleColliderLayerBits", ImGuiDataType_U64, &capsuleCollider2D->CollisionLayer);
+                TrackInteractiveMemberMutation<CapsuleCollider2DComponent>(
+                    undoService, "Edit CapsuleCollider2D Layer", selectedEntity, &CapsuleCollider2DComponent::CollisionLayer, capsuleCollider2D->CollisionLayer);
+                ImGui::TextUnformatted("Mask Bits");
+                ImGui::InputScalar("##CapsuleColliderMaskBits", ImGuiDataType_U64, &capsuleCollider2D->CollisionMask);
+                TrackInteractiveMemberMutation<CapsuleCollider2DComponent>(
+                    undoService, "Edit CapsuleCollider2D Mask", selectedEntity, &CapsuleCollider2DComponent::CollisionMask, capsuleCollider2D->CollisionMask);
 
                 ImGui::TreePop();
             }

@@ -29,7 +29,10 @@ namespace Limitless
         Audio = 1ull << 12,
         Camera = 1ull << 13,
         Tilemap = 1ull << 14,
-        Metadata = 1ull << 15
+        Metadata = 1ull << 15,
+        PolygonCollider2D = 1ull << 16,
+        EdgeCollider2D = 1ull << 17,
+        CapsuleCollider2D = 1ull << 18
     };
 
     constexpr uint64_t ToAccessMask(SceneSystemAccessComponent component)

@@ -29,6 +29,9 @@ namespace Limitless::EditorInspectorPanel
         bool RemoveRigidbody2DComponent = false;
         bool RemoveBoxCollider2DComponent = false;
         bool RemoveCircleCollider2DComponent = false;
+        bool RemovePolygonCollider2DComponent = false;
+        bool RemoveEdgeCollider2DComponent = false;
+        bool RemoveCapsuleCollider2DComponent = false;
         bool RemoveJoint2DComponent = false;
         bool RemoveDirectionalLight2DComponent = false;
         bool RemovePointLight2DComponent = false;

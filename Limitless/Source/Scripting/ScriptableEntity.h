@@ -28,6 +28,9 @@ namespace Limitless
         static constexpr uint64_t Rigidbody2D = ToAccessMask(SceneSystemAccessComponent::Rigidbody2D);
         static constexpr uint64_t BoxCollider2D = ToAccessMask(SceneSystemAccessComponent::BoxCollider2D);
         static constexpr uint64_t CircleCollider2D = ToAccessMask(SceneSystemAccessComponent::CircleCollider2D);
+        static constexpr uint64_t PolygonCollider2D = ToAccessMask(SceneSystemAccessComponent::PolygonCollider2D);
+        static constexpr uint64_t EdgeCollider2D = ToAccessMask(SceneSystemAccessComponent::EdgeCollider2D);
+        static constexpr uint64_t CapsuleCollider2D = ToAccessMask(SceneSystemAccessComponent::CapsuleCollider2D);
         static constexpr uint64_t Joint2D = ToAccessMask(SceneSystemAccessComponent::Joint2D);
         static constexpr uint64_t Animator = ToAccessMask(SceneSystemAccessComponent::Animator);
         static constexpr uint64_t ParticleEmitter = ToAccessMask(SceneSystemAccessComponent::ParticleEmitter);

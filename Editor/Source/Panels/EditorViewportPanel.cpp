@@ -24,6 +24,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -431,7 +432,14 @@ namespace Limitless::EditorViewportPanel
             BoxCorner2,
             BoxCorner3,
             CircleOffset,
-            CircleRadius
+            CircleRadius,
+            PolygonOffset,
+            PolygonPoint,
+            EdgeOffset,
+            EdgePointA,
+            EdgePointB,
+            CapsuleOffset,
+            CapsuleCorner
         };
 
         struct ColliderDragState final
@@ -440,6 +448,7 @@ namespace Limitless::EditorViewportPanel
             entt::entity Entity = entt::null;
             ColliderHandleKind Handle = ColliderHandleKind::None;
             const char* CommitLabel = nullptr;
+            int PointIndex = -1;
         };
 
         ColliderDragState& GetColliderDragState()
@@ -476,6 +485,92 @@ namespace Limitless::EditorViewportPanel
             const float dx = mousePosition.x - point.x;
             const float dy = mousePosition.y - point.y;
             return (dx * dx + dy * dy) <= radiusPixels * radiusPixels;
+        }
+
+        float DistanceToLineSegment(const ImVec2& point, const ImVec2& a, const ImVec2& b)
+        {
+            const float abx = b.x - a.x;
+            const float aby = b.y - a.y;
+            const float lengthSquared = abx * abx + aby * aby;
+            if (lengthSquared <= 0.000001f)
+                return std::sqrt((point.x - a.x) * (point.x - a.x) + (point.y - a.y) * (point.y - a.y));
+
+            const float t = std::clamp(((point.x - a.x) * abx + (point.y - a.y) * aby) / lengthSquared, 0.0f, 1.0f);
+            const float closestX = a.x + t * abx;
+            const float closestY = a.y + t * aby;
+            return std::sqrt((point.x - closestX) * (point.x - closestX) + (point.y - closestY) * (point.y - closestY));
+        }
+
+        glm::vec3 GetGizmoAxisDirection(int axis)
+        {
+            switch (axis)
+            {
+                case 0: return glm::vec3(1.0f, 0.0f, 0.0f);
+                case 1: return glm::vec3(0.0f, 1.0f, 0.0f);
+                default: return glm::vec3(0.0f, 0.0f, 1.0f);
+            }
+        }
+
+        glm::vec3 GetCameraForwardDirection(const Camera& camera)
+        {
+            const glm::mat4 inverseView = glm::inverse(camera.GetViewMatrix());
+            const glm::vec3 forward = glm::vec3(inverseView * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f));
+            const float length = glm::length(forward);
+            if (length <= 0.000001f)
+                return glm::vec3(0.0f, 0.0f, -1.0f);
+            return forward / length;
+        }
+
+        glm::vec3 ComputeAxisDragPlaneNormal(const Camera& camera, const glm::vec3& axisDirection, const glm::vec3& gizmoOrigin)
+        {
+            glm::vec3 viewDirection = -GetCameraForwardDirection(camera);
+            if (camera.GetType() == CameraType::Perspective3D)
+            {
+                const glm::mat4 inverseView = glm::inverse(camera.GetViewMatrix());
+                const glm::vec3 cameraPosition = glm::vec3(inverseView[3]);
+                const glm::vec3 toCamera = cameraPosition - gizmoOrigin;
+                const float toCameraLength = glm::length(toCamera);
+                if (toCameraLength > 0.000001f)
+                    viewDirection = toCamera / toCameraLength;
+            }
+
+            glm::vec3 planeNormal = viewDirection - axisDirection * glm::dot(viewDirection, axisDirection);
+            const float planeNormalLength = glm::length(planeNormal);
+            if (planeNormalLength > 0.000001f)
+                return planeNormal / planeNormalLength;
+
+            const glm::vec3 fallbackDirection = std::abs(axisDirection.z) < 0.999f
+                ? glm::vec3(0.0f, 0.0f, 1.0f)
+                : glm::vec3(0.0f, 1.0f, 0.0f);
+            planeNormal = fallbackDirection - axisDirection * glm::dot(fallbackDirection, axisDirection);
+            const float fallbackLength = glm::length(planeNormal);
+            if (fallbackLength <= 0.000001f)
+                return glm::vec3(0.0f, 0.0f, 1.0f);
+            return planeNormal / fallbackLength;
+        }
+
+        bool TryIntersectMouseWithPlane(const Camera& camera,
+                                        const ImVec2& viewportMin,
+                                        const ImVec2& viewportMax,
+                                        const ImVec2& mouseScreenPosition,
+                                        const glm::vec3& planePoint,
+                                        const glm::vec3& planeNormal,
+                                        glm::vec3& outIntersectionPoint)
+        {
+            glm::vec3 rayOrigin(0.0f);
+            glm::vec3 rayDirection(0.0f);
+            if (!TryComputeViewportRay(camera, viewportMin, viewportMax, mouseScreenPosition, rayOrigin, rayDirection))
+                return false;
+
+            const float planeNormalLength = glm::length(planeNormal);
+            if (planeNormalLength <= 0.000001f)
+                return false;
+
+            return TryIntersectRayWithPlane(rayOrigin,
+                                            rayDirection,
+                                            planePoint,
+                                            planeNormal / planeNormalLength,
+                                            outIntersectionPoint);
         }
 
         bool DrawAndHandleColliderGizmos(ImDrawList* drawList,
@@ -541,6 +636,11 @@ namespace Limitless::EditorViewportPanel
                 const glm::vec4 localPoint = inverseWorldTransform * glm::vec4(worldPoint, 1.0f);
                 localPointOut = glm::vec2(localPoint.x, localPoint.y);
                 return true;
+            };
+
+            auto projectLocalPoint = [&](const glm::vec2& localPoint, ImVec2& outPoint) -> bool {
+                const glm::vec4 worldPoint = worldTransform * glm::vec4(localPoint.x, localPoint.y, 0.0f, 1.0f);
+                return WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, glm::vec3(worldPoint), outPoint);
             };
 
             if (auto* boxCollider2D = registry.try_get<BoxCollider2DComponent>(selectedEntity))
@@ -696,6 +796,258 @@ namespace Limitless::EditorViewportPanel
                             else
                             {
                                 circleCollider2D->Radius = std::max(0.01f, glm::length(localPoint - circleCollider2D->Offset));
+                            }
+                        }
+
+                        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+                            commitOrCancelDrag(true);
+                    }
+                }
+            }
+
+            if (auto* polygonCollider2D = registry.try_get<PolygonCollider2DComponent>(selectedEntity))
+            {
+                ImVec2 projectedOffset{};
+                bool valid = projectLocalPoint(polygonCollider2D->Offset, projectedOffset);
+                std::vector<ImVec2> projectedPoints(polygonCollider2D->Points.size());
+                for (size_t pointIndex = 0; valid && pointIndex < polygonCollider2D->Points.size(); ++pointIndex)
+                    valid = projectLocalPoint(polygonCollider2D->Offset + polygonCollider2D->Points[pointIndex], projectedPoints[pointIndex]);
+
+                if (valid && projectedPoints.size() >= 2)
+                {
+                    for (size_t pointIndex = 0; pointIndex < projectedPoints.size(); ++pointIndex)
+                    {
+                        const ImVec2& pointA = projectedPoints[pointIndex];
+                        const ImVec2& pointB = projectedPoints[(pointIndex + 1) % projectedPoints.size()];
+                        drawList->AddLine(pointA, pointB, IM_COL32(220, 120, 255, 255), 2.0f);
+                    }
+
+                    drawList->AddCircleFilled(projectedOffset, handleRadiusPixels, IM_COL32(75, 220, 140, 245));
+                    for (const ImVec2& point : projectedPoints)
+                        drawList->AddCircleFilled(point, handleRadiusPixels, IM_COL32(220, 120, 255, 245));
+
+                    ColliderHandleKind hoveredHandle = ColliderHandleKind::None;
+                    int hoveredPointIndex = -1;
+                    if (canEdit && mouseInViewport && !dragState.Active)
+                    {
+                        if (IsMouseNearPoint(mousePosition, projectedOffset, handleRadiusPixels + 3.0f))
+                        {
+                            hoveredHandle = ColliderHandleKind::PolygonOffset;
+                        }
+                        else
+                        {
+                            for (size_t pointIndex = 0; pointIndex < projectedPoints.size(); ++pointIndex)
+                            {
+                                if (!IsMouseNearPoint(mousePosition, projectedPoints[pointIndex], handleRadiusPixels + 3.0f))
+                                    continue;
+                                hoveredHandle = ColliderHandleKind::PolygonPoint;
+                                hoveredPointIndex = static_cast<int>(pointIndex);
+                                break;
+                            }
+                        }
+                    }
+
+                    if (hoveredHandle != ColliderHandleKind::None)
+                    {
+                        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                        {
+                            if (undoService)
+                                undoService->BeginInteractiveSceneMutation();
+                            dragState.Active = true;
+                            dragState.Entity = selectedEntity;
+                            dragState.Handle = hoveredHandle;
+                            dragState.PointIndex = hoveredPointIndex;
+                            dragState.CommitLabel = (hoveredHandle == ColliderHandleKind::PolygonOffset)
+                                ? "Edit Polygon Collider Offset"
+                                : "Edit Polygon Collider Point";
+                        }
+                    }
+
+                    if (dragState.Active && dragState.Entity == selectedEntity &&
+                        (dragState.Handle == ColliderHandleKind::PolygonOffset || dragState.Handle == ColliderHandleKind::PolygonPoint))
+                    {
+                        glm::vec2 localPoint(0.0f);
+                        if (updateLocalPointFromMouse(localPoint))
+                        {
+                            if (dragState.Handle == ColliderHandleKind::PolygonOffset)
+                            {
+                                polygonCollider2D->Offset = localPoint;
+                            }
+                            else if (dragState.PointIndex >= 0 && dragState.PointIndex < static_cast<int>(polygonCollider2D->Points.size()))
+                            {
+                                polygonCollider2D->Points[static_cast<size_t>(dragState.PointIndex)] = localPoint - polygonCollider2D->Offset;
+                            }
+                        }
+
+                        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+                            commitOrCancelDrag(true);
+                    }
+                }
+            }
+
+            if (auto* edgeCollider2D = registry.try_get<EdgeCollider2DComponent>(selectedEntity))
+            {
+                ImVec2 projectedOffset{};
+                ImVec2 projectedPointA{};
+                ImVec2 projectedPointB{};
+                const bool valid = projectLocalPoint(edgeCollider2D->Offset, projectedOffset) &&
+                                   projectLocalPoint(edgeCollider2D->Offset + edgeCollider2D->PointA, projectedPointA) &&
+                                   projectLocalPoint(edgeCollider2D->Offset + edgeCollider2D->PointB, projectedPointB);
+                if (valid)
+                {
+                    drawList->AddLine(projectedPointA, projectedPointB, IM_COL32(255, 110, 110, 255), 2.0f);
+                    drawList->AddCircleFilled(projectedOffset, handleRadiusPixels, IM_COL32(75, 220, 140, 245));
+                    drawList->AddCircleFilled(projectedPointA, handleRadiusPixels, IM_COL32(255, 110, 110, 245));
+                    drawList->AddCircleFilled(projectedPointB, handleRadiusPixels, IM_COL32(255, 110, 110, 245));
+
+                    ColliderHandleKind hoveredHandle = ColliderHandleKind::None;
+                    if (canEdit && mouseInViewport && !dragState.Active)
+                    {
+                        if (IsMouseNearPoint(mousePosition, projectedOffset, handleRadiusPixels + 3.0f))
+                            hoveredHandle = ColliderHandleKind::EdgeOffset;
+                        else if (IsMouseNearPoint(mousePosition, projectedPointA, handleRadiusPixels + 3.0f))
+                            hoveredHandle = ColliderHandleKind::EdgePointA;
+                        else if (IsMouseNearPoint(mousePosition, projectedPointB, handleRadiusPixels + 3.0f))
+                            hoveredHandle = ColliderHandleKind::EdgePointB;
+                    }
+
+                    if (hoveredHandle != ColliderHandleKind::None)
+                    {
+                        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                        {
+                            if (undoService)
+                                undoService->BeginInteractiveSceneMutation();
+                            dragState.Active = true;
+                            dragState.Entity = selectedEntity;
+                            dragState.Handle = hoveredHandle;
+                            dragState.CommitLabel = (hoveredHandle == ColliderHandleKind::EdgeOffset)
+                                ? "Edit Edge Collider Offset"
+                                : "Edit Edge Collider Point";
+                            dragState.PointIndex = -1;
+                        }
+                    }
+
+                    if (dragState.Active && dragState.Entity == selectedEntity &&
+                        (dragState.Handle == ColliderHandleKind::EdgeOffset ||
+                         dragState.Handle == ColliderHandleKind::EdgePointA ||
+                         dragState.Handle == ColliderHandleKind::EdgePointB))
+                    {
+                        glm::vec2 localPoint(0.0f);
+                        if (updateLocalPointFromMouse(localPoint))
+                        {
+                            if (dragState.Handle == ColliderHandleKind::EdgeOffset)
+                            {
+                                edgeCollider2D->Offset = localPoint;
+                            }
+                            else if (dragState.Handle == ColliderHandleKind::EdgePointA)
+                            {
+                                edgeCollider2D->PointA = localPoint - edgeCollider2D->Offset;
+                            }
+                            else
+                            {
+                                edgeCollider2D->PointB = localPoint - edgeCollider2D->Offset;
+                            }
+                        }
+
+                        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+                            commitOrCancelDrag(true);
+                    }
+                }
+            }
+
+            if (auto* capsuleCollider2D = registry.try_get<CapsuleCollider2DComponent>(selectedEntity))
+            {
+                const glm::vec2 halfSize = capsuleCollider2D->Size * 0.5f;
+                const bool vertical = capsuleCollider2D->Direction == CapsuleCollider2DComponent::Orientation::Vertical;
+                const float radius = vertical ? halfSize.x : halfSize.y;
+                const float segmentHalf = vertical
+                    ? std::max(0.0f, halfSize.y - radius)
+                    : std::max(0.0f, halfSize.x - radius);
+                const glm::vec2 centerA = capsuleCollider2D->Offset + (vertical ? glm::vec2(0.0f, -segmentHalf) : glm::vec2(-segmentHalf, 0.0f));
+                const glm::vec2 centerB = capsuleCollider2D->Offset + (vertical ? glm::vec2(0.0f, segmentHalf) : glm::vec2(segmentHalf, 0.0f));
+                const glm::vec2 cornerPoint = capsuleCollider2D->Offset + halfSize;
+
+                ImVec2 projectedOffset{};
+                ImVec2 projectedCenterA{};
+                ImVec2 projectedCenterB{};
+                ImVec2 projectedRadiusPointA{};
+                ImVec2 projectedRadiusPointB{};
+                ImVec2 projectedCorner{};
+                const bool valid = projectLocalPoint(capsuleCollider2D->Offset, projectedOffset) &&
+                                   projectLocalPoint(centerA, projectedCenterA) &&
+                                   projectLocalPoint(centerB, projectedCenterB) &&
+                                   projectLocalPoint(centerA + (vertical ? glm::vec2(radius, 0.0f) : glm::vec2(0.0f, radius)), projectedRadiusPointA) &&
+                                   projectLocalPoint(centerB + (vertical ? glm::vec2(radius, 0.0f) : glm::vec2(0.0f, radius)), projectedRadiusPointB) &&
+                                   projectLocalPoint(cornerPoint, projectedCorner);
+                if (valid)
+                {
+                    const float radiusPixelsA = std::sqrt((projectedRadiusPointA.x - projectedCenterA.x) * (projectedRadiusPointA.x - projectedCenterA.x) +
+                                                          (projectedRadiusPointA.y - projectedCenterA.y) * (projectedRadiusPointA.y - projectedCenterA.y));
+                    const float radiusPixelsB = std::sqrt((projectedRadiusPointB.x - projectedCenterB.x) * (projectedRadiusPointB.x - projectedCenterB.x) +
+                                                          (projectedRadiusPointB.y - projectedCenterB.y) * (projectedRadiusPointB.y - projectedCenterB.y));
+                    drawList->AddCircle(projectedCenterA, radiusPixelsA, IM_COL32(120, 255, 180, 255), 32, 2.0f);
+                    drawList->AddCircle(projectedCenterB, radiusPixelsB, IM_COL32(120, 255, 180, 255), 32, 2.0f);
+
+                    ImVec2 sideA0{};
+                    ImVec2 sideA1{};
+                    ImVec2 sideB0{};
+                    ImVec2 sideB1{};
+                    const glm::vec2 sideOffset0 = vertical ? glm::vec2(radius, 0.0f) : glm::vec2(0.0f, radius);
+                    const glm::vec2 sideOffset1 = vertical ? glm::vec2(-radius, 0.0f) : glm::vec2(0.0f, -radius);
+                    if (projectLocalPoint(centerA + sideOffset0, sideA0) &&
+                        projectLocalPoint(centerB + sideOffset0, sideA1) &&
+                        projectLocalPoint(centerA + sideOffset1, sideB0) &&
+                        projectLocalPoint(centerB + sideOffset1, sideB1))
+                    {
+                        drawList->AddLine(sideA0, sideA1, IM_COL32(120, 255, 180, 255), 2.0f);
+                        drawList->AddLine(sideB0, sideB1, IM_COL32(120, 255, 180, 255), 2.0f);
+                    }
+
+                    drawList->AddCircleFilled(projectedOffset, handleRadiusPixels, IM_COL32(75, 220, 140, 245));
+                    drawList->AddCircleFilled(projectedCorner, handleRadiusPixels, IM_COL32(120, 255, 180, 245));
+
+                    ColliderHandleKind hoveredHandle = ColliderHandleKind::None;
+                    if (canEdit && mouseInViewport && !dragState.Active)
+                    {
+                        if (IsMouseNearPoint(mousePosition, projectedOffset, handleRadiusPixels + 3.0f))
+                            hoveredHandle = ColliderHandleKind::CapsuleOffset;
+                        else if (IsMouseNearPoint(mousePosition, projectedCorner, handleRadiusPixels + 3.0f))
+                            hoveredHandle = ColliderHandleKind::CapsuleCorner;
+                    }
+
+                    if (hoveredHandle != ColliderHandleKind::None)
+                    {
+                        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                        {
+                            if (undoService)
+                                undoService->BeginInteractiveSceneMutation();
+                            dragState.Active = true;
+                            dragState.Entity = selectedEntity;
+                            dragState.Handle = hoveredHandle;
+                            dragState.CommitLabel = (hoveredHandle == ColliderHandleKind::CapsuleOffset)
+                                ? "Edit Capsule Collider Offset"
+                                : "Edit Capsule Collider Size";
+                            dragState.PointIndex = -1;
+                        }
+                    }
+
+                    if (dragState.Active && dragState.Entity == selectedEntity &&
+                        (dragState.Handle == ColliderHandleKind::CapsuleOffset || dragState.Handle == ColliderHandleKind::CapsuleCorner))
+                    {
+                        glm::vec2 localPoint(0.0f);
+                        if (updateLocalPointFromMouse(localPoint))
+                        {
+                            if (dragState.Handle == ColliderHandleKind::CapsuleOffset)
+                            {
+                                capsuleCollider2D->Offset = localPoint;
+                            }
+                            else
+                            {
+                                const glm::vec2 delta = localPoint - capsuleCollider2D->Offset;
+                                capsuleCollider2D->Size = glm::max(glm::abs(delta) * 2.0f, glm::vec2(0.02f));
                             }
                         }
 
@@ -1413,18 +1765,28 @@ namespace Limitless::EditorViewportPanel
                 return false;
 
             // Axis endpoints in screen space
-            auto axisEndpoint = [&](int axis) -> ImVec2 {
-                glm::vec3 worldEnd = entityWorldPos;
-                const float worldLength = kGizmoAxisLength / pixelsPerUnit;
-                if (axis == 0) worldEnd.x += worldLength;
-                else if (axis == 1) worldEnd.y += worldLength;
-                else worldEnd.z += worldLength;
-                ImVec2 screen{};
-                if (!WorldToViewportPoint(camera, viewportMin, viewportWidth, viewportHeight, worldEnd, screen))
-                    return ImVec2(originScreen.x + (axis == 0 ? kGizmoAxisLength : 0.0f),
-                                  originScreen.y - (axis == 1 ? kGizmoAxisLength : 0.0f));
-                return screen;
-            };
+            const float worldAxisLength = kGizmoAxisLength / pixelsPerUnit;
+            std::array<ImVec2, 3> axisEnds{};
+            std::array<bool, 3> axisVisible{};
+            std::array<float, 3> axisScreenLengths{};
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                const glm::vec3 worldEnd = entityWorldPos + GetGizmoAxisDirection(axis) * worldAxisLength;
+                ImVec2 clippedStart{};
+                ImVec2 clippedEnd{};
+                axisVisible[axis] = ProjectLineSegmentClipped(camera,
+                                                              viewportMin,
+                                                              viewportWidth,
+                                                              viewportHeight,
+                                                              entityWorldPos,
+                                                              worldEnd,
+                                                              clippedStart,
+                                                              clippedEnd);
+                axisEnds[axis] = axisVisible[axis] ? clippedEnd : originScreen;
+                const float dx = axisEnds[axis].x - originScreen.x;
+                const float dy = axisEnds[axis].y - originScreen.y;
+                axisScreenLengths[axis] = std::sqrt(dx * dx + dy * dy);
+            }
 
             // If the selected entity changed mid-drag, abort
             if (gizmoState.DragActive && gizmoState.DragEntity != selectedEntity)
@@ -1438,45 +1800,30 @@ namespace Limitless::EditorViewportPanel
             // ---- TRANSLATE GIZMO ----
             if (gizmoState.Mode == TransformGizmoMode::Translate)
             {
-                const ImVec2 xEnd = axisEndpoint(0);
-                const ImVec2 yEnd = axisEndpoint(1);
+                auto drawArrowHead = [&](const ImVec2& endPoint, int axis) {
+                    const float dx = endPoint.x - originScreen.x;
+                    const float dy = endPoint.y - originScreen.y;
+                    const float length = std::sqrt(dx * dx + dy * dy);
+                    if (length <= 1.0f)
+                        return;
+
+                    const float nx = dx / length;
+                    const float ny = dy / length;
+                    const ImVec2 base1(endPoint.x - nx * kGizmoArrowSize - ny * kGizmoArrowSize * 0.4f,
+                                       endPoint.y - ny * kGizmoArrowSize + nx * kGizmoArrowSize * 0.4f);
+                    const ImVec2 base2(endPoint.x - nx * kGizmoArrowSize + ny * kGizmoArrowSize * 0.4f,
+                                       endPoint.y - ny * kGizmoArrowSize - nx * kGizmoArrowSize * 0.4f);
+                    drawList->AddTriangleFilled(endPoint, base1, base2, AxisColor(axis, activeAxis));
+                };
 
                 // Draw axes
-                drawList->AddLine(originScreen, xEnd, AxisColor(0, activeAxis), 2.5f);
-                drawList->AddLine(originScreen, yEnd, AxisColor(1, activeAxis), 2.5f);
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    if (!axisVisible[axis] || axisScreenLengths[axis] <= 1.0f)
+                        continue;
 
-                // Draw arrowheads
-                {
-                    const float dxX = xEnd.x - originScreen.x;
-                    const float dyX = xEnd.y - originScreen.y;
-                    const float lenX = std::sqrt(dxX * dxX + dyX * dyX);
-                    if (lenX > 1.0f)
-                    {
-                        const float nx = dxX / lenX;
-                        const float ny = dyX / lenX;
-                        const ImVec2 tip = xEnd;
-                        const ImVec2 base1(tip.x - nx * kGizmoArrowSize - ny * kGizmoArrowSize * 0.4f,
-                                           tip.y - ny * kGizmoArrowSize + nx * kGizmoArrowSize * 0.4f);
-                        const ImVec2 base2(tip.x - nx * kGizmoArrowSize + ny * kGizmoArrowSize * 0.4f,
-                                           tip.y - ny * kGizmoArrowSize - nx * kGizmoArrowSize * 0.4f);
-                        drawList->AddTriangleFilled(tip, base1, base2, AxisColor(0, activeAxis));
-                    }
-                }
-                {
-                    const float dxY = yEnd.x - originScreen.x;
-                    const float dyY = yEnd.y - originScreen.y;
-                    const float lenY = std::sqrt(dxY * dxY + dyY * dyY);
-                    if (lenY > 1.0f)
-                    {
-                        const float nx = dxY / lenY;
-                        const float ny = dyY / lenY;
-                        const ImVec2 tip = yEnd;
-                        const ImVec2 base1(tip.x - nx * kGizmoArrowSize - ny * kGizmoArrowSize * 0.4f,
-                                           tip.y - ny * kGizmoArrowSize + nx * kGizmoArrowSize * 0.4f);
-                        const ImVec2 base2(tip.x - nx * kGizmoArrowSize + ny * kGizmoArrowSize * 0.4f,
-                                           tip.y - ny * kGizmoArrowSize - nx * kGizmoArrowSize * 0.4f);
-                        drawList->AddTriangleFilled(tip, base1, base2, AxisColor(1, activeAxis));
-                    }
+                    drawList->AddLine(originScreen, axisEnds[axis], AxisColor(axis, activeAxis), 2.5f);
+                    drawArrowHead(axisEnds[axis], axis);
                 }
 
                 // XY plane handle (small square at offset)
@@ -1500,37 +1847,20 @@ namespace Limitless::EditorViewportPanel
                         hoveredAxis = 3; // XY plane
                     }
 
-                    // Check X axis
                     if (hoveredAxis < 0)
                     {
-                        const float dx = xEnd.x - originScreen.x;
-                        const float dy = xEnd.y - originScreen.y;
-                        const float len = std::sqrt(dx * dx + dy * dy);
-                        if (len > 1.0f)
+                        float bestDistance = kGizmoHitRadius + 1.0f;
+                        for (int axis = 0; axis < 3; ++axis)
                         {
-                            const float t = std::clamp(((mousePos.x - originScreen.x) * dx + (mousePos.y - originScreen.y) * dy) / (len * len), 0.0f, 1.0f);
-                            const float closestX = originScreen.x + t * dx;
-                            const float closestY = originScreen.y + t * dy;
-                            const float dist = std::sqrt((mousePos.x - closestX) * (mousePos.x - closestX) + (mousePos.y - closestY) * (mousePos.y - closestY));
-                            if (dist <= kGizmoHitRadius)
-                                hoveredAxis = 0;
-                        }
-                    }
+                            if (!axisVisible[axis] || axisScreenLengths[axis] <= 8.0f)
+                                continue;
 
-                    // Check Y axis
-                    if (hoveredAxis < 0)
-                    {
-                        const float dx = yEnd.x - originScreen.x;
-                        const float dy = yEnd.y - originScreen.y;
-                        const float len = std::sqrt(dx * dx + dy * dy);
-                        if (len > 1.0f)
-                        {
-                            const float t = std::clamp(((mousePos.x - originScreen.x) * dx + (mousePos.y - originScreen.y) * dy) / (len * len), 0.0f, 1.0f);
-                            const float closestX = originScreen.x + t * dx;
-                            const float closestY = originScreen.y + t * dy;
-                            const float dist = std::sqrt((mousePos.x - closestX) * (mousePos.x - closestX) + (mousePos.y - closestY) * (mousePos.y - closestY));
-                            if (dist <= kGizmoHitRadius)
-                                hoveredAxis = 1;
+                            const float distance = DistanceToLineSegment(mousePos, originScreen, axisEnds[axis]);
+                            if (distance <= kGizmoHitRadius && distance < bestDistance)
+                            {
+                                bestDistance = distance;
+                                hoveredAxis = axis;
+                            }
                         }
                     }
                 }
@@ -1547,9 +1877,32 @@ namespace Limitless::EditorViewportPanel
                     gizmoState.DragAxis = hoveredAxis;
                     gizmoState.DragEntity = selectedEntity;
                     gizmoState.DragStartEntityPosition = transform->Position;
+                    gizmoState.DragStartGizmoOrigin = entityWorldPos;
+                    gizmoState.DragStartMousePosition = glm::vec2(mousePos.x, mousePos.y);
+                    gizmoState.DragReferenceValue = worldAxisLength;
+
+                    if (hoveredAxis == 3)
+                    {
+                        gizmoState.DragPlaneNormal = glm::vec3(0.0f, 0.0f, 1.0f);
+                    }
+                    else
+                    {
+                        gizmoState.DragPlaneNormal = ComputeAxisDragPlaneNormal(camera,
+                                                                               GetGizmoAxisDirection(hoveredAxis),
+                                                                               entityWorldPos);
+                    }
 
                     glm::vec3 mouseWorld{};
-                    TryComputeDropWorldPosition(camera, viewportMin, viewportMax, mousePos, mouseWorld);
+                    if (!TryIntersectMouseWithPlane(camera,
+                                                    viewportMin,
+                                                    viewportMax,
+                                                    mousePos,
+                                                    gizmoState.DragStartGizmoOrigin,
+                                                    gizmoState.DragPlaneNormal,
+                                                    mouseWorld))
+                    {
+                        mouseWorld = gizmoState.DragStartGizmoOrigin;
+                    }
                     gizmoState.DragStartWorldPosition = mouseWorld;
 
                     // Snapshot multi-selection positions
@@ -1574,12 +1927,20 @@ namespace Limitless::EditorViewportPanel
                     gizmoState.Mode == TransformGizmoMode::Translate)
                 {
                     glm::vec3 currentMouseWorld{};
-                    if (TryComputeDropWorldPosition(camera, viewportMin, viewportMax, mousePos, currentMouseWorld))
+                    if (TryIntersectMouseWithPlane(camera,
+                                                   viewportMin,
+                                                   viewportMax,
+                                                   mousePos,
+                                                   gizmoState.DragStartGizmoOrigin,
+                                                   gizmoState.DragPlaneNormal,
+                                                   currentMouseWorld))
                     {
                         glm::vec3 delta = currentMouseWorld - gizmoState.DragStartWorldPosition;
-                        if (gizmoState.DragAxis == 0) delta.y = 0.0f; // X only
-                        else if (gizmoState.DragAxis == 1) delta.x = 0.0f; // Y only
-                        // axis==3 means XY plane, keep both
+                        if (gizmoState.DragAxis >= 0 && gizmoState.DragAxis < 3)
+                        {
+                            const glm::vec3 axisDirection = GetGizmoAxisDirection(gizmoState.DragAxis);
+                            delta = axisDirection * glm::dot(delta, axisDirection);
+                        }
 
                         transform->Position = gizmoState.DragStartEntityPosition + delta;
                         scene.MarkTransformDirty(selectedEntity);
@@ -1797,22 +2158,26 @@ namespace Limitless::EditorViewportPanel
             // ---- SCALE GIZMO ----
             else if (gizmoState.Mode == TransformGizmoMode::Scale)
             {
-                const ImVec2 xEnd = axisEndpoint(0);
-                const ImVec2 yEnd = axisEndpoint(1);
-
                 // Draw axes
-                drawList->AddLine(originScreen, xEnd, AxisColor(0, activeAxis), 2.5f);
-                drawList->AddLine(originScreen, yEnd, AxisColor(1, activeAxis), 2.5f);
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    if (!axisVisible[axis] || axisScreenLengths[axis] <= 1.0f)
+                        continue;
+
+                    drawList->AddLine(originScreen, axisEnds[axis], AxisColor(axis, activeAxis), 2.5f);
+                }
 
                 // Draw scale boxes at endpoints
-                drawList->AddRectFilled(
-                    ImVec2(xEnd.x - kGizmoScaleBoxSize, xEnd.y - kGizmoScaleBoxSize),
-                    ImVec2(xEnd.x + kGizmoScaleBoxSize, xEnd.y + kGizmoScaleBoxSize),
-                    AxisColor(0, activeAxis));
-                drawList->AddRectFilled(
-                    ImVec2(yEnd.x - kGizmoScaleBoxSize, yEnd.y - kGizmoScaleBoxSize),
-                    ImVec2(yEnd.x + kGizmoScaleBoxSize, yEnd.y + kGizmoScaleBoxSize),
-                    AxisColor(1, activeAxis));
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    if (!axisVisible[axis] || axisScreenLengths[axis] <= 8.0f)
+                        continue;
+
+                    drawList->AddRectFilled(
+                        ImVec2(axisEnds[axis].x - kGizmoScaleBoxSize, axisEnds[axis].y - kGizmoScaleBoxSize),
+                        ImVec2(axisEnds[axis].x + kGizmoScaleBoxSize, axisEnds[axis].y + kGizmoScaleBoxSize),
+                        AxisColor(axis, activeAxis));
+                }
 
                 // Center uniform scale handle
                 drawList->AddRectFilled(
@@ -1828,13 +2193,19 @@ namespace Limitless::EditorViewportPanel
                     if (IsMouseNearPoint(mousePos, originScreen, kGizmoScaleBoxSize + 4.0f))
                         hoveredAxis = 3;
 
-                    // X endpoint
-                    if (hoveredAxis < 0 && IsMouseNearPoint(mousePos, xEnd, kGizmoScaleBoxSize + 4.0f))
-                        hoveredAxis = 0;
+                    if (hoveredAxis < 0)
+                    {
+                        for (int axis = 0; axis < 3; ++axis)
+                        {
+                            if (!axisVisible[axis] || axisScreenLengths[axis] <= 8.0f)
+                                continue;
+                            if (!IsMouseNearPoint(mousePos, axisEnds[axis], kGizmoScaleBoxSize + 4.0f))
+                                continue;
 
-                    // Y endpoint
-                    if (hoveredAxis < 0 && IsMouseNearPoint(mousePos, yEnd, kGizmoScaleBoxSize + 4.0f))
-                        hoveredAxis = 1;
+                            hoveredAxis = axis;
+                            break;
+                        }
+                    }
                 }
 
                 if (hoveredAxis >= 0)
@@ -1849,10 +2220,24 @@ namespace Limitless::EditorViewportPanel
                     gizmoState.DragAxis = hoveredAxis;
                     gizmoState.DragEntity = selectedEntity;
                     gizmoState.DragStartEntityScale = transform->Scale;
+                    gizmoState.DragStartGizmoOrigin = entityWorldPos;
+                    gizmoState.DragStartMousePosition = glm::vec2(mousePos.x, mousePos.y);
 
-                    glm::vec3 mouseWorld{};
-                    TryComputeDropWorldPosition(camera, viewportMin, viewportMax, mousePos, mouseWorld);
-                    gizmoState.DragStartWorldPosition = mouseWorld;
+                    if (hoveredAxis == 3)
+                    {
+                        gizmoState.DragPlaneNormal = GetCameraForwardDirection(camera);
+                        gizmoState.DragStartWorldPosition = gizmoState.DragStartGizmoOrigin;
+                        const float dx = mousePos.x - originScreen.x;
+                        const float dy = mousePos.y - originScreen.y;
+                        gizmoState.DragReferenceValue = std::sqrt(dx * dx + dy * dy);
+                    }
+                    else
+                    {
+                        const glm::vec3 axisDirection = GetGizmoAxisDirection(hoveredAxis);
+                        gizmoState.DragPlaneNormal = ComputeAxisDragPlaneNormal(camera, axisDirection, entityWorldPos);
+                        gizmoState.DragStartWorldPosition = gizmoState.DragStartGizmoOrigin + axisDirection * worldAxisLength;
+                        gizmoState.DragReferenceValue = worldAxisLength;
+                    }
 
                     // Snapshot multi-selection scales
                     gizmoState.DragEntities.clear();
@@ -1875,42 +2260,59 @@ namespace Limitless::EditorViewportPanel
                 if (gizmoState.DragActive && gizmoState.DragEntity == selectedEntity &&
                     gizmoState.Mode == TransformGizmoMode::Scale)
                 {
-                    glm::vec3 currentMouseWorld{};
-                    if (TryComputeDropWorldPosition(camera, viewportMin, viewportMax, mousePos, currentMouseWorld))
+                    glm::vec3 scaleFactor(1.0f);
+                    if (gizmoState.DragAxis == 3)
                     {
-                        const glm::vec3 startOffset = gizmoState.DragStartWorldPosition - entityWorldPos;
-                        const glm::vec3 currentOffset = currentMouseWorld - entityWorldPos;
-
-                        auto safeDiv = [](float a, float b) -> float {
-                            return std::abs(b) > 0.001f ? a / b : 1.0f;
-                        };
-
-                        glm::vec3 scaleFactor(1.0f);
-                        if (gizmoState.DragAxis == 0)
-                            scaleFactor.x = safeDiv(currentOffset.x, startOffset.x);
-                        else if (gizmoState.DragAxis == 1)
-                            scaleFactor.y = safeDiv(currentOffset.y, startOffset.y);
-                        else // uniform
+                        const float startDistance = gizmoState.DragReferenceValue;
+                        float uniformFactor = 1.0f;
+                        if (startDistance > 8.0f)
                         {
-                            const float startDist = glm::length(glm::vec2(startOffset));
-                            const float currentDist = glm::length(glm::vec2(currentOffset));
-                            const float uniformFactor = (startDist > 0.001f) ? currentDist / startDist : 1.0f;
-                            scaleFactor = glm::vec3(uniformFactor);
+                            const float dx = mousePos.x - originScreen.x;
+                            const float dy = mousePos.y - originScreen.y;
+                            const float currentDistance = std::sqrt(dx * dx + dy * dy);
+                            uniformFactor = currentDistance / startDistance;
                         }
-
-                        transform->Scale = gizmoState.DragStartEntityScale * scaleFactor;
-                        scene.MarkTransformDirty(selectedEntity);
-
-                        for (size_t i = 0; i < gizmoState.DragEntities.size(); ++i)
+                        else
                         {
-                            entt::entity e = gizmoState.DragEntities[i];
-                            if (!scene.IsValid(e)) continue;
-                            auto* t = registry.try_get<TransformComponent>(e);
-                            if (t)
-                            {
-                                t->Scale = gizmoState.DragStartScales[i] * scaleFactor;
-                                scene.MarkTransformDirty(e);
-                            }
+                            const float deltaPixels = (mousePos.x - gizmoState.DragStartMousePosition.x) -
+                                                      (mousePos.y - gizmoState.DragStartMousePosition.y);
+                            uniformFactor = 1.0f + deltaPixels * 0.01f;
+                        }
+                        scaleFactor = glm::vec3(std::max(uniformFactor, 0.001f));
+                    }
+                    else
+                    {
+                        glm::vec3 currentMouseWorld{};
+                        if (TryIntersectMouseWithPlane(camera,
+                                                       viewportMin,
+                                                       viewportMax,
+                                                       mousePos,
+                                                       gizmoState.DragStartGizmoOrigin,
+                                                       gizmoState.DragPlaneNormal,
+                                                       currentMouseWorld))
+                        {
+                            const glm::vec3 axisDirection = GetGizmoAxisDirection(gizmoState.DragAxis);
+                            const float referenceDistance = std::abs(gizmoState.DragReferenceValue) > 0.001f
+                                ? gizmoState.DragReferenceValue
+                                : 1.0f;
+                            const float currentAxisDistance = glm::dot(currentMouseWorld - gizmoState.DragStartGizmoOrigin,
+                                                                       axisDirection);
+                            scaleFactor[gizmoState.DragAxis] = currentAxisDistance / referenceDistance;
+                        }
+                    }
+
+                    transform->Scale = gizmoState.DragStartEntityScale * scaleFactor;
+                    scene.MarkTransformDirty(selectedEntity);
+
+                    for (size_t i = 0; i < gizmoState.DragEntities.size(); ++i)
+                    {
+                        entt::entity e = gizmoState.DragEntities[i];
+                        if (!scene.IsValid(e)) continue;
+                        auto* t = registry.try_get<TransformComponent>(e);
+                        if (t)
+                        {
+                            t->Scale = gizmoState.DragStartScales[i] * scaleFactor;
+                            scene.MarkTransformDirty(e);
                         }
                     }
 
@@ -2226,7 +2628,7 @@ namespace Limitless::EditorViewportPanel
             }
         }
 
-        void DrawSelectedPhysicsOverlays(ImDrawList* drawList,
+        bool DrawSelectedPhysicsOverlays(ImDrawList* drawList,
                                          Scene& scene,
                                          const Camera& camera,
                                          entt::entity selectedEntity,
@@ -2237,10 +2639,11 @@ namespace Limitless::EditorViewportPanel
                                          EditorPlayModeState playModeState,
                                          EditorUndoService* undoService)
         {
-            (void)DrawAndHandleColliderGizmos(
+            const bool colliderCapturedInput = DrawAndHandleColliderGizmos(
                 drawList, scene, camera, selectedEntity, viewportMin, viewportMax, viewportWidth, viewportHeight, playModeState, undoService);
-            (void)DrawAndHandleLightingGizmos(
+            const bool lightingCapturedInput = !colliderCapturedInput && DrawAndHandleLightingGizmos(
                 drawList, scene, camera, selectedEntity, viewportMin, viewportMax, viewportWidth, viewportHeight, playModeState, undoService);
+            return colliderCapturedInput || lightingCapturedInput;
         }
     }
 
@@ -2444,16 +2847,16 @@ namespace Limitless::EditorViewportPanel
                     const ImVec2 viewportMin = sceneRectMin;
                     const ImVec2 viewportMax = sceneRectMax;
                     ImDrawList* drawList = ImGui::GetWindowDrawList();
-                    DrawSelectedPhysicsOverlays(drawList,
-                                                *scene,
-                                                *sceneViewCamera,
-                                                selectedEntity,
-                                                viewportMin,
-                                                viewportMax,
-                                                static_cast<float>(sceneWidth),
-                                                static_cast<float>(sceneHeight),
-                                                playModeState,
-                                                undoService);
+                    const bool physicsOverlayCapturedInput = DrawSelectedPhysicsOverlays(drawList,
+                                                                                         *scene,
+                                                                                         *sceneViewCamera,
+                                                                                         selectedEntity,
+                                                                                         viewportMin,
+                                                                                         viewportMax,
+                                                                                         static_cast<float>(sceneWidth),
+                                                                                         static_cast<float>(sceneHeight),
+                                                                                         playModeState,
+                                                                                         undoService);
                     if (tilemapEditorState)
                     {
                         // Grid2D + TilemapLayer editing.
@@ -2528,8 +2931,8 @@ namespace Limitless::EditorViewportPanel
                     }
 
                     // --- Transform gizmos ---
-                    bool gizmoCapturedInput = false;
-                    if (gizmoState)
+                    bool gizmoCapturedInput = physicsOverlayCapturedInput;
+                    if (gizmoState && !physicsOverlayCapturedInput)
                     {
                         static const std::vector<entt::entity> kEmptyEntities;
                         const std::vector<entt::entity>& multiEntities = scenePanelState
@@ -2546,7 +2949,7 @@ namespace Limitless::EditorViewportPanel
                             static_cast<float>(sceneHeight),
                             playModeState,
                             undoService,
-                            *gizmoState);
+                            *gizmoState) || gizmoCapturedInput;
                     }
 
                     // --- Scene view entity picking (click to select) ---

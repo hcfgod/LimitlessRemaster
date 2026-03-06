@@ -302,6 +302,15 @@ namespace Limitless::EditorInspectorPanel
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::CircleCollider2D))
             DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::PolygonCollider2D))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
+
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::EdgeCollider2D))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
+
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::CapsuleCollider2D))
+            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
+
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Joint2D))
             DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
@@ -415,6 +424,15 @@ namespace Limitless::EditorInspectorPanel
 
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::CircleCollider2D))
             ApplyPendingRemoval(*entry, pendingRemovals.RemoveCircleCollider2DComponent, registry, selectedEntity, undoService);
+
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::PolygonCollider2D))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemovePolygonCollider2DComponent, registry, selectedEntity, undoService);
+
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::EdgeCollider2D))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveEdgeCollider2DComponent, registry, selectedEntity, undoService);
+
+        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::CapsuleCollider2D))
+            ApplyPendingRemoval(*entry, pendingRemovals.RemoveCapsuleCollider2DComponent, registry, selectedEntity, undoService);
 
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Joint2D))
             ApplyPendingRemoval(*entry, pendingRemovals.RemoveJoint2DComponent, registry, selectedEntity, undoService);

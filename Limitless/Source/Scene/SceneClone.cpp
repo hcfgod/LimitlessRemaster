@@ -142,6 +142,24 @@ namespace Limitless
                 circleCollider2D->RuntimeShapeCreated = false;
             }
 
+            if (auto* polygonCollider2D = registry.try_get<PolygonCollider2DComponent>(entity))
+            {
+                polygonCollider2D->RuntimeShapeId = kNullPhysics2DShape;
+                polygonCollider2D->RuntimeShapeCreated = false;
+            }
+
+            if (auto* edgeCollider2D = registry.try_get<EdgeCollider2DComponent>(entity))
+            {
+                edgeCollider2D->RuntimeShapeId = kNullPhysics2DShape;
+                edgeCollider2D->RuntimeShapeCreated = false;
+            }
+
+            if (auto* capsuleCollider2D = registry.try_get<CapsuleCollider2DComponent>(entity))
+            {
+                capsuleCollider2D->RuntimeShapeId = kNullPhysics2DShape;
+                capsuleCollider2D->RuntimeShapeCreated = false;
+            }
+
             if (auto* joint2D = registry.try_get<Joint2DComponent>(entity))
             {
                 joint2D->RuntimeJointId = kNullPhysics2DJoint;
@@ -393,6 +411,27 @@ namespace Limitless
                 auto& destinationCircleCollider2D = destinationRegistry.emplace<CircleCollider2DComponent>(destinationEntity, *circleCollider2D);
                 destinationCircleCollider2D.RuntimeShapeId = kNullPhysics2DShape;
                 destinationCircleCollider2D.RuntimeShapeCreated = false;
+            }
+
+            if (const auto* polygonCollider2D = sourceRegistry.try_get<PolygonCollider2DComponent>(sourceEntity))
+            {
+                auto& destinationPolygonCollider2D = destinationRegistry.emplace<PolygonCollider2DComponent>(destinationEntity, *polygonCollider2D);
+                destinationPolygonCollider2D.RuntimeShapeId = kNullPhysics2DShape;
+                destinationPolygonCollider2D.RuntimeShapeCreated = false;
+            }
+
+            if (const auto* edgeCollider2D = sourceRegistry.try_get<EdgeCollider2DComponent>(sourceEntity))
+            {
+                auto& destinationEdgeCollider2D = destinationRegistry.emplace<EdgeCollider2DComponent>(destinationEntity, *edgeCollider2D);
+                destinationEdgeCollider2D.RuntimeShapeId = kNullPhysics2DShape;
+                destinationEdgeCollider2D.RuntimeShapeCreated = false;
+            }
+
+            if (const auto* capsuleCollider2D = sourceRegistry.try_get<CapsuleCollider2DComponent>(sourceEntity))
+            {
+                auto& destinationCapsuleCollider2D = destinationRegistry.emplace<CapsuleCollider2DComponent>(destinationEntity, *capsuleCollider2D);
+                destinationCapsuleCollider2D.RuntimeShapeId = kNullPhysics2DShape;
+                destinationCapsuleCollider2D.RuntimeShapeCreated = false;
             }
 
             if (const auto* joint2D = sourceRegistry.try_get<Joint2DComponent>(sourceEntity))

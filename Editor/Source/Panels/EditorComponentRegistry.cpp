@@ -190,6 +190,33 @@ namespace Limitless::EditorInspectorPanel
             &RemoveComponent<CircleCollider2DComponent>
         };
 
+        const ComponentRegistryEntry kPolygonCollider2DEntry{
+            "Polygon Collider 2D",
+            "Add PolygonCollider2D Component",
+            "Remove PolygonCollider2D Component",
+            &HasComponent<PolygonCollider2DComponent>,
+            &AddComponent<PolygonCollider2DComponent>,
+            &RemoveComponent<PolygonCollider2DComponent>
+        };
+
+        const ComponentRegistryEntry kEdgeCollider2DEntry{
+            "Edge Collider 2D",
+            "Add EdgeCollider2D Component",
+            "Remove EdgeCollider2D Component",
+            &HasComponent<EdgeCollider2DComponent>,
+            &AddComponent<EdgeCollider2DComponent>,
+            &RemoveComponent<EdgeCollider2DComponent>
+        };
+
+        const ComponentRegistryEntry kCapsuleCollider2DEntry{
+            "Capsule Collider 2D",
+            "Add CapsuleCollider2D Component",
+            "Remove CapsuleCollider2D Component",
+            &HasComponent<CapsuleCollider2DComponent>,
+            &AddComponent<CapsuleCollider2DComponent>,
+            &RemoveComponent<CapsuleCollider2DComponent>
+        };
+
         const ComponentRegistryEntry kJoint2DEntry{
             "Joint 2D",
             "Add Joint2D Component",
@@ -369,6 +396,12 @@ namespace Limitless::EditorInspectorPanel
                 return &kParticleEmitterEntry;
             case ComponentRegistryKey::CircleCollider2D:
                 return &kCircleCollider2DEntry;
+            case ComponentRegistryKey::PolygonCollider2D:
+                return &kPolygonCollider2DEntry;
+            case ComponentRegistryKey::EdgeCollider2D:
+                return &kEdgeCollider2DEntry;
+            case ComponentRegistryKey::CapsuleCollider2D:
+                return &kCapsuleCollider2DEntry;
             case ComponentRegistryKey::Joint2D:
                 return &kJoint2DEntry;
             case ComponentRegistryKey::Grid2D:

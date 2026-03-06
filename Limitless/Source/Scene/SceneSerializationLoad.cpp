@@ -144,6 +144,24 @@ namespace Limitless
                 circleCollider2D->RuntimeShapeCreated = false;
             }
 
+            if (auto* polygonCollider2D = registry.try_get<PolygonCollider2DComponent>(entity))
+            {
+                polygonCollider2D->RuntimeShapeId = kNullPhysics2DShape;
+                polygonCollider2D->RuntimeShapeCreated = false;
+            }
+
+            if (auto* edgeCollider2D = registry.try_get<EdgeCollider2DComponent>(entity))
+            {
+                edgeCollider2D->RuntimeShapeId = kNullPhysics2DShape;
+                edgeCollider2D->RuntimeShapeCreated = false;
+            }
+
+            if (auto* capsuleCollider2D = registry.try_get<CapsuleCollider2DComponent>(entity))
+            {
+                capsuleCollider2D->RuntimeShapeId = kNullPhysics2DShape;
+                capsuleCollider2D->RuntimeShapeCreated = false;
+            }
+
             if (auto* joint2D = registry.try_get<Joint2DComponent>(entity))
             {
                 joint2D->RuntimeJointId = kNullPhysics2DJoint;
@@ -903,6 +921,88 @@ namespace Limitless
                 circleCollider2D.CollisionMask = circleCollider2DJson.value("CollisionMask", ~0ull);
                 circleCollider2D.RuntimeShapeId = kNullPhysics2DShape;
                 circleCollider2D.RuntimeShapeCreated = false;
+            }
+
+            if (entry.contains("PolygonCollider2D") && entry["PolygonCollider2D"].is_object())
+            {
+                const auto& polygonCollider2DJson = entry["PolygonCollider2D"];
+                auto& polygonCollider2D = scene->GetRegistry().emplace<PolygonCollider2DComponent>(entity);
+                auto offset = polygonCollider2DJson.value("Offset", std::vector<float>{ 0.0f, 0.0f });
+                if (offset.size() >= 2)
+                    polygonCollider2D.Offset = glm::vec2(offset[0], offset[1]);
+                polygonCollider2D.Points.clear();
+                if (polygonCollider2DJson.contains("Points") && polygonCollider2DJson["Points"].is_array())
+                {
+                    for (const auto& pointJson : polygonCollider2DJson["Points"])
+                    {
+                        if (!pointJson.is_array() || pointJson.size() < 2)
+                            continue;
+                        polygonCollider2D.Points.emplace_back(pointJson[0].get<float>(), pointJson[1].get<float>());
+                    }
+                }
+                if (polygonCollider2D.Points.empty())
+                {
+                    polygonCollider2D.Points = {
+                        glm::vec2(-0.5f, -0.5f),
+                        glm::vec2(0.5f, -0.5f),
+                        glm::vec2(0.5f, 0.5f),
+                        glm::vec2(-0.5f, 0.5f)
+                    };
+                }
+                polygonCollider2D.Density = polygonCollider2DJson.value("Density", 1.0f);
+                polygonCollider2D.Friction = polygonCollider2DJson.value("Friction", 0.5f);
+                polygonCollider2D.Restitution = polygonCollider2DJson.value("Restitution", 0.0f);
+                polygonCollider2D.IsSensor = polygonCollider2DJson.value("IsSensor", false);
+                polygonCollider2D.CollisionLayer = polygonCollider2DJson.value("CollisionLayer", 1ull);
+                polygonCollider2D.CollisionMask = polygonCollider2DJson.value("CollisionMask", ~0ull);
+                polygonCollider2D.RuntimeShapeId = kNullPhysics2DShape;
+                polygonCollider2D.RuntimeShapeCreated = false;
+            }
+
+            if (entry.contains("EdgeCollider2D") && entry["EdgeCollider2D"].is_object())
+            {
+                const auto& edgeCollider2DJson = entry["EdgeCollider2D"];
+                auto& edgeCollider2D = scene->GetRegistry().emplace<EdgeCollider2DComponent>(entity);
+                auto offset = edgeCollider2DJson.value("Offset", std::vector<float>{ 0.0f, 0.0f });
+                if (offset.size() >= 2)
+                    edgeCollider2D.Offset = glm::vec2(offset[0], offset[1]);
+                auto pointA = edgeCollider2DJson.value("PointA", std::vector<float>{ -0.5f, 0.0f });
+                if (pointA.size() >= 2)
+                    edgeCollider2D.PointA = glm::vec2(pointA[0], pointA[1]);
+                auto pointB = edgeCollider2DJson.value("PointB", std::vector<float>{ 0.5f, 0.0f });
+                if (pointB.size() >= 2)
+                    edgeCollider2D.PointB = glm::vec2(pointB[0], pointB[1]);
+                edgeCollider2D.Friction = edgeCollider2DJson.value("Friction", 0.5f);
+                edgeCollider2D.Restitution = edgeCollider2DJson.value("Restitution", 0.0f);
+                edgeCollider2D.IsSensor = edgeCollider2DJson.value("IsSensor", false);
+                edgeCollider2D.CollisionLayer = edgeCollider2DJson.value("CollisionLayer", 1ull);
+                edgeCollider2D.CollisionMask = edgeCollider2DJson.value("CollisionMask", ~0ull);
+                edgeCollider2D.RuntimeShapeId = kNullPhysics2DShape;
+                edgeCollider2D.RuntimeShapeCreated = false;
+            }
+
+            if (entry.contains("CapsuleCollider2D") && entry["CapsuleCollider2D"].is_object())
+            {
+                const auto& capsuleCollider2DJson = entry["CapsuleCollider2D"];
+                auto& capsuleCollider2D = scene->GetRegistry().emplace<CapsuleCollider2DComponent>(entity);
+                auto offset = capsuleCollider2DJson.value("Offset", std::vector<float>{ 0.0f, 0.0f });
+                if (offset.size() >= 2)
+                    capsuleCollider2D.Offset = glm::vec2(offset[0], offset[1]);
+                auto size = capsuleCollider2DJson.value("Size", std::vector<float>{ 1.0f, 2.0f });
+                if (size.size() >= 2)
+                    capsuleCollider2D.Size = glm::vec2(size[0], size[1]);
+                const std::string direction = capsuleCollider2DJson.value("Direction", std::string("Vertical"));
+                capsuleCollider2D.Direction = direction == "Horizontal"
+                    ? CapsuleCollider2DComponent::Orientation::Horizontal
+                    : CapsuleCollider2DComponent::Orientation::Vertical;
+                capsuleCollider2D.Density = capsuleCollider2DJson.value("Density", 1.0f);
+                capsuleCollider2D.Friction = capsuleCollider2DJson.value("Friction", 0.5f);
+                capsuleCollider2D.Restitution = capsuleCollider2DJson.value("Restitution", 0.0f);
+                capsuleCollider2D.IsSensor = capsuleCollider2DJson.value("IsSensor", false);
+                capsuleCollider2D.CollisionLayer = capsuleCollider2DJson.value("CollisionLayer", 1ull);
+                capsuleCollider2D.CollisionMask = capsuleCollider2DJson.value("CollisionMask", ~0ull);
+                capsuleCollider2D.RuntimeShapeId = kNullPhysics2DShape;
+                capsuleCollider2D.RuntimeShapeCreated = false;
             }
 
             if (entry.contains("Joint2D") && entry["Joint2D"].is_object())

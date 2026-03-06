@@ -11,6 +11,7 @@
 #include <unordered_set>
 #include <vector>
 #include <glm/gtc/constants.hpp>
+#include <array>
 
 // Verify at compile time that our handle typedefs match Box2D's actual types.
 // If Box2D ever changes its ID layout, these asserts will catch it immediately.
@@ -169,11 +170,52 @@ namespace Limitless
             return static_cast<uint64_t>(std::bit_cast<uint32_t>(value));
         }
 
+        uint64_t HashPoints(uint64_t seed, const std::vector<glm::vec2>& points)
+        {
+            seed = HashCombine64(seed, static_cast<uint64_t>(points.size()));
+            for (const glm::vec2& point : points)
+            {
+                seed = HashCombine64(seed, HashFloat(point.x));
+                seed = HashCombine64(seed, HashFloat(point.y));
+            }
+            return seed;
+        }
+
+        b2ShapeDef MakeShapeDefinition(float density,
+                                        bool isSensor,
+                                        uint64_t collisionLayer,
+                                        uint64_t collisionMask,
+                                        Rigidbody2DComponent::BodyType bodyType,
+                                        bool updateBodyMass)
+        {
+            b2ShapeDef shapeDefinition = b2DefaultShapeDef();
+            shapeDefinition.density = glm::clamp(
+                SanitizeFiniteNonNegative(density, 1.0f),
+                0.0f,
+                kMaximumShapeDensity);
+            shapeDefinition.isSensor = isSensor;
+            shapeDefinition.enableContactEvents = true;
+            shapeDefinition.filter.categoryBits = collisionLayer;
+            shapeDefinition.filter.maskBits = collisionMask;
+            shapeDefinition.updateBodyMass = updateBodyMass && !shapeDefinition.isSensor;
+            if (bodyType == Rigidbody2DComponent::BodyType::Dynamic && shapeDefinition.updateBodyMass)
+            {
+                shapeDefinition.density = glm::clamp(
+                    shapeDefinition.density,
+                    kMinimumDynamicShapeDensity,
+                    kMaximumShapeDensity);
+            }
+            return shapeDefinition;
+        }
+
         uint64_t BuildBodyAndShapeSignature(const Rigidbody2DComponent& rigidbody,
-                                            const TransformComponent& transform,
-                                            const BoxCollider2DComponent* boxCollider,
-                                            const CircleCollider2DComponent* circleCollider,
-                                            uint16_t worldSlot)
+                                             const TransformComponent& transform,
+                                             const BoxCollider2DComponent* boxCollider,
+                                             const CircleCollider2DComponent* circleCollider,
+                                             const PolygonCollider2DComponent* polygonCollider,
+                                             const EdgeCollider2DComponent* edgeCollider,
+                                             const CapsuleCollider2DComponent* capsuleCollider,
+                                             uint16_t worldSlot)
         {
             uint64_t signature = 0;
             signature = HashCombine64(signature, static_cast<uint64_t>(worldSlot));
@@ -208,6 +250,52 @@ namespace Limitless
                 signature = HashCombine64(signature, circleCollider->IsSensor ? 1ull : 0ull);
                 signature = HashCombine64(signature, circleCollider->CollisionLayer);
                 signature = HashCombine64(signature, circleCollider->CollisionMask);
+            }
+
+            signature = HashCombine64(signature, polygonCollider ? 1ull : 0ull);
+            if (polygonCollider)
+            {
+                signature = HashCombine64(signature, HashFloat(polygonCollider->Offset.x));
+                signature = HashCombine64(signature, HashFloat(polygonCollider->Offset.y));
+                signature = HashPoints(signature, polygonCollider->Points);
+                signature = HashCombine64(signature, HashFloat(polygonCollider->Density));
+                signature = HashCombine64(signature, HashFloat(polygonCollider->Friction));
+                signature = HashCombine64(signature, HashFloat(polygonCollider->Restitution));
+                signature = HashCombine64(signature, polygonCollider->IsSensor ? 1ull : 0ull);
+                signature = HashCombine64(signature, polygonCollider->CollisionLayer);
+                signature = HashCombine64(signature, polygonCollider->CollisionMask);
+            }
+
+            signature = HashCombine64(signature, edgeCollider ? 1ull : 0ull);
+            if (edgeCollider)
+            {
+                signature = HashCombine64(signature, HashFloat(edgeCollider->Offset.x));
+                signature = HashCombine64(signature, HashFloat(edgeCollider->Offset.y));
+                signature = HashCombine64(signature, HashFloat(edgeCollider->PointA.x));
+                signature = HashCombine64(signature, HashFloat(edgeCollider->PointA.y));
+                signature = HashCombine64(signature, HashFloat(edgeCollider->PointB.x));
+                signature = HashCombine64(signature, HashFloat(edgeCollider->PointB.y));
+                signature = HashCombine64(signature, HashFloat(edgeCollider->Friction));
+                signature = HashCombine64(signature, HashFloat(edgeCollider->Restitution));
+                signature = HashCombine64(signature, edgeCollider->IsSensor ? 1ull : 0ull);
+                signature = HashCombine64(signature, edgeCollider->CollisionLayer);
+                signature = HashCombine64(signature, edgeCollider->CollisionMask);
+            }
+
+            signature = HashCombine64(signature, capsuleCollider ? 1ull : 0ull);
+            if (capsuleCollider)
+            {
+                signature = HashCombine64(signature, HashFloat(capsuleCollider->Offset.x));
+                signature = HashCombine64(signature, HashFloat(capsuleCollider->Offset.y));
+                signature = HashCombine64(signature, HashFloat(capsuleCollider->Size.x));
+                signature = HashCombine64(signature, HashFloat(capsuleCollider->Size.y));
+                signature = HashCombine64(signature, static_cast<uint64_t>(capsuleCollider->Direction));
+                signature = HashCombine64(signature, HashFloat(capsuleCollider->Density));
+                signature = HashCombine64(signature, HashFloat(capsuleCollider->Friction));
+                signature = HashCombine64(signature, HashFloat(capsuleCollider->Restitution));
+                signature = HashCombine64(signature, capsuleCollider->IsSensor ? 1ull : 0ull);
+                signature = HashCombine64(signature, capsuleCollider->CollisionLayer);
+                signature = HashCombine64(signature, capsuleCollider->CollisionMask);
             }
 
             return signature;
@@ -321,6 +409,21 @@ namespace Limitless
         {
             circleCollider->RuntimeShapeId = kNullPhysics2DShape;
             circleCollider->RuntimeShapeCreated = false;
+        }
+        if (auto* polygonCollider = registry.try_get<PolygonCollider2DComponent>(entity))
+        {
+            polygonCollider->RuntimeShapeId = kNullPhysics2DShape;
+            polygonCollider->RuntimeShapeCreated = false;
+        }
+        if (auto* edgeCollider = registry.try_get<EdgeCollider2DComponent>(entity))
+        {
+            edgeCollider->RuntimeShapeId = kNullPhysics2DShape;
+            edgeCollider->RuntimeShapeCreated = false;
+        }
+        if (auto* capsuleCollider = registry.try_get<CapsuleCollider2DComponent>(entity))
+        {
+            capsuleCollider->RuntimeShapeId = kNullPhysics2DShape;
+            capsuleCollider->RuntimeShapeCreated = false;
         }
         if (auto* joint = registry.try_get<Joint2DComponent>(entity))
         {
@@ -508,6 +611,42 @@ namespace Limitless
             collider.RuntimeShapeCreated = false;
         }
 
+        auto polygonColliderView = registry.view<PolygonCollider2DComponent>();
+        for (auto [entity, collider] : polygonColliderView.each())
+        {
+            const auto* rigidbody = registry.try_get<Rigidbody2DComponent>(entity);
+            if (!rigidbody || rigidbody->RuntimeWorldSlot != m_SceneWorldSlot)
+                continue;
+#ifdef LT_ENABLE_PHYSICS2D
+            collider.RuntimeShapeId = kNullPhysics2DShape;
+#endif
+            collider.RuntimeShapeCreated = false;
+        }
+
+        auto edgeColliderView = registry.view<EdgeCollider2DComponent>();
+        for (auto [entity, collider] : edgeColliderView.each())
+        {
+            const auto* rigidbody = registry.try_get<Rigidbody2DComponent>(entity);
+            if (!rigidbody || rigidbody->RuntimeWorldSlot != m_SceneWorldSlot)
+                continue;
+#ifdef LT_ENABLE_PHYSICS2D
+            collider.RuntimeShapeId = kNullPhysics2DShape;
+#endif
+            collider.RuntimeShapeCreated = false;
+        }
+
+        auto capsuleColliderView = registry.view<CapsuleCollider2DComponent>();
+        for (auto [entity, collider] : capsuleColliderView.each())
+        {
+            const auto* rigidbody = registry.try_get<Rigidbody2DComponent>(entity);
+            if (!rigidbody || rigidbody->RuntimeWorldSlot != m_SceneWorldSlot)
+                continue;
+#ifdef LT_ENABLE_PHYSICS2D
+            collider.RuntimeShapeId = kNullPhysics2DShape;
+#endif
+            collider.RuntimeShapeCreated = false;
+        }
+
         auto bodyView = registry.view<Rigidbody2DComponent>();
         for (auto [entity, rigidbody] : bodyView.each())
         {
@@ -521,6 +660,8 @@ namespace Limitless
 #endif
             rigidbody.RuntimeBodyCreated = false;
             rigidbody.RuntimeWorldSlot = 0;
+            rigidbody.RuntimeContactCount = 0;
+            rigidbody.RuntimeContactCountExcludingSensors = 0;
             rigidbody.RuntimeBodyAndShapeSignature = 0;
             rigidbody.RuntimePreviousPosition = glm::vec2(0.0f);
             rigidbody.RuntimePreviousAngleRadians = 0.0f;
@@ -535,8 +676,6 @@ namespace Limitless
             rigidbody.RuntimeHasPendingLinearVelocityX = false;
             rigidbody.RuntimePendingLinearVelocityY = 0.0f;
             rigidbody.RuntimeHasPendingLinearVelocityY = false;
-            rigidbody.RuntimeContactCount = 0;
-            rigidbody.RuntimeContactCountExcludingSensors = 0;
         }
         m_Diagnostics = Physics2DDiagnostics{};
         m_BodyDiagnostics.clear();
@@ -556,6 +695,9 @@ namespace Limitless
             auto& rigidbody = bodyView.get<Rigidbody2DComponent>(entity);
             auto* boxCollider = registry.try_get<BoxCollider2DComponent>(entity);
             auto* circleCollider = registry.try_get<CircleCollider2DComponent>(entity);
+            auto* polygonCollider = registry.try_get<PolygonCollider2DComponent>(entity);
+            auto* edgeCollider = registry.try_get<EdgeCollider2DComponent>(entity);
+            auto* capsuleCollider = registry.try_get<CapsuleCollider2DComponent>(entity);
             const bool assignedToThisWorld = IsEntityAssignedToWorld(scene, entity, m_SceneWorldSlot, &rigidbody);
             if (!assignedToThisWorld)
             {
@@ -578,6 +720,21 @@ namespace Limitless
                     {
                         circleCollider->RuntimeShapeId = kNullPhysics2DShape;
                         circleCollider->RuntimeShapeCreated = false;
+                    }
+                    if (polygonCollider)
+                    {
+                        polygonCollider->RuntimeShapeId = kNullPhysics2DShape;
+                        polygonCollider->RuntimeShapeCreated = false;
+                    }
+                    if (edgeCollider)
+                    {
+                        edgeCollider->RuntimeShapeId = kNullPhysics2DShape;
+                        edgeCollider->RuntimeShapeCreated = false;
+                    }
+                    if (capsuleCollider)
+                    {
+                        capsuleCollider->RuntimeShapeId = kNullPhysics2DShape;
+                        capsuleCollider->RuntimeShapeCreated = false;
                     }
                 }
                 continue;
@@ -607,12 +764,34 @@ namespace Limitless
                     circleCollider->RuntimeShapeId = kNullPhysics2DShape;
                     circleCollider->RuntimeShapeCreated = false;
                 }
+                if (polygonCollider)
+                {
+                    polygonCollider->RuntimeShapeId = kNullPhysics2DShape;
+                    polygonCollider->RuntimeShapeCreated = false;
+                }
+                if (edgeCollider)
+                {
+                    edgeCollider->RuntimeShapeId = kNullPhysics2DShape;
+                    edgeCollider->RuntimeShapeCreated = false;
+                }
+                if (capsuleCollider)
+                {
+                    capsuleCollider->RuntimeShapeId = kNullPhysics2DShape;
+                    capsuleCollider->RuntimeShapeCreated = false;
+                }
                 continue;
             }
 
             auto& transform = bodyView.get<TransformComponent>(entity);
             const uint64_t desiredBodyAndShapeSignature =
-                BuildBodyAndShapeSignature(rigidbody, transform, boxCollider, circleCollider, m_SceneWorldSlot);
+                BuildBodyAndShapeSignature(rigidbody,
+                                            transform,
+                                            boxCollider,
+                                            circleCollider,
+                                            polygonCollider,
+                                            edgeCollider,
+                                            capsuleCollider,
+                                            m_SceneWorldSlot);
 
             const bool hasValidRuntimeBody = rigidbody.RuntimeBodyCreated && b2Body_IsValid(rigidbody.RuntimeBodyId);
             bool shouldRebuildExistingRuntimeBody = false;
@@ -653,6 +832,21 @@ namespace Limitless
                 {
                     circleCollider->RuntimeShapeId = kNullPhysics2DShape;
                     circleCollider->RuntimeShapeCreated = false;
+                }
+                if (polygonCollider)
+                {
+                    polygonCollider->RuntimeShapeId = kNullPhysics2DShape;
+                    polygonCollider->RuntimeShapeCreated = false;
+                }
+                if (edgeCollider)
+                {
+                    edgeCollider->RuntimeShapeId = kNullPhysics2DShape;
+                    edgeCollider->RuntimeShapeCreated = false;
+                }
+                if (capsuleCollider)
+                {
+                    capsuleCollider->RuntimeShapeId = kNullPhysics2DShape;
+                    capsuleCollider->RuntimeShapeCreated = false;
                 }
             }
 
@@ -799,23 +993,12 @@ namespace Limitless
                     rigidbody.RuntimeWarnedInvalidBodyParameters = true;
                 }
 
-                b2ShapeDef shapeDefinition = b2DefaultShapeDef();
-                shapeDefinition.density = glm::clamp(
-                    SanitizeFiniteNonNegative(boxCollider->Density, 1.0f),
-                    0.0f,
-                    kMaximumShapeDensity);
-                shapeDefinition.isSensor = boxCollider->IsSensor;
-                shapeDefinition.enableContactEvents = true;
-                shapeDefinition.filter.categoryBits = boxCollider->CollisionLayer;
-                shapeDefinition.filter.maskBits = boxCollider->CollisionMask;
-                shapeDefinition.updateBodyMass = !shapeDefinition.isSensor;
-                if (rigidbody.Type == Rigidbody2DComponent::BodyType::Dynamic && !shapeDefinition.isSensor)
-                {
-                    shapeDefinition.density = glm::clamp(
-                        shapeDefinition.density,
-                        kMinimumDynamicShapeDensity,
-                        kMaximumShapeDensity);
-                }
+                b2ShapeDef shapeDefinition = MakeShapeDefinition(boxCollider->Density,
+                                                                  boxCollider->IsSensor,
+                                                                  boxCollider->CollisionLayer,
+                                                                  boxCollider->CollisionMask,
+                                                                  rigidbody.Type,
+                                                                  true);
                 b2Polygon boxPolygon = b2MakeOffsetBox(
                     halfWidth,
                     halfHeight,
@@ -865,23 +1048,12 @@ namespace Limitless
                     rigidbody.RuntimeWarnedInvalidBodyParameters = true;
                 }
 
-                b2ShapeDef shapeDefinition = b2DefaultShapeDef();
-                shapeDefinition.density = glm::clamp(
-                    SanitizeFiniteNonNegative(circleCollider->Density, 1.0f),
-                    0.0f,
-                    kMaximumShapeDensity);
-                shapeDefinition.isSensor = circleCollider->IsSensor;
-                shapeDefinition.enableContactEvents = true;
-                shapeDefinition.filter.categoryBits = circleCollider->CollisionLayer;
-                shapeDefinition.filter.maskBits = circleCollider->CollisionMask;
-                shapeDefinition.updateBodyMass = !shapeDefinition.isSensor;
-                if (rigidbody.Type == Rigidbody2DComponent::BodyType::Dynamic && !shapeDefinition.isSensor)
-                {
-                    shapeDefinition.density = glm::clamp(
-                        shapeDefinition.density,
-                        kMinimumDynamicShapeDensity,
-                        kMaximumShapeDensity);
-                }
+                b2ShapeDef shapeDefinition = MakeShapeDefinition(circleCollider->Density,
+                                                                  circleCollider->IsSensor,
+                                                                  circleCollider->CollisionLayer,
+                                                                  circleCollider->CollisionMask,
+                                                                  rigidbody.Type,
+                                                                  true);
                 b2Circle circleShape{};
                 circleShape.center = {
                     glm::clamp(safeCircleOffsetX * safeScaleX, -kMaximumColliderOffset, kMaximumColliderOffset),
@@ -897,6 +1069,214 @@ namespace Limitless
                     b2Shape_SetRestitution(
                         circleCollider->RuntimeShapeId,
                         glm::clamp(SanitizeFiniteNonNegative(circleCollider->Restitution, 0.0f), 0.0f, 1.0f));
+                }
+            }
+
+            if (polygonCollider)
+            {
+                const float safeScaleX = SanitizeFinite(transform.Scale.x, 1.0f);
+                const float safeScaleY = SanitizeFinite(transform.Scale.y, 1.0f);
+                const float safeOffsetX = SanitizeFinite(polygonCollider->Offset.x, 0.0f);
+                const float safeOffsetY = SanitizeFinite(polygonCollider->Offset.y, 0.0f);
+                const size_t pointCount = std::min<size_t>(polygonCollider->Points.size(), kPhysics2DPolygonMaxPoints);
+                std::array<b2Vec2, kPhysics2DPolygonMaxPoints> polygonPoints{};
+                bool hadInvalidPolygonParameters = (safeScaleX != transform.Scale.x) ||
+                                                   (safeScaleY != transform.Scale.y) ||
+                                                   (safeOffsetX != polygonCollider->Offset.x) ||
+                                                   (safeOffsetY != polygonCollider->Offset.y) ||
+                                                   (pointCount != polygonCollider->Points.size());
+                for (size_t pointIndex = 0; pointIndex < pointCount; ++pointIndex)
+                {
+                    const glm::vec2& authoredPoint = polygonCollider->Points[pointIndex];
+                    const float safePointX = SanitizeFinite(authoredPoint.x, 0.0f);
+                    const float safePointY = SanitizeFinite(authoredPoint.y, 0.0f);
+                    hadInvalidPolygonParameters = hadInvalidPolygonParameters ||
+                                                  (safePointX != authoredPoint.x) ||
+                                                  (safePointY != authoredPoint.y);
+                    polygonPoints[pointIndex] = {
+                        glm::clamp((safeOffsetX + safePointX) * safeScaleX, -kMaximumColliderOffset, kMaximumColliderOffset),
+                        glm::clamp((safeOffsetY + safePointY) * safeScaleY, -kMaximumColliderOffset, kMaximumColliderOffset)
+                    };
+                }
+
+                if (hadInvalidPolygonParameters && !rigidbody.RuntimeWarnedInvalidBodyParameters)
+                {
+                    const auto* tag = registry.try_get<TagComponent>(entity);
+                    LT_WARN("Physics2D: sanitized invalid polygon collider parameters for entity '{}' (pointCount={}, offset=({}, {}), scale=({}, {})).",
+                            tag ? tag->Tag : "Entity",
+                            polygonCollider->Points.size(),
+                            polygonCollider->Offset.x,
+                            polygonCollider->Offset.y,
+                            transform.Scale.x,
+                            transform.Scale.y);
+                    rigidbody.RuntimeWarnedInvalidBodyParameters = true;
+                }
+
+                polygonCollider->RuntimeShapeId = kNullPhysics2DShape;
+                polygonCollider->RuntimeShapeCreated = false;
+                if (pointCount >= 3)
+                {
+                    const b2Hull hull = b2ComputeHull(polygonPoints.data(), static_cast<int>(pointCount));
+                    if (hull.count >= 3 && b2ValidateHull(&hull))
+                    {
+                        b2ShapeDef shapeDefinition = MakeShapeDefinition(polygonCollider->Density,
+                                                                          polygonCollider->IsSensor,
+                                                                          polygonCollider->CollisionLayer,
+                                                                          polygonCollider->CollisionMask,
+                                                                          rigidbody.Type,
+                                                                          true);
+                        const b2Polygon polygonShape = b2MakePolygon(&hull, 0.0f);
+                        polygonCollider->RuntimeShapeId = b2CreatePolygonShape(rigidbody.RuntimeBodyId, &shapeDefinition, &polygonShape);
+                        polygonCollider->RuntimeShapeCreated = b2Shape_IsValid(polygonCollider->RuntimeShapeId);
+                        if (polygonCollider->RuntimeShapeCreated)
+                        {
+                            b2Shape_SetFriction(polygonCollider->RuntimeShapeId, SanitizeFiniteNonNegative(polygonCollider->Friction, 0.5f));
+                            b2Shape_SetRestitution(
+                                polygonCollider->RuntimeShapeId,
+                                glm::clamp(SanitizeFiniteNonNegative(polygonCollider->Restitution, 0.0f), 0.0f, 1.0f));
+                        }
+                    }
+                }
+            }
+
+            if (edgeCollider)
+            {
+                const float safeScaleX = SanitizeFinite(transform.Scale.x, 1.0f);
+                const float safeScaleY = SanitizeFinite(transform.Scale.y, 1.0f);
+                const float safeOffsetX = SanitizeFinite(edgeCollider->Offset.x, 0.0f);
+                const float safeOffsetY = SanitizeFinite(edgeCollider->Offset.y, 0.0f);
+                const float safePointAX = SanitizeFinite(edgeCollider->PointA.x, -0.5f);
+                const float safePointAY = SanitizeFinite(edgeCollider->PointA.y, 0.0f);
+                const float safePointBX = SanitizeFinite(edgeCollider->PointB.x, 0.5f);
+                const float safePointBY = SanitizeFinite(edgeCollider->PointB.y, 0.0f);
+                const b2Vec2 pointA = {
+                    glm::clamp((safeOffsetX + safePointAX) * safeScaleX, -kMaximumColliderOffset, kMaximumColliderOffset),
+                    glm::clamp((safeOffsetY + safePointAY) * safeScaleY, -kMaximumColliderOffset, kMaximumColliderOffset)
+                };
+                const b2Vec2 pointB = {
+                    glm::clamp((safeOffsetX + safePointBX) * safeScaleX, -kMaximumColliderOffset, kMaximumColliderOffset),
+                    glm::clamp((safeOffsetY + safePointBY) * safeScaleY, -kMaximumColliderOffset, kMaximumColliderOffset)
+                };
+                const bool hadInvalidEdgeParameters = (safeScaleX != transform.Scale.x) ||
+                                                      (safeScaleY != transform.Scale.y) ||
+                                                      (safeOffsetX != edgeCollider->Offset.x) ||
+                                                      (safeOffsetY != edgeCollider->Offset.y) ||
+                                                      (safePointAX != edgeCollider->PointA.x) ||
+                                                      (safePointAY != edgeCollider->PointA.y) ||
+                                                      (safePointBX != edgeCollider->PointB.x) ||
+                                                      (safePointBY != edgeCollider->PointB.y);
+                if (hadInvalidEdgeParameters && !rigidbody.RuntimeWarnedInvalidBodyParameters)
+                {
+                    const auto* tag = registry.try_get<TagComponent>(entity);
+                    LT_WARN("Physics2D: sanitized invalid edge collider parameters for entity '{}' (offset=({}, {}), pointA=({}, {}), pointB=({}, {}), scale=({}, {})).",
+                            tag ? tag->Tag : "Entity",
+                            edgeCollider->Offset.x,
+                            edgeCollider->Offset.y,
+                            edgeCollider->PointA.x,
+                            edgeCollider->PointA.y,
+                            edgeCollider->PointB.x,
+                            edgeCollider->PointB.y,
+                            transform.Scale.x,
+                            transform.Scale.y);
+                    rigidbody.RuntimeWarnedInvalidBodyParameters = true;
+                }
+
+                edgeCollider->RuntimeShapeId = kNullPhysics2DShape;
+                edgeCollider->RuntimeShapeCreated = false;
+                if (std::abs(pointA.x - pointB.x) > kTransformSnapEpsilon || std::abs(pointA.y - pointB.y) > kTransformSnapEpsilon)
+                {
+                    b2ShapeDef shapeDefinition = MakeShapeDefinition(0.0f,
+                                                                      edgeCollider->IsSensor,
+                                                                      edgeCollider->CollisionLayer,
+                                                                      edgeCollider->CollisionMask,
+                                                                      rigidbody.Type,
+                                                                      false);
+                    b2Segment segmentShape{};
+                    segmentShape.point1 = pointA;
+                    segmentShape.point2 = pointB;
+                    edgeCollider->RuntimeShapeId = b2CreateSegmentShape(rigidbody.RuntimeBodyId, &shapeDefinition, &segmentShape);
+                    edgeCollider->RuntimeShapeCreated = b2Shape_IsValid(edgeCollider->RuntimeShapeId);
+                    if (edgeCollider->RuntimeShapeCreated)
+                    {
+                        b2Shape_SetFriction(edgeCollider->RuntimeShapeId, SanitizeFiniteNonNegative(edgeCollider->Friction, 0.5f));
+                        b2Shape_SetRestitution(
+                            edgeCollider->RuntimeShapeId,
+                            glm::clamp(SanitizeFiniteNonNegative(edgeCollider->Restitution, 0.0f), 0.0f, 1.0f));
+                    }
+                }
+            }
+
+            if (capsuleCollider)
+            {
+                const float safeScaleX = SanitizeFinite(transform.Scale.x, 1.0f);
+                const float safeScaleY = SanitizeFinite(transform.Scale.y, 1.0f);
+                const float safeOffsetX = SanitizeFinite(capsuleCollider->Offset.x, 0.0f);
+                const float safeOffsetY = SanitizeFinite(capsuleCollider->Offset.y, 0.0f);
+                const float safeSizeX = SanitizeFiniteNonNegative(capsuleCollider->Size.x, 1.0f);
+                const float safeSizeY = SanitizeFiniteNonNegative(capsuleCollider->Size.y, 2.0f);
+                const float scaledOffsetX = glm::clamp(safeOffsetX * safeScaleX, -kMaximumColliderOffset, kMaximumColliderOffset);
+                const float scaledOffsetY = glm::clamp(safeOffsetY * safeScaleY, -kMaximumColliderOffset, kMaximumColliderOffset);
+                const float scaledSizeX = glm::clamp(
+                    std::max(kMinimumColliderExtent, safeSizeX * std::abs(safeScaleX)),
+                    kMinimumColliderExtent,
+                    kMaximumColliderExtent * 2.0f);
+                const float scaledSizeY = glm::clamp(
+                    std::max(kMinimumColliderExtent, safeSizeY * std::abs(safeScaleY)),
+                    kMinimumColliderExtent,
+                    kMaximumColliderExtent * 2.0f);
+                const bool hadInvalidCapsuleParameters = (safeScaleX != transform.Scale.x) ||
+                                                         (safeScaleY != transform.Scale.y) ||
+                                                         (safeOffsetX != capsuleCollider->Offset.x) ||
+                                                         (safeOffsetY != capsuleCollider->Offset.y) ||
+                                                         (safeSizeX != capsuleCollider->Size.x) ||
+                                                         (safeSizeY != capsuleCollider->Size.y);
+                if (hadInvalidCapsuleParameters && !rigidbody.RuntimeWarnedInvalidBodyParameters)
+                {
+                    const auto* tag = registry.try_get<TagComponent>(entity);
+                    LT_WARN("Physics2D: sanitized invalid capsule collider parameters for entity '{}' (size=({}, {}), offset=({}, {}), scale=({}, {})).",
+                            tag ? tag->Tag : "Entity",
+                            capsuleCollider->Size.x,
+                            capsuleCollider->Size.y,
+                            capsuleCollider->Offset.x,
+                            capsuleCollider->Offset.y,
+                            transform.Scale.x,
+                            transform.Scale.y);
+                    rigidbody.RuntimeWarnedInvalidBodyParameters = true;
+                }
+
+                const bool horizontal = capsuleCollider->Direction == CapsuleCollider2DComponent::Orientation::Horizontal;
+                const float radius = glm::clamp(
+                    horizontal ? scaledSizeY * 0.5f : scaledSizeX * 0.5f,
+                    kMinimumCircleRadius,
+                    kMaximumColliderExtent);
+                const float centerDistance = std::max(0.0f, (horizontal ? scaledSizeX : scaledSizeY) - radius * 2.0f);
+                b2Capsule capsuleShape{};
+                if (horizontal)
+                {
+                    capsuleShape.center1 = { scaledOffsetX - centerDistance * 0.5f, scaledOffsetY };
+                    capsuleShape.center2 = { scaledOffsetX + centerDistance * 0.5f, scaledOffsetY };
+                }
+                else
+                {
+                    capsuleShape.center1 = { scaledOffsetX, scaledOffsetY - centerDistance * 0.5f };
+                    capsuleShape.center2 = { scaledOffsetX, scaledOffsetY + centerDistance * 0.5f };
+                }
+                capsuleShape.radius = radius;
+
+                b2ShapeDef shapeDefinition = MakeShapeDefinition(capsuleCollider->Density,
+                                                                  capsuleCollider->IsSensor,
+                                                                  capsuleCollider->CollisionLayer,
+                                                                  capsuleCollider->CollisionMask,
+                                                                  rigidbody.Type,
+                                                                  true);
+                capsuleCollider->RuntimeShapeId = b2CreateCapsuleShape(rigidbody.RuntimeBodyId, &shapeDefinition, &capsuleShape);
+                capsuleCollider->RuntimeShapeCreated = b2Shape_IsValid(capsuleCollider->RuntimeShapeId);
+                if (capsuleCollider->RuntimeShapeCreated)
+                {
+                    b2Shape_SetFriction(capsuleCollider->RuntimeShapeId, SanitizeFiniteNonNegative(capsuleCollider->Friction, 0.5f));
+                    b2Shape_SetRestitution(
+                        capsuleCollider->RuntimeShapeId,
+                        glm::clamp(SanitizeFiniteNonNegative(capsuleCollider->Restitution, 0.0f), 0.0f, 1.0f));
                 }
             }
 

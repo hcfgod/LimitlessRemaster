@@ -40,10 +40,14 @@ namespace Limitless::EditorViewportPanel
         bool DragActive = false;
         int  DragAxis = -1; // 0=X, 1=Y, 2=Z (or -1 for XY plane / none)
         glm::vec3 DragStartWorldPosition = glm::vec3(0.0f);
+        glm::vec3 DragStartGizmoOrigin = glm::vec3(0.0f);
+        glm::vec3 DragPlaneNormal = glm::vec3(0.0f, 0.0f, 1.0f);
         glm::vec3 DragStartEntityPosition = glm::vec3(0.0f);
         glm::vec3 DragStartEntityRotation = glm::vec3(0.0f);
         glm::vec3 DragStartEntityScale = glm::vec3(1.0f);
         float DragStartAngle = 0.0f;
+        glm::vec2 DragStartMousePosition = glm::vec2(0.0f);
+        float DragReferenceValue = 0.0f;
         entt::entity DragEntity = entt::null;
 
         // Multi-entity drag snapshots

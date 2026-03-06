@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <glm/glm.hpp>
+#include <vector>
 
 namespace Limitless
 {
@@ -60,6 +61,8 @@ namespace Limitless
     inline constexpr Physics2DShapeHandle kNullPhysics2DShape{};
     inline constexpr Physics2DJointHandle kNullPhysics2DJoint{};
 #endif
+
+    inline constexpr uint32_t kPhysics2DPolygonMaxPoints = 8u;
 
     struct Rigidbody2DComponent
     {
@@ -172,6 +175,63 @@ namespace Limitless
     {
         glm::vec2 Offset = glm::vec2(0.0f);
         float Radius = 0.5f;
+        float Density = 1.0f;
+        float Friction = 0.5f;
+        float Restitution = 0.0f;
+        bool IsSensor = false;
+        uint64_t CollisionLayer = 1ull;
+        uint64_t CollisionMask = ~0ull;
+
+        Physics2DShapeHandle RuntimeShapeId = kNullPhysics2DShape;
+        bool RuntimeShapeCreated = false;
+    };
+
+    struct PolygonCollider2DComponent
+    {
+        glm::vec2 Offset = glm::vec2(0.0f);
+        std::vector<glm::vec2> Points = {
+            glm::vec2(-0.5f, -0.5f),
+            glm::vec2(0.5f, -0.5f),
+            glm::vec2(0.5f, 0.5f),
+            glm::vec2(-0.5f, 0.5f)
+        };
+        float Density = 1.0f;
+        float Friction = 0.5f;
+        float Restitution = 0.0f;
+        bool IsSensor = false;
+        uint64_t CollisionLayer = 1ull;
+        uint64_t CollisionMask = ~0ull;
+
+        Physics2DShapeHandle RuntimeShapeId = kNullPhysics2DShape;
+        bool RuntimeShapeCreated = false;
+    };
+
+    struct EdgeCollider2DComponent
+    {
+        glm::vec2 Offset = glm::vec2(0.0f);
+        glm::vec2 PointA = glm::vec2(-0.5f, 0.0f);
+        glm::vec2 PointB = glm::vec2(0.5f, 0.0f);
+        float Friction = 0.5f;
+        float Restitution = 0.0f;
+        bool IsSensor = false;
+        uint64_t CollisionLayer = 1ull;
+        uint64_t CollisionMask = ~0ull;
+
+        Physics2DShapeHandle RuntimeShapeId = kNullPhysics2DShape;
+        bool RuntimeShapeCreated = false;
+    };
+
+    struct CapsuleCollider2DComponent
+    {
+        enum class Orientation
+        {
+            Vertical = 0,
+            Horizontal = 1
+        };
+
+        glm::vec2 Offset = glm::vec2(0.0f);
+        glm::vec2 Size = glm::vec2(1.0f, 2.0f);
+        Orientation Direction = Orientation::Vertical;
         float Density = 1.0f;
         float Friction = 0.5f;
         float Restitution = 0.0f;

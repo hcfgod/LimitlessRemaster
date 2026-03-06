@@ -491,6 +491,52 @@ namespace Limitless
                 };
             }
 
+            if (const auto* polygonCollider2D = registry.try_get<PolygonCollider2DComponent>(entity))
+            {
+                nlohmann::json points = nlohmann::json::array();
+                for (const glm::vec2& point : polygonCollider2D->Points)
+                    points.push_back({ point.x, point.y });
+                entry["PolygonCollider2D"] = {
+                    { "Offset", { polygonCollider2D->Offset.x, polygonCollider2D->Offset.y } },
+                    { "Points", points },
+                    { "Density", polygonCollider2D->Density },
+                    { "Friction", polygonCollider2D->Friction },
+                    { "Restitution", polygonCollider2D->Restitution },
+                    { "IsSensor", polygonCollider2D->IsSensor },
+                    { "CollisionLayer", polygonCollider2D->CollisionLayer },
+                    { "CollisionMask", polygonCollider2D->CollisionMask }
+                };
+            }
+
+            if (const auto* edgeCollider2D = registry.try_get<EdgeCollider2DComponent>(entity))
+            {
+                entry["EdgeCollider2D"] = {
+                    { "Offset", { edgeCollider2D->Offset.x, edgeCollider2D->Offset.y } },
+                    { "PointA", { edgeCollider2D->PointA.x, edgeCollider2D->PointA.y } },
+                    { "PointB", { edgeCollider2D->PointB.x, edgeCollider2D->PointB.y } },
+                    { "Friction", edgeCollider2D->Friction },
+                    { "Restitution", edgeCollider2D->Restitution },
+                    { "IsSensor", edgeCollider2D->IsSensor },
+                    { "CollisionLayer", edgeCollider2D->CollisionLayer },
+                    { "CollisionMask", edgeCollider2D->CollisionMask }
+                };
+            }
+
+            if (const auto* capsuleCollider2D = registry.try_get<CapsuleCollider2DComponent>(entity))
+            {
+                entry["CapsuleCollider2D"] = {
+                    { "Offset", { capsuleCollider2D->Offset.x, capsuleCollider2D->Offset.y } },
+                    { "Size", { capsuleCollider2D->Size.x, capsuleCollider2D->Size.y } },
+                    { "Direction", capsuleCollider2D->Direction == CapsuleCollider2DComponent::Orientation::Horizontal ? "Horizontal" : "Vertical" },
+                    { "Density", capsuleCollider2D->Density },
+                    { "Friction", capsuleCollider2D->Friction },
+                    { "Restitution", capsuleCollider2D->Restitution },
+                    { "IsSensor", capsuleCollider2D->IsSensor },
+                    { "CollisionLayer", capsuleCollider2D->CollisionLayer },
+                    { "CollisionMask", capsuleCollider2D->CollisionMask }
+                };
+            }
+
             if (const auto* joint2D = registry.try_get<Joint2DComponent>(entity))
             {
                 auto toJointTypeString = [](Joint2DComponent::JointType type) -> const char*

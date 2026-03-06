@@ -112,6 +112,55 @@ namespace Limitless
                    before.CollisionMask != after.CollisionMask;
         }
 
+        bool HasPointListChangedForAccessValidation(const std::vector<glm::vec2>& before, const std::vector<glm::vec2>& after)
+        {
+            if (before.size() != after.size())
+                return true;
+            for (size_t pointIndex = 0; pointIndex < before.size(); ++pointIndex)
+            {
+                if (glm::length(after[pointIndex] - before[pointIndex]) > kScriptTransformDirtyEpsilon)
+                    return true;
+            }
+            return false;
+        }
+
+        bool HasPolygonColliderChangedForAccessValidation(const PolygonCollider2DComponent& before, const PolygonCollider2DComponent& after)
+        {
+            return glm::length(after.Offset - before.Offset) > kScriptTransformDirtyEpsilon ||
+                   HasPointListChangedForAccessValidation(before.Points, after.Points) ||
+                   std::abs(after.Density - before.Density) > kScriptTransformDirtyEpsilon ||
+                   std::abs(after.Friction - before.Friction) > kScriptTransformDirtyEpsilon ||
+                   std::abs(after.Restitution - before.Restitution) > kScriptTransformDirtyEpsilon ||
+                   before.IsSensor != after.IsSensor ||
+                   before.CollisionLayer != after.CollisionLayer ||
+                   before.CollisionMask != after.CollisionMask;
+        }
+
+        bool HasEdgeColliderChangedForAccessValidation(const EdgeCollider2DComponent& before, const EdgeCollider2DComponent& after)
+        {
+            return glm::length(after.Offset - before.Offset) > kScriptTransformDirtyEpsilon ||
+                   glm::length(after.PointA - before.PointA) > kScriptTransformDirtyEpsilon ||
+                   glm::length(after.PointB - before.PointB) > kScriptTransformDirtyEpsilon ||
+                   std::abs(after.Friction - before.Friction) > kScriptTransformDirtyEpsilon ||
+                   std::abs(after.Restitution - before.Restitution) > kScriptTransformDirtyEpsilon ||
+                   before.IsSensor != after.IsSensor ||
+                   before.CollisionLayer != after.CollisionLayer ||
+                   before.CollisionMask != after.CollisionMask;
+        }
+
+        bool HasCapsuleColliderChangedForAccessValidation(const CapsuleCollider2DComponent& before, const CapsuleCollider2DComponent& after)
+        {
+            return glm::length(after.Offset - before.Offset) > kScriptTransformDirtyEpsilon ||
+                   glm::length(after.Size - before.Size) > kScriptTransformDirtyEpsilon ||
+                   before.Direction != after.Direction ||
+                   std::abs(after.Density - before.Density) > kScriptTransformDirtyEpsilon ||
+                   std::abs(after.Friction - before.Friction) > kScriptTransformDirtyEpsilon ||
+                   std::abs(after.Restitution - before.Restitution) > kScriptTransformDirtyEpsilon ||
+                   before.IsSensor != after.IsSensor ||
+                   before.CollisionLayer != after.CollisionLayer ||
+                   before.CollisionMask != after.CollisionMask;
+        }
+
         bool HasJoint2DChangedForAccessValidation(const Joint2DComponent& before, const Joint2DComponent& after)
         {
             return before.Type != after.Type ||
@@ -413,6 +462,12 @@ namespace Limitless
                 append("BoxCollider2D");
             if ((mask & ToAccessMask(SceneSystemAccessComponent::CircleCollider2D)) != 0)
                 append("CircleCollider2D");
+            if ((mask & ToAccessMask(SceneSystemAccessComponent::PolygonCollider2D)) != 0)
+                append("PolygonCollider2D");
+            if ((mask & ToAccessMask(SceneSystemAccessComponent::EdgeCollider2D)) != 0)
+                append("EdgeCollider2D");
+            if ((mask & ToAccessMask(SceneSystemAccessComponent::CapsuleCollider2D)) != 0)
+                append("CapsuleCollider2D");
             if ((mask & ToAccessMask(SceneSystemAccessComponent::Joint2D)) != 0)
                 append("Joint2D");
             if ((mask & ToAccessMask(SceneSystemAccessComponent::Animator)) != 0)
@@ -557,8 +612,6 @@ namespace Limitless
                     scriptEntry.RuntimeInitialized = false;
                     scriptEntry.RuntimeUpdateCount = 0;
                     scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-                    scriptEntry.RuntimeWarnedMissingCompiledScript = false;
-                    scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
                     scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
                 }
             }
@@ -703,6 +756,12 @@ namespace Limitless
             bool hadBoxColliderBeforeUpdate = false;
             CircleCollider2DComponent circleColliderBeforeUpdate{};
             bool hadCircleColliderBeforeUpdate = false;
+            PolygonCollider2DComponent polygonColliderBeforeUpdate{};
+            bool hadPolygonColliderBeforeUpdate = false;
+            EdgeCollider2DComponent edgeColliderBeforeUpdate{};
+            bool hadEdgeColliderBeforeUpdate = false;
+            CapsuleCollider2DComponent capsuleColliderBeforeUpdate{};
+            bool hadCapsuleColliderBeforeUpdate = false;
             Joint2DComponent joint2DBeforeUpdate{};
             bool hadJoint2DBeforeUpdate = false;
             TagComponent tagBeforeUpdate{};
@@ -786,6 +845,21 @@ namespace Limitless
                 {
                     circleColliderBeforeUpdate = *circleCollider2D;
                     hadCircleColliderBeforeUpdate = true;
+                }
+                if (auto* polygonCollider2D = m_Registry.try_get<PolygonCollider2DComponent>(entity))
+                {
+                    polygonColliderBeforeUpdate = *polygonCollider2D;
+                    hadPolygonColliderBeforeUpdate = true;
+                }
+                if (auto* edgeCollider2D = m_Registry.try_get<EdgeCollider2DComponent>(entity))
+                {
+                    edgeColliderBeforeUpdate = *edgeCollider2D;
+                    hadEdgeColliderBeforeUpdate = true;
+                }
+                if (auto* capsuleCollider2D = m_Registry.try_get<CapsuleCollider2DComponent>(entity))
+                {
+                    capsuleColliderBeforeUpdate = *capsuleCollider2D;
+                    hadCapsuleColliderBeforeUpdate = true;
                 }
                 if (auto* joint2D = m_Registry.try_get<Joint2DComponent>(entity))
                 {
@@ -989,6 +1063,33 @@ namespace Limitless
                      HasCircleColliderChangedForAccessValidation(circleColliderBeforeUpdate, *circleColliderAfterUpdate)))
                 {
                     observedWriteMask |= ToAccessMask(SceneSystemAccessComponent::CircleCollider2D);
+                }
+
+                const auto* polygonColliderAfterUpdate = m_Registry.try_get<PolygonCollider2DComponent>(entity);
+                const bool hasPolygonColliderAfterUpdate = polygonColliderAfterUpdate != nullptr;
+                if (hadPolygonColliderBeforeUpdate != hasPolygonColliderAfterUpdate ||
+                    (hadPolygonColliderBeforeUpdate && polygonColliderAfterUpdate &&
+                     HasPolygonColliderChangedForAccessValidation(polygonColliderBeforeUpdate, *polygonColliderAfterUpdate)))
+                {
+                    observedWriteMask |= ToAccessMask(SceneSystemAccessComponent::PolygonCollider2D);
+                }
+
+                const auto* edgeColliderAfterUpdate = m_Registry.try_get<EdgeCollider2DComponent>(entity);
+                const bool hasEdgeColliderAfterUpdate = edgeColliderAfterUpdate != nullptr;
+                if (hadEdgeColliderBeforeUpdate != hasEdgeColliderAfterUpdate ||
+                    (hadEdgeColliderBeforeUpdate && edgeColliderAfterUpdate &&
+                     HasEdgeColliderChangedForAccessValidation(edgeColliderBeforeUpdate, *edgeColliderAfterUpdate)))
+                {
+                    observedWriteMask |= ToAccessMask(SceneSystemAccessComponent::EdgeCollider2D);
+                }
+
+                const auto* capsuleColliderAfterUpdate = m_Registry.try_get<CapsuleCollider2DComponent>(entity);
+                const bool hasCapsuleColliderAfterUpdate = capsuleColliderAfterUpdate != nullptr;
+                if (hadCapsuleColliderBeforeUpdate != hasCapsuleColliderAfterUpdate ||
+                    (hadCapsuleColliderBeforeUpdate && capsuleColliderAfterUpdate &&
+                     HasCapsuleColliderChangedForAccessValidation(capsuleColliderBeforeUpdate, *capsuleColliderAfterUpdate)))
+                {
+                    observedWriteMask |= ToAccessMask(SceneSystemAccessComponent::CapsuleCollider2D);
                 }
 
                 const auto* joint2DAfterUpdate = m_Registry.try_get<Joint2DComponent>(entity);
@@ -1865,6 +1966,12 @@ namespace Limitless
             bool hadBoxColliderBeforeFixedUpdate = false;
             CircleCollider2DComponent circleColliderBeforeFixedUpdate{};
             bool hadCircleColliderBeforeFixedUpdate = false;
+            PolygonCollider2DComponent polygonColliderBeforeFixedUpdate{};
+            bool hadPolygonColliderBeforeFixedUpdate = false;
+            EdgeCollider2DComponent edgeColliderBeforeFixedUpdate{};
+            bool hadEdgeColliderBeforeFixedUpdate = false;
+            CapsuleCollider2DComponent capsuleColliderBeforeFixedUpdate{};
+            bool hadCapsuleColliderBeforeFixedUpdate = false;
             Joint2DComponent joint2DBeforeFixedUpdate{};
             bool hadJoint2DBeforeFixedUpdate = false;
             TagComponent tagBeforeFixedUpdate{};
@@ -1942,6 +2049,21 @@ namespace Limitless
                 {
                     circleColliderBeforeFixedUpdate = *circleCollider2D;
                     hadCircleColliderBeforeFixedUpdate = true;
+                }
+                if (auto* polygonCollider2D = m_Registry.try_get<PolygonCollider2DComponent>(entity))
+                {
+                    polygonColliderBeforeFixedUpdate = *polygonCollider2D;
+                    hadPolygonColliderBeforeFixedUpdate = true;
+                }
+                if (auto* edgeCollider2D = m_Registry.try_get<EdgeCollider2DComponent>(entity))
+                {
+                    edgeColliderBeforeFixedUpdate = *edgeCollider2D;
+                    hadEdgeColliderBeforeFixedUpdate = true;
+                }
+                if (auto* capsuleCollider2D = m_Registry.try_get<CapsuleCollider2DComponent>(entity))
+                {
+                    capsuleColliderBeforeFixedUpdate = *capsuleCollider2D;
+                    hadCapsuleColliderBeforeFixedUpdate = true;
                 }
                 if (auto* joint2D = m_Registry.try_get<Joint2DComponent>(entity))
                 {
@@ -2139,6 +2261,33 @@ namespace Limitless
                      HasCircleColliderChangedForAccessValidation(circleColliderBeforeFixedUpdate, *circleColliderAfterFixedUpdate)))
                 {
                     observedWriteMask |= ToAccessMask(SceneSystemAccessComponent::CircleCollider2D);
+                }
+
+                const auto* polygonColliderAfterFixedUpdate = m_Registry.try_get<PolygonCollider2DComponent>(entity);
+                const bool hasPolygonColliderAfterFixedUpdate = polygonColliderAfterFixedUpdate != nullptr;
+                if (hadPolygonColliderBeforeFixedUpdate != hasPolygonColliderAfterFixedUpdate ||
+                    (hadPolygonColliderBeforeFixedUpdate && polygonColliderAfterFixedUpdate &&
+                     HasPolygonColliderChangedForAccessValidation(polygonColliderBeforeFixedUpdate, *polygonColliderAfterFixedUpdate)))
+                {
+                    observedWriteMask |= ToAccessMask(SceneSystemAccessComponent::PolygonCollider2D);
+                }
+
+                const auto* edgeColliderAfterFixedUpdate = m_Registry.try_get<EdgeCollider2DComponent>(entity);
+                const bool hasEdgeColliderAfterFixedUpdate = edgeColliderAfterFixedUpdate != nullptr;
+                if (hadEdgeColliderBeforeFixedUpdate != hasEdgeColliderAfterFixedUpdate ||
+                    (hadEdgeColliderBeforeFixedUpdate && edgeColliderAfterFixedUpdate &&
+                     HasEdgeColliderChangedForAccessValidation(edgeColliderBeforeFixedUpdate, *edgeColliderAfterFixedUpdate)))
+                {
+                    observedWriteMask |= ToAccessMask(SceneSystemAccessComponent::EdgeCollider2D);
+                }
+
+                const auto* capsuleColliderAfterFixedUpdate = m_Registry.try_get<CapsuleCollider2DComponent>(entity);
+                const bool hasCapsuleColliderAfterFixedUpdate = capsuleColliderAfterFixedUpdate != nullptr;
+                if (hadCapsuleColliderBeforeFixedUpdate != hasCapsuleColliderAfterFixedUpdate ||
+                    (hadCapsuleColliderBeforeFixedUpdate && capsuleColliderAfterFixedUpdate &&
+                     HasCapsuleColliderChangedForAccessValidation(capsuleColliderBeforeFixedUpdate, *capsuleColliderAfterFixedUpdate)))
+                {
+                    observedWriteMask |= ToAccessMask(SceneSystemAccessComponent::CapsuleCollider2D);
                 }
 
                 const auto* joint2DAfterFixedUpdate = m_Registry.try_get<Joint2DComponent>(entity);
