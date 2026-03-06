@@ -359,7 +359,7 @@ namespace Limitless
     };
 }
 
-#define LT_SYNC_EXPOSED_FIELD(FieldName) SyncExposedField(#FieldName, FieldName)
+#define LT_SYNC_EXPOSED_FIELD(FieldName) SyncExposedField(#FieldName, FieldName);
 #define LT_BEGIN_AUTO_EXPOSED_FIELD_SYNC() \
     void OnSynchronizeExposedFields() override \
     {
@@ -367,7 +367,7 @@ namespace Limitless
         LT_SYNC_EXPOSED_FIELD(FieldName);
 #define LT_END_AUTO_EXPOSED_FIELD_SYNC() \
     }
-#define LT_WRITEBACK_EXPOSED_FIELD(FieldName) WriteBackExposedField(#FieldName, FieldName)
+#define LT_WRITEBACK_EXPOSED_FIELD(FieldName) WriteBackExposedField(#FieldName, FieldName);
 
 #define LT_SCRIPT_ACCESS_MASK(...) ::Limitless::ScriptAccess::Combine(__VA_ARGS__)
 #define LT_DECLARE_SCRIPT_ACCESS(ReadMaskExpr, WriteMaskExpr) \
