@@ -98,17 +98,44 @@ jobs:
         ls -la Build/debug_x64-macosx-x64/ || echo "x64 build directory not found"
         
     - name: Run ARM64 tests
+      timeout-minutes: 16
       run: |
         TEST_EXE=$(find Build/debug_arm64-macosx-ARM64/ -name "Test" -type f 2>/dev/null | head -1)
         if [ -n "$TEST_EXE" ]; then
           echo "Running ARM64 tests..."
-          "$TEST_EXE" --no-success --abort-after=1
-          test_exit=$?
-          if [ $test_exit -ne 0 ]; then
+          TIMEOUT_SECONDS=900
+          "$TEST_EXE" --no-success --abort-after=1 &
+          test_pid=$!
+
+          (
+            sleep "$TIMEOUT_SECONDS"
+            if kill -0 "$test_pid" 2>/dev/null; then
+              echo "ARM64 test run timed out after ${TIMEOUT_SECONDS}s (possible deadlock/livelock)."
+              kill -TERM "$test_pid" 2>/dev/null || true
+              sleep 30
+              kill -KILL "$test_pid" 2>/dev/null || true
+            fi
+          ) &
+          watchdog_pid=$!
+
+          if wait "$test_pid"; then
+            test_exit=0
+          else
+            test_exit=$?
+          fi
+
+          kill "$watchdog_pid" 2>/dev/null || true
+          wait "$watchdog_pid" 2>/dev/null || true
+
+          if [ $test_exit -eq 143 ] || [ $test_exit -eq 137 ]; then
+            test_exit=124
+          fi
+
+          if [ $test_exit -eq 0 ]; then
+            echo "All ARM64 tests passed!"
+          else
             echo "Error: Some ARM64 tests failed"
             exit $test_exit
-          else
-            echo "All ARM64 tests passed!"
           fi
         else
           echo "ARM64 test executable not found"
@@ -116,17 +143,44 @@ jobs:
         fi
         
     - name: Run x64 tests
+      timeout-minutes: 16
       run: |
         TEST_EXE=$(find Build/debug_x64-macosx-x64/ -name "Test" -type f 2>/dev/null | head -1)
         if [ -n "$TEST_EXE" ]; then
           echo "Running x64 tests..."
-          "$TEST_EXE" --no-success --abort-after=1
-          test_exit=$?
-          if [ $test_exit -ne 0 ]; then
+          TIMEOUT_SECONDS=900
+          "$TEST_EXE" --no-success --abort-after=1 &
+          test_pid=$!
+
+          (
+            sleep "$TIMEOUT_SECONDS"
+            if kill -0 "$test_pid" 2>/dev/null; then
+              echo "x64 test run timed out after ${TIMEOUT_SECONDS}s (possible deadlock/livelock)."
+              kill -TERM "$test_pid" 2>/dev/null || true
+              sleep 30
+              kill -KILL "$test_pid" 2>/dev/null || true
+            fi
+          ) &
+          watchdog_pid=$!
+
+          if wait "$test_pid"; then
+            test_exit=0
+          else
+            test_exit=$?
+          fi
+
+          kill "$watchdog_pid" 2>/dev/null || true
+          wait "$watchdog_pid" 2>/dev/null || true
+
+          if [ $test_exit -eq 143 ] || [ $test_exit -eq 137 ]; then
+            test_exit=124
+          fi
+
+          if [ $test_exit -eq 0 ]; then
+            echo "All x64 tests passed!"
+          else
             echo "Error: Some x64 tests failed"
             exit $test_exit
-          else
-            echo "All x64 tests passed!"
           fi
         else
           echo "x64 test executable not found"
