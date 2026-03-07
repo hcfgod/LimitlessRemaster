@@ -10,12 +10,14 @@
 #include "EditorAssetNaming.h"
 #include "EditorPlayMode.h"
 #include "Graphics/Camera/PerspectiveCamera3D.h"
+#include "Graphics/Framebuffer.h"
 #include "Panels/EditorInspectorPanel.h"
 #include "Project/BuildSettings.h"
 #include "Project/ProjectManager.h"
 #include "Scene/Components/CoreComponents.h"
 #include "Physics/Physics2DQueries.h"
 #include "Scene/Scene.h"
+#include "Scene/SceneRenderer.h"
 #include "Scripting/NativeScriptRegistry.h"
 
 #include <algorithm>
@@ -33,6 +35,89 @@ namespace Limitless
             std::replace(pathText.begin(), pathText.end(), '\\', '/');
             return pathText;
         }
+
+        std::string ToLowerAscii(std::string text)
+        {
+            std::transform(text.begin(), text.end(), text.begin(), [](unsigned char character) {
+                return static_cast<char>(std::tolower(character));
+            });
+            return text;
+        }
+
+        bool EndsWithCaseInsensitive(const std::string& text, std::string_view suffix)
+        {
+            if (text.size() < suffix.size())
+                return false;
+
+            const size_t offset = text.size() - suffix.size();
+            for (size_t index = 0; index < suffix.size(); ++index)
+            {
+                const char left = static_cast<char>(std::tolower(static_cast<unsigned char>(text[offset + index])));
+                const char right = static_cast<char>(std::tolower(static_cast<unsigned char>(suffix[index])));
+                if (left != right)
+                    return false;
+            }
+            return true;
+        }
+
+        bool StartsWithCaseInsensitive(const std::string& text, std::string_view prefix)
+        {
+            if (text.size() < prefix.size())
+                return false;
+
+            for (size_t index = 0; index < prefix.size(); ++index)
+            {
+                const char left = static_cast<char>(std::tolower(static_cast<unsigned char>(text[index])));
+                const char right = static_cast<char>(std::tolower(static_cast<unsigned char>(prefix[index])));
+                if (left != right)
+                    return false;
+            }
+            return true;
+        }
+
+        std::string CanonicalizeSceneKeyForComparison(const std::string& sceneIdentifier)
+        {
+            std::string canonical = NormalizeSlashes(sceneIdentifier);
+            if (canonical.empty())
+                return canonical;
+
+            const bool isPathLike = canonical.find('/') != std::string::npos;
+            if (isPathLike && !StartsWithCaseInsensitive(canonical, "Assets/"))
+                canonical = "Assets/" + canonical;
+
+            if (isPathLike)
+            {
+                if (!EndsWithCaseInsensitive(canonical, ".scene.json"))
+                {
+                    if (EndsWithCaseInsensitive(canonical, ".scene"))
+                        canonical += ".json";
+                    else
+                        canonical += ".scene.json";
+                }
+            }
+
+            return canonical;
+        }
+
+        std::string ExtractSceneNameStem(const std::string& sceneIdentifier)
+        {
+            const std::filesystem::path scenePath(NormalizeSlashes(sceneIdentifier));
+            std::string stem = scenePath.stem().string();
+            if (EndsWithCaseInsensitive(stem, ".scene"))
+                stem.resize(stem.size() - std::string_view(".scene").size());
+            return stem;
+        }
+
+        constexpr SceneRoleMask kPlayModeRuntimeSceneBaseRoles =
+            SceneRole::RuntimeUpdate |
+            SceneRole::FixedUpdate |
+            SceneRole::Render |
+            SceneRole::AudioPlayback;
+
+        constexpr SceneRoleMask kPlayModeRuntimeSceneActiveRoles =
+            kPlayModeRuntimeSceneBaseRoles |
+            SceneRole::GameplayPrimary |
+            SceneRole::ScriptQueryTarget;
 
         bool IsPrefabAssetKey(const std::string& assetKey)
         {
@@ -239,6 +324,7 @@ namespace Limitless
         m_ScriptSafeModeMessage.clear();
         Audio::StopAudioSourcesInScene(m_Scene.get());
         Audio::StopAudioSourcesInScene(m_EditSceneStored.get());
+        ClearPlayModeRuntimeScenes();
 
         EditorPlayMode::Exit(
             m_PlayModeState,
@@ -318,7 +404,11 @@ namespace Limitless
         BeginSceneSwitch();
         Audio::StopAudioSourcesInScene(m_Scene.get());
 
-        m_Scene = std::make_unique<Scene>();
+        m_Scene.SetOwnedScene(
+            std::make_unique<Scene>(),
+            {},
+            SceneCollectionLifecycleState::Active,
+            SceneRole::EditAuthoring | SceneRole::Render);
         PopulateDefaultSceneTemplate(*m_Scene);
         m_SelectedEntity = entt::null;
         m_SelectedTextureAssetKey.clear();
@@ -457,7 +547,11 @@ namespace Limitless
             return false;
         }
 
-        m_Scene = std::move(sceneResult.GetValue());
+        m_Scene.SetOwnedScene(
+            std::move(sceneResult.GetValue()),
+            assetKey,
+            SceneCollectionLifecycleState::Loading,
+            SceneRole::EditAuthoring | SceneRole::Render);
         m_Scene->BeginLoadingState();
         m_Scene->MarkSceneObjectsInitialized();
         ApplyProjectPhysics2DSettingsToScenes();
@@ -499,12 +593,146 @@ namespace Limitless
         return true;
     }
 
-    bool EditorLayer::LoadSceneFromAssetKeyInPlayMode(const std::string& assetKey)
+    SceneCollection::Handle EditorLayer::FindLoadedSceneHandleByAssetKey(const std::string& assetKey) const
+    {
+        if (assetKey.empty())
+            return SceneCollection::InvalidHandle;
+
+        const std::string requestedCanonicalKeyLower = ToLowerAscii(CanonicalizeSceneKeyForComparison(assetKey));
+        const std::string requestedStemLower = ToLowerAscii(ExtractSceneNameStem(assetKey));
+        for (const SceneCollection::Handle handle : m_SceneCollection.CollectHandlesWithRoles(0u))
+        {
+            if (handle == m_EditSceneStoredHandle)
+                continue;
+
+            const SceneCollection::Record* record = m_SceneCollection.GetRecord(handle);
+            if (!record || !record->SceneInstance)
+                continue;
+
+            const std::string loadedCanonicalKeyLower = ToLowerAscii(CanonicalizeSceneKeyForComparison(record->AssetKey));
+            const std::string loadedStemLower = ToLowerAscii(ExtractSceneNameStem(record->AssetKey));
+            if ((!requestedCanonicalKeyLower.empty() && loadedCanonicalKeyLower == requestedCanonicalKeyLower) ||
+                (!requestedStemLower.empty() && loadedStemLower == requestedStemLower))
+            {
+                return handle;
+            }
+        }
+
+        return SceneCollection::InvalidHandle;
+    }
+
+    bool EditorLayer::ActivateLoadedSceneInPlayMode(SceneCollection::Handle handle)
+    {
+        SceneCollection::Record* record = m_SceneCollection.GetRecord(handle);
+        if (!record || !record->SceneInstance)
+            return false;
+
+        for (const SceneCollection::Handle loadedHandle : m_SceneCollection.CollectHandlesWithRoles(0u))
+        {
+            if (loadedHandle == m_EditSceneStoredHandle || loadedHandle == handle)
+                continue;
+
+            m_SceneCollection.RemoveRoles(loadedHandle, ToSceneRoleMask(SceneRole::GameplayPrimary) | ToSceneRoleMask(SceneRole::ScriptQueryTarget));
+            m_SceneCollection.SetLifecycleState(loadedHandle, SceneCollectionLifecycleState::Active);
+        }
+
+        m_SceneCollection.AddRoles(handle, ToSceneRoleMask(SceneRole::GameplayPrimary) | ToSceneRoleMask(SceneRole::ScriptQueryTarget));
+        m_SceneCollection.SetLifecycleState(handle, SceneCollectionLifecycleState::Active);
+        m_SceneHandle = handle;
+        m_CurrentSceneAssetKey = record->AssetKey;
+        Physics2DQueries::SetActiveSceneForScriptQueries(nullptr);
+        return true;
+    }
+
+    bool EditorLayer::ActivateLoadedSceneInPlayModeByAssetKey(const std::string& assetKey)
+    {
+        const SceneCollection::Handle handle = FindLoadedSceneHandleByAssetKey(assetKey);
+        return handle != SceneCollection::InvalidHandle && ActivateLoadedSceneInPlayMode(handle);
+    }
+
+    bool EditorLayer::UnloadLoadedSceneInPlayModeByAssetKey(const std::string& assetKey)
+    {
+        const SceneCollection::Handle handle = FindLoadedSceneHandleByAssetKey(assetKey);
+        if (handle == SceneCollection::InvalidHandle)
+            return false;
+
+        Scene* scene = m_SceneCollection.GetScene(handle);
+        if (scene)
+            Audio::StopAudioSourcesInScene(scene);
+
+        const bool wasActiveScene = handle == m_SceneHandle;
+        m_SceneCollection.RemoveScene(handle);
+        if (!wasActiveScene)
+            return true;
+
+        m_SceneHandle = SceneCollection::InvalidHandle;
+        m_CurrentSceneAssetKey.clear();
+        for (const SceneCollection::Handle remainingHandle : m_SceneCollection.CollectHandlesWithRoles(0u))
+        {
+            if (remainingHandle == m_EditSceneStoredHandle)
+                continue;
+            return ActivateLoadedSceneInPlayMode(remainingHandle);
+        }
+
+        return true;
+    }
+
+    void EditorLayer::ClearPlayModeRuntimeScenes()
+    {
+        for (const SceneCollection::Handle handle : m_SceneCollection.CollectHandlesWithRoles(0u))
+        {
+            if (handle == m_EditSceneStoredHandle)
+                continue;
+
+            if (Scene* scene = m_SceneCollection.GetScene(handle))
+                Audio::StopAudioSourcesInScene(scene);
+            m_SceneCollection.RemoveScene(handle);
+        }
+
+        Physics2DQueries::SetActiveSceneForScriptQueries(nullptr);
+        m_SceneHandle = SceneCollection::InvalidHandle;
+        m_CurrentSceneAssetKey.clear();
+    }
+
+    void EditorLayer::RenderLoadedGameScenes(Camera& camera, const std::shared_ptr<Framebuffer>& framebuffer, uint32_t width, uint32_t height)
+    {
+        if (m_PlayModeState == EditorPlayModeState::Edit)
+        {
+            if (m_Scene && m_Scene->IsReady())
+                SceneRenderer::RenderToViewport(*m_Scene, camera, framebuffer, width, height);
+            return;
+        }
+
+        bool firstScene = true;
+        for (const SceneCollection::Handle handle : m_SceneCollection.CollectHandlesWithRoles(ToSceneRoleMask(SceneRole::Render)))
+        {
+            if (handle == m_EditSceneStoredHandle)
+                continue;
+
+            Scene* scene = m_SceneCollection.GetScene(handle);
+            if (!scene || !scene->IsReady())
+                continue;
+
+            SceneRenderer::RenderToViewport(*scene, camera, framebuffer, width, height, firstScene);
+            firstScene = false;
+        }
+    }
+
+    bool EditorLayer::LoadSceneFromAssetKeyInPlayMode(const std::string& assetKey, LoadSceneMode loadMode)
     {
         if (assetKey.empty())
             return false;
 
-        Audio::StopAudioSourcesInScene(m_Scene.get());
+        if (loadMode == LoadSceneMode::Additive)
+        {
+            const SceneCollection::Handle existingHandle = FindLoadedSceneHandleByAssetKey(assetKey);
+            if (existingHandle != SceneCollection::InvalidHandle)
+                return true;
+        }
+        else
+        {
+            ClearPlayModeRuntimeScenes();
+        }
 
         const auto resolvedPathResult = Assets::ResolveAssetKeyToPath(assetKey);
         if (resolvedPathResult.IsFailure())
@@ -520,32 +748,41 @@ namespace Limitless
             return false;
         }
 
-        m_Scene = std::move(sceneResult.GetValue());
+        const bool shouldActivate = loadMode == LoadSceneMode::Single || m_SceneHandle == SceneCollection::InvalidHandle;
+        const SceneRoleMask sceneRoles = shouldActivate ? kPlayModeRuntimeSceneActiveRoles : kPlayModeRuntimeSceneBaseRoles;
+        const SceneCollection::Handle handle = m_SceneCollection.AddScene(
+            std::move(sceneResult.GetValue()),
+            assetKey,
+            SceneCollectionLifecycleState::Loading,
+            sceneRoles);
+        Scene* loadedScene = m_SceneCollection.GetScene(handle);
+        if (!loadedScene)
+            return false;
 
-        // The old scene destructor sets Physics2DQueries active scene to nullptr.
-        // Restore it immediately so bridge callbacks resolve to the new scene even
-        // before the first Scene::Update (mirrors GameLayer::LoadScene behaviour).
-        Physics2DQueries::SetActiveSceneForScriptQueries(m_Scene.get());
-
-        m_Scene->BeginLoadingState();
-        m_Scene->MarkSceneObjectsInitialized();
+        loadedScene->BeginLoadingState();
+        loadedScene->MarkSceneObjectsInitialized();
         ApplyProjectPhysics2DSettingsToScenes();
-        QueueSceneAssetPrewarm();
-        UpdateSceneLoadingState();
-        m_SelectedEntity = entt::null;
-        m_ScenePanelState.SelectionAnchorEntity = entt::null;
-        m_ScenePanelState.MultiSelectedEntities.clear();
-        m_ScenePanelState.DrawOrderEntities.clear();
-        m_SelectedTextureAssetKey.clear();
-        m_SelectedNativeScriptAssetKey.clear();
-        m_SelectedPrefabAssetKey.clear();
-        m_SelectedTilesetAssetKey.clear();
-        m_SelectedAudioMixerAssetKey.clear();
-        m_SelectedInputActionsAssetKey.clear();
-        m_SelectedAnimationClipAssetKey.clear();
-        m_SelectedAnimatorControllerAssetKey.clear();
-        m_CachedTextureAsset.reset();
-        m_CurrentSceneAssetKey = assetKey;
+        loadedScene->InitializePhysicsWorldForLoading();
+        loadedScene->SetLoadStateReady();
+        m_SceneCollection.SetLifecycleState(handle, SceneCollectionLifecycleState::Active);
+
+        if (shouldActivate)
+        {
+            (void)ActivateLoadedSceneInPlayMode(handle);
+            m_SelectedEntity = entt::null;
+            m_ScenePanelState.SelectionAnchorEntity = entt::null;
+            m_ScenePanelState.MultiSelectedEntities.clear();
+            m_ScenePanelState.DrawOrderEntities.clear();
+            m_SelectedTextureAssetKey.clear();
+            m_SelectedNativeScriptAssetKey.clear();
+            m_SelectedPrefabAssetKey.clear();
+            m_SelectedTilesetAssetKey.clear();
+            m_SelectedAudioMixerAssetKey.clear();
+            m_SelectedInputActionsAssetKey.clear();
+            m_SelectedAnimationClipAssetKey.clear();
+            m_SelectedAnimatorControllerAssetKey.clear();
+            m_CachedTextureAsset.reset();
+        }
 
         LT_INFO("Loaded scene during Play Mode {}", assetKey);
         m_EditorUndoService.Clear();

@@ -5,7 +5,6 @@
 #include "Editor/EditorCameraController.h"
 #include "Graphics/Framebuffer.h"
 #include "Graphics/Renderer2D.h"
-#include "Scene/Scene.h"
 #include "imgui/imgui.h"
 
 #include <glm/glm.hpp>
@@ -31,7 +30,7 @@ namespace Limitless::EditorRuntimeOperations
 
     void Attach(uint32_t viewportWidthPixels,
                 uint32_t viewportHeightPixels,
-                std::unique_ptr<Scene>& scene,
+                SceneCollectionSlot& scene,
                 CameraManager& cameraManager,
                 CameraId& editorCameraId,
                 std::unique_ptr<EditorCameraController>& editorCameraController,
@@ -39,7 +38,11 @@ namespace Limitless::EditorRuntimeOperations
     {
         Renderer2D::Default().Initialize();
 
-        scene = std::make_unique<Scene>();
+        scene.SetOwnedScene(
+            std::make_unique<Scene>(),
+            {},
+            SceneCollectionLifecycleState::Active,
+            SceneRole::EditAuthoring | SceneRole::Render);
 
         CameraManager::Perspective3DCreateInfo cameraInfo{};
         cameraInfo.Name = "EditorCamera";
@@ -76,8 +79,8 @@ namespace Limitless::EditorRuntimeOperations
         LT_INFO("EditorLayer attached");
     }
 
-    void Detach(std::unique_ptr<Scene>& scene,
-                std::unique_ptr<Scene>& editSceneStored,
+    void Detach(SceneCollectionSlot& scene,
+                SceneCollectionSlot& editSceneStored,
                 std::unique_ptr<EditorCameraController>& editorCameraController,
                 std::shared_ptr<Framebuffer>& viewportFramebuffer)
     {

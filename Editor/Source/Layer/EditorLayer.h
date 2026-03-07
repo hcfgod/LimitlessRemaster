@@ -18,6 +18,7 @@
 #include "Core/Concurrency/AsyncIO.h"
 #include "Undo/EditorUndoService.h"
 #include "Graphics/Texture.h"
+#include "Scene/SceneCollection.h"
 
 #include <array>
 #include <filesystem>
@@ -99,7 +100,13 @@ namespace Limitless
         void DrawSceneSwitchConfirmationPopup();
         bool LoadSceneFromAssetKey(const std::string& assetKey);
         bool LoadSceneFromAssetKey(const std::string& assetKey, bool forceWithoutConfirmation);
-        bool LoadSceneFromAssetKeyInPlayMode(const std::string& assetKey);
+        bool LoadSceneFromAssetKeyInPlayMode(const std::string& assetKey, LoadSceneMode loadMode = LoadSceneMode::Single);
+        bool ActivateLoadedSceneInPlayMode(SceneCollection::Handle handle);
+        bool ActivateLoadedSceneInPlayModeByAssetKey(const std::string& assetKey);
+        bool UnloadLoadedSceneInPlayModeByAssetKey(const std::string& assetKey);
+        void ClearPlayModeRuntimeScenes();
+        SceneCollection::Handle FindLoadedSceneHandleByAssetKey(const std::string& assetKey) const;
+        void RenderLoadedGameScenes(Camera& camera, const std::shared_ptr<Framebuffer>& framebuffer, uint32_t width, uint32_t height);
         bool SaveSceneToAssetKey(const std::string& assetKey);
         bool OpenPrefabAssetForEditing(const std::string& prefabAssetKey);
         bool ReturnFromPrefabMode(bool forceWithoutConfirmation);
@@ -166,9 +173,12 @@ namespace Limitless
         bool m_CreatedGameplayCameraFromScene = false;
         std::unique_ptr<EditorCameraController> m_EditorCameraController;
 
-        std::unique_ptr<Scene> m_Scene;
+        SceneCollection m_SceneCollection;
+        SceneCollection::Handle m_SceneHandle = SceneCollection::InvalidHandle;
+        SceneCollection::Handle m_EditSceneStoredHandle = SceneCollection::InvalidHandle;
+        SceneCollectionSlot m_Scene;
         /// Stored edit-scene while in Play/Pause. On Stop, we restore this instance.
-        std::unique_ptr<Scene> m_EditSceneStored;
+        SceneCollectionSlot m_EditSceneStored;
         PendingPlayModeTransition m_PendingPlayModeTransition = PendingPlayModeTransition::None;
         EditorPlayModeState m_PlayModeState = EditorPlayModeState::Edit;
         bool m_PlayModeMissingGameplayCamera = false;

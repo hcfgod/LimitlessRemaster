@@ -460,52 +460,98 @@ namespace Limitless
 
     void EditorLayer::ProcessPendingSceneTransitions()
     {
-        const std::optional<SceneTransitionRequest> pendingTransition = SceneManager::ConsumePendingSceneTransition();
-        if (!pendingTransition.has_value())
-            return;
-
-        switch (pendingTransition->Type)
+        while (true)
         {
-            case SceneTransitionType::LoadByAssetKey:
+            const std::optional<SceneTransitionRequest> pendingTransition = SceneManager::ConsumePendingSceneTransition();
+            if (!pendingTransition.has_value())
+                return;
+
+            switch (pendingTransition->Type)
             {
-                const auto resolvedSceneAssetKey = ResolveSceneIdentifierToAssetKey(pendingTransition->SceneIdentifier);
-                if (!resolvedSceneAssetKey.has_value())
+                case SceneTransitionType::LoadByAssetKey:
                 {
-                    LT_WARN("Scene transition request '{}' could not be resolved to a scene asset key.",
-                        pendingTransition->SceneIdentifier);
+                    const auto resolvedSceneAssetKey = ResolveSceneIdentifierToAssetKey(pendingTransition->SceneIdentifier);
+                    if (!resolvedSceneAssetKey.has_value())
+                    {
+                        LT_WARN("Scene transition request '{}' could not be resolved to a scene asset key.",
+                            pendingTransition->SceneIdentifier);
+                        break;
+                    }
+
+                    if (m_PlayModeState != EditorPlayModeState::Edit &&
+                        pendingTransition->LoadMode == LoadSceneMode::Single &&
+                        !m_CurrentSceneAssetKey.empty() &&
+                        *resolvedSceneAssetKey == m_CurrentSceneAssetKey)
+                    {
+                        LT_WARN("Ignored SceneManager::LoadScene('{}') in Play Mode because it matches the active scene. Use ReloadCurrentScene() for intentional restart.",
+                            *resolvedSceneAssetKey);
+                        break;
+                    }
+
+                    if (m_PlayModeState == EditorPlayModeState::Edit)
+                        (void)LoadSceneFromAssetKey(*resolvedSceneAssetKey);
+                    else
+                        (void)LoadSceneFromAssetKeyInPlayMode(*resolvedSceneAssetKey, pendingTransition->LoadMode);
                     break;
                 }
-
-                // Guard against accidental self-load loops in Play Mode.
-                // Example: script OnCreate calls LoadScene(currentScene) each time scene starts.
-                if (m_PlayModeState != EditorPlayModeState::Edit &&
-                    !m_CurrentSceneAssetKey.empty() &&
-                    *resolvedSceneAssetKey == m_CurrentSceneAssetKey)
+                case SceneTransitionType::ReloadCurrentScene:
                 {
-                    LT_WARN("Ignored SceneManager::LoadScene('{}') in Play Mode because it matches the active scene. Use ReloadCurrentScene() for intentional restart.",
-                        *resolvedSceneAssetKey);
+                    if (m_CurrentSceneAssetKey.empty())
+                    {
+                        LT_WARN("ReloadCurrentScene requested but no active scene asset key is available.");
+                        break;
+                    }
+
+                    if (m_PlayModeState == EditorPlayModeState::Edit)
+                        (void)LoadSceneFromAssetKey(m_CurrentSceneAssetKey);
+                    else
+                        (void)LoadSceneFromAssetKeyInPlayMode(m_CurrentSceneAssetKey, LoadSceneMode::Single);
                     break;
                 }
-
-                if (m_PlayModeState == EditorPlayModeState::Edit)
-                    (void)LoadSceneFromAssetKey(*resolvedSceneAssetKey);
-                else
-                    (void)LoadSceneFromAssetKeyInPlayMode(*resolvedSceneAssetKey);
-                break;
-            }
-            case SceneTransitionType::ReloadCurrentScene:
-            {
-                if (m_CurrentSceneAssetKey.empty())
+                case SceneTransitionType::SetActiveSceneByAssetKey:
                 {
-                    LT_WARN("ReloadCurrentScene requested but no active scene asset key is available.");
+                    const auto resolvedSceneAssetKey = ResolveSceneIdentifierToAssetKey(pendingTransition->SceneIdentifier);
+                    if (!resolvedSceneAssetKey.has_value())
+                    {
+                        LT_WARN("Scene activation request '{}' could not be resolved to a scene asset key.",
+                            pendingTransition->SceneIdentifier);
+                        break;
+                    }
+
+                    if (m_PlayModeState == EditorPlayModeState::Edit)
+                    {
+                        LT_WARN("SetActiveScene('{}') is ignored in Edit Mode.", *resolvedSceneAssetKey);
+                        break;
+                    }
+
+                    if (!ActivateLoadedSceneInPlayModeByAssetKey(*resolvedSceneAssetKey))
+                    {
+                        LT_WARN("SetActiveScene('{}') failed because the scene is not loaded.", *resolvedSceneAssetKey);
+                    }
                     break;
                 }
+                case SceneTransitionType::UnloadByAssetKey:
+                {
+                    const auto resolvedSceneAssetKey = ResolveSceneIdentifierToAssetKey(pendingTransition->SceneIdentifier);
+                    if (!resolvedSceneAssetKey.has_value())
+                    {
+                        LT_WARN("Scene unload request '{}' could not be resolved to a scene asset key.",
+                            pendingTransition->SceneIdentifier);
+                        break;
+                    }
 
-                if (m_PlayModeState == EditorPlayModeState::Edit)
-                    (void)LoadSceneFromAssetKey(m_CurrentSceneAssetKey);
-                else
-                    (void)LoadSceneFromAssetKeyInPlayMode(m_CurrentSceneAssetKey);
-                break;
+                    if (m_PlayModeState == EditorPlayModeState::Edit)
+                    {
+                        LT_WARN("UnloadScene('{}') is ignored in Edit Mode.", *resolvedSceneAssetKey);
+                        break;
+                    }
+
+                    if (!UnloadLoadedSceneInPlayModeByAssetKey(*resolvedSceneAssetKey))
+                    {
+                        LT_WARN("UnloadScene('{}') failed because the scene is not loaded.", *resolvedSceneAssetKey);
+                    }
+                    break;
+                }
             }
         }
     }

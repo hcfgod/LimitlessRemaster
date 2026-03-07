@@ -73,7 +73,8 @@ namespace Limitless
                               const std::shared_ptr<Framebuffer>& targetFramebuffer,
                               uint32_t width,
                               uint32_t height,
-                              const std::function<void()>& renderWorldAlbedoPass);
+                              const std::function<void()>& renderWorldAlbedoPass,
+                              bool clearTarget = true);
 
         static Lighting2DRenderer& Default();
 

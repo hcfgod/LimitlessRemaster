@@ -1,16 +1,19 @@
 #pragma once
 
 #include "Physics/Physics2DWorld.h"
+#include "Scene/SceneCollection.h"
 
 #include <glm/glm.hpp>
 
 namespace Limitless
 {
     class Scene;
+    class SceneCollection;
 
     namespace Physics2DQueries
     {
         void SetActiveSceneForScriptQueries(Scene* scene);
+        void SetActiveSceneCollectionForScriptQueries(SceneCollection* collection, SceneRoleMask requiredRoles = ToSceneRoleMask(SceneRole::ScriptQueryTarget));
         Scene* GetActiveSceneForScriptQueries();
 
         Physics2DRaycastHit RaycastClosest(Scene* scene,

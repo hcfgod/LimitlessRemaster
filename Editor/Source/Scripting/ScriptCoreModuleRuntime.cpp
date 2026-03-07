@@ -320,7 +320,7 @@ namespace Limitless::ScriptCoreModuleRuntime
             NativeScriptRegistry::RegisterScript(className, createFunction);
         }
 
-        bool ForwardSceneTransitionToHost(SceneTransitionType transitionType, const char* sceneIdentifier)
+        bool ForwardSceneTransitionToHost(SceneTransitionType transitionType, const char* sceneIdentifier, LoadSceneMode loadSceneMode)
         {
             switch (transitionType)
             {
@@ -328,10 +328,18 @@ namespace Limitless::ScriptCoreModuleRuntime
                 {
                     if (!sceneIdentifier)
                         return false;
-                    return SceneManager::LoadScene(sceneIdentifier);
+                    return SceneManager::LoadScene(sceneIdentifier, loadSceneMode);
                 }
                 case SceneTransitionType::ReloadCurrentScene:
                     return SceneManager::ReloadCurrentScene();
+                case SceneTransitionType::SetActiveSceneByAssetKey:
+                    if (!sceneIdentifier)
+                        return false;
+                    return SceneManager::SetActiveScene(sceneIdentifier);
+                case SceneTransitionType::UnloadByAssetKey:
+                    if (!sceneIdentifier)
+                        return false;
+                    return SceneManager::UnloadScene(sceneIdentifier);
             }
 
             return false;

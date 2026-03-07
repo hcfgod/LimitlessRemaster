@@ -876,14 +876,15 @@ namespace Limitless
         RenderPassDescriptor BuildCompositeRenderPassDescriptor(const std::shared_ptr<Framebuffer>& framebuffer,
                                                                 uint32_t width,
                                                                 uint32_t height,
-                                                                const glm::vec4& clearColor)
+                                                                const glm::vec4& clearColor,
+                                                                bool clearTarget)
         {
             RenderPassDescriptor descriptor{};
             descriptor.DebugName = "Lighting2D/Composite";
             descriptor.TargetFramebuffer = framebuffer;
             descriptor.Viewport = RenderViewport{ 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) };
             descriptor.ColorAttachments = {
-                RenderPassColorAttachmentDescriptor{ RenderLoadAction::Clear, RenderStoreAction::Store, clearColor }
+                RenderPassColorAttachmentDescriptor{ clearTarget ? RenderLoadAction::Clear : RenderLoadAction::Load, RenderStoreAction::Store, clearColor }
             };
             descriptor.DepthStencilAttachment = RenderPassDepthStencilAttachmentDescriptor{
                 RenderLoadAction::Clear,
@@ -1884,7 +1885,8 @@ namespace Limitless
                           const std::shared_ptr<Framebuffer>& targetFramebuffer,
                           uint32_t width,
                           uint32_t height,
-                          const std::function<void()>& renderWorldAlbedoPass)
+                          const std::function<void()>& renderWorldAlbedoPass,
+                          bool clearTarget)
     {
         g_State = &m_Impl->State;
         g_State->Diagnostics = {};
@@ -2046,7 +2048,7 @@ namespace Limitless
         RenderPass::End(renderer, lightPass);
 
         const glm::vec4 fallbackClearColor = SceneRenderer::GetViewportClearColor();
-        const RenderPassDescriptor compositePass = BuildCompositeRenderPassDescriptor(targetFramebuffer, width, height, fallbackClearColor);
+        const RenderPassDescriptor compositePass = BuildCompositeRenderPassDescriptor(targetFramebuffer, width, height, fallbackClearColor, clearTarget);
         RenderPass::Begin(renderer, compositePass);
 
         auto compositeShader = ResolveShaderFromAsset(g_State->CompositeShaderAsset, kCompositeShaderKey);

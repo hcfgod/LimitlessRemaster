@@ -143,6 +143,7 @@ namespace Limitless::EditorViewportPanel
               Camera* sceneViewCamera,
               Camera* gameViewCamera,
               Scene* scene,
+              const std::function<void(Camera&, const std::shared_ptr<Framebuffer>&, uint32_t, uint32_t)>& renderGameView,
               EditorPlayModeState playModeState,
               const std::function<void(uint32_t, uint32_t)>& ensureSceneViewFramebuffer,
               const std::function<void(uint32_t, uint32_t)>& ensureGameViewFramebuffer,

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <deque>
 #include <mutex>
 #include <string_view>
 
@@ -13,7 +14,7 @@ namespace Limitless
         struct SceneManagerRuntimeState
         {
             std::mutex SceneTransitionMutex;
-            std::optional<SceneTransitionRequest> PendingSceneTransition;
+            std::deque<SceneTransitionRequest> PendingSceneTransitions;
             SceneTransitionBridgeCallback TransitionBridgeCallback = nullptr;
         };
 
@@ -48,9 +49,18 @@ namespace Limitless
             }
             return normalizedIdentifier;
         }
+
+        bool EnqueueSceneTransition(SceneManagerRuntimeState& state,
+                                    SceneTransitionType transitionType,
+                                    const std::string& sceneIdentifier,
+                                    LoadSceneMode loadMode)
+        {
+            state.PendingSceneTransitions.push_back(SceneTransitionRequest{ transitionType, sceneIdentifier, loadMode });
+            return true;
+        }
     }
 
-    bool SceneManager::LoadScene(const std::string& sceneIdentifier)
+    bool SceneManager::LoadScene(const std::string& sceneIdentifier, LoadSceneMode loadMode)
     {
         if (sceneIdentifier.empty())
             return false;
@@ -58,14 +68,13 @@ namespace Limitless
         auto& state = GetSceneManagerRuntimeState();
         std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
         if (state.TransitionBridgeCallback != nullptr)
-            return state.TransitionBridgeCallback(SceneTransitionType::LoadByAssetKey, sceneIdentifier.c_str());
+            return state.TransitionBridgeCallback(SceneTransitionType::LoadByAssetKey, sceneIdentifier.c_str(), loadMode);
 
         const auto normalizedSceneIdentifier = NormalizeSceneAssetKey(sceneIdentifier);
         if (!normalizedSceneIdentifier.has_value())
             return false;
 
-        state.PendingSceneTransition = SceneTransitionRequest{ SceneTransitionType::LoadByAssetKey, *normalizedSceneIdentifier };
-        return true;
+        return EnqueueSceneTransition(state, SceneTransitionType::LoadByAssetKey, *normalizedSceneIdentifier, loadMode);
     }
 
     bool SceneManager::ReloadCurrentScene()
@@ -73,10 +82,43 @@ namespace Limitless
         auto& state = GetSceneManagerRuntimeState();
         std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
         if (state.TransitionBridgeCallback != nullptr)
-            return state.TransitionBridgeCallback(SceneTransitionType::ReloadCurrentScene, "");
+            return state.TransitionBridgeCallback(SceneTransitionType::ReloadCurrentScene, "", LoadSceneMode::Single);
 
-        state.PendingSceneTransition = SceneTransitionRequest{ SceneTransitionType::ReloadCurrentScene, {} };
-        return true;
+        return EnqueueSceneTransition(state, SceneTransitionType::ReloadCurrentScene, {}, LoadSceneMode::Single);
+    }
+
+    bool SceneManager::SetActiveScene(const std::string& sceneIdentifier)
+    {
+        if (sceneIdentifier.empty())
+            return false;
+
+        auto& state = GetSceneManagerRuntimeState();
+        std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
+        if (state.TransitionBridgeCallback != nullptr)
+            return state.TransitionBridgeCallback(SceneTransitionType::SetActiveSceneByAssetKey, sceneIdentifier.c_str(), LoadSceneMode::Single);
+
+        const auto normalizedSceneIdentifier = NormalizeSceneAssetKey(sceneIdentifier);
+        if (!normalizedSceneIdentifier.has_value())
+            return false;
+
+        return EnqueueSceneTransition(state, SceneTransitionType::SetActiveSceneByAssetKey, *normalizedSceneIdentifier, LoadSceneMode::Single);
+    }
+
+    bool SceneManager::UnloadScene(const std::string& sceneIdentifier)
+    {
+        if (sceneIdentifier.empty())
+            return false;
+
+        auto& state = GetSceneManagerRuntimeState();
+        std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
+        if (state.TransitionBridgeCallback != nullptr)
+            return state.TransitionBridgeCallback(SceneTransitionType::UnloadByAssetKey, sceneIdentifier.c_str(), LoadSceneMode::Single);
+
+        const auto normalizedSceneIdentifier = NormalizeSceneAssetKey(sceneIdentifier);
+        if (!normalizedSceneIdentifier.has_value())
+            return false;
+
+        return EnqueueSceneTransition(state, SceneTransitionType::UnloadByAssetKey, *normalizedSceneIdentifier, LoadSceneMode::Single);
     }
 
     void SceneManager::SetTransitionBridgeCallback(SceneTransitionBridgeCallback callback)
@@ -90,18 +132,18 @@ namespace Limitless
     {
         auto& state = GetSceneManagerRuntimeState();
         std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
-        return state.PendingSceneTransition.has_value();
+        return !state.PendingSceneTransitions.empty();
     }
 
     std::optional<SceneTransitionRequest> SceneManager::ConsumePendingSceneTransition()
     {
         auto& state = GetSceneManagerRuntimeState();
         std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
-        if (!state.PendingSceneTransition.has_value())
+        if (state.PendingSceneTransitions.empty())
             return std::nullopt;
 
-        std::optional<SceneTransitionRequest> transition = std::move(state.PendingSceneTransition);
-        state.PendingSceneTransition.reset();
+        SceneTransitionRequest transition = std::move(state.PendingSceneTransitions.front());
+        state.PendingSceneTransitions.pop_front();
         return transition;
     }
 
@@ -109,6 +151,6 @@ namespace Limitless
     {
         auto& state = GetSceneManagerRuntimeState();
         std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
-        state.PendingSceneTransition.reset();
+        state.PendingSceneTransitions.clear();
     }
 }

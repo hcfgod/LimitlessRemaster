@@ -223,8 +223,8 @@ namespace Limitless
             targetScene->SetPhysics2DSettings(runtimeSettings);
         };
 
-        applyProjectSettings(m_Scene.get());
-        applyProjectSettings(m_EditSceneStored.get());
+        for (const SceneCollection::Handle handle : m_SceneCollection.CollectHandlesWithRoles(0u))
+            applyProjectSettings(m_SceneCollection.GetScene(handle));
     }
 
     void EditorLayer::ApplyProjectLighting2DSettings()
@@ -433,6 +433,7 @@ namespace Limitless
         if (shaderReady && assetsReady && objectsReady && physicsReady)
         {
             m_Scene->SetLoadStateReady();
+            m_Scene.SetLifecycleState(SceneCollectionLifecycleState::Active);
             LT_INFO("Scene load completed and is now ready for rendering.");
         }
     }

@@ -263,8 +263,8 @@ namespace Limitless
     namespace EditorPlayMode
     {
         void Enter(EditorPlayModeState& playModeState,
-                   std::unique_ptr<Scene>& scene,
-                   std::unique_ptr<Scene>& editSceneStored,
+                   SceneCollectionSlot& scene,
+                   SceneCollectionSlot& editSceneStored,
                    CameraManager& cameraManager,
                    CameraId editorCameraId,
                    uint32_t viewportWidthPixels,
@@ -283,8 +283,23 @@ namespace Limitless
             selectedTextureAssetKey.clear();
             cachedTextureAsset.reset();
 
-            editSceneStored = std::move(scene);
-            scene = editSceneStored ? editSceneStored->Clone() : std::make_unique<Scene>();
+            const std::string sceneAssetKey = scene.GetAssetKey();
+            std::unique_ptr<Scene> editScene = scene.Release();
+            editSceneStored.SetOwnedScene(
+                std::move(editScene),
+                sceneAssetKey,
+                SceneCollectionLifecycleState::Suspended,
+                SceneRole::EditAuthoring | SceneRole::Render);
+            scene.SetOwnedScene(
+                editSceneStored ? editSceneStored->Clone() : std::make_unique<Scene>(),
+                sceneAssetKey,
+                SceneCollectionLifecycleState::Active,
+                SceneRole::GameplayPrimary |
+                    SceneRole::RuntimeUpdate |
+                    SceneRole::FixedUpdate |
+                    SceneRole::Render |
+                    SceneRole::ScriptQueryTarget |
+                    SceneRole::AudioPlayback);
             selectedEntity = ResolveSelectionPath(scene.get(), selectedEntityPath);
 
             playModeMissingGameplayCamera = false;
@@ -319,8 +334,8 @@ namespace Limitless
         }
 
         void EnterSimulate(EditorPlayModeState& playModeState,
-                           std::unique_ptr<Scene>& scene,
-                           std::unique_ptr<Scene>& editSceneStored,
+                           SceneCollectionSlot& scene,
+                           SceneCollectionSlot& editSceneStored,
                            CameraManager& cameraManager,
                            CameraId editorCameraId,
                            uint32_t viewportWidthPixels,
@@ -351,8 +366,8 @@ namespace Limitless
         }
 
         void Exit(EditorPlayModeState& playModeState,
-                  std::unique_ptr<Scene>& scene,
-                  std::unique_ptr<Scene>& editSceneStored,
+                  SceneCollectionSlot& scene,
+                  SceneCollectionSlot& editSceneStored,
                   CameraManager& cameraManager,
                   CameraId editorCameraId,
                   CameraId& cachedGameplayCameraId,
@@ -370,7 +385,15 @@ namespace Limitless
             cachedTextureAsset.reset();
 
             if (editSceneStored)
-                scene = std::move(editSceneStored);
+            {
+                const std::string sceneAssetKey = editSceneStored.GetAssetKey();
+                std::unique_ptr<Scene> restoredEditScene = editSceneStored.Release();
+                scene.SetOwnedScene(
+                    std::move(restoredEditScene),
+                    sceneAssetKey,
+                    SceneCollectionLifecycleState::Active,
+                    SceneRole::EditAuthoring | SceneRole::Render);
+            }
 
             selectedEntity = ResolveSelectionPath(scene.get(), selectedEntityPath);
 

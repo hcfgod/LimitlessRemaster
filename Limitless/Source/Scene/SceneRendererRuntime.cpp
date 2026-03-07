@@ -637,14 +637,15 @@ namespace Limitless
         RenderPassDescriptor BuildWorldRenderPassDescriptor(const std::shared_ptr<Framebuffer>& framebuffer,
                                                             uint32_t width,
                                                             uint32_t height,
-                                                            const glm::vec4& clearColor)
+                                                            const glm::vec4& clearColor,
+                                                            bool clearViewport)
         {
             RenderPassDescriptor descriptor{};
             descriptor.DebugName = "SceneRenderer/World";
             descriptor.TargetFramebuffer = framebuffer;
             descriptor.Viewport = RenderViewport{ 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) };
             descriptor.ColorAttachments.push_back(RenderPassColorAttachmentDescriptor{
-                RenderLoadAction::Clear,
+                clearViewport ? RenderLoadAction::Clear : RenderLoadAction::Load,
                 RenderStoreAction::Store,
                 clearColor
             });
@@ -1526,7 +1527,7 @@ namespace Limitless
     }
 
     void SceneRenderer::RenderToViewport(Scene& scene, const Camera& camera,
-        const std::shared_ptr<Framebuffer>& framebuffer, uint32_t width, uint32_t height)
+        const std::shared_ptr<Framebuffer>& framebuffer, uint32_t width, uint32_t height, bool clearViewport)
     {
         if (width == 0 || height == 0)
             return;
@@ -1553,7 +1554,7 @@ namespace Limitless
 
         const bool renderedWithLighting = Lighting2DRenderer::Default().RenderToViewport(scene, camera, framebuffer, width, height, [&]() {
             renderWorldAndWorldSpaceCanvasPasses();
-        });
+        }, clearViewport);
 
         if (!renderedWithLighting)
         {
@@ -1561,7 +1562,8 @@ namespace Limitless
                 framebuffer,
                 width,
                 height,
-                SceneRenderer::GetViewportClearColor());
+                SceneRenderer::GetViewportClearColor(),
+                clearViewport);
             RenderPass::Begin(renderer, worldPass);
             renderWorldAndWorldSpaceCanvasPasses();
             RenderPass::End(renderer, worldPass);

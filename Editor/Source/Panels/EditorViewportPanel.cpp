@@ -2760,6 +2760,7 @@ namespace Limitless::EditorViewportPanel
               Camera* sceneViewCamera,
               Camera* gameViewCamera,
               Scene* scene,
+              const std::function<void(Camera&, const std::shared_ptr<Framebuffer>&, uint32_t, uint32_t)>& renderGameView,
               EditorPlayModeState playModeState,
               const std::function<void(uint32_t, uint32_t)>& ensureSceneViewFramebuffer,
               const std::function<void(uint32_t, uint32_t)>& ensureGameViewFramebuffer,
@@ -3365,8 +3366,13 @@ namespace Limitless::EditorViewportPanel
                 gameViewCamera->SetViewportSize(gameWidth, gameHeight);
 
             const bool isSceneLoading = scene && scene->GetLoadState() == Scene::LoadState::Loading;
-            if (gameViewCamera && scene && gameViewFramebuffer && !isSceneLoading)
-                SceneRenderer::RenderToViewport(*scene, *gameViewCamera, gameViewFramebuffer, gameWidth, gameHeight);
+            if (gameViewCamera && gameViewFramebuffer && !isSceneLoading)
+            {
+                if (renderGameView)
+                    renderGameView(*gameViewCamera, gameViewFramebuffer, gameWidth, gameHeight);
+                else if (scene)
+                    SceneRenderer::RenderToViewport(*scene, *gameViewCamera, gameViewFramebuffer, gameWidth, gameHeight);
+            }
 
             if (gameViewFramebuffer && gameViewFramebuffer->GetColorAttachment())
             {

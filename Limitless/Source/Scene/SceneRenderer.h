@@ -32,6 +32,6 @@ namespace Limitless
         /// Render scene to a viewport framebuffer (binds, clears, draws, unbinds).
         /// Use this for editor viewports or off-screen rendering.
         static void RenderToViewport(Scene& scene, const Camera& camera,
-            const std::shared_ptr<Framebuffer>& framebuffer, uint32_t width, uint32_t height);
+            const std::shared_ptr<Framebuffer>& framebuffer, uint32_t width, uint32_t height, bool clearViewport = true);
     };
 }

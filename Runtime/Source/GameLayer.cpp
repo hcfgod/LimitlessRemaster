@@ -60,17 +60,32 @@ namespace Limitless
         using SetScriptCreateEntityBridgeFunction = void (*)(ScriptCreateEntityBridgeCallback callback);
         using SetScriptDestroyEntityBridgeFunction = void (*)(ScriptDestroyEntityBridgeCallback callback);
 
-        Scene* s_ActiveScene = nullptr;
+        constexpr SceneRoleMask kRuntimeSceneBaseRoles =
+            SceneRole::RuntimeUpdate |
+            SceneRole::FixedUpdate |
+            SceneRole::Render |
+            SceneRole::AudioPlayback;
 
-        bool ForwardSceneTransitionToHost(SceneTransitionType transitionType, const char* sceneIdentifier)
+        constexpr SceneRoleMask kRuntimeSceneActiveRoles =
+            kRuntimeSceneBaseRoles |
+            SceneRole::GameplayPrimary |
+            SceneRole::ScriptQueryTarget;
+
+        bool ForwardSceneTransitionToHost(SceneTransitionType transitionType, const char* sceneIdentifier, LoadSceneMode loadSceneMode)
         {
             switch (transitionType)
             {
                 case SceneTransitionType::LoadByAssetKey:
                     if (!sceneIdentifier) return false;
-                    return SceneManager::LoadScene(sceneIdentifier);
+                    return SceneManager::LoadScene(sceneIdentifier, loadSceneMode);
                 case SceneTransitionType::ReloadCurrentScene:
                     return SceneManager::ReloadCurrentScene();
+                case SceneTransitionType::SetActiveSceneByAssetKey:
+                    if (!sceneIdentifier) return false;
+                    return SceneManager::SetActiveScene(sceneIdentifier);
+                case SceneTransitionType::UnloadByAssetKey:
+                    if (!sceneIdentifier) return false;
+                    return SceneManager::UnloadScene(sceneIdentifier);
             }
             return false;
         }
@@ -140,10 +155,11 @@ namespace Limitless
             if (!outHit) return false;
             *outHit = RaycastHit2D{};
 
-            if (!s_ActiveScene) return false;
+            Scene* scene = Physics2DQueries::GetActiveSceneForScriptQueries();
+            if (!scene) return false;
 
             const Physics2DRaycastHit nativeHit = Physics2DQueries::RaycastClosest(
-                s_ActiveScene,
+                scene,
                 glm::vec2(originX, originY),
                 glm::vec2(directionX, directionY),
                 maxDistance,
@@ -178,30 +194,34 @@ namespace Limitless
 
         entt::entity ForwardScriptCreateEntityToHost(const char* name)
         {
-            if (!s_ActiveScene) return entt::null;
+            Scene* scene = Physics2DQueries::GetActiveSceneForScriptQueries();
+            if (!scene) return entt::null;
             if (!name || name[0] == '\0')
-                return s_ActiveScene->CreateEntity("Entity");
-            return s_ActiveScene->CreateEntity(name);
+                return scene->CreateEntity("Entity");
+            return scene->CreateEntity(name);
         }
 
         void ForwardScriptDestroyEntityToHost(entt::entity entity)
         {
-            if (!s_ActiveScene) return;
-            s_ActiveScene->DestroyEntity(entity);
+            Scene* scene = Physics2DQueries::GetActiveSceneForScriptQueries();
+            if (!scene) return;
+            scene->DestroyEntity(entity);
         }
 
         entt::entity ForwardScriptInstantiatePrefabToHost(const char* prefabAssetKey, entt::entity parentEntity)
         {
-            if (!s_ActiveScene || !prefabAssetKey || prefabAssetKey[0] == '\0')
+            Scene* scene = Physics2DQueries::GetActiveSceneForScriptQueries();
+            if (!scene || !prefabAssetKey || prefabAssetKey[0] == '\0')
                 return entt::null;
-            return s_ActiveScene->InstantiatePrefab(prefabAssetKey, parentEntity);
+            return scene->InstantiatePrefab(prefabAssetKey, parentEntity);
         }
 
         entt::entity ForwardScriptResolveEntityReferenceToHost(entt::entity entity)
         {
-            if (!s_ActiveScene || entity == entt::null)
+            Scene* scene = Physics2DQueries::GetActiveSceneForScriptQueries();
+            if (!scene || entity == entt::null)
                 return entity;
-            return s_ActiveScene->ResolveEntityReference(entity);
+            return scene->ResolveEntityReference(entity);
         }
 
         uint32_t ForwardScriptContactEntityHandlesToHost(entt::entity entity,
@@ -209,13 +229,14 @@ namespace Limitless
                                                          entt::entity* outHandles,
                                                          uint32_t capacity)
         {
-            if (!s_ActiveScene || entity == entt::null)
+            Scene* scene = Physics2DQueries::GetActiveSceneForScriptQueries();
+            if (!scene || entity == entt::null)
                 return 0u;
-            auto& registry = s_ActiveScene->GetRegistry();
+            auto& registry = scene->GetRegistry();
             if (!registry.valid(entity))
                 return 0u;
 
-            const Physics2DContactListener* contacts = s_ActiveScene->GetPhysics2DContactEventsForEntity(entity);
+            const Physics2DContactListener* contacts = scene->GetPhysics2DContactEventsForEntity(entity);
             if (!contacts)
                 return 0u;
 
@@ -528,6 +549,7 @@ namespace Limitless
 
     GameLayer::GameLayer()
         : Layer("GameLayer")
+        , m_Scene(m_SceneCollection, m_SceneHandle)
     {
     }
 
@@ -536,6 +558,7 @@ namespace Limitless
     void GameLayer::OnAttach()
     {
         LT_INFO("GameLayer: attaching (shipped game mode).");
+        Physics2DQueries::SetActiveSceneCollectionForScriptQueries(&m_SceneCollection, ToSceneRoleMask(SceneRole::ScriptQueryTarget));
 
         if (!LoadBootstrap())
         {
@@ -564,13 +587,9 @@ namespace Limitless
 
     void GameLayer::OnDetach()
     {
-        if (m_Scene)
-        {
-            Audio::StopAudioSourcesInScene(m_Scene.get());
-            s_ActiveScene = nullptr;
-            Physics2DQueries::SetActiveSceneForScriptQueries(nullptr);
-            m_Scene.reset();
-        }
+        ClearLoadedScenes();
+
+        Physics2DQueries::SetActiveSceneCollectionForScriptQueries(nullptr);
 
         ShutdownScriptCore();
         LT_INFO("GameLayer: detached.");
@@ -578,21 +597,37 @@ namespace Limitless
 
     void GameLayer::OnUpdate(float deltaTime)
     {
-        if (m_Scene && m_Scene->IsReady())
-            m_Scene->Update(deltaTime);
+        for (const SceneCollection::Handle handle : m_SceneCollection.CollectHandlesWithRoles(ToSceneRoleMask(SceneRole::RuntimeUpdate)))
+        {
+            Scene* scene = m_SceneCollection.GetScene(handle);
+            if (scene && scene->IsReady())
+                scene->Update(deltaTime);
+        }
 
-        Audio::UpdateSceneAudioSources(m_Scene.get(), deltaTime);
+        Physics2DQueries::SetActiveSceneForScriptQueries(nullptr);
+
+        for (const SceneCollection::Handle handle : m_SceneCollection.CollectHandlesWithRoles(ToSceneRoleMask(SceneRole::AudioPlayback)))
+        {
+            Scene* scene = m_SceneCollection.GetScene(handle);
+            if (scene && scene->IsReady())
+                Audio::UpdateSceneAudioSources(scene, deltaTime);
+        }
 
         ProcessPendingSceneTransitions();
     }
 
     void GameLayer::OnFixedUpdate(float fixedDeltaTime)
     {
-        if (!m_Scene || !m_Scene->IsReady())
-            return;
+        for (const SceneCollection::Handle handle : m_SceneCollection.CollectHandlesWithRoles(ToSceneRoleMask(SceneRole::FixedUpdate)))
+        {
+            Scene* scene = m_SceneCollection.GetScene(handle);
+            if (!scene || !scene->IsReady())
+                continue;
 
-        m_Scene->FixedUpdate(fixedDeltaTime);
-        m_Scene->StepPhysics2D(fixedDeltaTime);
+            scene->FixedUpdate(fixedDeltaTime);
+            scene->StepPhysics2D(fixedDeltaTime);
+        }
+        Physics2DQueries::SetActiveSceneForScriptQueries(nullptr);
     }
 
     void GameLayer::OnRender()
@@ -604,9 +639,7 @@ namespace Limitless
         if (camera)
         {
             m_LoggedMissingGameplayCamera = false;
-            // Use the same path as editor viewports so shipped runtime gets
-            // lighting/shadows and screen-space text rendering.
-            SceneRenderer::RenderToViewport(*m_Scene, *camera, {}, m_ViewportWidth, m_ViewportHeight);
+            RenderLoadedScenes(*camera);
         }
         else if (!m_LoggedMissingGameplayCamera)
         {
@@ -687,14 +720,22 @@ namespace Limitless
     // Scene loading
     // -------------------------------------------------------------------------
 
-    bool GameLayer::LoadScene(const std::string& sceneAssetKey)
+    bool GameLayer::LoadScene(const std::string& sceneAssetKey, LoadSceneMode loadMode)
     {
         if (sceneAssetKey.empty())
             return false;
 
-        Audio::StopAudioSourcesInScene(m_Scene.get());
+        if (loadMode == LoadSceneMode::Additive)
+        {
+            const SceneCollection::Handle existingHandle = FindLoadedSceneHandleByAssetKey(sceneAssetKey);
+            if (existingHandle != SceneCollection::InvalidHandle)
+                return true;
+        }
+        else
+        {
+            ClearLoadedScenes();
+        }
 
-        // Scene::LoadFromFile can read directly from AssetBundle when enabled by key.
         auto loadResult = Scene::LoadFromFile(sceneAssetKey);
 
         if (!loadResult.IsSuccess())
@@ -703,23 +744,29 @@ namespace Limitless
             return false;
         }
 
-        m_Scene = std::move(loadResult.GetValue());
-        m_CurrentSceneAssetKey = sceneAssetKey;
-        s_ActiveScene = m_Scene.get();
-        Physics2DQueries::SetActiveSceneForScriptQueries(m_Scene.get());
+        const bool shouldActivate = loadMode == LoadSceneMode::Single || m_SceneHandle == SceneCollection::InvalidHandle;
+        const SceneRoleMask sceneRoles = shouldActivate ? kRuntimeSceneActiveRoles : kRuntimeSceneBaseRoles;
+        const SceneCollection::Handle handle = m_SceneCollection.AddScene(
+            std::move(loadResult.GetValue()),
+            sceneAssetKey,
+            SceneCollectionLifecycleState::Loading,
+            sceneRoles);
+        Scene* loadedScene = m_SceneCollection.GetScene(handle);
+        Physics2DQueries::SetActiveSceneForScriptQueries(nullptr);
 
-        // Initialize the scene for runtime.
-        m_Scene->BeginLoadingState();
-        m_Scene->MarkSceneObjectsInitialized();
-        m_Scene->InitializePhysicsWorldForLoading();
-        m_Scene->SetLoadStateReady();
+        if (!loadedScene)
+            return false;
 
-        // Reset gameplay camera so it gets recreated from the scene.
-        m_GameplayCameraId = {};
-        m_LoggedMissingGameplayCamera = false;
+        loadedScene->BeginLoadingState();
+        loadedScene->MarkSceneObjectsInitialized();
+        loadedScene->InitializePhysicsWorldForLoading();
+        loadedScene->SetLoadStateReady();
+        m_SceneCollection.SetLifecycleState(handle, SceneCollectionLifecycleState::Active);
 
-        // One-time startup diagnostics for packaged runtime troubleshooting.
-        auto& registry = m_Scene->GetRegistry();
+        if (shouldActivate)
+            ActivateLoadedScene(handle);
+
+        auto& registry = loadedScene->GetRegistry();
         const size_t cameraCount = registry.storage<CameraComponent>().size();
         const size_t spriteCount = registry.storage<SpriteComponent>().size();
         const size_t grid2DCount = registry.storage<Grid2DComponent>().size();
@@ -729,6 +776,145 @@ namespace Limitless
 
         LT_INFO("GameLayer: scene '{}' loaded.", sceneAssetKey);
         return true;
+    }
+
+    bool GameLayer::ActivateLoadedScene(SceneCollection::Handle handle)
+    {
+        SceneCollection::Record* record = m_SceneCollection.GetRecord(handle);
+        if (!record || !record->SceneInstance)
+            return false;
+
+        const std::vector<SceneCollection::Handle> loadedHandles = m_SceneCollection.CollectHandlesWithRoles(0u);
+        for (const SceneCollection::Handle loadedHandle : loadedHandles)
+        {
+            if (loadedHandle == handle)
+                continue;
+
+            m_SceneCollection.RemoveRoles(loadedHandle, ToSceneRoleMask(SceneRole::GameplayPrimary) | ToSceneRoleMask(SceneRole::ScriptQueryTarget));
+            m_SceneCollection.SetLifecycleState(loadedHandle, SceneCollectionLifecycleState::Active);
+        }
+
+        m_SceneCollection.AddRoles(handle, ToSceneRoleMask(SceneRole::GameplayPrimary) | ToSceneRoleMask(SceneRole::ScriptQueryTarget));
+        m_SceneCollection.SetLifecycleState(handle, SceneCollectionLifecycleState::Active);
+        m_SceneHandle = handle;
+        m_CurrentSceneAssetKey = record->AssetKey;
+        Physics2DQueries::SetActiveSceneForScriptQueries(nullptr);
+        ResetGameplayCameraState();
+        return true;
+    }
+
+    bool GameLayer::ActivateLoadedSceneByAssetKey(const std::string& sceneAssetKey)
+    {
+        const SceneCollection::Handle handle = FindLoadedSceneHandleByAssetKey(sceneAssetKey);
+        return handle != SceneCollection::InvalidHandle && ActivateLoadedScene(handle);
+    }
+
+    bool GameLayer::UnloadLoadedSceneByAssetKey(const std::string& sceneAssetKey)
+    {
+        const SceneCollection::Handle handle = FindLoadedSceneHandleByAssetKey(sceneAssetKey);
+        if (handle == SceneCollection::InvalidHandle)
+            return false;
+
+        Scene* scene = m_SceneCollection.GetScene(handle);
+        if (scene)
+            Audio::StopAudioSourcesInScene(scene);
+
+        const bool wasActiveScene = handle == m_SceneHandle;
+        m_SceneCollection.RemoveScene(handle);
+        if (!wasActiveScene)
+            return true;
+
+        m_SceneHandle = SceneCollection::InvalidHandle;
+        m_CurrentSceneAssetKey.clear();
+        const std::vector<SceneCollection::Handle> remainingHandles = m_SceneCollection.CollectHandlesWithRoles(0u);
+        if (!remainingHandles.empty())
+            return ActivateLoadedScene(remainingHandles.front());
+
+        ResetGameplayCameraState();
+        return true;
+    }
+
+    void GameLayer::ClearLoadedScenes()
+    {
+        for (const SceneCollection::Handle handle : m_SceneCollection.CollectHandlesWithRoles(0u))
+        {
+            if (Scene* scene = m_SceneCollection.GetScene(handle))
+                Audio::StopAudioSourcesInScene(scene);
+        }
+
+        Physics2DQueries::SetActiveSceneForScriptQueries(nullptr);
+        m_SceneCollection.Clear();
+        m_SceneHandle = SceneCollection::InvalidHandle;
+        m_CurrentSceneAssetKey.clear();
+        ResetGameplayCameraState();
+    }
+
+    SceneCollection::Handle GameLayer::FindLoadedSceneHandleByAssetKey(const std::string& sceneAssetKey) const
+    {
+        if (sceneAssetKey.empty())
+            return SceneCollection::InvalidHandle;
+
+        const std::string requestedCanonicalKeyLower = ToLower(CanonicalizeSceneKeyForComparison(sceneAssetKey));
+        const std::string requestedStemLower = ToLower(ExtractSceneNameStem(sceneAssetKey));
+        for (const SceneCollection::Handle handle : m_SceneCollection.CollectHandlesWithRoles(0u))
+        {
+            const SceneCollection::Record* record = m_SceneCollection.GetRecord(handle);
+            if (!record || !record->SceneInstance)
+                continue;
+
+            const std::string loadedCanonicalKeyLower = ToLower(CanonicalizeSceneKeyForComparison(record->AssetKey));
+            const std::string loadedStemLower = ToLower(ExtractSceneNameStem(record->AssetKey));
+            if ((!requestedCanonicalKeyLower.empty() && loadedCanonicalKeyLower == requestedCanonicalKeyLower) ||
+                (!requestedStemLower.empty() && loadedStemLower == requestedStemLower))
+            {
+                return handle;
+            }
+        }
+
+        return SceneCollection::InvalidHandle;
+    }
+
+    std::string GameLayer::ResolveBuildSceneAssetKey(const std::string& sceneIdentifier) const
+    {
+        const std::string requestedCanonicalKeyLower = ToLower(CanonicalizeSceneKeyForComparison(sceneIdentifier));
+        const std::string requestedStemLower = ToLower(ExtractSceneNameStem(sceneIdentifier));
+        for (const auto& buildSceneKey : m_BuildScenes)
+        {
+            const std::string buildCanonicalKeyLower = ToLower(CanonicalizeSceneKeyForComparison(buildSceneKey));
+            const std::string buildStemLower = ToLower(ExtractSceneNameStem(buildSceneKey));
+            if ((!requestedCanonicalKeyLower.empty() && buildCanonicalKeyLower == requestedCanonicalKeyLower) ||
+                (!requestedStemLower.empty() && buildStemLower == requestedStemLower))
+            {
+                return buildSceneKey;
+            }
+        }
+
+        return {};
+    }
+
+    void GameLayer::ResetGameplayCameraState()
+    {
+        if (m_GameplayCameraId)
+        {
+            (void)m_CameraManager.DestroyCamera(m_GameplayCameraId);
+            m_GameplayCameraId = {};
+        }
+
+        m_LoggedMissingGameplayCamera = false;
+    }
+
+    void GameLayer::RenderLoadedScenes(Camera& camera)
+    {
+        bool firstScene = true;
+        for (const SceneCollection::Handle handle : m_SceneCollection.CollectHandlesWithRoles(ToSceneRoleMask(SceneRole::Render)))
+        {
+            Scene* scene = m_SceneCollection.GetScene(handle);
+            if (!scene || !scene->IsReady())
+                continue;
+
+            SceneRenderer::RenderToViewport(*scene, camera, {}, m_ViewportWidth, m_ViewportHeight, firstScene);
+            firstScene = false;
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -857,40 +1043,44 @@ namespace Limitless
 
     void GameLayer::ProcessPendingSceneTransitions()
     {
-        auto transition = SceneManager::ConsumePendingSceneTransition();
-        if (!transition.has_value())
-            return;
-
-        if (transition->Type == SceneTransitionType::ReloadCurrentScene)
+        while (true)
         {
-            LT_INFO("GameLayer: reloading current scene '{}'.", m_CurrentSceneAssetKey);
-            LoadScene(m_CurrentSceneAssetKey);
-            return;
-        }
-
-        const std::string requestedIdentifier = transition->SceneIdentifier;
-        const std::string requestedCanonicalKey = CanonicalizeSceneKeyForComparison(requestedIdentifier);
-        const std::string requestedCanonicalKeyLower = ToLower(requestedCanonicalKey);
-        const std::string requestedStemLower = ToLower(ExtractSceneNameStem(requestedIdentifier));
-
-        // Match the requested scene against build settings entries in a forgiving
-        // way (slash/case/extension differences) while still requiring the scene
-        // to be present in the build scene list.
-        for (const auto& buildSceneKey : m_BuildScenes)
-        {
-            const std::string buildCanonicalKey = CanonicalizeSceneKeyForComparison(buildSceneKey);
-            const std::string buildCanonicalKeyLower = ToLower(buildCanonicalKey);
-            const std::string buildStemLower = ToLower(ExtractSceneNameStem(buildSceneKey));
-
-            if ((!requestedCanonicalKeyLower.empty() && buildCanonicalKeyLower == requestedCanonicalKeyLower) ||
-                (!requestedStemLower.empty() && buildStemLower == requestedStemLower))
-            {
-                LoadScene(buildSceneKey);
+            auto transition = SceneManager::ConsumePendingSceneTransition();
+            if (!transition.has_value())
                 return;
+
+            if (transition->Type == SceneTransitionType::ReloadCurrentScene)
+            {
+                LT_INFO("GameLayer: reloading current scene '{}'.", m_CurrentSceneAssetKey);
+                if (!m_CurrentSceneAssetKey.empty())
+                    LoadScene(m_CurrentSceneAssetKey, LoadSceneMode::Single);
+                continue;
+            }
+
+            const std::string resolvedSceneAssetKey = ResolveBuildSceneAssetKey(transition->SceneIdentifier);
+            if (resolvedSceneAssetKey.empty())
+            {
+                LT_WARN("GameLayer: scene '{}' not found in build scenes list.", transition->SceneIdentifier);
+                continue;
+            }
+
+            switch (transition->Type)
+            {
+                case SceneTransitionType::LoadByAssetKey:
+                    (void)LoadScene(resolvedSceneAssetKey, transition->LoadMode);
+                    break;
+                case SceneTransitionType::SetActiveSceneByAssetKey:
+                    if (!ActivateLoadedSceneByAssetKey(resolvedSceneAssetKey))
+                        LT_WARN("GameLayer: cannot activate scene '{}'; it is not loaded.", resolvedSceneAssetKey);
+                    break;
+                case SceneTransitionType::UnloadByAssetKey:
+                    if (!UnloadLoadedSceneByAssetKey(resolvedSceneAssetKey))
+                        LT_WARN("GameLayer: cannot unload scene '{}'; it is not loaded.", resolvedSceneAssetKey);
+                    break;
+                case SceneTransitionType::ReloadCurrentScene:
+                    break;
             }
         }
-
-        LT_WARN("GameLayer: scene '{}' not found in build scenes list.", requestedIdentifier);
     }
 
     // -------------------------------------------------------------------------

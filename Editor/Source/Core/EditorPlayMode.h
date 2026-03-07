@@ -2,6 +2,7 @@
 
 #include "Assets/TextureAsset.h"
 #include "Limitless.h"
+#include "Scene/SceneCollection.h"
 
 #include <memory>
 #include <string>
@@ -21,8 +22,8 @@ namespace Limitless
     namespace EditorPlayMode
     {
         void Enter(EditorPlayModeState& playModeState,
-                   std::unique_ptr<Scene>& scene,
-                   std::unique_ptr<Scene>& editSceneStored,
+                   SceneCollectionSlot& scene,
+                   SceneCollectionSlot& editSceneStored,
                    CameraManager& cameraManager,
                    CameraId editorCameraId,
                    uint32_t viewportWidthPixels,
@@ -35,8 +36,8 @@ namespace Limitless
                    Assets::TextureAsset::Ptr& cachedTextureAsset);
 
         void EnterSimulate(EditorPlayModeState& playModeState,
-                           std::unique_ptr<Scene>& scene,
-                           std::unique_ptr<Scene>& editSceneStored,
+                           SceneCollectionSlot& scene,
+                           SceneCollectionSlot& editSceneStored,
                            CameraManager& cameraManager,
                            CameraId editorCameraId,
                            uint32_t viewportWidthPixels,
@@ -49,8 +50,8 @@ namespace Limitless
                            Assets::TextureAsset::Ptr& cachedTextureAsset);
 
         void Exit(EditorPlayModeState& playModeState,
-                  std::unique_ptr<Scene>& scene,
-                  std::unique_ptr<Scene>& editSceneStored,
+                  SceneCollectionSlot& scene,
+                  SceneCollectionSlot& editSceneStored,
                   CameraManager& cameraManager,
                   CameraId editorCameraId,
                   CameraId& cachedGameplayCameraId,

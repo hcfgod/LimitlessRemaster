@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Limitless.h"
+#include "Scene/SceneCollection.h"
 
 #include <memory>
 #include <string>
@@ -40,7 +41,16 @@ namespace Limitless
         bool LoadBootstrap();
 
         /// Load a scene by asset key from the AssetBundle.
-        bool LoadScene(const std::string& sceneAssetKey);
+        bool LoadScene(const std::string& sceneAssetKey, LoadSceneMode loadMode = LoadSceneMode::Single);
+
+        bool ActivateLoadedScene(SceneCollection::Handle handle);
+        bool ActivateLoadedSceneByAssetKey(const std::string& sceneAssetKey);
+        bool UnloadLoadedSceneByAssetKey(const std::string& sceneAssetKey);
+        void ClearLoadedScenes();
+        SceneCollection::Handle FindLoadedSceneHandleByAssetKey(const std::string& sceneAssetKey) const;
+        std::string ResolveBuildSceneAssetKey(const std::string& sceneIdentifier) const;
+        void ResetGameplayCameraState();
+        void RenderLoadedScenes(Camera& camera);
 
         /// Initialize the ScriptCore DLL (register scripts, connect bridges).
         void InitializeScriptCore();
@@ -58,7 +68,9 @@ namespace Limitless
         std::string m_StartupSceneKey;
         std::vector<std::string> m_BuildScenes;
 
-        std::unique_ptr<Scene> m_Scene;
+        SceneCollection m_SceneCollection;
+        SceneCollection::Handle m_SceneHandle = SceneCollection::InvalidHandle;
+        SceneCollectionSlot m_Scene;
         std::string m_CurrentSceneAssetKey;
 
         CameraManager m_CameraManager;

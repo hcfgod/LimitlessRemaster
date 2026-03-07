@@ -37,6 +37,7 @@
 #include "ImGui/ImGuiLayer.h"
 #include "Project/BuildSettings.h"
 #include "Project/ProjectManager.h"
+#include "Physics/Physics2DQueries.h"
 #include "Project/ProjectSettings.h"
 #include "Scene/Components/CoreComponents.h"
 #include "Scene/Components/RenderingComponents.h"
@@ -416,6 +417,8 @@ namespace Limitless
 
     EditorLayer::EditorLayer()
         : Layer("EditorLayer")
+        , m_Scene(m_SceneCollection, m_SceneHandle)
+        , m_EditSceneStored(m_SceneCollection, m_EditSceneStoredHandle)
     {
         const std::string defaultName = SceneDisplayNameFromFileName(kDefaultSceneFileName);
         const size_t copyCount = std::min(defaultName.size(), m_SaveSceneFileNameBuffer.size() - 1);
@@ -428,6 +431,7 @@ namespace Limitless
     void EditorLayer::OnAttach()
     {
         SceneManager::ClearPendingSceneTransition();
+        Physics2DQueries::SetActiveSceneCollectionForScriptQueries(&m_SceneCollection, ToSceneRoleMask(SceneRole::ScriptQueryTarget));
         m_EditorUndoService.Initialize(
             [this]() { return m_Scene.get(); },
             [this](std::unique_ptr<Scene> scene) { m_Scene = std::move(scene); },
@@ -435,7 +439,7 @@ namespace Limitless
                 if (!snapshot)
                     return false;
                 m_Scene.swap(snapshot);
-                return (m_Scene != nullptr);
+                return static_cast<bool>(m_Scene);
             });
 
         // Unity-style startup:
@@ -473,6 +477,8 @@ namespace Limitless
         SceneManager::ClearPendingSceneTransition();
         if (m_PlayModeState != EditorPlayModeState::Edit)
             ExitPlayMode();
+        Physics2DQueries::SetActiveSceneForScriptQueries(nullptr);
+        Physics2DQueries::SetActiveSceneCollectionForScriptQueries(nullptr);
 
         // Explicitly finalize any in-flight Build Settings build job before shutdown.
         EditorBuildSettingsPanel::Shutdown(m_BuildSettingsPanelState);
@@ -584,15 +590,42 @@ namespace Limitless
             ApplyProjectLighting2DSettings();
         }
 
-        if (m_PlayModeState == EditorPlayModeState::Play && m_Scene && m_Scene->IsReady())
-            m_Scene->Update(deltaTime);
+        if (m_PlayModeState == EditorPlayModeState::Play)
+        {
+            for (const SceneCollection::Handle handle : m_SceneCollection.CollectHandlesWithRoles(ToSceneRoleMask(SceneRole::RuntimeUpdate)))
+            {
+                if (handle == m_EditSceneStoredHandle)
+                    continue;
+
+                Scene* scene = m_SceneCollection.GetScene(handle);
+                if (scene && scene->IsReady())
+                    scene->Update(deltaTime);
+            }
+        }
+
+        Physics2DQueries::SetActiveSceneForScriptQueries(nullptr);
 
         // Tick particle emitters in edit mode so the inspector preview works.
         // Pass editModePreview=true to prevent PlayOnStart from auto-triggering.
         if (m_PlayModeState != EditorPlayModeState::Play && m_Scene && m_Scene->IsReady())
             UpdateParticleEmitterSystem(m_Scene->GetRegistry(), deltaTime, true);
 
-        Audio::UpdateSceneAudioSources(m_Scene.get(), deltaTime, audioPlaybackAllowed);
+        if (audioPlaybackAllowed)
+        {
+            for (const SceneCollection::Handle handle : m_SceneCollection.CollectHandlesWithRoles(ToSceneRoleMask(SceneRole::AudioPlayback)))
+            {
+                if (handle == m_EditSceneStoredHandle)
+                    continue;
+
+                Scene* scene = m_SceneCollection.GetScene(handle);
+                if (scene && scene->IsReady())
+                    Audio::UpdateSceneAudioSources(scene, deltaTime, true);
+            }
+        }
+        else
+        {
+            Audio::UpdateSceneAudioSources(m_Scene.get(), deltaTime, false);
+        }
         ApplyProjectAudioSettings();
 
         ApplyAnimationTimelinePreviewToSelectedEntity();
@@ -659,19 +692,29 @@ namespace Limitless
         if ((m_PlayModeState == EditorPlayModeState::Play || m_PlayModeState == EditorPlayModeState::Simulate) &&
             m_Scene->IsReady())
         {
-            // Only collect expensive per-body diagnostics when the diagnostics
-            // panel is actually visible, saving O(N*C) contact queries per step.
-            const uint16_t worldCount = std::max<uint16_t>(1, m_Scene->GetPhysics2DWorldCount());
-            for (uint16_t worldSlot = 0; worldSlot < worldCount; ++worldSlot)
+            for (const SceneCollection::Handle handle : m_SceneCollection.CollectHandlesWithRoles(ToSceneRoleMask(SceneRole::FixedUpdate)))
             {
-                Physics2DWorld* physicsWorld = m_Scene->GetPhysics2DWorld(worldSlot);
-                if (physicsWorld)
-                    physicsWorld->SetDiagnosticsEnabled(m_ShowPhysicsDiagnosticsWindow);
-            }
+                if (handle == m_EditSceneStoredHandle)
+                    continue;
 
-            m_Scene->FixedUpdate(fixedDeltaTime);
-            m_Scene->StepPhysics2D(fixedDeltaTime);
+                Scene* scene = m_SceneCollection.GetScene(handle);
+                if (!scene || !scene->IsReady())
+                    continue;
+
+                const uint16_t worldCount = std::max<uint16_t>(1, scene->GetPhysics2DWorldCount());
+                for (uint16_t worldSlot = 0; worldSlot < worldCount; ++worldSlot)
+                {
+                    Physics2DWorld* physicsWorld = scene->GetPhysics2DWorld(worldSlot);
+                    if (physicsWorld)
+                        physicsWorld->SetDiagnosticsEnabled(m_ShowPhysicsDiagnosticsWindow);
+                }
+
+                scene->FixedUpdate(fixedDeltaTime);
+                scene->StepPhysics2D(fixedDeltaTime);
+            }
         }
+
+        Physics2DQueries::SetActiveSceneForScriptQueries(nullptr);
     }
 
     void EditorLayer::OnRender()
@@ -1495,6 +1538,9 @@ namespace Limitless
             sceneViewCamera,
             gameViewCamera,
             m_Scene.get(),
+            [this](Camera& camera, const std::shared_ptr<Framebuffer>& framebuffer, uint32_t width, uint32_t height) {
+                RenderLoadedGameScenes(camera, framebuffer, width, height);
+            },
             m_PlayModeState,
             [this](uint32_t width, uint32_t height) { EnsureSceneViewFramebuffer(width, height); },
             [this](uint32_t width, uint32_t height) { EnsureGameViewFramebuffer(width, height); },

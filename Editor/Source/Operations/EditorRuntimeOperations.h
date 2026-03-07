@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EditorPlayMode.h"
+#include "Scene/SceneCollection.h"
 
 #include <cstdint>
 #include <glm/glm.hpp>
@@ -11,7 +12,6 @@ namespace Limitless
     class CameraManager;
     class EditorCameraController;
     class Framebuffer;
-    class Scene;
 }
 
 namespace Limitless::EditorRuntimeOperations
@@ -19,15 +19,15 @@ namespace Limitless::EditorRuntimeOperations
     /// Initializes editor runtime systems and an empty working scene container.
     void Attach(uint32_t viewportWidthPixels,
                 uint32_t viewportHeightPixels,
-                std::unique_ptr<Scene>& scene,
+                SceneCollectionSlot& scene,
                 CameraManager& cameraManager,
                 CameraId& editorCameraId,
                 std::unique_ptr<EditorCameraController>& editorCameraController,
                 std::shared_ptr<Framebuffer>& viewportFramebuffer);
 
     /// Shuts down editor runtime systems and clears runtime-owned resources.
-    void Detach(std::unique_ptr<Scene>& scene,
-                std::unique_ptr<Scene>& editSceneStored,
+    void Detach(SceneCollectionSlot& scene,
+                SceneCollectionSlot& editSceneStored,
                 std::unique_ptr<EditorCameraController>& editorCameraController,
                 std::shared_ptr<Framebuffer>& viewportFramebuffer);
 
