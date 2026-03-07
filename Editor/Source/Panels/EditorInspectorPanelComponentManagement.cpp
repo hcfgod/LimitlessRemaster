@@ -1,6 +1,8 @@
 #include "EditorInspectorPanelComponentManagement.h"
 
 #include "EditorComponentRegistry.h"
+#include "EditorInspectorPanelNativeScriptEditor.h"
+#include "Scripting/NativeScriptRegistry.h"
 #include "Undo/EditorUndoService.h"
 #include "Scene/Scene.h"
 #include "imgui/imgui.h"
@@ -68,6 +70,71 @@ namespace Limitless::EditorInspectorPanel
                 entry.RemoveComponent(registry, selectedEntity);
             }
         }
+
+        NativeScriptEntry BuildScriptEntryForComponentAdd(const std::string& requestedScriptName)
+        {
+            NativeScriptEntry scriptEntry{};
+            const std::string resolvedScriptClassName = ResolveRegisteredScriptClassNameForInspector(requestedScriptName);
+            scriptEntry.ScriptClassName = resolvedScriptClassName.empty() ? requestedScriptName : resolvedScriptClassName;
+            return scriptEntry;
+        }
+
+        void DrawAddComponentPopupSectionHeader(const char* label)
+        {
+            ImGui::Spacing();
+            ImGui::TextDisabled("%s", label);
+            ImGui::Separator();
+        }
+
+        void DrawAddScriptComponentMenu(Scene* scene,
+                                        entt::entity selectedEntity,
+                                        EditorUndoService* undoService)
+        {
+            const std::vector<std::string> registeredScriptNames = NativeScriptRegistry::GetRegisteredScriptNames();
+            const auto discoveredScriptNames = DiscoverNativeScriptClassNamesFromProjectAssetsForInspector();
+            std::vector<std::string> availableScriptNames = registeredScriptNames.empty()
+                ? discoveredScriptNames
+                : registeredScriptNames;
+            std::sort(availableScriptNames.begin(), availableScriptNames.end());
+            availableScriptNames.erase(std::unique(availableScriptNames.begin(), availableScriptNames.end()), availableScriptNames.end());
+
+            DrawAddComponentPopupSectionHeader("Scripts");
+
+            for (const std::string& scriptName : availableScriptNames)
+            {
+                if (!ImGui::MenuItem(scriptName.c_str()))
+                    continue;
+
+                NativeScriptEntry scriptEntry = BuildScriptEntryForComponentAdd(scriptName);
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Attach Script Component", [&](Scene& mutableScene) {
+                        return mutableScene.AttachScriptComponent(selectedEntity, std::move(scriptEntry)) != entt::null;
+                    });
+                }
+                else if (scene)
+                {
+                    (void)scene->AttachScriptComponent(selectedEntity, std::move(scriptEntry));
+                }
+            }
+
+            if (!availableScriptNames.empty())
+                ImGui::Separator();
+
+            if (ImGui::MenuItem("Empty Script Component"))
+            {
+                if (undoService)
+                {
+                    (void)undoService->ExecuteSceneMutation("Add Script Component", [&](Scene& mutableScene) {
+                        return mutableScene.AttachScriptComponent(selectedEntity) != entt::null;
+                    });
+                }
+                else if (scene)
+                {
+                    (void)scene->AttachScriptComponent(selectedEntity);
+                }
+            }
+        }
     }
 
     void DrawAddComponentPopup(Scene* scene,
@@ -75,11 +142,17 @@ namespace Limitless::EditorInspectorPanel
                                entt::entity selectedEntity,
                                EditorUndoService* undoService)
     {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.24f, 0.38f, 0.58f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.31f, 0.46f, 0.68f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.37f, 0.53f, 0.74f, 1.0f));
         if (ImGui::Button("Add Component", ImVec2(-1.0f, 0.0f)))
             ImGui::OpenPopup("AddComponentPopup");
+        ImGui::PopStyleColor(3);
 
         if (!ImGui::BeginPopup("AddComponentPopup"))
             return;
+
+        DrawAddComponentPopupSectionHeader("Components");
 
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Canvas))
             DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
@@ -284,9 +357,6 @@ namespace Limitless::EditorInspectorPanel
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AudioSource))
             DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
-        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::NativeScript))
-            DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
-
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Animator))
             DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
@@ -332,6 +402,8 @@ namespace Limitless::EditorInspectorPanel
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::ParticleEmitter))
             DrawAddComponentMenuItem(*entry, scene, registry, selectedEntity, undoService);
 
+        DrawAddScriptComponentMenu(scene, selectedEntity, undoService);
+
         ImGui::EndPopup();
     }
 
@@ -339,7 +411,6 @@ namespace Limitless::EditorInspectorPanel
                                              entt::registry& registry,
                                              entt::entity selectedEntity,
                                              PendingEntityComponentRemovals& pendingRemovals,
-                                             bool removeNativeScriptComponent,
                                              EditorUndoService* undoService)
     {
         (void)scene;
@@ -406,9 +477,6 @@ namespace Limitless::EditorInspectorPanel
 
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::AudioSource))
             ApplyPendingRemoval(*entry, pendingRemovals.RemoveAudioSourceComponent, registry, selectedEntity, undoService);
-
-        if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::NativeScript))
-            ApplyPendingRemoval(*entry, removeNativeScriptComponent, registry, selectedEntity, undoService);
 
         if (const ComponentRegistryEntry* entry = FindComponentRegistryEntry(ComponentRegistryKey::Animator))
             ApplyPendingRemoval(*entry, pendingRemovals.RemoveAnimatorComponent, registry, selectedEntity, undoService);

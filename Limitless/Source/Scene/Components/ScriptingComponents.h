@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EnTT/entt.hpp"
 #include "Scripting/ScriptProperty.h"
 #include "Scripting/ScriptableEntity.h"
 
@@ -86,8 +87,10 @@ namespace Limitless
     };
 
     /// Native C++ behavior scripts attached to an entity (Unity-style list).
-    struct NativeScriptComponent
+    struct ScriptComponent
     {
-        std::vector<NativeScriptEntry> Scripts;
+        entt::entity OwnerEntity = entt::null;
+        int32_t ComponentOrder = 0;
+        NativeScriptEntry Script;
     };
 }

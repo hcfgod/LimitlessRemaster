@@ -10,9 +10,8 @@ namespace Limitless
 
 namespace Limitless::EditorInspectorPanel
 {
-    void DrawNativeScriptComponentSection(Scene* scene,
-                                          entt::registry& registry,
-                                          entt::entity selectedEntity,
-                                          EditorUndoService* undoService,
-                                          bool& outRemoveNativeScriptComponent);
+    void DrawScriptComponentSections(Scene* scene,
+                                     entt::registry& registry,
+                                     entt::entity selectedEntity,
+                                     EditorUndoService* undoService);
 }

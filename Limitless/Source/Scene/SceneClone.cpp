@@ -198,19 +198,21 @@ namespace Limitless
                 particleEmitter->Paused = false;
             }
 
-            if (auto* nativeScript = registry.try_get<NativeScriptComponent>(entity))
+            auto scriptView = registry.view<ScriptComponent>();
+            for (entt::entity scriptEntity : scriptView)
             {
-                for (auto& scriptEntry : nativeScript->Scripts)
-                {
-                    scriptEntry.RuntimeInitialized = false;
-                    if (scriptEntry.RuntimeInstance)
-                        Coroutine::StopAll(*scriptEntry.RuntimeInstance);
-                    scriptEntry.RuntimeInstance.reset();
-                    scriptEntry.RuntimeUpdateCount = 0;
-                    scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-                    scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
-                    scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
-                }
+                auto& scriptComponent = scriptView.get<ScriptComponent>(scriptEntity);
+                if (scriptComponent.OwnerEntity != entity)
+                    continue;
+                auto& scriptEntry = scriptComponent.Script;
+                scriptEntry.RuntimeInitialized = false;
+                if (scriptEntry.RuntimeInstance)
+                    Coroutine::StopAll(*scriptEntry.RuntimeInstance);
+                scriptEntry.RuntimeInstance.reset();
+                scriptEntry.RuntimeUpdateCount = 0;
+                scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
+                scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
             }
         }
     }
@@ -471,26 +473,25 @@ namespace Limitless
                 destinationAudioSource.RuntimePreviousWorldPosition = glm::vec3(0.0f);
             }
 
-            if (const auto* nativeScript = sourceRegistry.try_get<NativeScriptComponent>(sourceEntity))
+            auto sourceScriptView = sourceRegistry.view<ScriptComponent>();
+            for (entt::entity sourceScriptEntity : sourceScriptView)
             {
-                auto& destinationNativeScript = destinationRegistry.emplace<NativeScriptComponent>(destinationEntity);
-                destinationNativeScript.Scripts.reserve(nativeScript->Scripts.size());
-                for (const auto& sourceScriptEntry : nativeScript->Scripts)
-                {
-                    auto& destinationScriptEntry = destinationNativeScript.Scripts.emplace_back();
-                    destinationScriptEntry.ScriptClassName = sourceScriptEntry.ScriptClassName;
-                    destinationScriptEntry.ScriptAssetRelativePath = sourceScriptEntry.ScriptAssetRelativePath;
-                    destinationScriptEntry.Enabled = sourceScriptEntry.Enabled;
-                    destinationScriptEntry.ExposedProperties = sourceScriptEntry.ExposedProperties;
-                    destinationScriptEntry.ExecutionPolicy = sourceScriptEntry.ExecutionPolicy;
-                    destinationScriptEntry.DeclaredReadAccessMask = sourceScriptEntry.DeclaredReadAccessMask;
-                    destinationScriptEntry.DeclaredWriteAccessMask = sourceScriptEntry.DeclaredWriteAccessMask;
-                    destinationScriptEntry.RuntimeInitialized = false;
-                    destinationScriptEntry.RuntimeInstance.reset();
-                    destinationScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-                    destinationScriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
-                    destinationScriptEntry.RuntimeWarnedAccessMaskMismatch = false;
-                }
+                const auto& sourceScriptComponent = sourceScriptView.get<ScriptComponent>(sourceScriptEntity);
+                if (sourceScriptComponent.OwnerEntity != sourceEntity)
+                    continue;
+
+                NativeScriptEntry destinationScriptEntry{};
+                destinationScriptEntry.ScriptClassName = sourceScriptComponent.Script.ScriptClassName;
+                destinationScriptEntry.ScriptAssetRelativePath = sourceScriptComponent.Script.ScriptAssetRelativePath;
+                destinationScriptEntry.Enabled = sourceScriptComponent.Script.Enabled;
+                destinationScriptEntry.ExposedProperties = sourceScriptComponent.Script.ExposedProperties;
+                destinationScriptEntry.ExecutionPolicy = sourceScriptComponent.Script.ExecutionPolicy;
+                destinationScriptEntry.DeclaredReadAccessMask = sourceScriptComponent.Script.DeclaredReadAccessMask;
+                destinationScriptEntry.DeclaredWriteAccessMask = sourceScriptComponent.Script.DeclaredWriteAccessMask;
+                destinationScriptEntry.RuntimeExposedPropertiesRevision = 1;
+                const entt::entity destinationScriptEntity = clone->AttachScriptComponent(destinationEntity, std::move(destinationScriptEntry));
+                if (auto* attachedScriptComponent = destinationRegistry.try_get<ScriptComponent>(destinationScriptEntity))
+                    attachedScriptComponent->ComponentOrder = sourceScriptComponent.ComponentOrder;
             }
 
             if (const auto* particleEmitter = sourceRegistry.try_get<ParticleEmitterComponent>(sourceEntity))

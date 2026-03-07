@@ -388,20 +388,18 @@ namespace Limitless
 
             if (const auto* audioSource = registry.try_get<AudioSourceComponent>(entity))
             {
-                const char* rolloffModeName = "SmoothStep";
-                switch (audioSource->SpatialRolloffMode)
-                {
-                    case AudioSourceComponent::RolloffMode::Linear:
-                        rolloffModeName = "Linear";
-                        break;
-                    case AudioSourceComponent::RolloffMode::Inverse:
-                        rolloffModeName = "Inverse";
-                        break;
-                    case AudioSourceComponent::RolloffMode::SmoothStep:
-                    default:
-                        rolloffModeName = "SmoothStep";
-                        break;
-                }
+                const char* rolloffModeName = [](AudioSourceComponent::RolloffMode rolloffMode) {
+                    switch (rolloffMode)
+                    {
+                        case AudioSourceComponent::RolloffMode::Linear:
+                            return "Linear";
+                        case AudioSourceComponent::RolloffMode::Inverse:
+                            return "Inverse";
+                        case AudioSourceComponent::RolloffMode::SmoothStep:
+                        default:
+                            return "SmoothStep";
+                    }
+                }(audioSource->SpatialRolloffMode);
 
                 entry["AudioSource"] = {
                     { "AudioClip", SceneSerialization::MakeAssetReferenceJson(audioSource->AudioClipKey, Assets::AssetType::AudioClip) },
@@ -577,13 +575,21 @@ namespace Limitless
             }
         }
 
-        void serialize_script_and_prefab_components(const entt::registry& registry, entt::entity entity, nlohmann::json& entry)
+        void serialize_script_and_prefab_components(const Scene& scene,
+                                                    const entt::registry& registry,
+                                                    entt::entity entity,
+                                                    nlohmann::json& entry)
         {
-            if (const auto* nativeScript = registry.try_get<NativeScriptComponent>(entity))
+            const auto scriptEntities = scene.GetScriptComponentEntities(entity);
+            if (!scriptEntities.empty())
             {
                 nlohmann::json scriptEntries = nlohmann::json::array();
-                for (const auto& scriptEntry : nativeScript->Scripts)
+                for (entt::entity scriptEntity : scriptEntities)
                 {
+                    const auto* scriptComponent = registry.try_get<ScriptComponent>(scriptEntity);
+                    if (!scriptComponent)
+                        continue;
+                    const auto& scriptEntry = scriptComponent->Script;
                     nlohmann::json exposedProperties = nlohmann::json::object();
                     for (const auto& [propertyName, propertyValue] : scriptEntry.ExposedProperties)
                     {
@@ -662,7 +668,7 @@ namespace Limitless
                 serialize_grid_and_tilemap_components(registry, entity, entry);
                 serialize_camera_and_audio_components(registry, entity, entry);
                 serialize_physics_components(registry, entity, indexByEntity, entry);
-                serialize_script_and_prefab_components(registry, entity, entry);
+                serialize_script_and_prefab_components(scene, registry, entity, entry);
                 root["Entities"].push_back(std::move(entry));
             }
         }

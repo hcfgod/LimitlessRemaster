@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <unordered_set>
@@ -22,6 +23,45 @@ namespace Limitless::EditorInspectorPanel
     namespace
     {
         constexpr const char* kSceneEntityPayload = "SCENE_ENTITY";
+        constexpr const char* kAssetMovePayload = "ASSET_MOVE";
+
+        bool BeginInspectorScriptSectionHeader(const char* label,
+                                               const char* popupId,
+                                               const char* optionsButtonId)
+        {
+            ImGui::Spacing();
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f, 10.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.12f, 0.19f, 0.29f, 0.96f));
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.18f, 0.27f, 0.41f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.24f, 0.34f, 0.50f, 1.0f));
+            const bool isOpen = ImGui::TreeNodeEx(label,
+                                                  ImGuiTreeNodeFlags_DefaultOpen |
+                                                      ImGuiTreeNodeFlags_Framed |
+                                                      ImGuiTreeNodeFlags_AllowItemOverlap);
+            ImGui::PopStyleColor(3);
+            ImGui::PopStyleVar(2);
+
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup(popupId);
+
+            const ImVec2 headerMin = ImGui::GetItemRectMin();
+            const ImVec2 headerMax = ImGui::GetItemRectMax();
+            const float optionsButtonWidth = ImGui::CalcTextSize("...").x + 16.0f;
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 4.0f));
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.23f, 0.34f, 0.50f, 0.95f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.43f, 0.60f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.35f, 0.49f, 0.67f, 1.0f));
+            const float optionsButtonHeight = ImGui::GetFrameHeight();
+            ImGui::SetCursorScreenPos(ImVec2(headerMax.x - optionsButtonWidth - 8.0f,
+                                             headerMin.y + std::max(0.0f, (headerMax.y - headerMin.y - optionsButtonHeight) * 0.5f) + 1.0f));
+            if (ImGui::Button(optionsButtonId))
+                ImGui::OpenPopup(popupId);
+            ImGui::PopStyleColor(3);
+            ImGui::PopStyleVar();
+
+            return isOpen;
+        }
 
         struct AccessMaskUiEntry
         {
@@ -36,7 +76,7 @@ namespace Limitless::EditorInspectorPanel
             AccessMaskUiEntry{ "Rigidbody2D", SceneSystemAccessComponent::Rigidbody2D, "Rigidbody2DComponent" },
             AccessMaskUiEntry{ "Animator", SceneSystemAccessComponent::Animator, "AnimatorComponent and animation event receiver data" },
             AccessMaskUiEntry{ "ParticleEmitter", SceneSystemAccessComponent::ParticleEmitter, "ParticleEmitterComponent" },
-            AccessMaskUiEntry{ "NativeScript", SceneSystemAccessComponent::NativeScript, "NativeScriptComponent and script entry state" },
+            AccessMaskUiEntry{ "NativeScript", SceneSystemAccessComponent::NativeScript, "ScriptComponent state" },
             AccessMaskUiEntry{ "BoxCollider2D", SceneSystemAccessComponent::BoxCollider2D, "BoxCollider2DComponent" },
             AccessMaskUiEntry{ "CircleCollider2D", SceneSystemAccessComponent::CircleCollider2D, "CircleCollider2DComponent" },
             AccessMaskUiEntry{ "Joint2D", SceneSystemAccessComponent::Joint2D, "Joint2DComponent" },
@@ -201,63 +241,113 @@ namespace Limitless::EditorInspectorPanel
 
             return EditorAssetNaming::GetAssetDisplayNameFromAssetKey(value.AssetKey);
         }
-    }
 
-    void DrawNativeScriptComponentSection(Scene* scene,
-                                          entt::registry& registry,
-                                          entt::entity selectedEntity,
-                                          EditorUndoService* undoService,
-                                          bool& outRemoveNativeScriptComponent)
-    {
-        outRemoveNativeScriptComponent = false;
-
-        auto* nativeScript = registry.try_get<NativeScriptComponent>(selectedEntity);
-        if (!nativeScript)
-            return;
-
-        const bool nativeScriptOpen = ImGui::TreeNodeEx("Native Script", ImGuiTreeNodeFlags_DefaultOpen);
-        if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-            ImGui::OpenPopup("NativeScriptComponentOptions");
-        ImGui::SameLine();
-        if (ImGui::Button("...##NativeScriptComponentOptionsButton"))
-            ImGui::OpenPopup("NativeScriptComponentOptions");
-
-        if (ImGui::BeginPopup("NativeScriptComponentOptions"))
+        std::string NormalizeSlashes(std::string pathText)
         {
-            bool showDebugInfo = GetNativeScriptDebugInfoEnabled();
-            if (ImGui::MenuItem("Show Debug Info", nullptr, &showDebugInfo))
-                SetNativeScriptDebugInfoEnabled(showDebugInfo);
-            ImGui::Separator();
-            if (ImGui::MenuItem("Remove Component"))
-                outRemoveNativeScriptComponent = true;
-            ImGui::EndPopup();
+            std::replace(pathText.begin(), pathText.end(), '\\', '/');
+            return pathText;
         }
 
-        if (!nativeScriptOpen)
+        std::string ToLowerAscii(std::string text)
+        {
+            std::transform(text.begin(), text.end(), text.begin(), [](unsigned char character) {
+                return static_cast<char>(std::tolower(character));
+            });
+            return text;
+        }
+
+        bool IsNativeScriptAssetKey(const std::string& assetKey)
+        {
+            if (assetKey.empty())
+                return false;
+
+            const std::string lowerKey = ToLowerAscii(NormalizeSlashes(assetKey));
+            return lowerKey.rfind("assets/", 0) == 0 &&
+                   (lowerKey.ends_with(".h") || lowerKey.ends_with(".cpp"));
+        }
+
+        std::string BuildScriptAssetRelativePathFromAssetKey(const std::string& assetKey)
+        {
+            if (!IsNativeScriptAssetKey(assetKey))
+                return {};
+
+            std::string relativePath = NormalizeSlashes(assetKey);
+            if (relativePath.rfind("Assets/", 0) == 0)
+                relativePath.erase(0, 7);
+
+            std::filesystem::path scriptPath(relativePath);
+            scriptPath.replace_extension();
+            return scriptPath.generic_string();
+        }
+
+        NativeScriptEntry BuildScriptEntryFromAssetKey(const std::string& assetKey)
+        {
+            NativeScriptEntry scriptEntry{};
+            scriptEntry.ScriptAssetRelativePath = BuildScriptAssetRelativePathFromAssetKey(assetKey);
+            const std::string requestedClassName = std::filesystem::path(scriptEntry.ScriptAssetRelativePath).stem().string();
+            const std::string resolvedClassName = ResolveRegisteredScriptClassNameForInspector(requestedClassName);
+            scriptEntry.ScriptClassName = resolvedClassName.empty() ? requestedClassName : resolvedClassName;
+            return scriptEntry;
+        }
+
+        bool TryAttachScriptAssetToEntity(Scene* scene,
+                                          entt::entity ownerEntity,
+                                          const std::string& assetKey,
+                                          EditorUndoService* undoService)
+        {
+            if (!scene || !scene->IsValid(ownerEntity) || !IsNativeScriptAssetKey(assetKey))
+                return false;
+
+            NativeScriptEntry scriptEntry = BuildScriptEntryFromAssetKey(assetKey);
+            if (scriptEntry.ScriptClassName.empty() && scriptEntry.ScriptAssetRelativePath.empty())
+                return false;
+
+            if (undoService)
+            {
+                return undoService->ExecuteSceneMutation("Attach Script Component", [&](Scene& mutableScene) {
+                    return mutableScene.AttachScriptComponent(ownerEntity, std::move(scriptEntry)) != entt::null;
+                });
+            }
+
+            return scene->AttachScriptComponent(ownerEntity, std::move(scriptEntry)) != entt::null;
+        }
+    }
+
+    void DrawScriptComponentSections(Scene* scene,
+                                     entt::registry& registry,
+                                     entt::entity selectedEntity,
+                                     EditorUndoService* undoService)
+    {
+        (void)registry;
+
+        if (!scene || selectedEntity == entt::null || !scene->IsValid(selectedEntity))
             return;
+
+        auto scriptComponentEntities = scene->GetScriptComponentEntities(selectedEntity);
+        const auto refreshScriptEntities = [&]() {
+            scriptComponentEntities = scene->GetScriptComponentEntities(selectedEntity);
+        };
 
         const std::vector<std::string> registeredScriptNames = NativeScriptRegistry::GetRegisteredScriptNames();
         const auto discoveredScriptNames = DiscoverNativeScriptClassNamesFromProjectAssetsForInspector();
         std::vector<std::string> availableScriptNames = registeredScriptNames.empty()
             ? discoveredScriptNames
             : registeredScriptNames;
-        if (ImGui::Button("Add Script", ImVec2(-1.0f, 0.0f)))
+        std::sort(availableScriptNames.begin(), availableScriptNames.end());
+        availableScriptNames.erase(std::unique(availableScriptNames.begin(), availableScriptNames.end()), availableScriptNames.end());
+
+        if (ImGui::BeginDragDropTarget())
         {
-            if (undoService)
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kAssetMovePayload))
             {
-                (void)undoService->ExecuteSceneMutation("Add Script Entry", [&](Scene& mutableScene) {
-                    auto* mutableNativeScript = mutableScene.GetRegistry().try_get<NativeScriptComponent>(selectedEntity);
-                    if (!mutableNativeScript)
-                        return false;
-                    mutableNativeScript->Scripts.emplace_back();
-                    return true;
-                });
-                nativeScript = registry.try_get<NativeScriptComponent>(selectedEntity);
+                if (payload->Data && payload->DataSize > 0)
+                {
+                    const std::string assetKey(static_cast<const char*>(payload->Data), static_cast<size_t>(std::max(0, payload->DataSize - 1)));
+                    if (TryAttachScriptAssetToEntity(scene, selectedEntity, assetKey, undoService))
+                        refreshScriptEntities();
+                }
             }
-            else
-            {
-                nativeScript->Scripts.emplace_back();
-            }
+            ImGui::EndDragDropTarget();
         }
 
         if (registeredScriptNames.empty())
@@ -283,35 +373,57 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::TextDisabled("Building ScriptCore...");
         }
 
-        if (nativeScript->Scripts.empty())
+        if (scriptComponentEntities.empty())
         {
-            ImGui::TextDisabled("No scripts attached. Click Add Script.");
+            ImGui::TextDisabled("No script components attached.");
         }
         else
         {
-            int removeScriptIndex = -1;
-            for (size_t scriptIndex = 0; scriptIndex < nativeScript->Scripts.size(); ++scriptIndex)
+            entt::entity scriptComponentToRemove = entt::null;
+            for (entt::entity scriptComponentEntity : scriptComponentEntities)
             {
-                auto& scriptEntry = nativeScript->Scripts[scriptIndex];
-                ImGui::PushID(static_cast<int>(scriptIndex));
+                auto* scriptComponent = scene->GetScriptComponent(scriptComponentEntity);
+                if (!scriptComponent || scriptComponent->OwnerEntity != selectedEntity)
+                    continue;
+
+                auto& scriptEntry = scriptComponent->Script;
+                ImGui::PushID(static_cast<int>(static_cast<uint32_t>(scriptComponentEntity)));
                 std::string scriptLabel = scriptEntry.ScriptClassName.empty()
-                    ? ("Script " + std::to_string(scriptIndex + 1))
+                    ? ("Script Component " + std::to_string(scriptComponent->ComponentOrder + 1))
                     : scriptEntry.ScriptClassName;
-                const bool scriptOpen = ImGui::TreeNodeEx(scriptLabel.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
-                if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                    ImGui::OpenPopup("NativeScriptEntryOptions");
-                ImGui::SameLine();
-                if (ImGui::Button("...##NativeScriptEntryOptionsButton"))
-                    ImGui::OpenPopup("NativeScriptEntryOptions");
-                if (ImGui::BeginPopup("NativeScriptEntryOptions"))
+                const bool scriptOpen = BeginInspectorScriptSectionHeader(scriptLabel.c_str(), "ScriptComponentOptions", "...##ScriptComponentOptionsButton");
+                if (ImGui::BeginPopup("ScriptComponentOptions"))
                 {
-                    if (ImGui::MenuItem("Remove Script"))
-                        removeScriptIndex = static_cast<int>(scriptIndex);
+                    bool showDebugInfo = GetNativeScriptDebugInfoEnabled();
+                    if (ImGui::MenuItem("Show Debug Info", nullptr, &showDebugInfo))
+                        SetNativeScriptDebugInfoEnabled(showDebugInfo);
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Remove Component"))
+                        scriptComponentToRemove = scriptComponentEntity;
                     ImGui::EndPopup();
                 }
 
                 if (scriptOpen)
                 {
+                    const auto mutateScriptEntry = [&](const char* mutationLabel, auto&& mutation) {
+                        if (undoService)
+                        {
+                            return undoService->ExecuteSceneMutation(mutationLabel, [&](Scene& mutableScene) {
+                                auto* mutableScriptComponent = mutableScene.GetScriptComponent(scriptComponentEntity);
+                                if (!mutableScriptComponent || mutableScriptComponent->OwnerEntity != selectedEntity)
+                                    return false;
+                                mutation(mutableScriptComponent->Script);
+                                return true;
+                            });
+                        }
+
+                        auto* mutableScriptComponent = scene->GetScriptComponent(scriptComponentEntity);
+                        if (!mutableScriptComponent || mutableScriptComponent->OwnerEntity != selectedEntity)
+                            return false;
+                        mutation(mutableScriptComponent->Script);
+                        return true;
+                    };
+
                     ImGui::TextUnformatted("Enabled");
                     ImGui::Checkbox("##NativeScriptEnabled", &scriptEntry.Enabled);
 
@@ -322,29 +434,14 @@ namespace Limitless::EditorInspectorPanel
                         const bool noneSelected = scriptEntry.ScriptClassName.empty();
                         if (ImGui::Selectable("None", noneSelected))
                         {
-                            if (undoService)
-                            {
-                                (void)undoService->ExecuteSceneMutation("Change Script Class", [&](Scene& mutableScene) {
-                                    auto* mutableNativeScript = mutableScene.GetRegistry().try_get<NativeScriptComponent>(selectedEntity);
-                                    if (!mutableNativeScript || scriptIndex >= mutableNativeScript->Scripts.size())
-                                        return false;
-                                    auto& mutableEntry = mutableNativeScript->Scripts[scriptIndex];
-                                    mutableEntry.ScriptClassName.clear();
-                                    mutableEntry.ScriptAssetRelativePath.clear();
-                                    mutableEntry.ExposedProperties.clear();
-                                    mutableEntry.RuntimeInitialized = false;
-                                    mutableEntry.RuntimeInstance.reset();
-                                    return true;
-                                });
-                            }
-                            else
-                            {
+                            (void)mutateScriptEntry("Change Script Class", [&](NativeScriptEntry& mutableEntry) {
                                 scriptEntry.ScriptClassName.clear();
-                                scriptEntry.ScriptAssetRelativePath.clear();
-                                scriptEntry.ExposedProperties.clear();
-                                scriptEntry.RuntimeInitialized = false;
-                                scriptEntry.RuntimeInstance.reset();
-                            }
+                                mutableEntry.ScriptClassName.clear();
+                                mutableEntry.ScriptAssetRelativePath.clear();
+                                mutableEntry.ExposedProperties.clear();
+                                mutableEntry.RuntimeInitialized = false;
+                                mutableEntry.RuntimeInstance.reset();
+                            });
                         }
                         if (noneSelected)
                             ImGui::SetItemDefaultFocus();
@@ -356,34 +453,43 @@ namespace Limitless::EditorInspectorPanel
                             {
                                 const std::string resolvedScriptClassName = ResolveRegisteredScriptClassNameForInspector(scriptName);
                                 const std::string& assignedScriptClassName = resolvedScriptClassName.empty() ? scriptName : resolvedScriptClassName;
-                                if (undoService)
-                                {
-                                    (void)undoService->ExecuteSceneMutation("Change Script Class", [&](Scene& mutableScene) {
-                                        auto* mutableNativeScript = mutableScene.GetRegistry().try_get<NativeScriptComponent>(selectedEntity);
-                                        if (!mutableNativeScript || scriptIndex >= mutableNativeScript->Scripts.size())
-                                            return false;
-                                        auto& mutableEntry = mutableNativeScript->Scripts[scriptIndex];
-                                        mutableEntry.ScriptClassName = assignedScriptClassName;
-                                        mutableEntry.ScriptAssetRelativePath.clear();
-                                        mutableEntry.ExposedProperties.clear();
-                                        mutableEntry.RuntimeInitialized = false;
-                                        mutableEntry.RuntimeInstance.reset();
-                                        return true;
-                                    });
-                                }
-                                else
-                                {
+                                (void)mutateScriptEntry("Change Script Class", [&](NativeScriptEntry& mutableEntry) {
                                     scriptEntry.ScriptClassName = assignedScriptClassName;
-                                    scriptEntry.ScriptAssetRelativePath.clear();
-                                    scriptEntry.ExposedProperties.clear();
-                                    scriptEntry.RuntimeInitialized = false;
-                                    scriptEntry.RuntimeInstance.reset();
-                                }
+                                    mutableEntry.ScriptClassName = assignedScriptClassName;
+                                    mutableEntry.ScriptAssetRelativePath.clear();
+                                    mutableEntry.ExposedProperties.clear();
+                                    mutableEntry.RuntimeInitialized = false;
+                                    mutableEntry.RuntimeInstance.reset();
+                                });
                             }
                             if (scriptSelected)
                                 ImGui::SetItemDefaultFocus();
                         }
                         ImGui::EndCombo();
+                    }
+
+                    if (ImGui::BeginDragDropTarget())
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kAssetMovePayload))
+                        {
+                            if (payload->Data && payload->DataSize > 0)
+                            {
+                                const std::string assetKey(static_cast<const char*>(payload->Data), static_cast<size_t>(std::max(0, payload->DataSize - 1)));
+                                if (IsNativeScriptAssetKey(assetKey))
+                                {
+                                    const NativeScriptEntry droppedScriptEntry = BuildScriptEntryFromAssetKey(assetKey);
+                                    (void)mutateScriptEntry("Assign Script Asset", [&](NativeScriptEntry& mutableEntry) {
+                                        scriptEntry.ScriptClassName = droppedScriptEntry.ScriptClassName;
+                                        mutableEntry.ScriptClassName = droppedScriptEntry.ScriptClassName;
+                                        mutableEntry.ScriptAssetRelativePath = droppedScriptEntry.ScriptAssetRelativePath;
+                                        mutableEntry.ExposedProperties.clear();
+                                        mutableEntry.RuntimeInitialized = false;
+                                        mutableEntry.RuntimeInstance.reset();
+                                    });
+                                }
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
                     }
 
                     const std::string resolvedSelectedClassName = ResolveRegisteredScriptClassNameForInspector(scriptEntry.ScriptClassName);
@@ -557,11 +663,11 @@ namespace Limitless::EditorInspectorPanel
                                     if (undoService)
                                     {
                                         return undoService->ExecuteSceneMutation(propertyEditLabel, [&](Scene& mutableScene) {
-                                            auto* mutableNativeScript = mutableScene.GetRegistry().try_get<NativeScriptComponent>(selectedEntity);
-                                            if (!mutableNativeScript || scriptIndex >= mutableNativeScript->Scripts.size())
+                                            auto* mutableScriptComponent = mutableScene.GetScriptComponent(scriptComponentEntity);
+                                            if (!mutableScriptComponent || mutableScriptComponent->OwnerEntity != selectedEntity)
                                                 return false;
 
-                                            auto& mutableEntry = mutableNativeScript->Scripts[scriptIndex];
+                                            auto& mutableEntry = mutableScriptComponent->Script;
                                             auto propertyIt = mutableEntry.ExposedProperties.find(propertyName);
                                             if (propertyIt == mutableEntry.ExposedProperties.end() ||
                                                 !std::holds_alternative<ScriptEntityReference>(propertyIt->second))
@@ -681,11 +787,11 @@ namespace Limitless::EditorInspectorPanel
                                     if (undoService)
                                     {
                                         return undoService->ExecuteSceneMutation(propertyEditLabel, [&](Scene& mutableScene) {
-                                            auto* mutableNativeScript = mutableScene.GetRegistry().try_get<NativeScriptComponent>(selectedEntity);
-                                            if (!mutableNativeScript || scriptIndex >= mutableNativeScript->Scripts.size())
+                                            auto* mutableScriptComponent = mutableScene.GetScriptComponent(scriptComponentEntity);
+                                            if (!mutableScriptComponent || mutableScriptComponent->OwnerEntity != selectedEntity)
                                                 return false;
 
-                                            auto& mutableEntry = mutableNativeScript->Scripts[scriptIndex];
+                                            auto& mutableEntry = mutableScriptComponent->Script;
                                             auto propertyIt = mutableEntry.ExposedProperties.find(propertyName);
                                             if (propertyIt == mutableEntry.ExposedProperties.end() ||
                                                 !std::holds_alternative<ScriptPrefabReference>(propertyIt->second))
@@ -760,27 +866,19 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::PopID();
             }
 
-            if (removeScriptIndex >= 0 && removeScriptIndex < static_cast<int>(nativeScript->Scripts.size()))
+            if (scriptComponentToRemove != entt::null)
             {
                 if (undoService)
                 {
-                    (void)undoService->ExecuteSceneMutation("Remove Script Entry", [&](Scene& mutableScene) {
-                        auto* mutableNativeScript = mutableScene.GetRegistry().try_get<NativeScriptComponent>(selectedEntity);
-                        if (!mutableNativeScript)
-                            return false;
-                        if (removeScriptIndex < 0 || removeScriptIndex >= static_cast<int>(mutableNativeScript->Scripts.size()))
-                            return false;
-                        mutableNativeScript->Scripts.erase(mutableNativeScript->Scripts.begin() + removeScriptIndex);
-                        return true;
+                    (void)undoService->ExecuteSceneMutation("Remove Script Component", [&](Scene& mutableScene) {
+                        return mutableScene.RemoveScriptComponent(scriptComponentToRemove);
                     });
                 }
                 else
                 {
-                    nativeScript->Scripts.erase(nativeScript->Scripts.begin() + removeScriptIndex);
+                    (void)scene->RemoveScriptComponent(scriptComponentToRemove);
                 }
             }
         }
-
-        ImGui::TreePop();
     }
 }

@@ -418,6 +418,24 @@ namespace
     {
         return glm::vec3(transform.WorldTransform[3]);
     }
+
+    Limitless::NativeScriptEntry& AttachScriptEntry(Limitless::Scene& scene, entt::entity owner)
+    {
+        const entt::entity scriptEntity = scene.AttachScriptComponent(owner);
+        return scene.GetRegistry().get<Limitless::ScriptComponent>(scriptEntity).Script;
+    }
+
+    Limitless::NativeScriptEntry& GetScriptEntry(Limitless::Scene& scene, entt::entity owner, size_t index)
+    {
+        const auto scriptEntities = scene.GetScriptComponentEntities(owner);
+        return scene.GetRegistry().get<Limitless::ScriptComponent>(scriptEntities.at(index)).Script;
+    }
+
+    const Limitless::NativeScriptEntry& GetScriptEntry(const Limitless::Scene& scene, entt::entity owner, size_t index)
+    {
+        const auto scriptEntities = scene.GetScriptComponentEntities(owner);
+        return scene.GetRegistry().get<Limitless::ScriptComponent>(scriptEntities.at(index)).Script;
+    }
 }
 
 TEST_SUITE("Scene And Editor Flows")
@@ -521,31 +539,30 @@ TEST_SUITE("Scene And Editor Flows")
         const entt::entity controller = scene.CreateEntity("Controller");
         const entt::entity target = scene.CreateEntity("Target");
 
-        auto& controllerScripts = registry.emplace<Limitless::NativeScriptComponent>(controller);
-        controllerScripts.Scripts.emplace_back();
-        controllerScripts.Scripts[0].ScriptClassName = "PrimaryScript";
-        controllerScripts.Scripts[0].ExposedProperties["TargetEntity"] = Limitless::ScriptEntityReference{ "Target" };
+        auto& primaryScriptEntry = AttachScriptEntry(scene, controller);
+        primaryScriptEntry.ScriptClassName = "PrimaryScript";
+        primaryScriptEntry.ExposedProperties["TargetEntity"] = Limitless::ScriptEntityReference{ "Target" };
 
         // Intentionally place SecondaryScript after PrimaryScript to verify
         // references resolve during OnCreate regardless of list order.
-        controllerScripts.Scripts.emplace_back();
-        controllerScripts.Scripts[1].ScriptClassName = "SecondaryScript";
+        auto& selfSecondaryScriptEntry = AttachScriptEntry(scene, controller);
+        selfSecondaryScriptEntry.ScriptClassName = "SecondaryScript";
 
-        auto& targetScripts = registry.emplace<Limitless::NativeScriptComponent>(target);
-        targetScripts.Scripts.emplace_back();
-        targetScripts.Scripts[0].ScriptClassName = "SecondaryScript";
+        auto& targetSecondaryScriptEntry = AttachScriptEntry(scene, target);
+        targetSecondaryScriptEntry.ScriptClassName = "SecondaryScript";
 
         scene.Update(1.0f / 60.0f);
 
-        REQUIRE(controllerScripts.Scripts[0].RuntimeInstance != nullptr);
-        auto* primary = dynamic_cast<PrimaryScript*>(controllerScripts.Scripts[0].RuntimeInstance.get());
+        const auto& primaryScriptEntryAfterUpdate = GetScriptEntry(scene, controller, 0);
+        REQUIRE(primaryScriptEntryAfterUpdate.RuntimeInstance != nullptr);
+        auto* primary = dynamic_cast<PrimaryScript*>(primaryScriptEntryAfterUpdate.RuntimeInstance.get());
         REQUIRE(primary != nullptr);
         CHECK(primary->FoundSelfInOnCreate);
         CHECK(primary->FoundTargetInOnCreate);
         CHECK(primary->FoundByNameOnSelfInOnCreate);
 
-        auto* selfSecondary = dynamic_cast<SecondaryScript*>(controllerScripts.Scripts[1].RuntimeInstance.get());
-        auto* targetSecondary = dynamic_cast<SecondaryScript*>(targetScripts.Scripts[0].RuntimeInstance.get());
+        auto* selfSecondary = dynamic_cast<SecondaryScript*>(GetScriptEntry(scene, controller, 1).RuntimeInstance.get());
+        auto* targetSecondary = dynamic_cast<SecondaryScript*>(GetScriptEntry(scene, target, 0).RuntimeInstance.get());
         REQUIRE(selfSecondary != nullptr);
         REQUIRE(targetSecondary != nullptr);
         CHECK(selfSecondary->ReceivedPing);
@@ -722,37 +739,39 @@ TEST_SUITE("Scene And Editor Flows")
         const entt::entity scriptHost = scene.CreateEntity("ScriptHost");
         const entt::entity victim = scene.CreateEntity("Victim");
 
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        scripts.Scripts[0].ScriptClassName = "ParallelSpawnScript";
-        scripts.Scripts[0].ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
-        scripts.Scripts[0].DeclaredWriteAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        auto& spawnScriptEntry = AttachScriptEntry(scene, scriptHost);
+        spawnScriptEntry.ScriptClassName = "ParallelSpawnScript";
+        spawnScriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        spawnScriptEntry.DeclaredWriteAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
 
-        scripts.Scripts.emplace_back();
-        scripts.Scripts[1].ScriptClassName = "ParallelDestroyScript";
-        scripts.Scripts[1].ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
-        scripts.Scripts[1].DeclaredWriteAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
-        scripts.Scripts[1].ExposedProperties["TargetEntity"] = Limitless::ScriptEntityReference{ "Victim" };
+        auto& destroyScriptEntry = AttachScriptEntry(scene, scriptHost);
+        destroyScriptEntry.ScriptClassName = "ParallelDestroyScript";
+        destroyScriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        destroyScriptEntry.DeclaredWriteAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        destroyScriptEntry.ExposedProperties["TargetEntity"] = Limitless::ScriptEntityReference{ "Victim" };
 
-        scripts.Scripts.emplace_back();
-        scripts.Scripts[2].ScriptClassName = "ParallelSpawnThenDestroyScript";
-        scripts.Scripts[2].ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
-        scripts.Scripts[2].DeclaredWriteAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
+        auto& spawnThenDestroyScriptEntry = AttachScriptEntry(scene, scriptHost);
+        spawnThenDestroyScriptEntry.ScriptClassName = "ParallelSpawnThenDestroyScript";
+        spawnThenDestroyScriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        spawnThenDestroyScriptEntry.DeclaredWriteAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
 
         scene.Update(1.0f / 60.0f);
 
         CHECK_FALSE(IsNullEntity(FindEntityByTag(scene, "ParallelSpawned")));
         CHECK(IsNullEntity(FindEntityByTag(scene, "ParallelSpawnedThenDestroyed")));
         CHECK(scene.IsValid(victim) == false);
-        REQUIRE(scripts.Scripts[0].RuntimeInstance != nullptr);
-        REQUIRE(scripts.Scripts[1].RuntimeInstance != nullptr);
-        REQUIRE(scripts.Scripts[2].RuntimeInstance != nullptr);
-        auto* spawnThenDestroyScript = dynamic_cast<ParallelSpawnThenDestroyScript*>(scripts.Scripts[2].RuntimeInstance.get());
+        const auto& spawnScriptEntryAfterUpdate = GetScriptEntry(scene, scriptHost, 0);
+        const auto& destroyScriptEntryAfterUpdate = GetScriptEntry(scene, scriptHost, 1);
+        const auto& spawnThenDestroyScriptEntryAfterUpdate = GetScriptEntry(scene, scriptHost, 2);
+        REQUIRE(spawnScriptEntryAfterUpdate.RuntimeInstance != nullptr);
+        REQUIRE(destroyScriptEntryAfterUpdate.RuntimeInstance != nullptr);
+        REQUIRE(spawnThenDestroyScriptEntryAfterUpdate.RuntimeInstance != nullptr);
+        auto* spawnThenDestroyScript = dynamic_cast<ParallelSpawnThenDestroyScript*>(spawnThenDestroyScriptEntryAfterUpdate.RuntimeInstance.get());
         REQUIRE(spawnThenDestroyScript != nullptr);
         CHECK(spawnThenDestroyScript->ReceivedNonNullDeferredHandle);
-        CHECK(scripts.Scripts[0].RuntimeUpdateCount >= 1);
-        CHECK(scripts.Scripts[1].RuntimeUpdateCount >= 1);
-        CHECK(scripts.Scripts[2].RuntimeUpdateCount >= 1);
+        CHECK(spawnScriptEntryAfterUpdate.RuntimeUpdateCount >= 1);
+        CHECK(destroyScriptEntryAfterUpdate.RuntimeUpdateCount >= 1);
+        CHECK(spawnThenDestroyScriptEntryAfterUpdate.RuntimeUpdateCount >= 1);
     }
 
     TEST_CASE("Deferred structural mutation flush respects budget and carries work to later flushes")
@@ -863,9 +882,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelMaskMismatchHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelTransformMutateScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
@@ -937,9 +954,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelRigidbodyMaskMismatchHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelRigidbodyMutateScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
@@ -1011,9 +1026,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelHierarchyMaskMismatchHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelHierarchyMutateScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
@@ -1083,9 +1096,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelBoxColliderMaskMismatchHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelBoxColliderMutateScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
@@ -1156,9 +1167,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelCircleColliderMaskMismatchHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelCircleColliderMutateScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
@@ -1229,9 +1238,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelJointMaskMismatchHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelJointMutateScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
@@ -1303,9 +1310,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelRenderingMaskMismatchHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelSpriteMutateScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
@@ -1376,9 +1381,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelAudioMaskMismatchHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelAudioMutateScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
@@ -1448,9 +1451,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelMetadataMaskMismatchHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelTagMutateScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
@@ -1519,9 +1520,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelAnimatorMaskMismatchHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelAnimatorMutateScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
@@ -1591,9 +1590,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelParticleEmitterMaskMismatchHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelParticleEmitterMutateScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
@@ -1663,9 +1660,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelTilemapMaskMismatchHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelTilemapMutateScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
@@ -1739,9 +1734,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelTilemapFixedMaskMismatchHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelTilemapFixedMutateScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
@@ -1810,9 +1803,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelMutableRegistryAccessHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelMutableRegistryAccessScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
@@ -1885,9 +1876,7 @@ TEST_SUITE("Scene And Editor Flows")
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
         const entt::entity scriptHost = scene.CreateEntity("ParallelHelperDeclaredAccessHost");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(scriptHost);
-        scripts.Scripts.emplace_back();
-        auto& scriptEntry = scripts.Scripts.back();
+        auto& scriptEntry = AttachScriptEntry(scene, scriptHost);
         scriptEntry.ScriptClassName = "ParallelHelperDeclaredAccessScript";
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = 0;
@@ -2070,9 +2059,7 @@ TEST_SUITE("Scene And Editor Flows")
         scene.SetPhysics2DSettings(settings);
 
         const auto attachScript = [&](entt::entity entity) {
-            auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(entity);
-            scripts.Scripts.emplace_back();
-            auto& scriptEntry = scripts.Scripts.back();
+            auto& scriptEntry = AttachScriptEntry(scene, entity);
             scriptEntry.ScriptClassName = "ContactOrderRecordingScript";
         };
 
@@ -2422,14 +2409,13 @@ TEST_SUITE("Scene And Editor Flows")
         audio.RuntimeHasPreviousWorldPosition = true;
         audio.RuntimePreviousWorldPosition = { -2.0f, 1.0f, 0.5f };
 
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(child);
-        scripts.Scripts.emplace_back();
-        scripts.Scripts[0].ScriptClassName = "ButtonScript";
-        scripts.Scripts[0].ScriptAssetRelativePath = "Gameplay/Ui/ButtonScript";
-        scripts.Scripts[0].Enabled = true;
-        scripts.Scripts[0].RuntimeInitialized = true;
-        scripts.Scripts[0].RuntimeUpdateCount = 123;
-        scripts.Scripts[0].ExposedProperties["FollowTarget"] = Limitless::ScriptEntityReference{ "Parent" };
+        auto& scriptEntry = AttachScriptEntry(scene, child);
+        scriptEntry.ScriptClassName = "ButtonScript";
+        scriptEntry.ScriptAssetRelativePath = "Gameplay/Ui/ButtonScript";
+        scriptEntry.Enabled = true;
+        scriptEntry.RuntimeInitialized = true;
+        scriptEntry.RuntimeUpdateCount = 123;
+        scriptEntry.ExposedProperties["FollowTarget"] = Limitless::ScriptEntityReference{ "Parent" };
 
         auto clone = scene.Clone();
         REQUIRE(clone != nullptr);
@@ -2445,7 +2431,7 @@ TEST_SUITE("Scene And Editor Flows")
         REQUIRE(cloneRegistry.all_of<Limitless::MaterialComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::UITextComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::AudioSourceComponent>(clonedChild));
-        REQUIRE(cloneRegistry.all_of<Limitless::NativeScriptComponent>(clonedChild));
+        REQUIRE(clone->GetScriptComponentEntities(clonedChild).size() == 1);
         REQUIRE(cloneRegistry.all_of<Limitless::DirectionalLight2DComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::PointLight2DComponent>(clonedChild));
         REQUIRE(cloneRegistry.all_of<Limitless::ShadowOccluder2DComponent>(clonedChild));
@@ -2529,15 +2515,14 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(clonedListener3D.RuntimePreviousWorldPosition.y == doctest::Approx(0.0f));
         CHECK(clonedListener3D.RuntimePreviousWorldPosition.z == doctest::Approx(0.0f));
 
-        const auto& clonedScripts = cloneRegistry.get<Limitless::NativeScriptComponent>(clonedChild);
-        REQUIRE(clonedScripts.Scripts.size() == 1);
-        CHECK(clonedScripts.Scripts[0].ScriptClassName == "ButtonScript");
-        REQUIRE(clonedScripts.Scripts[0].ExposedProperties.contains("FollowTarget"));
-        const auto* clonedFollowTarget = std::get_if<Limitless::ScriptEntityReference>(&clonedScripts.Scripts[0].ExposedProperties.at("FollowTarget"));
+        const auto& clonedScript = GetScriptEntry(*clone, clonedChild, 0);
+        CHECK(clonedScript.ScriptClassName == "ButtonScript");
+        REQUIRE(clonedScript.ExposedProperties.contains("FollowTarget"));
+        const auto* clonedFollowTarget = std::get_if<Limitless::ScriptEntityReference>(&clonedScript.ExposedProperties.at("FollowTarget"));
         REQUIRE(clonedFollowTarget != nullptr);
         CHECK(clonedFollowTarget->Tag == "Parent");
-        CHECK(clonedScripts.Scripts[0].RuntimeInitialized == false);
-        CHECK(clonedScripts.Scripts[0].RuntimeUpdateCount == 0);
+        CHECK(clonedScript.RuntimeInitialized == false);
+        CHECK(clonedScript.RuntimeUpdateCount == 0);
 
         const auto& clonedDirectionalLight = cloneRegistry.get<Limitless::DirectionalLight2DComponent>(clonedChild);
         CHECK(clonedDirectionalLight.RuntimeResolvedDirection.x == doctest::Approx(0.0f));
@@ -2766,13 +2751,12 @@ TEST_SUITE("Scene And Editor Flows")
         audioSource.RuntimeHasPreviousWorldPosition = true;
         audioSource.RuntimePreviousWorldPosition = { -2.0f, 1.0f, 0.5f };
 
-        auto& nativeScripts = registry.emplace<Limitless::NativeScriptComponent>(hud);
-        nativeScripts.Scripts.emplace_back();
-        nativeScripts.Scripts[0].ScriptClassName = "HudScript";
-        nativeScripts.Scripts[0].ScriptAssetRelativePath = "Gameplay/Ui/HudScript";
-        nativeScripts.Scripts[0].ExposedProperties["FollowTarget"] = Limitless::ScriptEntityReference{ "Root" };
-        nativeScripts.Scripts[0].ExposedProperties["DisplayName"] = std::string("HudLabel");
-        nativeScripts.Scripts[0].ExposedProperties["EnemyPrefab"] = Limitless::Prefab{ "Assets/Prefabs/Enemies/BasicEnemy.prefab.json" };
+        auto& scriptEntry = AttachScriptEntry(scene, hud);
+        scriptEntry.ScriptClassName = "HudScript";
+        scriptEntry.ScriptAssetRelativePath = "Gameplay/Ui/HudScript";
+        scriptEntry.ExposedProperties["FollowTarget"] = Limitless::ScriptEntityReference{ "Root" };
+        scriptEntry.ExposedProperties["DisplayName"] = std::string("HudLabel");
+        scriptEntry.ExposedProperties["EnemyPrefab"] = Limitless::Prefab{ "Assets/Prefabs/Enemies/BasicEnemy.prefab.json" };
 
         const std::filesystem::path scenePath = MakeTempScenePath("SceneRoundTrip.scene.json");
         const auto saveResult = scene.SaveToFile(scenePath);
@@ -2887,15 +2871,14 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(loadedAudioSource.RuntimePlayOnStartConsumed == false);
         CHECK(loadedAudioSource.RuntimeHasPreviousWorldPosition == false);
 
-        REQUIRE(loadedRegistry.all_of<Limitless::NativeScriptComponent>(loadedHud));
-        const auto& loadedNativeScripts = loadedRegistry.get<Limitless::NativeScriptComponent>(loadedHud);
-        REQUIRE(loadedNativeScripts.Scripts.size() == 1);
-        REQUIRE(loadedNativeScripts.Scripts[0].ExposedProperties.contains("FollowTarget"));
-        const auto* loadedFollowTarget = std::get_if<Limitless::ScriptEntityReference>(&loadedNativeScripts.Scripts[0].ExposedProperties.at("FollowTarget"));
+        REQUIRE(loadedScene.GetScriptComponentEntities(loadedHud).size() == 1);
+        const auto& loadedScript = GetScriptEntry(loadedScene, loadedHud, 0);
+        REQUIRE(loadedScript.ExposedProperties.contains("FollowTarget"));
+        const auto* loadedFollowTarget = std::get_if<Limitless::ScriptEntityReference>(&loadedScript.ExposedProperties.at("FollowTarget"));
         REQUIRE(loadedFollowTarget != nullptr);
         CHECK(loadedFollowTarget->Tag == "Root");
-        REQUIRE(loadedNativeScripts.Scripts[0].ExposedProperties.contains("EnemyPrefab"));
-        const auto* loadedEnemyPrefab = std::get_if<Limitless::Prefab>(&loadedNativeScripts.Scripts[0].ExposedProperties.at("EnemyPrefab"));
+        REQUIRE(loadedScript.ExposedProperties.contains("EnemyPrefab"));
+        const auto* loadedEnemyPrefab = std::get_if<Limitless::Prefab>(&loadedScript.ExposedProperties.at("EnemyPrefab"));
         REQUIRE(loadedEnemyPrefab != nullptr);
         CHECK(loadedEnemyPrefab->AssetKey == "Assets/Prefabs/Enemies/BasicEnemy.prefab.json");
 
@@ -2978,13 +2961,12 @@ TEST_SUITE("Scene And Editor Flows")
         auto& registry = scene.GetRegistry();
         const entt::entity entity = scene.CreateEntity("ThrowingOnDestroyEntity");
 
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(entity);
-        scripts.Scripts.emplace_back();
-        scripts.Scripts.back().ScriptClassName = "ThrowingOnDestroyScript";
+        auto& scriptEntry = AttachScriptEntry(scene, entity);
+        scriptEntry.ScriptClassName = "ThrowingOnDestroyScript";
 
         scene.Update(1.0f / 60.0f);
-        REQUIRE(scripts.Scripts.back().RuntimeInstance != nullptr);
-        REQUIRE(scripts.Scripts.back().RuntimeInitialized == true);
+        REQUIRE(scriptEntry.RuntimeInstance != nullptr);
+        REQUIRE(scriptEntry.RuntimeInitialized == true);
 
         CHECK_NOTHROW(scene.DestroyEntity(entity));
         CHECK_FALSE(scene.IsValid(entity));
@@ -3010,13 +2992,12 @@ TEST_SUITE("Scene And Editor Flows")
         auto& registry = scene->GetRegistry();
         const entt::entity entity = scene->CreateEntity("ThrowingOnDestroyOnSceneDestruct");
 
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(entity);
-        scripts.Scripts.emplace_back();
-        scripts.Scripts.back().ScriptClassName = "ThrowingOnDestroyScript";
+        auto& scriptEntry = AttachScriptEntry(*scene, entity);
+        scriptEntry.ScriptClassName = "ThrowingOnDestroyScript";
 
         scene->Update(1.0f / 60.0f);
-        REQUIRE(scripts.Scripts.back().RuntimeInstance != nullptr);
-        REQUIRE(scripts.Scripts.back().RuntimeInitialized == true);
+        REQUIRE(scriptEntry.RuntimeInstance != nullptr);
+        REQUIRE(scriptEntry.RuntimeInitialized == true);
 
         CHECK_NOTHROW(scene.reset());
         CHECK(ThrowingOnDestroyScript::DestroyCallCount.load(std::memory_order_relaxed) >= 1);
@@ -3040,13 +3021,12 @@ TEST_SUITE("Scene And Editor Flows")
         auto scene = std::make_unique<Limitless::Scene>();
         auto& registry = scene->GetRegistry();
         const entt::entity entity = scene->CreateEntity("DestroySelfOnDestroyEntity");
-        auto& scripts = registry.emplace<Limitless::NativeScriptComponent>(entity);
-        scripts.Scripts.emplace_back();
-        scripts.Scripts.back().ScriptClassName = "DestroySelfOnDestroyScript";
+        auto& scriptEntry = AttachScriptEntry(*scene, entity);
+        scriptEntry.ScriptClassName = "DestroySelfOnDestroyScript";
 
         scene->Update(1.0f / 60.0f);
-        REQUIRE(scripts.Scripts.back().RuntimeInstance != nullptr);
-        REQUIRE(scripts.Scripts.back().RuntimeInitialized == true);
+        REQUIRE(scriptEntry.RuntimeInstance != nullptr);
+        REQUIRE(scriptEntry.RuntimeInitialized == true);
 
         CHECK_NOTHROW(scene.reset());
         CHECK(DestroySelfOnDestroyScript::DestroyCallCount.load(std::memory_order_relaxed) >= 1);

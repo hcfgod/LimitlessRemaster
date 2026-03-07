@@ -3,6 +3,7 @@
 #include "Assets/AssetLoadProgress.h"
 #include "Assets/LoadingScreen.h"
 #include "Editor/EditorCameraController.h"
+#include "EditorInspectorPanelNativeScriptEditor.h"
 #include "EditorScenePanel.h"
 #include "Graphics/Camera/Camera.h"
 #include "Graphics/Camera/OrthographicCamera2D.h"
@@ -17,9 +18,11 @@
 
 #include <array>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <filesystem>
 #include <limits>
 #include <optional>
 #include <string>
@@ -33,6 +36,69 @@ namespace Limitless::EditorViewportPanel
 {
     namespace
     {
+        std::string NormalizeSlashes(std::string pathText)
+        {
+            std::replace(pathText.begin(), pathText.end(), '\\', '/');
+            return pathText;
+        }
+
+        std::string ToLowerAscii(std::string text)
+        {
+            std::transform(text.begin(), text.end(), text.begin(), [](unsigned char character) {
+                return static_cast<char>(std::tolower(character));
+            });
+            return text;
+        }
+
+        bool IsNativeScriptAssetKey(const std::string& assetKey)
+        {
+            if (assetKey.empty())
+                return false;
+
+            const std::string lowerKey = ToLowerAscii(NormalizeSlashes(assetKey));
+            return lowerKey.rfind("assets/", 0) == 0 &&
+                   (lowerKey.ends_with(".h") || lowerKey.ends_with(".cpp"));
+        }
+
+        NativeScriptEntry BuildScriptEntryFromAssetKey(const std::string& assetKey)
+        {
+            NativeScriptEntry scriptEntry{};
+            std::string relativePath = NormalizeSlashes(assetKey);
+            if (relativePath.rfind("Assets/", 0) == 0)
+                relativePath.erase(0, 7);
+
+            std::filesystem::path scriptPath(relativePath);
+            scriptPath.replace_extension();
+            scriptEntry.ScriptAssetRelativePath = scriptPath.generic_string();
+
+            const std::string requestedClassName = scriptPath.stem().string();
+            const std::string resolvedClassName = EditorInspectorPanel::ResolveRegisteredScriptClassNameForInspector(requestedClassName);
+            scriptEntry.ScriptClassName = resolvedClassName.empty() ? requestedClassName : resolvedClassName;
+            return scriptEntry;
+        }
+
+        bool TryAttachScriptAssetToEntity(Scene* scene,
+                                          entt::entity ownerEntity,
+                                          const std::string& assetKey,
+                                          EditorUndoService* undoService)
+        {
+            if (!scene || !scene->IsValid(ownerEntity) || !IsNativeScriptAssetKey(assetKey))
+                return false;
+
+            NativeScriptEntry scriptEntry = BuildScriptEntryFromAssetKey(assetKey);
+            if (scriptEntry.ScriptClassName.empty() && scriptEntry.ScriptAssetRelativePath.empty())
+                return false;
+
+            if (undoService)
+            {
+                return undoService->ExecuteSceneMutation("Attach Native Script", [&](Scene& mutableScene) {
+                    return mutableScene.AttachScriptComponent(ownerEntity, std::move(scriptEntry)) != entt::null;
+                });
+            }
+
+            return scene->AttachScriptComponent(ownerEntity, std::move(scriptEntry)) != entt::null;
+        }
+
         bool TryComputeDropWorldPosition(const Camera& camera,
                                          const ImVec2& viewportMin,
                                          const ImVec2& viewportMax,
@@ -332,6 +398,22 @@ namespace Limitless::EditorViewportPanel
             return true;
         }
 
+        /// Returns true when the entity itself carries a CanvasComponent or is a
+        /// descendant of an entity that does.  Screen-space UI should not be
+        /// pickable in the scene view, matching Unity behaviour.
+        bool IsEntityUnderCanvas(Scene& scene, entt::entity entity)
+        {
+            auto& registry = scene.GetRegistry();
+            entt::entity current = entity;
+            while (current != entt::null)
+            {
+                if (registry.any_of<CanvasComponent>(current))
+                    return true;
+                current = scene.GetParent(current);
+            }
+            return false;
+        }
+
         std::optional<entt::entity> PickTopmostSpriteEntityAtPoint(Scene& scene,
                                                                    const Camera& camera,
                                                                    const ImVec2& viewportMin,
@@ -351,6 +433,10 @@ namespace Limitless::EditorViewportPanel
 
             for (entt::entity entity : view)
             {
+                // Skip UI entities that live under a Canvas (screen-space UI).
+                if (IsEntityUnderCanvas(scene, entity))
+                    continue;
+
                 const glm::mat4 model = scene.GetWorldTransformMatrix(entity);
 
                 std::array<ImVec2, 4> projected{};
@@ -2534,6 +2620,10 @@ namespace Limitless::EditorViewportPanel
 
                     for (entt::entity entity : view)
                     {
+                        // Skip UI entities that live under a Canvas.
+                        if (IsEntityUnderCanvas(scene, entity))
+                            continue;
+
                         const glm::mat4 model = scene.GetWorldTransformMatrix(entity);
                         const glm::vec3 worldPos = glm::vec3(model[3]);
                         ImVec2 screenPos{};
@@ -2678,6 +2768,7 @@ namespace Limitless::EditorViewportPanel
               const std::function<void(const std::string&, const glm::vec3&)>& onPrefabDropped,
               entt::entity& selectedEntity,
               EditorUndoService* undoService,
+              const char* assetMovePayloadId,
               const char* materialPayloadId,
               std::string& selectedTextureAssetKey,
               Assets::TextureAsset::Ptr& cachedTextureAsset,
@@ -3064,6 +3155,51 @@ namespace Limitless::EditorViewportPanel
                                         cachedMaterialAsset.reset();
                                         selectedNativeScriptAssetKey.clear();
                                     }
+                                }
+                            }
+                        }
+                    }
+                    if (assetMovePayloadId)
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(assetMovePayloadId))
+                        {
+                            std::string assetKey;
+                            if (payload->Data && payload->DataSize > 0)
+                            {
+                                const auto* keyChars = static_cast<const char*>(payload->Data);
+                                const int keyLength = std::max(0, payload->DataSize - 1);
+                                assetKey.assign(keyChars, keyChars + keyLength);
+                            }
+
+                            if (!assetKey.empty() && scene && sceneViewCamera)
+                            {
+                                const ImVec2 viewportMin = ImGui::GetItemRectMin();
+                                const ImVec2 viewportMax = ImGui::GetItemRectMax();
+                                const ImVec2 mousePos = ImGui::GetMousePos();
+
+                                entt::entity targetEntity = entt::null;
+                                if (mousePos.x >= viewportMin.x && mousePos.x <= viewportMax.x &&
+                                    mousePos.y >= viewportMin.y && mousePos.y <= viewportMax.y)
+                                {
+                                    const float viewportWidth = viewportMax.x - viewportMin.x;
+                                    const float viewportHeight = viewportMax.y - viewportMin.y;
+                                    const auto picked = PickTopmostSpriteEntityAtPoint(*scene, *sceneViewCamera, viewportMin, viewportWidth, viewportHeight, mousePos);
+                                    if (picked.has_value())
+                                        targetEntity = *picked;
+                                }
+
+                                if (targetEntity == entt::null && selectedEntity != entt::null && scene->IsValid(selectedEntity))
+                                    targetEntity = selectedEntity;
+
+                                if (targetEntity != entt::null && scene->IsValid(targetEntity) &&
+                                    TryAttachScriptAssetToEntity(scene, targetEntity, assetKey, undoService))
+                                {
+                                    selectedEntity = targetEntity;
+                                    selectedTextureAssetKey.clear();
+                                    cachedTextureAsset.reset();
+                                    selectedMaterialAssetKey.clear();
+                                    cachedMaterialAsset.reset();
+                                    selectedNativeScriptAssetKey.clear();
                                 }
                             }
                         }

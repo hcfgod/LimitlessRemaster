@@ -1,5 +1,6 @@
 #include "EditorSpriteEditor.h"
 
+#include "EditorPanelStyle.h"
 #include "Assets/AssetManager.h"
 #include "Assets/SpriteImportSettings.h"
 #include "Assets/TextureAssetImporter.h"
@@ -145,9 +146,11 @@ namespace Limitless::EditorSpriteEditor
             return;
 
         ImGui::SetNextWindowSize(ImVec2(900, 650), ImGuiCond_FirstUseEver);
+        EditorPanelStyle::PushPanelVisualStyle();
         if (!ImGui::Begin("Sprite Editor", &state.Open))
         {
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -159,6 +162,7 @@ namespace Limitless::EditorSpriteEditor
         {
             ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Failed to load texture: %s", state.TextureAssetKey.c_str());
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -414,5 +418,6 @@ namespace Limitless::EditorSpriteEditor
         ImGui::EndChild();
 
         ImGui::End();
+        EditorPanelStyle::PopPanelVisualStyle();
     }
 }

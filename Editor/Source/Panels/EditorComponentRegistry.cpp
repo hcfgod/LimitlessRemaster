@@ -123,19 +123,6 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        void RemoveNativeScriptComponent(entt::registry& registry, entt::entity entity)
-        {
-            if (auto* nativeScript = registry.try_get<NativeScriptComponent>(entity))
-            {
-                for (auto& scriptEntry : nativeScript->Scripts)
-                {
-                    scriptEntry.RuntimeInitialized = false;
-                    scriptEntry.RuntimeInstance.reset();
-                }
-            }
-            registry.remove<NativeScriptComponent>(entity);
-        }
-
         const ComponentRegistryEntry kAudioListener2DEntry{
             "Audio Listener 2D",
             "Add Audio Listener 2D Component",
@@ -307,15 +294,6 @@ namespace Limitless::EditorInspectorPanel
             &RemoveAudioSourceComponent
         };
 
-        const ComponentRegistryEntry kNativeScriptEntry{
-            "Native Script",
-            "Add Native Script Component",
-            "Remove Native Script Component",
-            &HasComponent<NativeScriptComponent>,
-            &AddComponent<NativeScriptComponent>,
-            &RemoveNativeScriptComponent
-        };
-
         const ComponentRegistryEntry kTilemapLayerEntry{
             "Tilemap Layer",
             "Add TilemapLayer Component",
@@ -422,8 +400,6 @@ namespace Limitless::EditorInspectorPanel
                 return &kSpriteEntry;
             case ComponentRegistryKey::AudioSource:
                 return &kAudioSourceEntry;
-            case ComponentRegistryKey::NativeScript:
-                return &kNativeScriptEntry;
             case ComponentRegistryKey::TilemapLayer:
                 return &kTilemapLayerEntry;
             case ComponentRegistryKey::Canvas:

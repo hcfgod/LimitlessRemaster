@@ -152,6 +152,7 @@ namespace Limitless::EditorViewportPanel
               const std::function<void(const std::string&, const glm::vec3&)>& onPrefabDropped,
               entt::entity& selectedEntity,
               EditorUndoService* undoService,
+              const char* assetMovePayloadId,
               const char* materialPayloadId,
               std::string& selectedTextureAssetKey,
               Assets::TextureAsset::Ptr& cachedTextureAsset,

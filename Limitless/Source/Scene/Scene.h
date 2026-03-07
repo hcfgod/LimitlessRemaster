@@ -4,6 +4,7 @@
 #include "Core/Concurrency/LockFreeQueue.h"
 #include "Physics/Physics2DWorld.h"
 #include "Scene/Components/CoreComponents.h"
+#include "Scene/Components/ScriptingComponents.h"
 #include "Scene/Entity.h"
 
 #include <glm/glm.hpp>
@@ -155,6 +156,13 @@ namespace Limitless
         void StepPhysics2D(float fixedDeltaTime);
         bool PreviewAnimationClipOnEntity(entt::entity entity, const std::string& clipAssetKey, float previewTimeSeconds);
         void ClearAnimationPreviewOnAllEntities();
+
+        entt::entity AttachScriptComponent(entt::entity owner);
+        entt::entity AttachScriptComponent(entt::entity owner, NativeScriptEntry scriptEntry);
+        bool RemoveScriptComponent(entt::entity scriptComponentEntity);
+        std::vector<entt::entity> GetScriptComponentEntities(entt::entity owner) const;
+        ScriptComponent* GetScriptComponent(entt::entity scriptComponentEntity);
+        const ScriptComponent* GetScriptComponent(entt::entity scriptComponentEntity) const;
 
         void BeginLoadingState();
         void MarkSceneObjectsInitialized();

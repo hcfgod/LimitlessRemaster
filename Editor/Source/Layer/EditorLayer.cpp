@@ -17,6 +17,7 @@
 #include "EditorInspectorPanel.h"
 #include "EditorInspectorPanelAssetInspectors.h"
 #include "EditorMenuBar.h"
+#include "EditorPanelStyle.h"
 #include "EditorPrefabSystem.h"
 #include "EditorPlayMode.h"
 #include "EditorProjectDialog.h"
@@ -1042,9 +1043,11 @@ namespace Limitless
         if (!m_ShowPhysicsDiagnosticsWindow)
             return;
 
+        EditorPanelStyle::PushPanelVisualStyle();
         if (!ImGui::Begin("Physics 2D Diagnostics", &m_ShowPhysicsDiagnosticsWindow))
         {
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -1052,6 +1055,7 @@ namespace Limitless
         {
             ImGui::TextDisabled("No active scene.");
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -1171,6 +1175,7 @@ namespace Limitless
                     lightingDiagnostics.CpuBuildTimeMs,
                     lightingDiagnostics.CpuSubmitTimeMs);
         ImGui::End();
+        EditorPanelStyle::PopPanelVisualStyle();
     }
 
     void EditorLayer::DrawPerformancePanel()
@@ -1178,9 +1183,11 @@ namespace Limitless
         if (!m_ShowPerformancePanel)
             return;
 
+        EditorPanelStyle::PushPanelVisualStyle();
         if (!ImGui::Begin("Performance", &m_ShowPerformancePanel))
         {
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -1189,6 +1196,7 @@ namespace Limitless
         {
             ImGui::TextDisabled("Performance monitor not initialized.");
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -1231,6 +1239,7 @@ namespace Limitless
         ImGui::Text("Allocations: %u", metrics.allocationCount);
 
         ImGui::End();
+        EditorPanelStyle::PopPanelVisualStyle();
     }
 
     void EditorLayer::DrawConsolePanel()
@@ -1238,9 +1247,11 @@ namespace Limitless
         if (!m_ShowConsoleWindow)
             return;
 
+        EditorPanelStyle::PushPanelVisualStyle();
         if (!ImGui::Begin("Console", &m_ShowConsoleWindow))
         {
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -1438,6 +1449,7 @@ namespace Limitless
         ImGui::EndChild();
 
         ImGui::End();
+        EditorPanelStyle::PopPanelVisualStyle();
     }
 
     void EditorLayer::DrawViewportPanel()
@@ -1480,6 +1492,7 @@ namespace Limitless
             },
             m_SelectedEntity,
             &m_EditorUndoService,
+            kAssetMovePayload,
             kAssetMaterialPayload,
             m_SelectedTextureAssetKey,
             m_CachedTextureAsset,
@@ -1518,6 +1531,7 @@ namespace Limitless
             m_SelectedTilesetAssetKey,
             m_SelectedAudioMixerAssetKey,
             m_SelectedInputActionsAssetKey,
+            kAssetMovePayload,
             kAssetMaterialPayload,
             kAssetPrefabPayload,
             sceneRootDisplayName,
@@ -1871,26 +1885,24 @@ namespace Limitless
                     if (!scene)
                         return;
                     auto& registry = scene->GetRegistry();
-                    auto scriptView = registry.view<NativeScriptComponent>();
-                    for (entt::entity entity : scriptView)
+                    auto scriptView = registry.view<ScriptComponent>();
+                    for (entt::entity scriptEntity : scriptView)
                     {
-                        auto& nativeScript = scriptView.get<NativeScriptComponent>(entity);
-                        for (auto& scriptEntry : nativeScript.Scripts)
+                        auto& scriptComponent = scriptView.get<ScriptComponent>(scriptEntity);
+                        auto& scriptEntry = scriptComponent.Script;
+                        const bool matchedByStoredPath = (scriptEntry.ScriptAssetRelativePath == oldScriptRelativePath);
+                        const bool matchedByLegacyClassOnly =
+                            scriptEntry.ScriptAssetRelativePath.empty() &&
+                            !oldScriptClassName.empty() &&
+                            (scriptEntry.ScriptClassName == oldScriptClassName);
+                        if (matchedByStoredPath || matchedByLegacyClassOnly)
                         {
-                            const bool matchedByStoredPath = (scriptEntry.ScriptAssetRelativePath == oldScriptRelativePath);
-                            const bool matchedByLegacyClassOnly =
-                                scriptEntry.ScriptAssetRelativePath.empty() &&
-                                !oldScriptClassName.empty() &&
-                                (scriptEntry.ScriptClassName == oldScriptClassName);
-                            if (matchedByStoredPath || matchedByLegacyClassOnly)
-                            {
-                                scriptEntry.ScriptAssetRelativePath = newScriptRelativePath;
-                                if (!newScriptClassName.empty())
-                                    scriptEntry.ScriptClassName = newScriptClassName;
-                                scriptEntry.RuntimeInitialized = false;
-                                scriptEntry.RuntimeInstance.reset();
-                                updatedAnyNativeScriptPath = true;
-                            }
+                            scriptEntry.ScriptAssetRelativePath = newScriptRelativePath;
+                            if (!newScriptClassName.empty())
+                                scriptEntry.ScriptClassName = newScriptClassName;
+                            scriptEntry.RuntimeInitialized = false;
+                            scriptEntry.RuntimeInstance.reset();
+                            updatedAnyNativeScriptPath = true;
                         }
                     }
                 };

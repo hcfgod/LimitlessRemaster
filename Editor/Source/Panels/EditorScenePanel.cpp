@@ -1,14 +1,18 @@
 #include "EditorScenePanel.h"
 
+#include "EditorInspectorPanelNativeScriptEditor.h"
+#include "EditorPanelStyle.h"
 #include "EditorPrefabSystem.h"
 #include "Scene/Scene.h"
 #include "Undo/EditorUndoService.h"
 #include "imgui/imgui.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -18,6 +22,7 @@ namespace Limitless::EditorScenePanel
     namespace
     {
         constexpr const char* kSceneEntityPayload = "SCENE_ENTITY";
+        constexpr const char* kAssetMovePayload = "ASSET_MOVE";
         constexpr ImU32 kDropIndicatorColor = IM_COL32(80, 160, 255, 255);
         constexpr ImU32 kDropIndicatorTintColor = IM_COL32(80, 160, 255, 48);
         constexpr float kDropIndicatorThickness = 3.0f;
@@ -56,6 +61,69 @@ namespace Limitless::EditorScenePanel
             const char* bytes = static_cast<const char*>(payload->Data);
             const int payloadLength = std::max(0, payload->DataSize - 1);
             return std::string(bytes, bytes + payloadLength);
+        }
+
+        std::string NormalizeSlashes(std::string pathText)
+        {
+            std::replace(pathText.begin(), pathText.end(), '\\', '/');
+            return pathText;
+        }
+
+        std::string ToLowerAscii(std::string text)
+        {
+            std::transform(text.begin(), text.end(), text.begin(), [](unsigned char character) {
+                return static_cast<char>(std::tolower(character));
+            });
+            return text;
+        }
+
+        bool IsNativeScriptAssetKey(const std::string& assetKey)
+        {
+            if (assetKey.empty())
+                return false;
+
+            const std::string lowerKey = ToLowerAscii(NormalizeSlashes(assetKey));
+            return lowerKey.rfind("assets/", 0) == 0 &&
+                   (lowerKey.ends_with(".h") || lowerKey.ends_with(".cpp"));
+        }
+
+        NativeScriptEntry BuildScriptEntryFromAssetKey(const std::string& assetKey)
+        {
+            NativeScriptEntry scriptEntry{};
+            std::string relativePath = NormalizeSlashes(assetKey);
+            if (relativePath.rfind("Assets/", 0) == 0)
+                relativePath.erase(0, 7);
+
+            std::filesystem::path scriptPath(relativePath);
+            scriptPath.replace_extension();
+            scriptEntry.ScriptAssetRelativePath = scriptPath.generic_string();
+
+            const std::string requestedClassName = scriptPath.stem().string();
+            const std::string resolvedClassName = EditorInspectorPanel::ResolveRegisteredScriptClassNameForInspector(requestedClassName);
+            scriptEntry.ScriptClassName = resolvedClassName.empty() ? requestedClassName : resolvedClassName;
+            return scriptEntry;
+        }
+
+        bool TryAttachScriptAssetToEntity(Scene* scene,
+                                          entt::entity ownerEntity,
+                                          const std::string& assetKey,
+                                          EditorUndoService* undoService)
+        {
+            if (!scene || !scene->IsValid(ownerEntity) || !IsNativeScriptAssetKey(assetKey))
+                return false;
+
+            NativeScriptEntry scriptEntry = BuildScriptEntryFromAssetKey(assetKey);
+            if (scriptEntry.ScriptClassName.empty() && scriptEntry.ScriptAssetRelativePath.empty())
+                return false;
+
+            if (undoService)
+            {
+                return undoService->ExecuteSceneMutation("Attach Native Script", [&](Scene& mutableScene) {
+                    return mutableScene.AttachScriptComponent(ownerEntity, std::move(scriptEntry)) != entt::null;
+                });
+            }
+
+            return scene->AttachScriptComponent(ownerEntity, std::move(scriptEntry)) != entt::null;
         }
 
         void ClearAssetSelectionState(std::string& selectedTextureAssetKey,
@@ -253,6 +321,7 @@ namespace Limitless::EditorScenePanel
                             std::string& selectedTilesetAssetKey,
                             std::string& selectedAudioMixerAssetKey,
                             std::string& selectedInputActionsAssetKey,
+                            const char* assetMovePayloadId,
                             const char* materialPayloadId,
                             const char* prefabPayloadId,
                             EditorUndoService* undoService,
@@ -424,6 +493,26 @@ namespace Limitless::EditorScenePanel
                         }
                     }
                 }
+                else if (assetMovePayloadId)
+                {
+                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(assetMovePayloadId))
+                    {
+                        const std::string assetKey = ReadStringPayload(payload);
+                        if (TryAttachScriptAssetToEntity(scene, entity, assetKey, undoService))
+                        {
+                            SelectSingleEntity(state, selectedEntity, entity);
+                            selectedTextureAssetKey.clear();
+                            cachedTextureAsset.reset();
+                            selectedMaterialAssetKey.clear();
+                            cachedMaterialAsset.reset();
+                            selectedNativeScriptAssetKey.clear();
+                            selectedPrefabAssetKey.clear();
+                            selectedTilesetAssetKey.clear();
+                            selectedAudioMixerAssetKey.clear();
+                            selectedInputActionsAssetKey.clear();
+                        }
+                    }
+                }
                 else if (materialPayloadId)
                 {
                     // Unity-style: dropping a material onto an entity assigns it to the renderer.
@@ -586,6 +675,7 @@ namespace Limitless::EditorScenePanel
                                        selectedTilesetAssetKey,
                                        selectedAudioMixerAssetKey,
                                        selectedInputActionsAssetKey,
+                                       assetMovePayloadId,
                                        materialPayloadId,
                                        prefabPayloadId,
                                        undoService,
@@ -615,6 +705,7 @@ namespace Limitless::EditorScenePanel
               std::string& selectedTilesetAssetKey,
               std::string& selectedAudioMixerAssetKey,
               std::string& selectedInputActionsAssetKey,
+              const char* assetMovePayloadId,
               const char* materialPayloadId,
               const char* prefabPayloadId,
               const std::string& sceneRootDisplayName,
@@ -625,6 +716,7 @@ namespace Limitless::EditorScenePanel
               const std::function<entt::entity(entt::entity)>& onRevertPrefabEntity,
               const std::function<bool(entt::entity)>& onUnpackPrefabEntity)
     {
+        EditorPanelStyle::PushPanelVisualStyle();
         ImGui::Begin("Scene");
 
         state.DrawOrderEntities.clear();
@@ -811,6 +903,31 @@ namespace Limitless::EditorScenePanel
                             }
                         }
                     }
+                    if (assetMovePayloadId)
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(assetMovePayloadId))
+                        {
+                            const std::string assetKey = ReadStringPayload(payload);
+                            if (!assetKey.empty())
+                            {
+                                entt::entity targetEntity = selectedEntity;
+                                if (targetEntity != entt::null && scene->IsValid(targetEntity) &&
+                                    TryAttachScriptAssetToEntity(scene, targetEntity, assetKey, undoService))
+                                {
+                                    SelectSingleEntity(state, selectedEntity, targetEntity);
+                                    selectedTextureAssetKey.clear();
+                                    cachedTextureAsset.reset();
+                                    selectedMaterialAssetKey.clear();
+                                    cachedMaterialAsset.reset();
+                                    selectedNativeScriptAssetKey.clear();
+                                    selectedPrefabAssetKey.clear();
+                                    selectedTilesetAssetKey.clear();
+                                    selectedAudioMixerAssetKey.clear();
+                                    selectedInputActionsAssetKey.clear();
+                                }
+                            }
+                        }
+                    }
                     if (prefabPayloadId)
                     {
                         if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(prefabPayloadId))
@@ -853,6 +970,7 @@ namespace Limitless::EditorScenePanel
                                        selectedTilesetAssetKey,
                                        selectedAudioMixerAssetKey,
                                        selectedInputActionsAssetKey,
+                                       assetMovePayloadId,
                                        materialPayloadId,
                                        prefabPayloadId,
                                        undoService,
@@ -1342,5 +1460,6 @@ namespace Limitless::EditorScenePanel
         }
 
         ImGui::End();
+        EditorPanelStyle::PopPanelVisualStyle();
     }
 }

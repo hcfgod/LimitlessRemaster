@@ -1,5 +1,6 @@
 #include "EditorTilePalettePanel.h"
 
+#include "EditorPanelStyle.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/TileAsset.h"
@@ -377,9 +378,11 @@ namespace Limitless::EditorTilePalettePanel
         if (!state.PanelOpen)
             return;
 
+        EditorPanelStyle::PushPanelVisualStyle();
         if (!ImGui::Begin("Tile Palette", &state.PanelOpen))
         {
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -416,6 +419,7 @@ namespace Limitless::EditorTilePalettePanel
         {
             ImGui::TextDisabled("Select or create a Tile Palette asset.");
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -435,6 +439,7 @@ namespace Limitless::EditorTilePalettePanel
                     "Failed to load palette: %s",
                     loadResult.GetError().GetErrorMessage().c_str());
                 ImGui::End();
+                EditorPanelStyle::PopPanelVisualStyle();
                 return;
             }
         }
@@ -567,6 +572,7 @@ namespace Limitless::EditorTilePalettePanel
             palette.TileAssetKeys.empty())
         {
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -786,6 +792,7 @@ namespace Limitless::EditorTilePalettePanel
         ImGui::EndChild();
 
         ImGui::End();
+        EditorPanelStyle::PopPanelVisualStyle();
     }
 
     void InvalidatePaletteKeyCache()

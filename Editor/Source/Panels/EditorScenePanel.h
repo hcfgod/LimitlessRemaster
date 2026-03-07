@@ -45,6 +45,7 @@ namespace Limitless
                   std::string& selectedTilesetAssetKey,
                   std::string& selectedAudioMixerAssetKey,
                   std::string& selectedInputActionsAssetKey,
+                  const char* assetMovePayloadId,
                   const char* materialPayloadId,
                   const char* prefabPayloadId,
                   const std::string& sceneRootDisplayName,

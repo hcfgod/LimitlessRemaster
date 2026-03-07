@@ -1,5 +1,6 @@
 #include "EditorAnimationTimelinePanel.h"
 
+#include "EditorPanelStyle.h"
 #include "EditorAssetNaming.h"
 #include "Assets/AnimationClipAsset.h"
 #include "Assets/AssetDatabase.h"
@@ -915,9 +916,11 @@ namespace Limitless::EditorAnimationTimelinePanel
         if (!isOpen)
             return;
 
+        EditorPanelStyle::PushPanelVisualStyle();
         if (!ImGui::Begin("Animation Timeline", &isOpen))
         {
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -926,6 +929,7 @@ namespace Limitless::EditorAnimationTimelinePanel
         {
             ImGui::TextDisabled("Select an Animation Clip asset to edit.");
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -958,6 +962,7 @@ namespace Limitless::EditorAnimationTimelinePanel
         {
             ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", state.StatusMessage.c_str());
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -1871,6 +1876,7 @@ namespace Limitless::EditorAnimationTimelinePanel
         }
 
         ImGui::End();
+        EditorPanelStyle::PopPanelVisualStyle();
     }
 
     bool ApplyPendingChanges(EditorUndoService* undoService)

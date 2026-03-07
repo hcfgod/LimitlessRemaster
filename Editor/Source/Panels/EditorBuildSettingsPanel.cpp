@@ -1,6 +1,7 @@
 #include "PrecompiledHeader.h"
 #include "EditorBuildSettingsPanel.h"
 
+#include "EditorPanelStyle.h"
 #include "Assets/AssetDatabase.h"
 #include "Core/Debug/Log.h"
 #include "Project/BuildSettings.h"
@@ -957,9 +958,11 @@ namespace Limitless::EditorBuildSettingsPanel
         EnsureSettingsLoaded(state);
 
         ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_FirstUseEver);
+        EditorPanelStyle::PushPanelVisualStyle();
         if (!ImGui::Begin("Build Settings", &showWindow))
         {
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -1445,6 +1448,7 @@ namespace Limitless::EditorBuildSettingsPanel
         }
 
         ImGui::End();
+        EditorPanelStyle::PopPanelVisualStyle();
     }
 
     void Shutdown(EditorBuildSettingsPanelState& state)

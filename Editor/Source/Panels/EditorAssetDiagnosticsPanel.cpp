@@ -1,5 +1,6 @@
 #include "EditorAssetDiagnosticsPanel.h"
 
+#include "EditorPanelStyle.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetImportPipeline.h"
 #include "Assets/AssetPaths.h"
@@ -104,9 +105,11 @@ namespace Limitless::EditorAssetDiagnosticsPanel
             return;
         }
 
+        EditorPanelStyle::PushPanelVisualStyle();
         if (!ImGui::Begin("Asset Diagnostics", &open))
         {
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -158,6 +161,7 @@ namespace Limitless::EditorAssetDiagnosticsPanel
         {
             ImGui::TextDisabled("No validation issues.");
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -266,6 +270,7 @@ namespace Limitless::EditorAssetDiagnosticsPanel
 
         ImGui::EndChild();
         ImGui::End();
+        EditorPanelStyle::PopPanelVisualStyle();
     }
 }
 

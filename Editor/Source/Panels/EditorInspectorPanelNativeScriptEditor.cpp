@@ -1,5 +1,6 @@
 #include "EditorInspectorPanel.h"
 #include "EditorInspectorPanelNativeScriptEditor.h"
+#include "EditorPanelStyle.h"
 #include "Limitless.h"
 #include "Platform/Platform.h"
 #include "Project/BuildSettings.h"
@@ -1647,10 +1648,12 @@ namespace Limitless::EditorInspectorPanel
             const std::string windowTitle = hasUnsavedChanges
                 ? "Native Script Editor*"
                 : "Native Script Editor";
+            EditorPanelStyle::PushPanelVisualStyle();
             if (!ImGui::Begin(windowTitle.c_str(), &state.EditorWindowOpen))
             {
                 state.FocusEditorWindowRequested = false;
                 ImGui::End();
+                EditorPanelStyle::PopPanelVisualStyle();
                 return;
             }
             if (state.FocusEditorWindowRequested)
@@ -1836,6 +1839,7 @@ namespace Limitless::EditorInspectorPanel
             }
 
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
         }
     }
 

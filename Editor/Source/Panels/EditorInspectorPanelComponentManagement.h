@@ -19,6 +19,5 @@ namespace Limitless::EditorInspectorPanel
                                              entt::registry& registry,
                                              entt::entity selectedEntity,
                                              PendingEntityComponentRemovals& pendingRemovals,
-                                             bool removeNativeScriptComponent,
                                              EditorUndoService* undoService);
 }

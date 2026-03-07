@@ -44,8 +44,9 @@ namespace Limitless
             animator.RuntimeRotation = glm::vec3(0.0f);
         }
 
-        void ResetRuntimeStateForEntity(entt::registry& registry, entt::entity entity)
+        void ResetRuntimeStateForEntity(Scene& scene, entt::entity entity)
         {
+            auto& registry = scene.GetRegistry();
             if (auto* sprite = registry.try_get<SpriteComponent>(entity))
             {
                 sprite->CachedTexture.reset();
@@ -201,19 +202,20 @@ namespace Limitless
                 particleEmitter->Paused = false;
             }
 
-            if (auto* nativeScript = registry.try_get<NativeScriptComponent>(entity))
+            for (entt::entity scriptEntity : scene.GetScriptComponentEntities(entity))
             {
-                for (auto& scriptEntry : nativeScript->Scripts)
-                {
-                    scriptEntry.RuntimeInitialized = false;
-                    if (scriptEntry.RuntimeInstance)
-                        Coroutine::StopAll(*scriptEntry.RuntimeInstance);
-                    scriptEntry.RuntimeInstance.reset();
-                    scriptEntry.RuntimeUpdateCount = 0;
-                    scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-                    scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
-                    scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
-                }
+                auto* scriptComponent = registry.try_get<ScriptComponent>(scriptEntity);
+                if (!scriptComponent)
+                    continue;
+                auto& scriptEntry = scriptComponent->Script;
+                scriptEntry.RuntimeInitialized = false;
+                if (scriptEntry.RuntimeInstance)
+                    Coroutine::StopAll(*scriptEntry.RuntimeInstance);
+                scriptEntry.RuntimeInstance.reset();
+                scriptEntry.RuntimeUpdateCount = 0;
+                scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
+                scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
             }
         }
 
@@ -1069,7 +1071,6 @@ namespace Limitless
             outScriptEntry.RuntimeInstance.reset();
             outScriptEntry.RuntimeUpdateCount = 0;
             outScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-            outScriptEntry.RuntimeWarnedMissingCompiledScript = false;
             outScriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
             outScriptEntry.RuntimeWarnedAccessMaskMismatch = false;
         }
@@ -1078,20 +1079,20 @@ namespace Limitless
         {
             if (entry.contains("NativeScripts") && entry["NativeScripts"].is_array())
             {
-                auto& nativeScript = scene->GetRegistry().emplace<NativeScriptComponent>(entity);
                 for (const auto& scriptEntryJson : entry["NativeScripts"])
                 {
                     if (!scriptEntryJson.is_object())
                         continue;
-                    auto& loadedScriptEntry = nativeScript.Scripts.emplace_back();
+                    NativeScriptEntry loadedScriptEntry{};
                     LoadNativeScriptEntryFromJson(scriptEntryJson, loadedScriptEntry);
+                    (void)scene->AttachScriptComponent(entity, std::move(loadedScriptEntry));
                 }
             }
             else if (entry.contains("NativeScript") && entry["NativeScript"].is_object())
             {
-                auto& nativeScript = scene->GetRegistry().emplace<NativeScriptComponent>(entity);
-                auto& loadedScriptEntry = nativeScript.Scripts.emplace_back();
+                NativeScriptEntry loadedScriptEntry{};
                 LoadNativeScriptEntryFromJson(entry["NativeScript"], loadedScriptEntry);
+                (void)scene->AttachScriptComponent(entity, std::move(loadedScriptEntry));
             }
 
             if (entry.contains("ParticleEmitter") && entry["ParticleEmitter"].is_object())
@@ -1201,7 +1202,7 @@ namespace Limitless
                 info.SiblingOrder = hierarchyJson.value("SiblingOrder", 0);
             }
 
-            ResetRuntimeStateForEntity(scene->GetRegistry(), info.Entity);
+            ResetRuntimeStateForEntity(*scene, info.Entity);
             return info;
         }
 

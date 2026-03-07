@@ -65,13 +65,14 @@ namespace Limitless
                 return;
 
             auto& registry = scene.GetRegistry();
-            auto* nativeScriptComponent = registry.try_get<NativeScriptComponent>(selfEntity);
-            if (!nativeScriptComponent)
-                return;
-
             const Entity other(&registry, otherEntity);
-            for (auto& scriptEntry : nativeScriptComponent->Scripts)
+            const auto scriptEntities = scene.GetScriptComponentEntities(selfEntity);
+            for (entt::entity scriptEntity : scriptEntities)
             {
+                auto* scriptComponent = registry.try_get<ScriptComponent>(scriptEntity);
+                if (!scriptComponent)
+                    continue;
+                auto& scriptEntry = scriptComponent->Script;
                 if (!scriptEntry.Enabled || !scriptEntry.RuntimeInstance || !scriptEntry.RuntimeInitialized)
                     continue;
 

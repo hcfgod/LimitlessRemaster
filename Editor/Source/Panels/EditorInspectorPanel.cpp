@@ -5,12 +5,14 @@
 #include "EditorInspectorPanelEntityComponents.h"
 #include "EditorInspectorPanelNativeScriptComponent.h"
 #include "EditorInspectorPanelNativeScriptEditor.h"
+#include "EditorPanelStyle.h"
 #include "Undo/EditorUndoService.h"
 #include "Scene/Scene.h"
 #include "imgui/imgui.h"
 
 namespace Limitless::EditorInspectorPanel
 {
+
     void Draw(Scene* scene,
               entt::entity selectedEntity,
               const char* texturePayloadId,
@@ -33,6 +35,7 @@ namespace Limitless::EditorInspectorPanel
     {
         RestorePendingNativeScriptEditorSession();
 
+        EditorPanelStyle::PushPanelVisualStyle();
         ImGui::Begin("Inspector");
 
         static entt::entity animationPanelSelectionOwner = entt::null;
@@ -66,7 +69,6 @@ namespace Limitless::EditorInspectorPanel
         {
             auto& registry = scene->GetRegistry();
             PendingEntityComponentRemovals pendingRemovals{};
-            bool removeNativeScriptComponent = false;
             DrawStandardEntityComponentSections(
                 scene,
                 registry,
@@ -80,7 +82,7 @@ namespace Limitless::EditorInspectorPanel
                 pendingRemovals,
                 undoService);
 
-            DrawNativeScriptComponentSection(scene, registry, selectedEntity, undoService, removeNativeScriptComponent);
+            DrawScriptComponentSections(scene, registry, selectedEntity, undoService);
 
             ImGui::Spacing();
             ImGui::Separator();
@@ -88,7 +90,7 @@ namespace Limitless::EditorInspectorPanel
 
             DrawAddComponentPopup(scene, registry, selectedEntity, undoService);
 
-            ApplyPendingEntityComponentRemovals(scene, registry, selectedEntity, pendingRemovals, removeNativeScriptComponent, undoService);
+            ApplyPendingEntityComponentRemovals(scene, registry, selectedEntity, pendingRemovals, undoService);
         }
         else if (!selectedInputActionsAssetKey.empty())
         {
@@ -131,6 +133,7 @@ namespace Limitless::EditorInspectorPanel
         }
 
         ImGui::End();
+        EditorPanelStyle::PopPanelVisualStyle();
         DrawNativeScriptEditorWindow();
     }
 }

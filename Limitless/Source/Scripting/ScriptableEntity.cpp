@@ -358,14 +358,30 @@ namespace Limitless
         if (m_Registry == nullptr || entity == entt::null || !m_Registry->valid(entity))
             return {};
 
-        const auto* nativeScriptComponent = m_Registry->try_get<NativeScriptComponent>(entity);
-        if (!nativeScriptComponent)
-            return {};
-
         std::vector<ScriptableEntity*> scripts;
-        scripts.reserve(nativeScriptComponent->Scripts.size());
-        for (const auto& scriptEntry : nativeScriptComponent->Scripts)
+        std::vector<entt::entity> scriptEntities;
+#ifndef SCRIPTCORE_EXPORTS
+        if (m_Scene)
+            scriptEntities = m_Scene->GetScriptComponentEntities(entity);
+        else
+#endif
         {
+            auto view = m_Registry->view<ScriptComponent>();
+            for (entt::entity scriptEntity : view)
+            {
+                const auto& scriptComponent = view.get<ScriptComponent>(scriptEntity);
+                if (scriptComponent.OwnerEntity == entity)
+                    scriptEntities.push_back(scriptEntity);
+            }
+        }
+
+        scripts.reserve(scriptEntities.size());
+        for (entt::entity scriptEntity : scriptEntities)
+        {
+            const auto* scriptComponent = m_Registry->try_get<ScriptComponent>(scriptEntity);
+            if (!scriptComponent)
+                continue;
+            const auto& scriptEntry = scriptComponent->Script;
             if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty() || !scriptEntry.RuntimeInstance)
                 continue;
             scripts.push_back(scriptEntry.RuntimeInstance.get());
@@ -392,12 +408,28 @@ namespace Limitless
         if (className.empty() || m_Registry == nullptr || entity == entt::null || !m_Registry->valid(entity))
             return nullptr;
 
-        const auto* nativeScriptComponent = m_Registry->try_get<NativeScriptComponent>(entity);
-        if (!nativeScriptComponent)
-            return nullptr;
-
-        for (const auto& scriptEntry : nativeScriptComponent->Scripts)
+        std::vector<entt::entity> scriptEntities;
+#ifndef SCRIPTCORE_EXPORTS
+        if (m_Scene)
+            scriptEntities = m_Scene->GetScriptComponentEntities(entity);
+        else
+#endif
         {
+            auto view = m_Registry->view<ScriptComponent>();
+            for (entt::entity scriptEntity : view)
+            {
+                const auto& scriptComponent = view.get<ScriptComponent>(scriptEntity);
+                if (scriptComponent.OwnerEntity == entity)
+                    scriptEntities.push_back(scriptEntity);
+            }
+        }
+
+        for (entt::entity scriptEntity : scriptEntities)
+        {
+            const auto* scriptComponent = m_Registry->try_get<ScriptComponent>(scriptEntity);
+            if (!scriptComponent)
+                continue;
+            const auto& scriptEntry = scriptComponent->Script;
             if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty() || !scriptEntry.RuntimeInstance)
                 continue;
             if (ScriptClassNamesMatch(scriptEntry.ScriptClassName, className))

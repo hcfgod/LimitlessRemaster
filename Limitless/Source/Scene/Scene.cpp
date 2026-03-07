@@ -80,7 +80,7 @@ namespace Limitless
                     return classToken;
 
                 std::string matchedClassName;
-                for (const std::string& candidate : registeredScriptNames)
+                for (const auto& candidate : registeredScriptNames)
                 {
                     if (candidate == classToken || GetUnqualifiedScriptClassName(candidate) == classToken)
                     {
@@ -725,6 +725,49 @@ namespace Limitless
             }
         }
 
+        void SortScriptComponentEntities(const entt::registry& registry, std::vector<entt::entity>& scriptEntities)
+        {
+            std::sort(scriptEntities.begin(), scriptEntities.end(), [&registry](entt::entity left, entt::entity right) {
+                const auto* leftScript = registry.try_get<ScriptComponent>(left);
+                const auto* rightScript = registry.try_get<ScriptComponent>(right);
+                if (!leftScript || !rightScript)
+                    return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
+                if (leftScript->OwnerEntity != rightScript->OwnerEntity)
+                    return static_cast<uint32_t>(leftScript->OwnerEntity) < static_cast<uint32_t>(rightScript->OwnerEntity);
+                if (leftScript->ComponentOrder != rightScript->ComponentOrder)
+                    return leftScript->ComponentOrder < rightScript->ComponentOrder;
+                return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
+            });
+        }
+
+        std::vector<entt::entity> CollectScriptComponentEntities(const entt::registry& registry,
+                                                                  std::optional<entt::entity> ownerFilter = std::nullopt)
+        {
+            std::vector<entt::entity> scriptEntities;
+            auto view = registry.view<ScriptComponent>();
+            for (entt::entity scriptEntity : view)
+            {
+                const auto& scriptComponent = view.get<ScriptComponent>(scriptEntity);
+                if (ownerFilter.has_value() && scriptComponent.OwnerEntity != ownerFilter.value())
+                    continue;
+
+                scriptEntities.push_back(scriptEntity);
+            }
+            SortScriptComponentEntities(registry, scriptEntities);
+            return scriptEntities;
+        }
+
+        void RenormalizeScriptComponentOrder(entt::registry& registry, entt::entity owner)
+        {
+            auto scriptEntities = CollectScriptComponentEntities(registry, owner);
+            for (size_t index = 0; index < scriptEntities.size(); ++index)
+            {
+                auto* scriptComponent = registry.try_get<ScriptComponent>(scriptEntities[index]);
+                if (!scriptComponent)
+                    continue;
+                scriptComponent->ComponentOrder = static_cast<int32_t>(index);
+            }
+        }
     }
 
     Scene::Scene()
@@ -749,83 +792,120 @@ namespace Limitless
                 physicsWorld->Shutdown(*this);
         }
 
-        std::vector<std::pair<entt::entity, size_t>> scriptSlots;
+        const auto scriptEntities = CollectScriptComponentEntities(m_Registry);
+        for (entt::entity scriptEntity : scriptEntities)
         {
-            auto snapshotView = m_Registry.view<NativeScriptComponent>();
-            for (entt::entity entity : snapshotView)
-            {
-                const auto& nativeScript = snapshotView.get<NativeScriptComponent>(entity);
-                for (size_t scriptIndex = 0; scriptIndex < nativeScript.Scripts.size(); ++scriptIndex)
-                    scriptSlots.emplace_back(entity, scriptIndex);
-            }
-        }
-
-        auto tryGetScriptEntry = [this](entt::entity scriptEntity, size_t scriptIndex) -> NativeScriptEntry* {
-            auto* nativeScript = m_Registry.try_get<NativeScriptComponent>(scriptEntity);
-            if (!nativeScript || scriptIndex >= nativeScript->Scripts.size())
-                return nullptr;
-            return &nativeScript->Scripts[scriptIndex];
-        };
-
-        for (const auto& scriptSlot : scriptSlots)
-        {
-            const entt::entity entity = scriptSlot.first;
-            const size_t scriptIndex = scriptSlot.second;
-            NativeScriptEntry* scriptEntry = tryGetScriptEntry(entity, scriptIndex);
-            if (!scriptEntry || !scriptEntry->RuntimeInstance)
+            auto* scriptComponent = m_Registry.try_get<ScriptComponent>(scriptEntity);
+            if (!scriptComponent)
+                continue;
+            NativeScriptEntry& scriptEntry = scriptComponent->Script;
+            if (!scriptEntry.RuntimeInstance)
                 continue;
 
-            const auto* tag = m_Registry.try_get<TagComponent>(entity);
-            if (scriptEntry->RuntimeInitialized)
+            const entt::entity ownerEntity = scriptComponent->OwnerEntity;
+
+            const auto* tag = m_Registry.try_get<TagComponent>(ownerEntity);
+            if (scriptEntry.RuntimeInitialized)
             {
                 try
                 {
-                    scriptEntry->RuntimeInstance->OnDestroy();
+                    scriptEntry.RuntimeInstance->OnDestroy();
                 }
                 catch (const std::exception& exception)
                 {
                     LT_ERROR("Script '{}' on entity '{}' threw during OnDestroy in Scene destructor: {}",
-                             scriptEntry->ScriptClassName,
+                             scriptEntry.ScriptClassName,
                              tag ? tag->Tag : "Entity",
                              exception.what());
                 }
                 catch (...)
                 {
                     LT_ERROR("Script '{}' on entity '{}' threw a non-standard exception during OnDestroy in Scene destructor",
-                             scriptEntry->ScriptClassName,
+                             scriptEntry.ScriptClassName,
                              tag ? tag->Tag : "Entity");
                 }
             }
 
-            scriptEntry = tryGetScriptEntry(entity, scriptIndex);
-            if (!scriptEntry || !scriptEntry->RuntimeInstance)
+            scriptComponent = m_Registry.try_get<ScriptComponent>(scriptEntity);
+            if (!scriptComponent || !scriptComponent->Script.RuntimeInstance)
                 continue;
+            auto& refreshedScriptEntry = scriptComponent->Script;
 
             try
             {
-                Coroutine::StopAll(*scriptEntry->RuntimeInstance);
+                Coroutine::StopAll(*refreshedScriptEntry.RuntimeInstance);
             }
             catch (const std::exception& exception)
             {
                 LT_WARN("Script '{}' on entity '{}' threw during coroutine cleanup in Scene destructor: {}",
-                        scriptEntry->ScriptClassName,
+                        refreshedScriptEntry.ScriptClassName,
                         tag ? tag->Tag : "Entity",
                         exception.what());
             }
             catch (...)
             {
                 LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during coroutine cleanup in Scene destructor",
-                        scriptEntry->ScriptClassName,
+                        refreshedScriptEntry.ScriptClassName,
                         tag ? tag->Tag : "Entity");
             }
 
-            scriptEntry->RuntimeInstance.reset();
-            scriptEntry->RuntimeInitialized = false;
-            scriptEntry->RuntimeUpdateCount = 0;
-            scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
-            scriptEntry->RuntimeWarnedMissingAccessDeclaration = false;
-            scriptEntry->RuntimeWarnedAccessMaskMismatch = false;
+            refreshedScriptEntry.RuntimeInstance.reset();
+            refreshedScriptEntry.RuntimeInitialized = false;
+            refreshedScriptEntry.RuntimeUpdateCount = 0;
+            refreshedScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+            refreshedScriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
+            refreshedScriptEntry.RuntimeWarnedAccessMaskMismatch = false;
         }
+    }
+
+    entt::entity Scene::AttachScriptComponent(entt::entity owner)
+    {
+        return AttachScriptComponent(owner, NativeScriptEntry{});
+    }
+
+    entt::entity Scene::AttachScriptComponent(entt::entity owner, NativeScriptEntry scriptEntry)
+    {
+        owner = ResolveEntityReference(owner);
+        if (!IsValid(owner))
+            return entt::null;
+
+        entt::entity scriptEntity = m_Registry.create();
+        ScriptComponent component{};
+        component.OwnerEntity = owner;
+        component.ComponentOrder = static_cast<int32_t>(GetScriptComponentEntities(owner).size());
+        component.Script = std::move(scriptEntry);
+        m_Registry.emplace<ScriptComponent>(scriptEntity, std::move(component));
+        return scriptEntity;
+    }
+
+    bool Scene::RemoveScriptComponent(entt::entity scriptComponentEntity)
+    {
+        if (!m_Registry.valid(scriptComponentEntity) || !m_Registry.all_of<ScriptComponent>(scriptComponentEntity))
+            return false;
+
+        const entt::entity ownerEntity = m_Registry.get<ScriptComponent>(scriptComponentEntity).OwnerEntity;
+        m_Registry.destroy(scriptComponentEntity);
+        if (ownerEntity != entt::null && IsValid(ownerEntity))
+            RenormalizeScriptComponentOrder(m_Registry, ownerEntity);
+        return true;
+    }
+
+    std::vector<entt::entity> Scene::GetScriptComponentEntities(entt::entity owner) const
+    {
+        owner = ResolveEntityReference(owner);
+        if (owner == entt::null || !m_Registry.valid(owner))
+            return {};
+        return CollectScriptComponentEntities(m_Registry, owner);
+    }
+
+    ScriptComponent* Scene::GetScriptComponent(entt::entity scriptComponentEntity)
+    {
+        return m_Registry.try_get<ScriptComponent>(scriptComponentEntity);
+    }
+
+    const ScriptComponent* Scene::GetScriptComponent(entt::entity scriptComponentEntity) const
+    {
+        return m_Registry.try_get<ScriptComponent>(scriptComponentEntity);
     }
 
     void Scene::OnRigidbody2DComponentDestroyed(entt::registry& registry, entt::entity entity)

@@ -268,20 +268,33 @@ namespace Limitless::EditorPrefabSystem
                     destinationAudio.RuntimePreviousWorldPosition = glm::vec3(0.0f);
                 }
 
-                if (const auto* sourceScripts = sourceRegistry.try_get<NativeScriptComponent>(sourceEntity))
+                const auto sourceScriptEntities = sourceScene.GetScriptComponentEntities(sourceEntity);
+                for (entt::entity sourceScriptEntity : sourceScriptEntities)
                 {
-                    auto& destinationScripts = destinationRegistry.emplace<NativeScriptComponent>(destinationEntity);
-                    destinationScripts.Scripts.reserve(sourceScripts->Scripts.size());
-                    for (const auto& sourceScriptEntry : sourceScripts->Scripts)
-                    {
-                        auto& destinationScriptEntry = destinationScripts.Scripts.emplace_back();
-                        destinationScriptEntry.ScriptClassName = sourceScriptEntry.ScriptClassName;
-                        destinationScriptEntry.ScriptAssetRelativePath = sourceScriptEntry.ScriptAssetRelativePath;
-                        destinationScriptEntry.Enabled = sourceScriptEntry.Enabled;
-                        destinationScriptEntry.ExposedProperties = sourceScriptEntry.ExposedProperties;
-                        destinationScriptEntry.RuntimeInitialized = false;
-                        destinationScriptEntry.RuntimeInstance.reset();
-                    }
+                    const auto* sourceScriptComponent = sourceScene.GetScriptComponent(sourceScriptEntity);
+                    if (!sourceScriptComponent || sourceScriptComponent->OwnerEntity != sourceEntity)
+                        continue;
+
+                    NativeScriptEntry destinationScriptEntry{};
+                    destinationScriptEntry.ScriptClassName = sourceScriptComponent->Script.ScriptClassName;
+                    destinationScriptEntry.ScriptAssetRelativePath = sourceScriptComponent->Script.ScriptAssetRelativePath;
+                    destinationScriptEntry.Enabled = sourceScriptComponent->Script.Enabled;
+                    destinationScriptEntry.ExecutionPolicy = sourceScriptComponent->Script.ExecutionPolicy;
+                    destinationScriptEntry.DeclaredReadAccessMask = sourceScriptComponent->Script.DeclaredReadAccessMask;
+                    destinationScriptEntry.DeclaredWriteAccessMask = sourceScriptComponent->Script.DeclaredWriteAccessMask;
+                    destinationScriptEntry.ExposedProperties = sourceScriptComponent->Script.ExposedProperties;
+                    destinationScriptEntry.RuntimeExposedPropertiesRevision = 1;
+                    destinationScriptEntry.RuntimeInitialized = false;
+                    destinationScriptEntry.RuntimeInstance.reset();
+                    destinationScriptEntry.RuntimeUpdateCount = 0;
+                    destinationScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                    destinationScriptEntry.RuntimeWarnedMissingCompiledScript = false;
+                    destinationScriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
+                    destinationScriptEntry.RuntimeWarnedAccessMaskMismatch = false;
+
+                    const entt::entity destinationScriptEntity = destinationScene.AttachScriptComponent(destinationEntity, std::move(destinationScriptEntry));
+                    if (auto* attachedScriptComponent = destinationScene.GetScriptComponent(destinationScriptEntity))
+                        attachedScriptComponent->ComponentOrder = sourceScriptComponent->ComponentOrder;
                 }
             }
 

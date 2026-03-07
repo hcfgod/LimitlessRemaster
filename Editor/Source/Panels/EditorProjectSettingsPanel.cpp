@@ -1,6 +1,7 @@
 #include "EditorProjectSettingsPanel.h"
 
 #include "EditorAssetNaming.h"
+#include "EditorPanelStyle.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetTypes.h"
 #include "Core/Concurrency/JobSystem.h"
@@ -443,9 +444,11 @@ namespace Limitless::EditorProjectSettingsPanel
             return;
         }
 
+        EditorPanelStyle::PushPanelVisualStyle();
         if (!ImGui::Begin("Project Settings", &open))
         {
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -454,6 +457,7 @@ namespace Limitless::EditorProjectSettingsPanel
         {
             ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "No project is open.");
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -821,6 +825,7 @@ namespace Limitless::EditorProjectSettingsPanel
         }
 
         ImGui::End();
+        EditorPanelStyle::PopPanelVisualStyle();
     }
 }
 

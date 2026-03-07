@@ -51,6 +51,51 @@ namespace Limitless
             return std::max<size_t>(2, configuredMinBatchSize);
         }
 
+        std::vector<entt::entity> CollectOrderedScriptComponentEntities(const entt::registry& registry)
+        {
+            auto view = registry.view<ScriptComponent>();
+            std::vector<entt::entity> scriptEntities;
+            for (entt::entity scriptEntity : view)
+                scriptEntities.push_back(scriptEntity);
+
+            std::sort(scriptEntities.begin(), scriptEntities.end(), [&registry](entt::entity left, entt::entity right) {
+                const auto* leftScript = registry.try_get<ScriptComponent>(left);
+                const auto* rightScript = registry.try_get<ScriptComponent>(right);
+                if (leftScript == nullptr || rightScript == nullptr)
+                    return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
+                if (leftScript->OwnerEntity != rightScript->OwnerEntity)
+                    return static_cast<uint32_t>(leftScript->OwnerEntity) < static_cast<uint32_t>(rightScript->OwnerEntity);
+                if (leftScript->ComponentOrder != rightScript->ComponentOrder)
+                    return leftScript->ComponentOrder < rightScript->ComponentOrder;
+                return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
+            });
+            return scriptEntities;
+        }
+
+        NativeScriptEntry* TryGetScriptEntry(entt::registry& registry, entt::entity scriptEntity)
+        {
+            auto* scriptComponent = registry.try_get<ScriptComponent>(scriptEntity);
+            if (!scriptComponent)
+                return nullptr;
+            return &scriptComponent->Script;
+        }
+
+        const NativeScriptEntry* TryGetScriptEntry(const entt::registry& registry, entt::entity scriptEntity)
+        {
+            const auto* scriptComponent = registry.try_get<ScriptComponent>(scriptEntity);
+            if (!scriptComponent)
+                return nullptr;
+            return &scriptComponent->Script;
+        }
+
+        entt::entity TryGetScriptOwnerEntity(const entt::registry& registry, entt::entity scriptEntity)
+        {
+            const auto* scriptComponent = registry.try_get<ScriptComponent>(scriptEntity);
+            if (!scriptComponent)
+                return entt::null;
+            return scriptComponent->OwnerEntity;
+        }
+
         bool HasTransformChangedForAccessValidation(const TransformComponent& before, const TransformComponent& after)
         {
             const bool positionChanged = glm::length(after.Position - before.Position) > kScriptTransformDirtyEpsilon;
@@ -555,65 +600,66 @@ namespace Limitless
         if (NativeScriptRegistry::IsExecutionBlocked())
         {
             SetRuntimePhase(RuntimePhase::ScriptMainThread);
-            auto scriptView = m_Registry.view<NativeScriptComponent>();
-            for (entt::entity entity : scriptView)
+            for (entt::entity scriptEntity : CollectOrderedScriptComponentEntities(m_Registry))
             {
-                auto& nativeScript = scriptView.get<NativeScriptComponent>(entity);
-                for (auto& scriptEntry : nativeScript.Scripts)
-                {
-                    if (scriptEntry.RuntimeInstance)
-                    {
-                        if (scriptEntry.RuntimeInitialized)
-                        {
-                            try
-                            {
-                                scriptEntry.RuntimeInstance->UnsubscribeAllScriptEvents();
-                                scriptEntry.RuntimeInstance->OnDestroy();
-                            }
-                            catch (const std::exception& exception)
-                            {
-                                const auto* tag = m_Registry.try_get<TagComponent>(entity);
-                                LT_ERROR("Script '{}' on entity '{}' threw during OnDestroy while script execution is blocked: {}",
-                                         scriptEntry.ScriptClassName,
-                                         tag ? tag->Tag : "Entity",
-                                         exception.what());
-                            }
-                            catch (...)
-                            {
-                                const auto* tag = m_Registry.try_get<TagComponent>(entity);
-                                LT_ERROR("Script '{}' on entity '{}' threw a non-standard exception during OnDestroy while script execution is blocked",
-                                         scriptEntry.ScriptClassName,
-                                         tag ? tag->Tag : "Entity");
-                            }
-                        }
+                auto* scriptComponent = m_Registry.try_get<ScriptComponent>(scriptEntity);
+                if (!scriptComponent)
+                    continue;
 
+                const entt::entity entity = scriptComponent->OwnerEntity;
+                auto& scriptEntry = scriptComponent->Script;
+                if (scriptEntry.RuntimeInstance)
+                {
+                    if (scriptEntry.RuntimeInitialized)
+                    {
                         try
                         {
-                            Coroutine::StopAll(*scriptEntry.RuntimeInstance);
+                            scriptEntry.RuntimeInstance->UnsubscribeAllScriptEvents();
+                            scriptEntry.RuntimeInstance->OnDestroy();
                         }
                         catch (const std::exception& exception)
                         {
                             const auto* tag = m_Registry.try_get<TagComponent>(entity);
-                            LT_WARN("Script '{}' on entity '{}' threw during coroutine cleanup while script execution is blocked: {}",
-                                    scriptEntry.ScriptClassName,
-                                    tag ? tag->Tag : "Entity",
-                                    exception.what());
+                            LT_ERROR("Script '{}' on entity '{}' threw during OnDestroy while script execution is blocked: {}",
+                                     scriptEntry.ScriptClassName,
+                                     tag ? tag->Tag : "Entity",
+                                     exception.what());
                         }
                         catch (...)
                         {
                             const auto* tag = m_Registry.try_get<TagComponent>(entity);
-                            LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during coroutine cleanup while script execution is blocked",
-                                    scriptEntry.ScriptClassName,
-                                    tag ? tag->Tag : "Entity");
+                            LT_ERROR("Script '{}' on entity '{}' threw a non-standard exception during OnDestroy while script execution is blocked",
+                                     scriptEntry.ScriptClassName,
+                                     tag ? tag->Tag : "Entity");
                         }
-                        scriptEntry.RuntimeInstance.reset();
                     }
 
-                    scriptEntry.RuntimeInitialized = false;
-                    scriptEntry.RuntimeUpdateCount = 0;
-                    scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-                    scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
+                    try
+                    {
+                        Coroutine::StopAll(*scriptEntry.RuntimeInstance);
+                    }
+                    catch (const std::exception& exception)
+                    {
+                        const auto* tag = m_Registry.try_get<TagComponent>(entity);
+                        LT_WARN("Script '{}' on entity '{}' threw during coroutine cleanup while script execution is blocked: {}",
+                                scriptEntry.ScriptClassName,
+                                tag ? tag->Tag : "Entity",
+                                exception.what());
+                    }
+                    catch (...)
+                    {
+                        const auto* tag = m_Registry.try_get<TagComponent>(entity);
+                        LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during coroutine cleanup while script execution is blocked",
+                                scriptEntry.ScriptClassName,
+                                tag ? tag->Tag : "Entity");
+                    }
+                    scriptEntry.RuntimeInstance.reset();
                 }
+
+                scriptEntry.RuntimeInitialized = false;
+                scriptEntry.RuntimeUpdateCount = 0;
+                scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
             }
 
             runScheduledSimulationSystems();
@@ -624,21 +670,17 @@ namespace Limitless
         }
 
         std::vector<std::pair<entt::entity, size_t>> scriptSlots;
+        for (entt::entity scriptEntity : CollectOrderedScriptComponentEntities(m_Registry))
         {
-            auto snapshotView = m_Registry.view<NativeScriptComponent>();
-            for (entt::entity entity : snapshotView)
-            {
-                const auto& nativeScript = snapshotView.get<NativeScriptComponent>(entity);
-                for (size_t scriptIndex = 0; scriptIndex < nativeScript.Scripts.size(); ++scriptIndex)
-                    scriptSlots.emplace_back(entity, scriptIndex);
-            }
+            const entt::entity ownerEntity = TryGetScriptOwnerEntity(m_Registry, scriptEntity);
+            if (ownerEntity == entt::null)
+                continue;
+            scriptSlots.emplace_back(ownerEntity, static_cast<size_t>(static_cast<uint32_t>(scriptEntity)));
         }
 
         auto tryGetScriptEntry = [&](entt::entity scriptEntity, size_t scriptIndex) -> NativeScriptEntry* {
-            auto* nativeScript = m_Registry.try_get<NativeScriptComponent>(scriptEntity);
-            if (!nativeScript || scriptIndex >= nativeScript->Scripts.size())
-                return nullptr;
-            return &nativeScript->Scripts[scriptIndex];
+            (void)scriptEntity;
+            return TryGetScriptEntry(m_Registry, static_cast<entt::entity>(static_cast<uint32_t>(scriptIndex)));
         };
 
         auto applyScriptDeclaredAccessDefaults = [&](NativeScriptEntry& scriptEntry) {
@@ -1834,21 +1876,17 @@ namespace Limitless
         }
 
         std::vector<std::pair<entt::entity, size_t>> scriptSlots;
+        for (entt::entity scriptEntity : CollectOrderedScriptComponentEntities(m_Registry))
         {
-            auto snapshotView = m_Registry.view<NativeScriptComponent>();
-            for (entt::entity entity : snapshotView)
-            {
-                const auto& nativeScript = snapshotView.get<NativeScriptComponent>(entity);
-                for (size_t scriptIndex = 0; scriptIndex < nativeScript.Scripts.size(); ++scriptIndex)
-                    scriptSlots.emplace_back(entity, scriptIndex);
-            }
+            const entt::entity ownerEntity = TryGetScriptOwnerEntity(m_Registry, scriptEntity);
+            if (ownerEntity == entt::null)
+                continue;
+            scriptSlots.emplace_back(ownerEntity, static_cast<size_t>(static_cast<uint32_t>(scriptEntity)));
         }
 
         auto tryGetScriptEntry = [&](entt::entity scriptEntity, size_t scriptIndex) -> NativeScriptEntry* {
-            auto* nativeScript = m_Registry.try_get<NativeScriptComponent>(scriptEntity);
-            if (!nativeScript || scriptIndex >= nativeScript->Scripts.size())
-                return nullptr;
-            return &nativeScript->Scripts[scriptIndex];
+            (void)scriptEntity;
+            return TryGetScriptEntry(m_Registry, static_cast<entt::entity>(static_cast<uint32_t>(scriptIndex)));
         };
 
         auto applyScriptDeclaredAccessDefaults = [&](NativeScriptEntry& scriptEntry) {

@@ -29,6 +29,44 @@ namespace Limitless::EditorInspectorPanel
 {
     namespace
     {
+        bool BeginInspectorSectionHeader(const char* label,
+                                         const char* popupId,
+                                         const char* optionsButtonId)
+        {
+            ImGui::Spacing();
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f, 10.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.11f, 0.17f, 0.27f, 0.96f));
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.16f, 0.24f, 0.38f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.20f, 0.29f, 0.44f, 1.0f));
+            const bool isOpen = ImGui::TreeNodeEx(label,
+                                                  ImGuiTreeNodeFlags_DefaultOpen |
+                                                      ImGuiTreeNodeFlags_Framed |
+                                                      ImGuiTreeNodeFlags_AllowItemOverlap);
+            ImGui::PopStyleColor(3);
+            ImGui::PopStyleVar(2);
+
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                ImGui::OpenPopup(popupId);
+
+            const ImVec2 headerMin = ImGui::GetItemRectMin();
+            const ImVec2 headerMax = ImGui::GetItemRectMax();
+            const float optionsButtonWidth = ImGui::CalcTextSize("...").x + 16.0f;
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 4.0f));
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.31f, 0.46f, 0.95f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.39f, 0.56f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.33f, 0.45f, 0.63f, 1.0f));
+            const float optionsButtonHeight = ImGui::GetFrameHeight();
+            ImGui::SetCursorScreenPos(ImVec2(headerMax.x - optionsButtonWidth - 8.0f,
+                                             headerMin.y + std::max(0.0f, (headerMax.y - headerMin.y - optionsButtonHeight) * 0.5f) + 1.0f));
+            if (ImGui::Button(optionsButtonId))
+                ImGui::OpenPopup(popupId);
+            ImGui::PopStyleColor(3);
+            ImGui::PopStyleVar();
+
+            return isOpen;
+        }
+
         void ClearPrimaryFlagFromOtherCameras(entt::registry& registry, entt::entity currentEntity)
         {
             auto view = registry.view<CameraComponent>();
@@ -433,8 +471,27 @@ namespace Limitless::EditorInspectorPanel
                 std::snprintf(renameBuffer.data(), renameBuffer.size(), "%s", tag->Tag.c_str());
             }
 
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.06f, 0.09f, 0.15f, 0.92f));
+            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.20f, 0.32f, 0.48f, 0.45f));
+            ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 12.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 10.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 6.0f));
+            const float entityCardHeight = ImGui::GetFrameHeight() * 2.0f + 10.0f + ImGui::GetStyle().WindowPadding.y * 2.0f;
+            ImGui::BeginChild("InspectorEntityHeader", ImVec2(0.0f, entityCardHeight), true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
             ImGui::AlignTextToFramePadding();
-            ImGui::Text("Name");
+            ImGui::Checkbox("##EntityEnabled", &tag->Enabled);
+            TrackInteractiveMemberMutation<TagComponent>(
+                undoService, "Edit Entity Enabled", selectedEntity, &TagComponent::Enabled, tag->Enabled);
+            ImGui::SameLine();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("Enabled");
+            ImGui::SameLine();
+            ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - ImGui::CalcTextSize("ENTITY").x));
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("ENTITY");
+
             ImGui::SetNextItemWidth(-1.0f);
             ImGui::InputText("##EntityName", renameBuffer.data(), renameBuffer.size());
             if (ImGui::IsItemDeactivatedAfterEdit())
@@ -455,11 +512,9 @@ namespace Limitless::EditorInspectorPanel
                     tag->Tag = updatedName;
                 }
             }
-
-            ImGui::TextUnformatted("Enabled");
-            ImGui::Checkbox("##EntityEnabled", &tag->Enabled);
-            TrackInteractiveMemberMutation<TagComponent>(
-                undoService, "Edit Entity Enabled", selectedEntity, &TagComponent::Enabled, tag->Enabled);
+            ImGui::EndChild();
+            ImGui::PopStyleVar(4);
+            ImGui::PopStyleColor(2);
         }
 
         ImGui::Spacing();
@@ -467,12 +522,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* transform = registry.try_get<TransformComponent>(selectedEntity))
         {
-            const bool transformOpen = ImGui::TreeNodeEx("Transform", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("TransformComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##TransformComponentOptionsButton"))
-                ImGui::OpenPopup("TransformComponentOptions");
+            const bool transformOpen = BeginInspectorSectionHeader("Transform", "TransformComponentOptions", "...##TransformComponentOptionsButton");
 
             if (ImGui::BeginPopup("TransformComponentOptions"))
             {
@@ -531,12 +581,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* canvas = registry.try_get<CanvasComponent>(selectedEntity))
         {
-            const bool canvasOpen = ImGui::TreeNodeEx("Canvas", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("CanvasComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##CanvasComponentOptionsButton"))
-                ImGui::OpenPopup("CanvasComponentOptions");
+            const bool canvasOpen = BeginInspectorSectionHeader("Canvas", "CanvasComponentOptions", "...##CanvasComponentOptionsButton");
 
             if (ImGui::BeginPopup("CanvasComponentOptions"))
             {
@@ -576,12 +621,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* rectTransform = registry.try_get<RectTransformComponent>(selectedEntity))
         {
-            const bool rectTransformOpen = ImGui::TreeNodeEx("RectTransform", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("RectTransformComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##RectTransformComponentOptionsButton"))
-                ImGui::OpenPopup("RectTransformComponentOptions");
+            const bool rectTransformOpen = BeginInspectorSectionHeader("RectTransform", "RectTransformComponentOptions", "...##RectTransformComponentOptionsButton");
 
             if (ImGui::BeginPopup("RectTransformComponentOptions"))
             {
@@ -717,12 +757,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* sprite = registry.try_get<SpriteComponent>(selectedEntity))
         {
-            const bool spriteOpen = ImGui::TreeNodeEx("Sprite", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("SpriteComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##SpriteComponentOptionsButton"))
-                ImGui::OpenPopup("SpriteComponentOptions");
+            const bool spriteOpen = BeginInspectorSectionHeader("Sprite", "SpriteComponentOptions", "...##SpriteComponentOptionsButton");
 
             if (ImGui::BeginPopup("SpriteComponentOptions"))
             {
@@ -910,12 +945,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* animator = registry.try_get<AnimatorComponent>(selectedEntity))
         {
-            const bool animatorOpen = ImGui::TreeNodeEx("Animator", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("AnimatorComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##AnimatorComponentOptionsButton"))
-                ImGui::OpenPopup("AnimatorComponentOptions");
+            const bool animatorOpen = BeginInspectorSectionHeader("Animator", "AnimatorComponentOptions", "...##AnimatorComponentOptionsButton");
 
             if (ImGui::BeginPopup("AnimatorComponentOptions"))
             {
@@ -1331,23 +1361,23 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 ImGui::Separator();
-                ImGui::TextDisabled("Runtime");
-                ImGui::Text("State: %s", animator->RuntimeCurrentStateName.empty() ? "<none>" : animator->RuntimeCurrentStateName.c_str());
-                ImGui::Text("Clip: %s", animator->RuntimeCurrentClipKey.empty() ? "<none>" : animator->RuntimeCurrentClipKey.c_str());
-                ImGui::Text("State Time: %.3f", animator->RuntimeStateTimeSeconds);
-                ImGui::Text("Duration: %.3f", animator->RuntimeCurrentStateDurationSeconds);
+                const bool runtimeOpen = ImGui::TreeNodeEx("Runtime", ImGuiTreeNodeFlags_DefaultOpen);
+                if (runtimeOpen)
+                {
+                    ImGui::Text("State: %s", animator->RuntimeCurrentStateName.empty() ? "<none>" : animator->RuntimeCurrentStateName.c_str());
+                    ImGui::Text("Clip: %s", animator->RuntimeCurrentClipKey.empty() ? "<none>" : animator->RuntimeCurrentClipKey.c_str());
+                    ImGui::Text("State Time: %.3f", animator->RuntimeStateTimeSeconds);
+                    ImGui::Text("Duration: %.3f", animator->RuntimeCurrentStateDurationSeconds);
+                    ImGui::TreePop();
+                }
+
                 ImGui::TreePop();
             }
         }
 
         if (auto* animationEventReceiver = registry.try_get<AnimationEventReceiverComponent>(selectedEntity))
         {
-            const bool receiverOpen = ImGui::TreeNodeEx("Animation Event Receiver", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("AnimationEventReceiverComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##AnimationEventReceiverComponentOptionsButton"))
-                ImGui::OpenPopup("AnimationEventReceiverComponentOptions");
+            const bool receiverOpen = BeginInspectorSectionHeader("Animation Event Receiver", "AnimationEventReceiverComponentOptions", "...##AnimationEventReceiverComponentOptionsButton");
 
             if (ImGui::BeginPopup("AnimationEventReceiverComponentOptions"))
             {
@@ -1361,11 +1391,7 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::TextUnformatted("Enabled");
                 ImGui::Checkbox("##AnimationEventReceiverEnabled", &animationEventReceiver->Enabled);
                 TrackInteractiveMemberMutation<AnimationEventReceiverComponent>(
-                    undoService,
-                    "Edit Animation Event Receiver Enabled",
-                    selectedEntity,
-                    &AnimationEventReceiverComponent::Enabled,
-                    animationEventReceiver->Enabled);
+                    undoService, "Edit Animation Event Receiver Enabled", selectedEntity, &AnimationEventReceiverComponent::Enabled, animationEventReceiver->Enabled);
 
                 ImGui::Text("Received Events This Frame: %u", static_cast<uint32_t>(animationEventReceiver->RuntimeDispatchedEvents.size()));
                 for (const auto& eventMessage : animationEventReceiver->RuntimeDispatchedEvents)
@@ -1384,12 +1410,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* camera = registry.try_get<CameraComponent>(selectedEntity))
         {
-            const bool cameraOpen = ImGui::TreeNodeEx("Camera", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("CameraComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##CameraComponentOptionsButton"))
-                ImGui::OpenPopup("CameraComponentOptions");
+            const bool cameraOpen = BeginInspectorSectionHeader("Camera", "CameraComponentOptions", "...##CameraComponentOptionsButton");
 
             if (ImGui::BeginPopup("CameraComponentOptions"))
             {
@@ -1517,12 +1538,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* audioListener = registry.try_get<AudioListener2DComponent>(selectedEntity))
         {
-            const bool listenerOpen = ImGui::TreeNodeEx("Audio Listener 2D", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("AudioListener2DComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##AudioListener2DComponentOptionsButton"))
-                ImGui::OpenPopup("AudioListener2DComponentOptions");
+            const bool listenerOpen = BeginInspectorSectionHeader("Audio Listener 2D", "AudioListener2DComponentOptions", "...##AudioListener2DComponentOptionsButton");
 
             if (ImGui::BeginPopup("AudioListener2DComponentOptions"))
             {
@@ -1552,12 +1568,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* audioListener3D = registry.try_get<AudioListener3DComponent>(selectedEntity))
         {
-            const bool listener3DOpen = ImGui::TreeNodeEx("Audio Listener 3D", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("AudioListener3DComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##AudioListener3DComponentOptionsButton"))
-                ImGui::OpenPopup("AudioListener3DComponentOptions");
+            const bool listener3DOpen = BeginInspectorSectionHeader("Audio Listener 3D", "AudioListener3DComponentOptions", "...##AudioListener3DComponentOptionsButton");
 
             if (ImGui::BeginPopup("AudioListener3DComponentOptions"))
             {
@@ -1587,12 +1598,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* grid2D = registry.try_get<Grid2DComponent>(selectedEntity))
         {
-            const bool grid2DOpen = ImGui::TreeNodeEx("Grid 2D", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("Grid2DComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##Grid2DComponentOptionsButton"))
-                ImGui::OpenPopup("Grid2DComponentOptions");
+            const bool grid2DOpen = BeginInspectorSectionHeader("Grid 2D", "Grid2DComponentOptions", "...##Grid2DComponentOptionsButton");
 
             if (ImGui::BeginPopup("Grid2DComponentOptions"))
             {
@@ -1673,12 +1679,7 @@ namespace Limitless::EditorInspectorPanel
         if (auto* tilemapLayer = registry.try_get<TilemapLayerComponent>(selectedEntity))
         {
             tilemapLayer->EnsureStorage();
-            const bool layerOpen = ImGui::TreeNodeEx("Tilemap Layer", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("TilemapLayerComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##TilemapLayerComponentOptionsButton"))
-                ImGui::OpenPopup("TilemapLayerComponentOptions");
+            const bool layerOpen = BeginInspectorSectionHeader("Tilemap Layer", "TilemapLayerComponentOptions", "...##TilemapLayerComponentOptionsButton");
 
             if (ImGui::BeginPopup("TilemapLayerComponentOptions"))
             {
@@ -1748,12 +1749,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* audioSource = registry.try_get<AudioSourceComponent>(selectedEntity))
         {
-            const bool audioOpen = ImGui::TreeNodeEx("Audio Source", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("AudioSourceComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##AudioSourceComponentOptionsButton"))
-                ImGui::OpenPopup("AudioSourceComponentOptions");
+            const bool audioOpen = BeginInspectorSectionHeader("Audio Source", "AudioSourceComponentOptions", "...##AudioSourceComponentOptionsButton");
 
             if (ImGui::BeginPopup("AudioSourceComponentOptions"))
             {
@@ -2109,12 +2105,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* rigidbody2D = registry.try_get<Rigidbody2DComponent>(selectedEntity))
         {
-            const bool rigidbodyOpen = ImGui::TreeNodeEx("Rigidbody 2D", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("Rigidbody2DComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##Rigidbody2DComponentOptionsButton"))
-                ImGui::OpenPopup("Rigidbody2DComponentOptions");
+            const bool rigidbodyOpen = BeginInspectorSectionHeader("Rigidbody 2D", "Rigidbody2DComponentOptions", "...##Rigidbody2DComponentOptionsButton");
 
             if (ImGui::BeginPopup("Rigidbody2DComponentOptions"))
             {
@@ -2266,12 +2257,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* boxCollider2D = registry.try_get<BoxCollider2DComponent>(selectedEntity))
         {
-            const bool boxColliderOpen = ImGui::TreeNodeEx("Box Collider 2D", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("BoxCollider2DComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##BoxCollider2DComponentOptionsButton"))
-                ImGui::OpenPopup("BoxCollider2DComponentOptions");
+            const bool boxColliderOpen = BeginInspectorSectionHeader("Box Collider 2D", "BoxCollider2DComponentOptions", "...##BoxCollider2DComponentOptionsButton");
 
             if (ImGui::BeginPopup("BoxCollider2DComponentOptions"))
             {
@@ -2321,12 +2307,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* circleCollider2D = registry.try_get<CircleCollider2DComponent>(selectedEntity))
         {
-            const bool circleColliderOpen = ImGui::TreeNodeEx("Circle Collider 2D", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("CircleCollider2DComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##CircleCollider2DComponentOptionsButton"))
-                ImGui::OpenPopup("CircleCollider2DComponentOptions");
+            const bool circleColliderOpen = BeginInspectorSectionHeader("Circle Collider 2D", "CircleCollider2DComponentOptions", "...##CircleCollider2DComponentOptionsButton");
 
             if (ImGui::BeginPopup("CircleCollider2DComponentOptions"))
             {
@@ -2376,12 +2357,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* polygonCollider2D = registry.try_get<PolygonCollider2DComponent>(selectedEntity))
         {
-            const bool polygonColliderOpen = ImGui::TreeNodeEx("Polygon Collider 2D", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("PolygonCollider2DComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##PolygonCollider2DComponentOptionsButton"))
-                ImGui::OpenPopup("PolygonCollider2DComponentOptions");
+            const bool polygonColliderOpen = BeginInspectorSectionHeader("Polygon Collider 2D", "PolygonCollider2DComponentOptions", "...##PolygonCollider2DComponentOptionsButton");
 
             if (ImGui::BeginPopup("PolygonCollider2DComponentOptions"))
             {
@@ -2492,12 +2468,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* edgeCollider2D = registry.try_get<EdgeCollider2DComponent>(selectedEntity))
         {
-            const bool edgeColliderOpen = ImGui::TreeNodeEx("Edge Collider 2D", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("EdgeCollider2DComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##EdgeCollider2DComponentOptionsButton"))
-                ImGui::OpenPopup("EdgeCollider2DComponentOptions");
+            const bool edgeColliderOpen = BeginInspectorSectionHeader("Edge Collider 2D", "EdgeCollider2DComponentOptions", "...##EdgeCollider2DComponentOptionsButton");
 
             if (ImGui::BeginPopup("EdgeCollider2DComponentOptions"))
             {
@@ -2547,12 +2518,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* capsuleCollider2D = registry.try_get<CapsuleCollider2DComponent>(selectedEntity))
         {
-            const bool capsuleColliderOpen = ImGui::TreeNodeEx("Capsule Collider 2D", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("CapsuleCollider2DComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##CapsuleCollider2DComponentOptionsButton"))
-                ImGui::OpenPopup("CapsuleCollider2DComponentOptions");
+            const bool capsuleColliderOpen = BeginInspectorSectionHeader("Capsule Collider 2D", "CapsuleCollider2DComponentOptions", "...##CapsuleCollider2DComponentOptionsButton");
 
             if (ImGui::BeginPopup("CapsuleCollider2DComponentOptions"))
             {
@@ -2614,12 +2580,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* directionalLight = registry.try_get<DirectionalLight2DComponent>(selectedEntity))
         {
-            const bool directionalLightOpen = ImGui::TreeNodeEx("Directional Light 2D", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("DirectionalLight2DComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##DirectionalLight2DComponentOptionsButton"))
-                ImGui::OpenPopup("DirectionalLight2DComponentOptions");
+            const bool directionalLightOpen = BeginInspectorSectionHeader("Directional Light 2D", "DirectionalLight2DComponentOptions", "...##DirectionalLight2DComponentOptionsButton");
 
             if (ImGui::BeginPopup("DirectionalLight2DComponentOptions"))
             {
@@ -2704,12 +2665,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* pointLight = registry.try_get<PointLight2DComponent>(selectedEntity))
         {
-            const bool pointLightOpen = ImGui::TreeNodeEx("Point Light 2D", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("PointLight2DComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##PointLight2DComponentOptionsButton"))
-                ImGui::OpenPopup("PointLight2DComponentOptions");
+            const bool pointLightOpen = BeginInspectorSectionHeader("Point Light 2D", "PointLight2DComponentOptions", "...##PointLight2DComponentOptionsButton");
 
             if (ImGui::BeginPopup("PointLight2DComponentOptions"))
             {
@@ -2773,12 +2729,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* shadowOccluder = registry.try_get<ShadowOccluder2DComponent>(selectedEntity))
         {
-            const bool occluderOpen = ImGui::TreeNodeEx("Shadow Occluder 2D", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("ShadowOccluder2DComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##ShadowOccluder2DComponentOptionsButton"))
-                ImGui::OpenPopup("ShadowOccluder2DComponentOptions");
+            const bool occluderOpen = BeginInspectorSectionHeader("Shadow Occluder 2D", "ShadowOccluder2DComponentOptions", "...##ShadowOccluder2DComponentOptionsButton");
 
             if (ImGui::BeginPopup("ShadowOccluder2DComponentOptions"))
             {
@@ -2922,12 +2873,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* joint2D = registry.try_get<Joint2DComponent>(selectedEntity))
         {
-            const bool jointOpen = ImGui::TreeNodeEx("Joint 2D", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("Joint2DComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##Joint2DComponentOptionsButton"))
-                ImGui::OpenPopup("Joint2DComponentOptions");
+            const bool jointOpen = BeginInspectorSectionHeader("Joint 2D", "Joint2DComponentOptions", "...##Joint2DComponentOptionsButton");
 
             if (ImGui::BeginPopup("Joint2DComponentOptions"))
             {
@@ -3008,12 +2954,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* uiImage = registry.try_get<UIImageComponent>(selectedEntity))
         {
-            const bool uiImageOpen = ImGui::TreeNodeEx("UI Image", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("UIImageComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##UIImageComponentOptionsButton"))
-                ImGui::OpenPopup("UIImageComponentOptions");
+            const bool uiImageOpen = BeginInspectorSectionHeader("UI Image", "UIImageComponentOptions", "...##UIImageComponentOptionsButton");
 
             if (ImGui::BeginPopup("UIImageComponentOptions"))
             {
@@ -3103,12 +3044,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* uiPanel = registry.try_get<UIPanelComponent>(selectedEntity))
         {
-            const bool uiPanelOpen = ImGui::TreeNodeEx("UI Panel", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("UIPanelComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##UIPanelComponentOptionsButton"))
-                ImGui::OpenPopup("UIPanelComponentOptions");
+            const bool uiPanelOpen = BeginInspectorSectionHeader("UI Panel", "UIPanelComponentOptions", "...##UIPanelComponentOptionsButton");
 
             if (ImGui::BeginPopup("UIPanelComponentOptions"))
             {
@@ -3208,12 +3144,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* uiText = registry.try_get<UITextComponent>(selectedEntity))
         {
-            const bool uiTextOpen = ImGui::TreeNodeEx("UI Text", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("UITextComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##UITextComponentOptionsButton"))
-                ImGui::OpenPopup("UITextComponentOptions");
+            const bool uiTextOpen = BeginInspectorSectionHeader("UI Text", "UITextComponentOptions", "...##UITextComponentOptionsButton");
 
             if (ImGui::BeginPopup("UITextComponentOptions"))
             {
@@ -3334,12 +3265,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* uiButton = registry.try_get<UIButtonComponent>(selectedEntity))
         {
-            const bool uiButtonOpen = ImGui::TreeNodeEx("UI Button", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("UIButtonComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##UIButtonComponentOptionsButton"))
-                ImGui::OpenPopup("UIButtonComponentOptions");
+            const bool uiButtonOpen = BeginInspectorSectionHeader("UI Button", "UIButtonComponentOptions", "...##UIButtonComponentOptionsButton");
 
             if (ImGui::BeginPopup("UIButtonComponentOptions"))
             {
@@ -3411,12 +3337,7 @@ namespace Limitless::EditorInspectorPanel
 
         if (auto* uiSlider = registry.try_get<UISliderComponent>(selectedEntity))
         {
-            const bool uiSliderOpen = ImGui::TreeNodeEx("UI Slider", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("UISliderComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##UISliderComponentOptionsButton"))
-                ImGui::OpenPopup("UISliderComponentOptions");
+            const bool uiSliderOpen = BeginInspectorSectionHeader("UI Slider", "UISliderComponentOptions", "...##UISliderComponentOptionsButton");
 
             if (ImGui::BeginPopup("UISliderComponentOptions"))
             {
@@ -3523,12 +3444,7 @@ namespace Limitless::EditorInspectorPanel
         // -----------------------------------------------------------------
         if (auto* particleEmitter = registry.try_get<ParticleEmitterComponent>(selectedEntity))
         {
-            const bool particleOpen = ImGui::TreeNodeEx("Particle Emitter", ImGuiTreeNodeFlags_DefaultOpen);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
-                ImGui::OpenPopup("ParticleEmitterComponentOptions");
-            ImGui::SameLine();
-            if (ImGui::Button("...##ParticleEmitterComponentOptionsButton"))
-                ImGui::OpenPopup("ParticleEmitterComponentOptions");
+            const bool particleOpen = BeginInspectorSectionHeader("Particle Emitter", "ParticleEmitterComponentOptions", "...##ParticleEmitterComponentOptionsButton");
 
             if (ImGui::BeginPopup("ParticleEmitterComponentOptions"))
             {

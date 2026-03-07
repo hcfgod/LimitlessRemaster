@@ -205,42 +205,45 @@ namespace Limitless
             for (entt::entity child : children)
                 self(self, child);
 
-            if (auto* nativeScript = m_Registry.try_get<NativeScriptComponent>(target))
+            const auto scriptEntities = GetScriptComponentEntities(target);
+            for (entt::entity scriptEntity : scriptEntities)
             {
-                for (auto& scriptEntry : nativeScript->Scripts)
+                auto* scriptComponent = m_Registry.try_get<ScriptComponent>(scriptEntity);
+                if (!scriptComponent)
+                    continue;
+                auto& scriptEntry = scriptComponent->Script;
+                if (scriptEntry.RuntimeInstance)
                 {
-                    if (scriptEntry.RuntimeInstance)
+                    if (scriptEntry.RuntimeInitialized)
                     {
-                        if (scriptEntry.RuntimeInitialized)
+                        const auto* tag = m_Registry.try_get<TagComponent>(target);
+                        try
                         {
-                            const auto* tag = m_Registry.try_get<TagComponent>(target);
-                            try
-                            {
-                                scriptEntry.RuntimeInstance->OnDestroy();
-                            }
-                            catch (const std::exception& exception)
-                            {
-                                LT_ERROR("Script '{}' on entity '{}' threw during OnDestroy while destroying entity: {}",
-                                         scriptEntry.ScriptClassName,
-                                         tag ? tag->Tag : "Entity",
-                                         exception.what());
-                            }
-                            catch (...)
-                            {
-                                LT_ERROR("Script '{}' on entity '{}' threw a non-standard exception during OnDestroy while destroying entity",
-                                         scriptEntry.ScriptClassName,
-                                         tag ? tag->Tag : "Entity");
-                            }
+                            scriptEntry.RuntimeInstance->OnDestroy();
                         }
-                        Coroutine::StopAll(*scriptEntry.RuntimeInstance);
-                        scriptEntry.RuntimeInstance.reset();
+                        catch (const std::exception& exception)
+                        {
+                            LT_ERROR("Script '{}' on entity '{}' threw during OnDestroy while destroying entity: {}",
+                                     scriptEntry.ScriptClassName,
+                                     tag ? tag->Tag : "Entity",
+                                     exception.what());
+                        }
+                        catch (...)
+                        {
+                            LT_ERROR("Script '{}' on entity '{}' threw a non-standard exception during OnDestroy while destroying entity",
+                                     scriptEntry.ScriptClassName,
+                                     tag ? tag->Tag : "Entity");
+                        }
                     }
-                    scriptEntry.RuntimeInitialized = false;
-                    scriptEntry.RuntimeUpdateCount = 0;
-                    scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-                    scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
-                    scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
+                    Coroutine::StopAll(*scriptEntry.RuntimeInstance);
+                    scriptEntry.RuntimeInstance.reset();
                 }
+                scriptEntry.RuntimeInitialized = false;
+                scriptEntry.RuntimeUpdateCount = 0;
+                scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
+                scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
+                m_Registry.destroy(scriptEntity);
             }
 
             destroyedEntityIds.insert(static_cast<uint32_t>(target));

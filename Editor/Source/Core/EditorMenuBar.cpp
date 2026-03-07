@@ -1,5 +1,6 @@
 #include "EditorMenuBar.h"
 
+#include "EditorPanelStyle.h"
 #include "Core/Application.h"
 #include "imgui/imgui.h"
 
@@ -45,8 +46,12 @@ namespace Limitless::EditorMenuBar
               const std::function<void()>& onApplyPrefabToInstances,
               const std::function<void()>& onResetLayoutToDefault)
     {
+        EditorPanelStyle::PushPanelVisualStyle();
         if (!ImGui::BeginMainMenuBar())
+        {
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
+        }
 
         auto trimLabel = [](const std::string& label) {
             constexpr size_t kMaxLabelLength = 40;
@@ -218,5 +223,6 @@ namespace Limitless::EditorMenuBar
         }
 
         ImGui::EndMainMenuBar();
+        EditorPanelStyle::PopPanelVisualStyle();
     }
 }

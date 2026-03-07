@@ -1,6 +1,7 @@
 #include "EditorProjectPanel.h"
 
 #include "EditorAssetNaming.h"
+#include "EditorPanelStyle.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetImportPipeline.h"
 #include "Assets/AssetPaths.h"
@@ -1169,6 +1170,13 @@ namespace Limitless::EditorProjectPanel
                                 onNativeScriptAssetActivated(sourceAssetKey);
                             }
 
+                            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                            {
+                                ImGui::SetDragDropPayload(assetMovePayloadId, sourceAssetKey.c_str(), static_cast<uint32_t>(sourceAssetKey.size() + 1), ImGuiCond_Once);
+                                ImGui::Text("%s", scriptBaseName.c_str());
+                                ImGui::EndDragDropSource();
+                            }
+
                             if (ImGui::BeginPopupContextItem())
                             {
                                 if (ImGui::MenuItem("Open Script") && onNativeScriptAssetActivated)
@@ -1244,6 +1252,13 @@ namespace Limitless::EditorProjectPanel
                                 if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
                                     onNativeScriptAssetActivated(headerAssetKey);
 
+                                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                                {
+                                    ImGui::SetDragDropPayload(assetMovePayloadId, headerAssetKey.c_str(), static_cast<uint32_t>(headerAssetKey.size() + 1), ImGuiCond_Once);
+                                    ImGui::Text("%s", scriptBaseName.c_str());
+                                    ImGui::EndDragDropSource();
+                                }
+
                                 const float sourceIndentX = ImGui::GetCursorScreenPos().x;
                                 ImGui::TreeNodeEx(sourceItemLabel.c_str(), sourceItemFlags);
                                 DrawAssetTypeBadge(kBadgeScript, sourceIndentX);
@@ -1265,6 +1280,13 @@ namespace Limitless::EditorProjectPanel
                                 }
                                 if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
                                     onNativeScriptAssetActivated(sourceAssetKey);
+
+                                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                                {
+                                    ImGui::SetDragDropPayload(assetMovePayloadId, sourceAssetKey.c_str(), static_cast<uint32_t>(sourceAssetKey.size() + 1), ImGuiCond_Once);
+                                    ImGui::Text("%s", scriptBaseName.c_str());
+                                    ImGui::EndDragDropSource();
+                                }
                                 ImGui::TreePop();
                             }
                             continue;
@@ -2264,6 +2286,7 @@ namespace Limitless::EditorProjectPanel
               const std::function<bool(const std::vector<std::string>&)>& onDeleteSceneAssetsRequested,
               const std::function<void(const std::string&)>& onNativeScriptAssetActivated)
     {
+        EditorPanelStyle::PushPanelVisualStyle();
         ImGui::Begin("Project");
         state.TreeExpansionStateChanged = false;
         state.HoveredFolderRelativePathForExternalDrop.clear();
@@ -2275,6 +2298,7 @@ namespace Limitless::EditorProjectPanel
         {
             ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Could not find Assets folder.");
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -2284,6 +2308,7 @@ namespace Limitless::EditorProjectPanel
         {
             ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Assets directory not found.");
             ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
 
@@ -2630,5 +2655,6 @@ namespace Limitless::EditorProjectPanel
         ImGui::PopStyleVar(5);
         gProjectSearchMatchCache.clear();
         ImGui::End();
+        EditorPanelStyle::PopPanelVisualStyle();
     }
 }

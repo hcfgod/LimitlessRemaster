@@ -148,7 +148,8 @@ project "Editor"
         buildoptions
         {
             "/utf-8",
-            "/FS"
+            "/FS",
+            "/bigobj"
         }
 
         -- Copy shaderc runtime DLLs
