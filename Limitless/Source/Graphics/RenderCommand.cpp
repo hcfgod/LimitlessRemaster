@@ -30,9 +30,26 @@ namespace Limitless
     {
     }
 
+    SetDrawColorAttachmentsCommand::SetDrawColorAttachmentsCommand(std::vector<uint32_t> attachments)
+        : m_Attachments(std::move(attachments))
+    {
+    }
+
+    ClearColorAttachmentCommand::ClearColorAttachmentCommand(uint32_t attachmentIndex, const glm::vec4& clearValue)
+        : m_AttachmentIndex(attachmentIndex)
+        , m_ClearValue(clearValue)
+    {
+    }
+
     // BindShaderCommand implementation
     BindShaderCommand::BindShaderCommand(std::shared_ptr<Shader> shader)
         : m_Shader(std::move(shader))
+    {
+    }
+
+    // BindRenderPipelineCommand implementation
+    BindRenderPipelineCommand::BindRenderPipelineCommand(std::shared_ptr<RenderPipeline> pipeline)
+        : m_Pipeline(std::move(pipeline))
     {
     }
 
@@ -108,7 +125,7 @@ namespace Limitless
         {
             if (m_KeepAlive.TextureHandles[i])
             {
-                m_TextureRendererIds[i] = m_KeepAlive.TextureHandles[i]->GetRendererID();
+                m_TextureRendererIds[i] = static_cast<uint32_t>(m_KeepAlive.TextureHandles[i]->GetNativeHandle());
             }
             else
             {

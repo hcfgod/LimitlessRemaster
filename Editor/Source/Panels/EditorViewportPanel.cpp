@@ -9,6 +9,7 @@
 #include "Graphics/Camera/OrthographicCamera2D.h"
 #include "Graphics/Camera/PerspectiveCamera3D.h"
 #include "Graphics/Framebuffer.h"
+#include "Graphics/NativeRenderHandles.h"
 #include "Graphics/Renderer2D.h"
 #include "Core/Time.h"
 #include "Scene/Scene.h"
@@ -2923,7 +2924,7 @@ namespace Limitless::EditorViewportPanel
             if (sceneViewFramebuffer && sceneViewFramebuffer->GetColorAttachment())
             {
                 ImGui::Image(
-                    (ImTextureID)(void*)(uintptr_t)sceneViewFramebuffer->GetColorAttachment()->GetRendererID(),
+                    static_cast<ImTextureID>(GetTextureNativeHandle(sceneViewFramebuffer->GetColorAttachment())),
                     ImVec2(static_cast<float>(sceneWidth), static_cast<float>(sceneHeight)),
                     ImVec2(0, 1),
                     ImVec2(1, 0));
@@ -3370,7 +3371,7 @@ namespace Limitless::EditorViewportPanel
             if (gameViewFramebuffer && gameViewFramebuffer->GetColorAttachment())
             {
                 ImGui::Image(
-                    (ImTextureID)(void*)(uintptr_t)gameViewFramebuffer->GetColorAttachment()->GetRendererID(),
+                    static_cast<ImTextureID>(GetTextureNativeHandle(gameViewFramebuffer->GetColorAttachment())),
                     ImVec2(static_cast<float>(gameWidth), static_cast<float>(gameHeight)),
                     ImVec2(0, 1),
                     ImVec2(1, 0));

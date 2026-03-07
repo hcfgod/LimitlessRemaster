@@ -99,7 +99,10 @@ namespace Limitless
         {
             using ResultT = decltype(func(static_cast<GraphicsContext*>(nullptr)));
 
-            if (IsOnRenderThread())
+            // Fast path: if the calling thread already owns the graphics context
+            // (either the render thread or the main thread inside ProcessCommands),
+            // execute inline to avoid a cross-thread round-trip and prevent deadlocks.
+            if (IsOnRenderThread() || (m_GraphicsContext && m_GraphicsContext->IsCurrentOnThisThread()))
             {
                 if constexpr (std::is_void_v<ResultT>)
                 {
@@ -196,7 +199,7 @@ namespace Limitless
         {
             using ResultT = decltype(func(static_cast<GraphicsContext*>(nullptr)));
 
-            if (IsOnRenderThread())
+            if (IsOnRenderThread() || (m_GraphicsContext && m_GraphicsContext->IsCurrentOnThisThread()))
             {
                 std::promise<ResultT> promise;
                 auto future = promise.get_future();
@@ -279,7 +282,6 @@ namespace Limitless
                 throw std::runtime_error("RenderResourceCommandQueue (primary) is full");
             }
 
-            // Wake the render thread; it is the only consumer of the primary-resource queue.
             NotifyRenderThreadResourceWorkAvailable();
             return future;
         }
@@ -327,7 +329,7 @@ namespace Limitless
         {
             using ResultT = decltype(func(static_cast<GraphicsContext*>(nullptr)));
 
-            if (IsOnRenderThread())
+            if (IsOnRenderThread() || (m_GraphicsContext && m_GraphicsContext->IsCurrentOnThisThread()))
             {
                 std::promise<ResultT> promise;
                 auto fut = promise.get_future();
@@ -435,7 +437,10 @@ namespace Limitless
         auto SubmitResourceAndWait(const char* debugName, Func&& func) -> decltype(func(static_cast<GraphicsContext*>(nullptr)))
         {
             using ResultT = decltype(func(static_cast<GraphicsContext*>(nullptr)));
-            if (IsOnRenderThread())
+            // Fast path: if the calling thread already owns the graphics context
+            // (either the render thread or the main thread inside ProcessCommands),
+            // execute inline to avoid a cross-thread round-trip and prevent deadlocks.
+            if (IsOnRenderThread() || (m_GraphicsContext && m_GraphicsContext->IsCurrentOnThisThread()))
             {
                 if constexpr (std::is_void_v<ResultT>)
                 {

@@ -693,6 +693,10 @@ namespace Limitless
             const auto& pm = Project::ProjectManager::GetInstance();
             const std::filesystem::path projectRoot = pm.GetProjectRoot();
 
+            ScriptCoreModuleRuntime::ShutdownIncrementalCompiler();
+            ScriptCoreModuleRuntime::Shutdown();
+            ScriptCoreModuleRuntime::Initialize();
+
             // Defer startup reimport to a background task once the initial scene is
             // visible, so project open remains responsive for tile-heavy projects.
             m_StartupAssetImportPending = true;

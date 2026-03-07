@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 
 namespace Limitless::Audio
 {
@@ -17,6 +18,12 @@ namespace Limitless::Audio
         constexpr float kAudioMinimumPitch = 0.01f;
         constexpr float kMinimumDeltaTime = 0.000001f;
         constexpr float kSpeedOfSoundMetersPerSecond = 343.0f;
+
+        std::unordered_map<std::string, Async::Task<Assets::AudioClipAsset::Ptr>>& GetPendingAudioClipLoads()
+        {
+            static std::unordered_map<std::string, Async::Task<Assets::AudioClipAsset::Ptr>> pendingAudioClipLoads;
+            return pendingAudioClipLoads;
+        }
 
         glm::vec3 ComputeEntityWorldPosition3D(const Scene& scene, entt::entity entity)
         {
@@ -438,7 +445,29 @@ namespace Limitless::Audio
 
             if (shouldPlayOnStart && !audioSource.RuntimePlayOnStartConsumed)
             {
-                auto clipAsset = Assets::AudioClipAsset::LoadBlocking(audioSource.AudioClipKey);
+                auto& pendingAudioClipLoads = GetPendingAudioClipLoads();
+                auto clipAsset = std::dynamic_pointer_cast<Assets::AudioClipAsset>(
+                    Assets::AssetManager::GetCachedByKey(audioSource.AudioClipKey));
+                if (!clipAsset)
+                {
+                    auto pendingIt = pendingAudioClipLoads.find(audioSource.AudioClipKey);
+                    if (pendingIt == pendingAudioClipLoads.end())
+                    {
+                        pendingAudioClipLoads.emplace(audioSource.AudioClipKey, Assets::AudioClipAsset::LoadAsync(audioSource.AudioClipKey));
+                        continue;
+                    }
+
+                    if (!pendingIt->second.IsDone())
+                        continue;
+
+                    clipAsset = pendingIt->second.Get();
+                    pendingAudioClipLoads.erase(pendingIt);
+                }
+                else
+                {
+                    pendingAudioClipLoads.erase(audioSource.AudioClipKey);
+                }
+
                 if (clipAsset && clipAsset->GetClip())
                 {
                     audioSource.RuntimeVoiceId = AudioEngine::GetInstance().PlayClip(

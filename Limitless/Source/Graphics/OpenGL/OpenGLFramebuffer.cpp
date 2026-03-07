@@ -105,7 +105,7 @@ namespace Limitless
         {
             auto colorAttachment = std::make_shared<OpenGLTexture2D>(m_Width, m_Height);
             const auto* glTexture = static_cast<const OpenGLTexture2D*>(colorAttachment.get());
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index, GL_TEXTURE_2D, glTexture->GetRendererID(), 0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index, GL_TEXTURE_2D, static_cast<GLuint>(glTexture->GetNativeHandle()), 0);
             m_ColorAttachments.push_back(std::move(colorAttachment));
             drawBuffers[index] = GL_COLOR_ATTACHMENT0 + index;
         }

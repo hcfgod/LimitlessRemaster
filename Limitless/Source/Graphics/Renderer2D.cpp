@@ -8,6 +8,7 @@
 
 #include "Graphics/Buffer.h"
 #include "Graphics/RenderCommand.h"
+#include "Graphics/RenderPipeline.h"
 #include "Graphics/Renderer.h"
 #include "Graphics/VertexArray.h"
 
@@ -44,6 +45,44 @@ namespace Limitless
             transform = glm::scale(transform, glm::vec3(size, 1.0f));
             return transform;
         }
+
+        constexpr size_t GetPipelineVariantIndex(bool depthTestEnabled)
+        {
+            return depthTestEnabled ? 1u : 0u;
+        }
+
+        void EnsureRenderer2DPipeline(std::array<std::shared_ptr<RenderPipeline>, 2>& pipelines,
+                                      std::array<std::shared_ptr<Shader>, 2>& pipelineShaders,
+                                      const std::shared_ptr<Shader>& shader,
+                                      const BufferLayout& vertexLayout,
+                                      const char* debugName,
+                                      bool depthTestEnabled)
+        {
+            if (!shader)
+                return;
+
+            const size_t variantIndex = GetPipelineVariantIndex(depthTestEnabled);
+            if (pipelines[variantIndex] && pipelineShaders[variantIndex] == shader)
+                return;
+
+            RenderPipelineDescriptor descriptor{};
+            descriptor.DebugName = debugName ? debugName : "Renderer2D/Pipeline";
+            descriptor.ShaderProgram = shader;
+            descriptor.VertexLayout = vertexLayout;
+            descriptor.Topology = PrimitiveTopology::Triangles;
+            descriptor.BlendState.Enabled = true;
+            descriptor.BlendState.SourceColorFactor = BlendFactor::SrcAlpha;
+            descriptor.BlendState.DestinationColorFactor = BlendFactor::OneMinusSrcAlpha;
+            descriptor.DepthStencilState.DepthTestEnabled = depthTestEnabled;
+            descriptor.DepthStencilState.DepthWriteEnabled = depthTestEnabled;
+            descriptor.DepthStencilState.DepthCompare = DepthTestFunc::LessEqual;
+            descriptor.RasterState.CullEnabled = false;
+            descriptor.RasterState.CullMode = CullFace::Back;
+            descriptor.RasterState.FillMode = PolygonMode::Fill;
+
+            pipelines[variantIndex] = RenderPipeline::Create(descriptor);
+            pipelineShaders[variantIndex] = shader;
+        }
     }
 
     struct Renderer2D::Impl
@@ -64,10 +103,15 @@ namespace Limitless
         std::shared_ptr<Shader> ShaderProgram;
         Assets::MaterialAsset::Ptr TextMaterial;
         std::shared_ptr<Shader> TextShaderProgram;
+        std::array<std::shared_ptr<RenderPipeline>, 2> QuadPipelines{};
+        std::array<std::shared_ptr<Shader>, 2> QuadPipelineShaders{};
+        std::array<std::shared_ptr<RenderPipeline>, 2> TextPipelines{};
+        std::array<std::shared_ptr<Shader>, 2> TextPipelineShaders{};
 
         std::shared_ptr<Texture2D> WhiteTexture;
         std::array<std::shared_ptr<Texture2D>, kCompileTimeMaxTextureSlots> TextureSlots{};
         uint32_t TextureSlotCount = 0;
+        bool SceneDepthTestEnabled = true;
 
         glm::mat4 ViewProjection{1.0f};
 
@@ -289,11 +333,20 @@ namespace Limitless
         d.TextureSlots[0] = d.WhiteTexture;
         d.TextTextureSlotCount = 1;
         d.TextTextureSlots[0] = d.WhiteTexture;
+        d.SceneDepthTestEnabled = enableDepthTest;
 
-        auto& renderer = Renderer::GetInstance();
-        renderer.SubmitCommandArena<SetBlendModeCommand>(BlendFactor::SrcAlpha, BlendFactor::OneMinusSrcAlpha, true);
-        renderer.SubmitCommandArena<SetDepthTestCommand>(enableDepthTest);
-        renderer.SubmitCommandArena<SetCullFaceCommand>(false);
+        EnsureRenderer2DPipeline(d.QuadPipelines,
+                                 d.QuadPipelineShaders,
+                                 d.ShaderProgram,
+                                 d.QuadVertexBuffer->GetLayout(),
+                                 "Renderer2D/Quad",
+                                 d.SceneDepthTestEnabled);
+        EnsureRenderer2DPipeline(d.TextPipelines,
+                                 d.TextPipelineShaders,
+                                 d.TextShaderProgram,
+                                 d.QuadVertexBuffer->GetLayout(),
+                                 "Renderer2D/Text",
+                                 d.SceneDepthTestEnabled);
     }
 
     void Renderer2D::EndScene()
@@ -600,6 +653,24 @@ namespace Limitless
         }
 
         auto& renderer = Renderer::GetInstance();
+        EnsureRenderer2DPipeline(d.QuadPipelines,
+                                 d.QuadPipelineShaders,
+                                 d.ShaderProgram,
+                                 d.QuadVertexBuffer->GetLayout(),
+                                 "Renderer2D/Quad",
+                                 d.SceneDepthTestEnabled);
+
+        const auto& quadPipeline = d.QuadPipelines[GetPipelineVariantIndex(d.SceneDepthTestEnabled)];
+        if (quadPipeline)
+        {
+            renderer.SubmitCommandArena<BindRenderPipelineCommand>(quadPipeline);
+        }
+        else
+        {
+            renderer.SubmitCommandArena<SetBlendModeCommand>(BlendFactor::SrcAlpha, BlendFactor::OneMinusSrcAlpha, true);
+            renderer.SubmitCommandArena<SetDepthTestCommand>(d.SceneDepthTestEnabled);
+            renderer.SubmitCommandArena<SetCullFaceCommand>(false);
+        }
 
         const uint32_t dataSizeBytes = vertexCount * static_cast<uint32_t>(sizeof(QuadVertex));
         void* uploadBytes = renderer.AllocateFrameUpload(dataSizeBytes, alignof(QuadVertex));
@@ -682,6 +753,25 @@ namespace Limitless
         }
 
         auto& renderer = Renderer::GetInstance();
+        EnsureRenderer2DPipeline(d.TextPipelines,
+                                 d.TextPipelineShaders,
+                                 d.TextShaderProgram,
+                                 d.QuadVertexBuffer->GetLayout(),
+                                 "Renderer2D/Text",
+                                 d.SceneDepthTestEnabled);
+
+        const auto& textPipeline = d.TextPipelines[GetPipelineVariantIndex(d.SceneDepthTestEnabled)];
+        if (textPipeline)
+        {
+            renderer.SubmitCommandArena<BindRenderPipelineCommand>(textPipeline);
+        }
+        else
+        {
+            renderer.SubmitCommandArena<SetBlendModeCommand>(BlendFactor::SrcAlpha, BlendFactor::OneMinusSrcAlpha, true);
+            renderer.SubmitCommandArena<SetDepthTestCommand>(d.SceneDepthTestEnabled);
+            renderer.SubmitCommandArena<SetCullFaceCommand>(false);
+        }
+
         const uint32_t dataSizeBytes = vertexCount * static_cast<uint32_t>(sizeof(QuadVertex));
         void* uploadBytes = renderer.AllocateFrameUpload(dataSizeBytes, alignof(QuadVertex));
         if (!uploadBytes)

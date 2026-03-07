@@ -43,6 +43,10 @@ namespace Limitless {
             return m_VSyncActuallyEnabled;
         }
 
+        bool IsCurrentOnThisThread() const override {
+            return m_CurrentDepth > 0 && m_CurrentThread == std::this_thread::get_id();
+        }
+
         int32_t GetMaxTextureImageUnits() const override { return m_MaxTextureImageUnits; }
 
         // Create a resource-sharing OpenGL context suitable for running GPU resource work on a

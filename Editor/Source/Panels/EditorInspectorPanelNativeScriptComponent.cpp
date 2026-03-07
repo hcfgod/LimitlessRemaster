@@ -16,6 +16,8 @@
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
+#include <functional>
+#include <map>
 #include <unordered_set>
 
 namespace Limitless::EditorInspectorPanel
@@ -24,6 +26,12 @@ namespace Limitless::EditorInspectorPanel
     {
         constexpr const char* kSceneEntityPayload = "SCENE_ENTITY";
         constexpr const char* kAssetMovePayload = "ASSET_MOVE";
+
+        struct ProjectScriptFolderNode final
+        {
+            std::map<std::string, ProjectScriptFolderNode> Children;
+            std::vector<ProjectNativeScriptInfo> Scripts;
+        };
 
         bool BeginInspectorScriptSectionHeader(const char* label,
                                                const char* popupId,
@@ -61,6 +69,25 @@ namespace Limitless::EditorInspectorPanel
             ImGui::PopStyleVar();
 
             return isOpen;
+        }
+
+        ProjectScriptFolderNode BuildProjectScriptFolderTree(const std::vector<ProjectNativeScriptInfo>& availableScripts)
+        {
+            ProjectScriptFolderNode root;
+            for (const ProjectNativeScriptInfo& scriptInfo : availableScripts)
+            {
+                ProjectScriptFolderNode* node = &root;
+                const std::filesystem::path folderPath(scriptInfo.FolderRelativePath);
+                for (const auto& segment : folderPath)
+                {
+                    const std::string folderName = segment.string();
+                    if (folderName.empty() || folderName == ".")
+                        continue;
+                    node = &node->Children[folderName];
+                }
+                node->Scripts.push_back(scriptInfo);
+            }
+            return root;
         }
 
         struct AccessMaskUiEntry
@@ -329,12 +356,8 @@ namespace Limitless::EditorInspectorPanel
         };
 
         const std::vector<std::string> registeredScriptNames = NativeScriptRegistry::GetRegisteredScriptNames();
-        const auto discoveredScriptNames = DiscoverNativeScriptClassNamesFromProjectAssetsForInspector();
-        std::vector<std::string> availableScriptNames = registeredScriptNames.empty()
-            ? discoveredScriptNames
-            : registeredScriptNames;
-        std::sort(availableScriptNames.begin(), availableScriptNames.end());
-        availableScriptNames.erase(std::unique(availableScriptNames.begin(), availableScriptNames.end()), availableScriptNames.end());
+        const std::vector<ProjectNativeScriptInfo> availableScripts = GetAvailableProjectScriptsForInspector();
+        const ProjectScriptFolderNode scriptFolderTree = BuildProjectScriptFolderTree(availableScripts);
 
         if (ImGui::BeginDragDropTarget())
         {
@@ -360,7 +383,7 @@ namespace Limitless::EditorInspectorPanel
                 attemptedAutoScriptBuild = TriggerNativeScriptBuildFromInspector();
             }
 
-            if (availableScriptNames.empty())
+            if (availableScripts.empty())
                 ImGui::TextDisabled("No scripts found.");
             else
                 ImGui::TextDisabled("No scripts registered yet.");
@@ -427,7 +450,9 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::TextUnformatted("Enabled");
                     ImGui::Checkbox("##NativeScriptEnabled", &scriptEntry.Enabled);
 
-                    std::string previewLabel = scriptEntry.ScriptClassName.empty() ? std::string("None") : scriptEntry.ScriptClassName;
+                    std::string previewLabel = scriptEntry.ScriptClassName.empty()
+                        ? std::string("None")
+                        : (!scriptEntry.ScriptAssetRelativePath.empty() ? scriptEntry.ScriptAssetRelativePath : scriptEntry.ScriptClassName);
                     ImGui::TextUnformatted("Class");
                     if (ImGui::BeginCombo("##NativeScriptClass", previewLabel.c_str()))
                     {
@@ -446,25 +471,40 @@ namespace Limitless::EditorInspectorPanel
                         if (noneSelected)
                             ImGui::SetItemDefaultFocus();
 
-                        for (const auto& scriptName : availableScriptNames)
-                        {
-                            const bool scriptSelected = (scriptEntry.ScriptClassName == scriptName);
-                            if (ImGui::Selectable(scriptName.c_str(), scriptSelected))
+                        std::function<void(const ProjectScriptFolderNode&)> drawFolderContents;
+                        drawFolderContents = [&](const ProjectScriptFolderNode& folderNode) {
+                            for (const ProjectNativeScriptInfo& scriptInfo : folderNode.Scripts)
                             {
-                                const std::string resolvedScriptClassName = ResolveRegisteredScriptClassNameForInspector(scriptName);
-                                const std::string& assignedScriptClassName = resolvedScriptClassName.empty() ? scriptName : resolvedScriptClassName;
-                                (void)mutateScriptEntry("Change Script Class", [&](NativeScriptEntry& mutableEntry) {
-                                    scriptEntry.ScriptClassName = assignedScriptClassName;
-                                    mutableEntry.ScriptClassName = assignedScriptClassName;
-                                    mutableEntry.ScriptAssetRelativePath.clear();
-                                    mutableEntry.ExposedProperties.clear();
-                                    mutableEntry.RuntimeInitialized = false;
-                                    mutableEntry.RuntimeInstance.reset();
-                                });
+                                const bool scriptSelected = (scriptEntry.ScriptAssetRelativePath == scriptInfo.ScriptAssetRelativePath) ||
+                                                            (scriptEntry.ScriptAssetRelativePath.empty() && scriptEntry.ScriptClassName == scriptInfo.ScriptClassName);
+                                if (ImGui::Selectable(scriptInfo.DisplayName.c_str(), scriptSelected))
+                                {
+                                    const std::string resolvedScriptClassName = ResolveRegisteredScriptClassNameForInspector(scriptInfo.ScriptClassName);
+                                    const std::string& assignedScriptClassName = resolvedScriptClassName.empty() ? scriptInfo.ScriptClassName : resolvedScriptClassName;
+                                    (void)mutateScriptEntry("Change Script Class", [&](NativeScriptEntry& mutableEntry) {
+                                        scriptEntry.ScriptClassName = assignedScriptClassName;
+                                        scriptEntry.ScriptAssetRelativePath = scriptInfo.ScriptAssetRelativePath;
+                                        mutableEntry.ScriptClassName = assignedScriptClassName;
+                                        mutableEntry.ScriptAssetRelativePath = scriptInfo.ScriptAssetRelativePath;
+                                        mutableEntry.ExposedProperties.clear();
+                                        mutableEntry.RuntimeInitialized = false;
+                                        mutableEntry.RuntimeInstance.reset();
+                                    });
+                                }
+                                if (scriptSelected)
+                                    ImGui::SetItemDefaultFocus();
                             }
-                            if (scriptSelected)
-                                ImGui::SetItemDefaultFocus();
-                        }
+
+                            for (const auto& [folderName, childNode] : folderNode.Children)
+                            {
+                                if (!ImGui::BeginMenu(folderName.c_str()))
+                                    continue;
+                                drawFolderContents(childNode);
+                                ImGui::EndMenu();
+                            }
+                        };
+
+                        drawFolderContents(scriptFolderTree);
                         ImGui::EndCombo();
                     }
 

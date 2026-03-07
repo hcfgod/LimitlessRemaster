@@ -9,6 +9,7 @@
 #include "Assets/TextureAsset.h"
 #include "Assets/TextureAssetImporter.h"
 #include "Core/Debug/Log.h"
+#include "Graphics/NativeRenderHandles.h"
 #include "Project/ProjectManager.h"
 #include "Scene/Scene.h"
 #include "Scene/Components/CoreComponents.h"
@@ -751,7 +752,7 @@ namespace Limitless::EditorTilePalettePanel
                     }
                     if (it != state.CachedTextures.end() && it->second && it->second->GetTexture())
                     {
-                        textureId = (ImTextureID)(void*)(uintptr_t)it->second->GetTexture()->GetRendererID();
+                        textureId = static_cast<ImTextureID>(GetTextureNativeHandle(it->second->GetTexture()));
                         uv0 = ImVec2(info.UvMin.x, info.UvMin.y);
                         uv1 = ImVec2(info.UvMax.x, info.UvMax.y);
                     }

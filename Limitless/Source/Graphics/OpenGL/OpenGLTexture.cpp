@@ -50,6 +50,8 @@ namespace Limitless
     OpenGLTexture2D::OpenGLTexture2D(const std::string& path, TextureSpecification specification)
         : m_Specification(specification)
     {
+        m_Specification.Usage = TextureUsage::Sampled;
+        m_Specification.Residency = MemoryUsage::GpuOnly;
         stbi_set_flip_vertically_on_load(m_Specification.FlipVerticallyOnLoad ? 1 : 0);
 
         int width = 0;
@@ -74,11 +76,13 @@ namespace Limitless
         {
             internalFormat = GL_RGBA8;
             dataFormat = GL_RGBA;
+            m_Specification.Format = TextureFormat::RGBA8UNorm;
         }
         else if (channels == 3)
         {
             internalFormat = GL_RGB8;
             dataFormat = GL_RGB;
+            m_Specification.Format = TextureFormat::RGB8UNorm;
         }
         else
         {
@@ -111,6 +115,10 @@ namespace Limitless
         LT_VERIFY(rgbaPixels != nullptr, "RGBA8 pixel data cannot be null");
         LT_VERIFY(width > 0 && height > 0, "Texture size must be non-zero");
 
+        m_Specification.Format = TextureFormat::RGBA8UNorm;
+        m_Specification.Usage = TextureUsage::Sampled;
+        m_Specification.Residency = MemoryUsage::GpuOnly;
+
         glGenTextures(1, &m_RendererID);
         glBindTexture(GL_TEXTURE_2D, m_RendererID);
         ApplyParameters();
@@ -131,6 +139,9 @@ namespace Limitless
     {
         LT_VERIFY(width > 0 && height > 0, "Render target texture size must be non-zero");
 
+        m_Specification.Format = TextureFormat::RGBA8UNorm;
+        m_Specification.Usage = TextureUsage::Sampled | TextureUsage::RenderTarget;
+        m_Specification.Residency = MemoryUsage::GpuOnly;
         m_Specification.GenerateMipmaps = false;
         m_Specification.MinFilter = TextureFilter::Linear;
         m_Specification.MagFilter = TextureFilter::Linear;
@@ -152,6 +163,10 @@ namespace Limitless
         LT_VERIFY(!mipLevels.empty(), "OpenGLTexture2D: mipLevels is empty");
         LT_VERIFY(mipLevels[0].PixelsRGBA8 != nullptr, "OpenGLTexture2D: base mip pixels are null");
         LT_VERIFY(mipLevels[0].Width > 0 && mipLevels[0].Height > 0, "OpenGLTexture2D: base mip size must be non-zero");
+
+        m_Specification.Format = TextureFormat::RGBA8UNorm;
+        m_Specification.Usage = TextureUsage::Sampled;
+        m_Specification.Residency = MemoryUsage::GpuOnly;
 
         m_Width = mipLevels[0].Width;
         m_Height = mipLevels[0].Height;

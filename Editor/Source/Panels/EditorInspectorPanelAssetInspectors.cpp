@@ -17,6 +17,7 @@
 #include "Assets/SpriteImportSettings.h"
 #include "Assets/TextureAssetImporter.h"
 #include "Graphics/Renderer.h"
+#include "Graphics/NativeRenderHandles.h"
 #include "Scene/Scene.h"
 #include "imgui/imgui.h"
 
@@ -954,12 +955,12 @@ namespace Limitless::EditorInspectorPanel
         if (aspect > 1.0f)
         {
             const float width = previewSize / aspect;
-            ImGui::Image((ImTextureID)(void*)(uintptr_t)texture->GetRendererID(), ImVec2(width, previewSize), uv0, uv1, tintColor, borderColor);
+            ImGui::Image(static_cast<ImTextureID>(GetTextureNativeHandle(texture)), ImVec2(width, previewSize), uv0, uv1, tintColor, borderColor);
         }
         else
         {
             const float height = previewSize * aspect;
-            ImGui::Image((ImTextureID)(void*)(uintptr_t)texture->GetRendererID(), ImVec2(previewSize, height), uv0, uv1, tintColor, borderColor);
+            ImGui::Image(static_cast<ImTextureID>(GetTextureNativeHandle(texture)), ImVec2(previewSize, height), uv0, uv1, tintColor, borderColor);
         }
 
         ImGui::Spacing();

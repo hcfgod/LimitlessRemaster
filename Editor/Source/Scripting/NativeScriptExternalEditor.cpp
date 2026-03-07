@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <string_view>
 #include <vector>
@@ -29,6 +30,7 @@ namespace Limitless::NativeScriptExternalEditor
         constexpr std::string_view kSolutionName = "ProjectScriptCore.External.sln";
         constexpr std::string_view kProjectName = "ProjectScriptCore.External";
         constexpr std::string_view kProjectFileName = "ProjectScriptCore.External.vcxproj";
+        constexpr std::string_view kProjectFiltersFileName = "ProjectScriptCore.External.vcxproj.filters";
 
         std::string TrimCopy(std::string value)
         {
@@ -149,6 +151,36 @@ namespace Limitless::NativeScriptExternalEditor
 
             std::sort(files.begin(), files.end());
             return files;
+        }
+
+        std::string BuildFilterPathForFile(const std::filesystem::path& filePath, const std::filesystem::path& rootDirectory)
+        {
+            std::error_code errorCode;
+            std::filesystem::path relativePath = std::filesystem::relative(filePath, rootDirectory, errorCode);
+            if (errorCode || relativePath.empty())
+                return {};
+
+            const std::filesystem::path parentPath = relativePath.parent_path();
+            if (parentPath.empty() || parentPath == ".")
+                return {};
+
+            return ToWindowsPath(parentPath);
+        }
+
+        void InsertFilterHierarchy(std::set<std::string>& filters, const std::string& filterPath)
+        {
+            if (filterPath.empty())
+                return;
+
+            std::filesystem::path currentPath;
+            for (const auto& segment : std::filesystem::path(filterPath))
+            {
+                const std::string segmentText = segment.string();
+                if (segmentText.empty() || segmentText == ".")
+                    continue;
+                currentPath /= segment;
+                filters.insert(ToWindowsPath(currentPath));
+            }
         }
 
         std::vector<std::filesystem::path> BuildIncludePaths(const OpenVisualStudioRequest& request,
@@ -384,6 +416,7 @@ namespace Limitless::NativeScriptExternalEditor
                 request.ProjectRoot / "Build" / "ScriptCore" / BuildConfigFolderName(configuration, platform) / "ExternalEditor";
             const std::filesystem::path solutionPath = externalEditorDirectory / std::string(kSolutionName);
             const std::filesystem::path projectPath = externalEditorDirectory / std::string(kProjectFileName);
+            const std::filesystem::path projectFiltersPath = externalEditorDirectory / std::string(kProjectFiltersFileName);
 
             const std::vector<std::filesystem::path> cppFiles = DiscoverScriptFiles(assetsRoot, ".cpp");
             const std::vector<std::filesystem::path> headerFiles = DiscoverScriptFiles(assetsRoot, ".h");
@@ -410,6 +443,47 @@ namespace Limitless::NativeScriptExternalEditor
             std::ostringstream includeItems;
             for (const auto& file : headerFiles)
                 includeItems << "    <ClInclude Include=\"" << XmlEscape(ToProjectRelativeWindowsPath(file, externalEditorDirectory)) << "\" />\n";
+
+            std::set<std::string> filters;
+            std::ostringstream compileFilterItems;
+            for (const auto& file : cppFiles)
+            {
+                const std::string filterPath = BuildFilterPathForFile(file, assetsRoot);
+                if (!filterPath.empty())
+                    InsertFilterHierarchy(filters, filterPath);
+
+                compileFilterItems << "    <ClCompile Include=\"" << XmlEscape(ToProjectRelativeWindowsPath(file, externalEditorDirectory)) << "\"";
+                if (filterPath.empty())
+                {
+                    compileFilterItems << " />\n";
+                }
+                else
+                {
+                    compileFilterItems << ">\n";
+                    compileFilterItems << "      <Filter>" << XmlEscape(filterPath) << "</Filter>\n";
+                    compileFilterItems << "    </ClCompile>\n";
+                }
+            }
+
+            std::ostringstream includeFilterItems;
+            for (const auto& file : headerFiles)
+            {
+                const std::string filterPath = BuildFilterPathForFile(file, assetsRoot);
+                if (!filterPath.empty())
+                    InsertFilterHierarchy(filters, filterPath);
+
+                includeFilterItems << "    <ClInclude Include=\"" << XmlEscape(ToProjectRelativeWindowsPath(file, externalEditorDirectory)) << "\"";
+                if (filterPath.empty())
+                {
+                    includeFilterItems << " />\n";
+                }
+                else
+                {
+                    includeFilterItems << ">\n";
+                    includeFilterItems << "      <Filter>" << XmlEscape(filterPath) << "</Filter>\n";
+                    includeFilterItems << "    </ClInclude>\n";
+                }
+            }
 
             const std::string preprocessorDefinitions = XmlEscape(BuildPreprocessorDefinitions(request));
             const std::string projectConfiguration = configuration + "|" + platform;
@@ -483,6 +557,28 @@ namespace Limitless::NativeScriptExternalEditor
                 "\tEndGlobalSection\n"
                 "EndGlobal\n";
 
+            std::ostringstream dummyFilterItems;
+            if (cppFiles.empty())
+            {
+                InsertFilterHierarchy(filters, "Generated");
+                dummyFilterItems
+                    << "    <ClCompile Include=\"Generated\\DummyScriptCoreTranslationUnit.cpp\">\n"
+                    << "      <Filter>Generated</Filter>\n"
+                    << "    </ClCompile>\n";
+            }
+
+            std::ostringstream filterDefinitions;
+            for (const std::string& filter : filters)
+                filterDefinitions << "    <Filter Include=\"" << XmlEscape(filter) << "\" />\n";
+
+            const std::string vcxprojFiltersContents =
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                "<Project ToolsVersion=\"4.0\" xmlns=\"http://schemas.microsoft.com/developer/msbuild/2003\">\n"
+                + (filters.empty() ? std::string{} : "  <ItemGroup>\n" + filterDefinitions.str() + "  </ItemGroup>\n")
+                + ((compileFilterItems.str().empty() && dummyFilterItems.str().empty()) ? std::string{} : "  <ItemGroup>\n" + compileFilterItems.str() + dummyFilterItems.str() + "  </ItemGroup>\n")
+                + (includeFilterItems.str().empty() ? std::string{} : "  <ItemGroup>\n" + includeFilterItems.str() + "  </ItemGroup>\n")
+                + "</Project>\n";
+
             std::error_code directoryError;
             std::filesystem::create_directories(externalEditorDirectory / "Generated", directoryError);
             if (directoryError)
@@ -504,6 +600,8 @@ namespace Limitless::NativeScriptExternalEditor
             }
 
             if (!WriteTextFile(projectPath, vcxprojContents, outError))
+                return false;
+            if (!WriteTextFile(projectFiltersPath, vcxprojFiltersContents, outError))
                 return false;
             if (!WriteTextFile(solutionPath, solutionContents, outError))
                 return false;

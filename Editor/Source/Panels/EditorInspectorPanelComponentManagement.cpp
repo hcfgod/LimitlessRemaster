@@ -2,17 +2,25 @@
 
 #include "EditorComponentRegistry.h"
 #include "EditorInspectorPanelNativeScriptEditor.h"
-#include "Scripting/NativeScriptRegistry.h"
 #include "Undo/EditorUndoService.h"
 #include "Scene/Scene.h"
 #include "imgui/imgui.h"
 
 #include <algorithm>
+#include <filesystem>
+#include <functional>
+#include <map>
 
 namespace Limitless::EditorInspectorPanel
 {
     namespace
     {
+        struct ProjectScriptFolderNode final
+        {
+            std::map<std::string, ProjectScriptFolderNode> Children;
+            std::vector<ProjectNativeScriptInfo> Scripts;
+        };
+
         template<typename ComponentType>
         bool HasComponent(const entt::registry& registry, entt::entity entity)
         {
@@ -71,11 +79,31 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        NativeScriptEntry BuildScriptEntryForComponentAdd(const std::string& requestedScriptName)
+        ProjectScriptFolderNode BuildProjectScriptFolderTree(const std::vector<ProjectNativeScriptInfo>& availableScripts)
+        {
+            ProjectScriptFolderNode root;
+            for (const ProjectNativeScriptInfo& scriptInfo : availableScripts)
+            {
+                ProjectScriptFolderNode* node = &root;
+                const std::filesystem::path folderPath(scriptInfo.FolderRelativePath);
+                for (const auto& segment : folderPath)
+                {
+                    const std::string folderName = segment.string();
+                    if (folderName.empty() || folderName == ".")
+                        continue;
+                    node = &node->Children[folderName];
+                }
+                node->Scripts.push_back(scriptInfo);
+            }
+            return root;
+        }
+
+        NativeScriptEntry BuildScriptEntryForComponentAdd(const ProjectNativeScriptInfo& requestedScript)
         {
             NativeScriptEntry scriptEntry{};
-            const std::string resolvedScriptClassName = ResolveRegisteredScriptClassNameForInspector(requestedScriptName);
-            scriptEntry.ScriptClassName = resolvedScriptClassName.empty() ? requestedScriptName : resolvedScriptClassName;
+            scriptEntry.ScriptAssetRelativePath = requestedScript.ScriptAssetRelativePath;
+            const std::string resolvedScriptClassName = ResolveRegisteredScriptClassNameForInspector(requestedScript.ScriptClassName);
+            scriptEntry.ScriptClassName = resolvedScriptClassName.empty() ? requestedScript.ScriptClassName : resolvedScriptClassName;
             return scriptEntry;
         }
 
@@ -90,22 +118,13 @@ namespace Limitless::EditorInspectorPanel
                                         entt::entity selectedEntity,
                                         EditorUndoService* undoService)
         {
-            const std::vector<std::string> registeredScriptNames = NativeScriptRegistry::GetRegisteredScriptNames();
-            const auto discoveredScriptNames = DiscoverNativeScriptClassNamesFromProjectAssetsForInspector();
-            std::vector<std::string> availableScriptNames = registeredScriptNames.empty()
-                ? discoveredScriptNames
-                : registeredScriptNames;
-            std::sort(availableScriptNames.begin(), availableScriptNames.end());
-            availableScriptNames.erase(std::unique(availableScriptNames.begin(), availableScriptNames.end()), availableScriptNames.end());
+            const std::vector<ProjectNativeScriptInfo> availableScripts = GetAvailableProjectScriptsForInspector();
+            const ProjectScriptFolderNode scriptFolderTree = BuildProjectScriptFolderTree(availableScripts);
 
             DrawAddComponentPopupSectionHeader("Scripts");
 
-            for (const std::string& scriptName : availableScriptNames)
-            {
-                if (!ImGui::MenuItem(scriptName.c_str()))
-                    continue;
-
-                NativeScriptEntry scriptEntry = BuildScriptEntryForComponentAdd(scriptName);
+            const auto attachScript = [&](const ProjectNativeScriptInfo& scriptInfo) {
+                NativeScriptEntry scriptEntry = BuildScriptEntryForComponentAdd(scriptInfo);
                 if (undoService)
                 {
                     (void)undoService->ExecuteSceneMutation("Attach Script Component", [&](Scene& mutableScene) {
@@ -116,10 +135,31 @@ namespace Limitless::EditorInspectorPanel
                 {
                     (void)scene->AttachScriptComponent(selectedEntity, std::move(scriptEntry));
                 }
-            }
+            };
 
-            if (!availableScriptNames.empty())
+            std::function<void(const ProjectScriptFolderNode&)> drawFolderContents;
+            drawFolderContents = [&](const ProjectScriptFolderNode& folderNode) {
+                for (const ProjectNativeScriptInfo& scriptInfo : folderNode.Scripts)
+                {
+                    if (ImGui::MenuItem(scriptInfo.DisplayName.c_str()))
+                        attachScript(scriptInfo);
+                }
+
+                for (const auto& [folderName, childNode] : folderNode.Children)
+                {
+                    if (!ImGui::BeginMenu(folderName.c_str()))
+                        continue;
+                    drawFolderContents(childNode);
+                    ImGui::EndMenu();
+                }
+            };
+
+            drawFolderContents(scriptFolderTree);
+
+            if (!availableScripts.empty())
+            {
                 ImGui::Separator();
+            }
 
             if (ImGui::MenuItem("Empty Script Component"))
             {

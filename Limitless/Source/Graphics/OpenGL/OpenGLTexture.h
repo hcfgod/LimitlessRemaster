@@ -23,7 +23,8 @@ namespace Limitless
 
         uint32_t GetWidth() const override { return m_Width; }
         uint32_t GetHeight() const override { return m_Height; }
-        uint32_t GetRendererID() const override { return static_cast<uint32_t>(m_RendererID); }
+        const TextureSpecification& GetSpecification() const override { return m_Specification; }
+        uintptr_t GetNativeHandle() const override { return static_cast<uintptr_t>(m_RendererID); }
 
     private:
         void ApplyParameters() const;

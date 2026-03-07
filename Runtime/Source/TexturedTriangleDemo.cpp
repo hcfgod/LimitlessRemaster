@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include "Graphics/NativeRenderHandles.h"
 
 namespace Limitless
 {
@@ -131,7 +132,7 @@ namespace Limitless
                 LT_INFO("Material ready: key='{}' (shader='{}', textureId={})",
                         m_Material->GetKey(),
                         shader->GetName(),
-                        tex->GetRendererID());
+                        GetTextureNativeHandle(tex));
             }
         }
     }

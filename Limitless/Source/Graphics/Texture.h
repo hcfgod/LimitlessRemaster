@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Graphics/RenderTypes.h"
+
 #include <cstdint>
 #include <future>
 #include <memory>
@@ -26,6 +28,9 @@ namespace Limitless
         TextureFilter MagFilter = TextureFilter::Linear;
         TextureWrap WrapU = TextureWrap::Repeat;
         TextureWrap WrapV = TextureWrap::Repeat;
+        TextureFormat Format = TextureFormat::RGBA8UNorm;
+        TextureUsage Usage = TextureUsage::Sampled;
+        MemoryUsage Residency = MemoryUsage::GpuOnly;
         bool GenerateMipmaps = true;
         bool FlipVerticallyOnLoad = true;
     };
@@ -45,9 +50,8 @@ namespace Limitless
         virtual void Bind(uint32_t slot) const = 0;
         virtual uint32_t GetWidth() const = 0;
         virtual uint32_t GetHeight() const = 0;
-
-        // Renderer handle (OpenGL texture ID, etc.) for debugging and low-level bridging.
-        virtual uint32_t GetRendererID() const = 0;
+        virtual const TextureSpecification& GetSpecification() const = 0;
+        virtual uintptr_t GetNativeHandle() const = 0;
 
         // Update sampler-like parameters (filtering/wrapping/mips) for this texture.
         // This is intended to be called from the render thread (via render commands).

@@ -16,6 +16,7 @@
 #include "Graphics/Framebuffer.h"
 #include "Graphics/Lighting2DRenderer.h"
 #include "Graphics/RenderCommand.h"
+#include "Graphics/RenderPass.h"
 #include "Graphics/Renderer.h"
 #include "Graphics/Renderer2D.h"
 
@@ -631,6 +632,56 @@ namespace Limitless
                 default:
                     return true;
             }
+        }
+
+        RenderPassDescriptor BuildWorldRenderPassDescriptor(const std::shared_ptr<Framebuffer>& framebuffer,
+                                                            uint32_t width,
+                                                            uint32_t height,
+                                                            const glm::vec4& clearColor)
+        {
+            RenderPassDescriptor descriptor{};
+            descriptor.DebugName = "SceneRenderer/World";
+            descriptor.TargetFramebuffer = framebuffer;
+            descriptor.Viewport = RenderViewport{ 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) };
+            descriptor.ColorAttachments.push_back(RenderPassColorAttachmentDescriptor{
+                RenderLoadAction::Clear,
+                RenderStoreAction::Store,
+                clearColor
+            });
+            descriptor.DepthStencilAttachment = RenderPassDepthStencilAttachmentDescriptor{
+                RenderLoadAction::Clear,
+                RenderStoreAction::Store,
+                RenderLoadAction::DontCare,
+                RenderStoreAction::DontCare,
+                1.0f,
+                0u
+            };
+            return descriptor;
+        }
+
+        RenderPassDescriptor BuildOverlayRenderPassDescriptor(const std::shared_ptr<Framebuffer>& framebuffer,
+                                                              uint32_t width,
+                                                              uint32_t height,
+                                                              const char* debugName)
+        {
+            RenderPassDescriptor descriptor{};
+            descriptor.DebugName = debugName ? debugName : "SceneRenderer/Overlay";
+            descriptor.TargetFramebuffer = framebuffer;
+            descriptor.Viewport = RenderViewport{ 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) };
+            descriptor.ColorAttachments.push_back(RenderPassColorAttachmentDescriptor{
+                RenderLoadAction::Load,
+                RenderStoreAction::Store,
+                glm::vec4(0.0f)
+            });
+            descriptor.DepthStencilAttachment = RenderPassDepthStencilAttachmentDescriptor{
+                RenderLoadAction::Load,
+                RenderStoreAction::Store,
+                RenderLoadAction::DontCare,
+                RenderStoreAction::DontCare,
+                1.0f,
+                0u
+            };
+            return descriptor;
         }
 
         void RenderCanvasUiPass(Scene& scene,
@@ -1506,30 +1557,24 @@ namespace Limitless
 
         if (!renderedWithLighting)
         {
-            // Null framebuffer means render directly to the default backbuffer.
-            renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(framebuffer));
-            renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
-            const glm::vec4 fallbackClearColor = SceneRenderer::GetViewportClearColor();
-
-            ClearCommand::ClearFlags clearFlags;
-            clearFlags.color = true;
-            clearFlags.depth = true;
-            clearFlags.stencil = false;
-            renderer.SubmitCommand(std::make_unique<ClearCommand>(
-                clearFlags,
-                fallbackClearColor.r,
-                fallbackClearColor.g,
-                fallbackClearColor.b,
-                fallbackClearColor.a));
-
+            const RenderPassDescriptor worldPass = BuildWorldRenderPassDescriptor(
+                framebuffer,
+                width,
+                height,
+                SceneRenderer::GetViewportClearColor());
+            RenderPass::Begin(renderer, worldPass);
             renderWorldAndWorldSpaceCanvasPasses();
+            RenderPass::End(renderer, worldPass);
         }
 
+        const RenderPassDescriptor screenUiPass = BuildOverlayRenderPassDescriptor(framebuffer, width, height, "SceneRenderer/ScreenUI");
+        RenderPass::Begin(renderer, screenUiPass);
         RenderCanvasUiPass(scene,
                            camera,
                            width,
                            height,
                            CanvasUiRenderPhase::ScreenSpaceOnly);
+        RenderPass::End(renderer, screenUiPass);
 
         renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(nullptr));
     }

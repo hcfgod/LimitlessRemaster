@@ -881,14 +881,22 @@ namespace Limitless::EditorInspectorPanel
             return false;
         }
 
-        std::vector<std::string> DiscoverNativeScriptClassNamesFromProjectAssets()
+        std::string NormalizeRelativeScriptPath(const std::filesystem::path& path)
         {
-            std::vector<std::string> discoveredClassNames;
+            const std::string normalized = path.generic_string();
+            if (normalized == ".")
+                return {};
+            return normalized;
+        }
+
+        std::vector<ProjectNativeScriptInfo> DiscoverProjectNativeScriptsFromAssets()
+        {
+            std::vector<ProjectNativeScriptInfo> discoveredScripts;
             const auto assetsRoot = GetOpenedProjectAssetsRoot();
             if (!assetsRoot.has_value())
-                return discoveredClassNames;
+                return discoveredScripts;
 
-            std::unordered_set<std::string> uniqueClassNames;
+            std::unordered_set<std::string> uniqueScriptAssetPaths;
             for (const auto& entry : std::filesystem::recursive_directory_iterator(assetsRoot.value(), std::filesystem::directory_options::skip_permission_denied))
             {
                 if (!entry.is_regular_file())
@@ -900,13 +908,65 @@ namespace Limitless::EditorInspectorPanel
                 if (!std::filesystem::exists(headerPath))
                     continue;
 
-                const std::string className = entry.path().stem().string();
-                if (!className.empty() && uniqueClassNames.insert(className).second)
-                    discoveredClassNames.push_back(className);
+                std::error_code relativeError;
+                std::filesystem::path relativePathWithoutExtension = std::filesystem::relative(entry.path(), assetsRoot.value(), relativeError);
+                if (relativeError || relativePathWithoutExtension.empty())
+                    continue;
+                relativePathWithoutExtension.replace_extension();
+
+                const std::string scriptAssetRelativePath = NormalizeRelativeScriptPath(relativePathWithoutExtension);
+                if (scriptAssetRelativePath.empty() || !uniqueScriptAssetPaths.insert(scriptAssetRelativePath).second)
+                    continue;
+
+                ProjectNativeScriptInfo info{};
+                info.ScriptClassName = entry.path().stem().string();
+                info.ScriptAssetRelativePath = scriptAssetRelativePath;
+                info.FolderRelativePath = NormalizeRelativeScriptPath(relativePathWithoutExtension.parent_path());
+                info.DisplayName = relativePathWithoutExtension.filename().string();
+                discoveredScripts.push_back(std::move(info));
+            }
+
+            std::sort(discoveredScripts.begin(), discoveredScripts.end(), [](const ProjectNativeScriptInfo& left, const ProjectNativeScriptInfo& right) {
+                if (left.FolderRelativePath != right.FolderRelativePath)
+                    return left.FolderRelativePath < right.FolderRelativePath;
+                if (left.DisplayName != right.DisplayName)
+                    return left.DisplayName < right.DisplayName;
+                return left.ScriptAssetRelativePath < right.ScriptAssetRelativePath;
+            });
+            return discoveredScripts;
+        }
+
+        std::vector<std::string> DiscoverNativeScriptClassNamesFromProjectAssets()
+        {
+            std::vector<std::string> discoveredClassNames;
+            std::unordered_set<std::string> uniqueClassNames;
+            for (const auto& scriptInfo : DiscoverProjectNativeScriptsFromAssets())
+            {
+                if (!scriptInfo.ScriptClassName.empty() && uniqueClassNames.insert(scriptInfo.ScriptClassName).second)
+                    discoveredClassNames.push_back(scriptInfo.ScriptClassName);
             }
 
             std::sort(discoveredClassNames.begin(), discoveredClassNames.end());
             return discoveredClassNames;
+        }
+
+        std::vector<ProjectNativeScriptInfo> BuildAvailableProjectScripts()
+        {
+            return DiscoverProjectNativeScriptsFromAssets();
+        }
+
+        std::vector<std::string> BuildAvailableProjectScriptClassNames()
+        {
+            std::vector<std::string> availableScriptClassNames;
+            availableScriptClassNames.reserve(32);
+            std::unordered_set<std::string> uniqueClassNames;
+            for (const auto& scriptInfo : BuildAvailableProjectScripts())
+            {
+                if (!scriptInfo.ScriptClassName.empty() && uniqueClassNames.insert(scriptInfo.ScriptClassName).second)
+                    availableScriptClassNames.push_back(scriptInfo.ScriptClassName);
+            }
+            std::sort(availableScriptClassNames.begin(), availableScriptClassNames.end());
+            return availableScriptClassNames;
         }
 
         std::string GetUnqualifiedScriptClassName(std::string_view className)
@@ -1898,6 +1958,16 @@ namespace Limitless::EditorInspectorPanel
     std::vector<std::string> DiscoverNativeScriptClassNamesFromProjectAssetsForInspector()
     {
         return DiscoverNativeScriptClassNamesFromProjectAssets();
+    }
+
+    std::vector<ProjectNativeScriptInfo> GetAvailableProjectScriptsForInspector()
+    {
+        return BuildAvailableProjectScripts();
+    }
+
+    std::vector<std::string> GetAvailableProjectScriptClassNamesForInspector()
+    {
+        return BuildAvailableProjectScriptClassNames();
     }
 
     std::string ResolveRegisteredScriptClassNameForInspector(const std::string& requestedClassName)

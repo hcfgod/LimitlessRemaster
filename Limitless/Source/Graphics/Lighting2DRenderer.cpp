@@ -10,10 +10,9 @@
 #include "Graphics/Camera/Camera.h"
 #include "Graphics/Framebuffer.h"
 #include "Graphics/GraphicsAPIDetector.h"
-#include "Graphics/OpenGL/OpenGLShader.h"
-#include "Graphics/OpenGL/OpenGLTexture.h"
-#include "Graphics/OpenGL/OpenGLVertexArray.h"
 #include "Graphics/RenderCommand.h"
+#include "Graphics/RenderPass.h"
+#include "Graphics/RenderPipeline.h"
 #include "Graphics/Renderer.h"
 #include "Graphics/Shader.h"
 #include "Graphics/Texture.h"
@@ -24,10 +23,6 @@
 #include "Scene/Components/TilemapComponents.h"
 #include "Scene/Scene.h"
 #include "Scene/SceneRenderer.h"
-
-#ifdef LT_USE_GLAD
-#include <glad/glad.h>
-#endif
 
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -132,6 +127,14 @@ namespace Limitless
             Assets::ShaderAsset::Ptr DirectionalLightShaderAsset;
             Assets::ShaderAsset::Ptr PointLightShaderAsset;
             Assets::ShaderAsset::Ptr CompositeShaderAsset;
+            std::shared_ptr<RenderPipeline> GBufferNormalPipeline;
+            std::shared_ptr<Shader> GBufferNormalPipelineShader;
+            std::shared_ptr<RenderPipeline> DirectionalLightPipeline;
+            std::shared_ptr<Shader> DirectionalLightPipelineShader;
+            std::shared_ptr<RenderPipeline> PointLightPipeline;
+            std::shared_ptr<Shader> PointLightPipelineShader;
+            std::shared_ptr<RenderPipeline> CompositePipeline;
+            std::shared_ptr<Shader> CompositePipelineShader;
 
             std::vector<ShadowSegment> CachedShadowSegments;
             uint32_t CachedShadowOccluderCount = 0;
@@ -797,102 +800,135 @@ namespace Limitless
             return drawList;
         }
 
-        void SubmitSelectDrawBuffers(const std::array<GLenum, 3>& drawBuffers, GLsizei count, const char* commandName)
+        void SubmitSelectDrawBuffers(std::vector<uint32_t> attachments)
         {
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([drawBuffers, count, commandName](GraphicsContext*) {
-                // Keep diagnostics local to this custom command so stale errors
-                // don't leak into later OpenGL command error checks.
-                while (glGetError() != GL_NO_ERROR)
-                    ;
-
-                GLint drawFramebuffer = 0;
-                glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFramebuffer);
-                if (drawFramebuffer == 0)
-                {
-                    glDrawBuffer(GL_BACK);
-                }
-                else
-                {
-                    glDrawBuffers(count, drawBuffers.data());
-                }
-
-                GLenum error = glGetError();
-                if (error != GL_NO_ERROR)
-                {
-                    LT_CORE_ERROR("Lighting2DRenderer: {} failed (fbo={}, error=0x{:x}); applying fallback draw buffer",
-                                  commandName,
-                                  drawFramebuffer,
-                                  static_cast<uint32_t>(error));
-                    while (glGetError() != GL_NO_ERROR)
-                        ;
-
-                    if (drawFramebuffer == 0)
-                    {
-                        glDrawBuffer(GL_BACK);
-                    }
-                    else
-                    {
-                        const GLenum fallbackBuffers[] = { GL_COLOR_ATTACHMENT0 };
-                        glDrawBuffers(1, fallbackBuffers);
-                    }
-                }
-            }, commandName));
+            Renderer::GetInstance().SubmitCommand(std::make_unique<SetDrawColorAttachmentsCommand>(std::move(attachments)));
         }
 
         void SubmitSelectGBufferDrawBuffers()
         {
-            SubmitSelectDrawBuffers(
-                { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2 },
-                3,
-                "Lighting2D/SetGBufferDrawBuffers");
+            SubmitSelectDrawBuffers({ 0u, 1u, 2u });
         }
 
         void SubmitSelectAlbedoAttachmentOnly()
         {
-            SubmitSelectDrawBuffers(
-                { GL_COLOR_ATTACHMENT0, GL_NONE, GL_NONE },
-                1,
-                "Lighting2D/SetAlbedoAttachmentOnly");
+            SubmitSelectDrawBuffers({ 0u });
         }
 
         void SubmitSelectNormalAndEntityAttachments()
         {
-            SubmitSelectDrawBuffers(
-                { GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_NONE },
-                2,
-                "Lighting2D/SetNormalAndEntityAttachments");
+            SubmitSelectDrawBuffers({ 1u, 2u });
         }
 
         void SubmitClearNormalAttachment()
         {
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([](GraphicsContext*) {
-                while (glGetError() != GL_NO_ERROR)
-                    ;
-                // Alpha is the receive-shadows mask.
-                // Default to 1 so scene pixels receive shadows unless explicitly opted out.
-                const GLfloat flatNormal[4] = { 0.5f, 0.5f, 1.0f, 1.0f };
-                glClearBufferfv(GL_COLOR, 1, flatNormal);
-                if (const GLenum error = glGetError(); error != GL_NO_ERROR)
-                {
-                    LT_CORE_ERROR("Lighting2DRenderer: clearing normal attachment failed (error=0x{:x})",
-                                  static_cast<uint32_t>(error));
-                }
-            }, "Lighting2D/ClearNormalAttachment"));
+            Renderer::GetInstance().SubmitCommand(std::make_unique<ClearColorAttachmentCommand>(1u, glm::vec4(0.5f, 0.5f, 1.0f, 1.0f)));
         }
 
         void SubmitClearEntityIdAttachment()
         {
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([](GraphicsContext*) {
-                while (glGetError() != GL_NO_ERROR)
-                    ;
-                const GLfloat emptyEntityId[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-                glClearBufferfv(GL_COLOR, 2, emptyEntityId);
-                if (const GLenum error = glGetError(); error != GL_NO_ERROR)
-                {
-                    LT_CORE_ERROR("Lighting2DRenderer: clearing entity-id attachment failed (error=0x{:x})",
-                                  static_cast<uint32_t>(error));
+            Renderer::GetInstance().SubmitCommand(std::make_unique<ClearColorAttachmentCommand>(2u, glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)));
+        }
+
+        RenderPassDescriptor BuildGBufferRenderPassDescriptor(const std::shared_ptr<Framebuffer>& framebuffer,
+                                                              uint32_t width,
+                                                              uint32_t height)
+        {
+            RenderPassDescriptor descriptor{};
+            descriptor.DebugName = "Lighting2D/GBuffer";
+            descriptor.TargetFramebuffer = framebuffer;
+            descriptor.Viewport = RenderViewport{ 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) };
+            descriptor.ColorAttachments = {
+                RenderPassColorAttachmentDescriptor{ RenderLoadAction::Clear, RenderStoreAction::Store, glm::vec4(0.0f) },
+                RenderPassColorAttachmentDescriptor{ RenderLoadAction::Clear, RenderStoreAction::Store, glm::vec4(0.0f) },
+                RenderPassColorAttachmentDescriptor{ RenderLoadAction::Clear, RenderStoreAction::Store, glm::vec4(0.0f) }
+            };
+            descriptor.DepthStencilAttachment = RenderPassDepthStencilAttachmentDescriptor{
+                RenderLoadAction::Clear,
+                RenderStoreAction::Store,
+                RenderLoadAction::DontCare,
+                RenderStoreAction::DontCare,
+                1.0f,
+                0u
+            };
+            return descriptor;
+        }
+
+        RenderPassDescriptor BuildLightAccumulationRenderPassDescriptor(const std::shared_ptr<Framebuffer>& framebuffer,
+                                                                        uint32_t width,
+                                                                        uint32_t height,
+                                                                        const glm::vec3& ambientColor)
+        {
+            RenderPassDescriptor descriptor{};
+            descriptor.DebugName = "Lighting2D/LightAccumulation";
+            descriptor.TargetFramebuffer = framebuffer;
+            descriptor.Viewport = RenderViewport{ 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) };
+            descriptor.ColorAttachments = {
+                RenderPassColorAttachmentDescriptor{
+                    RenderLoadAction::Clear,
+                    RenderStoreAction::Store,
+                    glm::vec4(ambientColor, 1.0f)
                 }
-            }, "Lighting2D/ClearEntityIdAttachment"));
+            };
+            return descriptor;
+        }
+
+        RenderPassDescriptor BuildCompositeRenderPassDescriptor(const std::shared_ptr<Framebuffer>& framebuffer,
+                                                                uint32_t width,
+                                                                uint32_t height,
+                                                                const glm::vec4& clearColor)
+        {
+            RenderPassDescriptor descriptor{};
+            descriptor.DebugName = "Lighting2D/Composite";
+            descriptor.TargetFramebuffer = framebuffer;
+            descriptor.Viewport = RenderViewport{ 0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height) };
+            descriptor.ColorAttachments = {
+                RenderPassColorAttachmentDescriptor{ RenderLoadAction::Clear, RenderStoreAction::Store, clearColor }
+            };
+            descriptor.DepthStencilAttachment = RenderPassDepthStencilAttachmentDescriptor{
+                RenderLoadAction::Clear,
+                RenderStoreAction::Store,
+                RenderLoadAction::DontCare,
+                RenderStoreAction::DontCare,
+                1.0f,
+                0u
+            };
+            return descriptor;
+        }
+
+        void EnsureLightingPipeline(std::shared_ptr<RenderPipeline>& pipeline,
+                                    std::shared_ptr<Shader>& cachedShader,
+                                    const std::shared_ptr<Shader>& shader,
+                                    const char* debugName,
+                                    bool blendEnabled,
+                                    BlendFactor srcBlend,
+                                    BlendFactor dstBlend,
+                                    bool depthTestEnabled,
+                                    bool depthWriteEnabled)
+        {
+            if (!shader || !g_State || !g_State->UnitQuadVertexBuffer)
+                return;
+
+            if (pipeline && cachedShader == shader)
+                return;
+
+            RenderPipelineDescriptor descriptor{};
+            descriptor.DebugName = debugName ? debugName : "Lighting2D/Pipeline";
+            descriptor.ShaderProgram = shader;
+            descriptor.VertexLayout = g_State->UnitQuadVertexBuffer->GetLayout();
+            descriptor.Topology = PrimitiveTopology::TriangleStrip;
+            descriptor.BlendState.Enabled = blendEnabled;
+            descriptor.BlendState.SourceColorFactor = srcBlend;
+            descriptor.BlendState.DestinationColorFactor = dstBlend;
+            descriptor.DepthStencilState.DepthTestEnabled = depthTestEnabled;
+            descriptor.DepthStencilState.DepthWriteEnabled = depthWriteEnabled;
+            descriptor.DepthStencilState.DepthCompare = DepthTestFunc::LessEqual;
+            descriptor.RasterState.CullEnabled = false;
+            descriptor.RasterState.CullMode = CullFace::Back;
+            descriptor.RasterState.FillMode = PolygonMode::Fill;
+
+            pipeline = RenderPipeline::Create(descriptor);
+            cachedShader = shader;
         }
 
         void SubmitNormalPassDraws(const std::vector<NormalPassSpriteDraw>& drawList, const glm::mat4& viewProjection)
@@ -904,8 +940,25 @@ namespace Limitless
             if (!shader || !g_State->UnitQuadVertexArray)
                 return;
 
-            Renderer::GetInstance().SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
-            Renderer::GetInstance().SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::Zero, false));
+            EnsureLightingPipeline(g_State->GBufferNormalPipeline,
+                                   g_State->GBufferNormalPipelineShader,
+                                   shader,
+                                   "Lighting2D/GBufferNormal",
+                                   false,
+                                   BlendFactor::One,
+                                   BlendFactor::Zero,
+                                   false,
+                                   false);
+            if (g_State->GBufferNormalPipeline)
+            {
+                Renderer::GetInstance().SubmitCommand(std::make_unique<BindRenderPipelineCommand>(g_State->GBufferNormalPipeline));
+            }
+            else
+            {
+                Renderer::GetInstance().SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
+                Renderer::GetInstance().SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::Zero, false));
+                Renderer::GetInstance().SubmitCommand(std::make_unique<SetCullFaceCommand>(false));
+            }
             SubmitSelectNormalAndEntityAttachments();
             const float shadowAlphaCutoff = std::clamp(g_State->Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
 
@@ -921,42 +974,25 @@ namespace Limitless
                 const int receiveShadows = draw.ReceiveShadows ? 1 : 0;
                 const glm::vec2 casterEntityId = draw.CasterEntityId;
                 Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, viewProjection, model, color, normalStrength, receiveShadows, casterEntityId, shadowAlphaCutoff](GraphicsContext*) {
-                    auto* glShader = dynamic_cast<OpenGLShader*>(shaderRef.get());
-                    auto* glVertexArray = dynamic_cast<OpenGLVertexArray*>(vertexArrayRef.get());
-                    auto* glAlbedoTexture = dynamic_cast<OpenGLTexture2D*>(albedoRef.get());
-                    auto* glNormalTexture = dynamic_cast<OpenGLTexture2D*>(normalRef.get());
-                    if (!glShader || !glVertexArray || !glAlbedoTexture || !glNormalTexture)
+                    if (!shaderRef || !vertexArrayRef || !albedoRef || !normalRef)
                         return;
 
-                    const GLuint shaderProgram = glShader->GetRendererID();
-                    glUseProgram(shaderProgram);
-                    glBindVertexArray(glVertexArray->GetRendererID());
-                    glActiveTexture(GL_TEXTURE0);
-                    glBindTexture(GL_TEXTURE_2D, glAlbedoTexture->GetRendererID());
-                    glActiveTexture(GL_TEXTURE1);
-                    glBindTexture(GL_TEXTURE_2D, glNormalTexture->GetRendererID());
+                    shaderRef->Bind();
+                    vertexArrayRef->Bind();
+                    albedoRef->Bind(0);
+                    normalRef->Bind(1);
 
-                    if (GLint location = glGetUniformLocation(shaderProgram, "u_ViewProjection"); location != -1)
-                        glUniformMatrix4fv(location, 1, GL_FALSE, &viewProjection[0][0]);
-                    if (GLint location = glGetUniformLocation(shaderProgram, "u_Model"); location != -1)
-                        glUniformMatrix4fv(location, 1, GL_FALSE, &model[0][0]);
-                    if (GLint location = glGetUniformLocation(shaderProgram, "u_Color"); location != -1)
-                        glUniform4f(location, color.r, color.g, color.b, color.a);
-                    if (GLint location = glGetUniformLocation(shaderProgram, "u_NormalStrength"); location != -1)
-                        glUniform1f(location, normalStrength);
-                    if (GLint location = glGetUniformLocation(shaderProgram, "u_ReceiveShadows"); location != -1)
-                        glUniform1i(location, receiveShadows);
-                    if (GLint location = glGetUniformLocation(shaderProgram, "u_CasterEntityId"); location != -1)
-                        glUniform2f(location, casterEntityId.x, casterEntityId.y);
-                    if (GLint location = glGetUniformLocation(shaderProgram, "u_ShadowAlphaCutoff"); location != -1)
-                        glUniform1f(location, shadowAlphaCutoff);
-                    if (GLint location = glGetUniformLocation(shaderProgram, "u_AlbedoTexture"); location != -1)
-                        glUniform1i(location, 0);
-                    if (GLint location = glGetUniformLocation(shaderProgram, "u_NormalTexture"); location != -1)
-                        glUniform1i(location, 1);
-
-                    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+                    shaderRef->SetMat4("u_ViewProjection", viewProjection);
+                    shaderRef->SetMat4("u_Model", model);
+                    shaderRef->SetFloat4("u_Color", color);
+                    shaderRef->SetFloat("u_NormalStrength", normalStrength);
+                    shaderRef->SetInt("u_ReceiveShadows", receiveShadows);
+                    shaderRef->SetFloat2("u_CasterEntityId", casterEntityId);
+                    shaderRef->SetFloat("u_ShadowAlphaCutoff", shadowAlphaCutoff);
+                    shaderRef->SetInt("u_AlbedoTexture", 0);
+                    shaderRef->SetInt("u_NormalTexture", 1);
                 }, "Lighting2D/NormalPassSprite"));
+                Renderer::GetInstance().SubmitCommand(std::make_unique<DrawArraysCommand>(DrawMode::TriangleStrip, 0, 4));
             }
 
             SubmitSelectGBufferDrawBuffers();
@@ -1620,71 +1656,41 @@ namespace Limitless
             }
 
             Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, entityIdRef, lightColor, intensity, shadowDirection, shadingDirection, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowDistance, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segmentEndpoints = std::move(segmentEndpoints), segmentCasterIds = std::move(segmentCasterIds)](GraphicsContext*) {
-                auto* glShader = dynamic_cast<OpenGLShader*>(shaderRef.get());
-                auto* glVertexArray = dynamic_cast<OpenGLVertexArray*>(vertexArrayRef.get());
-                auto* glAlbedoTexture = dynamic_cast<OpenGLTexture2D*>(albedoRef.get());
-                auto* glNormalTexture = dynamic_cast<OpenGLTexture2D*>(normalRef.get());
-                auto* glEntityIdTexture = dynamic_cast<OpenGLTexture2D*>(entityIdRef.get());
-                if (!glShader || !glVertexArray || !glAlbedoTexture || !glNormalTexture || !glEntityIdTexture)
+                if (!shaderRef || !vertexArrayRef || !albedoRef || !normalRef || !entityIdRef)
                     return;
 
-                const GLuint program = glShader->GetRendererID();
-                glUseProgram(program);
-                glBindVertexArray(glVertexArray->GetRendererID());
+                shaderRef->Bind();
+                vertexArrayRef->Bind();
+                albedoRef->Bind(0);
+                normalRef->Bind(1);
+                entityIdRef->Bind(2);
 
-                glActiveTexture(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_2D, glAlbedoTexture->GetRendererID());
-                glActiveTexture(GL_TEXTURE1);
-                glBindTexture(GL_TEXTURE_2D, glNormalTexture->GetRendererID());
-                glActiveTexture(GL_TEXTURE2);
-                glBindTexture(GL_TEXTURE_2D, glEntityIdTexture->GetRendererID());
-
-                if (GLint location = glGetUniformLocation(program, "u_AlbedoTexture"); location != -1)
-                    glUniform1i(location, 0);
-                if (GLint location = glGetUniformLocation(program, "u_NormalTexture"); location != -1)
-                    glUniform1i(location, 1);
-                if (GLint location = glGetUniformLocation(program, "u_EntityIdTexture"); location != -1)
-                    glUniform1i(location, 2);
-                if (GLint location = glGetUniformLocation(program, "u_ViewportSize"); location != -1)
-                    glUniform2f(location, static_cast<float>(width), static_cast<float>(height));
-                if (GLint location = glGetUniformLocation(program, "u_LightColor"); location != -1)
-                    glUniform3f(location, lightColor.r, lightColor.g, lightColor.b);
-                if (GLint location = glGetUniformLocation(program, "u_LightIntensity"); location != -1)
-                    glUniform1f(location, intensity);
-                if (GLint location = glGetUniformLocation(program, "u_LightDirection"); location != -1)
-                    glUniform2f(location, shadowDirection.x, shadowDirection.y);
-                if (GLint location = glGetUniformLocation(program, "u_ShadingLightDirection"); location != -1)
-                    glUniform2f(location, shadingDirection.x, shadingDirection.y);
-                if (GLint location = glGetUniformLocation(program, "u_UseShadows"); location != -1)
-                    glUniform1i(location, useShadows);
-                if (GLint location = glGetUniformLocation(program, "u_ShadowStrength"); location != -1)
-                    glUniform1f(location, shadowStrength);
-                if (GLint location = glGetUniformLocation(program, "u_ShadowSoftness"); location != -1)
-                    glUniform1f(location, shadowSoftness);
-                if (GLint location = glGetUniformLocation(program, "u_ShadowSamples"); location != -1)
-                    glUniform1i(location, shadowSamples);
-                if (GLint location = glGetUniformLocation(program, "u_ShadowDistance"); location != -1)
-                    glUniform1f(location, shadowDistance);
-                if (GLint location = glGetUniformLocation(program, "u_ShadowBias"); location != -1)
-                    glUniform1f(location, shadowBias);
-                if (GLint location = glGetUniformLocation(program, "u_ShadowAlphaCutoff"); location != -1)
-                    glUniform1f(location, shadowAlphaCutoff);
-                if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentSnapPixels"); location != -1)
-                    glUniform1f(location, shadowSegmentSnapPixelsClamped);
+                shaderRef->SetInt("u_AlbedoTexture", 0);
+                shaderRef->SetInt("u_NormalTexture", 1);
+                shaderRef->SetInt("u_EntityIdTexture", 2);
+                shaderRef->SetFloat2("u_ViewportSize", glm::vec2(static_cast<float>(width), static_cast<float>(height)));
+                shaderRef->SetFloat3("u_LightColor", lightColor);
+                shaderRef->SetFloat("u_LightIntensity", intensity);
+                shaderRef->SetFloat2("u_LightDirection", shadowDirection);
+                shaderRef->SetFloat2("u_ShadingLightDirection", shadingDirection);
+                shaderRef->SetInt("u_UseShadows", useShadows);
+                shaderRef->SetFloat("u_ShadowStrength", shadowStrength);
+                shaderRef->SetFloat("u_ShadowSoftness", shadowSoftness);
+                shaderRef->SetInt("u_ShadowSamples", shadowSamples);
+                shaderRef->SetFloat("u_ShadowDistance", shadowDistance);
+                shaderRef->SetFloat("u_ShadowBias", shadowBias);
+                shaderRef->SetFloat("u_ShadowAlphaCutoff", shadowAlphaCutoff);
+                shaderRef->SetFloat("u_ShadowSegmentSnapPixels", shadowSegmentSnapPixelsClamped);
 
                 const int segmentCount = static_cast<int>(segmentEndpoints.size());
-                if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentCount"); location != -1)
-                    glUniform1i(location, segmentCount);
+                shaderRef->SetInt("u_ShadowSegmentCount", segmentCount);
                 if (segmentCount > 0)
                 {
-                    if (GLint location = glGetUniformLocation(program, "u_ShadowSegments"); location != -1)
-                        glUniform4fv(location, segmentCount, &segmentEndpoints[0][0]);
-                    if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentCasterIds"); location != -1)
-                        glUniform2fv(location, segmentCount, &segmentCasterIds[0][0]);
+                    shaderRef->SetFloat4Array("u_ShadowSegments", segmentEndpoints.data(), static_cast<uint32_t>(segmentCount));
+                    shaderRef->SetFloat2Array("u_ShadowSegmentCasterIds", segmentCasterIds.data(), static_cast<uint32_t>(segmentCount));
                 }
-
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
             }, "Lighting2D/DirectionalLightPass"));
+            Renderer::GetInstance().SubmitCommand(std::make_unique<DrawArraysCommand>(DrawMode::TriangleStrip, 0, 4));
         }
 
         void SubmitPointLightPass(const std::shared_ptr<Texture2D>& albedoTexture,
@@ -1729,71 +1735,41 @@ namespace Limitless
             }
 
             Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, entityIdRef, lightColor, intensity, lightPosition, lightRadius, lightFalloff, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segmentEndpoints = std::move(segmentEndpoints), segmentCasterIds = std::move(segmentCasterIds)](GraphicsContext*) {
-                auto* glShader = dynamic_cast<OpenGLShader*>(shaderRef.get());
-                auto* glVertexArray = dynamic_cast<OpenGLVertexArray*>(vertexArrayRef.get());
-                auto* glAlbedoTexture = dynamic_cast<OpenGLTexture2D*>(albedoRef.get());
-                auto* glNormalTexture = dynamic_cast<OpenGLTexture2D*>(normalRef.get());
-                auto* glEntityIdTexture = dynamic_cast<OpenGLTexture2D*>(entityIdRef.get());
-                if (!glShader || !glVertexArray || !glAlbedoTexture || !glNormalTexture || !glEntityIdTexture)
+                if (!shaderRef || !vertexArrayRef || !albedoRef || !normalRef || !entityIdRef)
                     return;
 
-                const GLuint program = glShader->GetRendererID();
-                glUseProgram(program);
-                glBindVertexArray(glVertexArray->GetRendererID());
+                shaderRef->Bind();
+                vertexArrayRef->Bind();
+                albedoRef->Bind(0);
+                normalRef->Bind(1);
+                entityIdRef->Bind(2);
 
-                glActiveTexture(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_2D, glAlbedoTexture->GetRendererID());
-                glActiveTexture(GL_TEXTURE1);
-                glBindTexture(GL_TEXTURE_2D, glNormalTexture->GetRendererID());
-                glActiveTexture(GL_TEXTURE2);
-                glBindTexture(GL_TEXTURE_2D, glEntityIdTexture->GetRendererID());
-
-                if (GLint location = glGetUniformLocation(program, "u_AlbedoTexture"); location != -1)
-                    glUniform1i(location, 0);
-                if (GLint location = glGetUniformLocation(program, "u_NormalTexture"); location != -1)
-                    glUniform1i(location, 1);
-                if (GLint location = glGetUniformLocation(program, "u_EntityIdTexture"); location != -1)
-                    glUniform1i(location, 2);
-                if (GLint location = glGetUniformLocation(program, "u_ViewportSize"); location != -1)
-                    glUniform2f(location, static_cast<float>(width), static_cast<float>(height));
-                if (GLint location = glGetUniformLocation(program, "u_LightColor"); location != -1)
-                    glUniform3f(location, lightColor.r, lightColor.g, lightColor.b);
-                if (GLint location = glGetUniformLocation(program, "u_LightIntensity"); location != -1)
-                    glUniform1f(location, intensity);
-                if (GLint location = glGetUniformLocation(program, "u_LightPosition"); location != -1)
-                    glUniform2f(location, lightPosition.x, lightPosition.y);
-                if (GLint location = glGetUniformLocation(program, "u_LightRadius"); location != -1)
-                    glUniform1f(location, lightRadius);
-                if (GLint location = glGetUniformLocation(program, "u_LightFalloff"); location != -1)
-                    glUniform1f(location, lightFalloff);
-                if (GLint location = glGetUniformLocation(program, "u_UseShadows"); location != -1)
-                    glUniform1i(location, useShadows);
-                if (GLint location = glGetUniformLocation(program, "u_ShadowStrength"); location != -1)
-                    glUniform1f(location, shadowStrength);
-                if (GLint location = glGetUniformLocation(program, "u_ShadowSoftness"); location != -1)
-                    glUniform1f(location, shadowSoftness);
-                if (GLint location = glGetUniformLocation(program, "u_ShadowSamples"); location != -1)
-                    glUniform1i(location, shadowSamples);
-                if (GLint location = glGetUniformLocation(program, "u_ShadowBias"); location != -1)
-                    glUniform1f(location, shadowBias);
-                if (GLint location = glGetUniformLocation(program, "u_ShadowAlphaCutoff"); location != -1)
-                    glUniform1f(location, shadowAlphaCutoff);
-                if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentSnapPixels"); location != -1)
-                    glUniform1f(location, shadowSegmentSnapPixelsClamped);
+                shaderRef->SetInt("u_AlbedoTexture", 0);
+                shaderRef->SetInt("u_NormalTexture", 1);
+                shaderRef->SetInt("u_EntityIdTexture", 2);
+                shaderRef->SetFloat2("u_ViewportSize", glm::vec2(static_cast<float>(width), static_cast<float>(height)));
+                shaderRef->SetFloat3("u_LightColor", lightColor);
+                shaderRef->SetFloat("u_LightIntensity", intensity);
+                shaderRef->SetFloat2("u_LightPosition", lightPosition);
+                shaderRef->SetFloat("u_LightRadius", lightRadius);
+                shaderRef->SetFloat("u_LightFalloff", lightFalloff);
+                shaderRef->SetInt("u_UseShadows", useShadows);
+                shaderRef->SetFloat("u_ShadowStrength", shadowStrength);
+                shaderRef->SetFloat("u_ShadowSoftness", shadowSoftness);
+                shaderRef->SetInt("u_ShadowSamples", shadowSamples);
+                shaderRef->SetFloat("u_ShadowBias", shadowBias);
+                shaderRef->SetFloat("u_ShadowAlphaCutoff", shadowAlphaCutoff);
+                shaderRef->SetFloat("u_ShadowSegmentSnapPixels", shadowSegmentSnapPixelsClamped);
 
                 const int segmentCount = static_cast<int>(segmentEndpoints.size());
-                if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentCount"); location != -1)
-                    glUniform1i(location, segmentCount);
+                shaderRef->SetInt("u_ShadowSegmentCount", segmentCount);
                 if (segmentCount > 0)
                 {
-                    if (GLint location = glGetUniformLocation(program, "u_ShadowSegments"); location != -1)
-                        glUniform4fv(location, segmentCount, &segmentEndpoints[0][0]);
-                    if (GLint location = glGetUniformLocation(program, "u_ShadowSegmentCasterIds"); location != -1)
-                        glUniform2fv(location, segmentCount, &segmentCasterIds[0][0]);
+                    shaderRef->SetFloat4Array("u_ShadowSegments", segmentEndpoints.data(), static_cast<uint32_t>(segmentCount));
+                    shaderRef->SetFloat2Array("u_ShadowSegmentCasterIds", segmentCasterIds.data(), static_cast<uint32_t>(segmentCount));
                 }
-
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
             }, "Lighting2D/PointLightPass"));
+            Renderer::GetInstance().SubmitCommand(std::make_unique<DrawArraysCommand>(DrawMode::TriangleStrip, 0, 4));
         }
 
         void SubmitCompositePass(const std::shared_ptr<Texture2D>& albedoTexture,
@@ -1808,29 +1784,17 @@ namespace Limitless
             auto albedoRef = albedoTexture;
             auto lightRef = lightTexture;
             Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, lightRef](GraphicsContext*) {
-                auto* glShader = dynamic_cast<OpenGLShader*>(shaderRef.get());
-                auto* glVertexArray = dynamic_cast<OpenGLVertexArray*>(vertexArrayRef.get());
-                auto* glAlbedoTexture = dynamic_cast<OpenGLTexture2D*>(albedoRef.get());
-                auto* glLightTexture = dynamic_cast<OpenGLTexture2D*>(lightRef.get());
-                if (!glShader || !glVertexArray || !glAlbedoTexture || !glLightTexture)
+                if (!shaderRef || !vertexArrayRef || !albedoRef || !lightRef)
                     return;
 
-                const GLuint program = glShader->GetRendererID();
-                glUseProgram(program);
-                glBindVertexArray(glVertexArray->GetRendererID());
-
-                glActiveTexture(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_2D, glAlbedoTexture->GetRendererID());
-                glActiveTexture(GL_TEXTURE1);
-                glBindTexture(GL_TEXTURE_2D, glLightTexture->GetRendererID());
-
-                if (GLint location = glGetUniformLocation(program, "u_AlbedoTexture"); location != -1)
-                    glUniform1i(location, 0);
-                if (GLint location = glGetUniformLocation(program, "u_LightTexture"); location != -1)
-                    glUniform1i(location, 1);
-
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+                shaderRef->Bind();
+                vertexArrayRef->Bind();
+                albedoRef->Bind(0);
+                lightRef->Bind(1);
+                shaderRef->SetInt("u_AlbedoTexture", 0);
+                shaderRef->SetInt("u_LightTexture", 1);
             }, "Lighting2D/CompositePass"));
+            Renderer::GetInstance().SubmitCommand(std::make_unique<DrawArraysCommand>(DrawMode::TriangleStrip, 0, 4));
         }
 
         bool PrepareResources(uint32_t width, uint32_t height)
@@ -2014,15 +1978,9 @@ namespace Limitless
 
         const auto submitStart = std::chrono::high_resolution_clock::now();
 
-        renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(g_State->GBufferFramebuffer));
-        renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
+        const RenderPassDescriptor gBufferPass = BuildGBufferRenderPassDescriptor(g_State->GBufferFramebuffer, width, height);
+        RenderPass::Begin(renderer, gBufferPass);
         SubmitSelectGBufferDrawBuffers();
-
-        ClearCommand::ClearFlags gBufferClearFlags{};
-        gBufferClearFlags.color = true;
-        gBufferClearFlags.depth = true;
-        gBufferClearFlags.stencil = false;
-        renderer.SubmitCommand(std::make_unique<ClearCommand>(gBufferClearFlags, 0.0f, 0.0f, 0.0f, 0.0f));
         SubmitClearNormalAttachment();
         SubmitClearEntityIdAttachment();
 
@@ -2031,27 +1989,53 @@ namespace Limitless
             renderWorldAlbedoPass();
 
         SubmitNormalPassDraws(normalPassDraws, viewProjection);
-
-        renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(g_State->LightFramebuffer));
-        renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
+        RenderPass::End(renderer, gBufferPass);
 
         const glm::vec3 ambient = glm::max(g_State->Settings.AmbientColor * g_State->Settings.AmbientIntensity, glm::vec3(0.0f));
-        ClearCommand::ClearFlags lightClearFlags{};
-        lightClearFlags.color = true;
-        lightClearFlags.depth = false;
-        lightClearFlags.stencil = false;
-        renderer.SubmitCommand(std::make_unique<ClearCommand>(lightClearFlags, ambient.r, ambient.g, ambient.b, 1.0f));
-
-        renderer.SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
-        renderer.SubmitCommand(std::make_unique<SetCullFaceCommand>(false));
-        renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::One, true));
+        const RenderPassDescriptor lightPass = BuildLightAccumulationRenderPassDescriptor(g_State->LightFramebuffer, width, height, ambient);
+        RenderPass::Begin(renderer, lightPass);
 
         const auto gBufferAlbedo = g_State->GBufferFramebuffer->GetColorAttachment(0);
         const auto gBufferNormal = g_State->GBufferFramebuffer->GetColorAttachment(1);
         const auto gBufferEntityId = g_State->GBufferFramebuffer->GetColorAttachment(2);
+        auto directionalShader = ResolveShaderFromAsset(g_State->DirectionalLightShaderAsset, kDirectionalLightShaderKey);
+        EnsureLightingPipeline(g_State->DirectionalLightPipeline,
+                               g_State->DirectionalLightPipelineShader,
+                               directionalShader,
+                               "Lighting2D/DirectionalLight",
+                               true,
+                               BlendFactor::One,
+                               BlendFactor::One,
+                               false,
+                               false);
+        if (g_State->DirectionalLightPipeline)
+        {
+            renderer.SubmitCommand(std::make_unique<BindRenderPipelineCommand>(g_State->DirectionalLightPipeline));
+        }
+        else
+        {
+            renderer.SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
+            renderer.SubmitCommand(std::make_unique<SetCullFaceCommand>(false));
+            renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::One, true));
+        }
         for (const ScreenDirectionalLight& directionalLight : directionalLights)
         {
             SubmitDirectionalLightPass(gBufferAlbedo, gBufferNormal, gBufferEntityId, shadowSegments, directionalLight, width, height, effectiveShadowSegmentSnapPixels);
+        }
+
+        auto pointShader = ResolveShaderFromAsset(g_State->PointLightShaderAsset, kPointLightShaderKey);
+        EnsureLightingPipeline(g_State->PointLightPipeline,
+                               g_State->PointLightPipelineShader,
+                               pointShader,
+                               "Lighting2D/PointLight",
+                               true,
+                               BlendFactor::One,
+                               BlendFactor::One,
+                               false,
+                               false);
+        if (g_State->PointLightPipeline)
+        {
+            renderer.SubmitCommand(std::make_unique<BindRenderPipelineCommand>(g_State->PointLightPipeline));
         }
         for (const ScreenPointLight& pointLight : pointLights)
         {
@@ -2059,27 +2043,34 @@ namespace Limitless
         }
 
         renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::Zero, false));
-
-        renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(targetFramebuffer));
-        renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(width), static_cast<int>(height)));
+        RenderPass::End(renderer, lightPass);
 
         const glm::vec4 fallbackClearColor = SceneRenderer::GetViewportClearColor();
+        const RenderPassDescriptor compositePass = BuildCompositeRenderPassDescriptor(targetFramebuffer, width, height, fallbackClearColor);
+        RenderPass::Begin(renderer, compositePass);
 
-        ClearCommand::ClearFlags targetClearFlags{};
-        targetClearFlags.color = true;
-        targetClearFlags.depth = true;
-        targetClearFlags.stencil = false;
-        renderer.SubmitCommand(std::make_unique<ClearCommand>(
-            targetClearFlags,
-            fallbackClearColor.r,
-            fallbackClearColor.g,
-            fallbackClearColor.b,
-            fallbackClearColor.a));
-
-        renderer.SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
-        renderer.SubmitCommand(std::make_unique<SetCullFaceCommand>(false));
-        renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::OneMinusSrcAlpha, true));
+        auto compositeShader = ResolveShaderFromAsset(g_State->CompositeShaderAsset, kCompositeShaderKey);
+        EnsureLightingPipeline(g_State->CompositePipeline,
+                               g_State->CompositePipelineShader,
+                               compositeShader,
+                               "Lighting2D/Composite",
+                               true,
+                               BlendFactor::One,
+                               BlendFactor::OneMinusSrcAlpha,
+                               false,
+                               false);
+        if (g_State->CompositePipeline)
+        {
+            renderer.SubmitCommand(std::make_unique<BindRenderPipelineCommand>(g_State->CompositePipeline));
+        }
+        else
+        {
+            renderer.SubmitCommand(std::make_unique<SetDepthTestCommand>(false));
+            renderer.SubmitCommand(std::make_unique<SetCullFaceCommand>(false));
+            renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::OneMinusSrcAlpha, true));
+        }
         SubmitCompositePass(gBufferAlbedo, g_State->LightFramebuffer->GetColorAttachment(0));
+        RenderPass::End(renderer, compositePass);
 
         const auto submitEnd = std::chrono::high_resolution_clock::now();
         g_State->Diagnostics.CpuSubmitTimeMs = std::chrono::duration<float, std::milli>(submitEnd - submitStart).count();

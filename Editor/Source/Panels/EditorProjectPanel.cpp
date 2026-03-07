@@ -11,6 +11,7 @@
 #include "Assets/TilePaletteAsset.h"
 #include "EditorTilePalettePanel.h"
 #include "Core/Debug/Log.h"
+#include "Graphics/NativeRenderHandles.h"
 #include "ProjectAssetOperations.h"
 #include "imgui/imgui.h"
 
@@ -3170,7 +3171,7 @@ namespace Limitless::EditorProjectPanel
                                     previewMin.y + (previewInnerHeight - drawHeight) * 0.5f);
                                 const ImVec2 imageMax(imageMin.x + drawWidth, imageMin.y + drawHeight);
                                 drawList->AddImage(
-                                    (ImTextureID)(void*)(uintptr_t)textureHandle->GetRendererID(),
+                                    static_cast<ImTextureID>(GetTextureNativeHandle(textureHandle)),
                                     imageMin,
                                     imageMax,
                                     uvMin,

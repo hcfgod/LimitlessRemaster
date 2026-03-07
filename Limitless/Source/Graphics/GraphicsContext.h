@@ -39,6 +39,10 @@ public:
     /// Defaults to 16; backends override with the actual hardware limit.
     virtual int32_t GetMaxTextureImageUnits() const { return 16; }
 
+    /// Returns true if this context is currently made current on the calling thread.
+    /// Used to short-circuit blocking resource submissions when the caller already owns the context.
+    virtual bool IsCurrentOnThisThread() const { return false; }
+
     // VSync control
     virtual bool SetVSync(bool enabled) = 0; // returns true if succeeded
     virtual bool IsVSync() const = 0;

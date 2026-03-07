@@ -5,6 +5,7 @@
 #include "Assets/SpriteImportSettings.h"
 #include "Assets/TextureAssetImporter.h"
 #include "Core/Debug/Log.h"
+#include "Graphics/NativeRenderHandles.h"
 #include "Graphics/Texture.h"
 #include "imgui/imgui.h"
 
@@ -345,7 +346,7 @@ namespace Limitless::EditorSpriteEditor
 
             // Draw the texture (OpenGL UV flip: bottom-left origin).
             drawList->AddImage(
-                (ImTextureID)(void*)(uintptr_t)texture->GetRendererID(),
+                static_cast<ImTextureID>(GetTextureNativeHandle(texture)),
                 texScreenMin, texScreenMax,
                 ImVec2(0, 1), ImVec2(1, 0));
 

@@ -5,6 +5,7 @@
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetUtils.h"
 #include "Core/Debug/Log.h"
+#include "Scripting/NativeScriptRegistry.h"
 
 #include <chrono>
 #include <ctime>
@@ -61,6 +62,7 @@ namespace Limitless::Project
 
         // Project switch must flush cross-project weak caches keyed by "Assets/..." keys.
         Assets::AssetManager::ClearCaches();
+        NativeScriptRegistry::Clear();
 
         // Make AssetPaths deterministic for the entire runtime/editor session.
         // Root directory should be the directory that contains `Assets/`.
@@ -123,6 +125,7 @@ namespace Limitless::Project
     void ProjectManager::CloseProject()
     {
         Assets::AssetManager::ClearCaches();
+        NativeScriptRegistry::Clear();
         Assets::AssetDatabase::GetInstance().Reset();
         Assets::SetAssetRootDirectory({});
 

@@ -4,6 +4,12 @@
 #include <algorithm>
 #include <vector>
 
+#include "Graphics/Lighting2DRenderer.h"
+#include "Graphics/NativeRenderHandles.h"
+#include "Graphics/Renderer.h"
+#include "Graphics/Renderer2D.h"
+#include "Graphics/Texture.h"
+
 namespace Limitless
 {
     namespace
@@ -261,8 +267,8 @@ namespace Limitless
         {
             m_LoggedReadyOnce = true;
             LT_INFO("Renderer2DDemo: assets ready (checkerTextureId={}, sissyTextureId={})",
-                    m_CheckerTexture->GetTexture()->GetRendererID(),
-                    m_SissyTexture->GetTexture()->GetRendererID());
+                    GetTextureNativeHandle(m_CheckerTexture->GetTexture()),
+                    GetTextureNativeHandle(m_SissyTexture->GetTexture()));
 
             // One-time startup resource summary (useful because most resource work happens before steady-state frames).
             const auto resourceStats = Renderer::GetInstance().GetLastFrameResourceQueueStatistics();

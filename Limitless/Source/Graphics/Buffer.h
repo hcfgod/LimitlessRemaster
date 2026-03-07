@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Graphics/GraphicsEnums.h"
+#include "Graphics/RenderTypes.h"
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -14,6 +17,21 @@ namespace Limitless
         Mat3, Mat4,
         Int, Int2, Int3, Int4,
         Bool
+    };
+
+    struct BufferSpecification
+    {
+        uint32_t Size = 0;
+        ResourceUsage Usage = ResourceUsage::Dynamic;
+        MemoryUsage Residency = MemoryUsage::CpuToGpu;
+    };
+
+    struct IndexBufferSpecification
+    {
+        uint32_t Count = 0;
+        IndexType Type = IndexType::UnsignedInt;
+        ResourceUsage Usage = ResourceUsage::Immutable;
+        MemoryUsage Residency = MemoryUsage::GpuOnly;
     };
 
     static inline uint32_t ShaderDataTypeSize(ShaderDataType type)
@@ -119,7 +137,10 @@ namespace Limitless
 
         virtual const BufferLayout& GetLayout() const = 0;
         virtual void SetLayout(const BufferLayout& layout) = 0;
+        virtual const BufferSpecification& GetSpecification() const = 0;
+        virtual uintptr_t GetNativeHandle() const = 0;
 
+        static std::shared_ptr<VertexBuffer> Create(const BufferSpecification& specification, const void* initialData = nullptr);
         static std::shared_ptr<VertexBuffer> Create(const void* data, uint32_t size);
         static std::shared_ptr<VertexBuffer> Create(uint32_t size);
     };
@@ -132,9 +153,11 @@ namespace Limitless
         virtual void Bind() const = 0;
         virtual void Unbind() const = 0;
         virtual uint32_t GetCount() const = 0;
+        virtual const IndexBufferSpecification& GetSpecification() const = 0;
+        virtual uintptr_t GetNativeHandle() const = 0;
 
+        static std::shared_ptr<IndexBuffer> Create(const IndexBufferSpecification& specification, const void* indices);
         static std::shared_ptr<IndexBuffer> Create(const uint32_t* indices, uint32_t count);
         static std::shared_ptr<IndexBuffer> Create(const uint16_t* indices, uint32_t count);
     };
 }
-

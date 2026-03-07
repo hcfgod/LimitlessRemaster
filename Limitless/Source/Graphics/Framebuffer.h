@@ -60,8 +60,8 @@ namespace Limitless
         virtual uint32_t GetWidth() const = 0;
         virtual uint32_t GetHeight() const = 0;
 
-        /// Renderer handle (OpenGL FBO ID, etc.) for debugging.
-        virtual uint32_t GetRendererID() const = 0;
+        /// Native handle (e.g. OpenGL FBO ID, Vulkan framebuffer handle, etc.).
+        virtual uintptr_t GetNativeHandle() const = 0;
 
         /// Factory: creates a framebuffer on the render thread. Blocks until complete.
         static std::shared_ptr<Framebuffer> Create(const FramebufferSpecification& specification);

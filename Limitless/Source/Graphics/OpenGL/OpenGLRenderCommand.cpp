@@ -5,9 +5,8 @@
 #include "Graphics/Buffer.h"
 #include "Graphics/Texture.h"
 #include "Graphics/Framebuffer.h"
-#include "Graphics/OpenGL/OpenGLBuffer.h"
-#include "Graphics/OpenGL/OpenGLShader.h"
-#include "Graphics/OpenGL/OpenGLVertexArray.h"
+#include "Graphics/NativeRenderHandles.h"
+#include "Graphics/RenderPipeline.h"
 #include "Core/Error.h"
 #include "Core/Debug/Log.h"
 
@@ -73,6 +72,100 @@ namespace Limitless
 {
     namespace
     {
+        GLenum ToOpenGLBlendFactor(BlendFactor factor)
+        {
+            switch (factor)
+            {
+                case BlendFactor::Zero: return GL_ZERO;
+                case BlendFactor::One: return GL_ONE;
+                case BlendFactor::SrcColor: return GL_SRC_COLOR;
+                case BlendFactor::OneMinusSrcColor: return GL_ONE_MINUS_SRC_COLOR;
+                case BlendFactor::SrcAlpha: return GL_SRC_ALPHA;
+                case BlendFactor::OneMinusSrcAlpha: return GL_ONE_MINUS_SRC_ALPHA;
+                case BlendFactor::DstAlpha: return GL_DST_ALPHA;
+                case BlendFactor::OneMinusDstAlpha: return GL_ONE_MINUS_DST_ALPHA;
+                case BlendFactor::DstColor: return GL_DST_COLOR;
+                case BlendFactor::OneMinusDstColor: return GL_ONE_MINUS_DST_COLOR;
+                case BlendFactor::SrcAlphaSaturate: return GL_SRC_ALPHA_SATURATE;
+                default: return GL_ONE;
+            }
+        }
+
+        GLenum ToOpenGLDepthFunc(DepthTestFunc func)
+        {
+            switch (func)
+            {
+                case DepthTestFunc::Never: return GL_NEVER;
+                case DepthTestFunc::Less: return GL_LESS;
+                case DepthTestFunc::Equal: return GL_EQUAL;
+                case DepthTestFunc::LessEqual: return GL_LEQUAL;
+                case DepthTestFunc::Greater: return GL_GREATER;
+                case DepthTestFunc::NotEqual: return GL_NOTEQUAL;
+                case DepthTestFunc::GreaterEqual: return GL_GEQUAL;
+                case DepthTestFunc::Always: return GL_ALWAYS;
+                default: return GL_LEQUAL;
+            }
+        }
+
+        GLenum ToOpenGLCullFace(CullFace face)
+        {
+            switch (face)
+            {
+                case CullFace::Front: return GL_FRONT;
+                case CullFace::Back: return GL_BACK;
+                case CullFace::FrontAndBack: return GL_FRONT_AND_BACK;
+                default: return GL_BACK;
+            }
+        }
+
+        GLenum ToOpenGLPolygonMode(PolygonMode mode)
+        {
+            switch (mode)
+            {
+                case PolygonMode::Point: return GL_POINT;
+                case PolygonMode::Line: return GL_LINE;
+                case PolygonMode::Fill: return GL_FILL;
+                default: return GL_FILL;
+            }
+        }
+
+        GLenum ToOpenGLPolygonFace(PolygonFace face)
+        {
+            switch (face)
+            {
+                case PolygonFace::Front: return GL_FRONT;
+                case PolygonFace::Back: return GL_BACK;
+                case PolygonFace::FrontAndBack: return GL_FRONT_AND_BACK;
+                default: return GL_FRONT_AND_BACK;
+            }
+        }
+
+        GLenum ToOpenGLDrawMode(DrawMode mode)
+        {
+            switch (mode)
+            {
+                case DrawMode::Points: return GL_POINTS;
+                case DrawMode::Lines: return GL_LINES;
+                case DrawMode::LineLoop: return GL_LINE_LOOP;
+                case DrawMode::LineStrip: return GL_LINE_STRIP;
+                case DrawMode::Triangles: return GL_TRIANGLES;
+                case DrawMode::TriangleStrip: return GL_TRIANGLE_STRIP;
+                case DrawMode::TriangleFan: return GL_TRIANGLE_FAN;
+                default: return GL_TRIANGLES;
+            }
+        }
+
+        GLenum ToOpenGLIndexType(IndexType type)
+        {
+            switch (type)
+            {
+                case IndexType::UnsignedByte: return GL_UNSIGNED_BYTE;
+                case IndexType::UnsignedShort: return GL_UNSIGNED_SHORT;
+                case IndexType::UnsignedInt: return GL_UNSIGNED_INT;
+                default: return GL_UNSIGNED_INT;
+            }
+        }
+
         // Render-thread OpenGL state tracker.
         // Commands that mutate tracked state MUST update this cache.
         // CustomCommand MUST invalidate it (unknown GL calls).
@@ -248,6 +341,79 @@ namespace Limitless
         }
     }
 
+    void SetDrawColorAttachmentsCommand::Execute(GraphicsContext* context)
+    {
+        if (!context)
+        {
+            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
+        }
+
+        while (glGetError() != GL_NO_ERROR)
+            ;
+
+        GLint drawFramebuffer = 0;
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFramebuffer);
+        if (drawFramebuffer == 0)
+        {
+            glDrawBuffer(GL_BACK);
+        }
+        else if (!m_Attachments.empty())
+        {
+            std::vector<GLenum> drawBuffers;
+            drawBuffers.reserve(m_Attachments.size());
+            for (uint32_t attachment : m_Attachments)
+            {
+                drawBuffers.push_back(GL_COLOR_ATTACHMENT0 + attachment);
+            }
+            glDrawBuffers(static_cast<GLsizei>(drawBuffers.size()), drawBuffers.data());
+        }
+        else
+        {
+            const GLenum fallbackBuffers[] = { GL_COLOR_ATTACHMENT0 };
+            glDrawBuffers(1, fallbackBuffers);
+        }
+
+        GLenum error = glGetError();
+        if (error != GL_NO_ERROR)
+        {
+            LT_CORE_ERROR("SetDrawColorAttachmentsCommand failed (fbo={}, error=0x{:x}); applying fallback draw buffer",
+                          drawFramebuffer,
+                          static_cast<uint32_t>(error));
+            while (glGetError() != GL_NO_ERROR)
+                ;
+
+            if (drawFramebuffer == 0)
+            {
+                glDrawBuffer(GL_BACK);
+            }
+            else
+            {
+                const GLenum fallbackBuffers[] = { GL_COLOR_ATTACHMENT0 };
+                glDrawBuffers(1, fallbackBuffers);
+            }
+        }
+    }
+
+    void ClearColorAttachmentCommand::Execute(GraphicsContext* context)
+    {
+        if (!context)
+        {
+            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
+        }
+
+        while (glGetError() != GL_NO_ERROR)
+            ;
+
+        const GLfloat clearValue[4] = { m_ClearValue.r, m_ClearValue.g, m_ClearValue.b, m_ClearValue.a };
+        glClearBufferfv(GL_COLOR, static_cast<GLint>(m_AttachmentIndex), clearValue);
+        if (const GLenum error = glGetError(); error != GL_NO_ERROR)
+        {
+            LT_CORE_ERROR("ClearColorAttachmentCommand failed (attachment={}, error=0x{:x})",
+                          m_AttachmentIndex,
+                          static_cast<uint32_t>(error));
+        }
+    }
+
     // BindShaderCommand Execute implementation
     void BindShaderCommand::Execute(GraphicsContext* context)
     {
@@ -258,9 +424,10 @@ namespace Limitless
 
         if (m_Shader)
         {
-            if (auto* glShader = dynamic_cast<OpenGLShader*>(m_Shader.get()))
+            const GLuint program = static_cast<GLuint>(GetShaderNativeHandle(m_Shader));
+            if (program != 0)
             {
-                GetOpenGLRenderCommandRuntimeState().GLState.UseProgram(glShader->GetRendererID());
+                GetOpenGLRenderCommandRuntimeState().GLState.UseProgram(program);
             }
             else
             {
@@ -272,6 +439,73 @@ namespace Limitless
         {
             LT_CORE_WARN("BindShaderCommand: shader was null (no-op)");
         }
+    }
+
+    void BindRenderPipelineCommand::Execute(GraphicsContext* context)
+    {
+        if (!context)
+        {
+            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
+        }
+
+        if (!m_Pipeline)
+        {
+            LT_CORE_WARN("BindRenderPipelineCommand: pipeline was null (no-op)");
+            return;
+        }
+
+        const auto& descriptor = m_Pipeline->GetDescriptor();
+        if (descriptor.ShaderProgram)
+        {
+            const GLuint program = static_cast<GLuint>(GetShaderNativeHandle(descriptor.ShaderProgram));
+            if (program != 0)
+            {
+                GetOpenGLRenderCommandRuntimeState().GLState.UseProgram(program);
+            }
+            else
+            {
+                descriptor.ShaderProgram->Bind();
+                GetOpenGLRenderCommandRuntimeState().GLState.Program = 0;
+            }
+        }
+
+        if (descriptor.BlendState.Enabled)
+        {
+            glEnable(GL_BLEND);
+            glBlendFunc(ToOpenGLBlendFactor(descriptor.BlendState.SourceColorFactor),
+                        ToOpenGLBlendFactor(descriptor.BlendState.DestinationColorFactor));
+        }
+        else
+        {
+            glDisable(GL_BLEND);
+        }
+        CheckOpenGLError("BindRenderPipelineCommand::BlendState");
+
+        if (descriptor.DepthStencilState.DepthTestEnabled)
+        {
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(ToOpenGLDepthFunc(descriptor.DepthStencilState.DepthCompare));
+        }
+        else
+        {
+            glDisable(GL_DEPTH_TEST);
+        }
+        glDepthMask(descriptor.DepthStencilState.DepthWriteEnabled ? GL_TRUE : GL_FALSE);
+        CheckOpenGLError("BindRenderPipelineCommand::DepthState");
+
+        if (descriptor.RasterState.CullEnabled)
+        {
+            glEnable(GL_CULL_FACE);
+            glCullFace(ToOpenGLCullFace(descriptor.RasterState.CullMode));
+        }
+        else
+        {
+            glDisable(GL_CULL_FACE);
+        }
+        CheckOpenGLError("BindRenderPipelineCommand::CullState");
+
+        glPolygonMode(GL_FRONT_AND_BACK, ToOpenGLPolygonMode(descriptor.RasterState.FillMode));
+        CheckOpenGLError("BindRenderPipelineCommand::PolygonMode");
     }
 
     void SetShaderMat4Command::Execute(GraphicsContext* context)
@@ -287,9 +521,9 @@ namespace Limitless
             return;
         }
 
-        if (auto* glShader = dynamic_cast<OpenGLShader*>(m_Shader.get()))
+        const GLuint program = static_cast<GLuint>(GetShaderNativeHandle(m_Shader));
+        if (program != 0)
         {
-            const GLuint program = glShader->GetRendererID();
             GetOpenGLRenderCommandRuntimeState().GLState.UseProgram(program);
 
             const GLint loc = glGetUniformLocation(program, m_UniformName.c_str());
@@ -313,9 +547,10 @@ namespace Limitless
 
         if (m_VertexArray)
         {
-            if (auto* glVAO = dynamic_cast<OpenGLVertexArray*>(m_VertexArray.get()))
+            const GLuint vao = static_cast<GLuint>(GetVertexArrayNativeHandle(m_VertexArray));
+            if (vao != 0)
             {
-                GetOpenGLRenderCommandRuntimeState().GLState.BindVertexArray(glVAO->GetRendererID());
+                GetOpenGLRenderCommandRuntimeState().GLState.BindVertexArray(vao);
             }
             else
             {
@@ -420,9 +655,9 @@ namespace Limitless
         m_KeepAlive.VertexBufferHandle->SetData(m_VertexBytes, m_VertexByteCount);
 
         // Bind shader + uniforms (OpenGL fast path when possible).
-        if (auto* glShader = dynamic_cast<OpenGLShader*>(m_KeepAlive.ShaderProgramHandle.get()))
+        const GLuint program = static_cast<GLuint>(GetShaderNativeHandle(m_KeepAlive.ShaderProgramHandle));
+        if (program != 0)
         {
-            const GLuint program = glShader->GetRendererID();
             GetOpenGLRenderCommandRuntimeState().GLState.UseProgram(program);
             auto& renderer2DUniforms = GetOpenGLRenderCommandRuntimeState().Renderer2DUniforms;
             renderer2DUniforms.OnProgramBound(program);
@@ -475,9 +710,9 @@ namespace Limitless
         }
 
         // Bind geometry and issue draw.
-        if (auto* glVAO = dynamic_cast<OpenGLVertexArray*>(m_KeepAlive.VertexArrayHandle.get()))
+        const GLuint vao = static_cast<GLuint>(GetVertexArrayNativeHandle(m_KeepAlive.VertexArrayHandle));
+        if (vao != 0)
         {
-            const GLuint vao = glVAO->GetRendererID();
             GetOpenGLRenderCommandRuntimeState().GLState.BindVertexArray(vao);
         }
         else
@@ -498,8 +733,8 @@ namespace Limitless
             return;
         }
 
-        glDrawElements(static_cast<GLenum>(DrawMode::Triangles), static_cast<GLsizei>(m_IndexCount),
-                       static_cast<GLenum>(m_IndexType), nullptr);
+        glDrawElements(ToOpenGLDrawMode(DrawMode::Triangles), static_cast<GLsizei>(m_IndexCount),
+                       ToOpenGLIndexType(m_IndexType), nullptr);
         CheckOpenGLError("Renderer2DFlushCommand glDrawElements");
     }
 
@@ -511,7 +746,7 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        const GLuint id = m_Texture ? static_cast<GLuint>(m_Texture->GetRendererID()) : 0;
+        const GLuint id = static_cast<GLuint>(GetTextureNativeHandle(m_Texture));
         GetOpenGLRenderCommandRuntimeState().GLState.BindTexture2D(m_Slot, id);
     }
 
@@ -572,7 +807,7 @@ namespace Limitless
             return;
         }
 
-        glDrawArrays(static_cast<GLenum>(m_Mode), m_First, static_cast<GLsizei>(m_Count));
+        glDrawArrays(ToOpenGLDrawMode(m_Mode), m_First, static_cast<GLsizei>(m_Count));
         CheckOpenGLError("glDrawArrays");
     }
 
@@ -607,14 +842,14 @@ namespace Limitless
 
         if (m_BaseVertex != 0)
         {
-            glDrawElementsBaseVertex(static_cast<GLenum>(m_Mode), static_cast<GLsizei>(m_Count),
-                                     static_cast<GLenum>(m_IndexType), m_Indices, m_BaseVertex);
+            glDrawElementsBaseVertex(ToOpenGLDrawMode(m_Mode), static_cast<GLsizei>(m_Count),
+                                     ToOpenGLIndexType(m_IndexType), m_Indices, m_BaseVertex);
             CheckOpenGLError("glDrawElementsBaseVertex");
         }
         else
         {
-            glDrawElements(static_cast<GLenum>(m_Mode), static_cast<GLsizei>(m_Count),
-                           static_cast<GLenum>(m_IndexType), m_Indices);
+            glDrawElements(ToOpenGLDrawMode(m_Mode), static_cast<GLsizei>(m_Count),
+                           ToOpenGLIndexType(m_IndexType), m_Indices);
             CheckOpenGLError("glDrawElements");
         }
     }
@@ -636,7 +871,7 @@ namespace Limitless
             return;
         }
 
-        glDrawArraysInstanced(static_cast<GLenum>(m_Mode), m_First, static_cast<GLsizei>(m_Count),
+        glDrawArraysInstanced(ToOpenGLDrawMode(m_Mode), m_First, static_cast<GLsizei>(m_Count),
                               static_cast<GLsizei>(m_InstanceCount));
         CheckOpenGLError("glDrawArraysInstanced");
     }
@@ -672,15 +907,15 @@ namespace Limitless
 
         if (m_BaseVertex != 0)
         {
-            glDrawElementsInstancedBaseVertex(static_cast<GLenum>(m_Mode), static_cast<GLsizei>(m_Count),
-                                              static_cast<GLenum>(m_IndexType), m_Indices,
+            glDrawElementsInstancedBaseVertex(ToOpenGLDrawMode(m_Mode), static_cast<GLsizei>(m_Count),
+                                              ToOpenGLIndexType(m_IndexType), m_Indices,
                                               static_cast<GLsizei>(m_InstanceCount), m_BaseVertex);
             CheckOpenGLError("glDrawElementsInstancedBaseVertex");
         }
         else
         {
-            glDrawElementsInstanced(static_cast<GLenum>(m_Mode), static_cast<GLsizei>(m_Count),
-                                    static_cast<GLenum>(m_IndexType), m_Indices, static_cast<GLsizei>(m_InstanceCount));
+            glDrawElementsInstanced(ToOpenGLDrawMode(m_Mode), static_cast<GLsizei>(m_Count),
+                                    ToOpenGLIndexType(m_IndexType), m_Indices, static_cast<GLsizei>(m_InstanceCount));
             CheckOpenGLError("glDrawElementsInstanced");
         }
     }
@@ -696,7 +931,7 @@ namespace Limitless
         if (m_Enable)
         {
             glEnable(GL_BLEND);
-            glBlendFunc(static_cast<GLenum>(m_SrcFactor), static_cast<GLenum>(m_DstFactor));
+            glBlendFunc(ToOpenGLBlendFactor(m_SrcFactor), ToOpenGLBlendFactor(m_DstFactor));
             CheckOpenGLError("glBlendFunc");
         }
         else
@@ -716,7 +951,7 @@ namespace Limitless
         if (m_Enable)
         {
             glEnable(GL_DEPTH_TEST);
-            glDepthFunc(static_cast<GLenum>(m_Func));
+            glDepthFunc(ToOpenGLDepthFunc(m_Func));
             CheckOpenGLError("glDepthFunc");
         }
         else
@@ -736,7 +971,7 @@ namespace Limitless
         if (m_Enable)
         {
             glEnable(GL_CULL_FACE);
-            glCullFace(static_cast<GLenum>(m_Face));
+            glCullFace(ToOpenGLCullFace(m_Face));
             CheckOpenGLError("glCullFace");
         }
         else
@@ -753,7 +988,7 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        glPolygonMode(static_cast<GLenum>(m_Face), static_cast<GLenum>(m_Mode));
+        glPolygonMode(ToOpenGLPolygonFace(m_Face), ToOpenGLPolygonMode(m_Mode));
         CheckOpenGLError("glPolygonMode");
     }
 

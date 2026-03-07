@@ -24,6 +24,7 @@ namespace Limitless
     class VertexBuffer;
     class Texture;
     class Framebuffer;
+    class RenderPipeline;
 
     // Render command types
     enum class RenderCommandType
@@ -31,7 +32,10 @@ namespace Limitless
         Clear,
         SetViewport,
         SetScissor,
+        SetDrawColorAttachments,
+        ClearColorAttachment,
         BindShader,
+        BindRenderPipeline,
         SetShaderMat4,
         BindVertexArray,
         BindIndexBuffer,
@@ -218,6 +222,38 @@ namespace Limitless
         bool m_Enable;
     };
 
+    class SetDrawColorAttachmentsCommand : public RenderCommand
+    {
+    public:
+        explicit SetDrawColorAttachmentsCommand(std::vector<uint32_t> attachments);
+
+        void Execute(GraphicsContext* context) override;
+        RenderCommandType GetType() const override { return RenderCommandType::SetDrawColorAttachments; }
+        std::string GetName() const override { return "SetDrawColorAttachments"; }
+
+        const std::vector<uint32_t>& GetAttachments() const { return m_Attachments; }
+
+    private:
+        std::vector<uint32_t> m_Attachments;
+    };
+
+    class ClearColorAttachmentCommand : public RenderCommand
+    {
+    public:
+        ClearColorAttachmentCommand(uint32_t attachmentIndex, const glm::vec4& clearValue);
+
+        void Execute(GraphicsContext* context) override;
+        RenderCommandType GetType() const override { return RenderCommandType::ClearColorAttachment; }
+        std::string GetName() const override { return "ClearColorAttachment"; }
+
+        uint32_t GetAttachmentIndex() const { return m_AttachmentIndex; }
+        const glm::vec4& GetClearValue() const { return m_ClearValue; }
+
+    private:
+        uint32_t m_AttachmentIndex = 0;
+        glm::vec4 m_ClearValue{0.0f};
+    };
+
     // Bind shader command
     class BindShaderCommand : public RenderCommand
     {
@@ -230,6 +266,20 @@ namespace Limitless
 
     private:
         std::shared_ptr<Shader> m_Shader;
+    };
+
+    // Bind render pipeline command
+    class BindRenderPipelineCommand : public RenderCommand
+    {
+    public:
+        explicit BindRenderPipelineCommand(std::shared_ptr<RenderPipeline> pipeline);
+
+        void Execute(GraphicsContext* context) override;
+        RenderCommandType GetType() const override { return RenderCommandType::BindRenderPipeline; }
+        std::string GetName() const override { return "BindRenderPipeline"; }
+
+    private:
+        std::shared_ptr<RenderPipeline> m_Pipeline;
     };
 
     // Set shader mat4 uniform command (intended for per-frame camera/model matrices).

@@ -7,20 +7,46 @@
 
 namespace Limitless
 {
-    OpenGLVertexBuffer::OpenGLVertexBuffer(const void* data, uint32_t size)
+    namespace
     {
+        GLenum ToOpenGLBufferUsage(ResourceUsage usage)
+        {
+            switch (usage)
+            {
+                case ResourceUsage::Immutable:
+                case ResourceUsage::Default:
+                    return GL_STATIC_DRAW;
+                case ResourceUsage::Dynamic:
+                    return GL_DYNAMIC_DRAW;
+                case ResourceUsage::Streaming:
+                case ResourceUsage::Transient:
+                    return GL_STREAM_DRAW;
+                case ResourceUsage::Staging:
+                    return GL_DYNAMIC_READ;
+                default:
+                    return GL_DYNAMIC_DRAW;
+            }
+        }
+    }
+
+    OpenGLVertexBuffer::OpenGLVertexBuffer(const BufferSpecification& specification, const void* data)
+        : m_SizeBytes(specification.Size)
+        , m_Specification(specification)
+    {
+        LT_VERIFY(m_Specification.Size > 0, "OpenGLVertexBuffer: specification size must be non-zero");
         glGenBuffers(1, &m_RendererID);
         glBindBuffer(GL_ARRAY_BUFFER, m_RendererID);
-        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(size), data, GL_STATIC_DRAW);
-        m_SizeBytes = size;
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_Specification.Size), data, ToOpenGLBufferUsage(m_Specification.Usage));
+    }
+
+    OpenGLVertexBuffer::OpenGLVertexBuffer(const void* data, uint32_t size)
+        : OpenGLVertexBuffer(BufferSpecification{ size, ResourceUsage::Immutable, MemoryUsage::GpuOnly }, data)
+    {
     }
 
     OpenGLVertexBuffer::OpenGLVertexBuffer(uint32_t size)
+        : OpenGLVertexBuffer(BufferSpecification{ size, ResourceUsage::Dynamic, MemoryUsage::CpuToGpu }, nullptr)
     {
-        glGenBuffers(1, &m_RendererID);
-        glBindBuffer(GL_ARRAY_BUFFER, m_RendererID);
-        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(size), nullptr, GL_DYNAMIC_DRAW);
-        m_SizeBytes = size;
     }
 
     OpenGLVertexBuffer::~OpenGLVertexBuffer()
@@ -68,15 +94,11 @@ namespace Limitless
         glBindBuffer(GL_ARRAY_BUFFER, m_RendererID);
         if (size > m_SizeBytes)
         {
-            // Grow the buffer if needed (rare for our streaming use cases).
-            glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(size), nullptr, GL_DYNAMIC_DRAW);
+            glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(size), nullptr, ToOpenGLBufferUsage(m_Specification.Usage));
             m_SizeBytes = size;
+            m_Specification.Size = size;
         }
 
-        // Prefer a map+memcpy path for dynamic streaming buffers:
-        // - GL_MAP_INVALIDATE_BUFFER_BIT avoids sync hazards by allowing the driver to "orphan"
-        //   the old storage.
-        // - This tends to reduce driver overhead vs. repeated glBufferSubData for large uploads.
         void* dst = glMapBufferRange(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(size),
                                      GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
         if (dst)
@@ -86,25 +108,43 @@ namespace Limitless
         }
         else
         {
-            // Fallback: should be rare, but keep it safe.
             glBufferSubData(GL_ARRAY_BUFFER, 0, static_cast<GLsizeiptr>(size), data);
         }
     }
 
-    OpenGLIndexBuffer::OpenGLIndexBuffer(const uint32_t* indices, uint32_t count)
-        : m_Count(count)
+    OpenGLIndexBuffer::OpenGLIndexBuffer(const IndexBufferSpecification& specification, const void* indices)
+        : m_Count(specification.Count)
+        , m_Specification(specification)
     {
+        LT_VERIFY(m_Specification.Count > 0, "OpenGLIndexBuffer: specification count must be non-zero");
+
+        const uint32_t indexSize = [&]() -> uint32_t {
+            switch (m_Specification.Type)
+            {
+                case IndexType::UnsignedByte: return static_cast<uint32_t>(sizeof(uint8_t));
+                case IndexType::UnsignedShort: return static_cast<uint32_t>(sizeof(uint16_t));
+                case IndexType::UnsignedInt: return static_cast<uint32_t>(sizeof(uint32_t));
+                default: return static_cast<uint32_t>(sizeof(uint32_t));
+            }
+        }();
+
         glGenBuffers(1, &m_RendererID);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_RendererID);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(count * sizeof(uint32_t)), indices, GL_STATIC_DRAW);
+        glBufferData(
+            GL_ELEMENT_ARRAY_BUFFER,
+            static_cast<GLsizeiptr>(m_Specification.Count * indexSize),
+            indices,
+            ToOpenGLBufferUsage(m_Specification.Usage));
+    }
+
+    OpenGLIndexBuffer::OpenGLIndexBuffer(const uint32_t* indices, uint32_t count)
+        : OpenGLIndexBuffer(IndexBufferSpecification{ count, IndexType::UnsignedInt, ResourceUsage::Immutable, MemoryUsage::GpuOnly }, indices)
+    {
     }
 
     OpenGLIndexBuffer::OpenGLIndexBuffer(const uint16_t* indices, uint32_t count)
-        : m_Count(count)
+        : OpenGLIndexBuffer(IndexBufferSpecification{ count, IndexType::UnsignedShort, ResourceUsage::Immutable, MemoryUsage::GpuOnly }, indices)
     {
-        glGenBuffers(1, &m_RendererID);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_RendererID);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(count * sizeof(uint16_t)), indices, GL_STATIC_DRAW);
     }
 
     OpenGLIndexBuffer::~OpenGLIndexBuffer()

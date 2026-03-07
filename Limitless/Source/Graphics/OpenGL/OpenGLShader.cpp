@@ -193,6 +193,190 @@ namespace Limitless
         }
     }
 
+    void OpenGLShader::SetFloat(const std::string& name, float value)
+    {
+        auto& renderer = Renderer::GetInstance();
+        if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
+        {
+            renderer.SubmitResourceAndWait("OpenGLShader/SetFloat", [&](GraphicsContext*) {
+                glUseProgram(m_RendererID);
+                GLint location = GetUniformLocation(m_RendererID, name);
+                if (location != -1)
+                {
+                    glUniform1f(location, value);
+                }
+            });
+            return;
+        }
+
+        if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
+        {
+            OpenGLContext::ScopedCurrentContext scope(*glContext);
+        }
+
+        glUseProgram(m_RendererID);
+        GLint location = GetUniformLocation(m_RendererID, name);
+        if (location != -1)
+        {
+            glUniform1f(location, value);
+        }
+    }
+
+    void OpenGLShader::SetFloat2(const std::string& name, const glm::vec2& value)
+    {
+        auto& renderer = Renderer::GetInstance();
+        if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
+        {
+            renderer.SubmitResourceAndWait("OpenGLShader/SetFloat2", [&](GraphicsContext*) {
+                glUseProgram(m_RendererID);
+                GLint location = GetUniformLocation(m_RendererID, name);
+                if (location != -1)
+                {
+                    glUniform2fv(location, 1, glm::value_ptr(value));
+                }
+            });
+            return;
+        }
+
+        if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
+        {
+            OpenGLContext::ScopedCurrentContext scope(*glContext);
+        }
+
+        glUseProgram(m_RendererID);
+        GLint location = GetUniformLocation(m_RendererID, name);
+        if (location != -1)
+        {
+            glUniform2fv(location, 1, glm::value_ptr(value));
+        }
+    }
+
+    void OpenGLShader::SetFloat3(const std::string& name, const glm::vec3& value)
+    {
+        auto& renderer = Renderer::GetInstance();
+        if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
+        {
+            renderer.SubmitResourceAndWait("OpenGLShader/SetFloat3", [&](GraphicsContext*) {
+                glUseProgram(m_RendererID);
+                GLint location = GetUniformLocation(m_RendererID, name);
+                if (location != -1)
+                {
+                    glUniform3fv(location, 1, glm::value_ptr(value));
+                }
+            });
+            return;
+        }
+
+        if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
+        {
+            OpenGLContext::ScopedCurrentContext scope(*glContext);
+        }
+
+        glUseProgram(m_RendererID);
+        GLint location = GetUniformLocation(m_RendererID, name);
+        if (location != -1)
+        {
+            glUniform3fv(location, 1, glm::value_ptr(value));
+        }
+    }
+
+    void OpenGLShader::SetFloat4(const std::string& name, const glm::vec4& value)
+    {
+        auto& renderer = Renderer::GetInstance();
+        if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
+        {
+            renderer.SubmitResourceAndWait("OpenGLShader/SetFloat4", [&](GraphicsContext*) {
+                glUseProgram(m_RendererID);
+                GLint location = GetUniformLocation(m_RendererID, name);
+                if (location != -1)
+                {
+                    glUniform4fv(location, 1, glm::value_ptr(value));
+                }
+            });
+            return;
+        }
+
+        if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
+        {
+            OpenGLContext::ScopedCurrentContext scope(*glContext);
+        }
+
+        glUseProgram(m_RendererID);
+        GLint location = GetUniformLocation(m_RendererID, name);
+        if (location != -1)
+        {
+            glUniform4fv(location, 1, glm::value_ptr(value));
+        }
+    }
+
+    void OpenGLShader::SetFloat2Array(const std::string& name, const glm::vec2* values, uint32_t count)
+    {
+        if (values == nullptr || count == 0)
+        {
+            return;
+        }
+
+        auto& renderer = Renderer::GetInstance();
+        if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
+        {
+            renderer.SubmitResourceAndWait("OpenGLShader/SetFloat2Array", [&](GraphicsContext*) {
+                glUseProgram(m_RendererID);
+                GLint location = GetUniformLocationWithArrayFallback(m_RendererID, name);
+                if (location != -1)
+                {
+                    glUniform2fv(location, static_cast<GLsizei>(count), glm::value_ptr(values[0]));
+                }
+            });
+            return;
+        }
+
+        if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
+        {
+            OpenGLContext::ScopedCurrentContext scope(*glContext);
+        }
+
+        glUseProgram(m_RendererID);
+        GLint location = GetUniformLocationWithArrayFallback(m_RendererID, name);
+        if (location != -1)
+        {
+            glUniform2fv(location, static_cast<GLsizei>(count), glm::value_ptr(values[0]));
+        }
+    }
+
+    void OpenGLShader::SetFloat4Array(const std::string& name, const glm::vec4* values, uint32_t count)
+    {
+        if (values == nullptr || count == 0)
+        {
+            return;
+        }
+
+        auto& renderer = Renderer::GetInstance();
+        if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
+        {
+            renderer.SubmitResourceAndWait("OpenGLShader/SetFloat4Array", [&](GraphicsContext*) {
+                glUseProgram(m_RendererID);
+                GLint location = GetUniformLocationWithArrayFallback(m_RendererID, name);
+                if (location != -1)
+                {
+                    glUniform4fv(location, static_cast<GLsizei>(count), glm::value_ptr(values[0]));
+                }
+            });
+            return;
+        }
+
+        if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
+        {
+            OpenGLContext::ScopedCurrentContext scope(*glContext);
+        }
+
+        glUseProgram(m_RendererID);
+        GLint location = GetUniformLocationWithArrayFallback(m_RendererID, name);
+        if (location != -1)
+        {
+            glUniform4fv(location, static_cast<GLsizei>(count), glm::value_ptr(values[0]));
+        }
+    }
+
     void OpenGLShader::SetMat4(const std::string& name, const glm::mat4& value)
     {
         auto& renderer = Renderer::GetInstance();
