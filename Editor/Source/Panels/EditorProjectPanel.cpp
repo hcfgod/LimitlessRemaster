@@ -3067,8 +3067,6 @@ namespace Limitless::EditorProjectPanel
                 const float textLineGap = std::max(1.0f, 2.0f * gridScale);
                 const float textBlockBottomPadding = 12.0f * gridScale;
                 const float badgeFontSize = ImGui::GetFontSize();
-                const float nameFontSize = ImGui::GetFontSize();
-                const float pathFontSize = ImGui::GetFontSize();
                 const float nameLineHeight = ImGui::GetTextLineHeight();
                 const float pathLineHeight = ImGui::GetTextLineHeight();
                 const float tileHeight =

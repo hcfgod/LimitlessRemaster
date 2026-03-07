@@ -1,4 +1,16 @@
 {
+    "ecs": {
+        "mt": {
+            "enable_parallel_physics_world_step": true,
+            "enable_parallel_scripts": true,
+            "enable_parallel_transforms": true,
+            "enable_system_scheduler": true,
+            "require_parallel_script_access_declarations": true,
+            "validate_parallel_script_access_masks": true,
+            "warn_implicit_parallel_script_access": true,
+            "warn_parallel_script_access_mismatch": true
+        }
+    },
     "logging": {
         "app_level": "debug",
         "console_enabled": true,
