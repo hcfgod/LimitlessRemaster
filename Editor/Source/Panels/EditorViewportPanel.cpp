@@ -2796,7 +2796,7 @@ namespace Limitless::EditorViewportPanel
             return static_cast<uint32_t>(std::floor(value));
         };
 
-        auto drawLoadingOverlay = [scene](const ImVec2& minPos, const ImVec2& maxPos) -> bool {
+        auto drawLoadingOverlay = [&scene](const ImVec2& minPos, const ImVec2& maxPos) -> bool {
             const LoadingScreen::Context ctx = LoadingScreen::BuildContext(
                 scene, Renderer2D::Default().IsShaderReady(), Renderer2D::GetDefaultShaderKey());
             const LoadingScreen::State state = LoadingScreen::GetState(ctx);
@@ -3082,7 +3082,10 @@ namespace Limitless::EditorViewportPanel
                     {
                         const char* key = static_cast<const char*>(payload->Data);
                         if (key && key[0] && onSceneDropped)
+                        {
                             onSceneDropped(key);
+                            scene = nullptr;
+                        }
                     }
                     if (prefabPayloadId)
                     {

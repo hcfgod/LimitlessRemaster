@@ -73,7 +73,7 @@ namespace Limitless
         constexpr const char* kDefaultSceneFileName = "SampleScene.scene.json";
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 5;
+        constexpr uint32_t kEditorSessionStateVersion = 7;
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
         struct EditorSessionStateData final
@@ -85,6 +85,8 @@ namespace Limitless
             bool ShowPerformancePanel = false;
             bool ShowConsoleWindow = true;
             bool ProjectAssetsRootExpanded = true;
+            std::string ProjectActiveFolderRelativePath;
+            float ProjectGridScale = 1.0f;
             std::unordered_map<std::string, bool> ProjectFolderExpansionState;
         };
 
@@ -262,7 +264,7 @@ namespace Limitless
                     return state;
                 }
 
-                if (version != 3 && version != 4 && version != kEditorSessionStateVersion)
+                if (version != 3 && version != 4 && version != 5 && version != 6 && version != kEditorSessionStateVersion)
                 {
                     return {};
                 }
@@ -293,6 +295,10 @@ namespace Limitless
                         }
                     }
                 }
+                if (version >= 6)
+                    state.ProjectActiveFolderRelativePath = root.value("projectActiveFolderRelativePath", std::string{});
+                if (version >= 7)
+                    state.ProjectGridScale = root.value("projectGridScale", 1.0f);
                 return state;
             }
             catch (...)
@@ -335,6 +341,8 @@ namespace Limitless
                 root["showPerformancePanel"] = state.ShowPerformancePanel;
                 root["showConsoleWindow"] = state.ShowConsoleWindow;
                 root["projectAssetsRootExpanded"] = state.ProjectAssetsRootExpanded;
+                root["projectActiveFolderRelativePath"] = state.ProjectActiveFolderRelativePath;
+                root["projectGridScale"] = state.ProjectGridScale;
 
                 nlohmann::json folderExpansionRoot = nlohmann::json::object();
                 for (const auto& [folderPath, expanded] : state.ProjectFolderExpansionState)
@@ -746,6 +754,8 @@ namespace Limitless
             m_ShowPerformancePanel = sessionState.ShowPerformancePanel;
             m_ShowConsoleWindow = sessionState.ShowConsoleWindow;
             m_ProjectPanelState.AssetsRootExpanded = sessionState.ProjectAssetsRootExpanded;
+            m_ProjectPanelState.ActiveFolderRelativePath = std::filesystem::path(sessionState.ProjectActiveFolderRelativePath);
+            m_ProjectPanelState.GridScale = std::clamp(sessionState.ProjectGridScale, 0.70f, 1.80f);
             m_ProjectPanelState.ExpandedFolderState = sessionState.ProjectFolderExpansionState;
             const std::string lastOpenedSceneAssetKey = sessionState.LastOpenedSceneAssetKey;
             if (!lastOpenedSceneAssetKey.empty())
@@ -2189,7 +2199,7 @@ namespace Limitless
                 (void)EditorInspectorPanel::OpenNativeScriptEditorForAssetKey(scriptAssetKey);
             });
 
-        if (m_ProjectPanelState.TreeExpansionStateChanged)
+        if (m_ProjectPanelState.TreeExpansionStateChanged || m_ProjectPanelState.BrowseLocationChanged || m_ProjectPanelState.GridScaleChanged)
             PersistProjectSessionState();
 
         if (!m_SelectedAnimationClipAssetKey.empty() && m_SelectedAnimationClipAssetKey != prevClipKey)

@@ -34,6 +34,7 @@ namespace Limitless
         std::string SelectionAnchorAssetKey;
         std::string SubSpriteSelectionAnchorKey;
 
+        std::filesystem::path ActiveFolderRelativePath;
         std::filesystem::path FolderPopupParent;
         std::filesystem::path HoveredFolderRelativePathForExternalDrop;
         std::filesystem::path RenameAssetRelativePath;
@@ -72,6 +73,9 @@ namespace Limitless
         bool CreateTilePalettePopupPending = false;
         bool CreateTilePalettePopupOpen = false;
         bool AssetsRootExpanded = true;
+        float GridScale = 1.0f;
+        bool BrowseLocationChanged = false;
+        bool GridScaleChanged = false;
         bool TreeExpansionStateChanged = false;
 
         std::array<char, 256> FolderPopupBuffer{};

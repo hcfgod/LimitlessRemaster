@@ -23,7 +23,7 @@ namespace Limitless
     {
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 5;
+        constexpr uint32_t kEditorSessionStateVersion = 7;
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
         struct EditorSessionStateData final
@@ -35,6 +35,8 @@ namespace Limitless
             bool ShowPerformancePanel = false;
             bool ShowConsoleWindow = true;
             bool ProjectAssetsRootExpanded = true;
+            std::string ProjectActiveFolderRelativePath;
+            float ProjectGridScale = 1.0f;
             std::unordered_map<std::string, bool> ProjectFolderExpansionState;
         };
 
@@ -226,6 +228,8 @@ namespace Limitless
                 root["showPerformancePanel"] = state.ShowPerformancePanel;
                 root["showConsoleWindow"] = state.ShowConsoleWindow;
                 root["projectAssetsRootExpanded"] = state.ProjectAssetsRootExpanded;
+                root["projectActiveFolderRelativePath"] = state.ProjectActiveFolderRelativePath;
+                root["projectGridScale"] = state.ProjectGridScale;
 
                 nlohmann::json folderExpansionRoot = nlohmann::json::object();
                 for (const auto& [folderPath, expanded] : state.ProjectFolderExpansionState)
@@ -448,6 +452,8 @@ namespace Limitless
         state.ShowPerformancePanel = m_ShowPerformancePanel;
         state.ShowConsoleWindow = m_ShowConsoleWindow;
         state.ProjectAssetsRootExpanded = m_ProjectPanelState.AssetsRootExpanded;
+        state.ProjectActiveFolderRelativePath = m_ProjectPanelState.ActiveFolderRelativePath.generic_string();
+        state.ProjectGridScale = m_ProjectPanelState.GridScale;
         state.ProjectFolderExpansionState = m_ProjectPanelState.ExpandedFolderState;
         WriteProjectSessionState(projectManager.GetProjectRoot(), state);
     }

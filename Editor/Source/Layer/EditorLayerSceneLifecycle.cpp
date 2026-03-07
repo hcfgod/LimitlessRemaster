@@ -397,6 +397,27 @@ namespace Limitless
         m_EditorUndoService.MarkSaved();
         m_ActiveSceneTexturePrewarmKeys.clear();
         m_ActiveSceneMaterialPrewarmKeys.clear();
+        m_SelectedEntity = entt::null;
+        m_ScenePanelState.PendingDeleteEntities.clear();
+        m_ScenePanelState.RenameEntity = entt::null;
+        m_ScenePanelState.PendingClickSelectionEntity = entt::null;
+        m_ScenePanelState.PendingClickCtrlModifier = false;
+        m_ScenePanelState.PendingClickShiftModifier = false;
+        m_ScenePanelState.SelectionAnchorEntity = entt::null;
+        m_ScenePanelState.MultiSelectedEntities.clear();
+        m_ScenePanelState.DrawOrderEntities.clear();
+        m_ScenePanelState.RenamePopupOpen = false;
+        m_TilemapEditorState.ActiveGridEntity = entt::null;
+        m_TilemapEditorState.ActiveLayerEntity = entt::null;
+        m_TilemapEditorState.HasHoveredCell = false;
+        m_TransformGizmoState.DragActive = false;
+        m_TransformGizmoState.DragAxis = -1;
+        m_TransformGizmoState.DragEntity = entt::null;
+        m_TransformGizmoState.DragEntities.clear();
+        m_TransformGizmoState.DragStartPositions.clear();
+        m_TransformGizmoState.DragStartRotations.clear();
+        m_TransformGizmoState.DragStartScales.clear();
+        m_TransformGizmoState.BoxSelectActive = false;
     }
 
     bool EditorLayer::LoadSceneFromAssetKey(const std::string& assetKey)
@@ -443,6 +464,9 @@ namespace Limitless
         QueueSceneAssetPrewarm();
         UpdateSceneLoadingState();
         m_SelectedEntity = entt::null;
+        m_ScenePanelState.SelectionAnchorEntity = entt::null;
+        m_ScenePanelState.MultiSelectedEntities.clear();
+        m_ScenePanelState.DrawOrderEntities.clear();
         m_SelectedTextureAssetKey.clear();
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();
@@ -509,6 +533,9 @@ namespace Limitless
         QueueSceneAssetPrewarm();
         UpdateSceneLoadingState();
         m_SelectedEntity = entt::null;
+        m_ScenePanelState.SelectionAnchorEntity = entt::null;
+        m_ScenePanelState.MultiSelectedEntities.clear();
+        m_ScenePanelState.DrawOrderEntities.clear();
         m_SelectedTextureAssetKey.clear();
         m_SelectedNativeScriptAssetKey.clear();
         m_SelectedPrefabAssetKey.clear();

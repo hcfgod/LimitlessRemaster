@@ -6,6 +6,8 @@
 #include "Assets/AssetImportPipeline.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/SpriteImportSettings.h"
+#include "Assets/TextureAssetImporter.h"
+#include "Assets/TextureAsset.h"
 #include "Assets/TilePaletteAsset.h"
 #include "EditorTilePalettePanel.h"
 #include "Core/Debug/Log.h"
@@ -19,6 +21,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <optional>
 #include <regex>
 #include <unordered_map>
 #include <unordered_set>
@@ -102,10 +105,17 @@ namespace Limitless::EditorProjectPanel
             Assets::SpriteImportSettings Settings;
             std::chrono::steady_clock::time_point LoadTime = {};
         };
+        struct TextureThumbnailCacheEntry
+        {
+            Assets::TextureAsset::Ptr TextureAsset;
+            std::chrono::steady_clock::time_point LoadTime = {};
+        };
         std::unordered_map<std::string, SpriteSettingsCacheEntry> gSpriteSettingsCache;
+        std::unordered_map<std::string, TextureThumbnailCacheEntry> gTextureThumbnailCache;
         std::string gProjectSearchFilterLower;
         std::unordered_map<std::string, bool> gProjectSearchMatchCache;
         constexpr std::chrono::milliseconds kSpriteSettingsCacheLifetime(2000);
+        constexpr std::chrono::milliseconds kTextureThumbnailCacheLifetime(2000);
 
         struct AssetTypeBadgeInfo
         {
@@ -130,6 +140,7 @@ namespace Limitless::EditorProjectPanel
         constexpr AssetTypeBadgeInfo kBadgeAnimController  = { "ACT", IM_COL32(175,  45,  70, 255), IM_COL32(230,  95, 120, 255), IM_COL32(255, 230, 235, 255) };
         constexpr AssetTypeBadgeInfo kBadgeSubSprite       = { "SUB", IM_COL32( 80, 130,  80, 255), IM_COL32(130, 185, 130, 255), IM_COL32(235, 255, 235, 255) };
         constexpr AssetTypeBadgeInfo kBadgeTileset         = { "TLS", IM_COL32(140, 110,  50, 255), IM_COL32(195, 165,  90, 255), IM_COL32(255, 248, 230, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeTilePalette     = { "PAL", IM_COL32(110,  95,  55, 255), IM_COL32(180, 155,  95, 255), IM_COL32(255, 246, 225, 255) };
         constexpr AssetTypeBadgeInfo kBadgeUnknown         = { "---", IM_COL32( 90,  90, 100, 255), IM_COL32(140, 140, 155, 255), IM_COL32(220, 220, 230, 255) };
 
         void DrawAssetTypeBadge(const AssetTypeBadgeInfo& badge, float indentScreenX)
@@ -200,6 +211,25 @@ namespace Limitless::EditorProjectPanel
             return insertedIt->second.Settings;
         }
 
+        Assets::TextureAsset::Ptr GetCachedThumbnailTextureAsset(const std::string& textureAssetKey)
+        {
+            if (textureAssetKey.empty())
+                return nullptr;
+
+            const auto now = std::chrono::steady_clock::now();
+            if (auto it = gTextureThumbnailCache.find(textureAssetKey); it != gTextureThumbnailCache.end())
+            {
+                if ((now - it->second.LoadTime) < kTextureThumbnailCacheLifetime)
+                    return it->second.TextureAsset;
+            }
+
+            TextureThumbnailCacheEntry entry;
+            entry.TextureAsset = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(textureAssetKey);
+            entry.LoadTime = now;
+            auto [insertedIt, _] = gTextureThumbnailCache.insert_or_assign(textureAssetKey, std::move(entry));
+            return insertedIt->second.TextureAsset;
+        }
+
         std::string ToLowerAscii(std::string value)
         {
             for (char& character : value)
@@ -262,6 +292,22 @@ namespace Limitless::EditorProjectPanel
         {
             return lowerFileName.ends_with(".animcontroller.json") ||
                    lowerFileName.ends_with(".animatorcontroller.json");
+        }
+
+        bool IsTilesetFileNameLower(const std::string& lowerFileName)
+        {
+            constexpr const char* tilesetSuffix = ".tileset.json";
+            const std::string suffixString = tilesetSuffix;
+            return lowerFileName.size() >= suffixString.size() &&
+                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
+        }
+
+        bool IsTilePaletteFileNameLower(const std::string& lowerFileName)
+        {
+            constexpr const char* tilePaletteSuffix = ".tilepalette.json";
+            const std::string suffixString = tilePaletteSuffix;
+            return lowerFileName.size() >= suffixString.size() &&
+                   lowerFileName.rfind(suffixString) == (lowerFileName.size() - suffixString.size());
         }
 
         bool IsShaderExtensionLower(const std::string& lowerExtension)
@@ -352,6 +398,7 @@ namespace Limitless::EditorProjectPanel
         void InvalidateProjectDirectoryCache()
         {
             gProjectAssetDirectoryCache.clear();
+            gTextureThumbnailCache.clear();
         }
 
         void MoveAssetOrFolderToTargetFolder(const char* assetOrFolderKey,
@@ -2289,9 +2336,12 @@ namespace Limitless::EditorProjectPanel
         EditorPanelStyle::PushPanelVisualStyle();
         ImGui::Begin("Project");
         state.TreeExpansionStateChanged = false;
+        state.BrowseLocationChanged = false;
+        state.GridScaleChanged = false;
         state.HoveredFolderRelativePathForExternalDrop.clear();
         gProjectSearchFilterLower = ToLowerAscii(std::string(state.SearchBuffer.data()));
         gProjectSearchMatchCache.clear();
+        state.GridScale = std::clamp(state.GridScale, 0.70f, 1.80f);
 
         const auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
         if (rootResult.IsFailure())
@@ -2312,6 +2362,16 @@ namespace Limitless::EditorProjectPanel
             return;
         }
 
+        if (!state.ActiveFolderRelativePath.empty())
+        {
+            const std::filesystem::path activeFolderAbsolutePath = assetsDirectory / state.ActiveFolderRelativePath;
+            if (!std::filesystem::exists(activeFolderAbsolutePath, errorCode) || !std::filesystem::is_directory(activeFolderAbsolutePath, errorCode))
+            {
+                state.ActiveFolderRelativePath.clear();
+                state.BrowseLocationChanged = true;
+            }
+        }
+
         const auto clearProjectAssetSelection = [&]() {
             selectedTextureAssetKey.clear();
             selectedMaterialAssetKey.clear();
@@ -2320,6 +2380,8 @@ namespace Limitless::EditorProjectPanel
             selectedTilesetAssetKey.clear();
             selectedAudioMixerAssetKey.clear();
             selectedInputActionsAssetKey.clear();
+            selectedAnimationClipAssetKey.clear();
+            selectedAnimatorControllerAssetKey.clear();
             selectedEntity = entt::null;
             cachedTextureAsset.reset();
             cachedMaterialAsset.reset();
@@ -2329,59 +2391,98 @@ namespace Limitless::EditorProjectPanel
             state.SubSpriteSelectionAnchorKey.clear();
         };
 
+        const auto clearPrimaryAssetSelection = [&]() {
+            selectedTextureAssetKey.clear();
+            selectedMaterialAssetKey.clear();
+            selectedNativeScriptAssetKey.clear();
+            selectedPrefabAssetKey.clear();
+            selectedTilesetAssetKey.clear();
+            selectedAudioMixerAssetKey.clear();
+            selectedInputActionsAssetKey.clear();
+            selectedAnimationClipAssetKey.clear();
+            selectedAnimatorControllerAssetKey.clear();
+            selectedEntity = entt::null;
+            cachedTextureAsset.reset();
+            cachedMaterialAsset.reset();
+        };
+
+        const auto setActiveFolder = [&](std::filesystem::path relativePath) {
+            relativePath = relativePath.lexically_normal();
+            if (relativePath == ".")
+                relativePath.clear();
+            if (state.ActiveFolderRelativePath != relativePath)
+            {
+                state.ActiveFolderRelativePath = std::move(relativePath);
+                state.AssetsRootExpanded = true;
+                std::filesystem::path ancestorPath;
+                for (const std::filesystem::path& segment : state.ActiveFolderRelativePath)
+                {
+                    ancestorPath /= segment;
+                    state.ExpandedFolderState[ancestorPath.generic_string()] = true;
+                }
+                state.BrowseLocationChanged = true;
+            }
+        };
+
         const size_t selectedCount = !state.MultiSelectedSubSpriteKeys.empty()
             ? state.MultiSelectedSubSpriteKeys.size()
             : state.MultiSelectedAssetKeys.size();
 
         if (ImGui::BeginPopupContextWindow("ProjectContext", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
         {
+            state.FolderPopupParent = state.ActiveFolderRelativePath;
             if (ImGui::MenuItem("Create Folder"))
             {
-                state.FolderPopupParent = "";
                 state.FolderPopupPending = EditorProjectFolderPopup::Create;
                 CopyTextToBuffer(state.FolderPopupBuffer, "New Folder");
             }
             if (ImGui::MenuItem("Create Scene") && onCreateSceneRequested)
-                onCreateSceneRequested("");
+                onCreateSceneRequested(state.ActiveFolderRelativePath);
             if (ImGui::MenuItem("Create Material"))
             {
-                state.CreateMaterialParentRelativePath = "";
+                state.CreateMaterialParentRelativePath = state.ActiveFolderRelativePath;
                 CopyTextToBuffer(state.CreateMaterialNameBuffer, "New Material");
                 state.CreateMaterialPopupPending = true;
             }
+            if (ImGui::MenuItem("Create Tileset"))
+            {
+                state.CreateTilesetParentRelativePath = state.ActiveFolderRelativePath;
+                CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
+                state.CreateTilesetPopupPending = true;
+            }
             if (ImGui::MenuItem("Create Tile Palette"))
             {
-                state.CreateTilePaletteParentRelativePath = "";
+                state.CreateTilePaletteParentRelativePath = state.ActiveFolderRelativePath;
                 CopyTextToBuffer(state.CreateTilePaletteNameBuffer, "New Tile Palette");
                 state.CreateTilePalettePopupPending = true;
             }
             if (ImGui::MenuItem("Create Audio Mixer"))
             {
-                state.CreateAudioMixerParentRelativePath = "";
+                state.CreateAudioMixerParentRelativePath = state.ActiveFolderRelativePath;
                 CopyTextToBuffer(state.CreateAudioMixerNameBuffer, "New Audio Mixer");
                 state.CreateAudioMixerPopupPending = true;
             }
             if (ImGui::MenuItem("Create Input Actions"))
             {
-                state.CreateInputActionsParentRelativePath = "";
+                state.CreateInputActionsParentRelativePath = state.ActiveFolderRelativePath;
                 CopyTextToBuffer(state.CreateInputActionsNameBuffer, "New Input Actions");
                 state.CreateInputActionsPopupPending = true;
             }
             if (ImGui::MenuItem("Create Animation Clip"))
             {
-                state.CreateAnimationClipParentRelativePath = "";
+                state.CreateAnimationClipParentRelativePath = state.ActiveFolderRelativePath;
                 CopyTextToBuffer(state.CreateAnimationClipNameBuffer, "New Animation Clip");
                 state.CreateAnimationClipPopupPending = true;
             }
             if (ImGui::MenuItem("Create Animator Controller"))
             {
-                state.CreateAnimatorControllerParentRelativePath = "";
+                state.CreateAnimatorControllerParentRelativePath = state.ActiveFolderRelativePath;
                 CopyTextToBuffer(state.CreateAnimatorControllerNameBuffer, "New Animator Controller");
                 state.CreateAnimatorControllerPopupPending = true;
             }
             if (ImGui::MenuItem("Create Native Script"))
             {
-                state.CreateNativeScriptParentRelativePath = "";
+                state.CreateNativeScriptParentRelativePath = state.ActiveFolderRelativePath;
                 CopyTextToBuffer(state.CreateNativeScriptClassNameBuffer, "NewNativeScript");
                 state.CreateNativeScriptPopupPending = true;
             }
@@ -2401,7 +2502,7 @@ namespace Limitless::EditorProjectPanel
         ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.24f, 0.33f, 0.48f, 0.75f));
         ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.27f, 0.38f, 0.56f, 0.95f));
 
-        if (ImGui::BeginChild("##ProjectToolbar", ImVec2(0.0f, 86.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
+        if (ImGui::BeginChild("##ProjectToolbar", ImVec2(0.0f, 112.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
         {
             ImGui::TextUnformatted("Project Assets");
             ImGui::SameLine();
@@ -2439,173 +2540,940 @@ namespace Limitless::EditorProjectPanel
                     gProjectSearchMatchCache.clear();
                 }
             }
+
+            ImGui::Spacing();
+            ImGui::SetNextItemWidth(180.0f);
+            if (ImGui::SliderFloat("Grid Scale", &state.GridScale, 0.70f, 1.80f, "%.2fx"))
+            {
+                state.GridScale = std::clamp(state.GridScale, 0.70f, 1.80f);
+                state.GridScaleChanged = true;
+            }
         }
         ImGui::EndChild();
 
         ImGui::Spacing();
 
-        ImGui::BeginChild("##ProjectTreeRegion", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
-
-        const bool previousAssetsRootExpanded = state.AssetsRootExpanded;
         const bool searchActive = !gProjectSearchFilterLower.empty();
-        const bool shouldShowAssetsRoot = !searchActive || MatchesProjectSearchFilter("Assets") || DirectoryContainsProjectSearchMatch(assetsDirectory, "");
-        bool assetsRootOpen = false;
-        if (shouldShowAssetsRoot)
+
+        struct ProjectGridEntry
         {
-            ImGui::SetNextItemOpen(searchActive ? true : state.AssetsRootExpanded, ImGuiCond_Always);
-            const float assetsRootIndentX = ImGui::GetCursorScreenPos().x;
-            assetsRootOpen = ImGui::TreeNodeEx(BadgePadLabel("Assets").c_str(), ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_FramePadding);
-            DrawAssetTypeBadge(kBadgeFolder, assetsRootIndentX);
-            if (!searchActive)
+            ProjectAssetTreeEntry Entry;
+            std::string DisplayName;
+            std::string PrimaryAssetKey;
+            std::string SecondaryAssetKey;
+            const AssetTypeBadgeInfo* Badge = &kBadgeUnknown;
+            bool IsDirectory = false;
+            bool IsTexture = false;
+            bool IsScene = false;
+            bool IsMaterial = false;
+            bool IsTileset = false;
+            bool IsTilePalette = false;
+            bool IsAudioMixer = false;
+            bool IsInputActions = false;
+            bool IsAnimationClip = false;
+            bool IsAnimatorController = false;
+            bool IsPrefab = false;
+            bool IsShader = false;
+            bool IsAudio = false;
+            bool IsFont = false;
+            bool IsNativeScriptFile = false;
+            bool IsScriptPair = false;
+            bool HasPairedScriptFile = false;
+            bool HasThumbnailSubRect = false;
+            glm::ivec4 ThumbnailRectPixels = glm::ivec4(0);
+            ImVec2 ThumbnailUvMin = ImVec2(0.0f, 1.0f);
+            ImVec2 ThumbnailUvMax = ImVec2(1.0f, 0.0f);
+        };
+
+        const auto resolveGridBadge = [&](const ProjectGridEntry& entry) -> const AssetTypeBadgeInfo& {
+            if (entry.IsDirectory) return kBadgeFolder;
+            if (entry.IsTexture) return kBadgeTexture;
+            if (entry.IsScene) return kBadgeScene;
+            if (entry.IsMaterial) return kBadgeMaterial;
+            if (entry.IsTileset) return kBadgeTileset;
+            if (entry.IsTilePalette) return kBadgeTilePalette;
+            if (entry.IsAudioMixer) return kBadgeAudioMixer;
+            if (entry.IsInputActions) return kBadgeInputActions;
+            if (entry.IsAnimationClip) return kBadgeAnimationClip;
+            if (entry.IsAnimatorController) return kBadgeAnimController;
+            if (entry.IsPrefab) return kBadgePrefab;
+            if (entry.IsShader) return kBadgeShader;
+            if (entry.IsAudio) return kBadgeAudio;
+            if (entry.IsFont) return kBadgeFont;
+            if (entry.IsNativeScriptFile) return kBadgeScript;
+            return kBadgeUnknown;
+        };
+
+        const auto isGridEntryPrimarySelected = [&](const ProjectGridEntry& entry) -> bool {
+            std::string selectedTextureParentKey;
+            int32_t selectedTextureSubIndex = -1;
+            const bool selectedTextureIsSubSprite =
+                Assets::TryParseSubSpriteAssetKey(selectedTextureAssetKey, selectedTextureParentKey, selectedTextureSubIndex);
+            (void)selectedTextureSubIndex;
+
+            if (entry.IsTexture)
+                return selectedTextureAssetKey == entry.PrimaryAssetKey || (selectedTextureIsSubSprite && selectedTextureParentKey == entry.PrimaryAssetKey);
+            if (entry.IsMaterial)
+                return selectedMaterialAssetKey == entry.PrimaryAssetKey;
+            if (entry.IsTileset)
+                return selectedTilesetAssetKey == entry.PrimaryAssetKey;
+            if (entry.IsAudioMixer)
+                return selectedAudioMixerAssetKey == entry.PrimaryAssetKey;
+            if (entry.IsInputActions)
+                return selectedInputActionsAssetKey == entry.PrimaryAssetKey;
+            if (entry.IsAnimationClip)
+                return selectedAnimationClipAssetKey == entry.PrimaryAssetKey;
+            if (entry.IsAnimatorController)
+                return selectedAnimatorControllerAssetKey == entry.PrimaryAssetKey;
+            if (entry.IsNativeScriptFile)
+                return selectedNativeScriptAssetKey == entry.PrimaryAssetKey || (!entry.SecondaryAssetKey.empty() && selectedNativeScriptAssetKey == entry.SecondaryAssetKey);
+            if (entry.IsPrefab)
+                return selectedPrefabAssetKey == entry.PrimaryAssetKey;
+            return false;
+        };
+
+        const auto setPrimarySelectionForGridEntry = [&](const ProjectGridEntry& entry) {
+            clearPrimaryAssetSelection();
+            if (entry.IsTexture)
+                selectedTextureAssetKey = entry.PrimaryAssetKey;
+            else if (entry.IsMaterial)
+                selectedMaterialAssetKey = entry.PrimaryAssetKey;
+            else if (entry.IsNativeScriptFile)
+                selectedNativeScriptAssetKey = entry.PrimaryAssetKey;
+            else if (entry.IsPrefab)
+                selectedPrefabAssetKey = entry.PrimaryAssetKey;
+            else if (entry.IsTileset)
+                selectedTilesetAssetKey = entry.PrimaryAssetKey;
+            else if (entry.IsAudioMixer)
+                selectedAudioMixerAssetKey = entry.PrimaryAssetKey;
+            else if (entry.IsInputActions)
+                selectedInputActionsAssetKey = entry.PrimaryAssetKey;
+            else if (entry.IsAnimationClip)
+                selectedAnimationClipAssetKey = entry.PrimaryAssetKey;
+            else if (entry.IsAnimatorController)
+                selectedAnimatorControllerAssetKey = entry.PrimaryAssetKey;
+        };
+
+        const auto beginFolderContextMenu = [&](const std::filesystem::path& folderRelativePath, const std::string& folderName, const bool isRoot) {
+            if (!ImGui::BeginPopupContextItem())
+                return;
+
+            state.FolderPopupParent = folderRelativePath;
+            if (ImGui::MenuItem("Create Folder"))
             {
-                state.AssetsRootExpanded = assetsRootOpen;
-                if (state.AssetsRootExpanded != previousAssetsRootExpanded)
+                state.FolderPopupPending = EditorProjectFolderPopup::Create;
+                CopyTextToBuffer(state.FolderPopupBuffer, "New Folder");
+            }
+            if (ImGui::MenuItem("Create Scene") && onCreateSceneRequested)
+                onCreateSceneRequested(folderRelativePath);
+            if (ImGui::MenuItem("Create Material"))
+            {
+                state.CreateMaterialParentRelativePath = folderRelativePath;
+                CopyTextToBuffer(state.CreateMaterialNameBuffer, "New Material");
+                state.CreateMaterialPopupPending = true;
+            }
+            if (ImGui::MenuItem("Create Tileset"))
+            {
+                state.CreateTilesetParentRelativePath = folderRelativePath;
+                CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
+                state.CreateTilesetPopupPending = true;
+            }
+            if (ImGui::MenuItem("Create Tile Palette"))
+            {
+                state.CreateTilePaletteParentRelativePath = folderRelativePath;
+                CopyTextToBuffer(state.CreateTilePaletteNameBuffer, "New Tile Palette");
+                state.CreateTilePalettePopupPending = true;
+            }
+            if (ImGui::MenuItem("Create Audio Mixer"))
+            {
+                state.CreateAudioMixerParentRelativePath = folderRelativePath;
+                CopyTextToBuffer(state.CreateAudioMixerNameBuffer, "New Audio Mixer");
+                state.CreateAudioMixerPopupPending = true;
+            }
+            if (ImGui::MenuItem("Create Input Actions"))
+            {
+                state.CreateInputActionsParentRelativePath = folderRelativePath;
+                CopyTextToBuffer(state.CreateInputActionsNameBuffer, "New Input Actions");
+                state.CreateInputActionsPopupPending = true;
+            }
+            if (ImGui::MenuItem("Create Animation Clip"))
+            {
+                state.CreateAnimationClipParentRelativePath = folderRelativePath;
+                CopyTextToBuffer(state.CreateAnimationClipNameBuffer, "New Animation Clip");
+                state.CreateAnimationClipPopupPending = true;
+            }
+            if (ImGui::MenuItem("Create Animator Controller"))
+            {
+                state.CreateAnimatorControllerParentRelativePath = folderRelativePath;
+                CopyTextToBuffer(state.CreateAnimatorControllerNameBuffer, "New Animator Controller");
+                state.CreateAnimatorControllerPopupPending = true;
+            }
+            if (ImGui::MenuItem("Create Native Script"))
+            {
+                state.CreateNativeScriptParentRelativePath = folderRelativePath;
+                CopyTextToBuffer(state.CreateNativeScriptClassNameBuffer, "NewNativeScript");
+                state.CreateNativeScriptPopupPending = true;
+            }
+
+            if (!isRoot)
+            {
+                ImGui::Separator();
+                if (ImGui::MenuItem("Rename"))
+                {
+                    state.FolderPopupPending = EditorProjectFolderPopup::Rename;
+                    CopyTextToBuffer(state.FolderPopupBuffer, folderName.c_str());
+                }
+                if (ImGui::MenuItem("Delete"))
+                {
+                    if (ProjectAssetOperations::DeleteFolderInAssets(assetsDirectory, folderRelativePath))
+                    {
+                        InvalidateProjectDirectoryCache();
+                        if (state.ActiveFolderRelativePath == folderRelativePath ||
+                            (!state.ActiveFolderRelativePath.empty() && state.ActiveFolderRelativePath.generic_string().rfind(folderRelativePath.generic_string() + "/", 0) == 0))
+                        {
+                            setActiveFolder(folderRelativePath.parent_path());
+                        }
+                        LT_INFO("Deleted folder {}", folderRelativePath.generic_string());
+                    }
+                }
+            }
+
+            ImGui::EndPopup();
+        };
+
+        const auto acceptFolderDropTarget = [&](const std::filesystem::path& folderRelativePath) {
+            if (!ImGui::BeginDragDropTarget())
+                return;
+
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kAssetMultiSelectionPayload))
+            {
+                const std::vector<std::string> keys = ParseAssetKeyListPayload(payload->Data, payload->DataSize);
+                MoveAssetListToTargetFolder(keys, folderRelativePath);
+            }
+            else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
+            {
+                const char* key = static_cast<const char*>(payload->Data);
+                MoveAssetOrFolderToTargetFolder(key, folderRelativePath);
+            }
+            else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(assetMovePayloadId))
+            {
+                const char* key = static_cast<const char*>(payload->Data);
+                MoveAssetOrFolderToTargetFolder(key, folderRelativePath);
+            }
+            else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(audioPayloadId))
+            {
+                const char* key = static_cast<const char*>(payload->Data);
+                MoveAssetOrFolderToTargetFolder(key, folderRelativePath);
+            }
+            else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(fontPayloadId))
+            {
+                const char* key = static_cast<const char*>(payload->Data);
+                MoveAssetOrFolderToTargetFolder(key, folderRelativePath);
+            }
+            else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSceneEntityPayload))
+            {
+                const auto* entity = static_cast<const entt::entity*>(payload->Data);
+                if (entity && onCreatePrefabFromSceneEntityRequested)
+                    onCreatePrefabFromSceneEntityRequested(*entity, folderRelativePath);
+            }
+
+            ImGui::EndDragDropTarget();
+        };
+
+        std::function<void(const std::filesystem::path&, bool)> drawFolderNode = [&](const std::filesystem::path& relativePath, const bool isRoot) {
+            const std::string displayName = isRoot ? std::string("Assets") : relativePath.filename().string();
+            const std::string folderStateKey = relativePath.generic_string();
+            const bool selected = relativePath == state.ActiveFolderRelativePath;
+            bool folderExpanded = isRoot ? state.AssetsRootExpanded : true;
+            if (!isRoot)
+            {
+                if (const auto expandedStateIt = state.ExpandedFolderState.find(folderStateKey); expandedStateIt != state.ExpandedFolderState.end())
+                    folderExpanded = expandedStateIt->second;
+            }
+
+            const bool previousFolderExpanded = folderExpanded;
+            ImGui::SetNextItemOpen(folderExpanded, ImGuiCond_Always);
+            const float folderIndentX = ImGui::GetCursorScreenPos().x;
+            const std::string label = isRoot
+                ? (BadgePadLabel(displayName) + "###ProjectFolderRoot")
+                : (BadgePadLabel(displayName) + "###ProjectFolder_" + folderStateKey);
+            const bool nodeOpen = ImGui::TreeNodeEx(label.c_str(),
+                ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_FramePadding |
+                (selected ? ImGuiTreeNodeFlags_Selected : ImGuiTreeNodeFlags_None));
+            DrawAssetTypeBadge(kBadgeFolder, folderIndentX);
+
+            if (isRoot)
+            {
+                state.AssetsRootExpanded = nodeOpen;
+                if (state.AssetsRootExpanded != previousFolderExpanded)
                     state.TreeExpansionStateChanged = true;
             }
-        }
-        if (assetsRootOpen)
-        {
+            else
+            {
+                state.ExpandedFolderState[folderStateKey] = nodeOpen;
+                if (nodeOpen != previousFolderExpanded)
+                    state.TreeExpansionStateChanged = true;
+            }
+
+            if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
+                setActiveFolder(relativePath);
+
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_RectOnly))
+                state.HoveredFolderRelativePathForExternalDrop = relativePath;
+
+            beginFolderContextMenu(relativePath, displayName, isRoot);
+            acceptFolderDropTarget(relativePath);
+
+            if (!isRoot && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
             {
-                state.HoveredFolderRelativePathForExternalDrop.clear();
+                const std::string assetKey = "Assets/" + relativePath.generic_string();
+                ImGui::SetDragDropPayload(assetMovePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                ImGui::Text("%s", displayName.c_str());
+                ImGui::EndDragDropSource();
             }
 
-            if (ImGui::BeginPopupContextItem())
+            if (nodeOpen)
             {
-                state.FolderPopupParent = "";
-                if (ImGui::MenuItem("Create Folder"))
+                const std::vector<ProjectAssetTreeEntry>& childEntries = GetCachedProjectDirectoryEntries(assetsDirectory, relativePath);
+                for (const ProjectAssetTreeEntry& childEntry : childEntries)
                 {
-                    state.FolderPopupPending = EditorProjectFolderPopup::Create;
-                    CopyTextToBuffer(state.FolderPopupBuffer, "New Folder");
+                    if (childEntry.IsDirectory)
+                        drawFolderNode(childEntry.RelativePath, false);
                 }
-                if (ImGui::MenuItem("Create Scene") && onCreateSceneRequested)
-                    onCreateSceneRequested("");
-                if (ImGui::MenuItem("Create Material"))
-                {
-                    state.CreateMaterialParentRelativePath = "";
-                    CopyTextToBuffer(state.CreateMaterialNameBuffer, "New Material");
-                    state.CreateMaterialPopupPending = true;
-                }
-                if (ImGui::MenuItem("Create Tile Palette"))
-                {
-                    state.CreateTilePaletteParentRelativePath = "";
-                    CopyTextToBuffer(state.CreateTilePaletteNameBuffer, "New Tile Palette");
-                    state.CreateTilePalettePopupPending = true;
-                }
-                if (ImGui::MenuItem("Create Audio Mixer"))
-                {
-                    state.CreateAudioMixerParentRelativePath = "";
-                    CopyTextToBuffer(state.CreateAudioMixerNameBuffer, "New Audio Mixer");
-                    state.CreateAudioMixerPopupPending = true;
-                }
-                if (ImGui::MenuItem("Create Input Actions"))
-                {
-                    state.CreateInputActionsParentRelativePath = "";
-                    CopyTextToBuffer(state.CreateInputActionsNameBuffer, "New Input Actions");
-                    state.CreateInputActionsPopupPending = true;
-                }
-                if (ImGui::MenuItem("Create Animation Clip"))
-                {
-                    state.CreateAnimationClipParentRelativePath = "";
-                    CopyTextToBuffer(state.CreateAnimationClipNameBuffer, "New Animation Clip");
-                    state.CreateAnimationClipPopupPending = true;
-                }
-                if (ImGui::MenuItem("Create Animator Controller"))
-                {
-                    state.CreateAnimatorControllerParentRelativePath = "";
-                    CopyTextToBuffer(state.CreateAnimatorControllerNameBuffer, "New Animator Controller");
-                    state.CreateAnimatorControllerPopupPending = true;
-                }
-                if (ImGui::MenuItem("Create Native Script"))
-                {
-                    state.CreateNativeScriptParentRelativePath = "";
-                    CopyTextToBuffer(state.CreateNativeScriptClassNameBuffer, "NewNativeScript");
-                    state.CreateNativeScriptPopupPending = true;
-                }
-                ImGui::EndPopup();
+                ImGui::TreePop();
             }
+        };
 
-            if (ImGui::BeginDragDropTarget())
-            {
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kAssetMultiSelectionPayload))
+        std::function<void(const std::filesystem::path&, std::vector<ProjectGridEntry>&)> appendGridEntries =
+            [&](const std::filesystem::path& relativePath, std::vector<ProjectGridEntry>& output) {
+                const std::vector<ProjectAssetTreeEntry>& entries = GetCachedProjectDirectoryEntries(assetsDirectory, relativePath);
+                std::unordered_map<std::string, uint8_t> scriptPairPresenceByBasePath;
+                scriptPairPresenceByBasePath.reserve(entries.size());
+                for (const ProjectAssetTreeEntry& entry : entries)
                 {
-                    const std::vector<std::string> keys = ParseAssetKeyListPayload(payload->Data, payload->DataSize);
-                    MoveAssetListToTargetFolder(keys, "");
+                    if (entry.IsDirectory || !IsNativeScriptExtensionLower(entry.LowerExtension))
+                        continue;
+                    const std::filesystem::path scriptBaseRelativePath = entry.RelativePath.parent_path() / std::filesystem::path(entry.FileName).stem();
+                    const std::string scriptBaseKey = scriptBaseRelativePath.generic_string();
+                    uint8_t& presenceBits = scriptPairPresenceByBasePath[scriptBaseKey];
+                    if (entry.LowerExtension == ".h")
+                        presenceBits |= kScriptPairHeaderBit;
+                    else if (entry.LowerExtension == ".cpp")
+                        presenceBits |= kScriptPairSourceBit;
                 }
-                else
-                if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(texturePayloadId))
-                {
-                    const char* key = static_cast<const char*>(payload->Data);
-                    MoveAssetOrFolderToTargetFolder(key, "");
-                }
-                else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(assetMovePayloadId))
-                {
-                    const char* key = static_cast<const char*>(payload->Data);
-                    MoveAssetOrFolderToTargetFolder(key, "");
-                }
-                else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(audioPayloadId))
-                {
-                    const char* key = static_cast<const char*>(payload->Data);
-                    MoveAssetOrFolderToTargetFolder(key, "");
-                }
-                else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(fontPayloadId))
-                {
-                    const char* key = static_cast<const char*>(payload->Data);
-                    MoveAssetOrFolderToTargetFolder(key, "");
-                }
-                else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSceneEntityPayload))
-                {
-                    const auto* entity = static_cast<const entt::entity*>(payload->Data);
-                    if (entity && onCreatePrefabFromSceneEntityRequested)
-                        onCreatePrefabFromSceneEntityRequested(*entity, "");
-                }
-                ImGui::EndDragDropTarget();
-            }
 
-            DrawAssetTree(assetsDirectory,
-                          "",
-                          state,
-                          selectedEntity,
-                          selectedTextureAssetKey,
-                          cachedTextureAsset,
-                          selectedMaterialAssetKey,
-                          cachedMaterialAsset,
-                          selectedNativeScriptAssetKey,
-                          selectedPrefabAssetKey,
-                          selectedTilesetAssetKey,
-                          selectedAudioMixerAssetKey,
-                          selectedInputActionsAssetKey,
-                          selectedAnimationClipAssetKey,
-                          selectedAnimatorControllerAssetKey,
-                          texturePayloadId,
-                          audioPayloadId,
-                          assetMovePayloadId,
-                          scenePayloadId,
-                          materialPayloadId,
-                          prefabPayloadId,
-                          shaderPayloadId,
-                          fontPayloadId,
-                          onSceneActivated,
-                          onCreateSceneRequested,
-                          onCreateMaterialRequested,
-                          onCreateTilesetRequested,
-                          onCreateAudioMixerRequested,
-                          onCreateInputActionsRequested,
-                          onCreateAnimationClipRequested,
-                          onCreateAnimatorControllerRequested,
-                          onCreatePrefabFromSceneEntityRequested,
-                          onPrefabOpened,
-                          onPrefabInstantiated,
-                          onSetDefaultSceneRequested,
-                          onAssetRenamed,
-                          onDeleteSceneAssetsRequested,
-                          onNativeScriptAssetActivated);
-            ImGui::TreePop();
-        }
-        else if (searchActive)
+                std::unordered_set<std::string> renderedScriptBasePaths;
+                for (const ProjectAssetTreeEntry& entry : entries)
+                {
+                    if (entry.IsDirectory)
+                    {
+                        const bool directoryVisible = !searchActive || MatchesProjectSearchFilter(entry.FileName) || DirectoryContainsProjectSearchMatch(assetsDirectory, entry.RelativePath);
+                        if (!directoryVisible)
+                            continue;
+
+                        ProjectGridEntry folderEntry;
+                        folderEntry.Entry = entry;
+                        folderEntry.DisplayName = entry.FileName;
+                        folderEntry.PrimaryAssetKey = entry.AssetKey;
+                        folderEntry.Badge = &kBadgeFolder;
+                        folderEntry.IsDirectory = true;
+                        output.push_back(std::move(folderEntry));
+
+                        if (searchActive)
+                            appendGridEntries(entry.RelativePath, output);
+                        continue;
+                    }
+
+                    if (IsNativeScriptExtensionLower(entry.LowerExtension))
+                    {
+                        const std::filesystem::path scriptBaseRelativePath = entry.RelativePath.parent_path() / entry.RelativePath.stem();
+                        const std::string scriptBaseKey = scriptBaseRelativePath.generic_string();
+                        if (renderedScriptBasePaths.find(scriptBaseKey) != renderedScriptBasePaths.end())
+                            continue;
+
+                        const auto scriptPairPresenceIt = scriptPairPresenceByBasePath.find(scriptBaseKey);
+                        const bool hasScriptPair =
+                            scriptPairPresenceIt != scriptPairPresenceByBasePath.end() &&
+                            (scriptPairPresenceIt->second & (kScriptPairHeaderBit | kScriptPairSourceBit)) ==
+                                (kScriptPairHeaderBit | kScriptPairSourceBit);
+                        if (hasScriptPair)
+                        {
+                            const std::filesystem::path headerRelativePath = scriptBaseRelativePath.string() + ".h";
+                            const std::filesystem::path sourceRelativePath = scriptBaseRelativePath.string() + ".cpp";
+                            const std::string sourceAssetKey = "Assets/" + sourceRelativePath.generic_string();
+                            const std::string headerAssetKey = "Assets/" + headerRelativePath.generic_string();
+                            const std::string scriptBaseName = scriptBaseRelativePath.stem().string();
+                            const bool matchesSearch = !searchActive ||
+                                MatchesProjectSearchFilter(scriptBaseName) ||
+                                MatchesProjectSearchFilter(sourceAssetKey) ||
+                                MatchesProjectSearchFilter(headerAssetKey);
+                            renderedScriptBasePaths.insert(scriptBaseKey);
+                            if (!matchesSearch)
+                                continue;
+
+                            ProjectGridEntry scriptEntry;
+                            scriptEntry.Entry = entry;
+                            scriptEntry.DisplayName = scriptBaseName + " [Native Script]";
+                            scriptEntry.PrimaryAssetKey = sourceAssetKey;
+                            scriptEntry.SecondaryAssetKey = headerAssetKey;
+                            scriptEntry.Badge = &kBadgeScript;
+                            scriptEntry.IsNativeScriptFile = true;
+                            scriptEntry.IsScriptPair = true;
+                            scriptEntry.HasPairedScriptFile = true;
+                            output.push_back(std::move(scriptEntry));
+                            continue;
+                        }
+                    }
+
+                    const bool isTexture = IsTextureExtensionLower(entry.LowerExtension);
+                    const bool isScene = IsSceneFileNameLower(entry.LowerFileName);
+                    const bool isMaterial = IsMaterialFileNameLower(entry.LowerFileName);
+                    const bool isTileset = IsTilesetFileNameLower(entry.LowerFileName);
+                    const bool isTilePalette = IsTilePaletteFileNameLower(entry.LowerFileName);
+                    const bool isAudioMixer = IsAudioMixerFileNameLower(entry.LowerFileName);
+                    const bool isInputActions = IsInputActionsFileNameLower(entry.LowerFileName);
+                    const bool isAnimationClip = IsAnimationClipFileNameLower(entry.LowerFileName);
+                    const bool isAnimatorController = IsAnimatorControllerFileNameLower(entry.LowerFileName);
+                    const bool isPrefab = IsPrefabFileNameLower(entry.LowerFileName);
+                    const bool isShader = IsShaderExtensionLower(entry.LowerExtension);
+                    const bool isAudio = IsAudioExtensionLower(entry.LowerExtension);
+                    const bool isFont = IsFontExtensionLower(entry.LowerExtension);
+                    const bool isNativeScriptFile = IsNativeScriptExtensionLower(entry.LowerExtension);
+                    const bool hasPairedScriptFile = isNativeScriptFile && ([&]() {
+                        const std::filesystem::path scriptBaseRelativePath = entry.RelativePath.parent_path() / entry.RelativePath.stem();
+                        const auto scriptPairPresenceIt = scriptPairPresenceByBasePath.find(scriptBaseRelativePath.generic_string());
+                        return scriptPairPresenceIt != scriptPairPresenceByBasePath.end() &&
+                               (scriptPairPresenceIt->second & (kScriptPairHeaderBit | kScriptPairSourceBit)) ==
+                                   (kScriptPairHeaderBit | kScriptPairSourceBit);
+                    })();
+                    const std::string displayName = isNativeScriptFile
+                        ? BuildScriptAssetDisplayName(entry.AbsolutePath)
+                        : GetAssetDisplayName(entry.AbsolutePath);
+                    if (searchActive && !EntryMatchesProjectSearchFilter(entry, displayName))
+                        continue;
+
+                    ProjectGridEntry fileEntry;
+                    fileEntry.Entry = entry;
+                    fileEntry.DisplayName = displayName;
+                    fileEntry.PrimaryAssetKey = entry.AssetKey;
+                    fileEntry.IsTexture = isTexture;
+                    fileEntry.IsScene = isScene;
+                    fileEntry.IsMaterial = isMaterial;
+                    fileEntry.IsTileset = isTileset;
+                    fileEntry.IsTilePalette = isTilePalette;
+                    fileEntry.IsAudioMixer = isAudioMixer;
+                    fileEntry.IsInputActions = isInputActions;
+                    fileEntry.IsAnimationClip = isAnimationClip;
+                    fileEntry.IsAnimatorController = isAnimatorController;
+                    fileEntry.IsPrefab = isPrefab;
+                    fileEntry.IsShader = isShader;
+                    fileEntry.IsAudio = isAudio;
+                    fileEntry.IsFont = isFont;
+                    fileEntry.IsNativeScriptFile = isNativeScriptFile;
+                    fileEntry.HasPairedScriptFile = hasPairedScriptFile;
+                    if (isTexture)
+                    {
+                        const Assets::SpriteImportSettings& spriteSettings = GetCachedSpriteImportSettings(entry.AssetKey);
+                        if (spriteSettings.Mode == Assets::SpriteImportSettings::SpriteMode::Multiple && !spriteSettings.SubSprites.empty())
+                        {
+                            const auto& firstSubSprite = spriteSettings.SubSprites.front();
+                            fileEntry.HasThumbnailSubRect = true;
+                            fileEntry.ThumbnailRectPixels = firstSubSprite.RectPixels;
+                        }
+                    }
+                    fileEntry.Badge = &resolveGridBadge(fileEntry);
+                    output.push_back(std::move(fileEntry));
+                }
+            };
+
+        ImGui::BeginChild("##ProjectBrowserRegion", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+
+        if (ImGui::BeginChild("##ProjectFolderPane", ImVec2(260.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar))
         {
-            ImGui::TextColored(ImVec4(0.78f, 0.82f, 0.90f, 1.0f), "No assets match the current filter.");
+            ImGui::TextUnformatted("Folders");
+            ImGui::Separator();
+            drawFolderNode("", true);
         }
+        ImGui::EndChild();
+
+        ImGui::SameLine();
+
+        if (ImGui::BeginChild("##ProjectGridPane", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar))
+        {
+            if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup))
+                state.HoveredFolderRelativePathForExternalDrop = state.ActiveFolderRelativePath;
+
+            if (!state.ActiveFolderRelativePath.empty())
+            {
+                if (ImGui::Button("Up"))
+                    setActiveFolder(state.ActiveFolderRelativePath.parent_path());
+                ImGui::SameLine();
+            }
+
+            if (ImGui::SmallButton("Assets"))
+                setActiveFolder("");
+
+            const std::filesystem::path activeFolderPathForBreadcrumbs = state.ActiveFolderRelativePath;
+            std::optional<std::filesystem::path> pendingBreadcrumbFolder;
+            std::filesystem::path breadcrumbPath;
+            for (const std::filesystem::path& segment : activeFolderPathForBreadcrumbs)
+            {
+                breadcrumbPath /= segment;
+                ImGui::SameLine();
+                ImGui::TextUnformatted("/");
+                ImGui::SameLine();
+                ImGui::PushID(breadcrumbPath.generic_string().c_str());
+                if (ImGui::SmallButton(segment.string().c_str()))
+                    pendingBreadcrumbFolder = breadcrumbPath;
+                ImGui::PopID();
+            }
+
+            if (pendingBreadcrumbFolder.has_value())
+                setActiveFolder(*pendingBreadcrumbFolder);
+
+            ImGui::Separator();
+
+            std::vector<ProjectGridEntry> gridEntries;
+            appendGridEntries(state.ActiveFolderRelativePath, gridEntries);
+
+            std::vector<std::string> visibleAssetKeys;
+            visibleAssetKeys.reserve(gridEntries.size());
+            for (const ProjectGridEntry& entry : gridEntries)
+            {
+                if (!entry.IsDirectory && !entry.PrimaryAssetKey.empty())
+                    visibleAssetKeys.push_back(entry.PrimaryAssetKey);
+            }
+
+            if (gridEntries.empty())
+            {
+                ImGui::Dummy(ImVec2(0.0f, 8.0f));
+                ImGui::TextColored(ImVec4(0.78f, 0.82f, 0.90f, 1.0f),
+                    searchActive ? "No assets match the current filter in this location." : "This folder is empty.");
+            }
+            else
+            {
+                const float gridScale = state.GridScale;
+                const float tileWidth = 168.0f * gridScale;
+                const float tileSpacing = 14.0f * gridScale;
+                const float previewInset = 10.0f * gridScale;
+                const float previewTopOffset = 24.0f * gridScale;
+                const float previewHeight = 96.0f * gridScale;
+                const float badgeOffsetX = 10.0f * gridScale;
+                const float badgeOffsetY = 10.0f * gridScale;
+                const float badgePadX = 7.0f * gridScale;
+                const float badgePadY = 4.0f * gridScale;
+                const float tileTextPadX = 12.0f * gridScale;
+                const float textBlockTopPadding = 10.0f * gridScale;
+                const float textLineGap = std::max(1.0f, 2.0f * gridScale);
+                const float textBlockBottomPadding = 12.0f * gridScale;
+                const float badgeFontSize = ImGui::GetFontSize();
+                const float nameFontSize = ImGui::GetFontSize();
+                const float pathFontSize = ImGui::GetFontSize();
+                const float nameLineHeight = ImGui::GetTextLineHeight();
+                const float pathLineHeight = ImGui::GetTextLineHeight();
+                const float tileHeight =
+                    previewInset + previewTopOffset + previewHeight + textBlockTopPadding +
+                    nameLineHeight + textLineGap + pathLineHeight + textBlockBottomPadding;
+                const float availableWidth = ImGui::GetContentRegionAvail().x;
+                const int columns = std::max(1, static_cast<int>((availableWidth + tileSpacing) / (tileWidth + tileSpacing)));
+                const auto fitTextToWidth = [](const std::string& text, const float maxWidth) {
+                    if (text.empty() || maxWidth <= 0.0f)
+                        return std::string{};
+
+                    if (ImGui::CalcTextSize(text.c_str()).x <= maxWidth)
+                        return text;
+
+                    constexpr const char* ellipsis = "...";
+                    const float ellipsisWidth = ImGui::CalcTextSize(ellipsis).x;
+                    if (ellipsisWidth >= maxWidth)
+                        return std::string(ellipsis);
+
+                    std::string fitted = text;
+                    while (!fitted.empty())
+                    {
+                        fitted.pop_back();
+                        const std::string candidate = fitted + ellipsis;
+                        if (ImGui::CalcTextSize(candidate.c_str()).x <= maxWidth)
+                            return candidate;
+                    }
+
+                    return std::string(ellipsis);
+                };
+
+                for (size_t index = 0; index < gridEntries.size(); ++index)
+                {
+                    ProjectGridEntry& entry = gridEntries[index];
+                    if (index > 0 && static_cast<int>(index % static_cast<size_t>(columns)) != 0)
+                        ImGui::SameLine(0.0f, tileSpacing);
+
+                    ImGui::PushID(static_cast<int>(index));
+                    const ImVec2 tileMin = ImGui::GetCursorScreenPos();
+                    ImGui::InvisibleButton("##AssetTile", ImVec2(tileWidth, tileHeight));
+                    const bool hovered = ImGui::IsItemHovered();
+                    const bool releasedOnItemWithoutDrag =
+                        hovered && ImGui::IsMouseReleased(0) && (ImGui::GetDragDropPayload() == nullptr);
+                    const bool isMultiSelected = !entry.IsDirectory &&
+                        std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey) != state.MultiSelectedAssetKeys.end();
+                    const bool isSelected = !entry.IsDirectory && (isGridEntryPrimarySelected(entry) || isMultiSelected);
+
+                    const ImVec2 tileMax(tileMin.x + tileWidth, tileMin.y + tileHeight);
+                    ImDrawList* drawList = ImGui::GetWindowDrawList();
+                    const auto drawCrispText = [&](const ImVec2& pos, const ImU32 color, const std::string& text) {
+                        drawList->AddText(pos, color, text.c_str());
+                    };
+                    const ImU32 fillColor = isSelected
+                        ? IM_COL32(44, 79, 138, 240)
+                        : (hovered ? IM_COL32(29, 39, 60, 240) : IM_COL32(19, 26, 40, 225));
+                    const ImU32 borderColor = isSelected
+                        ? IM_COL32(92, 145, 230, 255)
+                        : IM_COL32(56, 72, 104, 210);
+                    drawList->AddRectFilled(tileMin, tileMax, fillColor, 8.0f);
+                    drawList->AddRect(tileMin, tileMax, borderColor, 8.0f, 0, isSelected ? 2.0f : 1.0f);
+
+                    const ImVec2 previewMin(tileMin.x + previewInset, tileMin.y + previewInset + previewTopOffset);
+                    const ImVec2 previewMax(tileMax.x - previewInset, previewMin.y + previewHeight);
+                    drawList->AddRectFilled(previewMin, previewMax, IM_COL32(13, 18, 29, 240), 6.0f);
+                    drawList->AddRect(previewMin, previewMax, IM_COL32(48, 61, 90, 220), 6.0f, 0, 1.0f);
+
+                    const AssetTypeBadgeInfo& badge = *entry.Badge;
+                    const ImVec2 badgeTextSize = ImGui::GetFont()->CalcTextSizeA(badgeFontSize, 100000.0f, 0.0f, badge.Label);
+                    const ImVec2 badgeMin(tileMin.x + badgeOffsetX, tileMin.y + badgeOffsetY);
+                    const ImVec2 badgeMax(badgeMin.x + badgeTextSize.x + badgePadX * 2.0f, badgeMin.y + badgeTextSize.y + badgePadY * 2.0f);
+                    drawList->AddRectFilled(badgeMin, badgeMax, badge.FillColor, 5.0f);
+                    drawList->AddRect(badgeMin, badgeMax, badge.BorderColor, 5.0f, 0, 1.0f);
+                    drawList->AddText(ImVec2(badgeMin.x + badgePadX, badgeMin.y + badgePadY), badge.TextColor, badge.Label);
+
+                    if (entry.IsTexture)
+                    {
+                        if (Assets::TextureAsset::Ptr textureAsset = GetCachedThumbnailTextureAsset(entry.PrimaryAssetKey))
+                        {
+                            if (const auto& textureHandle = textureAsset->GetTexture(); textureHandle)
+                            {
+                                const float textureWidth = static_cast<float>(std::max(1u, textureHandle->GetWidth()));
+                                const float textureHeight = static_cast<float>(std::max(1u, textureHandle->GetHeight()));
+                                ImVec2 uvMin = entry.ThumbnailUvMin;
+                                ImVec2 uvMax = entry.ThumbnailUvMax;
+                                if (entry.HasThumbnailSubRect)
+                                {
+                                    const glm::vec4 subUvs = Assets::ComputeSubSpriteUvs(
+                                        entry.ThumbnailRectPixels,
+                                        textureHandle->GetWidth(),
+                                        textureHandle->GetHeight());
+                                    uvMin = ImVec2(subUvs.x, 1.0f - subUvs.y);
+                                    uvMax = ImVec2(subUvs.z, 1.0f - subUvs.w);
+                                }
+                                const float previewWidth = previewMax.x - previewMin.x;
+                                const float previewInnerHeight = previewMax.y - previewMin.y;
+                                const float scale = std::min(previewWidth / textureWidth, previewInnerHeight / textureHeight);
+                                const float drawWidth = std::max(1.0f, textureWidth * scale);
+                                const float drawHeight = std::max(1.0f, textureHeight * scale);
+                                const ImVec2 imageMin(
+                                    previewMin.x + (previewWidth - drawWidth) * 0.5f,
+                                    previewMin.y + (previewInnerHeight - drawHeight) * 0.5f);
+                                const ImVec2 imageMax(imageMin.x + drawWidth, imageMin.y + drawHeight);
+                                drawList->AddImage(
+                                    (ImTextureID)(void*)(uintptr_t)textureHandle->GetRendererID(),
+                                    imageMin,
+                                    imageMax,
+                                    uvMin,
+                                    uvMax,
+                                    IM_COL32_WHITE);
+                            }
+                        }
+                    }
+                    else if (entry.IsDirectory)
+                    {
+                        const char* folderGlyph = "DIR";
+                        const ImVec2 glyphSize = ImGui::CalcTextSize(folderGlyph);
+                        drawList->AddText(
+                            ImVec2(previewMin.x + (previewMax.x - previewMin.x - glyphSize.x) * 0.5f,
+                                   previewMin.y + (previewMax.y - previewMin.y - glyphSize.y) * 0.5f),
+                            IM_COL32(130, 170, 235, 255),
+                            folderGlyph);
+                    }
+                    else
+                    {
+                        drawList->AddText(ImVec2(previewMin.x + tileTextPadX, previewMin.y + tileTextPadX), badge.TextColor, badge.Label);
+                    }
+
+                    const std::string secondaryText = entry.IsDirectory
+                        ? (entry.Entry.RelativePath.empty() ? std::string("Assets") : std::string("Assets/") + entry.Entry.RelativePath.generic_string())
+                        : (entry.Entry.RelativePath.parent_path().empty() ? std::string("Assets") : std::string("Assets/") + entry.Entry.RelativePath.parent_path().generic_string());
+                    const float availableTextWidth = std::max(0.0f, tileWidth - tileTextPadX * 2.0f);
+                    const std::string fittedDisplayName = fitTextToWidth(entry.DisplayName, availableTextWidth);
+                    const std::string fittedSecondaryText = fitTextToWidth(secondaryText, availableTextWidth);
+                    const float nameTextY = previewMax.y + textBlockTopPadding;
+                    const float pathTextY = nameTextY + nameLineHeight + textLineGap;
+                    drawList->PushClipRect(tileMin, tileMax, true);
+                    drawCrispText(ImVec2(tileMin.x + tileTextPadX, nameTextY), IM_COL32(230, 236, 245, 255), fittedDisplayName);
+                    drawCrispText(ImVec2(tileMin.x + tileTextPadX, pathTextY), IM_COL32(145, 156, 176, 255), fittedSecondaryText);
+                    drawList->PopClipRect();
+
+                    if (entry.IsDirectory)
+                    {
+                        if (hovered)
+                            state.HoveredFolderRelativePathForExternalDrop = entry.Entry.RelativePath;
+
+                        if (hovered && ImGui::IsMouseDoubleClicked(0))
+                            setActiveFolder(entry.Entry.RelativePath);
+
+                        beginFolderContextMenu(entry.Entry.RelativePath, entry.Entry.FileName, false);
+                        acceptFolderDropTarget(entry.Entry.RelativePath);
+
+                        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                        {
+                            const std::string assetKey = entry.PrimaryAssetKey;
+                            ImGui::SetDragDropPayload(assetMovePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                            ImGui::Text("%s", entry.DisplayName.c_str());
+                            ImGui::EndDragDropSource();
+                        }
+                    }
+                    else
+                    {
+                        if (releasedOnItemWithoutDrag)
+                        {
+                            const ImGuiIO& io = ImGui::GetIO();
+                            const bool shiftPressed = io.KeyShift;
+                            const bool controlPressed = io.KeyCtrl;
+                            state.MultiSelectedSubSpriteKeys.clear();
+                            state.SubSpriteSelectionAnchorKey.clear();
+
+                            if (shiftPressed)
+                            {
+                                const auto findIndex = [&](const std::string& key) -> int32_t {
+                                    for (size_t selectionIndex = 0; selectionIndex < visibleAssetKeys.size(); ++selectionIndex)
+                                    {
+                                        if (visibleAssetKeys[selectionIndex] == key)
+                                            return static_cast<int32_t>(selectionIndex);
+                                    }
+                                    return -1;
+                                };
+
+                                const int32_t anchorIndex = findIndex(state.SelectionAnchorAssetKey);
+                                const int32_t clickedIndex = findIndex(entry.PrimaryAssetKey);
+                                if (!controlPressed)
+                                    state.MultiSelectedAssetKeys.clear();
+
+                                if (anchorIndex >= 0 && clickedIndex >= 0)
+                                {
+                                    const int32_t minIndex = std::min(anchorIndex, clickedIndex);
+                                    const int32_t maxIndex = std::max(anchorIndex, clickedIndex);
+                                    for (int32_t rangeIndex = minIndex; rangeIndex <= maxIndex; ++rangeIndex)
+                                    {
+                                        const std::string& rangeKey = visibleAssetKeys[static_cast<size_t>(rangeIndex)];
+                                        if (std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), rangeKey) == state.MultiSelectedAssetKeys.end())
+                                            state.MultiSelectedAssetKeys.push_back(rangeKey);
+                                    }
+                                }
+                                else if (std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey) == state.MultiSelectedAssetKeys.end())
+                                {
+                                    state.MultiSelectedAssetKeys.push_back(entry.PrimaryAssetKey);
+                                }
+
+                                setPrimarySelectionForGridEntry(entry);
+                            }
+                            else if (controlPressed)
+                            {
+                                const auto foundIt = std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey);
+                                const bool wasSelected = foundIt != state.MultiSelectedAssetKeys.end();
+                                if (wasSelected)
+                                {
+                                    state.MultiSelectedAssetKeys.erase(foundIt);
+                                    if (state.MultiSelectedAssetKeys.empty())
+                                        clearPrimaryAssetSelection();
+                                }
+                                else
+                                {
+                                    state.MultiSelectedAssetKeys.push_back(entry.PrimaryAssetKey);
+                                    setPrimarySelectionForGridEntry(entry);
+                                }
+                                state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            }
+                            else
+                            {
+                                state.MultiSelectedAssetKeys.clear();
+                                state.MultiSelectedAssetKeys.push_back(entry.PrimaryAssetKey);
+                                state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                                setPrimarySelectionForGridEntry(entry);
+                            }
+                        }
+
+                        if (entry.IsTexture && hovered && ImGui::IsMouseDoubleClicked(0))
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedTextureAssetKey = entry.PrimaryAssetKey;
+                        }
+                        else if (entry.IsScene && hovered && ImGui::IsMouseDoubleClicked(0) && onSceneActivated)
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedNativeScriptAssetKey.clear();
+                            onSceneActivated(entry.PrimaryAssetKey);
+                        }
+                        else if (entry.IsPrefab && hovered && ImGui::IsMouseDoubleClicked(0) && onPrefabOpened)
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedPrefabAssetKey = entry.PrimaryAssetKey;
+                            onPrefabOpened(entry.PrimaryAssetKey);
+                        }
+                        else if (entry.IsMaterial && hovered && ImGui::IsMouseDoubleClicked(0))
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedMaterialAssetKey = entry.PrimaryAssetKey;
+                        }
+                        else if (entry.IsTileset && hovered && ImGui::IsMouseDoubleClicked(0))
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedTilesetAssetKey = entry.PrimaryAssetKey;
+                        }
+                        else if (entry.IsAudioMixer && hovered && ImGui::IsMouseDoubleClicked(0))
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedAudioMixerAssetKey = entry.PrimaryAssetKey;
+                        }
+                        else if (entry.IsAnimationClip && hovered && ImGui::IsMouseDoubleClicked(0))
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedAnimationClipAssetKey = entry.PrimaryAssetKey;
+                        }
+                        else if (entry.IsAnimatorController && hovered && ImGui::IsMouseDoubleClicked(0))
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedAnimatorControllerAssetKey = entry.PrimaryAssetKey;
+                        }
+                        else if (entry.IsNativeScriptFile && hovered && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedNativeScriptAssetKey = entry.PrimaryAssetKey;
+                            onNativeScriptAssetActivated(entry.PrimaryAssetKey);
+                        }
+
+                        if (ImGui::BeginPopupContextItem())
+                        {
+                            if (entry.IsNativeScriptFile)
+                            {
+                                if (ImGui::MenuItem("Open Script") && onNativeScriptAssetActivated)
+                                    onNativeScriptAssetActivated(entry.PrimaryAssetKey);
+                                if (entry.HasPairedScriptFile)
+                                    ImGui::Separator();
+                            }
+
+                            if (entry.IsScene)
+                            {
+                                if (ImGui::MenuItem("Open Scene") && onSceneActivated)
+                                    onSceneActivated(entry.PrimaryAssetKey);
+                                if (ImGui::MenuItem("Set As Default Scene") && onSetDefaultSceneRequested)
+                                    onSetDefaultSceneRequested(entry.PrimaryAssetKey);
+                                ImGui::Separator();
+                            }
+
+                            if (entry.IsPrefab)
+                            {
+                                if (ImGui::MenuItem("Open Prefab") && onPrefabOpened)
+                                    onPrefabOpened(entry.PrimaryAssetKey);
+                                if (ImGui::MenuItem("Instantiate Prefab") && onPrefabInstantiated)
+                                    onPrefabInstantiated(entry.PrimaryAssetKey);
+                                ImGui::Separator();
+                            }
+
+                            if (ImGui::MenuItem(entry.HasPairedScriptFile ? "Rename Script Pair" : "Rename"))
+                            {
+                                state.RenameAssetRelativePath = entry.Entry.RelativePath;
+                                if (entry.HasPairedScriptFile)
+                                    CopyTextToBuffer(state.RenameAssetBuffer, entry.Entry.AbsolutePath.stem().string().c_str());
+                                else
+                                    CopyTextToBuffer(state.RenameAssetBuffer, entry.DisplayName.c_str());
+                                state.RenameAssetAsNativeScriptPair = entry.HasPairedScriptFile;
+                                state.RenameAssetPopupPending = true;
+                            }
+
+                            if (ImGui::MenuItem(entry.HasPairedScriptFile ? "Delete Script Pair" : "Delete"))
+                            {
+                                const bool deleteMultiSelection =
+                                    state.MultiSelectedAssetKeys.size() > 1 &&
+                                    std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey) != state.MultiSelectedAssetKeys.end();
+                                const bool removed = deleteMultiSelection
+                                    ? DeleteAssetKeysWithSceneHandling(assetsDirectory, state.MultiSelectedAssetKeys, onDeleteSceneAssetsRequested)
+                                    : DeleteAssetKeysWithSceneHandling(assetsDirectory, { entry.PrimaryAssetKey }, onDeleteSceneAssetsRequested);
+                                if (removed)
+                                {
+                                    state.MultiSelectedAssetKeys.clear();
+                                    state.SelectionAnchorAssetKey.clear();
+                                    state.MultiSelectedSubSpriteKeys.clear();
+                                    state.SubSpriteSelectionAnchorKey.clear();
+                                    clearPrimaryAssetSelection();
+                                    InvalidateProjectDirectoryCache();
+                                    LT_INFO("Deleted asset {}", entry.PrimaryAssetKey);
+                                }
+                            }
+
+                            ImGui::EndPopup();
+                        }
+
+                        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                        {
+                            const bool draggingMultiSelection =
+                                state.MultiSelectedAssetKeys.size() > 1 &&
+                                std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey) != state.MultiSelectedAssetKeys.end();
+                            if (draggingMultiSelection)
+                            {
+                                const std::string payloadText = EncodeAssetKeyListPayload(state.MultiSelectedAssetKeys);
+                                if (!payloadText.empty())
+                                {
+                                    ImGui::SetDragDropPayload(
+                                        kAssetMultiSelectionPayload,
+                                        payloadText.c_str(),
+                                        static_cast<uint32_t>(payloadText.size() + 1),
+                                        ImGuiCond_Once);
+                                }
+                                ImGui::Text("%zu assets", state.MultiSelectedAssetKeys.size());
+                            }
+                            else
+                            {
+                                if (entry.IsTexture)
+                                    ImGui::SetDragDropPayload(texturePayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                else if (entry.IsScene)
+                                    ImGui::SetDragDropPayload(scenePayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                else if (entry.IsPrefab)
+                                    ImGui::SetDragDropPayload(prefabPayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                else if (entry.IsMaterial)
+                                    ImGui::SetDragDropPayload(materialPayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                else if (entry.IsShader)
+                                    ImGui::SetDragDropPayload(shaderPayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                else if (entry.IsAudio)
+                                    ImGui::SetDragDropPayload(audioPayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                else if (entry.IsFont)
+                                    ImGui::SetDragDropPayload(fontPayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                else
+                                    ImGui::SetDragDropPayload(assetMovePayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                ImGui::Text("%s", entry.DisplayName.c_str());
+                            }
+                            ImGui::EndDragDropSource();
+                        }
+                    }
+
+                    ImGui::PopID();
+                }
+            }
+        }
+        ImGui::EndChild();
 
         ImGui::EndChild();
 
