@@ -1,0 +1,12 @@
+{
+  "formatVersion": 1,
+  "apiVersion": 1,
+  "coralManagedAssembly": "Coral.Managed.dll",
+  "coralManagedRuntimeConfig": "Coral.Managed.runtimeconfig.json",
+  "contractAssembly": "Limitless.Managed.dll",
+  "contractRuntimeConfig": "Limitless.Managed.runtimeconfig.json",
+  "scriptAssemblies": ["Limitless.Managed.TestScripts.dll", "TestProject.ManagedScripts.dll"],
+  "buildConfiguration": "Release",
+  "targetOS": "Windows",
+  "targetArchitecture": "x64"
+}

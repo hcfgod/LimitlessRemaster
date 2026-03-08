@@ -19,6 +19,7 @@
 #include "Graphics/Renderer.h"
 #include "Graphics/NativeRenderHandles.h"
 #include "Scene/Scene.h"
+#include "Scripting/ManagedScriptHost.h"
 #include "imgui/imgui.h"
 
 #include <SDL3/SDL_gamepad.h>
@@ -122,6 +123,29 @@ namespace Limitless::EditorInspectorPanel
             outDrop.UvMin = glm::vec2(uvs.x, uvs.y);
             outDrop.UvMax = glm::vec2(uvs.z, uvs.w);
             return true;
+        }
+
+        const char* GetScriptPropertyTypeLabel(ScriptPropertyType type)
+        {
+            switch (type)
+            {
+                case ScriptPropertyType::Float:
+                    return "Float";
+                case ScriptPropertyType::Integer:
+                    return "Integer";
+                case ScriptPropertyType::Boolean:
+                    return "Boolean";
+                case ScriptPropertyType::Vector3:
+                    return "Vector3";
+                case ScriptPropertyType::String:
+                    return "String";
+                case ScriptPropertyType::Entity:
+                    return "Entity";
+                case ScriptPropertyType::Prefab:
+                    return "Prefab";
+            }
+
+            return "Unknown";
         }
 
         std::vector<std::string> BuildAssetPickerKeysByType(Assets::AssetType assetType)
@@ -1589,9 +1613,94 @@ namespace Limitless::EditorInspectorPanel
         for (char& character : extension)
             character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
 
+        if (extension == ".cs")
+        {
+            const std::string selectedFileName = selectedPath.filename().string();
+            const std::string scriptClassName = selectedPath.stem().string();
+            const auto resolvedSelectedPath = Assets::ResolveAssetKeyToPath(selectedNativeScriptAssetKey);
+            const std::string resolvedClassName = ManagedScriptHost::ResolveDiscoveredClassName(scriptClassName);
+            const auto& snapshot = ManagedScriptHost::GetSnapshot();
+
+            const ManagedScriptHost::DiscoveredScriptClass* discoveredClass = nullptr;
+            if (!resolvedClassName.empty())
+            {
+                const auto discoveredIt = std::find_if(snapshot.Classes.begin(),
+                                                       snapshot.Classes.end(),
+                                                       [&](const ManagedScriptHost::DiscoveredScriptClass& candidate) {
+                                                           return candidate.FullName == resolvedClassName;
+                                                       });
+                if (discoveredIt != snapshot.Classes.end())
+                    discoveredClass = &(*discoveredIt);
+            }
+
+            ImGui::Text("C# Script: %s", selectedFileName.c_str());
+            ImGui::TextDisabled("Class: %s", scriptClassName.c_str());
+            ImGui::TextDisabled("Type: C# Source (.cs)");
+            ImGui::TextDisabled("Asset Key: %s", selectedNativeScriptAssetKey.c_str());
+            if (resolvedSelectedPath.IsSuccess())
+                ImGui::TextDisabled("Path: %s", resolvedSelectedPath.GetValue().string().c_str());
+            else
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Could not resolve selected script path.");
+
+            if (discoveredClass)
+            {
+                ImGui::TextDisabled("Discovered Class: %s", discoveredClass->FullName.c_str());
+                ImGui::TextDisabled("Assembly: %s", discoveredClass->AssemblyPath.filename().string().c_str());
+            }
+            else
+            {
+                const char* statusMessage = snapshot.HostInitialized
+                    ? "Managed class is not discovered in the active managed payload."
+                    : "Managed payload is not loaded in the editor yet.";
+                ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", statusMessage);
+            }
+
+            ImGui::Spacing();
+            if (ImGui::Button("Open Script", ImVec2(-1.0f, 0.0f)))
+                (void)EditorInspectorPanel::OpenNativeScriptEditorForAssetKey(selectedNativeScriptAssetKey);
+            if (ImGui::Button("Build Project Scripts", ImVec2(-1.0f, 0.0f)))
+            {
+                std::string buildStatusMessage;
+                const bool buildStarted = EditorInspectorPanel::BuildProjectNativeScripts(&buildStatusMessage);
+                if (!buildStatusMessage.empty())
+                {
+                    if (buildStarted)
+                        ImGui::SetTooltip("%s", buildStatusMessage.c_str());
+                }
+            }
+
+            std::string lastBuildFailure;
+            if (EditorInspectorPanel::GetLastNativeScriptBuildFailure(&lastBuildFailure) && !lastBuildFailure.empty())
+                ImGui::TextWrapped("%s", lastBuildFailure.c_str());
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Reflected Fields");
+            if (!discoveredClass)
+            {
+                const char* reflectedFieldsHint = snapshot.HostInitialized
+                    ? "Build project scripts to inspect managed reflected fields."
+                    : "Build project scripts to stage the editor managed payload and inspect reflected fields.";
+                ImGui::TextDisabled("%s", reflectedFieldsHint);
+            }
+            else if (discoveredClass->ReflectedFields.empty())
+            {
+                ImGui::TextDisabled("No public reflected fields were discovered for this managed script.");
+            }
+            else
+            {
+                for (const auto& field : discoveredClass->ReflectedFields)
+                {
+                    ImGui::Text("%s", field.Name.c_str());
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(%s)", GetScriptPropertyTypeLabel(field.Type));
+                }
+            }
+            return;
+        }
+
         if (extension != ".h" && extension != ".cpp")
         {
-            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Selected asset is not a native script file.");
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Selected asset is not a script file.");
             if (ImGui::Button("Clear Selection", ImVec2(160.0f, 0.0f)))
                 selectedNativeScriptAssetKey.clear();
             return;

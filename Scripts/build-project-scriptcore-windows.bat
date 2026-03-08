@@ -78,6 +78,7 @@ set "SDK_LIB_DIR=%TOOLCHAIN_ROOT%\SDK\lib\%BUILD_FOLDER%"
 set "RUNTIME_TEMPLATE_DIR=%TOOLCHAIN_ROOT%\RuntimeTemplates\%BUILD_FOLDER%"
 set "MANAGED_BUILD_SCRIPT=%TOOLCHAIN_ROOT%\Scripts\build-managed-runtime-windows.bat"
 set "OUTPUT_DIR=%TOOLCHAIN_ROOT%\Build\%BUILD_FOLDER%\Editor"
+set "PROJECT_LOCAL_OUTPUT_DIR=%PROJECT_ROOT%\Build\ScriptCore\%BUILD_FOLDER%"
 set "INTERMEDIATE_DIR=%TOOLCHAIN_ROOT%\Build\Intermediates\%BUILD_FOLDER%\ProjectScriptCore"
 set "OBJ_DIR=%INTERMEDIATE_DIR%\obj"
 set "DEP_DIR=%INTERMEDIATE_DIR%\dep"
@@ -327,7 +328,19 @@ if not exist "%MANAGED_BUILD_SCRIPT%" (
     exit /b 1
 )
 
-call "%MANAGED_BUILD_SCRIPT%" %CONFIGURATION% %PLATFORM% "%RUNTIME_TEMPLATE_DIR%"
+call "%MANAGED_BUILD_SCRIPT%" %CONFIGURATION% %PLATFORM% "%OUTPUT_DIR%" "%PROJECT_ROOT%"
+if errorlevel 1 (
+    echo Error: Failed to refresh managed runtime payload in "%OUTPUT_DIR%".
+    exit /b 1
+)
+
+call "%MANAGED_BUILD_SCRIPT%" %CONFIGURATION% %PLATFORM% "%PROJECT_LOCAL_OUTPUT_DIR%" "%PROJECT_ROOT%"
+if errorlevel 1 (
+    echo Error: Failed to refresh managed runtime payload in "%PROJECT_LOCAL_OUTPUT_DIR%".
+    exit /b 1
+)
+
+call "%MANAGED_BUILD_SCRIPT%" %CONFIGURATION% %PLATFORM% "%RUNTIME_TEMPLATE_DIR%" "%PROJECT_ROOT%"
 if errorlevel 1 (
     echo Error: Failed to refresh managed runtime payload in "%RUNTIME_TEMPLATE_DIR%".
     exit /b 1

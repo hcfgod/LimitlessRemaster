@@ -31,6 +31,11 @@ namespace Limitless::NativeScriptExternalEditor
         constexpr std::string_view kProjectName = "ProjectScriptCore.External";
         constexpr std::string_view kProjectFileName = "ProjectScriptCore.External.vcxproj";
         constexpr std::string_view kProjectFiltersFileName = "ProjectScriptCore.External.vcxproj.filters";
+        constexpr std::string_view kManagedProjectTypeGuid = "{9A19103F-16F7-4668-BE54-9A1E7A4F7556}";
+        constexpr std::string_view kManagedSolutionName = "ProjectManagedScripts.External.sln";
+        constexpr std::string_view kManagedProjectGuid = "{B4FC1D03-CB48-49A5-86D2-6C4193A7D905}";
+        constexpr std::string_view kEngineManagedProjectGuid = "{21149F17-6270-443C-9A14-1652E4A6D1CC}";
+        constexpr std::string_view kCoralManagedProjectGuid = "{E8E95A91-9894-4D58-B7E4-11DF55CE4993}";
 
         std::string TrimCopy(std::string value)
         {
@@ -132,6 +137,34 @@ namespace Limitless::NativeScriptExternalEditor
             if (errorCode || relativePath.empty())
                 relativePath = filePath;
             return ToWindowsPath(relativePath);
+        }
+
+        bool IsManagedScriptPath(const std::filesystem::path& scriptPath)
+        {
+            std::string extension = scriptPath.extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char character) {
+                return static_cast<char>(std::tolower(character));
+            });
+            return extension == ".cs";
+        }
+
+        std::string SanitizeManagedProjectName(const std::filesystem::path& projectRoot)
+        {
+            std::string projectLeaf = projectRoot.filename().string();
+            std::string sanitized;
+            sanitized.reserve(projectLeaf.size());
+            for (char character : projectLeaf)
+            {
+                const unsigned char unsignedCharacter = static_cast<unsigned char>(character);
+                if (std::isalnum(unsignedCharacter) != 0 || character == '_')
+                    sanitized.push_back(character);
+            }
+
+            if (sanitized.empty())
+                sanitized = "Project";
+            if (std::isdigit(static_cast<unsigned char>(sanitized.front())) != 0)
+                sanitized = "Project_" + sanitized;
+            return sanitized;
         }
 
         std::vector<std::filesystem::path> DiscoverScriptFiles(const std::filesystem::path& assetsRoot, const std::string& extension)
@@ -273,7 +306,7 @@ namespace Limitless::NativeScriptExternalEditor
         }
 
 #ifdef LT_PLATFORM_WINDOWS
-        std::optional<std::filesystem::path> FindVisualStudioDevenv()
+        std::optional<std::filesystem::path> FindVisualStudioDevenv(bool requireCppWorkload)
         {
             if (const char* vsInstallDir = std::getenv("VSINSTALLDIR"); vsInstallDir && vsInstallDir[0] != '\0')
             {
@@ -291,8 +324,11 @@ namespace Limitless::NativeScriptExternalEditor
                 std::error_code errorCode;
                 if (std::filesystem::exists(vsWherePath, errorCode))
                 {
-                    const std::string command =
-                        "\"" + vsWherePath.string() + "\" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find Common7\\IDE\\devenv.exe";
+                    std::string command =
+                        "\"" + vsWherePath.string() + "\" -latest -products *";
+                    if (requireCppWorkload)
+                        command += " -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64";
+                    command += " -find Common7\\IDE\\devenv.exe";
                     FILE* pipe = _popen(command.c_str(), "r");
                     if (pipe)
                     {
@@ -396,6 +432,189 @@ namespace Limitless::NativeScriptExternalEditor
             return true;
         }
 #endif
+
+        bool EnsureManagedProjectCsproj(const OpenVisualStudioRequest& request,
+                                        std::filesystem::path& outProjectPath,
+                                        std::string& outError)
+        {
+#ifndef LT_PLATFORM_WINDOWS
+            (void)request;
+            outProjectPath.clear();
+            outError = "External Visual Studio editing is only available on Windows.";
+            return false;
+#else
+            outError.clear();
+
+            const std::filesystem::path engineSourceRoot = request.EngineSourceRoot.empty()
+                ? request.BuildRoot
+                : request.EngineSourceRoot;
+
+            const std::filesystem::path assetsRoot = request.ProjectRoot / "Assets";
+            const std::vector<std::filesystem::path> managedFiles = DiscoverScriptFiles(assetsRoot, ".cs");
+            if (managedFiles.empty())
+            {
+                outProjectPath.clear();
+                outError = "No managed C# scripts were found under the project Assets folder.";
+                return false;
+            }
+
+            const std::filesystem::path generatedManagedDirectory = request.ProjectRoot / "Build" / "Generated" / "ManagedScripts";
+            const std::string assemblyName = SanitizeManagedProjectName(request.ProjectRoot) + ".ManagedScripts";
+            const std::filesystem::path managedProjectPath = generatedManagedDirectory / (assemblyName + ".csproj");
+            const std::filesystem::path contractPath = engineSourceRoot / "Managed" / "Limitless.Managed" / "Limitless.Managed.csproj";
+
+            std::error_code contractError;
+            if (!std::filesystem::exists(contractPath, contractError))
+            {
+                outProjectPath.clear();
+                outError = "Managed engine contract project was not found: " + contractPath.string();
+                return false;
+            }
+
+            std::ostringstream compileItems;
+            for (const auto& file : managedFiles)
+            {
+                std::error_code relativeError;
+                std::filesystem::path relativePath = std::filesystem::relative(file, assetsRoot, relativeError);
+                if (relativeError || relativePath.empty())
+                    relativePath = file.filename();
+
+                compileItems
+                    << "    <Compile Include=\"" << XmlEscape(ToWindowsPath(file)) << "\"><Link>"
+                    << XmlEscape((std::filesystem::path("Assets") / relativePath).generic_string())
+                    << "</Link></Compile>\n";
+            }
+
+            const std::string csprojContents =
+                "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
+                "  <PropertyGroup>\n"
+                "    <TargetFramework>net9.0</TargetFramework>\n"
+                "    <OutputType>Library</OutputType>\n"
+                "    <Nullable>enable</Nullable>\n"
+                "    <ImplicitUsings>enable</ImplicitUsings>\n"
+                "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
+                "    <AssemblyName>" + XmlEscape(assemblyName) + "</AssemblyName>\n"
+                "    <RootNamespace>" + XmlEscape(assemblyName) + "</RootNamespace>\n"
+                "    <EnableDynamicLoading>true</EnableDynamicLoading>\n"
+                "  </PropertyGroup>\n"
+                "  <ItemGroup>\n"
+                "    <ProjectReference Include=\"" + XmlEscape(ToWindowsPath(contractPath)) + "\" />\n"
+                "  </ItemGroup>\n"
+                "  <ItemGroup>\n"
+                + compileItems.str() +
+                "  </ItemGroup>\n"
+                "</Project>\n";
+
+            if (!WriteTextFile(managedProjectPath, csprojContents, outError))
+            {
+                outProjectPath.clear();
+                return false;
+            }
+
+            outProjectPath = managedProjectPath;
+            return true;
+#endif
+        }
+
+        bool EnsureManagedVisualStudioProject(const OpenVisualStudioRequest& request,
+                                              std::filesystem::path& outSolutionPath,
+                                              std::string& outError)
+        {
+#ifndef LT_PLATFORM_WINDOWS
+            (void)request;
+            outSolutionPath.clear();
+            outError = "External Visual Studio editing is only available on Windows.";
+            return false;
+#else
+            outError.clear();
+
+            const std::filesystem::path engineSourceRoot = request.EngineSourceRoot.empty()
+                ? request.BuildRoot
+                : request.EngineSourceRoot;
+
+            std::filesystem::path managedProjectPath;
+            if (!EnsureManagedProjectCsproj(request, managedProjectPath, outError))
+            {
+                outSolutionPath.clear();
+                return false;
+            }
+
+            const std::filesystem::path engineManagedProjectPath = engineSourceRoot / "Managed" / "Limitless.Managed" / "Limitless.Managed.csproj";
+            const std::filesystem::path coralManagedProjectPath = engineSourceRoot / "Limitless" / "Vendor" / "Coral" / "Coral.Managed" / "Coral.Managed-Static.csproj";
+            std::error_code fileError;
+            if (!std::filesystem::exists(engineManagedProjectPath, fileError))
+            {
+                outSolutionPath.clear();
+                outError = "Managed engine project was not found: " + engineManagedProjectPath.string();
+                return false;
+            }
+            fileError.clear();
+            if (!std::filesystem::exists(coralManagedProjectPath, fileError))
+            {
+                outSolutionPath.clear();
+                outError = "Coral managed project was not found: " + coralManagedProjectPath.string();
+                return false;
+            }
+
+            std::string configuration = NormalizeConfiguration(request.Configuration);
+            if (configuration == "Dist")
+                configuration = "Release";
+            const std::string projectConfiguration = configuration + "|Any CPU";
+
+            const std::filesystem::path externalEditorDirectory = request.ProjectRoot / "Build" / "Generated" / "ManagedScripts" / "ExternalEditor";
+            const std::filesystem::path solutionPath = externalEditorDirectory / std::string(kManagedSolutionName);
+
+            std::error_code directoryError;
+            std::filesystem::create_directories(externalEditorDirectory, directoryError);
+            if (directoryError)
+            {
+                outSolutionPath.clear();
+                outError = "Failed to prepare managed external editor directory: " + directoryError.message();
+                return false;
+            }
+
+            const std::string managedProjectRelativePath = XmlEscape(ToProjectRelativeWindowsPath(managedProjectPath, externalEditorDirectory));
+            const std::string engineManagedProjectRelativePath = XmlEscape(ToProjectRelativeWindowsPath(engineManagedProjectPath, externalEditorDirectory));
+            const std::string coralManagedProjectRelativePath = XmlEscape(ToProjectRelativeWindowsPath(coralManagedProjectPath, externalEditorDirectory));
+
+            const std::string solutionContents =
+                "Microsoft Visual Studio Solution File, Format Version 12.00\n"
+                "# Visual Studio Version 17\n"
+                "VisualStudioVersion = 17.0.31903.59\n"
+                "MinimumVisualStudioVersion = 10.0.40219.1\n"
+                "Project(\"" + std::string(kManagedProjectTypeGuid) + "\") = \"ProjectManagedScripts\", \"" + managedProjectRelativePath + "\", \"" + std::string(kManagedProjectGuid) + "\"\n"
+                "EndProject\n"
+                "Project(\"" + std::string(kManagedProjectTypeGuid) + "\") = \"Limitless.Managed\", \"" + engineManagedProjectRelativePath + "\", \"" + std::string(kEngineManagedProjectGuid) + "\"\n"
+                "EndProject\n"
+                "Project(\"" + std::string(kManagedProjectTypeGuid) + "\") = \"Coral.Managed\", \"" + coralManagedProjectRelativePath + "\", \"" + std::string(kCoralManagedProjectGuid) + "\"\n"
+                "EndProject\n"
+                "Global\n"
+                "\tGlobalSection(SolutionConfigurationPlatforms) = preSolution\n"
+                "\t\t" + projectConfiguration + " = " + projectConfiguration + "\n"
+                "\tEndGlobalSection\n"
+                "\tGlobalSection(ProjectConfigurationPlatforms) = postSolution\n"
+                "\t\t" + std::string(kManagedProjectGuid) + "." + projectConfiguration + ".ActiveCfg = " + projectConfiguration + "\n"
+                "\t\t" + std::string(kManagedProjectGuid) + "." + projectConfiguration + ".Build.0 = " + projectConfiguration + "\n"
+                "\t\t" + std::string(kEngineManagedProjectGuid) + "." + projectConfiguration + ".ActiveCfg = " + projectConfiguration + "\n"
+                "\t\t" + std::string(kEngineManagedProjectGuid) + "." + projectConfiguration + ".Build.0 = " + projectConfiguration + "\n"
+                "\t\t" + std::string(kCoralManagedProjectGuid) + "." + projectConfiguration + ".ActiveCfg = " + projectConfiguration + "\n"
+                "\t\t" + std::string(kCoralManagedProjectGuid) + "." + projectConfiguration + ".Build.0 = " + projectConfiguration + "\n"
+                "\tEndGlobalSection\n"
+                "\tGlobalSection(SolutionProperties) = preSolution\n"
+                "\t\tHideSolutionNode = FALSE\n"
+                "\tEndGlobalSection\n"
+                "EndGlobal\n";
+
+            if (!WriteTextFile(solutionPath, solutionContents, outError))
+            {
+                outSolutionPath.clear();
+                return false;
+            }
+
+            outSolutionPath = solutionPath;
+            return true;
+#endif
+        }
 
         bool EnsureVisualStudioProject(const OpenVisualStudioRequest& request,
                                        std::filesystem::path& outSolutionPath,
@@ -643,23 +862,30 @@ namespace Limitless::NativeScriptExternalEditor
             return result;
         }
 
-        const auto devenvPath = FindVisualStudioDevenv();
+        const bool isManagedScript = IsManagedScriptPath(request.TargetScriptPath);
+
+        const auto devenvPath = FindVisualStudioDevenv(!isManagedScript);
         if (!devenvPath.has_value())
         {
-            result.ErrorMessage = "Visual Studio was not detected. Install Visual Studio 2022 with C++ workload.";
+            result.ErrorMessage = isManagedScript
+                ? "Visual Studio was not detected. Install Visual Studio 2022 with .NET desktop development or C++ workload."
+                : "Visual Studio was not detected. Install Visual Studio 2022 with C++ workload.";
             return result;
         }
         result.DevenvPath = devenvPath.value();
 
         std::filesystem::path solutionPath;
-        if (!EnsureVisualStudioProject(request, solutionPath, result.ErrorMessage))
+        if (!(isManagedScript ? EnsureManagedVisualStudioProject(request, solutionPath, result.ErrorMessage)
+                              : EnsureVisualStudioProject(request, solutionPath, result.ErrorMessage)))
             return result;
         result.SolutionPath = solutionPath;
 
         if (!LaunchVisualStudio(devenvPath.value(), solutionPath, request.TargetScriptPath, result.ErrorMessage))
             return result;
 
-        LT_INFO("Native scripts: opened Visual Studio external editor using '{}'.", solutionPath.string());
+        LT_INFO("{}: opened Visual Studio external editor using '{}'.",
+            isManagedScript ? "Managed scripts" : "Native scripts",
+            solutionPath.string());
         result.Launched = true;
         return result;
 #endif

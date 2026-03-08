@@ -9,6 +9,7 @@ namespace Limitless::NativeScriptExternalEditor
     {
         std::filesystem::path ProjectRoot;
         std::filesystem::path BuildRoot;
+        std::filesystem::path EngineSourceRoot;
         std::filesystem::path TargetScriptPath;
         std::string Configuration = "Dist";
         std::string Platform = "x64";

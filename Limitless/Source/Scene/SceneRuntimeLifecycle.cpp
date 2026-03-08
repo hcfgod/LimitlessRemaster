@@ -6,6 +6,7 @@
 #include "Core/ConfigManager.h"
 #include "Physics/Physics2DQueries.h"
 #include "Physics/Physics2DWorld.h"
+#include "Scripting/ManagedScriptHost.h"
 #include "Scripting/ScriptableEntity.h"
 
 #include <algorithm>
@@ -72,46 +73,82 @@ namespace Limitless
                 auto* scriptComponent = registry.try_get<ScriptComponent>(scriptEntity);
                 if (!scriptComponent)
                     continue;
-                NativeScriptEntry* scriptEntry = scriptComponent->TryGetNativeEntry();
-                if (!scriptEntry || !scriptEntry->Enabled || !scriptEntry->RuntimeInstance || !scriptEntry->RuntimeInitialized)
-                    continue;
 
                 const auto* tag = registry.try_get<TagComponent>(selfEntity);
-                try
+                if (NativeScriptEntry* scriptEntry = scriptComponent->TryGetNativeEntry())
                 {
+                    if (!scriptEntry->Enabled || !scriptEntry->RuntimeInstance || !scriptEntry->RuntimeInitialized)
+                        continue;
+
+                    try
+                    {
+                        if (isSensor)
+                        {
+                            if (dispatchEnter)
+                                scriptEntry->RuntimeInstance->DispatchTriggerEnter(other);
+                            if (dispatchStay)
+                                scriptEntry->RuntimeInstance->DispatchTriggerStay(other);
+                            if (dispatchExit)
+                                scriptEntry->RuntimeInstance->DispatchTriggerExit(other);
+                        }
+                        else
+                        {
+                            if (dispatchEnter)
+                                scriptEntry->RuntimeInstance->DispatchCollisionEnter(other);
+                            if (dispatchStay)
+                                scriptEntry->RuntimeInstance->DispatchCollisionStay(other);
+                            if (dispatchExit)
+                                scriptEntry->RuntimeInstance->DispatchCollisionExit(other);
+                        }
+                    }
+                    catch (const std::exception& exception)
+                    {
+                        LT_WARN("Script '{}' on entity '{}' threw during {} callback: {}",
+                                scriptEntry->ScriptClassName,
+                                tag ? tag->Tag : "Entity",
+                                isSensor ? "trigger" : "collision",
+                                exception.what());
+                    }
+                    catch (...)
+                    {
+                        LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during {} callback",
+                                scriptEntry->ScriptClassName,
+                                tag ? tag->Tag : "Entity",
+                                isSensor ? "trigger" : "collision");
+                    }
+                }
+                else if (ManagedScriptEntry* scriptEntry = scriptComponent->TryGetManagedEntry())
+                {
+                    if (!scriptEntry->Enabled || scriptEntry->RuntimeInstanceId == 0 || !scriptEntry->RuntimeInitialized)
+                        continue;
+
+                    auto invokeManagedCallback = [&](bool shouldDispatch, auto&& callback, const char* callbackName) {
+                        if (!shouldDispatch)
+                            return;
+
+                        std::string managedError;
+                        if (!callback(scriptEntry->RuntimeInstanceId, &scene, static_cast<uint32_t>(otherEntity), &managedError))
+                        {
+                            LT_WARN("Managed script '{}' on entity '{}' failed during {} callback: {}",
+                                    scriptEntry->ScriptClassName,
+                                    tag ? tag->Tag : "Entity",
+                                    callbackName,
+                                    managedError.empty() ? "unknown error" : managedError.c_str());
+                        }
+                    };
+
                     if (isSensor)
                     {
-                        if (dispatchEnter)
-                            scriptEntry->RuntimeInstance->DispatchTriggerEnter(other);
-                        if (dispatchStay)
-                            scriptEntry->RuntimeInstance->DispatchTriggerStay(other);
-                        if (dispatchExit)
-                            scriptEntry->RuntimeInstance->DispatchTriggerExit(other);
+                        invokeManagedCallback(dispatchEnter, ManagedScriptHost::InvokeScriptOnTriggerEnter, "OnTriggerEnter");
+                        invokeManagedCallback(dispatchStay, ManagedScriptHost::InvokeScriptOnTriggerStay, "OnTriggerStay");
+                        invokeManagedCallback(dispatchExit, ManagedScriptHost::InvokeScriptOnTriggerExit, "OnTriggerExit");
                     }
                     else
                     {
-                        if (dispatchEnter)
-                            scriptEntry->RuntimeInstance->DispatchCollisionEnter(other);
-                        if (dispatchStay)
-                            scriptEntry->RuntimeInstance->DispatchCollisionStay(other);
-                        if (dispatchExit)
-                            scriptEntry->RuntimeInstance->DispatchCollisionExit(other);
+                        invokeManagedCallback(dispatchEnter, ManagedScriptHost::InvokeScriptOnCollisionEnter, "OnCollisionEnter");
+                        invokeManagedCallback(dispatchStay, ManagedScriptHost::InvokeScriptOnCollisionStay, "OnCollisionStay");
+                        invokeManagedCallback(dispatchExit, ManagedScriptHost::InvokeScriptOnCollisionExit, "OnCollisionExit");
                     }
-                }
-                catch (const std::exception& exception)
-                {
-                    LT_WARN("Script '{}' on entity '{}' threw during {} callback: {}",
-                            scriptEntry->ScriptClassName,
-                            tag ? tag->Tag : "Entity",
-                            isSensor ? "trigger" : "collision",
-                            exception.what());
-                }
-                catch (...)
-                {
-                    LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during {} callback",
-                            scriptEntry->ScriptClassName,
-                            tag ? tag->Tag : "Entity",
-                            isSensor ? "trigger" : "collision");
                 }
             }
         }
@@ -345,6 +382,61 @@ namespace Limitless
         if (!world)
             return nullptr;
         return &world->GetContactListener();
+    }
+
+    bool Scene::HasActivePhysics2DContact(entt::entity entity, entt::entity otherEntity, bool includeSensorContacts) const
+    {
+        if (!IsValid(entity) || !IsValid(otherEntity) || entity == otherEntity)
+            return false;
+
+        const uint32_t encodedEntity = static_cast<uint32_t>(entity);
+        const uint32_t encodedOtherEntity = static_cast<uint32_t>(otherEntity);
+        const uint32_t keyEntityA = std::min(encodedEntity, encodedOtherEntity);
+        const uint32_t keyEntityB = std::max(encodedEntity, encodedOtherEntity);
+        for (const RuntimeContactPairKey& key : m_RuntimeActiveContactPairs)
+        {
+            if (!includeSensorContacts && key.IsSensor)
+                continue;
+            if (key.EntityA == keyEntityA && key.EntityB == keyEntityB)
+                return true;
+        }
+
+        return false;
+    }
+
+    int Scene::GetActivePhysics2DContactCount(entt::entity entity, bool includeSensorContacts) const
+    {
+        return static_cast<int>(GetActivePhysics2DContactEntityHandles(entity, includeSensorContacts).size());
+    }
+
+    std::vector<entt::entity> Scene::GetActivePhysics2DContactEntityHandles(entt::entity entity, bool includeSensorContacts) const
+    {
+        std::vector<entt::entity> contactsOut;
+        if (!IsValid(entity))
+            return contactsOut;
+
+        std::unordered_set<entt::entity> uniqueContacts;
+        for (const RuntimeContactPairKey& key : m_RuntimeActiveContactPairs)
+        {
+            if (!includeSensorContacts && key.IsSensor)
+                continue;
+
+            entt::entity other = entt::null;
+            if (key.EntityA == static_cast<uint32_t>(entity))
+                other = static_cast<entt::entity>(key.EntityB);
+            else if (key.EntityB == static_cast<uint32_t>(entity))
+                other = static_cast<entt::entity>(key.EntityA);
+
+            if (other == entt::null || !IsValid(other))
+                continue;
+            if (uniqueContacts.insert(other).second)
+                contactsOut.push_back(other);
+        }
+
+        std::sort(contactsOut.begin(), contactsOut.end(), [](entt::entity left, entt::entity right) {
+            return static_cast<uint32_t>(left) < static_cast<uint32_t>(right);
+        });
+        return contactsOut;
     }
 
     bool Scene::TryGetPhysics2DBodyDiagnostics(entt::entity entity, Physics2DBodyDiagnostics& outDiagnostics) const

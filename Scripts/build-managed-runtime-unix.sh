@@ -5,9 +5,10 @@ set -euo pipefail
 CONFIGURATION="Debug"
 PLATFORM="x64"
 OUTPUT_DIR=""
+PROJECT_ROOT=""
 
 print_usage() {
-    echo "Usage: $0 --config [Debug|Release|Dist] --platform [x64|ARM64] --output-dir /path/to/output"
+    echo "Usage: $0 --config [Debug|Release|Dist] --platform [x64|ARM64] --output-dir /path/to/output [--project-root /path/to/project]"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -22,6 +23,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --output-dir)
             OUTPUT_DIR="${2:-}"
+            shift 2
+            ;;
+        --project-root)
+            PROJECT_ROOT="${2:-}"
             shift 2
             ;;
         --help|-h)
@@ -64,8 +69,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MANAGED_OUTPUT_DIR="$OUTPUT_DIR/Managed"
 MANAGED_MANIFEST_PATH="$MANAGED_OUTPUT_DIR/Limitless.Managed.payload.json"
+MANAGED_PROJECT_GENERATOR_SCRIPT="$REPO_ROOT/Scripts/generate-managed-project-csproj-unix.sh"
 MANAGED_LOCK_ROOT="$REPO_ROOT/Build/ManagedRuntimeLocks"
 MANAGED_LOCK_DIR="$MANAGED_LOCK_ROOT/${DOTNET_CONFIGURATION}-${PLATFORM}"
+MANAGED_PROJECT_CSPROJ=""
+MANAGED_PROJECT_ASSEMBLY_FILE=""
+SCRIPT_ASSEMBLIES_JSON='["Limitless.Managed.TestScripts.dll"]'
 mkdir -p "$MANAGED_OUTPUT_DIR"
 mkdir -p "$MANAGED_LOCK_ROOT"
 
@@ -84,6 +93,24 @@ dotnet publish "$REPO_ROOT/Limitless/Vendor/Coral/Coral.Managed/Coral.Managed-St
 dotnet build "$REPO_ROOT/Managed/Limitless.Managed/Limitless.Managed.csproj" -c "$DOTNET_CONFIGURATION" -o "$MANAGED_OUTPUT_DIR" /nologo /verbosity:minimal
 dotnet build "$REPO_ROOT/Managed/Limitless.Managed.TestScripts/Limitless.Managed.TestScripts.csproj" -c "$DOTNET_CONFIGURATION" -o "$MANAGED_OUTPUT_DIR" /nologo /verbosity:minimal
 
+if [[ -n "$PROJECT_ROOT" ]]; then
+    PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd)"
+    if [[ ! -f "$MANAGED_PROJECT_GENERATOR_SCRIPT" ]]; then
+        echo "Error: Managed project generator script not found: $MANAGED_PROJECT_GENERATOR_SCRIPT"
+        exit 1
+    fi
+
+    generator_output="$(bash "$MANAGED_PROJECT_GENERATOR_SCRIPT" "$PROJECT_ROOT" "$REPO_ROOT")"
+    if [[ -n "$generator_output" ]]; then
+        IFS='|' read -r MANAGED_PROJECT_CSPROJ MANAGED_PROJECT_ASSEMBLY_FILE <<< "$generator_output"
+    fi
+
+    if [[ -n "$MANAGED_PROJECT_CSPROJ" ]]; then
+        dotnet build "$MANAGED_PROJECT_CSPROJ" -c "$DOTNET_CONFIGURATION" -o "$MANAGED_OUTPUT_DIR" /nologo /verbosity:minimal
+        SCRIPT_ASSEMBLIES_JSON='["Limitless.Managed.TestScripts.dll", '"\"$MANAGED_PROJECT_ASSEMBLY_FILE\""']'
+    fi
+fi
+
 TARGET_OS="Linux"
 if [[ "$(uname -s | tr '[:upper:]' '[:lower:]')" == "darwin" ]]; then
     TARGET_OS="macOS"
@@ -97,7 +124,7 @@ cat > "$MANAGED_MANIFEST_PATH" <<EOF
   "coralManagedRuntimeConfig": "Coral.Managed.runtimeconfig.json",
   "contractAssembly": "Limitless.Managed.dll",
   "contractRuntimeConfig": "Limitless.Managed.runtimeconfig.json",
-  "scriptAssemblies": ["Limitless.Managed.TestScripts.dll"],
+  "scriptAssemblies": ${SCRIPT_ASSEMBLIES_JSON},
   "buildConfiguration": "${DOTNET_CONFIGURATION}",
   "targetOS": "${TARGET_OS}",
   "targetArchitecture": "${PLATFORM}"

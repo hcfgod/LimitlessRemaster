@@ -92,6 +92,7 @@ BUILD_FOLDER="${CONFIG_LOWER}_${PLATFORM_LOWER}-${SYSTEM_NAME}-${PLATFORM}"
 RUNTIME_TEMPLATE_DIR="$TOOLCHAIN_ROOT/RuntimeTemplates/$BUILD_FOLDER"
 MANAGED_BUILD_SCRIPT="$TOOLCHAIN_ROOT/Scripts/build-managed-runtime-unix.sh"
 OUTPUT_DIR="$TOOLCHAIN_ROOT/Build/$BUILD_FOLDER/Editor"
+PROJECT_LOCAL_OUTPUT_DIR="$PROJECT_ROOT/Build/ScriptCore/$BUILD_FOLDER"
 INTERMEDIATE_DIR="$TOOLCHAIN_ROOT/Build/Intermediates/$BUILD_FOLDER/ProjectScriptCore"
 OBJ_DIR="$INTERMEDIATE_DIR/obj"
 DEP_DIR="$INTERMEDIATE_DIR/dep"
@@ -371,7 +372,11 @@ if [[ ! -f "$MANAGED_BUILD_SCRIPT" ]]; then
     exit 1
 fi
 
-bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$RUNTIME_TEMPLATE_DIR"
+bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$OUTPUT_DIR" --project-root "$PROJECT_ROOT"
+
+bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$PROJECT_LOCAL_OUTPUT_DIR" --project-root "$PROJECT_ROOT"
+
+bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$RUNTIME_TEMPLATE_DIR" --project-root "$PROJECT_ROOT"
 
 echo "ScriptCore build completed successfully."
 echo "Output: $OUTPUT_LIB"

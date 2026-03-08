@@ -49,6 +49,17 @@ public sealed class Entity
         }
     }
 
+    public bool HasRigidbody2D
+    {
+        get
+        {
+            unsafe
+            {
+                return ScriptBridge.HasRigidbody2DComponentIcall(m_Handle);
+            }
+        }
+    }
+
     public string Tag
     {
         get
@@ -84,6 +95,7 @@ public sealed class Entity
     }
 
     public Transform Transform => new(m_Handle);
+    public Rigidbody2D Rigidbody2D => new(m_Handle);
 
     public static Entity Null => new(NullHandle);
 

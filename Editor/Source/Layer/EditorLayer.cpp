@@ -802,7 +802,7 @@ namespace Limitless
             m_ShowConsoleWindow = sessionState.ShowConsoleWindow;
             m_ProjectPanelState.AssetsRootExpanded = sessionState.ProjectAssetsRootExpanded;
             m_ProjectPanelState.ActiveFolderRelativePath = std::filesystem::path(sessionState.ProjectActiveFolderRelativePath);
-            m_ProjectPanelState.GridScale = std::clamp(sessionState.ProjectGridScale, 0.70f, 1.80f);
+            m_ProjectPanelState.GridScale = std::clamp(sessionState.ProjectGridScale, 0.0f, 1.80f);
             m_ProjectPanelState.ExpandedFolderState = sessionState.ProjectFolderExpansionState;
             const std::string lastOpenedSceneAssetKey = sessionState.LastOpenedSceneAssetKey;
             if (!lastOpenedSceneAssetKey.empty())

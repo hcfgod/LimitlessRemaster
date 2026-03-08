@@ -39,6 +39,7 @@ namespace Limitless
         std::filesystem::path HoveredFolderRelativePathForExternalDrop;
         std::filesystem::path RenameAssetRelativePath;
         std::filesystem::path CreateNativeScriptParentRelativePath;
+        std::filesystem::path CreateManagedScriptParentRelativePath;
         std::filesystem::path CreateMaterialParentRelativePath;
         std::filesystem::path CreateTilesetParentRelativePath;
         std::filesystem::path CreateAudioMixerParentRelativePath;
@@ -58,6 +59,8 @@ namespace Limitless
         bool RenameAssetAsNativeScriptPair = false;
         bool CreateNativeScriptPopupPending = false;
         bool CreateNativeScriptPopupOpen = false;
+        bool CreateManagedScriptPopupPending = false;
+        bool CreateManagedScriptPopupOpen = false;
         bool CreateMaterialPopupPending = false;
         bool CreateMaterialPopupOpen = false;
         bool CreateTilesetPopupPending = false;
@@ -82,6 +85,7 @@ namespace Limitless
         std::array<char, 256> RenameAssetBuffer{};
         std::array<char, 256> SearchBuffer{};
         std::array<char, 256> CreateNativeScriptClassNameBuffer{};
+        std::array<char, 256> CreateManagedScriptClassNameBuffer{};
         std::array<char, 256> CreateMaterialNameBuffer{};
         std::array<char, 256> CreateTilesetNameBuffer{};
         std::array<char, 256> CreateAudioMixerNameBuffer{};

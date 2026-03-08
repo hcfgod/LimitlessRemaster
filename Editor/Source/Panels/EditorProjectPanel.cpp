@@ -1,6 +1,7 @@
 #include "EditorProjectPanel.h"
 
 #include "EditorAssetNaming.h"
+#include "EditorInspectorPanel.h"
 #include "EditorPanelStyle.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetImportPipeline.h"
@@ -80,6 +81,7 @@ namespace Limitless::EditorProjectPanel
         constexpr uint8_t kScriptPairHeaderBit = 1u << 0u;
         constexpr uint8_t kScriptPairSourceBit = 1u << 1u;
         constexpr std::chrono::milliseconds kDirectoryCacheRefreshInterval(250);
+        constexpr float kCompactListScaleThreshold = 0.20f;
 
         struct ProjectAssetTreeEntry
         {
@@ -134,6 +136,7 @@ namespace Limitless::EditorProjectPanel
         constexpr AssetTypeBadgeInfo kBadgeFont            = { "FNT", IM_COL32( 40, 140, 150, 255), IM_COL32( 80, 195, 200, 255), IM_COL32(225, 250, 252, 255) };
         constexpr AssetTypeBadgeInfo kBadgePrefab          = { "PFB", IM_COL32( 58, 125, 198, 255), IM_COL32(120, 190, 255, 255), IM_COL32(235, 245, 255, 255) };
         constexpr AssetTypeBadgeInfo kBadgeScript          = { "CPP", IM_COL32(165, 145,  35, 255), IM_COL32(215, 200,  80, 255), IM_COL32(255, 252, 225, 255) };
+        constexpr AssetTypeBadgeInfo kBadgeManagedScript   = { "C#",  IM_COL32( 80, 120,  60, 255), IM_COL32(125, 180, 105, 255), IM_COL32(235, 255, 230, 255) };
         constexpr AssetTypeBadgeInfo kBadgeShader          = { "SHD", IM_COL32( 30, 150, 180, 255), IM_COL32( 70, 200, 230, 255), IM_COL32(225, 250, 255, 255) };
         constexpr AssetTypeBadgeInfo kBadgeAudioMixer      = { "MIX", IM_COL32(155,  55, 140, 255), IM_COL32(210, 110, 195, 255), IM_COL32(255, 230, 250, 255) };
         constexpr AssetTypeBadgeInfo kBadgeInputActions    = { "INP", IM_COL32( 70, 155,  50, 255), IM_COL32(120, 210, 100, 255), IM_COL32(235, 255, 230, 255) };
@@ -177,7 +180,7 @@ namespace Limitless::EditorProjectPanel
             bool isTexture, bool isScene, bool isMaterial, bool isAudioMixer,
             bool isInputActions, bool isAnimationClip, bool isAnimatorController,
             bool isPrefab, bool isShader, bool isAudio, bool isFont,
-            bool isNativeScriptFile)
+            bool isNativeScriptFile, bool isManagedScriptFile)
         {
             if (isTexture)             return kBadgeTexture;
             if (isScene)               return kBadgeScene;
@@ -190,6 +193,7 @@ namespace Limitless::EditorProjectPanel
             if (isShader)              return kBadgeShader;
             if (isAudio)               return kBadgeAudio;
             if (isFont)                return kBadgeFont;
+            if (isManagedScriptFile)   return kBadgeManagedScript;
             if (isNativeScriptFile)    return kBadgeScript;
             return kBadgeUnknown;
         }
@@ -331,6 +335,16 @@ namespace Limitless::EditorProjectPanel
             return lowerExtension == ".h" || lowerExtension == ".cpp";
         }
 
+        bool IsManagedScriptExtensionLower(const std::string& lowerExtension)
+        {
+            return lowerExtension == ".cs";
+        }
+
+        bool IsScriptAssetExtensionLower(const std::string& lowerExtension)
+        {
+            return IsNativeScriptExtensionLower(lowerExtension) || IsManagedScriptExtensionLower(lowerExtension);
+        }
+
         std::vector<ProjectAssetTreeEntry> ScanProjectDirectoryEntries(const std::filesystem::path& assetsDirectory,
                                                                        const std::filesystem::path& relativePath)
         {
@@ -463,6 +477,21 @@ namespace Limitless::EditorProjectPanel
             return stem + " [.cpp Source]";
         }
 
+        std::string BuildManagedScriptAssetDisplayName(const std::filesystem::path& path)
+        {
+            return path.stem().string() + " [C# Script]";
+        }
+
+        std::string BuildProjectScriptAssetDisplayName(const std::filesystem::path& path)
+        {
+            std::string extension = path.extension().string();
+            for (char& character : extension)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            if (extension == ".cs")
+                return BuildManagedScriptAssetDisplayName(path);
+            return BuildScriptAssetDisplayName(path);
+        }
+
         std::string SanitizeScriptClassBaseName(std::string value)
         {
             while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0)
@@ -481,6 +510,29 @@ namespace Limitless::EditorProjectPanel
 
             if (sanitized.empty())
                 sanitized = "NewNativeScript";
+            if (std::isdigit(static_cast<unsigned char>(sanitized.front())) != 0)
+                sanitized.insert(0, "Script_");
+            return sanitized;
+        }
+
+        std::string SanitizeManagedScriptClassName(std::string value)
+        {
+            while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0)
+                value.erase(value.begin());
+            while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0)
+                value.pop_back();
+
+            std::string sanitized;
+            sanitized.reserve(value.size() + 8);
+            for (char character : value)
+            {
+                const unsigned char raw = static_cast<unsigned char>(character);
+                if (std::isalnum(raw) || character == '_')
+                    sanitized.push_back(character);
+            }
+
+            if (sanitized.empty())
+                sanitized = "NewManagedScript";
             if (std::isdigit(static_cast<unsigned char>(sanitized.front())) != 0)
                 sanitized.insert(0, "Script_");
             return sanitized;
@@ -565,6 +617,66 @@ namespace Limitless::EditorProjectPanel
 
             (void)Assets::AssetImportPipeline::ReimportChanged(true);
             outCreatedSourceAssetKey = "Assets/" + (parentRelativePath / (className + ".cpp")).generic_string();
+            outError.clear();
+            InvalidateProjectDirectoryCache();
+            return true;
+        }
+
+        bool CreateManagedScriptInAssets(const std::filesystem::path& assetsDirectory,
+                                         const std::filesystem::path& parentRelativePath,
+                                         const std::string& requestedClassName,
+                                         std::string& outCreatedAssetKey,
+                                         std::string& outError)
+        {
+            const std::string className = SanitizeManagedScriptClassName(requestedClassName);
+            const std::filesystem::path scriptDirectory = assetsDirectory / parentRelativePath;
+
+            std::error_code errorCode;
+            std::filesystem::create_directories(scriptDirectory, errorCode);
+            if (errorCode)
+            {
+                outError = "Failed to create script directory: " + errorCode.message();
+                return false;
+            }
+
+            const std::filesystem::path sourcePath = scriptDirectory / (className + ".cs");
+            if (std::filesystem::exists(sourcePath))
+            {
+                outError = "Script already exists: " + className;
+                return false;
+            }
+
+            const std::string sourceTemplate =
+                "using Limitless.Managed;\n\n"
+                "namespace GameScripts;\n\n"
+                "public sealed class " + className + " : ScriptableEntity\n"
+                "{\n"
+                "    public override void OnCreate()\n"
+                "    {\n"
+                "    }\n\n"
+                "    public override void OnUpdate(float deltaTime)\n"
+                "    {\n"
+                "    }\n"
+                "}\n";
+
+            {
+                std::ofstream sourceOutput(sourcePath, std::ios::out | std::ios::binary | std::ios::trunc);
+                if (!sourceOutput.is_open())
+                {
+                    outError = "Failed to create script source file: " + sourcePath.string();
+                    return false;
+                }
+
+                sourceOutput.write(sourceTemplate.data(), static_cast<std::streamsize>(sourceTemplate.size()));
+                if (!sourceOutput.good())
+                {
+                    outError = "Failed to write script source file: " + sourcePath.string();
+                    return false;
+                }
+            }
+
+            (void)Assets::AssetImportPipeline::ReimportChanged(true);
+            outCreatedAssetKey = "Assets/" + (parentRelativePath / (className + ".cs")).generic_string();
             outError.clear();
             InvalidateProjectDirectoryCache();
             return true;
@@ -873,8 +985,8 @@ namespace Limitless::EditorProjectPanel
                     continue;
                 }
 
-                const std::string displayName = IsNativeScriptExtensionLower(entry.LowerExtension)
-                    ? BuildScriptAssetDisplayName(entry.AbsolutePath)
+                const std::string displayName = IsScriptAssetExtensionLower(entry.LowerExtension)
+                    ? BuildProjectScriptAssetDisplayName(entry.AbsolutePath)
                     : GetAssetDisplayName(entry.AbsolutePath);
                 if (EntryMatchesProjectSearchFilter(entry, displayName))
                 {
@@ -1051,6 +1163,12 @@ namespace Limitless::EditorProjectPanel
                             state.CreateNativeScriptParentRelativePath = entryRelativePath;
                             CopyTextToBuffer(state.CreateNativeScriptClassNameBuffer, "NewNativeScript");
                             state.CreateNativeScriptPopupPending = true;
+                        }
+                        if (ImGui::MenuItem("Create C# Script"))
+                        {
+                            state.CreateManagedScriptParentRelativePath = entryRelativePath;
+                            CopyTextToBuffer(state.CreateManagedScriptClassNameBuffer, "NewManagedScript");
+                            state.CreateManagedScriptPopupPending = true;
                         }
                         if (ImGui::MenuItem("Rename"))
                         {
@@ -1353,6 +1471,8 @@ namespace Limitless::EditorProjectPanel
                     const bool isAudio = IsAudioExtensionLower(entry.LowerExtension);
                     const bool isFont = IsFontExtensionLower(entry.LowerExtension);
                     const bool isNativeScriptFile = IsNativeScriptExtensionLower(entry.LowerExtension);
+                    const bool isManagedScriptFile = IsManagedScriptExtensionLower(entry.LowerExtension);
+                    const bool isScriptAssetFile = isNativeScriptFile || isManagedScriptFile;
                     const bool hasPairedScriptFile = isNativeScriptFile
                         && ([&]() {
                                const std::filesystem::path scriptBaseRelativePath = entryRelativePath.parent_path() / entryRelativePath.stem();
@@ -1361,8 +1481,8 @@ namespace Limitless::EditorProjectPanel
                                       (scriptPairPresenceIt->second & (kScriptPairHeaderBit | kScriptPairSourceBit)) ==
                                           (kScriptPairHeaderBit | kScriptPairSourceBit);
                            })();
-                    const std::string displayName = isNativeScriptFile
-                        ? BuildScriptAssetDisplayName(entry.AbsolutePath)
+                    const std::string displayName = isScriptAssetFile
+                        ? BuildProjectScriptAssetDisplayName(entry.AbsolutePath)
                         : GetAssetDisplayName(entry.AbsolutePath);
                     if (searchActive && !EntryMatchesProjectSearchFilter(entry, displayName))
                         continue;
@@ -1392,12 +1512,12 @@ namespace Limitless::EditorProjectPanel
                         (isInputActions && (selectedInputActionsAssetKey == assetKey)) ||
                         (isAnimationClip && (selectedAnimationClipAssetKey == assetKey)) ||
                         (isAnimatorController && (selectedAnimatorControllerAssetKey == assetKey)) ||
-                        (isNativeScriptFile && (selectedNativeScriptAssetKey == assetKey)) ||
+                        (isScriptAssetFile && (selectedNativeScriptAssetKey == assetKey)) ||
                         (isPrefab && (selectedPrefabAssetKey == assetKey));
                     const bool isMultiSelected = std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), assetKey) != state.MultiSelectedAssetKeys.end();
                     const float assetIndentX = ImGui::GetCursorScreenPos().x;
                     const bool treeNodeOpen = ImGui::TreeNodeEx(treeLabel.c_str(), (isPrimarySelected || isMultiSelected) ? (flags | ImGuiTreeNodeFlags_Selected) : flags);
-                    DrawAssetTypeBadge(ResolveAssetBadge(isTexture, isScene, isMaterial, isAudioMixer, isInputActions, isAnimationClip, isAnimatorController, isPrefab, isShader, isAudio, isFont, isNativeScriptFile), assetIndentX);
+                    DrawAssetTypeBadge(ResolveAssetBadge(isTexture, isScene, isMaterial, isAudioMixer, isInputActions, isAnimationClip, isAnimatorController, isPrefab, isShader, isAudio, isFont, isNativeScriptFile, isManagedScriptFile), assetIndentX);
 
                     const bool releasedOnItemWithoutDrag =
                         ImGui::IsItemHovered() &&
@@ -1421,7 +1541,7 @@ namespace Limitless::EditorProjectPanel
                             selectedTextureAssetKey = assetKey;
                         else if (isMaterial)
                             selectedMaterialAssetKey = assetKey;
-                        else if (isNativeScriptFile)
+                        else if (isScriptAssetFile)
                             selectedNativeScriptAssetKey = assetKey;
                         else if (isPrefab)
                             selectedPrefabAssetKey = assetKey;
@@ -1556,7 +1676,7 @@ namespace Limitless::EditorProjectPanel
                         clearAssetSelection();
                         selectedAnimatorControllerAssetKey = assetKey;
                     }
-                    else if (isNativeScriptFile && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
+                    else if (isScriptAssetFile && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
                     {
                         state.MultiSelectedAssetKeys.clear();
                         state.MultiSelectedAssetKeys.push_back(assetKey);
@@ -1568,7 +1688,7 @@ namespace Limitless::EditorProjectPanel
 
                     if (ImGui::BeginPopupContextItem())
                     {
-                        if (isNativeScriptFile)
+                        if (isScriptAssetFile)
                         {
                             if (ImGui::MenuItem("Open Script") && onNativeScriptAssetActivated)
                                 onNativeScriptAssetActivated(assetKey);
@@ -1601,6 +1721,8 @@ namespace Limitless::EditorProjectPanel
                         {
                             state.RenameAssetRelativePath = entryRelativePath;
                             if (hasPairedScriptFile)
+                                CopyTextToBuffer(state.RenameAssetBuffer, entry.AbsolutePath.stem().string().c_str());
+                            else if (isScriptAssetFile)
                                 CopyTextToBuffer(state.RenameAssetBuffer, entry.AbsolutePath.stem().string().c_str());
                             else
                                 CopyTextToBuffer(state.RenameAssetBuffer, displayName.c_str());
@@ -1916,6 +2038,14 @@ namespace Limitless::EditorProjectPanel
                 state.CreateNativeScriptPopupOpen = true;
             }
 
+            if (state.CreateManagedScriptPopupPending)
+            {
+                ImGui::OpenPopup("CreateManagedScriptAsset");
+                ImGui::SetNextWindowFocus();
+                state.CreateManagedScriptPopupPending = false;
+                state.CreateManagedScriptPopupOpen = true;
+            }
+
             if (state.CreateMaterialPopupPending)
             {
                 ImGui::OpenPopup("CreateMaterialAsset");
@@ -2077,6 +2207,58 @@ namespace Limitless::EditorProjectPanel
                 ImGui::SameLine();
                 if (ImGui::Button("Cancel", ImVec2(120, 0)))
                     state.CreateNativeScriptPopupOpen = false;
+
+                ImGui::EndPopup();
+            }
+
+            if (ImGui::BeginPopupModal("CreateManagedScriptAsset", &state.CreateManagedScriptPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+            {
+                ImGui::Text("Create C# Script");
+                ImGui::Separator();
+                if (ImGui::IsWindowAppearing())
+                    ImGui::SetKeyboardFocusHere();
+
+                const bool create = ImGui::InputText("Class Name",
+                                                     state.CreateManagedScriptClassNameBuffer.data(),
+                                                     state.CreateManagedScriptClassNameBuffer.size(),
+                                                     ImGuiInputTextFlags_EnterReturnsTrue);
+                if (ImGui::Button("Create", ImVec2(120, 0)) || create)
+                {
+                    std::string createdScriptAssetKey;
+                    std::string createError;
+                    if (CreateManagedScriptInAssets(
+                            assetsDirectory,
+                            state.CreateManagedScriptParentRelativePath,
+                            state.CreateManagedScriptClassNameBuffer.data(),
+                            createdScriptAssetKey,
+                            createError))
+                    {
+                        LT_INFO("Created managed script {}", createdScriptAssetKey);
+                        state.MultiSelectedAssetKeys.clear();
+                        state.MultiSelectedAssetKeys.push_back(createdScriptAssetKey);
+                        state.SelectionAnchorAssetKey = createdScriptAssetKey;
+                        state.MultiSelectedSubSpriteKeys.clear();
+                        state.SubSpriteSelectionAnchorKey.clear();
+
+                        std::string buildStatusMessage;
+                        const bool buildStarted = EditorInspectorPanel::BuildProjectNativeScripts(&buildStatusMessage);
+                        if (!buildStatusMessage.empty())
+                        {
+                            if (buildStarted)
+                                LT_INFO("{}", buildStatusMessage);
+                            else
+                                LT_WARN("{}", buildStatusMessage);
+                        }
+                        state.CreateManagedScriptPopupOpen = false;
+                    }
+                    else if (!createError.empty())
+                    {
+                        LT_WARN("Failed to create managed script: {}", createError);
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(120, 0)))
+                    state.CreateManagedScriptPopupOpen = false;
 
                 ImGui::EndPopup();
             }
@@ -2342,7 +2524,7 @@ namespace Limitless::EditorProjectPanel
         state.HoveredFolderRelativePathForExternalDrop.clear();
         gProjectSearchFilterLower = ToLowerAscii(std::string(state.SearchBuffer.data()));
         gProjectSearchMatchCache.clear();
-        state.GridScale = std::clamp(state.GridScale, 0.70f, 1.80f);
+        state.GridScale = std::clamp(state.GridScale, 0.0f, 1.80f);
 
         const auto rootResult = Assets::FindProjectRootFromWorkingDirectory();
         if (rootResult.IsFailure())
@@ -2425,70 +2607,74 @@ namespace Limitless::EditorProjectPanel
             }
         };
 
-        const size_t selectedCount = !state.MultiSelectedSubSpriteKeys.empty()
-            ? state.MultiSelectedSubSpriteKeys.size()
-            : state.MultiSelectedAssetKeys.size();
-
-        if (ImGui::BeginPopupContextWindow("ProjectContext", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
-        {
-            state.FolderPopupParent = state.ActiveFolderRelativePath;
+        const auto drawCreateMenuItems = [&](const std::filesystem::path& parentRelativePath) {
+            state.FolderPopupParent = parentRelativePath;
             if (ImGui::MenuItem("Create Folder"))
             {
                 state.FolderPopupPending = EditorProjectFolderPopup::Create;
                 CopyTextToBuffer(state.FolderPopupBuffer, "New Folder");
             }
             if (ImGui::MenuItem("Create Scene") && onCreateSceneRequested)
-                onCreateSceneRequested(state.ActiveFolderRelativePath);
+                onCreateSceneRequested(parentRelativePath);
             if (ImGui::MenuItem("Create Material"))
             {
-                state.CreateMaterialParentRelativePath = state.ActiveFolderRelativePath;
+                state.CreateMaterialParentRelativePath = parentRelativePath;
                 CopyTextToBuffer(state.CreateMaterialNameBuffer, "New Material");
                 state.CreateMaterialPopupPending = true;
             }
             if (ImGui::MenuItem("Create Tileset"))
             {
-                state.CreateTilesetParentRelativePath = state.ActiveFolderRelativePath;
+                state.CreateTilesetParentRelativePath = parentRelativePath;
                 CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
                 state.CreateTilesetPopupPending = true;
             }
             if (ImGui::MenuItem("Create Tile Palette"))
             {
-                state.CreateTilePaletteParentRelativePath = state.ActiveFolderRelativePath;
+                state.CreateTilePaletteParentRelativePath = parentRelativePath;
                 CopyTextToBuffer(state.CreateTilePaletteNameBuffer, "New Tile Palette");
                 state.CreateTilePalettePopupPending = true;
             }
             if (ImGui::MenuItem("Create Audio Mixer"))
             {
-                state.CreateAudioMixerParentRelativePath = state.ActiveFolderRelativePath;
+                state.CreateAudioMixerParentRelativePath = parentRelativePath;
                 CopyTextToBuffer(state.CreateAudioMixerNameBuffer, "New Audio Mixer");
                 state.CreateAudioMixerPopupPending = true;
             }
             if (ImGui::MenuItem("Create Input Actions"))
             {
-                state.CreateInputActionsParentRelativePath = state.ActiveFolderRelativePath;
+                state.CreateInputActionsParentRelativePath = parentRelativePath;
                 CopyTextToBuffer(state.CreateInputActionsNameBuffer, "New Input Actions");
                 state.CreateInputActionsPopupPending = true;
             }
             if (ImGui::MenuItem("Create Animation Clip"))
             {
-                state.CreateAnimationClipParentRelativePath = state.ActiveFolderRelativePath;
+                state.CreateAnimationClipParentRelativePath = parentRelativePath;
                 CopyTextToBuffer(state.CreateAnimationClipNameBuffer, "New Animation Clip");
                 state.CreateAnimationClipPopupPending = true;
             }
             if (ImGui::MenuItem("Create Animator Controller"))
             {
-                state.CreateAnimatorControllerParentRelativePath = state.ActiveFolderRelativePath;
+                state.CreateAnimatorControllerParentRelativePath = parentRelativePath;
                 CopyTextToBuffer(state.CreateAnimatorControllerNameBuffer, "New Animator Controller");
                 state.CreateAnimatorControllerPopupPending = true;
             }
             if (ImGui::MenuItem("Create Native Script"))
             {
-                state.CreateNativeScriptParentRelativePath = state.ActiveFolderRelativePath;
+                state.CreateNativeScriptParentRelativePath = parentRelativePath;
                 CopyTextToBuffer(state.CreateNativeScriptClassNameBuffer, "NewNativeScript");
                 state.CreateNativeScriptPopupPending = true;
             }
-            ImGui::EndPopup();
-        }
+            if (ImGui::MenuItem("Create C# Script"))
+            {
+                state.CreateManagedScriptParentRelativePath = parentRelativePath;
+                CopyTextToBuffer(state.CreateManagedScriptClassNameBuffer, "NewManagedScript");
+                state.CreateManagedScriptPopupPending = true;
+            }
+        };
+
+        const size_t selectedCount = !state.MultiSelectedSubSpriteKeys.empty()
+            ? state.MultiSelectedSubSpriteKeys.size()
+            : state.MultiSelectedAssetKeys.size();
 
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 6.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 6.0f));
@@ -2526,6 +2712,14 @@ namespace Limitless::EditorProjectPanel
                 state.TreeExpansionStateChanged = true;
             }
             ImGui::SameLine();
+            if (ImGui::Button("Create"))
+                ImGui::OpenPopup("##ProjectToolbarCreateMenu");
+            if (ImGui::BeginPopup("##ProjectToolbarCreateMenu"))
+            {
+                drawCreateMenuItems(state.ActiveFolderRelativePath);
+                ImGui::EndPopup();
+            }
+            ImGui::SameLine();
             if (gProjectSearchFilterLower.empty())
                 ImGui::SetNextItemWidth(-1.0f);
             else
@@ -2544,9 +2738,9 @@ namespace Limitless::EditorProjectPanel
 
             ImGui::Spacing();
             ImGui::SetNextItemWidth(180.0f);
-            if (ImGui::SliderFloat("Grid Scale", &state.GridScale, 0.70f, 1.80f, "%.2fx"))
+            if (ImGui::SliderFloat("Grid Scale", &state.GridScale, 0.0f, 1.80f, "%.2fx"))
             {
-                state.GridScale = std::clamp(state.GridScale, 0.70f, 1.80f);
+                state.GridScale = std::clamp(state.GridScale, 0.0f, 1.80f);
                 state.GridScaleChanged = true;
             }
         }
@@ -2578,6 +2772,7 @@ namespace Limitless::EditorProjectPanel
             bool IsAudio = false;
             bool IsFont = false;
             bool IsNativeScriptFile = false;
+            bool IsManagedScriptFile = false;
             bool IsScriptPair = false;
             bool HasPairedScriptFile = false;
             bool HasThumbnailSubRect = false;
@@ -2601,6 +2796,7 @@ namespace Limitless::EditorProjectPanel
             if (entry.IsShader) return kBadgeShader;
             if (entry.IsAudio) return kBadgeAudio;
             if (entry.IsFont) return kBadgeFont;
+            if (entry.IsManagedScriptFile) return kBadgeManagedScript;
             if (entry.IsNativeScriptFile) return kBadgeScript;
             return kBadgeUnknown;
         };
@@ -2626,7 +2822,7 @@ namespace Limitless::EditorProjectPanel
                 return selectedAnimationClipAssetKey == entry.PrimaryAssetKey;
             if (entry.IsAnimatorController)
                 return selectedAnimatorControllerAssetKey == entry.PrimaryAssetKey;
-            if (entry.IsNativeScriptFile)
+            if (entry.IsNativeScriptFile || entry.IsManagedScriptFile)
                 return selectedNativeScriptAssetKey == entry.PrimaryAssetKey || (!entry.SecondaryAssetKey.empty() && selectedNativeScriptAssetKey == entry.SecondaryAssetKey);
             if (entry.IsPrefab)
                 return selectedPrefabAssetKey == entry.PrimaryAssetKey;
@@ -2639,7 +2835,7 @@ namespace Limitless::EditorProjectPanel
                 selectedTextureAssetKey = entry.PrimaryAssetKey;
             else if (entry.IsMaterial)
                 selectedMaterialAssetKey = entry.PrimaryAssetKey;
-            else if (entry.IsNativeScriptFile)
+            else if (entry.IsNativeScriptFile || entry.IsManagedScriptFile)
                 selectedNativeScriptAssetKey = entry.PrimaryAssetKey;
             else if (entry.IsPrefab)
                 selectedPrefabAssetKey = entry.PrimaryAssetKey;
@@ -2659,62 +2855,7 @@ namespace Limitless::EditorProjectPanel
             if (!ImGui::BeginPopupContextItem())
                 return;
 
-            state.FolderPopupParent = folderRelativePath;
-            if (ImGui::MenuItem("Create Folder"))
-            {
-                state.FolderPopupPending = EditorProjectFolderPopup::Create;
-                CopyTextToBuffer(state.FolderPopupBuffer, "New Folder");
-            }
-            if (ImGui::MenuItem("Create Scene") && onCreateSceneRequested)
-                onCreateSceneRequested(folderRelativePath);
-            if (ImGui::MenuItem("Create Material"))
-            {
-                state.CreateMaterialParentRelativePath = folderRelativePath;
-                CopyTextToBuffer(state.CreateMaterialNameBuffer, "New Material");
-                state.CreateMaterialPopupPending = true;
-            }
-            if (ImGui::MenuItem("Create Tileset"))
-            {
-                state.CreateTilesetParentRelativePath = folderRelativePath;
-                CopyTextToBuffer(state.CreateTilesetNameBuffer, "New Tileset");
-                state.CreateTilesetPopupPending = true;
-            }
-            if (ImGui::MenuItem("Create Tile Palette"))
-            {
-                state.CreateTilePaletteParentRelativePath = folderRelativePath;
-                CopyTextToBuffer(state.CreateTilePaletteNameBuffer, "New Tile Palette");
-                state.CreateTilePalettePopupPending = true;
-            }
-            if (ImGui::MenuItem("Create Audio Mixer"))
-            {
-                state.CreateAudioMixerParentRelativePath = folderRelativePath;
-                CopyTextToBuffer(state.CreateAudioMixerNameBuffer, "New Audio Mixer");
-                state.CreateAudioMixerPopupPending = true;
-            }
-            if (ImGui::MenuItem("Create Input Actions"))
-            {
-                state.CreateInputActionsParentRelativePath = folderRelativePath;
-                CopyTextToBuffer(state.CreateInputActionsNameBuffer, "New Input Actions");
-                state.CreateInputActionsPopupPending = true;
-            }
-            if (ImGui::MenuItem("Create Animation Clip"))
-            {
-                state.CreateAnimationClipParentRelativePath = folderRelativePath;
-                CopyTextToBuffer(state.CreateAnimationClipNameBuffer, "New Animation Clip");
-                state.CreateAnimationClipPopupPending = true;
-            }
-            if (ImGui::MenuItem("Create Animator Controller"))
-            {
-                state.CreateAnimatorControllerParentRelativePath = folderRelativePath;
-                CopyTextToBuffer(state.CreateAnimatorControllerNameBuffer, "New Animator Controller");
-                state.CreateAnimatorControllerPopupPending = true;
-            }
-            if (ImGui::MenuItem("Create Native Script"))
-            {
-                state.CreateNativeScriptParentRelativePath = folderRelativePath;
-                CopyTextToBuffer(state.CreateNativeScriptClassNameBuffer, "NewNativeScript");
-                state.CreateNativeScriptPopupPending = true;
-            }
+            drawCreateMenuItems(folderRelativePath);
 
             if (!isRoot)
             {
@@ -2940,6 +3081,8 @@ namespace Limitless::EditorProjectPanel
                     const bool isAudio = IsAudioExtensionLower(entry.LowerExtension);
                     const bool isFont = IsFontExtensionLower(entry.LowerExtension);
                     const bool isNativeScriptFile = IsNativeScriptExtensionLower(entry.LowerExtension);
+                    const bool isManagedScriptFile = IsManagedScriptExtensionLower(entry.LowerExtension);
+                    const bool isScriptAssetFile = isNativeScriptFile || isManagedScriptFile;
                     const bool hasPairedScriptFile = isNativeScriptFile && ([&]() {
                         const std::filesystem::path scriptBaseRelativePath = entry.RelativePath.parent_path() / entry.RelativePath.stem();
                         const auto scriptPairPresenceIt = scriptPairPresenceByBasePath.find(scriptBaseRelativePath.generic_string());
@@ -2947,8 +3090,8 @@ namespace Limitless::EditorProjectPanel
                                (scriptPairPresenceIt->second & (kScriptPairHeaderBit | kScriptPairSourceBit)) ==
                                    (kScriptPairHeaderBit | kScriptPairSourceBit);
                     })();
-                    const std::string displayName = isNativeScriptFile
-                        ? BuildScriptAssetDisplayName(entry.AbsolutePath)
+                    const std::string displayName = isScriptAssetFile
+                        ? BuildProjectScriptAssetDisplayName(entry.AbsolutePath)
                         : GetAssetDisplayName(entry.AbsolutePath);
                     if (searchActive && !EntryMatchesProjectSearchFilter(entry, displayName))
                         continue;
@@ -2971,6 +3114,7 @@ namespace Limitless::EditorProjectPanel
                     fileEntry.IsAudio = isAudio;
                     fileEntry.IsFont = isFont;
                     fileEntry.IsNativeScriptFile = isNativeScriptFile;
+                    fileEntry.IsManagedScriptFile = isManagedScriptFile;
                     fileEntry.HasPairedScriptFile = hasPairedScriptFile;
                     if (isTexture)
                     {
@@ -2986,6 +3130,8 @@ namespace Limitless::EditorProjectPanel
                     output.push_back(std::move(fileEntry));
                 }
             };
+
+        const bool useCompactListView = state.GridScale <= kCompactListScaleThreshold;
 
         ImGui::BeginChild("##ProjectBrowserRegion", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
 
@@ -3034,6 +3180,12 @@ namespace Limitless::EditorProjectPanel
 
             ImGui::Separator();
 
+            if (ImGui::BeginPopupContextWindow("##ProjectGridContext", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
+            {
+                drawCreateMenuItems(state.ActiveFolderRelativePath);
+                ImGui::EndPopup();
+            }
+
             std::vector<ProjectGridEntry> gridEntries;
             appendGridEntries(state.ActiveFolderRelativePath, gridEntries);
 
@@ -3050,6 +3202,374 @@ namespace Limitless::EditorProjectPanel
                 ImGui::Dummy(ImVec2(0.0f, 8.0f));
                 ImGui::TextColored(ImVec4(0.78f, 0.82f, 0.90f, 1.0f),
                     searchActive ? "No assets match the current filter in this location." : "This folder is empty.");
+            }
+            else if (useCompactListView)
+            {
+                const auto fitRowTextToWidth = [](const std::string& text, const float maxWidth) {
+                    if (text.empty() || maxWidth <= 0.0f)
+                        return std::string{};
+
+                    if (ImGui::CalcTextSize(text.c_str()).x <= maxWidth)
+                        return text;
+
+                    constexpr const char* ellipsis = "...";
+                    const float ellipsisWidth = ImGui::CalcTextSize(ellipsis).x;
+                    if (ellipsisWidth >= maxWidth)
+                        return std::string(ellipsis);
+
+                    std::string fitted = text;
+                    while (!fitted.empty())
+                    {
+                        fitted.pop_back();
+                        const std::string candidate = fitted + ellipsis;
+                        if (ImGui::CalcTextSize(candidate.c_str()).x <= maxWidth)
+                            return candidate;
+                    }
+
+                    return std::string(ellipsis);
+                };
+
+                const float rowHeight = 30.0f;
+                const float rowSpacing = 4.0f;
+                const float rowPaddingX = 10.0f;
+                const float badgePadX = 5.0f;
+                const float badgePadY = 2.0f;
+                const float textGap = 8.0f;
+                const float rightPadding = 10.0f;
+                const float minNameWidth = 120.0f;
+
+                for (size_t index = 0; index < gridEntries.size(); ++index)
+                {
+                    ProjectGridEntry& entry = gridEntries[index];
+                    ImGui::PushID(static_cast<int>(index));
+                    const float rowWidth = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+                    const ImVec2 rowMin = ImGui::GetCursorScreenPos();
+                    ImGui::InvisibleButton("##AssetRow", ImVec2(rowWidth, rowHeight));
+                    const bool hovered = ImGui::IsItemHovered();
+                    const bool releasedOnItemWithoutDrag =
+                        hovered && ImGui::IsMouseReleased(0) && (ImGui::GetDragDropPayload() == nullptr);
+                    const bool isMultiSelected = !entry.IsDirectory &&
+                        std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey) != state.MultiSelectedAssetKeys.end();
+                    const bool isSelected = !entry.IsDirectory && (isGridEntryPrimarySelected(entry) || isMultiSelected);
+
+                    const ImVec2 rowMax(rowMin.x + rowWidth, rowMin.y + rowHeight);
+                    ImDrawList* drawList = ImGui::GetWindowDrawList();
+                    const ImU32 fillColor = isSelected
+                        ? IM_COL32(44, 79, 138, 240)
+                        : (hovered ? IM_COL32(29, 39, 60, 240) : IM_COL32(19, 26, 40, 225));
+                    const ImU32 borderColor = isSelected
+                        ? IM_COL32(92, 145, 230, 255)
+                        : IM_COL32(56, 72, 104, 210);
+                    drawList->AddRectFilled(rowMin, rowMax, fillColor, 6.0f);
+                    drawList->AddRect(rowMin, rowMax, borderColor, 6.0f, 0, isSelected ? 2.0f : 1.0f);
+
+                    const AssetTypeBadgeInfo& badge = *entry.Badge;
+                    const ImVec2 badgeTextSize = ImGui::CalcTextSize(badge.Label);
+                    const float badgeHeight = badgeTextSize.y + badgePadY * 2.0f;
+                    const ImVec2 badgeMin(rowMin.x + rowPaddingX, rowMin.y + (rowHeight - badgeHeight) * 0.5f);
+                    const ImVec2 badgeMax(badgeMin.x + badgeTextSize.x + badgePadX * 2.0f, badgeMin.y + badgeHeight);
+                    drawList->AddRectFilled(badgeMin, badgeMax, badge.FillColor, 4.0f);
+                    drawList->AddRect(badgeMin, badgeMax, badge.BorderColor, 4.0f, 0, 1.0f);
+                    drawList->AddText(ImVec2(badgeMin.x + badgePadX, badgeMin.y + badgePadY), badge.TextColor, badge.Label);
+
+                    const float nameStartX = badgeMax.x + textGap;
+                    const float textY = rowMin.y + (rowHeight - ImGui::GetTextLineHeight()) * 0.5f;
+                    const std::string secondaryText = searchActive
+                        ? (entry.IsDirectory
+                            ? (entry.Entry.RelativePath.empty() ? std::string("Assets") : std::string("Assets/") + entry.Entry.RelativePath.generic_string())
+                            : (entry.Entry.RelativePath.parent_path().empty() ? std::string("Assets") : std::string("Assets/") + entry.Entry.RelativePath.parent_path().generic_string()))
+                        : std::string{};
+                    std::string fittedSecondaryText;
+                    float secondaryTextWidth = 0.0f;
+                    bool drawSecondaryText = false;
+                    if (!secondaryText.empty())
+                    {
+                        fittedSecondaryText = fitRowTextToWidth(secondaryText, std::max(120.0f, rowWidth * 0.35f));
+                        secondaryTextWidth = ImGui::CalcTextSize(fittedSecondaryText.c_str()).x;
+                        drawSecondaryText = !fittedSecondaryText.empty() &&
+                            (rowMax.x - nameStartX - rightPadding) > (secondaryTextWidth + textGap + minNameWidth);
+                    }
+
+                    const float nameMaxX = rowMax.x - rightPadding - (drawSecondaryText ? (secondaryTextWidth + textGap) : 0.0f);
+                    const float nameWidth = std::max(0.0f, nameMaxX - nameStartX);
+                    const std::string fittedDisplayName = fitRowTextToWidth(entry.DisplayName, nameWidth);
+                    drawList->PushClipRect(ImVec2(nameStartX, rowMin.y), ImVec2(nameMaxX, rowMax.y), true);
+                    drawList->AddText(ImVec2(nameStartX, textY), IM_COL32(230, 236, 245, 255), fittedDisplayName.c_str());
+                    drawList->PopClipRect();
+                    if (drawSecondaryText)
+                    {
+                        drawList->AddText(
+                            ImVec2(rowMax.x - rightPadding - secondaryTextWidth, textY),
+                            IM_COL32(145, 156, 176, 255),
+                            fittedSecondaryText.c_str());
+                    }
+
+                    if (entry.IsDirectory)
+                    {
+                        if (hovered)
+                            state.HoveredFolderRelativePathForExternalDrop = entry.Entry.RelativePath;
+
+                        if (hovered && ImGui::IsMouseDoubleClicked(0))
+                            setActiveFolder(entry.Entry.RelativePath);
+
+                        beginFolderContextMenu(entry.Entry.RelativePath, entry.Entry.FileName, false);
+                        acceptFolderDropTarget(entry.Entry.RelativePath);
+
+                        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                        {
+                            const std::string assetKey = entry.PrimaryAssetKey;
+                            ImGui::SetDragDropPayload(assetMovePayloadId, assetKey.c_str(), static_cast<uint32_t>(assetKey.size() + 1), ImGuiCond_Once);
+                            ImGui::Text("%s", entry.DisplayName.c_str());
+                            ImGui::EndDragDropSource();
+                        }
+                    }
+                    else
+                    {
+                        if (releasedOnItemWithoutDrag)
+                        {
+                            const ImGuiIO& io = ImGui::GetIO();
+                            const bool shiftPressed = io.KeyShift;
+                            const bool controlPressed = io.KeyCtrl;
+                            state.MultiSelectedSubSpriteKeys.clear();
+                            state.SubSpriteSelectionAnchorKey.clear();
+
+                            if (shiftPressed)
+                            {
+                                const auto findIndex = [&](const std::string& key) -> int32_t {
+                                    for (size_t selectionIndex = 0; selectionIndex < visibleAssetKeys.size(); ++selectionIndex)
+                                    {
+                                        if (visibleAssetKeys[selectionIndex] == key)
+                                            return static_cast<int32_t>(selectionIndex);
+                                    }
+                                    return -1;
+                                };
+
+                                const int32_t anchorIndex = findIndex(state.SelectionAnchorAssetKey);
+                                const int32_t clickedIndex = findIndex(entry.PrimaryAssetKey);
+                                if (!controlPressed)
+                                    state.MultiSelectedAssetKeys.clear();
+
+                                if (anchorIndex >= 0 && clickedIndex >= 0)
+                                {
+                                    const int32_t minIndex = std::min(anchorIndex, clickedIndex);
+                                    const int32_t maxIndex = std::max(anchorIndex, clickedIndex);
+                                    for (int32_t rangeIndex = minIndex; rangeIndex <= maxIndex; ++rangeIndex)
+                                    {
+                                        const std::string& rangeKey = visibleAssetKeys[static_cast<size_t>(rangeIndex)];
+                                        if (std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), rangeKey) == state.MultiSelectedAssetKeys.end())
+                                            state.MultiSelectedAssetKeys.push_back(rangeKey);
+                                    }
+                                }
+                                else if (std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey) == state.MultiSelectedAssetKeys.end())
+                                {
+                                    state.MultiSelectedAssetKeys.push_back(entry.PrimaryAssetKey);
+                                }
+
+                                setPrimarySelectionForGridEntry(entry);
+                            }
+                            else if (controlPressed)
+                            {
+                                const auto foundIt = std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey);
+                                const bool wasSelected = foundIt != state.MultiSelectedAssetKeys.end();
+                                if (wasSelected)
+                                {
+                                    state.MultiSelectedAssetKeys.erase(foundIt);
+                                    if (state.MultiSelectedAssetKeys.empty())
+                                        clearPrimaryAssetSelection();
+                                }
+                                else
+                                {
+                                    state.MultiSelectedAssetKeys.push_back(entry.PrimaryAssetKey);
+                                    setPrimarySelectionForGridEntry(entry);
+                                }
+                                state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            }
+                            else
+                            {
+                                state.MultiSelectedAssetKeys.clear();
+                                state.MultiSelectedAssetKeys.push_back(entry.PrimaryAssetKey);
+                                state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                                setPrimarySelectionForGridEntry(entry);
+                            }
+                        }
+
+                        if (entry.IsTexture && hovered && ImGui::IsMouseDoubleClicked(0))
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedTextureAssetKey = entry.PrimaryAssetKey;
+                        }
+                        else if (entry.IsScene && hovered && ImGui::IsMouseDoubleClicked(0) && onSceneActivated)
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedNativeScriptAssetKey.clear();
+                            onSceneActivated(entry.PrimaryAssetKey);
+                        }
+                        else if (entry.IsPrefab && hovered && ImGui::IsMouseDoubleClicked(0) && onPrefabOpened)
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedPrefabAssetKey = entry.PrimaryAssetKey;
+                            onPrefabOpened(entry.PrimaryAssetKey);
+                        }
+                        else if (entry.IsMaterial && hovered && ImGui::IsMouseDoubleClicked(0))
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedMaterialAssetKey = entry.PrimaryAssetKey;
+                        }
+                        else if (entry.IsTileset && hovered && ImGui::IsMouseDoubleClicked(0))
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedTilesetAssetKey = entry.PrimaryAssetKey;
+                        }
+                        else if (entry.IsAudioMixer && hovered && ImGui::IsMouseDoubleClicked(0))
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedAudioMixerAssetKey = entry.PrimaryAssetKey;
+                        }
+                        else if (entry.IsAnimationClip && hovered && ImGui::IsMouseDoubleClicked(0))
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedAnimationClipAssetKey = entry.PrimaryAssetKey;
+                        }
+                        else if (entry.IsAnimatorController && hovered && ImGui::IsMouseDoubleClicked(0))
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedAnimatorControllerAssetKey = entry.PrimaryAssetKey;
+                        }
+                        else if ((entry.IsNativeScriptFile || entry.IsManagedScriptFile) && hovered && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
+                        {
+                            state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
+                            state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
+                            clearPrimaryAssetSelection();
+                            selectedNativeScriptAssetKey = entry.PrimaryAssetKey;
+                            onNativeScriptAssetActivated(entry.PrimaryAssetKey);
+                        }
+
+                        if (ImGui::BeginPopupContextItem())
+                        {
+                            if (entry.IsNativeScriptFile || entry.IsManagedScriptFile)
+                            {
+                                if (ImGui::MenuItem("Open Script") && onNativeScriptAssetActivated)
+                                    onNativeScriptAssetActivated(entry.PrimaryAssetKey);
+                                if (entry.HasPairedScriptFile)
+                                    ImGui::Separator();
+                            }
+
+                            if (entry.IsScene)
+                            {
+                                if (ImGui::MenuItem("Open Scene") && onSceneActivated)
+                                    onSceneActivated(entry.PrimaryAssetKey);
+                                if (ImGui::MenuItem("Set As Default Scene") && onSetDefaultSceneRequested)
+                                    onSetDefaultSceneRequested(entry.PrimaryAssetKey);
+                                ImGui::Separator();
+                            }
+
+                            if (entry.IsPrefab)
+                            {
+                                if (ImGui::MenuItem("Open Prefab") && onPrefabOpened)
+                                    onPrefabOpened(entry.PrimaryAssetKey);
+                                if (ImGui::MenuItem("Instantiate Prefab") && onPrefabInstantiated)
+                                    onPrefabInstantiated(entry.PrimaryAssetKey);
+                                ImGui::Separator();
+                            }
+
+                            if (ImGui::MenuItem(entry.HasPairedScriptFile ? "Rename Script Pair" : "Rename"))
+                            {
+                                state.RenameAssetRelativePath = entry.Entry.RelativePath;
+                                if (entry.HasPairedScriptFile)
+                                    CopyTextToBuffer(state.RenameAssetBuffer, entry.Entry.AbsolutePath.stem().string().c_str());
+                                else if (entry.IsNativeScriptFile || entry.IsManagedScriptFile)
+                                    CopyTextToBuffer(state.RenameAssetBuffer, entry.Entry.AbsolutePath.stem().string().c_str());
+                                else
+                                    CopyTextToBuffer(state.RenameAssetBuffer, entry.DisplayName.c_str());
+                                state.RenameAssetAsNativeScriptPair = entry.HasPairedScriptFile;
+                                state.RenameAssetPopupPending = true;
+                            }
+
+                            if (ImGui::MenuItem(entry.HasPairedScriptFile ? "Delete Script Pair" : "Delete"))
+                            {
+                                const bool deleteMultiSelection =
+                                    state.MultiSelectedAssetKeys.size() > 1 &&
+                                    std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey) != state.MultiSelectedAssetKeys.end();
+                                const bool removed = deleteMultiSelection
+                                    ? DeleteAssetKeysWithSceneHandling(assetsDirectory, state.MultiSelectedAssetKeys, onDeleteSceneAssetsRequested)
+                                    : DeleteAssetKeysWithSceneHandling(assetsDirectory, { entry.PrimaryAssetKey }, onDeleteSceneAssetsRequested);
+                                if (removed)
+                                {
+                                    state.MultiSelectedAssetKeys.clear();
+                                    state.SelectionAnchorAssetKey.clear();
+                                    state.MultiSelectedSubSpriteKeys.clear();
+                                    state.SubSpriteSelectionAnchorKey.clear();
+                                    clearPrimaryAssetSelection();
+                                    InvalidateProjectDirectoryCache();
+                                    LT_INFO("Deleted asset {}", entry.PrimaryAssetKey);
+                                }
+                            }
+
+                            ImGui::EndPopup();
+                        }
+
+                        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                        {
+                            const bool draggingMultiSelection =
+                                state.MultiSelectedAssetKeys.size() > 1 &&
+                                std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey) != state.MultiSelectedAssetKeys.end();
+                            if (draggingMultiSelection)
+                            {
+                                const std::string payloadText = EncodeAssetKeyListPayload(state.MultiSelectedAssetKeys);
+                                if (!payloadText.empty())
+                                {
+                                    ImGui::SetDragDropPayload(
+                                        kAssetMultiSelectionPayload,
+                                        payloadText.c_str(),
+                                        static_cast<uint32_t>(payloadText.size() + 1),
+                                        ImGuiCond_Once);
+                                }
+                                ImGui::Text("%zu assets", state.MultiSelectedAssetKeys.size());
+                            }
+                            else
+                            {
+                                if (entry.IsTexture)
+                                    ImGui::SetDragDropPayload(texturePayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                else if (entry.IsScene)
+                                    ImGui::SetDragDropPayload(scenePayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                else if (entry.IsPrefab)
+                                    ImGui::SetDragDropPayload(prefabPayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                else if (entry.IsMaterial)
+                                    ImGui::SetDragDropPayload(materialPayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                else if (entry.IsShader)
+                                    ImGui::SetDragDropPayload(shaderPayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                else if (entry.IsAudio)
+                                    ImGui::SetDragDropPayload(audioPayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                else if (entry.IsFont)
+                                    ImGui::SetDragDropPayload(fontPayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                else
+                                    ImGui::SetDragDropPayload(assetMovePayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                ImGui::Text("%s", entry.DisplayName.c_str());
+                            }
+                            ImGui::EndDragDropSource();
+                        }
+                    }
+
+                    ImGui::PopID();
+                    if (index + 1 < gridEntries.size())
+                        ImGui::Dummy(ImVec2(0.0f, rowSpacing));
+                }
             }
             else
             {
@@ -3355,7 +3875,7 @@ namespace Limitless::EditorProjectPanel
                             clearPrimaryAssetSelection();
                             selectedAnimatorControllerAssetKey = entry.PrimaryAssetKey;
                         }
-                        else if (entry.IsNativeScriptFile && hovered && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
+                        else if ((entry.IsNativeScriptFile || entry.IsManagedScriptFile) && hovered && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
                         {
                             state.MultiSelectedAssetKeys = { entry.PrimaryAssetKey };
                             state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
@@ -3366,7 +3886,7 @@ namespace Limitless::EditorProjectPanel
 
                         if (ImGui::BeginPopupContextItem())
                         {
-                            if (entry.IsNativeScriptFile)
+                            if (entry.IsNativeScriptFile || entry.IsManagedScriptFile)
                             {
                                 if (ImGui::MenuItem("Open Script") && onNativeScriptAssetActivated)
                                     onNativeScriptAssetActivated(entry.PrimaryAssetKey);
@@ -3396,6 +3916,8 @@ namespace Limitless::EditorProjectPanel
                             {
                                 state.RenameAssetRelativePath = entry.Entry.RelativePath;
                                 if (entry.HasPairedScriptFile)
+                                    CopyTextToBuffer(state.RenameAssetBuffer, entry.Entry.AbsolutePath.stem().string().c_str());
+                                else if (entry.IsNativeScriptFile || entry.IsManagedScriptFile)
                                     CopyTextToBuffer(state.RenameAssetBuffer, entry.Entry.AbsolutePath.stem().string().c_str());
                                 else
                                     CopyTextToBuffer(state.RenameAssetBuffer, entry.DisplayName.c_str());

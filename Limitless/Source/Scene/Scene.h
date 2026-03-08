@@ -187,6 +187,9 @@ namespace Limitless
         uint16_t GetPhysics2DWorldCount() const;
         const Physics2DContactListener* GetPhysics2DContactEvents() const;
         const Physics2DContactListener* GetPhysics2DContactEventsForEntity(entt::entity entity) const;
+        bool HasActivePhysics2DContact(entt::entity entity, entt::entity otherEntity, bool includeSensorContacts = true) const;
+        int GetActivePhysics2DContactCount(entt::entity entity, bool includeSensorContacts = true) const;
+        std::vector<entt::entity> GetActivePhysics2DContactEntityHandles(entt::entity entity, bool includeSensorContacts = true) const;
         bool TryGetPhysics2DBodyDiagnostics(entt::entity entity, Physics2DBodyDiagnostics& outDiagnostics) const;
         Physics2DRaycastHit RaycastClosestAcrossPhysicsWorlds(const glm::vec2& origin,
                                                               const glm::vec2& direction,

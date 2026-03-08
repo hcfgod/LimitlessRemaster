@@ -3286,6 +3286,7 @@ TEST_SUITE("Scene And Editor Flows")
         writeTextFile(payloadDirectory / "Limitless.Managed.dll", "placeholder");
         writeTextFile(payloadDirectory / "Limitless.Managed.runtimeconfig.json", "{}");
         writeTextFile(payloadDirectory / "Limitless.Managed.TestScripts.dll", "placeholder");
+        writeTextFile(payloadDirectory / "Project.ManagedScripts.dll", "placeholder");
 
         nlohmann::json manifestJson;
         manifestJson["formatVersion"] = Limitless::ManagedScriptPayload::PayloadManifestFormatVersion;
@@ -3294,7 +3295,7 @@ TEST_SUITE("Scene And Editor Flows")
         manifestJson["coralManagedRuntimeConfig"] = "Coral.Managed.runtimeconfig.json";
         manifestJson["contractAssembly"] = "Limitless.Managed.dll";
         manifestJson["contractRuntimeConfig"] = "Limitless.Managed.runtimeconfig.json";
-        manifestJson["scriptAssemblies"] = nlohmann::json::array({ "Limitless.Managed.TestScripts.dll" });
+        manifestJson["scriptAssemblies"] = nlohmann::json::array({ "Limitless.Managed.TestScripts.dll", "Project.ManagedScripts.dll" });
         manifestJson["buildConfiguration"] = "Debug";
         manifestJson["targetOS"] = "Windows";
         manifestJson["targetArchitecture"] = "x64";
@@ -3306,8 +3307,9 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK(Limitless::ManagedScriptPayload::ValidatePayloadDirectory(payloadDirectory, &loadedManifest, &validationError));
         CHECK(validationError.empty());
         CHECK(loadedManifest.ApiVersion == Limitless::ManagedScriptPayload::HostApiVersion);
-        CHECK(loadedManifest.ScriptAssemblies.size() == 1);
-        CHECK(loadedManifest.ScriptAssemblies.front() == "Limitless.Managed.TestScripts.dll");
+        CHECK(loadedManifest.ScriptAssemblies.size() == 2);
+        CHECK(loadedManifest.ScriptAssemblies[0] == "Limitless.Managed.TestScripts.dll");
+        CHECK(loadedManifest.ScriptAssemblies[1] == "Project.ManagedScripts.dll");
 
         manifestJson["apiVersion"] = Limitless::ManagedScriptPayload::HostApiVersion + 1;
         writeTextFile(payloadDirectory / Limitless::ManagedScriptPayload::PayloadManifestFileName, manifestJson.dump(2));

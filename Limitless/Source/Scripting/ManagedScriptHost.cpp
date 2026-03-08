@@ -2,6 +2,7 @@
 
 #include "Core/Debug/Log.h"
 #include "Scene/Components/CoreComponents.h"
+#include "Scene/Components/PhysicsComponents.h"
 #include "Scene/Scene.h"
 
 #include <Coral/Assembly.hpp>
@@ -50,6 +51,21 @@ namespace Limitless::ManagedScriptHost
             float X = 0.0f;
             float Y = 0.0f;
             float Z = 0.0f;
+        };
+
+        struct ManagedVector2 final
+        {
+            float X = 0.0f;
+            float Y = 0.0f;
+        };
+
+        struct ManagedRaycastHit2D final
+        {
+            int32_t HasHitValue = 0;
+            uint32_t HitEntityHandle = static_cast<uint32_t>(entt::null);
+            ManagedVector2 Point{};
+            ManagedVector2 Normal{ 0.0f, 1.0f };
+            float Fraction = 0.0f;
         };
 
         struct HostState final
@@ -201,6 +217,42 @@ namespace Limitless::ManagedScriptHost
             return glm::vec3(value.X, value.Y, value.Z);
         }
 
+        ManagedVector2 ToManagedVector2(const glm::vec2& value)
+        {
+            ManagedVector2 result{};
+            result.X = value.x;
+            result.Y = value.y;
+            return result;
+        }
+
+        glm::vec2 ToGlmVector2(const ManagedVector2& value)
+        {
+            return glm::vec2(value.X, value.Y);
+        }
+
+        ManagedRaycastHit2D ToManagedRaycastHit2D(const Physics2DRaycastHit& value)
+        {
+            ManagedRaycastHit2D result{};
+            if (!value.HasHit || s_HostState.ActiveScene == nullptr)
+                return result;
+
+            result.HasHitValue = 1;
+            result.HitEntityHandle = static_cast<uint32_t>(s_HostState.ActiveScene->ResolveEntityReference(value.Entity));
+            result.Point = ToManagedVector2(value.Point);
+            result.Normal = ToManagedVector2(value.Normal);
+            result.Fraction = value.Fraction;
+            return result;
+        }
+
+        Rigidbody2DComponent* TryGetManagedRigidbody2DComponent(uint32_t entityHandle)
+        {
+            entt::registry* registry = GetActiveRegistry();
+            const entt::entity entity = ResolveManagedEntityHandle(entityHandle);
+            if (registry == nullptr || entity == entt::null)
+                return nullptr;
+            return registry->try_get<Rigidbody2DComponent>(entity);
+        }
+
         ScriptPropertyValue BuildDefaultScriptPropertyValue(ScriptPropertyType type)
         {
             switch (type)
@@ -338,16 +390,52 @@ namespace Limitless::ManagedScriptHost
             return reflectedFields;
         }
 
+        std::string GetUnqualifiedManagedClassName(std::string_view className)
+        {
+            if (className.empty())
+                return {};
+
+            const size_t namespaceSeparator = className.rfind('.');
+            if (namespaceSeparator == std::string_view::npos)
+                return std::string(className);
+            return std::string(className.substr(namespaceSeparator + 1));
+        }
+
+        const DiscoveredScriptClass* ResolveDiscoveredClassMetadata(std::string_view className)
+        {
+            if (className.empty())
+                return nullptr;
+
+            const auto exactIterator = std::find_if(s_HostState.Snapshot.Classes.begin(),
+                                                    s_HostState.Snapshot.Classes.end(),
+                                                    [&](const DiscoveredScriptClass& discoveredClass) {
+                                                        return discoveredClass.FullName == className;
+                                                    });
+            if (exactIterator != s_HostState.Snapshot.Classes.end())
+                return &(*exactIterator);
+
+            const std::string requestedUnqualifiedName = GetUnqualifiedManagedClassName(className);
+            if (requestedUnqualifiedName.empty())
+                return nullptr;
+
+            const DiscoveredScriptClass* matchedClass = nullptr;
+            for (const DiscoveredScriptClass& discoveredClass : s_HostState.Snapshot.Classes)
+            {
+                if (GetUnqualifiedManagedClassName(discoveredClass.FullName) != requestedUnqualifiedName)
+                    continue;
+
+                if (matchedClass != nullptr)
+                    return nullptr;
+
+                matchedClass = &discoveredClass;
+            }
+
+            return matchedClass;
+        }
+
         const DiscoveredScriptClass* FindDiscoveredClassMetadata(std::string_view className)
         {
-            const auto iterator = std::find_if(s_HostState.Snapshot.Classes.begin(),
-                                               s_HostState.Snapshot.Classes.end(),
-                                               [&](const DiscoveredScriptClass& discoveredClass) {
-                                                   return discoveredClass.FullName == className;
-                                               });
-            if (iterator == s_HostState.Snapshot.Classes.end())
-                return nullptr;
-            return &(*iterator);
+            return ResolveDiscoveredClassMetadata(className);
         }
 
         Coral::ManagedObject CreateManagedEntityObject(Scene* scene, const ScriptEntityReference& entityReference)
@@ -682,6 +770,272 @@ namespace Limitless::ManagedScriptHost
             s_HostState.ActiveScene->MarkTransformDirty(entity);
         }
 
+        bool ManagedHasRigidbody2DComponentIcall(uint32_t entityHandle)
+        {
+            return TryGetManagedRigidbody2DComponent(entityHandle) != nullptr;
+        }
+
+        int ManagedGetRigidbody2DBodyTypeIcall(uint32_t entityHandle)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? static_cast<int>(rigidbody->Type) : static_cast<int>(Rigidbody2DComponent::BodyType::Static);
+        }
+
+        void ManagedSetRigidbody2DBodyTypeIcall(uint32_t entityHandle, int bodyType)
+        {
+            auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            if (rigidbody == nullptr)
+                return;
+
+            switch (bodyType)
+            {
+                case static_cast<int>(Rigidbody2DComponent::BodyType::Static):
+                    rigidbody->Type = Rigidbody2DComponent::BodyType::Static;
+                    break;
+                case static_cast<int>(Rigidbody2DComponent::BodyType::Dynamic):
+                    rigidbody->Type = Rigidbody2DComponent::BodyType::Dynamic;
+                    break;
+                case static_cast<int>(Rigidbody2DComponent::BodyType::Kinematic):
+                    rigidbody->Type = Rigidbody2DComponent::BodyType::Kinematic;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        bool ManagedGetRigidbody2DFreezePositionXIcall(uint32_t entityHandle)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? rigidbody->FreezePositionX : false;
+        }
+
+        void ManagedSetRigidbody2DFreezePositionXIcall(uint32_t entityHandle, bool value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->FreezePositionX = value;
+        }
+
+        bool ManagedGetRigidbody2DFreezePositionYIcall(uint32_t entityHandle)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? rigidbody->FreezePositionY : false;
+        }
+
+        void ManagedSetRigidbody2DFreezePositionYIcall(uint32_t entityHandle, bool value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->FreezePositionY = value;
+        }
+
+        bool ManagedGetRigidbody2DFixedRotationIcall(uint32_t entityHandle)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? rigidbody->FixedRotation : false;
+        }
+
+        void ManagedSetRigidbody2DFixedRotationIcall(uint32_t entityHandle, bool value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->FixedRotation = value;
+        }
+
+        bool ManagedGetRigidbody2DUseCCDIcall(uint32_t entityHandle)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? rigidbody->UseCCD : false;
+        }
+
+        void ManagedSetRigidbody2DUseCCDIcall(uint32_t entityHandle, bool value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->UseCCD = value;
+        }
+
+        bool ManagedGetRigidbody2DEnableSleepIcall(uint32_t entityHandle)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? rigidbody->EnableSleep : false;
+        }
+
+        void ManagedSetRigidbody2DEnableSleepIcall(uint32_t entityHandle, bool value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->EnableSleep = value;
+        }
+
+        bool ManagedGetRigidbody2DStartAwakeIcall(uint32_t entityHandle)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? rigidbody->StartAwake : false;
+        }
+
+        void ManagedSetRigidbody2DStartAwakeIcall(uint32_t entityHandle, bool value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->StartAwake = value;
+        }
+
+        bool ManagedGetRigidbody2DInterpolateIcall(uint32_t entityHandle)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? rigidbody->Interpolate : false;
+        }
+
+        void ManagedSetRigidbody2DInterpolateIcall(uint32_t entityHandle, bool value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->Interpolate = value;
+        }
+
+        bool ManagedGetRigidbody2DHighContactQualityIcall(uint32_t entityHandle)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? rigidbody->HighContactQuality : false;
+        }
+
+        void ManagedSetRigidbody2DHighContactQualityIcall(uint32_t entityHandle, bool value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->HighContactQuality = value;
+        }
+
+        int ManagedGetRigidbody2DExtraSolverSubStepsIcall(uint32_t entityHandle)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? rigidbody->ExtraSolverSubSteps : 0;
+        }
+
+        void ManagedSetRigidbody2DExtraSolverSubStepsIcall(uint32_t entityHandle, int value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->ExtraSolverSubSteps = std::max(0, value);
+        }
+
+        float ManagedGetRigidbody2DGravityScaleIcall(uint32_t entityHandle)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? rigidbody->GravityScale : 0.0f;
+        }
+
+        void ManagedSetRigidbody2DGravityScaleIcall(uint32_t entityHandle, float value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->GravityScale = value;
+        }
+
+        float ManagedGetRigidbody2DLinearDampingIcall(uint32_t entityHandle)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? rigidbody->LinearDamping : 0.0f;
+        }
+
+        void ManagedSetRigidbody2DLinearDampingIcall(uint32_t entityHandle, float value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->LinearDamping = value;
+        }
+
+        float ManagedGetRigidbody2DAngularDampingIcall(uint32_t entityHandle)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? rigidbody->AngularDamping : 0.0f;
+        }
+
+        void ManagedSetRigidbody2DAngularDampingIcall(uint32_t entityHandle, float value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->AngularDamping = value;
+        }
+
+        ManagedVector2 ManagedGetRigidbody2DLinearVelocityIcall(uint32_t entityHandle)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? ToManagedVector2(rigidbody->GetLinearVelocity()) : ManagedVector2{};
+        }
+
+        void ManagedSetRigidbody2DLinearVelocityIcall(uint32_t entityHandle, ManagedVector2 value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->SetLinearVelocity(ToGlmVector2(value));
+        }
+
+        void ManagedSetRigidbody2DLinearVelocityXIcall(uint32_t entityHandle, float value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->SetLinearVelocityX(value);
+        }
+
+        void ManagedSetRigidbody2DLinearVelocityYIcall(uint32_t entityHandle, float value)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->SetLinearVelocityY(value);
+        }
+
+        void ManagedAddRigidbody2DLinearVelocityIcall(uint32_t entityHandle, ManagedVector2 deltaVelocity)
+        {
+            if (auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle))
+                rigidbody->AddLinearVelocity(ToGlmVector2(deltaVelocity));
+        }
+
+        int ManagedGetRigidbody2DContactCountIcall(uint32_t entityHandle, bool includeSensorContacts)
+        {
+            const auto* rigidbody = TryGetManagedRigidbody2DComponent(entityHandle);
+            return rigidbody ? rigidbody->GetContactCount(includeSensorContacts) : 0;
+        }
+
+        bool ManagedHasContactWithEntityIcall(uint32_t entityHandle, uint32_t otherEntityHandle, bool includeSensorContacts)
+        {
+            if (s_HostState.ActiveScene == nullptr)
+                return false;
+
+            const entt::entity entity = ResolveManagedEntityHandle(entityHandle);
+            const entt::entity otherEntity = ResolveManagedEntityHandle(otherEntityHandle);
+            if (entity == entt::null || otherEntity == entt::null)
+                return false;
+
+            return s_HostState.ActiveScene->HasActivePhysics2DContact(entity, otherEntity, includeSensorContacts);
+        }
+
+        uint32_t ManagedGetContactEntityCountIcall(uint32_t entityHandle, bool includeSensorContacts)
+        {
+            if (s_HostState.ActiveScene == nullptr)
+                return 0;
+
+            const entt::entity entity = ResolveManagedEntityHandle(entityHandle);
+            if (entity == entt::null)
+                return 0;
+
+            return static_cast<uint32_t>(s_HostState.ActiveScene->GetActivePhysics2DContactEntityHandles(entity, includeSensorContacts).size());
+        }
+
+        uint32_t ManagedGetContactEntityAtIcall(uint32_t entityHandle, bool includeSensorContacts, uint32_t index)
+        {
+            if (s_HostState.ActiveScene == nullptr)
+                return static_cast<uint32_t>(entt::null);
+
+            const entt::entity entity = ResolveManagedEntityHandle(entityHandle);
+            if (entity == entt::null)
+                return static_cast<uint32_t>(entt::null);
+
+            const auto contactHandles = s_HostState.ActiveScene->GetActivePhysics2DContactEntityHandles(entity, includeSensorContacts);
+            if (index >= contactHandles.size())
+                return static_cast<uint32_t>(entt::null);
+            return static_cast<uint32_t>(s_HostState.ActiveScene->ResolveEntityReference(contactHandles[index]));
+        }
+
+        ManagedRaycastHit2D ManagedRaycast2DIcall(ManagedVector2 origin, ManagedVector2 direction, float maxDistance, uint64_t collisionMask)
+        {
+            if (s_HostState.ActiveScene == nullptr)
+                return {};
+
+            const float safeDistance = std::max(0.0f, maxDistance);
+            if (safeDistance <= 0.0f)
+                return {};
+
+            return ToManagedRaycastHit2D(
+                s_HostState.ActiveScene->RaycastClosestAcrossPhysicsWorlds(ToGlmVector2(origin), ToGlmVector2(direction), safeDistance, collisionMask));
+        }
+
         void RegisterInternalCalls(Coral::ManagedAssembly& contractAssembly)
         {
             contractAssembly.AddInternalCall(kScriptBridgeTypeName, "LogInfoIcall", reinterpret_cast<void*>(&ManagedLogInfoIcall));
@@ -699,6 +1053,43 @@ namespace Limitless::ManagedScriptHost
             contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetTransformRotationIcall", reinterpret_cast<void*>(&ManagedSetTransformRotationIcall));
             contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetTransformScaleIcall", reinterpret_cast<void*>(&ManagedGetTransformScaleIcall));
             contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetTransformScaleIcall", reinterpret_cast<void*>(&ManagedSetTransformScaleIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasRigidbody2DComponentIcall", reinterpret_cast<void*>(&ManagedHasRigidbody2DComponentIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DBodyTypeIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DBodyTypeIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DBodyTypeIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DBodyTypeIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DFreezePositionXIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DFreezePositionXIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DFreezePositionXIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DFreezePositionXIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DFreezePositionYIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DFreezePositionYIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DFreezePositionYIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DFreezePositionYIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DFixedRotationIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DFixedRotationIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DFixedRotationIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DFixedRotationIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DUseCCDIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DUseCCDIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DUseCCDIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DUseCCDIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DEnableSleepIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DEnableSleepIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DEnableSleepIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DEnableSleepIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DStartAwakeIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DStartAwakeIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DStartAwakeIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DStartAwakeIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DInterpolateIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DInterpolateIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DInterpolateIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DInterpolateIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DHighContactQualityIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DHighContactQualityIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DHighContactQualityIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DHighContactQualityIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DExtraSolverSubStepsIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DExtraSolverSubStepsIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DExtraSolverSubStepsIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DExtraSolverSubStepsIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DGravityScaleIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DGravityScaleIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DGravityScaleIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DGravityScaleIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DLinearDampingIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DLinearDampingIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DLinearDampingIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DLinearDampingIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DAngularDampingIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DAngularDampingIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DAngularDampingIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DAngularDampingIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DLinearVelocityIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DLinearVelocityIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DLinearVelocityIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DLinearVelocityIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DLinearVelocityXIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DLinearVelocityXIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRigidbody2DLinearVelocityYIcall", reinterpret_cast<void*>(&ManagedSetRigidbody2DLinearVelocityYIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "AddRigidbody2DLinearVelocityIcall", reinterpret_cast<void*>(&ManagedAddRigidbody2DLinearVelocityIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRigidbody2DContactCountIcall", reinterpret_cast<void*>(&ManagedGetRigidbody2DContactCountIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasContactWithEntityIcall", reinterpret_cast<void*>(&ManagedHasContactWithEntityIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetContactEntityCountIcall", reinterpret_cast<void*>(&ManagedGetContactEntityCountIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetContactEntityAtIcall", reinterpret_cast<void*>(&ManagedGetContactEntityAtIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "Raycast2DIcall", reinterpret_cast<void*>(&ManagedRaycast2DIcall));
             contractAssembly.UploadInternalCalls();
         }
 
@@ -730,6 +1121,43 @@ namespace Limitless::ManagedScriptHost
             if (errorMessage != nullptr)
                 errorMessage->clear();
             return true;
+        }
+
+        template<typename... TArgs>
+        bool InvokeRuntimeMethod(uint64_t instanceId,
+                                 Scene* scene,
+                                 std::string_view methodName,
+                                 const char* nonStandardMessage,
+                                 std::string* errorMessage,
+                                 TArgs... args)
+        {
+            RuntimeInstance* runtimeInstance = FindMutableRuntimeInstance(instanceId);
+            if (runtimeInstance == nullptr)
+            {
+                if (errorMessage != nullptr)
+                    *errorMessage = "managed runtime instance was not found";
+                return false;
+            }
+
+            InvocationScope invocationScope(scene, instanceId);
+            try
+            {
+                runtimeInstance->Object.InvokeMethod(methodName, args...);
+            }
+            catch (const std::exception& exception)
+            {
+                if (errorMessage != nullptr)
+                    *errorMessage = exception.what();
+                return false;
+            }
+            catch (...)
+            {
+                if (errorMessage != nullptr)
+                    *errorMessage = nonStandardMessage;
+                return false;
+            }
+
+            return ConsumeInvocationStatus(errorMessage);
         }
 
         void ClearState()
@@ -942,12 +1370,18 @@ namespace Limitless::ManagedScriptHost
         return s_HostState.Snapshot.HostInitialized;
     }
 
+    std::string ResolveDiscoveredClassName(std::string_view className)
+    {
+        const DiscoveredScriptClass* discoveredClass = ResolveDiscoveredClassMetadata(className);
+        return discoveredClass ? discoveredClass->FullName : std::string{};
+    }
+
     bool HasDiscoveredClass(std::string_view className)
     {
         if (className.empty())
             return false;
 
-        return s_HostState.DiscoveredTypes.contains(std::string(className));
+        return ResolveDiscoveredClassMetadata(className) != nullptr;
     }
 
     uint64_t CreateScriptInstance(std::string_view className, uint32_t entityHandle, std::string* errorMessage)
@@ -959,7 +1393,8 @@ namespace Limitless::ManagedScriptHost
             return 0;
         }
 
-        const auto typeIterator = s_HostState.DiscoveredTypes.find(std::string(className));
+        const std::string resolvedClassName = ResolveDiscoveredClassName(className);
+        const auto typeIterator = s_HostState.DiscoveredTypes.find(resolvedClassName.empty() ? std::string(className) : resolvedClassName);
         if (typeIterator == s_HostState.DiscoveredTypes.end() || typeIterator->second == nullptr || !(*typeIterator->second))
         {
             if (errorMessage != nullptr)
@@ -981,7 +1416,7 @@ namespace Limitless::ManagedScriptHost
 
             RuntimeInstance runtimeInstance{};
             runtimeInstance.Id = s_HostState.NextRuntimeInstanceId++;
-            runtimeInstance.ClassName = std::string(className);
+            runtimeInstance.ClassName = resolvedClassName.empty() ? std::string(className) : resolvedClassName;
             runtimeInstance.EntityHandle = entityHandle;
             runtimeInstance.Object = std::move(instance);
             runtimeInstance.LastSynchronizedExposedPropertiesRevision = 0;
@@ -1056,95 +1491,52 @@ namespace Limitless::ManagedScriptHost
 
     bool InvokeScriptOnCreate(uint64_t instanceId, Scene* scene, std::string* errorMessage)
     {
-        RuntimeInstance* runtimeInstance = FindMutableRuntimeInstance(instanceId);
-        if (runtimeInstance == nullptr)
-        {
-            if (errorMessage != nullptr)
-                *errorMessage = "managed runtime instance was not found";
-            return false;
-        }
+        return InvokeRuntimeMethod(instanceId, scene, "OnCreate", "non-standard exception during OnCreate", errorMessage);
+    }
 
-        InvocationScope invocationScope(scene, instanceId);
-        try
-        {
-            runtimeInstance->Object.InvokeMethod("OnCreate");
-        }
-        catch (const std::exception& exception)
-        {
-            if (errorMessage != nullptr)
-                *errorMessage = exception.what();
-            return false;
-        }
-        catch (...)
-        {
-            if (errorMessage != nullptr)
-                *errorMessage = "non-standard exception during OnCreate";
-            return false;
-        }
-
-        return ConsumeInvocationStatus(errorMessage);
+    bool InvokeScriptOnFixedUpdate(uint64_t instanceId, Scene* scene, float fixedDeltaTime, std::string* errorMessage)
+    {
+        return InvokeRuntimeMethod(instanceId, scene, "OnFixedUpdate", "non-standard exception during OnFixedUpdate", errorMessage, fixedDeltaTime);
     }
 
     bool InvokeScriptOnUpdate(uint64_t instanceId, Scene* scene, float deltaTime, std::string* errorMessage)
     {
-        RuntimeInstance* runtimeInstance = FindMutableRuntimeInstance(instanceId);
-        if (runtimeInstance == nullptr)
-        {
-            if (errorMessage != nullptr)
-                *errorMessage = "managed runtime instance was not found";
-            return false;
-        }
+        return InvokeRuntimeMethod(instanceId, scene, "OnUpdate", "non-standard exception during OnUpdate", errorMessage, deltaTime);
+    }
 
-        InvocationScope invocationScope(scene, instanceId);
-        try
-        {
-            runtimeInstance->Object.InvokeMethod("OnUpdate", deltaTime);
-        }
-        catch (const std::exception& exception)
-        {
-            if (errorMessage != nullptr)
-                *errorMessage = exception.what();
-            return false;
-        }
-        catch (...)
-        {
-            if (errorMessage != nullptr)
-                *errorMessage = "non-standard exception during OnUpdate";
-            return false;
-        }
+    bool InvokeScriptOnCollisionEnter(uint64_t instanceId, Scene* scene, uint32_t otherEntityHandle, std::string* errorMessage)
+    {
+        return InvokeRuntimeMethod(instanceId, scene, "DispatchCollisionEnterInternal", "non-standard exception during OnCollisionEnter", errorMessage, otherEntityHandle);
+    }
 
-        return ConsumeInvocationStatus(errorMessage);
+    bool InvokeScriptOnCollisionStay(uint64_t instanceId, Scene* scene, uint32_t otherEntityHandle, std::string* errorMessage)
+    {
+        return InvokeRuntimeMethod(instanceId, scene, "DispatchCollisionStayInternal", "non-standard exception during OnCollisionStay", errorMessage, otherEntityHandle);
+    }
+
+    bool InvokeScriptOnCollisionExit(uint64_t instanceId, Scene* scene, uint32_t otherEntityHandle, std::string* errorMessage)
+    {
+        return InvokeRuntimeMethod(instanceId, scene, "DispatchCollisionExitInternal", "non-standard exception during OnCollisionExit", errorMessage, otherEntityHandle);
+    }
+
+    bool InvokeScriptOnTriggerEnter(uint64_t instanceId, Scene* scene, uint32_t otherEntityHandle, std::string* errorMessage)
+    {
+        return InvokeRuntimeMethod(instanceId, scene, "DispatchTriggerEnterInternal", "non-standard exception during OnTriggerEnter", errorMessage, otherEntityHandle);
+    }
+
+    bool InvokeScriptOnTriggerStay(uint64_t instanceId, Scene* scene, uint32_t otherEntityHandle, std::string* errorMessage)
+    {
+        return InvokeRuntimeMethod(instanceId, scene, "DispatchTriggerStayInternal", "non-standard exception during OnTriggerStay", errorMessage, otherEntityHandle);
+    }
+
+    bool InvokeScriptOnTriggerExit(uint64_t instanceId, Scene* scene, uint32_t otherEntityHandle, std::string* errorMessage)
+    {
+        return InvokeRuntimeMethod(instanceId, scene, "DispatchTriggerExitInternal", "non-standard exception during OnTriggerExit", errorMessage, otherEntityHandle);
     }
 
     bool InvokeScriptOnDestroy(uint64_t instanceId, Scene* scene, std::string* errorMessage)
     {
-        RuntimeInstance* runtimeInstance = FindMutableRuntimeInstance(instanceId);
-        if (runtimeInstance == nullptr)
-        {
-            if (errorMessage != nullptr)
-                *errorMessage = "managed runtime instance was not found";
-            return false;
-        }
-
-        InvocationScope invocationScope(scene, instanceId);
-        try
-        {
-            runtimeInstance->Object.InvokeMethod("OnDestroy");
-        }
-        catch (const std::exception& exception)
-        {
-            if (errorMessage != nullptr)
-                *errorMessage = exception.what();
-            return false;
-        }
-        catch (...)
-        {
-            if (errorMessage != nullptr)
-                *errorMessage = "non-standard exception during OnDestroy";
-            return false;
-        }
-
-        return ConsumeInvocationStatus(errorMessage);
+        return InvokeRuntimeMethod(instanceId, scene, "OnDestroy", "non-standard exception during OnDestroy", errorMessage);
     }
 
     void DestroyScriptInstance(uint64_t instanceId)

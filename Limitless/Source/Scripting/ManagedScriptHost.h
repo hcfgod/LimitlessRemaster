@@ -44,6 +44,7 @@ namespace Limitless::ManagedScriptHost
     bool Initialize(const std::filesystem::path& managedDirectory);
     void Shutdown();
     bool IsInitialized();
+    std::string ResolveDiscoveredClassName(std::string_view className);
     bool HasDiscoveredClass(std::string_view className);
     uint64_t CreateScriptInstance(std::string_view className, uint32_t entityHandle, std::string* errorMessage = nullptr);
     bool SynchronizeScriptExposedProperties(uint64_t instanceId,
@@ -52,7 +53,14 @@ namespace Limitless::ManagedScriptHost
                                             uint64_t revision,
                                             std::string* errorMessage = nullptr);
     bool InvokeScriptOnCreate(uint64_t instanceId, Scene* scene, std::string* errorMessage = nullptr);
+    bool InvokeScriptOnFixedUpdate(uint64_t instanceId, Scene* scene, float fixedDeltaTime, std::string* errorMessage = nullptr);
     bool InvokeScriptOnUpdate(uint64_t instanceId, Scene* scene, float deltaTime, std::string* errorMessage = nullptr);
+    bool InvokeScriptOnCollisionEnter(uint64_t instanceId, Scene* scene, uint32_t otherEntityHandle, std::string* errorMessage = nullptr);
+    bool InvokeScriptOnCollisionStay(uint64_t instanceId, Scene* scene, uint32_t otherEntityHandle, std::string* errorMessage = nullptr);
+    bool InvokeScriptOnCollisionExit(uint64_t instanceId, Scene* scene, uint32_t otherEntityHandle, std::string* errorMessage = nullptr);
+    bool InvokeScriptOnTriggerEnter(uint64_t instanceId, Scene* scene, uint32_t otherEntityHandle, std::string* errorMessage = nullptr);
+    bool InvokeScriptOnTriggerStay(uint64_t instanceId, Scene* scene, uint32_t otherEntityHandle, std::string* errorMessage = nullptr);
+    bool InvokeScriptOnTriggerExit(uint64_t instanceId, Scene* scene, uint32_t otherEntityHandle, std::string* errorMessage = nullptr);
     bool InvokeScriptOnDestroy(uint64_t instanceId, Scene* scene, std::string* errorMessage = nullptr);
     void DestroyScriptInstance(uint64_t instanceId);
     const DiscoverySnapshot& GetSnapshot();

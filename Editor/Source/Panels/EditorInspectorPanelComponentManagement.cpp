@@ -1,16 +1,21 @@
 #include "EditorInspectorPanelComponentManagement.h"
 
 #include "EditorComponentRegistry.h"
+#include "EditorInspectorPanel.h"
 #include "EditorInspectorPanelNativeScriptEditor.h"
+#include "Project/ProjectManager.h"
 #include "Undo/EditorUndoService.h"
 #include "Scene/Scene.h"
 #include "Scripting/ManagedScriptHost.h"
 #include "imgui/imgui.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <unordered_set>
+#include <vector>
 
 namespace Limitless::EditorInspectorPanel
 {
@@ -108,6 +113,84 @@ namespace Limitless::EditorInspectorPanel
             return scriptEntry;
         }
 
+        ManagedScriptEntry BuildManagedScriptEntryForComponentAdd(const ProjectNativeScriptInfo& requestedScript)
+        {
+            ManagedScriptEntry scriptEntry{};
+            scriptEntry.ScriptAssetRelativePath = requestedScript.ScriptAssetRelativePath;
+            const std::string resolvedScriptClassName = ManagedScriptHost::ResolveDiscoveredClassName(requestedScript.ScriptClassName);
+            scriptEntry.ScriptClassName = resolvedScriptClassName.empty() ? requestedScript.ScriptClassName : resolvedScriptClassName;
+            return scriptEntry;
+        }
+
+        std::vector<ProjectNativeScriptInfo> DiscoverProjectManagedScriptsForComponentAdd()
+        {
+            std::vector<ProjectNativeScriptInfo> availableScripts;
+
+            const auto& projectManager = Project::ProjectManager::GetInstance();
+            if (!projectManager.HasOpenProject())
+                return availableScripts;
+
+            const std::filesystem::path assetsDirectory = projectManager.GetProjectRoot() / "Assets";
+            std::error_code errorCode;
+            if (!std::filesystem::exists(assetsDirectory, errorCode) || !std::filesystem::is_directory(assetsDirectory, errorCode))
+                return availableScripts;
+
+            for (std::filesystem::recursive_directory_iterator iterator(assetsDirectory, std::filesystem::directory_options::skip_permission_denied, errorCode), end;
+                 iterator != end;
+                 iterator.increment(errorCode))
+            {
+                if (errorCode)
+                {
+                    errorCode.clear();
+                    continue;
+                }
+
+                const auto& entry = *iterator;
+                const bool isRegularFile = entry.is_regular_file(errorCode);
+                if (errorCode || !isRegularFile)
+                {
+                    errorCode.clear();
+                    continue;
+                }
+
+                std::string extension = entry.path().extension().string();
+                std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char character) {
+                    return static_cast<char>(std::tolower(character));
+                });
+                if (extension != ".cs")
+                    continue;
+
+                const std::filesystem::path relativePath = std::filesystem::relative(entry.path(), assetsDirectory, errorCode);
+                if (errorCode)
+                {
+                    errorCode.clear();
+                    continue;
+                }
+
+                ProjectNativeScriptInfo scriptInfo{};
+                scriptInfo.ScriptClassName = entry.path().stem().string();
+                scriptInfo.ScriptAssetRelativePath = relativePath.generic_string();
+                scriptInfo.FolderRelativePath = relativePath.parent_path().generic_string();
+                scriptInfo.DisplayName = scriptInfo.ScriptClassName;
+                availableScripts.push_back(std::move(scriptInfo));
+            }
+
+            std::sort(availableScripts.begin(), availableScripts.end(), [](const ProjectNativeScriptInfo& left, const ProjectNativeScriptInfo& right) {
+                if (left.FolderRelativePath != right.FolderRelativePath)
+                    return left.FolderRelativePath < right.FolderRelativePath;
+                return left.DisplayName < right.DisplayName;
+            });
+
+            return availableScripts;
+        }
+
+        bool IsBuiltinManagedScriptClassForComponentAdd(const ManagedScriptHost::DiscoveredScriptClass& discoveredClass)
+        {
+            const std::string assemblyFileName = discoveredClass.AssemblyPath.filename().generic_string();
+            return assemblyFileName == "Limitless.Managed.TestScripts.dll" ||
+                   discoveredClass.AssemblyName == "Limitless.Managed.TestScripts";
+        }
+
         void DrawAddComponentPopupSectionHeader(const char* label)
         {
             ImGui::Spacing();
@@ -121,6 +204,7 @@ namespace Limitless::EditorInspectorPanel
         {
             const std::vector<ProjectNativeScriptInfo> availableScripts = GetAvailableProjectScriptsForInspector();
             const ProjectScriptFolderNode scriptFolderTree = BuildProjectScriptFolderTree(availableScripts);
+            const std::vector<ProjectNativeScriptInfo> availableManagedScripts = DiscoverProjectManagedScriptsForComponentAdd();
             const auto& managedSnapshot = ManagedScriptHost::GetSnapshot();
 
             DrawAddComponentPopupSectionHeader("Scripts");
@@ -177,14 +261,10 @@ namespace Limitless::EditorInspectorPanel
                 }
             }
 
-            if (!managedSnapshot.Classes.empty())
+            if (!managedSnapshot.Classes.empty() || !availableManagedScripts.empty())
             {
                 ImGui::Separator();
-                for (const auto& discoveredClass : managedSnapshot.Classes)
-                {
-                    if (!ImGui::MenuItem(discoveredClass.FullName.c_str()))
-                        continue;
-
+                const auto attachManagedScript = [&](const ManagedScriptHost::DiscoveredScriptClass& discoveredClass) {
                     ManagedScriptEntry scriptEntry{};
                     scriptEntry.ScriptClassName = discoveredClass.FullName;
                     scriptEntry.ScriptAssetRelativePath = discoveredClass.AssemblyPath.filename().generic_string();
@@ -198,6 +278,87 @@ namespace Limitless::EditorInspectorPanel
                     {
                         (void)scene->AttachManagedScriptComponent(selectedEntity, std::move(scriptEntry));
                     }
+                };
+
+                const auto attachManagedScriptAsset = [&](const ProjectNativeScriptInfo& scriptInfo) {
+                    ManagedScriptEntry scriptEntry = BuildManagedScriptEntryForComponentAdd(scriptInfo);
+                    if (ManagedScriptHost::ResolveDiscoveredClassName(scriptInfo.ScriptClassName).empty())
+                        (void)BuildProjectNativeScripts(nullptr);
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation("Attach Managed Script Component", [&](Scene& mutableScene) {
+                            return mutableScene.AttachManagedScriptComponent(selectedEntity, std::move(scriptEntry)) != entt::null;
+                        });
+                    }
+                    else if (scene)
+                    {
+                        (void)scene->AttachManagedScriptComponent(selectedEntity, std::move(scriptEntry));
+                    }
+                };
+
+                std::vector<const ManagedScriptHost::DiscoveredScriptClass*> builtinManagedClasses;
+                std::vector<const ManagedScriptHost::DiscoveredScriptClass*> otherManagedClasses;
+                std::unordered_set<std::string> projectManagedResolvedClassNames;
+                builtinManagedClasses.reserve(managedSnapshot.Classes.size());
+                otherManagedClasses.reserve(managedSnapshot.Classes.size());
+                projectManagedResolvedClassNames.reserve(availableManagedScripts.size());
+                for (const ProjectNativeScriptInfo& scriptInfo : availableManagedScripts)
+                {
+                    const std::string resolvedClassName = ManagedScriptHost::ResolveDiscoveredClassName(scriptInfo.ScriptClassName);
+                    if (!resolvedClassName.empty())
+                        projectManagedResolvedClassNames.insert(resolvedClassName);
+                }
+                for (const auto& discoveredClass : managedSnapshot.Classes)
+                {
+                    if (IsBuiltinManagedScriptClassForComponentAdd(discoveredClass))
+                        builtinManagedClasses.push_back(&discoveredClass);
+                    else if (!projectManagedResolvedClassNames.contains(discoveredClass.FullName))
+                        otherManagedClasses.push_back(&discoveredClass);
+                    else
+                        (void)discoveredClass;
+                }
+
+                if (!builtinManagedClasses.empty() && ImGui::BeginMenu("Engine"))
+                {
+                    if (ImGui::BeginMenu("Builtin"))
+                    {
+                        if (ImGui::BeginMenu("C#"))
+                        {
+                            for (const ManagedScriptHost::DiscoveredScriptClass* discoveredClass : builtinManagedClasses)
+                            {
+                                if (discoveredClass && ImGui::MenuItem(discoveredClass->FullName.c_str()))
+                                    attachManagedScript(*discoveredClass);
+                            }
+                            ImGui::EndMenu();
+                        }
+                        ImGui::EndMenu();
+                    }
+                    ImGui::EndMenu();
+                }
+
+                if (!availableManagedScripts.empty() && ImGui::BeginMenu("Project"))
+                {
+                    if (ImGui::BeginMenu("C#"))
+                    {
+                        for (const ProjectNativeScriptInfo& scriptInfo : availableManagedScripts)
+                        {
+                            const std::string menuLabel = scriptInfo.DisplayName + "##ManagedProjectScript_" + scriptInfo.ScriptAssetRelativePath;
+                            if (ImGui::MenuItem(menuLabel.c_str()))
+                                attachManagedScriptAsset(scriptInfo);
+                        }
+                        if (!availableManagedScripts.empty())
+                            ImGui::Separator();
+                        if (ImGui::MenuItem("Build Project Scripts"))
+                            (void)BuildProjectNativeScripts(nullptr);
+                        ImGui::EndMenu();
+                    }
+                    ImGui::EndMenu();
+                }
+
+                for (const ManagedScriptHost::DiscoveredScriptClass* discoveredClass : otherManagedClasses)
+                {
+                    if (discoveredClass && ImGui::MenuItem(discoveredClass->FullName.c_str()))
+                        attachManagedScript(*discoveredClass);
                 }
 
                 if (ImGui::MenuItem("Empty Managed Script Component"))

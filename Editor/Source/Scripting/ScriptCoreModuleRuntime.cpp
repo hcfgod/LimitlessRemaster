@@ -332,6 +332,14 @@ namespace Limitless::ScriptCoreModuleRuntime
 
             const std::filesystem::path currentConfigOutput = BuildConfigOutputFolder();
             const std::filesystem::path distConfigOutput = BuildDistConfigOutputFolder();
+            const std::filesystem::path currentConfigPlatformFolderName = currentConfigOutput.parent_path().filename();
+            const std::filesystem::path distConfigPlatformFolderName = distConfigOutput.parent_path().filename();
+            if (const auto projectRoot = GetOpenProjectRoot(); projectRoot.has_value())
+            {
+                addCandidate(projectRoot.value() / "Build" / "ScriptCore" / currentConfigPlatformFolderName / "Managed");
+                addCandidate(projectRoot.value() / "Build" / "ScriptCore" / distConfigPlatformFolderName / "Managed");
+            }
+
             if (const std::string executablePath = PlatformDetection::GetExecutablePath(); !executablePath.empty())
             {
                 const std::filesystem::path executableDirectory = std::filesystem::path(executablePath).parent_path();
@@ -391,7 +399,13 @@ namespace Limitless::ScriptCoreModuleRuntime
             {
                 std::string validationError;
                 if (!ManagedScriptPayload::ValidatePayloadDirectory(candidatePath, nullptr, &validationError))
+                {
+#if defined(LT_CONFIG_DEBUG)
+                    if (!validationError.empty())
+                        LT_INFO("Managed scripting: rejected candidate '{}' ({})", candidatePath.string(), validationError);
+#endif
                     continue;
+                }
 
                 outSourceDirectory = candidatePath;
                 outManifestPath = ManagedScriptPayload::GetPayloadManifestPath(candidatePath);

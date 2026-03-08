@@ -9,6 +9,7 @@ public abstract class ScriptableEntity
     public uint EntityHandle => EntityId;
     public Entity Entity => new(EntityId);
     public Transform Transform => new(EntityId);
+    public Rigidbody2D Rigidbody2D => new(EntityId);
 
     public bool IsEntityAlive
     {
@@ -42,12 +43,70 @@ public abstract class ScriptableEntity
     {
     }
 
+    public virtual void OnFixedUpdate(float fixedDeltaTime)
+    {
+    }
+
     public virtual void OnUpdate(float deltaTime)
+    {
+    }
+
+    public virtual void OnCollisionEnter(Entity other)
+    {
+    }
+
+    public virtual void OnCollisionStay(Entity other)
+    {
+    }
+
+    public virtual void OnCollisionExit(Entity other)
+    {
+    }
+
+    public virtual void OnTriggerEnter(Entity other)
+    {
+    }
+
+    public virtual void OnTriggerStay(Entity other)
+    {
+    }
+
+    public virtual void OnTriggerExit(Entity other)
     {
     }
 
     public virtual void OnDestroy()
     {
+    }
+
+    internal void DispatchCollisionEnterInternal(uint otherEntityHandle)
+    {
+        OnCollisionEnter(new Entity(otherEntityHandle));
+    }
+
+    internal void DispatchCollisionStayInternal(uint otherEntityHandle)
+    {
+        OnCollisionStay(new Entity(otherEntityHandle));
+    }
+
+    internal void DispatchCollisionExitInternal(uint otherEntityHandle)
+    {
+        OnCollisionExit(new Entity(otherEntityHandle));
+    }
+
+    internal void DispatchTriggerEnterInternal(uint otherEntityHandle)
+    {
+        OnTriggerEnter(new Entity(otherEntityHandle));
+    }
+
+    internal void DispatchTriggerStayInternal(uint otherEntityHandle)
+    {
+        OnTriggerStay(new Entity(otherEntityHandle));
+    }
+
+    internal void DispatchTriggerExitInternal(uint otherEntityHandle)
+    {
+        OnTriggerExit(new Entity(otherEntityHandle));
     }
 
     protected void LogInfo(string message)

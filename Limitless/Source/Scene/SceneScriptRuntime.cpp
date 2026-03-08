@@ -826,6 +826,8 @@ namespace Limitless
                 return;
 
             destroyManagedScriptRuntime(*scriptEntry);
+            scriptEntry->RuntimeWarnedMissingHost = false;
+            scriptEntry->RuntimeWarnedMissingClass = false;
         };
 
         const bool validateParallelScriptAccessMasks =
@@ -2144,17 +2146,28 @@ namespace Limitless
         }
 
         std::vector<std::pair<entt::entity, size_t>> scriptSlots;
+        std::vector<std::pair<entt::entity, size_t>> managedScriptSlots;
         for (entt::entity scriptEntity : CollectOrderedScriptComponentEntities(m_Registry))
         {
             const entt::entity ownerEntity = TryGetScriptOwnerEntity(m_Registry, scriptEntity);
             if (ownerEntity == entt::null)
                 continue;
-            scriptSlots.emplace_back(ownerEntity, static_cast<size_t>(static_cast<uint32_t>(scriptEntity)));
+            const size_t scriptIndex = static_cast<size_t>(static_cast<uint32_t>(scriptEntity));
+            const auto* scriptComponent = m_Registry.try_get<ScriptComponent>(scriptEntity);
+            if (scriptComponent && scriptComponent->IsManagedBackend())
+                managedScriptSlots.emplace_back(ownerEntity, scriptIndex);
+            else
+                scriptSlots.emplace_back(ownerEntity, scriptIndex);
         }
 
         auto tryGetScriptEntry = [&](entt::entity scriptEntity, size_t scriptIndex) -> NativeScriptEntry* {
             (void)scriptEntity;
             return TryGetScriptEntry(m_Registry, static_cast<entt::entity>(static_cast<uint32_t>(scriptIndex)));
+        };
+
+        auto tryGetManagedEntry = [&](entt::entity scriptEntity, size_t scriptIndex) -> ManagedScriptEntry* {
+            (void)scriptEntity;
+            return TryGetManagedScriptEntry(m_Registry, static_cast<entt::entity>(static_cast<uint32_t>(scriptIndex)));
         };
 
         auto applyScriptDeclaredAccessDefaults = [&](NativeScriptEntry& scriptEntry) {
@@ -2214,6 +2227,35 @@ namespace Limitless
             scriptEntry->RuntimeUpdateCount = 0;
             scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
             scriptEntry->RuntimeWarnedAccessMaskMismatch = false;
+        };
+
+        auto destroyManagedScriptRuntime = [&](ManagedScriptEntry& scriptEntry) {
+            if (scriptEntry.RuntimeInstanceId != 0)
+                ManagedScriptHost::DestroyScriptInstance(scriptEntry.RuntimeInstanceId);
+            scriptEntry.RuntimeInstanceId = 0;
+            scriptEntry.RuntimeInitialized = false;
+            scriptEntry.RuntimeUpdateCount = 0;
+            scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+        };
+
+        auto handleManagedScriptCallbackFailure = [&](entt::entity scriptEntity,
+                                                      size_t scriptIndex,
+                                                      std::string_view callbackName,
+                                                      const char* message) {
+            ManagedScriptEntry* scriptEntry = tryGetManagedEntry(scriptEntity, scriptIndex);
+            const auto* tag = m_Registry.try_get<TagComponent>(scriptEntity);
+            LT_ERROR("Managed script '{}' on entity '{}' failed during {}: {}",
+                     scriptEntry ? scriptEntry->ScriptClassName : "<unknown>",
+                     tag ? tag->Tag : "Entity",
+                     callbackName,
+                     message ? message : "unknown error");
+
+            if (!scriptEntry)
+                return;
+
+            destroyManagedScriptRuntime(*scriptEntry);
+            scriptEntry->RuntimeWarnedMissingHost = false;
+            scriptEntry->RuntimeWarnedMissingClass = false;
         };
 
         const bool validateParallelScriptAccessMasks =
@@ -2850,6 +2892,170 @@ namespace Limitless
             return true;
         };
         SetRuntimePhase(RuntimePhase::ScriptMainThread);
+        for (const auto& managedScriptSlot : managedScriptSlots)
+        {
+            const entt::entity entity = managedScriptSlot.first;
+            const size_t scriptIndex = managedScriptSlot.second;
+            ManagedScriptEntry* scriptEntry = tryGetManagedEntry(entity, scriptIndex);
+            if (!scriptEntry)
+                continue;
+
+            if (!scriptEntry->Enabled || scriptEntry->ScriptClassName.empty() || !IsEntityEnabledInHierarchy(entity))
+            {
+                if (scriptEntry->RuntimeInitialized && scriptEntry->RuntimeInstanceId != 0)
+                {
+                    std::string managedError;
+                    executeWithDeferredEntityDestroy([&]() {
+                        if (!ManagedScriptHost::InvokeScriptOnDestroy(scriptEntry->RuntimeInstanceId, this, &managedError))
+                        {
+                            handleManagedScriptCallbackFailure(entity, scriptIndex, "OnDestroy", managedError.empty() ? "unknown error" : managedError.c_str());
+                        }
+                    });
+                }
+
+                scriptEntry = tryGetManagedEntry(entity, scriptIndex);
+                if (!scriptEntry)
+                    continue;
+
+                destroyManagedScriptRuntime(*scriptEntry);
+                continue;
+            }
+
+            if (!ManagedScriptHost::IsInitialized())
+            {
+                if (!scriptEntry->RuntimeWarnedMissingHost)
+                {
+                    const auto* tag = m_Registry.try_get<TagComponent>(entity);
+                    LT_WARN("Managed script '{}' on entity '{}' cannot execute because the managed host is unavailable.",
+                            scriptEntry->ScriptClassName,
+                            tag ? tag->Tag : "Entity");
+                    scriptEntry->RuntimeWarnedMissingHost = true;
+                }
+                destroyManagedScriptRuntime(*scriptEntry);
+                continue;
+            }
+            scriptEntry->RuntimeWarnedMissingHost = false;
+
+            if (!ManagedScriptHost::HasDiscoveredClass(scriptEntry->ScriptClassName))
+            {
+                if (!scriptEntry->RuntimeWarnedMissingClass)
+                {
+                    const auto* tag = m_Registry.try_get<TagComponent>(entity);
+                    LT_WARN("Managed script '{}' on entity '{}' was not discovered in the active managed assemblies.",
+                            scriptEntry->ScriptClassName,
+                            tag ? tag->Tag : "Entity");
+                    scriptEntry->RuntimeWarnedMissingClass = true;
+                }
+
+                destroyManagedScriptRuntime(*scriptEntry);
+                continue;
+            }
+            scriptEntry->RuntimeWarnedMissingClass = false;
+
+            TransformComponent transformBeforeFixedUpdate{};
+            bool hadTransformBeforeFixedUpdate = false;
+            if (auto* transform = m_Registry.try_get<TransformComponent>(entity))
+            {
+                transformBeforeFixedUpdate = *transform;
+                hadTransformBeforeFixedUpdate = true;
+            }
+
+            if (scriptEntry->RuntimeInstanceId == 0)
+            {
+                std::string managedError;
+                scriptEntry->RuntimeInstanceId = ManagedScriptHost::CreateScriptInstance(scriptEntry->ScriptClassName,
+                                                                                         static_cast<uint32_t>(entity),
+                                                                                         &managedError);
+                if (scriptEntry->RuntimeInstanceId == 0)
+                {
+                    handleManagedScriptCallbackFailure(entity, scriptIndex, "CreateInstance", managedError.empty() ? "unknown error" : managedError.c_str());
+                    continue;
+                }
+
+                scriptEntry->RuntimeInitialized = false;
+                scriptEntry->RuntimeUpdateCount = 0;
+                scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
+            }
+
+            {
+                std::string managedError;
+                if (!ManagedScriptHost::SynchronizeScriptExposedProperties(scriptEntry->RuntimeInstanceId,
+                                                                           this,
+                                                                           scriptEntry->ExposedProperties,
+                                                                           scriptEntry->RuntimeExposedPropertiesRevision,
+                                                                           &managedError))
+                {
+                    handleManagedScriptCallbackFailure(entity,
+                                                       scriptIndex,
+                                                       "SyncExposedProperties",
+                                                       managedError.empty() ? "unknown error" : managedError.c_str());
+                    continue;
+                }
+            }
+
+            if (!scriptEntry->RuntimeInitialized)
+            {
+                std::string managedError;
+                executeWithDeferredEntityDestroy([&]() {
+                    if (!ManagedScriptHost::InvokeScriptOnCreate(scriptEntry->RuntimeInstanceId, this, &managedError))
+                    {
+                        handleManagedScriptCallbackFailure(entity, scriptIndex, "OnCreate", managedError.empty() ? "unknown error" : managedError.c_str());
+                    }
+                });
+
+                scriptEntry = tryGetManagedEntry(entity, scriptIndex);
+                if (!scriptEntry || scriptEntry->RuntimeInstanceId == 0)
+                    continue;
+
+                if (!managedError.empty())
+                    continue;
+
+                scriptEntry->RuntimeInitialized = true;
+            }
+
+            std::string managedError;
+            if (!ManagedScriptHost::SynchronizeScriptExposedProperties(scriptEntry->RuntimeInstanceId,
+                                                                       this,
+                                                                       scriptEntry->ExposedProperties,
+                                                                       scriptEntry->RuntimeExposedPropertiesRevision,
+                                                                       &managedError))
+            {
+                handleManagedScriptCallbackFailure(entity,
+                                                   scriptIndex,
+                                                   "SyncExposedProperties",
+                                                   managedError.empty() ? "unknown error" : managedError.c_str());
+                continue;
+            }
+
+            managedError.clear();
+            executeWithDeferredEntityDestroy([&]() {
+                if (!ManagedScriptHost::InvokeScriptOnFixedUpdate(scriptEntry->RuntimeInstanceId, this, fixedDeltaTime, &managedError))
+                {
+                    handleManagedScriptCallbackFailure(entity, scriptIndex, "OnFixedUpdate", managedError.empty() ? "unknown error" : managedError.c_str());
+                }
+            });
+
+            scriptEntry = tryGetManagedEntry(entity, scriptIndex);
+            if (!scriptEntry || scriptEntry->RuntimeInstanceId == 0)
+                continue;
+
+            if (!managedError.empty())
+                continue;
+
+            const auto* transformAfterFixedUpdate = m_Registry.try_get<TransformComponent>(entity);
+            bool transformChanged = false;
+            if (hadTransformBeforeFixedUpdate && transformAfterFixedUpdate)
+            {
+                transformChanged = HasTransformChangedForAccessValidation(transformBeforeFixedUpdate, *transformAfterFixedUpdate);
+                if (transformChanged)
+                    MarkTransformDirty(entity);
+            }
+            else if (!hadTransformBeforeFixedUpdate && transformAfterFixedUpdate)
+            {
+                MarkTransformDirty(entity);
+            }
+        }
+
         for (const auto& scriptSlot : scriptSlots)
         {
             const entt::entity entity = scriptSlot.first;

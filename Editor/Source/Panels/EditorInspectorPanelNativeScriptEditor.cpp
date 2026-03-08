@@ -37,8 +37,10 @@
         #define WIN32_LEAN_AND_MEAN
     #endif
     #include <windows.h>
+    #include <shellapi.h>
 #else
     #include <sys/wait.h>
+    #include <unistd.h>
 #endif
 
 namespace Limitless::EditorInspectorPanel
@@ -159,6 +161,51 @@ namespace Limitless::EditorInspectorPanel
             if (mode == Project::ScriptEditorMode::Internal || mode == Project::ScriptEditorMode::External)
                 return mode;
             return Project::ScriptEditorMode::Internal;
+        }
+
+        bool OpenPathInExternalApplication(const std::filesystem::path& path, std::string& outError)
+        {
+            outError.clear();
+            if (path.empty())
+            {
+                outError = "Target path is empty.";
+                return false;
+            }
+
+            std::error_code errorCode;
+            if (!std::filesystem::exists(path, errorCode))
+            {
+                outError = "Target file was not found: " + path.string();
+                return false;
+            }
+
+#if defined(LT_PLATFORM_WINDOWS)
+            const std::string pathString = path.string();
+            const HINSTANCE result = ShellExecuteA(nullptr, "open", pathString.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            if (reinterpret_cast<intptr_t>(result) > 32)
+                return true;
+            outError = "Failed to open script in the external application.";
+            return false;
+#else
+            pid_t pid = fork();
+            if (pid < 0)
+            {
+                outError = "Failed to spawn external opener process.";
+                return false;
+            }
+
+            if (pid == 0)
+            {
+#if defined(LT_PLATFORM_MACOS)
+                execlp("open", "open", path.string().c_str(), static_cast<char*>(nullptr));
+#else
+                execlp("xdg-open", "xdg-open", path.string().c_str(), static_cast<char*>(nullptr));
+#endif
+                _exit(127);
+            }
+
+            return true;
+#endif
         }
 
         bool IsInternalToolchainRootCandidate(const std::filesystem::path& candidate)
@@ -331,6 +378,89 @@ namespace Limitless::EditorInspectorPanel
             return std::nullopt;
         }
 
+        std::optional<std::filesystem::path> FindEngineSourceWorkspaceRoot()
+        {
+            auto isEngineRootCandidate = [](const std::filesystem::path& candidate) -> bool
+            {
+                std::error_code errorCode;
+#if defined(LT_PLATFORM_WINDOWS)
+                const std::filesystem::path scriptCoreBuildScript = candidate / "Scripts" / "build-scriptcore-windows.bat";
+#else
+                const std::filesystem::path scriptCoreBuildScript = candidate / "Scripts" / "build-scriptcore-unix.sh";
+#endif
+                const std::filesystem::path scriptsFolder = candidate / "Scripts";
+                const std::filesystem::path solutionPath = candidate / "LimitlessRemaster.sln";
+
+                if (std::filesystem::exists(scriptCoreBuildScript, errorCode) &&
+                    std::filesystem::is_regular_file(scriptCoreBuildScript, errorCode))
+                    return true;
+                if (std::filesystem::is_directory(scriptsFolder, errorCode) &&
+                    std::filesystem::exists(solutionPath, errorCode))
+                    return true;
+                return false;
+            };
+
+            auto walkUp = [&](std::filesystem::path probe) -> std::optional<std::filesystem::path>
+            {
+                for (int depth = 0; depth < 32 && !probe.empty(); ++depth)
+                {
+                    if (isEngineRootCandidate(probe))
+                        return probe;
+
+                    if (!probe.has_parent_path())
+                        break;
+                    const std::filesystem::path parent = probe.parent_path();
+                    if (parent == probe)
+                        break;
+                    probe = parent;
+                }
+                return std::nullopt;
+            };
+
+            if (const auto openedProjectRoot = GetOpenedProjectRoot(); openedProjectRoot.has_value())
+            {
+                const auto buildSettingsResult = Project::LoadBuildSettings(openedProjectRoot.value());
+                if (buildSettingsResult.IsSuccess())
+                {
+                    const std::string& overrideRoot = buildSettingsResult.GetValue().EngineRootOverride;
+                    if (!overrideRoot.empty())
+                    {
+                        std::filesystem::path candidate = std::filesystem::path(overrideRoot);
+                        std::error_code ec;
+                        candidate = std::filesystem::weakly_canonical(candidate, ec);
+                        if (ec)
+                            candidate = std::filesystem::path(overrideRoot);
+                        if (isEngineRootCandidate(candidate))
+                            return candidate;
+                    }
+                }
+            }
+
+            if (const char* envRoot = std::getenv("LIMITLESS_ENGINE_ROOT"); envRoot && envRoot[0] != '\0')
+            {
+                std::filesystem::path candidate(envRoot);
+                std::error_code ec;
+                candidate = std::filesystem::weakly_canonical(candidate, ec);
+                if (ec)
+                    candidate = std::filesystem::path(envRoot);
+                if (isEngineRootCandidate(candidate))
+                    return candidate;
+            }
+
+            const auto& platformInfo = PlatformDetection::GetPlatformInfo();
+            if (!platformInfo.executablePath.empty())
+            {
+                if (const auto fromExe = walkUp(std::filesystem::path(platformInfo.executablePath).parent_path()); fromExe.has_value())
+                    return fromExe;
+            }
+
+            std::error_code errorCode;
+            if (const auto fromCwd = walkUp(std::filesystem::current_path(errorCode)); fromCwd.has_value())
+                return fromCwd;
+
+            return std::nullopt;
+        }
+
         std::vector<std::filesystem::path> GetGeneratedScriptCoreMirrorDirectories()
         {
             std::vector<std::filesystem::path> directories;
@@ -478,6 +608,7 @@ namespace Limitless::EditorInspectorPanel
                                    const std::filesystem::path& openedProjectRoot,
                                    const std::string& configuration,
                                    const std::string& platform,
+                                   bool hasOpenedProject,
                                    bool useInternalBackend,
                                    std::string& outBuildOutput)
         {
@@ -489,7 +620,7 @@ namespace Limitless::EditorInspectorPanel
                 ? "build-project-scriptcore-windows.bat"
                 : "build-scriptcore-windows.bat";
             std::string scriptCommand = "cmd.exe /c \"Scripts\\" + scriptName + " " + configuration + " " + platform;
-            if (useInternalBackend)
+            if (hasOpenedProject)
                 scriptCommand += " \"" + openedProjectRoot.string() + "\"";
             scriptCommand += " > \"" + buildLogPath.string() + "\" 2>&1\"";
             STARTUPINFOA startupInfo{};
@@ -533,7 +664,7 @@ namespace Limitless::EditorInspectorPanel
                 : "build-scriptcore-unix.sh";
             std::string scriptCommand =
                 "cd \"" + buildRoot.string() + "\" && bash \"Scripts/" + scriptName + "\" --config \"" + configuration + "\" --platform \"" + platform + "\"";
-            if (useInternalBackend)
+            if (hasOpenedProject)
                 scriptCommand += " --project-root \"" + openedProjectRoot.string() + "\"";
             scriptCommand += " > \"" + buildLogPath.string() + "\" 2>&1";
 
@@ -703,7 +834,7 @@ namespace Limitless::EditorInspectorPanel
                     ? openedProjectRoot.value()
                     : root;
                 std::string buildOutput;
-                int exitCode = RunBuildScriptBlocking(root, effectiveProjectRoot, configuration, platform, useInternalBackend, buildOutput);
+                int exitCode = RunBuildScriptBlocking(root, effectiveProjectRoot, configuration, platform, openedProjectRoot.has_value(), useInternalBackend, buildOutput);
                 if (exitCode == 0 && openedProjectRoot.has_value())
                 {
                     const std::filesystem::path builtScriptCorePath = GetBuiltScriptCoreLibraryPath(root, configuration, platform);
@@ -2013,15 +2144,18 @@ namespace Limitless::EditorInspectorPanel
         std::string extension = assetPath.extension().string();
         for (char& character : extension)
             character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
-        if (extension != ".h" && extension != ".cpp")
+        if (extension != ".h" && extension != ".cpp" && extension != ".cs")
             return false;
-        const bool preferHeaderTab = (extension == ".h");
-        const bool preferSourceTab = (extension == ".cpp");
 
         const std::string normalizedKey = assetPath.generic_string();
         constexpr const char* assetsPrefix = "Assets/";
         if (normalizedKey.rfind(assetsPrefix, 0) != 0)
             return false;
+
+        const bool isManagedScript = (extension == ".cs");
+
+        const bool preferHeaderTab = (extension == ".h");
+        const bool preferSourceTab = (extension == ".cpp");
 
         std::filesystem::path relativeWithoutAssets = normalizedKey.substr(std::strlen(assetsPrefix));
         relativeWithoutAssets.replace_extension("");
@@ -2032,8 +2166,33 @@ namespace Limitless::EditorInspectorPanel
         auto& nativeScriptAuthoringState = GetNativeScriptAuthoringState();
         const std::string className = assetPath.stem().string();
 
+        const auto openManagedWithDefaultApplication = [&](const std::string& optionalWarning = {}) -> bool
+        {
+            const auto resolvedScriptPathResult = Assets::ResolveAssetKeyToPath(normalizedKey);
+            if (resolvedScriptPathResult.IsFailure())
+            {
+                LT_WARN("Managed scripts: failed resolving script asset path '{}' for external open.", normalizedKey);
+                return false;
+            }
+
+            std::string openError;
+            if (!OpenPathInExternalApplication(resolvedScriptPathResult.GetValue(), openError))
+            {
+                LT_WARN("Managed scripts: {}", openError);
+                return false;
+            }
+
+            if (!optionalWarning.empty())
+                LT_WARN("Managed scripts: {}", optionalWarning);
+            LT_INFO("Managed scripts: opened external editor for '{}'.", resolvedScriptPathResult.GetValue().string());
+            return true;
+        };
+
         const auto openInternalEditor = [&](const std::string& optionalStatus = {}, bool isError = false) -> bool
         {
+            if (isManagedScript)
+                return openManagedWithDefaultApplication(optionalStatus);
+
             std::string openError;
             if (!OpenNativeScriptEditor(className, assetRelativePathWithoutExtension, nativeScriptAuthoringState, openError))
             {
@@ -2078,27 +2237,36 @@ namespace Limitless::EditorInspectorPanel
         {
             if (!openedProjectRoot.has_value())
             {
-                return openInternalEditor("External editor requested, but no project is open. Using built-in editor.", true);
+                return openInternalEditor(
+                    isManagedScript
+                        ? "External Visual Studio requested, but no project is open. Falling back to the default external application."
+                        : "External editor requested, but no project is open. Using built-in editor.",
+                    true);
             }
 
-            std::string mirrorError;
-            if (nativeScriptAuthoringState.BuildInProgress.load(std::memory_order_relaxed))
+            if (!isManagedScript)
             {
-                // Avoid clearing/rebuilding Generated/ScriptCore while an active compile is reading it.
-                LT_WARN("Native scripts: skipping full generated mirror refresh because a build is currently running.");
-            }
-            else if (!MirrorAllProjectNativeScriptsToGeneratedDirectory(mirrorError))
-            {
-                return openInternalEditor(
-                    "Could not prepare external script mirror (" + mirrorError + "). Using built-in editor.",
-                    true);
+                std::string mirrorError;
+                if (nativeScriptAuthoringState.BuildInProgress.load(std::memory_order_relaxed))
+                {
+                    // Avoid clearing/rebuilding Generated/ScriptCore while an active compile is reading it.
+                    LT_WARN("Native scripts: skipping full generated mirror refresh because a build is currently running.");
+                }
+                else if (!MirrorAllProjectNativeScriptsToGeneratedDirectory(mirrorError))
+                {
+                    return openInternalEditor(
+                        "Could not prepare external script mirror (" + mirrorError + "). Using built-in editor.",
+                        true);
+                }
             }
 
             const auto buildRoot = FindEngineWorkspaceRoot();
             if (!buildRoot.has_value())
             {
                 return openInternalEditor(
-                    "External editor could not locate engine/toolchain root. Using built-in editor.",
+                    isManagedScript
+                        ? "External Visual Studio could not locate engine/toolchain root. Falling back to the default external application."
+                        : "External editor could not locate engine/toolchain root. Using built-in editor.",
                     true);
             }
 
@@ -2116,7 +2284,9 @@ namespace Limitless::EditorInspectorPanel
             if (resolvedScriptPathResult.IsFailure())
             {
                 return openInternalEditor(
-                    "Failed resolving script asset path for external editor. Using built-in editor.",
+                    isManagedScript
+                        ? "Failed resolving script asset path for external Visual Studio launch. Falling back to the default external application."
+                        : "Failed resolving script asset path for external editor. Using built-in editor.",
                     true);
             }
 
@@ -2124,6 +2294,8 @@ namespace Limitless::EditorInspectorPanel
             NativeScriptExternalEditor::OpenVisualStudioRequest request;
             request.ProjectRoot = openedProjectRoot.value();
             request.BuildRoot = buildRoot.value();
+            if (const auto engineSourceRoot = FindEngineSourceWorkspaceRoot(); engineSourceRoot.has_value())
+                request.EngineSourceRoot = engineSourceRoot.value();
             request.TargetScriptPath = resolvedScriptPathResult.GetValue();
             request.Configuration = configuration;
             request.Platform = platform;
@@ -2135,14 +2307,20 @@ namespace Limitless::EditorInspectorPanel
 
             const std::string warningMessage =
                 externalOpenResult.ErrorMessage.empty()
-                    ? "External editor launch failed. Using built-in editor."
-                    : externalOpenResult.ErrorMessage + " Falling back to built-in editor.";
-            LT_WARN("Native scripts: {}", warningMessage);
+                    ? (isManagedScript ? "External Visual Studio launch failed. Falling back to the default external application."
+                                       : "External editor launch failed. Using built-in editor.")
+                    : (isManagedScript ? externalOpenResult.ErrorMessage + " Falling back to the default external application."
+                                       : externalOpenResult.ErrorMessage + " Falling back to built-in editor.");
+            LT_WARN("{}: {}", isManagedScript ? "Managed scripts" : "Native scripts", warningMessage);
             return openInternalEditor(warningMessage, true);
         }
 #else
         if (scriptEditorMode == Project::ScriptEditorMode::External)
-            return openInternalEditor("External Visual Studio mode is only available on Windows. Using built-in editor.", true);
+            return openInternalEditor(
+                isManagedScript
+                    ? "External Visual Studio mode is only available on Windows. Falling back to the default external application."
+                    : "External Visual Studio mode is only available on Windows. Using built-in editor.",
+                true);
 #endif
 
         return openInternalEditor();

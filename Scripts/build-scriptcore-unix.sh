@@ -5,9 +5,10 @@ set -euo pipefail
 CONFIGURATION="Debug"
 PLATFORM=""
 COMPILER=""
+OPEN_PROJECT_ROOT=""
 
 print_usage() {
-    echo "Usage: $0 [--config Debug|Release|Dist] [--platform x64|ARM64] [--compiler gcc|clang]"
+    echo "Usage: $0 [--config Debug|Release|Dist] [--platform x64|ARM64] [--compiler gcc|clang] [--project-root /path/to/project]"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -22,6 +23,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --compiler)
             COMPILER="${2:-}"
+            shift 2
+            ;;
+        --project-root)
+            OPEN_PROJECT_ROOT="${2:-}"
             shift 2
             ;;
         --help|-h)
@@ -74,8 +79,12 @@ if [[ "$COMPILER" != "gcc" && "$COMPILER" != "clang" ]]; then
 fi
 
 SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
-cd "$PROJECT_ROOT"
+REPO_ROOT="$(cd "$SCRIPT_DIRECTORY/.." && pwd)"
+cd "$REPO_ROOT"
+
+if [[ -n "$OPEN_PROJECT_ROOT" ]]; then
+    OPEN_PROJECT_ROOT="$(cd "$OPEN_PROJECT_ROOT" && pwd)"
+fi
 
 can_use_sudo() {
     if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
@@ -221,6 +230,14 @@ fi
 CONFIG_LOWER="$(echo "$CONFIGURATION" | tr '[:upper:]' '[:lower:]')"
 PLATFORM_LOWER="$(echo "$PLATFORM" | tr '[:upper:]' '[:lower:]')"
 CFG_SHORTNAME="${CONFIG_LOWER}_${PLATFORM_LOWER}"
+BUILD_FOLDER="${CFG_SHORTNAME}-${SYSTEM_NAME}-${PLATFORM}"
+OUTPUT_DIR="$REPO_ROOT/Build/$BUILD_FOLDER/Editor"
+RUNTIME_TEMPLATE_DIR="$REPO_ROOT/RuntimeTemplates/$BUILD_FOLDER"
+MANAGED_BUILD_SCRIPT="$REPO_ROOT/Scripts/build-managed-runtime-unix.sh"
+PROJECT_LOCAL_OUTPUT_DIR=""
+if [[ -n "$OPEN_PROJECT_ROOT" ]]; then
+    PROJECT_LOCAL_OUTPUT_DIR="$OPEN_PROJECT_ROOT/Build/ScriptCore/$BUILD_FOLDER"
+fi
 
 get_job_count() {
     local jobs
@@ -244,6 +261,27 @@ get_job_count() {
 JOBS="$(get_job_count)"
 echo "Building ScriptCore only: config=${CFG_SHORTNAME}, compiler=${COMPILER}, jobs=${JOBS}"
 make -j"${JOBS}" ScriptCore config="${CFG_SHORTNAME}"
+
+if [[ ! -f "$MANAGED_BUILD_SCRIPT" ]]; then
+    echo "Error: Managed runtime build script not found: $MANAGED_BUILD_SCRIPT"
+    exit 1
+fi
+
+if [[ -n "$OPEN_PROJECT_ROOT" ]]; then
+    bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$OUTPUT_DIR" --project-root "$OPEN_PROJECT_ROOT"
+else
+    bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$OUTPUT_DIR"
+fi
+
+if [[ -n "$PROJECT_LOCAL_OUTPUT_DIR" ]]; then
+    bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$PROJECT_LOCAL_OUTPUT_DIR" --project-root "$OPEN_PROJECT_ROOT"
+fi
+
+if [[ -n "$OPEN_PROJECT_ROOT" ]]; then
+    bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$RUNTIME_TEMPLATE_DIR" --project-root "$OPEN_PROJECT_ROOT"
+else
+    bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$RUNTIME_TEMPLATE_DIR"
+fi
 
 echo "ScriptCore build completed successfully."
 echo "Output directory: Build/${CFG_SHORTNAME}-${SYSTEM_NAME}-${PLATFORM}/Editor/"

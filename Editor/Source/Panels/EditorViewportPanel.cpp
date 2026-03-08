@@ -14,6 +14,7 @@
 #include "Core/Time.h"
 #include "Scene/Scene.h"
 #include "Scene/SceneRenderer.h"
+#include "Scripting/ManagedScriptHost.h"
 #include "Undo/EditorUndoService.h"
 #include "imgui/imgui.h"
 
@@ -61,6 +62,15 @@ namespace Limitless::EditorViewportPanel
                    (lowerKey.ends_with(".h") || lowerKey.ends_with(".cpp"));
         }
 
+        bool IsManagedScriptAssetKey(const std::string& assetKey)
+        {
+            if (assetKey.empty())
+                return false;
+
+            const std::string lowerKey = ToLowerAscii(NormalizeSlashes(assetKey));
+            return lowerKey.rfind("assets/", 0) == 0 && lowerKey.ends_with(".cs");
+        }
+
         NativeScriptEntry BuildScriptEntryFromAssetKey(const std::string& assetKey)
         {
             NativeScriptEntry scriptEntry{};
@@ -78,26 +88,59 @@ namespace Limitless::EditorViewportPanel
             return scriptEntry;
         }
 
+        ManagedScriptEntry BuildManagedScriptEntryFromAssetKey(const std::string& assetKey)
+        {
+            ManagedScriptEntry scriptEntry{};
+            std::string relativePath = NormalizeSlashes(assetKey);
+            if (relativePath.rfind("Assets/", 0) == 0)
+                relativePath.erase(0, 7);
+
+            scriptEntry.ScriptAssetRelativePath = relativePath;
+            const std::string requestedClassName = std::filesystem::path(relativePath).stem().string();
+            const std::string resolvedClassName = ManagedScriptHost::ResolveDiscoveredClassName(requestedClassName);
+            scriptEntry.ScriptClassName = resolvedClassName.empty() ? requestedClassName : resolvedClassName;
+            return scriptEntry;
+        }
+
         bool TryAttachScriptAssetToEntity(Scene* scene,
                                           entt::entity ownerEntity,
                                           const std::string& assetKey,
                                           EditorUndoService* undoService)
         {
-            if (!scene || !scene->IsValid(ownerEntity) || !IsNativeScriptAssetKey(assetKey))
+            if (!scene || !scene->IsValid(ownerEntity))
                 return false;
 
-            NativeScriptEntry scriptEntry = BuildScriptEntryFromAssetKey(assetKey);
+            if (IsNativeScriptAssetKey(assetKey))
+            {
+                NativeScriptEntry scriptEntry = BuildScriptEntryFromAssetKey(assetKey);
+                if (scriptEntry.ScriptClassName.empty() && scriptEntry.ScriptAssetRelativePath.empty())
+                    return false;
+
+                if (undoService)
+                {
+                    return undoService->ExecuteSceneMutation("Attach Native Script", [&](Scene& mutableScene) {
+                        return mutableScene.AttachScriptComponent(ownerEntity, std::move(scriptEntry)) != entt::null;
+                    });
+                }
+
+                return scene->AttachScriptComponent(ownerEntity, std::move(scriptEntry)) != entt::null;
+            }
+
+            if (!IsManagedScriptAssetKey(assetKey))
+                return false;
+
+            ManagedScriptEntry scriptEntry = BuildManagedScriptEntryFromAssetKey(assetKey);
             if (scriptEntry.ScriptClassName.empty() && scriptEntry.ScriptAssetRelativePath.empty())
                 return false;
 
             if (undoService)
             {
-                return undoService->ExecuteSceneMutation("Attach Native Script", [&](Scene& mutableScene) {
-                    return mutableScene.AttachScriptComponent(ownerEntity, std::move(scriptEntry)) != entt::null;
+                return undoService->ExecuteSceneMutation("Attach Managed Script", [&](Scene& mutableScene) {
+                    return mutableScene.AttachManagedScriptComponent(ownerEntity, std::move(scriptEntry)) != entt::null;
                 });
             }
 
-            return scene->AttachScriptComponent(ownerEntity, std::move(scriptEntry)) != entt::null;
+            return scene->AttachManagedScriptComponent(ownerEntity, std::move(scriptEntry)) != entt::null;
         }
 
         bool TryComputeDropWorldPosition(const Camera& camera,
