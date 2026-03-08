@@ -723,9 +723,11 @@ namespace Limitless
         if (assetKey.empty())
             return false;
 
+        const std::string requestedAssetKey = assetKey;
+
         if (loadMode == LoadSceneMode::Additive)
         {
-            const SceneCollection::Handle existingHandle = FindLoadedSceneHandleByAssetKey(assetKey);
+            const SceneCollection::Handle existingHandle = FindLoadedSceneHandleByAssetKey(requestedAssetKey);
             if (existingHandle != SceneCollection::InvalidHandle)
                 return true;
         }
@@ -734,17 +736,17 @@ namespace Limitless
             ClearPlayModeRuntimeScenes();
         }
 
-        const auto resolvedPathResult = Assets::ResolveAssetKeyToPath(assetKey);
+        const auto resolvedPathResult = Assets::ResolveAssetKeyToPath(requestedAssetKey);
         if (resolvedPathResult.IsFailure())
         {
-            LT_ERROR("Failed to resolve scene asset key {}: {}", assetKey, resolvedPathResult.GetError().GetErrorMessage());
+            LT_ERROR("Failed to resolve scene asset key {}: {}", requestedAssetKey, resolvedPathResult.GetError().GetErrorMessage());
             return false;
         }
 
         auto sceneResult = Scene::LoadFromFile(resolvedPathResult.GetValue());
         if (sceneResult.IsFailure())
         {
-            LT_ERROR("Failed to load scene {}: {}", assetKey, sceneResult.GetError().GetErrorMessage());
+            LT_ERROR("Failed to load scene {}: {}", requestedAssetKey, sceneResult.GetError().GetErrorMessage());
             return false;
         }
 
@@ -752,7 +754,7 @@ namespace Limitless
         const SceneRoleMask sceneRoles = shouldActivate ? kPlayModeRuntimeSceneActiveRoles : kPlayModeRuntimeSceneBaseRoles;
         const SceneCollection::Handle handle = m_SceneCollection.AddScene(
             std::move(sceneResult.GetValue()),
-            assetKey,
+            requestedAssetKey,
             SceneCollectionLifecycleState::Loading,
             sceneRoles);
         Scene* loadedScene = m_SceneCollection.GetScene(handle);
@@ -784,7 +786,7 @@ namespace Limitless
             m_CachedTextureAsset.reset();
         }
 
-        LT_INFO("Loaded scene during Play Mode {}", assetKey);
+        LT_INFO("Loaded scene during Play Mode {}", requestedAssetKey);
         m_EditorUndoService.Clear();
         return true;
     }

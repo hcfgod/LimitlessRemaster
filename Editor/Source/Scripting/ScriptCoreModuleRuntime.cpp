@@ -1,5 +1,6 @@
 #include "ScriptCoreModuleRuntime.h"
 #include "IncrementalScriptCompiler.h"
+#include "Scripting/ManagedScriptHost.h"
 
 #include "Core/Debug/Log.h"
 #include "Core/Input/InputSystem.h"
@@ -60,6 +61,15 @@ namespace Limitless::ScriptCoreModuleRuntime
             std::chrono::steady_clock::time_point LastPollTime{};
         };
 
+        struct ManagedRuntimeState final
+        {
+            std::filesystem::path SourceManagedDirectory;
+            std::filesystem::path SourceManifestPath;
+            std::filesystem::file_time_type LastWriteTime{};
+            std::filesystem::path LastRejectedSourcePath;
+            std::filesystem::file_time_type LastRejectedSourceWriteTime{};
+        };
+
         struct GameplayInputRoutingState final
         {
             bool GameViewFocused = false;
@@ -69,6 +79,7 @@ namespace Limitless::ScriptCoreModuleRuntime
         };
 
         RuntimeState s_RuntimeState;
+        ManagedRuntimeState s_ManagedRuntimeState;
         GameplayInputRoutingState s_GameplayInputRoutingState;
 
         bool ShouldSuppressGameplayInput()
@@ -306,6 +317,221 @@ namespace Limitless::ScriptCoreModuleRuntime
 #else
             (void)candidates;
 #endif
+        }
+
+        std::vector<std::filesystem::path> BuildManagedDirectoryCandidates()
+        {
+            std::vector<std::filesystem::path> candidates;
+            auto addCandidate = [&](const std::filesystem::path& candidatePath) {
+                if (candidatePath.empty())
+                    return;
+                if (std::find(candidates.begin(), candidates.end(), candidatePath) != candidates.end())
+                    return;
+                candidates.push_back(candidatePath);
+            };
+
+            const std::filesystem::path currentConfigOutput = BuildConfigOutputFolder();
+            const std::filesystem::path distConfigOutput = BuildDistConfigOutputFolder();
+            if (const std::string executablePath = PlatformDetection::GetExecutablePath(); !executablePath.empty())
+            {
+                const std::filesystem::path executableDirectory = std::filesystem::path(executablePath).parent_path();
+                if (!executableDirectory.empty())
+                    addCandidate(executableDirectory / "Managed");
+            }
+
+            if (const auto configuredBuildRoot = GetConfiguredBuildRoot(); configuredBuildRoot.has_value())
+            {
+                addCandidate(configuredBuildRoot.value() / currentConfigOutput / "Managed");
+                addCandidate(configuredBuildRoot.value() / distConfigOutput / "Managed");
+            }
+
+            if (const auto engineRoot = FindEngineWorkspaceRoot(); engineRoot.has_value())
+            {
+                addCandidate(engineRoot.value() / currentConfigOutput / "Managed");
+                addCandidate(engineRoot.value() / distConfigOutput / "Managed");
+            }
+
+            return candidates;
+        }
+
+        void LogManagedDirectoryCandidates(const std::vector<std::filesystem::path>& candidates)
+        {
+#if defined(LT_CONFIG_DEBUG)
+            if (candidates.empty())
+            {
+                LT_INFO("Managed scripting: no candidate payload directories were generated for the editor.");
+                return;
+            }
+
+            LT_INFO("Managed scripting: probing {} editor managed payload candidate(s).", candidates.size());
+            for (size_t index = 0; index < candidates.size(); ++index)
+                LT_INFO("Managed scripting candidate [{}]: '{}'", index, candidates[index].string());
+#else
+            (void)candidates;
+#endif
+        }
+
+        void ResetManagedRuntimeState()
+        {
+            s_ManagedRuntimeState = {};
+        }
+
+        bool SelectManagedPayloadCandidate(const std::vector<std::filesystem::path>& candidatePaths,
+                                           std::filesystem::path& outSourceDirectory,
+                                           std::filesystem::path& outManifestPath,
+                                           std::filesystem::file_time_type& outWriteTime,
+                                           bool& outHasWriteTime)
+        {
+            outSourceDirectory.clear();
+            outManifestPath.clear();
+            outWriteTime = {};
+            outHasWriteTime = false;
+
+            for (const auto& candidatePath : candidatePaths)
+            {
+                std::string validationError;
+                if (!ManagedScriptPayload::ValidatePayloadDirectory(candidatePath, nullptr, &validationError))
+                    continue;
+
+                outSourceDirectory = candidatePath;
+                outManifestPath = ManagedScriptPayload::GetPayloadManifestPath(candidatePath);
+
+                std::error_code timeError;
+                outWriteTime = std::filesystem::last_write_time(outManifestPath, timeError);
+                outHasWriteTime = !timeError;
+                return true;
+            }
+
+            return false;
+        }
+
+        bool ReloadManagedScriptHost(const std::filesystem::path& sourceDirectory)
+        {
+            ManagedScriptHost::Shutdown();
+            ResetManagedRuntimeState();
+
+            if (!ManagedScriptHost::Initialize(sourceDirectory))
+                return false;
+
+            const auto& snapshot = ManagedScriptHost::GetSnapshot();
+            s_ManagedRuntimeState.SourceManagedDirectory = snapshot.ManagedDirectory;
+            s_ManagedRuntimeState.SourceManifestPath = ManagedScriptPayload::GetPayloadManifestPath(snapshot.ManagedDirectory);
+
+            std::error_code timeError;
+            s_ManagedRuntimeState.LastWriteTime = std::filesystem::last_write_time(s_ManagedRuntimeState.SourceManifestPath, timeError);
+            if (timeError)
+                s_ManagedRuntimeState.LastWriteTime = {};
+
+            LT_INFO("Managed scripting: loaded editor payload from '{}' (shadow '{}', apiVersion={}).",
+                    snapshot.ManagedDirectory.string(),
+                    snapshot.LoadedManagedDirectory.string(),
+                    snapshot.PayloadApiVersion);
+            return true;
+        }
+
+        void InitializeManagedScriptHost()
+        {
+            const auto candidatePaths = BuildManagedDirectoryCandidates();
+            LogManagedDirectoryCandidates(candidatePaths);
+
+            std::filesystem::path sourceDirectory;
+            std::filesystem::path manifestPath;
+            std::filesystem::file_time_type writeTime{};
+            bool hasWriteTime = false;
+            if (SelectManagedPayloadCandidate(candidatePaths, sourceDirectory, manifestPath, writeTime, hasWriteTime))
+            {
+                if (ReloadManagedScriptHost(sourceDirectory))
+                {
+                    s_ManagedRuntimeState.SourceManagedDirectory = sourceDirectory;
+                    s_ManagedRuntimeState.SourceManifestPath = manifestPath;
+                    if (hasWriteTime)
+                        s_ManagedRuntimeState.LastWriteTime = writeTime;
+                    return;
+                }
+            }
+
+            LT_INFO("Managed scripting: no managed discovery payload found for the editor yet.");
+        }
+
+        void UpdateManagedScriptHost()
+        {
+            std::filesystem::path sourceDirectory;
+            std::filesystem::path manifestPath;
+            std::filesystem::file_time_type writeTime{};
+            bool hasWriteTime = false;
+            if (!SelectManagedPayloadCandidate(BuildManagedDirectoryCandidates(), sourceDirectory, manifestPath, writeTime, hasWriteTime))
+                return;
+
+            auto markSourceRejected = [&](const std::filesystem::path& rejectedPath) {
+                if (!hasWriteTime)
+                    return;
+                s_ManagedRuntimeState.LastRejectedSourcePath = rejectedPath;
+                s_ManagedRuntimeState.LastRejectedSourceWriteTime = writeTime;
+            };
+
+            auto clearRejectedSource = [&]() {
+                s_ManagedRuntimeState.LastRejectedSourcePath.clear();
+                s_ManagedRuntimeState.LastRejectedSourceWriteTime = {};
+            };
+
+            const bool sourceKnownRejected =
+                hasWriteTime &&
+                s_ManagedRuntimeState.LastRejectedSourcePath == sourceDirectory &&
+                s_ManagedRuntimeState.LastRejectedSourceWriteTime == writeTime;
+
+            if (s_ManagedRuntimeState.SourceManagedDirectory != sourceDirectory)
+            {
+                if (sourceKnownRejected)
+                    return;
+
+                if (ReloadManagedScriptHost(sourceDirectory))
+                {
+                    clearRejectedSource();
+                    s_ManagedRuntimeState.SourceManagedDirectory = sourceDirectory;
+                    s_ManagedRuntimeState.SourceManifestPath = manifestPath;
+                    if (hasWriteTime)
+                        s_ManagedRuntimeState.LastWriteTime = writeTime;
+                }
+                else
+                {
+                    markSourceRejected(sourceDirectory);
+                }
+                return;
+            }
+
+            if (!ManagedScriptHost::IsInitialized())
+            {
+                if (ReloadManagedScriptHost(sourceDirectory))
+                {
+                    clearRejectedSource();
+                    s_ManagedRuntimeState.SourceManagedDirectory = sourceDirectory;
+                    s_ManagedRuntimeState.SourceManifestPath = manifestPath;
+                    if (hasWriteTime)
+                        s_ManagedRuntimeState.LastWriteTime = writeTime;
+                }
+                return;
+            }
+
+            if (!hasWriteTime)
+                return;
+
+            if (writeTime != s_ManagedRuntimeState.LastWriteTime)
+            {
+                if (sourceKnownRejected)
+                    return;
+
+                if (ReloadManagedScriptHost(sourceDirectory))
+                {
+                    clearRejectedSource();
+                    s_ManagedRuntimeState.SourceManagedDirectory = sourceDirectory;
+                    s_ManagedRuntimeState.SourceManifestPath = manifestPath;
+                    s_ManagedRuntimeState.LastWriteTime = writeTime;
+                }
+                else
+                {
+                    markSourceRejected(sourceDirectory);
+                }
+            }
         }
 
         void ResetRuntimeScriptRegistry()
@@ -799,16 +1025,21 @@ namespace Limitless::ScriptCoreModuleRuntime
 
         const auto candidatePaths = BuildScriptCoreLibraryCandidates();
         LogScriptCoreLibraryCandidates(candidatePaths);
-        if (TryReloadScriptCoreFromCandidates(candidatePaths))
-            return;
+        const bool scriptCoreLoaded = TryReloadScriptCoreFromCandidates(candidatePaths);
 
-        LT_INFO("ScriptCore runtime: ScriptCore module not found yet, using built-in scripts only.");
+        InitializeManagedScriptHost();
+
+        if (!scriptCoreLoaded)
+            LT_INFO("ScriptCore runtime: ScriptCore module not found yet, using built-in scripts only.");
     }
 
     void Shutdown()
     {
         if (!s_RuntimeState.Initialized)
             return;
+
+        ManagedScriptHost::Shutdown();
+        ResetManagedRuntimeState();
 
         if (s_RuntimeState.LibraryHandle != nullptr)
         {
@@ -844,6 +1075,8 @@ namespace Limitless::ScriptCoreModuleRuntime
         if (now - s_RuntimeState.LastPollTime < std::chrono::milliseconds(500))
             return;
         s_RuntimeState.LastPollTime = now;
+
+        UpdateManagedScriptHost();
 
         // Always prefer the highest-priority available candidate. This allows
         // switching from fallback ScriptCore (e.g. next to Editor.exe) to the

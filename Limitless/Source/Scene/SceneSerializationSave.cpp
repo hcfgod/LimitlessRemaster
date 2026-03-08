@@ -583,29 +583,53 @@ namespace Limitless
             const auto scriptEntities = scene.GetScriptComponentEntities(entity);
             if (!scriptEntities.empty())
             {
-                nlohmann::json scriptEntries = nlohmann::json::array();
+                nlohmann::json nativeScriptEntries = nlohmann::json::array();
+                nlohmann::json managedScriptEntries = nlohmann::json::array();
                 for (entt::entity scriptEntity : scriptEntities)
                 {
                     const auto* scriptComponent = registry.try_get<ScriptComponent>(scriptEntity);
                     if (!scriptComponent)
                         continue;
-                    const auto& scriptEntry = scriptComponent->Script;
-                    nlohmann::json exposedProperties = nlohmann::json::object();
-                    for (const auto& [propertyName, propertyValue] : scriptEntry.ExposedProperties)
+
+                    if (const NativeScriptEntry* scriptEntry = scriptComponent->TryGetNativeEntry())
                     {
-                        exposedProperties[propertyName] = SceneSerialization::SerializeScriptPropertyValue(propertyValue);
+                        nlohmann::json exposedProperties = nlohmann::json::object();
+                        for (const auto& [propertyName, propertyValue] : scriptEntry->ExposedProperties)
+                        {
+                            exposedProperties[propertyName] = SceneSerialization::SerializeScriptPropertyValue(propertyValue);
+                        }
+                        nativeScriptEntries.push_back({
+                            { "Backend", "Native" },
+                            { "Class", scriptEntry->ScriptClassName },
+                            { "AssetPath", scriptEntry->ScriptAssetRelativePath },
+                            { "ExposedProperties", std::move(exposedProperties) },
+                            { "Enabled", scriptEntry->Enabled },
+                            { "ExecutionPolicy", scriptEntry->ExecutionPolicy == ScriptExecutionPolicy::ParallelSafe ? "ParallelSafe" : "MainThread" },
+                            { "DeclaredReadAccessMask", scriptEntry->DeclaredReadAccessMask },
+                            { "DeclaredWriteAccessMask", scriptEntry->DeclaredWriteAccessMask }
+                        });
                     }
-                    scriptEntries.push_back({
-                        { "Class", scriptEntry.ScriptClassName },
-                        { "AssetPath", scriptEntry.ScriptAssetRelativePath },
-                        { "ExposedProperties", std::move(exposedProperties) },
-                        { "Enabled", scriptEntry.Enabled },
-                        { "ExecutionPolicy", scriptEntry.ExecutionPolicy == ScriptExecutionPolicy::ParallelSafe ? "ParallelSafe" : "MainThread" },
-                        { "DeclaredReadAccessMask", scriptEntry.DeclaredReadAccessMask },
-                        { "DeclaredWriteAccessMask", scriptEntry.DeclaredWriteAccessMask }
-                    });
+                    else if (const ManagedScriptEntry* scriptEntry = scriptComponent->TryGetManagedEntry())
+                    {
+                        nlohmann::json exposedProperties = nlohmann::json::object();
+                        for (const auto& [propertyName, propertyValue] : scriptEntry->ExposedProperties)
+                        {
+                            exposedProperties[propertyName] = SceneSerialization::SerializeScriptPropertyValue(propertyValue);
+                        }
+                        managedScriptEntries.push_back({
+                            { "Backend", "Managed" },
+                            { "Class", scriptEntry->ScriptClassName },
+                            { "AssetPath", scriptEntry->ScriptAssetRelativePath },
+                            { "ExposedProperties", std::move(exposedProperties) },
+                            { "Enabled", scriptEntry->Enabled }
+                        });
+                    }
                 }
-                entry["NativeScripts"] = std::move(scriptEntries);
+
+                if (!nativeScriptEntries.empty())
+                    entry["NativeScripts"] = std::move(nativeScriptEntries);
+                if (!managedScriptEntries.empty())
+                    entry["ManagedScripts"] = std::move(managedScriptEntries);
             }
 
             if (const auto* particleEmitter = registry.try_get<ParticleEmitterComponent>(entity))

@@ -8,6 +8,7 @@
 #include "Core/Error.h"
 #include "Physics/Physics2DWorld.h"
 #include "Scripting/Coroutine.h"
+#include "Scripting/ManagedScriptHost.h"
 
 #include <nlohmann/json.hpp>
 
@@ -207,15 +208,28 @@ namespace Limitless
                 auto* scriptComponent = registry.try_get<ScriptComponent>(scriptEntity);
                 if (!scriptComponent)
                     continue;
-                auto& scriptEntry = scriptComponent->Script;
-                scriptEntry.RuntimeInitialized = false;
-                if (scriptEntry.RuntimeInstance)
-                    Coroutine::StopAll(*scriptEntry.RuntimeInstance);
-                scriptEntry.RuntimeInstance.reset();
-                scriptEntry.RuntimeUpdateCount = 0;
-                scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-                scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
-                scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
+                if (NativeScriptEntry* scriptEntry = scriptComponent->TryGetNativeEntry())
+                {
+                    scriptEntry->RuntimeInitialized = false;
+                    if (scriptEntry->RuntimeInstance)
+                        Coroutine::StopAll(*scriptEntry->RuntimeInstance);
+                    scriptEntry->RuntimeInstance.reset();
+                    scriptEntry->RuntimeUpdateCount = 0;
+                    scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
+                    scriptEntry->RuntimeWarnedMissingAccessDeclaration = false;
+                    scriptEntry->RuntimeWarnedAccessMaskMismatch = false;
+                }
+                else if (ManagedScriptEntry* scriptEntry = scriptComponent->TryGetManagedEntry())
+                {
+                    if (scriptEntry->RuntimeInstanceId != 0)
+                        ManagedScriptHost::DestroyScriptInstance(scriptEntry->RuntimeInstanceId);
+                    scriptEntry->RuntimeInstanceId = 0;
+                    scriptEntry->RuntimeInitialized = false;
+                    scriptEntry->RuntimeUpdateCount = 0;
+                    scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
+                    scriptEntry->RuntimeWarnedMissingHost = false;
+                    scriptEntry->RuntimeWarnedMissingClass = false;
+                }
             }
         }
 
@@ -1075,6 +1089,28 @@ namespace Limitless
             outScriptEntry.RuntimeWarnedAccessMaskMismatch = false;
         }
 
+        void LoadManagedScriptEntryFromJson(const nlohmann::json& managedScriptJson, ManagedScriptEntry& outScriptEntry)
+        {
+            outScriptEntry.ScriptClassName = managedScriptJson.value("Class", std::string{});
+            outScriptEntry.ScriptAssetRelativePath = managedScriptJson.value("AssetPath", std::string{});
+            outScriptEntry.Enabled = managedScriptJson.value("Enabled", true);
+            if (managedScriptJson.contains("ExposedProperties") && managedScriptJson["ExposedProperties"].is_object())
+            {
+                for (auto it = managedScriptJson["ExposedProperties"].begin(); it != managedScriptJson["ExposedProperties"].end(); ++it)
+                {
+                    ScriptPropertyValue propertyValue;
+                    if (SceneSerialization::DeserializeScriptPropertyValue(it.value(), propertyValue))
+                        outScriptEntry.ExposedProperties[it.key()] = propertyValue;
+                }
+            }
+            outScriptEntry.RuntimeInitialized = false;
+            outScriptEntry.RuntimeExposedPropertiesRevision = 1;
+            outScriptEntry.RuntimeUpdateCount = 0;
+            outScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+            outScriptEntry.RuntimeWarnedMissingHost = false;
+            outScriptEntry.RuntimeWarnedMissingClass = false;
+        }
+
         void DeserializeScriptAndPrefabComponents(const nlohmann::json& entry, Scene* scene, entt::entity entity)
         {
             if (entry.contains("NativeScripts") && entry["NativeScripts"].is_array())
@@ -1093,6 +1129,24 @@ namespace Limitless
                 NativeScriptEntry loadedScriptEntry{};
                 LoadNativeScriptEntryFromJson(entry["NativeScript"], loadedScriptEntry);
                 (void)scene->AttachScriptComponent(entity, std::move(loadedScriptEntry));
+            }
+
+            if (entry.contains("ManagedScripts") && entry["ManagedScripts"].is_array())
+            {
+                for (const auto& scriptEntryJson : entry["ManagedScripts"])
+                {
+                    if (!scriptEntryJson.is_object())
+                        continue;
+                    ManagedScriptEntry loadedScriptEntry{};
+                    LoadManagedScriptEntryFromJson(scriptEntryJson, loadedScriptEntry);
+                    (void)scene->AttachManagedScriptComponent(entity, std::move(loadedScriptEntry));
+                }
+            }
+            else if (entry.contains("ManagedScript") && entry["ManagedScript"].is_object())
+            {
+                ManagedScriptEntry loadedScriptEntry{};
+                LoadManagedScriptEntryFromJson(entry["ManagedScript"], loadedScriptEntry);
+                (void)scene->AttachManagedScriptComponent(entity, std::move(loadedScriptEntry));
             }
 
             if (entry.contains("ParticleEmitter") && entry["ParticleEmitter"].is_object())

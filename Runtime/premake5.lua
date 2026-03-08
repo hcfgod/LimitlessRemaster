@@ -68,13 +68,17 @@ project "Runtime"
         -- Use the project location directly to avoid duplicated path segments
         -- segments on some generators after project renames.
         "{COPY} \"%{prj.location}/config.json\" \"%{cfg.targetdir}\"",
-        "{COPY} \"%{wks.location}/Resources/LimitlessLogo.ico\" \"%{cfg.targetdir}\""
+        "{COPY} \"%{prj.location}/../Resources/LimitlessLogo.ico\" \"%{cfg.targetdir}\""
     }
 
     filter "system:windows"
         cppdialect "C++20"
         staticruntime "Off"
         systemversion "latest"
+        prebuildcommands
+        {
+            "\"%{prj.location}/../Scripts/build-managed-runtime-windows.bat\" %{cfg.buildcfg} %{cfg.platform} \"%{cfg.targetdir}\""
+        }
         -- Runtime links a mixed third-party stack (some prebuilt libs may request
         -- static CRT defaults). Ignore LIBCMT defaults so we consistently use /MD.
         ignoredefaultlibraries { "LIBCMT", "LIBCMTD" }
@@ -177,6 +181,10 @@ project "Runtime"
     filter "system:macosx"
         cppdialect "C++20"
         staticruntime "Off"
+        prebuildcommands
+        {
+            "bash \"%{prj.location}/../Scripts/build-managed-runtime-unix.sh\" --config %{cfg.buildcfg} --platform %{cfg.platform} --output-dir \"%{cfg.targetdir}\""
+        }
 
         defines
         {
@@ -247,6 +255,10 @@ project "Runtime"
     filter "system:linux"
         cppdialect "C++20"
         staticruntime "Off"
+        prebuildcommands
+        {
+            "bash \"%{prj.location}/../Scripts/build-managed-runtime-unix.sh\" --config %{cfg.buildcfg} --platform %{cfg.platform} --output-dir \"%{cfg.targetdir}\""
+        }
 
         defines
         {

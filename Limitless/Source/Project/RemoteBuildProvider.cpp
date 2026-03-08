@@ -83,6 +83,7 @@ namespace Limitless::Project
 
                 manifest.RuntimeDirectory = root.value("runtimeDirectory", std::string{});
                 manifest.ScriptCoreLibraryPath = root.value("scriptCoreLibraryPath", std::string{});
+                manifest.ManagedPayloadDirectory = root.value("managedPayloadDirectory", std::string{});
                 if (root.contains("dynamicLibraryDirectories") && root["dynamicLibraryDirectories"].is_array())
                 {
                     for (const auto& item : root["dynamicLibraryDirectories"])
@@ -108,6 +109,15 @@ namespace Limitless::Project
             if (manifest.ScriptCoreLibraryPath.empty() || !std::filesystem::exists(manifest.ScriptCoreLibraryPath))
             {
                 result.ErrorMessage = "Remote build ScriptCore library is missing or invalid in manifest.";
+                return false;
+            }
+
+            if (manifest.ManagedPayloadDirectory.empty())
+                manifest.ManagedPayloadDirectory = manifest.RuntimeDirectory / "Managed";
+
+            if (!manifest.ManagedPayloadDirectory.empty() && !std::filesystem::is_directory(manifest.ManagedPayloadDirectory))
+            {
+                result.ErrorMessage = "Remote build managed payload directory is missing or invalid in manifest.";
                 return false;
             }
 

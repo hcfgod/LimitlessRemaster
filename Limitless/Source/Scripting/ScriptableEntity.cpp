@@ -381,10 +381,10 @@ namespace Limitless
             const auto* scriptComponent = m_Registry->try_get<ScriptComponent>(scriptEntity);
             if (!scriptComponent)
                 continue;
-            const auto& scriptEntry = scriptComponent->Script;
-            if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty() || !scriptEntry.RuntimeInstance)
+            const NativeScriptEntry* scriptEntry = scriptComponent->TryGetNativeEntry();
+            if (!scriptEntry || !scriptEntry->Enabled || scriptEntry->ScriptClassName.empty() || !scriptEntry->RuntimeInstance)
                 continue;
-            scripts.push_back(scriptEntry.RuntimeInstance.get());
+            scripts.push_back(scriptEntry->RuntimeInstance.get());
         }
         return scripts;
     }
@@ -429,11 +429,11 @@ namespace Limitless
             const auto* scriptComponent = m_Registry->try_get<ScriptComponent>(scriptEntity);
             if (!scriptComponent)
                 continue;
-            const auto& scriptEntry = scriptComponent->Script;
-            if (!scriptEntry.Enabled || scriptEntry.ScriptClassName.empty() || !scriptEntry.RuntimeInstance)
+            const NativeScriptEntry* scriptEntry = scriptComponent->TryGetNativeEntry();
+            if (!scriptEntry || !scriptEntry->Enabled || scriptEntry->ScriptClassName.empty() || !scriptEntry->RuntimeInstance)
                 continue;
-            if (ScriptClassNamesMatch(scriptEntry.ScriptClassName, className))
-                return scriptEntry.RuntimeInstance.get();
+            if (ScriptClassNamesMatch(scriptEntry->ScriptClassName, className))
+                return scriptEntry->RuntimeInstance.get();
         }
         return nullptr;
     }

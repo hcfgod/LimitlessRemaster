@@ -106,6 +106,8 @@ Write-Host "Copying internal toolchain assets..."
 New-Item -ItemType Directory -Path (Join-Path $toolchainRoot "Scripts") -Force | Out-Null
 Copy-IfExists -Source (Join-Path $repoRoot "Scripts\build-project-scriptcore-windows.bat") -Destination (Join-Path $toolchainRoot "Scripts\build-project-scriptcore-windows.bat")
 Copy-IfExists -Source (Join-Path $repoRoot "Scripts\build-project-scriptcore-unix.sh") -Destination (Join-Path $toolchainRoot "Scripts\build-project-scriptcore-unix.sh")
+Copy-IfExists -Source (Join-Path $repoRoot "Scripts\build-managed-runtime-windows.bat") -Destination (Join-Path $toolchainRoot "Scripts\build-managed-runtime-windows.bat")
+Copy-IfExists -Source (Join-Path $repoRoot "Scripts\build-managed-runtime-unix.sh") -Destination (Join-Path $toolchainRoot "Scripts\build-managed-runtime-unix.sh")
 
 Write-Host "Copying SDK headers (no engine .cpp source)..."
 New-Item -ItemType Directory -Path $sdkIncludeRoot -Force | Out-Null

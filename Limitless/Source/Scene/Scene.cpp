@@ -32,6 +32,7 @@
 #include "Physics/Physics2DWorld.h"
 #include "Scene/ParticleEmitterSystem.h"
 #include "Scripting/Coroutine.h"
+#include "Scripting/ManagedScriptHost.h"
 #include "Scripting/NativeScriptRegistry.h"
 
 #include <nlohmann/json.hpp>
@@ -798,63 +799,92 @@ namespace Limitless
             auto* scriptComponent = m_Registry.try_get<ScriptComponent>(scriptEntity);
             if (!scriptComponent)
                 continue;
-            NativeScriptEntry& scriptEntry = scriptComponent->Script;
-            if (!scriptEntry.RuntimeInstance)
-                continue;
-
             const entt::entity ownerEntity = scriptComponent->OwnerEntity;
 
             const auto* tag = m_Registry.try_get<TagComponent>(ownerEntity);
-            if (scriptEntry.RuntimeInitialized)
+
+            if (NativeScriptEntry* scriptEntry = scriptComponent->TryGetNativeEntry())
             {
+                if (!scriptEntry->RuntimeInstance)
+                    continue;
+
+                if (scriptEntry->RuntimeInitialized)
+                {
+                    try
+                    {
+                        scriptEntry->RuntimeInstance->OnDestroy();
+                    }
+                    catch (const std::exception& exception)
+                    {
+                        LT_ERROR("Script '{}' on entity '{}' threw during OnDestroy in Scene destructor: {}",
+                                 scriptEntry->ScriptClassName,
+                                 tag ? tag->Tag : "Entity",
+                                 exception.what());
+                    }
+                    catch (...)
+                    {
+                        LT_ERROR("Script '{}' on entity '{}' threw a non-standard exception during OnDestroy in Scene destructor",
+                                 scriptEntry->ScriptClassName,
+                                 tag ? tag->Tag : "Entity");
+                    }
+                }
+
+                scriptComponent = m_Registry.try_get<ScriptComponent>(scriptEntity);
+                if (!scriptComponent)
+                    continue;
+                NativeScriptEntry* refreshedScriptEntry = scriptComponent->TryGetNativeEntry();
+                if (!refreshedScriptEntry || !refreshedScriptEntry->RuntimeInstance)
+                    continue;
+
                 try
                 {
-                    scriptEntry.RuntimeInstance->OnDestroy();
+                    Coroutine::StopAll(*refreshedScriptEntry->RuntimeInstance);
                 }
                 catch (const std::exception& exception)
                 {
-                    LT_ERROR("Script '{}' on entity '{}' threw during OnDestroy in Scene destructor: {}",
-                             scriptEntry.ScriptClassName,
-                             tag ? tag->Tag : "Entity",
-                             exception.what());
+                    LT_WARN("Script '{}' on entity '{}' threw during coroutine cleanup in Scene destructor: {}",
+                            refreshedScriptEntry->ScriptClassName,
+                            tag ? tag->Tag : "Entity",
+                            exception.what());
                 }
                 catch (...)
                 {
-                    LT_ERROR("Script '{}' on entity '{}' threw a non-standard exception during OnDestroy in Scene destructor",
-                             scriptEntry.ScriptClassName,
-                             tag ? tag->Tag : "Entity");
+                    LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during coroutine cleanup in Scene destructor",
+                            refreshedScriptEntry->ScriptClassName,
+                            tag ? tag->Tag : "Entity");
+                }
+
+                refreshedScriptEntry->RuntimeInstance.reset();
+                refreshedScriptEntry->RuntimeInitialized = false;
+                refreshedScriptEntry->RuntimeUpdateCount = 0;
+                refreshedScriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
+                refreshedScriptEntry->RuntimeWarnedMissingAccessDeclaration = false;
+                refreshedScriptEntry->RuntimeWarnedAccessMaskMismatch = false;
+                continue;
+            }
+
+            ManagedScriptEntry* managedScriptEntry = scriptComponent->TryGetManagedEntry();
+            if (!managedScriptEntry || managedScriptEntry->RuntimeInstanceId == 0)
+                continue;
+
+            if (managedScriptEntry->RuntimeInitialized)
+            {
+                std::string managedError;
+                if (!ManagedScriptHost::InvokeScriptOnDestroy(managedScriptEntry->RuntimeInstanceId, this, &managedError))
+                {
+                    LT_ERROR("Managed script '{}' on entity '{}' failed during OnDestroy in Scene destructor: {}",
+                             managedScriptEntry->ScriptClassName,
+                             tag ? tag->Tag : "Entity",
+                             managedError.empty() ? "unknown error" : managedError.c_str());
                 }
             }
 
-            scriptComponent = m_Registry.try_get<ScriptComponent>(scriptEntity);
-            if (!scriptComponent || !scriptComponent->Script.RuntimeInstance)
-                continue;
-            auto& refreshedScriptEntry = scriptComponent->Script;
-
-            try
-            {
-                Coroutine::StopAll(*refreshedScriptEntry.RuntimeInstance);
-            }
-            catch (const std::exception& exception)
-            {
-                LT_WARN("Script '{}' on entity '{}' threw during coroutine cleanup in Scene destructor: {}",
-                        refreshedScriptEntry.ScriptClassName,
-                        tag ? tag->Tag : "Entity",
-                        exception.what());
-            }
-            catch (...)
-            {
-                LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during coroutine cleanup in Scene destructor",
-                        refreshedScriptEntry.ScriptClassName,
-                        tag ? tag->Tag : "Entity");
-            }
-
-            refreshedScriptEntry.RuntimeInstance.reset();
-            refreshedScriptEntry.RuntimeInitialized = false;
-            refreshedScriptEntry.RuntimeUpdateCount = 0;
-            refreshedScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-            refreshedScriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
-            refreshedScriptEntry.RuntimeWarnedAccessMaskMismatch = false;
+            ManagedScriptHost::DestroyScriptInstance(managedScriptEntry->RuntimeInstanceId);
+            managedScriptEntry->RuntimeInstanceId = 0;
+            managedScriptEntry->RuntimeInitialized = false;
+            managedScriptEntry->RuntimeUpdateCount = 0;
+            managedScriptEntry->RuntimeWarnedMissingHost = false;
+            managedScriptEntry->RuntimeWarnedMissingClass = false;
         }
     }
 
@@ -873,7 +903,29 @@ namespace Limitless
         ScriptComponent component{};
         component.OwnerEntity = owner;
         component.ComponentOrder = static_cast<int32_t>(GetScriptComponentEntities(owner).size());
+        component.Backend = ScriptBackend::Native;
         component.Script = std::move(scriptEntry);
+        m_Registry.emplace<ScriptComponent>(scriptEntity, std::move(component));
+        return scriptEntity;
+    }
+
+    entt::entity Scene::AttachManagedScriptComponent(entt::entity owner)
+    {
+        return AttachManagedScriptComponent(owner, ManagedScriptEntry{});
+    }
+
+    entt::entity Scene::AttachManagedScriptComponent(entt::entity owner, ManagedScriptEntry scriptEntry)
+    {
+        owner = ResolveEntityReference(owner);
+        if (!IsValid(owner))
+            return entt::null;
+
+        entt::entity scriptEntity = m_Registry.create();
+        ScriptComponent component{};
+        component.OwnerEntity = owner;
+        component.ComponentOrder = static_cast<int32_t>(GetScriptComponentEntities(owner).size());
+        component.Backend = ScriptBackend::Managed;
+        component.ManagedScript = std::move(scriptEntry);
         m_Registry.emplace<ScriptComponent>(scriptEntity, std::move(component));
         return scriptEntity;
     }
@@ -883,7 +935,14 @@ namespace Limitless
         if (!m_Registry.valid(scriptComponentEntity) || !m_Registry.all_of<ScriptComponent>(scriptComponentEntity))
             return false;
 
-        const entt::entity ownerEntity = m_Registry.get<ScriptComponent>(scriptComponentEntity).OwnerEntity;
+        const auto& scriptComponent = m_Registry.get<ScriptComponent>(scriptComponentEntity);
+        if (const ManagedScriptEntry* managedEntry = scriptComponent.TryGetManagedEntry())
+        {
+            if (managedEntry->RuntimeInstanceId != 0)
+                ManagedScriptHost::DestroyScriptInstance(managedEntry->RuntimeInstanceId);
+        }
+
+        const entt::entity ownerEntity = scriptComponent.OwnerEntity;
         m_Registry.destroy(scriptComponentEntity);
         if (ownerEntity != entt::null && IsValid(ownerEntity))
             RenormalizeScriptComponentOrder(m_Registry, ownerEntity);

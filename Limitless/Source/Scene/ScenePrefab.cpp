@@ -278,15 +278,25 @@ namespace Limitless
                 auto& scriptComponent = scriptView.get<ScriptComponent>(scriptEntity);
                 if (scriptComponent.OwnerEntity != entity)
                     continue;
-                auto& scriptEntry = scriptComponent.Script;
-                scriptEntry.RuntimeInitialized = false;
-                if (scriptEntry.RuntimeInstance)
-                    Coroutine::StopAll(*scriptEntry.RuntimeInstance);
-                scriptEntry.RuntimeInstance.reset();
-                scriptEntry.RuntimeUpdateCount = 0;
-                scriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-                scriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
-                scriptEntry.RuntimeWarnedAccessMaskMismatch = false;
+                if (NativeScriptEntry* scriptEntry = scriptComponent.TryGetNativeEntry())
+                {
+                    scriptEntry->RuntimeInitialized = false;
+                    if (scriptEntry->RuntimeInstance)
+                        Coroutine::StopAll(*scriptEntry->RuntimeInstance);
+                    scriptEntry->RuntimeInstance.reset();
+                    scriptEntry->RuntimeUpdateCount = 0;
+                    scriptEntry->RuntimeWarnedOnUpdateTransformMutation = false;
+                    scriptEntry->RuntimeWarnedMissingAccessDeclaration = false;
+                    scriptEntry->RuntimeWarnedAccessMaskMismatch = false;
+                }
+                else if (ManagedScriptEntry* scriptEntry = scriptComponent.TryGetManagedEntry())
+                {
+                    scriptEntry->RuntimeInstanceId = 0;
+                    scriptEntry->RuntimeInitialized = false;
+                    scriptEntry->RuntimeUpdateCount = 0;
+                    scriptEntry->RuntimeWarnedMissingHost = false;
+                    scriptEntry->RuntimeWarnedMissingClass = false;
+                }
             }
         }
 
@@ -469,16 +479,30 @@ namespace Limitless
                     if (sourceScriptComponent.OwnerEntity != sourceEntity)
                         continue;
 
-                    NativeScriptEntry destinationScriptEntry{};
-                    destinationScriptEntry.ScriptClassName = sourceScriptComponent.Script.ScriptClassName;
-                    destinationScriptEntry.ScriptAssetRelativePath = sourceScriptComponent.Script.ScriptAssetRelativePath;
-                    destinationScriptEntry.Enabled = sourceScriptComponent.Script.Enabled;
-                    destinationScriptEntry.ExecutionPolicy = sourceScriptComponent.Script.ExecutionPolicy;
-                    destinationScriptEntry.DeclaredReadAccessMask = sourceScriptComponent.Script.DeclaredReadAccessMask;
-                    destinationScriptEntry.DeclaredWriteAccessMask = sourceScriptComponent.Script.DeclaredWriteAccessMask;
-                    destinationScriptEntry.ExposedProperties = sourceScriptComponent.Script.ExposedProperties;
-                    destinationScriptEntry.RuntimeExposedPropertiesRevision = 1;
-                    const entt::entity destinationScriptEntity = destinationScene.AttachScriptComponent(destinationEntity, std::move(destinationScriptEntry));
+                    entt::entity destinationScriptEntity = entt::null;
+                    if (const NativeScriptEntry* sourceScriptEntry = sourceScriptComponent.TryGetNativeEntry())
+                    {
+                        NativeScriptEntry destinationScriptEntry{};
+                        destinationScriptEntry.ScriptClassName = sourceScriptEntry->ScriptClassName;
+                        destinationScriptEntry.ScriptAssetRelativePath = sourceScriptEntry->ScriptAssetRelativePath;
+                        destinationScriptEntry.Enabled = sourceScriptEntry->Enabled;
+                        destinationScriptEntry.ExecutionPolicy = sourceScriptEntry->ExecutionPolicy;
+                        destinationScriptEntry.DeclaredReadAccessMask = sourceScriptEntry->DeclaredReadAccessMask;
+                        destinationScriptEntry.DeclaredWriteAccessMask = sourceScriptEntry->DeclaredWriteAccessMask;
+                        destinationScriptEntry.ExposedProperties = sourceScriptEntry->ExposedProperties;
+                        destinationScriptEntry.RuntimeExposedPropertiesRevision = 1;
+                        destinationScriptEntity = destinationScene.AttachScriptComponent(destinationEntity, std::move(destinationScriptEntry));
+                    }
+                    else if (const ManagedScriptEntry* sourceScriptEntry = sourceScriptComponent.TryGetManagedEntry())
+                    {
+                        ManagedScriptEntry destinationScriptEntry{};
+                        destinationScriptEntry.ScriptClassName = sourceScriptEntry->ScriptClassName;
+                        destinationScriptEntry.ScriptAssetRelativePath = sourceScriptEntry->ScriptAssetRelativePath;
+                        destinationScriptEntry.Enabled = sourceScriptEntry->Enabled;
+                        destinationScriptEntry.ExposedProperties = sourceScriptEntry->ExposedProperties;
+                        destinationScriptEntry.RuntimeExposedPropertiesRevision = 1;
+                        destinationScriptEntity = destinationScene.AttachManagedScriptComponent(destinationEntity, std::move(destinationScriptEntry));
+                    }
                     if (auto* attachedScriptComponent = destinationRegistry.try_get<ScriptComponent>(destinationScriptEntity))
                         attachedScriptComponent->ComponentOrder = sourceScriptComponent.ComponentOrder;
                 }

@@ -25,12 +25,18 @@ project "Limitless"
     -- Force-include PCH only for engine translation units.
     filter "files:Source/**.cpp"
         forceincludes { "PrecompiledHeader.h" }
+    filter "files:Vendor/Coral/Coral.Native/Source/**.cpp"
+        forceincludes { "CoralPCH.hpp" }
     filter {}
 
     files
     {
         "Source/**.h",
         "Source/**.cpp",
+        "Vendor/Coral/Coral.Native/Include/Coral/**.hpp",
+        "Vendor/Coral/Coral.Native/Source/**.hpp",
+        "Vendor/Coral/Coral.Native/Source/**.cpp",
+        "Vendor/Coral/NetCore/*.h",
         "Vendor/stb/stb_image/stb_image.cpp",
         "Vendor/glad/glad/glad.c",
         "Vendor/imgui/imgui.cpp",
@@ -64,6 +70,9 @@ project "Limitless"
     {
         "Source",
         "Vendor/",
+        "Vendor/Coral/Coral.Native/Include",
+        "Vendor/Coral/Coral.Native/Source",
+        "Vendor/Coral/NetCore",
         "Vendor/Zstd/include",
         "Vendor/glad",
         "Vendor/spdlog",

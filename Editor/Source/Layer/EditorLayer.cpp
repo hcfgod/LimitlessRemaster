@@ -1949,19 +1949,21 @@ namespace Limitless
                     for (entt::entity scriptEntity : scriptView)
                     {
                         auto& scriptComponent = scriptView.get<ScriptComponent>(scriptEntity);
-                        auto& scriptEntry = scriptComponent.Script;
-                        const bool matchedByStoredPath = (scriptEntry.ScriptAssetRelativePath == oldScriptRelativePath);
+                        NativeScriptEntry* scriptEntry = scriptComponent.TryGetNativeEntry();
+                        if (!scriptEntry)
+                            continue;
+                        const bool matchedByStoredPath = (scriptEntry->ScriptAssetRelativePath == oldScriptRelativePath);
                         const bool matchedByLegacyClassOnly =
-                            scriptEntry.ScriptAssetRelativePath.empty() &&
+                            scriptEntry->ScriptAssetRelativePath.empty() &&
                             !oldScriptClassName.empty() &&
-                            (scriptEntry.ScriptClassName == oldScriptClassName);
+                            (scriptEntry->ScriptClassName == oldScriptClassName);
                         if (matchedByStoredPath || matchedByLegacyClassOnly)
                         {
-                            scriptEntry.ScriptAssetRelativePath = newScriptRelativePath;
+                            scriptEntry->ScriptAssetRelativePath = newScriptRelativePath;
                             if (!newScriptClassName.empty())
-                                scriptEntry.ScriptClassName = newScriptClassName;
-                            scriptEntry.RuntimeInitialized = false;
-                            scriptEntry.RuntimeInstance.reset();
+                                scriptEntry->ScriptClassName = newScriptClassName;
+                            scriptEntry->RuntimeInitialized = false;
+                            scriptEntry->RuntimeInstance.reset();
                             updatedAnyNativeScriptPath = true;
                         }
                     }

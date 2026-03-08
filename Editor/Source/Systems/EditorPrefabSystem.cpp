@@ -275,24 +275,41 @@ namespace Limitless::EditorPrefabSystem
                     if (!sourceScriptComponent || sourceScriptComponent->OwnerEntity != sourceEntity)
                         continue;
 
-                    NativeScriptEntry destinationScriptEntry{};
-                    destinationScriptEntry.ScriptClassName = sourceScriptComponent->Script.ScriptClassName;
-                    destinationScriptEntry.ScriptAssetRelativePath = sourceScriptComponent->Script.ScriptAssetRelativePath;
-                    destinationScriptEntry.Enabled = sourceScriptComponent->Script.Enabled;
-                    destinationScriptEntry.ExecutionPolicy = sourceScriptComponent->Script.ExecutionPolicy;
-                    destinationScriptEntry.DeclaredReadAccessMask = sourceScriptComponent->Script.DeclaredReadAccessMask;
-                    destinationScriptEntry.DeclaredWriteAccessMask = sourceScriptComponent->Script.DeclaredWriteAccessMask;
-                    destinationScriptEntry.ExposedProperties = sourceScriptComponent->Script.ExposedProperties;
-                    destinationScriptEntry.RuntimeExposedPropertiesRevision = 1;
-                    destinationScriptEntry.RuntimeInitialized = false;
-                    destinationScriptEntry.RuntimeInstance.reset();
-                    destinationScriptEntry.RuntimeUpdateCount = 0;
-                    destinationScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
-                    destinationScriptEntry.RuntimeWarnedMissingCompiledScript = false;
-                    destinationScriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
-                    destinationScriptEntry.RuntimeWarnedAccessMaskMismatch = false;
+                    entt::entity destinationScriptEntity = entt::null;
+                    if (const NativeScriptEntry* sourceScriptEntry = sourceScriptComponent->TryGetNativeEntry())
+                    {
+                        NativeScriptEntry destinationScriptEntry{};
+                        destinationScriptEntry.ScriptClassName = sourceScriptEntry->ScriptClassName;
+                        destinationScriptEntry.ScriptAssetRelativePath = sourceScriptEntry->ScriptAssetRelativePath;
+                        destinationScriptEntry.Enabled = sourceScriptEntry->Enabled;
+                        destinationScriptEntry.ExecutionPolicy = sourceScriptEntry->ExecutionPolicy;
+                        destinationScriptEntry.DeclaredReadAccessMask = sourceScriptEntry->DeclaredReadAccessMask;
+                        destinationScriptEntry.DeclaredWriteAccessMask = sourceScriptEntry->DeclaredWriteAccessMask;
+                        destinationScriptEntry.ExposedProperties = sourceScriptEntry->ExposedProperties;
+                        destinationScriptEntry.RuntimeExposedPropertiesRevision = 1;
+                        destinationScriptEntry.RuntimeInitialized = false;
+                        destinationScriptEntry.RuntimeInstance.reset();
+                        destinationScriptEntry.RuntimeUpdateCount = 0;
+                        destinationScriptEntry.RuntimeWarnedOnUpdateTransformMutation = false;
+                        destinationScriptEntry.RuntimeWarnedMissingCompiledScript = false;
+                        destinationScriptEntry.RuntimeWarnedMissingAccessDeclaration = false;
+                        destinationScriptEntry.RuntimeWarnedAccessMaskMismatch = false;
+                        destinationScriptEntity = destinationScene.AttachScriptComponent(destinationEntity, std::move(destinationScriptEntry));
+                    }
+                    else if (const ManagedScriptEntry* sourceScriptEntry = sourceScriptComponent->TryGetManagedEntry())
+                    {
+                        ManagedScriptEntry destinationScriptEntry{};
+                        destinationScriptEntry.ScriptClassName = sourceScriptEntry->ScriptClassName;
+                        destinationScriptEntry.ScriptAssetRelativePath = sourceScriptEntry->ScriptAssetRelativePath;
+                        destinationScriptEntry.Enabled = sourceScriptEntry->Enabled;
+                        destinationScriptEntry.ExposedProperties = sourceScriptEntry->ExposedProperties;
+                        destinationScriptEntry.RuntimeExposedPropertiesRevision = 1;
+                        destinationScriptEntry.RuntimeInitialized = false;
+                        destinationScriptEntry.RuntimeUpdateCount = 0;
+                        destinationScriptEntry.RuntimeWarnedMissingHost = false;
+                        destinationScriptEntity = destinationScene.AttachManagedScriptComponent(destinationEntity, std::move(destinationScriptEntry));
+                    }
 
-                    const entt::entity destinationScriptEntity = destinationScene.AttachScriptComponent(destinationEntity, std::move(destinationScriptEntry));
                     if (auto* attachedScriptComponent = destinationScene.GetScriptComponent(destinationScriptEntity))
                         attachedScriptComponent->ComponentOrder = sourceScriptComponent->ComponentOrder;
                 }

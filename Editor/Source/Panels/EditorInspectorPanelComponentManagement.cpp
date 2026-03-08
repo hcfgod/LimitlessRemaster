@@ -4,6 +4,7 @@
 #include "EditorInspectorPanelNativeScriptEditor.h"
 #include "Undo/EditorUndoService.h"
 #include "Scene/Scene.h"
+#include "Scripting/ManagedScriptHost.h"
 #include "imgui/imgui.h"
 
 #include <algorithm>
@@ -120,6 +121,7 @@ namespace Limitless::EditorInspectorPanel
         {
             const std::vector<ProjectNativeScriptInfo> availableScripts = GetAvailableProjectScriptsForInspector();
             const ProjectScriptFolderNode scriptFolderTree = BuildProjectScriptFolderTree(availableScripts);
+            const auto& managedSnapshot = ManagedScriptHost::GetSnapshot();
 
             DrawAddComponentPopupSectionHeader("Scripts");
 
@@ -172,6 +174,44 @@ namespace Limitless::EditorInspectorPanel
                 else if (scene)
                 {
                     (void)scene->AttachScriptComponent(selectedEntity);
+                }
+            }
+
+            if (!managedSnapshot.Classes.empty())
+            {
+                ImGui::Separator();
+                for (const auto& discoveredClass : managedSnapshot.Classes)
+                {
+                    if (!ImGui::MenuItem(discoveredClass.FullName.c_str()))
+                        continue;
+
+                    ManagedScriptEntry scriptEntry{};
+                    scriptEntry.ScriptClassName = discoveredClass.FullName;
+                    scriptEntry.ScriptAssetRelativePath = discoveredClass.AssemblyPath.filename().generic_string();
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation("Attach Managed Script Component", [&](Scene& mutableScene) {
+                            return mutableScene.AttachManagedScriptComponent(selectedEntity, std::move(scriptEntry)) != entt::null;
+                        });
+                    }
+                    else if (scene)
+                    {
+                        (void)scene->AttachManagedScriptComponent(selectedEntity, std::move(scriptEntry));
+                    }
+                }
+
+                if (ImGui::MenuItem("Empty Managed Script Component"))
+                {
+                    if (undoService)
+                    {
+                        (void)undoService->ExecuteSceneMutation("Add Managed Script Component", [&](Scene& mutableScene) {
+                            return mutableScene.AttachManagedScriptComponent(selectedEntity) != entt::null;
+                        });
+                    }
+                    else if (scene)
+                    {
+                        (void)scene->AttachManagedScriptComponent(selectedEntity);
+                    }
                 }
             }
         }

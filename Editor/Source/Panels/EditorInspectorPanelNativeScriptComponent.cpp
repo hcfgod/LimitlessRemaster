@@ -8,6 +8,7 @@
 #include "Project/ProjectManager.h"
 #include "Scene/Scene.h"
 #include "Scene/SceneSystemScheduler.h"
+#include "Scripting/ManagedScriptHost.h"
 #include "Scripting/NativeScriptRegistry.h"
 #include "imgui/imgui.h"
 
@@ -338,6 +339,389 @@ namespace Limitless::EditorInspectorPanel
 
             return scene->AttachScriptComponent(ownerEntity, std::move(scriptEntry)) != entt::null;
         }
+
+        const ManagedScriptHost::DiscoveredScriptClass* FindManagedDiscoveredClassForInspector(const std::string& className)
+        {
+            if (className.empty())
+                return nullptr;
+
+            const auto& managedSnapshot = ManagedScriptHost::GetSnapshot();
+            const auto iterator = std::find_if(managedSnapshot.Classes.begin(),
+                                               managedSnapshot.Classes.end(),
+                                               [&](const ManagedScriptHost::DiscoveredScriptClass& discoveredClass) {
+                                                   return discoveredClass.FullName == className;
+                                               });
+            if (iterator == managedSnapshot.Classes.end())
+                return nullptr;
+
+            return &(*iterator);
+        }
+
+        bool SynchronizeManagedExposedPropertiesForInspector(ManagedScriptEntry& managedScript,
+                                                             std::vector<std::string>& outFieldOrder,
+                                                             std::string& outError)
+        {
+            outFieldOrder.clear();
+            outError.clear();
+
+            if (managedScript.ScriptClassName.empty())
+                return true;
+
+            const ManagedScriptHost::DiscoveredScriptClass* discoveredClass = FindManagedDiscoveredClassForInspector(managedScript.ScriptClassName);
+            if (discoveredClass == nullptr)
+            {
+                outError = "Managed class '" + managedScript.ScriptClassName + "' is not discovered in the active managed payload.";
+                return false;
+            }
+
+            outFieldOrder.reserve(discoveredClass->ReflectedFields.size());
+            for (const auto& field : discoveredClass->ReflectedFields)
+            {
+                outFieldOrder.push_back(field.Name);
+
+                const auto found = managedScript.ExposedProperties.find(field.Name);
+                if (found == managedScript.ExposedProperties.end())
+                {
+                    managedScript.ExposedProperties.emplace(field.Name, field.DefaultValue);
+                    continue;
+                }
+
+                if (found->second.index() == field.DefaultValue.index())
+                    continue;
+
+                if (std::holds_alternative<ScriptEntityReference>(field.DefaultValue))
+                {
+                    if (const auto* legacyPrefab = std::get_if<Prefab>(&found->second))
+                    {
+                        ScriptEntityReference migratedReference{};
+                        migratedReference.PrefabAssetKey = legacyPrefab->AssetKey;
+                        found->second = std::move(migratedReference);
+                        continue;
+                    }
+                }
+
+                found->second = field.DefaultValue;
+            }
+
+            return true;
+        }
+
+        bool ScriptPropertyValuesEqual(const ScriptPropertyValue& left, const ScriptPropertyValue& right)
+        {
+            if (left.index() != right.index())
+                return false;
+
+            if (const auto* floatValue = std::get_if<float>(&left))
+                return *floatValue == std::get<float>(right);
+            if (const auto* integerValue = std::get_if<int32_t>(&left))
+                return *integerValue == std::get<int32_t>(right);
+            if (const auto* booleanValue = std::get_if<bool>(&left))
+                return *booleanValue == std::get<bool>(right);
+            if (const auto* vectorValue = std::get_if<glm::vec3>(&left))
+            {
+                const glm::vec3& rightValue = std::get<glm::vec3>(right);
+                return vectorValue->x == rightValue.x && vectorValue->y == rightValue.y && vectorValue->z == rightValue.z;
+            }
+            if (const auto* stringValue = std::get_if<std::string>(&left))
+                return *stringValue == std::get<std::string>(right);
+            if (const auto* entityValue = std::get_if<ScriptEntityReference>(&left))
+            {
+                const auto& rightValue = std::get<ScriptEntityReference>(right);
+                return entityValue->Tag == rightValue.Tag && entityValue->PrefabAssetKey == rightValue.PrefabAssetKey;
+            }
+            if (const auto* prefabValue = std::get_if<Prefab>(&left))
+                return prefabValue->AssetKey == std::get<Prefab>(right).AssetKey;
+
+            return false;
+        }
+
+        void IncrementScriptPropertyRevision(ScriptComponent& scriptComponent)
+        {
+            if (uint64_t* revision = scriptComponent.TryGetRuntimeExposedPropertiesRevision())
+                ++(*revision);
+        }
+
+        bool UpdateScriptPropertyValue(ScriptComponent& scriptComponent,
+                                       const std::string& propertyName,
+                                       const ScriptPropertyValue& newValue)
+        {
+            auto* exposedProperties = scriptComponent.TryGetExposedProperties();
+            if (exposedProperties == nullptr)
+                return false;
+
+            const auto propertyIterator = exposedProperties->find(propertyName);
+            if (propertyIterator == exposedProperties->end())
+            {
+                exposedProperties->emplace(propertyName, newValue);
+                IncrementScriptPropertyRevision(scriptComponent);
+                return true;
+            }
+
+            if (ScriptPropertyValuesEqual(propertyIterator->second, newValue))
+                return true;
+
+            propertyIterator->second = newValue;
+            IncrementScriptPropertyRevision(scriptComponent);
+            return true;
+        }
+
+        void HandleInteractiveScriptPropertyUndo(EditorUndoService* undoService, const std::string& propertyEditLabel)
+        {
+            if (!undoService)
+                return;
+
+            if (ImGui::IsItemActivated())
+                undoService->BeginInteractiveSceneMutation();
+            if (ImGui::IsItemDeactivatedAfterEdit())
+                (void)undoService->CommitInteractiveSceneMutation(propertyEditLabel);
+        }
+
+        bool MutateScriptComponent(Scene* scene,
+                                   entt::entity scriptComponentEntity,
+                                   entt::entity selectedEntity,
+                                   EditorUndoService* undoService,
+                                   const std::string& mutationLabel,
+                                   const std::function<bool(ScriptComponent&)>& mutation)
+        {
+            if (undoService)
+            {
+                return undoService->ExecuteSceneMutation(mutationLabel, [&](Scene& mutableScene) {
+                    auto* mutableScriptComponent = mutableScene.GetScriptComponent(scriptComponentEntity);
+                    if (!mutableScriptComponent || mutableScriptComponent->OwnerEntity != selectedEntity)
+                        return false;
+                    return mutation(*mutableScriptComponent);
+                });
+            }
+
+            auto* mutableScriptComponent = scene ? scene->GetScriptComponent(scriptComponentEntity) : nullptr;
+            if (!mutableScriptComponent || mutableScriptComponent->OwnerEntity != selectedEntity)
+                return false;
+            return mutation(*mutableScriptComponent);
+        }
+
+        void DrawExposedScriptPropertyEditors(Scene* scene,
+                                              entt::entity selectedEntity,
+                                              entt::entity scriptComponentEntity,
+                                              ScriptComponent& scriptComponent,
+                                              const std::vector<std::string>& declaredFieldNames,
+                                              EditorUndoService* undoService)
+        {
+            auto* exposedProperties = scriptComponent.TryGetExposedProperties();
+            if (exposedProperties == nullptr)
+                return;
+
+            for (const std::string& propertyName : declaredFieldNames)
+            {
+                auto propertyIterator = exposedProperties->find(propertyName);
+                if (propertyIterator == exposedProperties->end())
+                    continue;
+
+                auto& propertyValue = propertyIterator->second;
+                const std::string propertyEditLabel = "Edit Script Property: " + propertyName;
+                ImGui::PushID(propertyName.c_str());
+                ImGui::TextUnformatted(propertyName.c_str());
+                if (auto* floatValue = std::get_if<float>(&propertyValue))
+                {
+                    if (ImGui::DragFloat("##ScriptPropertyValue", floatValue, 0.1f))
+                        IncrementScriptPropertyRevision(scriptComponent);
+                    HandleInteractiveScriptPropertyUndo(undoService, propertyEditLabel);
+                }
+                else if (auto* integerValue = std::get_if<int32_t>(&propertyValue))
+                {
+                    if (ImGui::DragInt("##ScriptPropertyValue", integerValue, 1.0f))
+                        IncrementScriptPropertyRevision(scriptComponent);
+                    HandleInteractiveScriptPropertyUndo(undoService, propertyEditLabel);
+                }
+                else if (auto* booleanValue = std::get_if<bool>(&propertyValue))
+                {
+                    if (ImGui::Checkbox("##ScriptPropertyValue", booleanValue))
+                        IncrementScriptPropertyRevision(scriptComponent);
+                    HandleInteractiveScriptPropertyUndo(undoService, propertyEditLabel);
+                }
+                else if (auto* vectorValue = std::get_if<glm::vec3>(&propertyValue))
+                {
+                    if (ImGui::DragFloat3("##ScriptPropertyValue", &vectorValue->x, 0.1f))
+                        IncrementScriptPropertyRevision(scriptComponent);
+                    HandleInteractiveScriptPropertyUndo(undoService, propertyEditLabel);
+                }
+                else if (auto* stringValue = std::get_if<std::string>(&propertyValue))
+                {
+                    std::array<char, 256> textBuffer{};
+                    std::snprintf(textBuffer.data(), textBuffer.size(), "%s", stringValue->c_str());
+                    if (ImGui::InputText("##ScriptPropertyValue", textBuffer.data(), textBuffer.size()))
+                    {
+                        *stringValue = textBuffer.data();
+                        IncrementScriptPropertyRevision(scriptComponent);
+                    }
+                    HandleInteractiveScriptPropertyUndo(undoService, propertyEditLabel);
+                }
+                else if (auto* entityValue = std::get_if<ScriptEntityReference>(&propertyValue))
+                {
+                    auto assignEntityReference = [&](const std::string& tagValue, const std::string& prefabAssetKeyValue) {
+                        ScriptEntityReference referenceValue{};
+                        referenceValue.Tag = tagValue;
+                        referenceValue.PrefabAssetKey = prefabAssetKeyValue;
+                        return MutateScriptComponent(scene,
+                                                     scriptComponentEntity,
+                                                     selectedEntity,
+                                                     undoService,
+                                                     propertyEditLabel,
+                                                     [&](ScriptComponent& mutableScriptComponent) {
+                                                         return UpdateScriptPropertyValue(mutableScriptComponent, propertyName, referenceValue);
+                                                     });
+                    };
+
+                    const std::string previewLabel = BuildEntityReferencePreviewLabel(scene, *entityValue);
+                    if (ImGui::BeginCombo("##ScriptPropertyValue", previewLabel.c_str()))
+                    {
+                        const bool noneSelected = entityValue->Tag.empty() && entityValue->PrefabAssetKey.empty();
+                        if (ImGui::Selectable("None (Entity/Prefab)", noneSelected))
+                            (void)assignEntityReference({}, {});
+                        if (noneSelected)
+                            ImGui::SetItemDefaultFocus();
+
+                        ImGui::Separator();
+                        ImGui::TextDisabled("Scene Entities");
+                        if (scene)
+                        {
+                            const auto& sceneRegistry = scene->GetRegistry();
+                            auto entityView = sceneRegistry.view<TagComponent>();
+                            for (entt::entity candidateEntity : entityView)
+                            {
+                                const auto& candidateTag = entityView.get<TagComponent>(candidateEntity).Tag;
+                                const bool isSelected = entityValue->PrefabAssetKey.empty() && candidateTag == entityValue->Tag;
+                                std::string optionLabel = candidateTag.empty() ? "Entity" : candidateTag;
+                                optionLabel += "##EntityReferenceOption_" + std::to_string(static_cast<uint32_t>(candidateEntity));
+                                if (ImGui::Selectable(optionLabel.c_str(), isSelected))
+                                    (void)assignEntityReference(candidateTag, {});
+                                if (isSelected)
+                                    ImGui::SetItemDefaultFocus();
+                            }
+                        }
+
+                        ImGui::Separator();
+                        ImGui::TextDisabled("Prefab Assets");
+                        const std::vector<std::string> prefabKeys = BuildPrefabReferencePickerKeys();
+                        for (const std::string& prefabKey : prefabKeys)
+                        {
+                            const bool isSelected = prefabKey == entityValue->PrefabAssetKey;
+                            const std::string displayName = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(prefabKey);
+                            if (ImGui::Selectable((displayName + "##EntityReferencePrefabOption_" + prefabKey).c_str(), isSelected))
+                                (void)assignEntityReference({}, prefabKey);
+                            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                                ImGui::SetTooltip("%s", prefabKey.c_str());
+                            if (isSelected)
+                                ImGui::SetItemDefaultFocus();
+                        }
+                        ImGui::EndCombo();
+                    }
+
+                    if (ImGui::BeginDragDropTarget())
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSceneEntityPayload))
+                        {
+                            if (scene && payload->Data && payload->DataSize == sizeof(entt::entity))
+                            {
+                                const entt::entity droppedEntity = *static_cast<const entt::entity*>(payload->Data);
+                                if (scene->IsValid(droppedEntity))
+                                {
+                                    if (const auto* tagComponent = scene->GetRegistry().try_get<TagComponent>(droppedEntity))
+                                        (void)assignEntityReference(tagComponent->Tag, {});
+                                }
+                            }
+                        }
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_PREFAB"))
+                        {
+                            if (payload->Data && payload->DataSize > 0)
+                            {
+                                const char* prefabKey = static_cast<const char*>(payload->Data);
+                                if (prefabKey && prefabKey[0])
+                                    (void)assignEntityReference({}, prefabKey);
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+
+                    if (!entityValue->Tag.empty() || !entityValue->PrefabAssetKey.empty())
+                    {
+                        ImGui::SameLine();
+                        if (ImGui::Button("X##ClearEntityReference"))
+                            (void)assignEntityReference({}, {});
+                    }
+
+                    const int matchingTagCount = CountEntitiesByTag(scene, entityValue->Tag);
+                    if (entityValue->PrefabAssetKey.empty() && !entityValue->Tag.empty() && matchingTagCount > 1)
+                    {
+                        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
+                                           "Tag '%s' matches %d entities. Entity references by tag require unique tags.",
+                                           entityValue->Tag.c_str(),
+                                           matchingTagCount);
+                    }
+                }
+                else if (auto* prefabValue = std::get_if<ScriptPrefabReference>(&propertyValue))
+                {
+                    ImGui::TextDisabled("Legacy prefab field. Prefer Limitless::Entity for new script references.");
+                    auto assignPrefabKey = [&](const std::string& prefabKey) {
+                        return MutateScriptComponent(scene,
+                                                     scriptComponentEntity,
+                                                     selectedEntity,
+                                                     undoService,
+                                                     propertyEditLabel,
+                                                     [&](ScriptComponent& mutableScriptComponent) {
+                                                         return UpdateScriptPropertyValue(mutableScriptComponent,
+                                                                                          propertyName,
+                                                                                          ScriptPrefabReference{ prefabKey });
+                                                     });
+                    };
+
+                    const std::string previewLabel = BuildPrefabReferencePreviewLabel(*prefabValue);
+                    if (ImGui::BeginCombo("##ScriptPropertyValue", previewLabel.c_str()))
+                    {
+                        const bool noneSelected = prefabValue->AssetKey.empty();
+                        if (ImGui::Selectable("None (Prefab)", noneSelected))
+                            (void)assignPrefabKey({});
+                        if (noneSelected)
+                            ImGui::SetItemDefaultFocus();
+
+                        const std::vector<std::string> prefabKeys = BuildPrefabReferencePickerKeys();
+                        for (const std::string& prefabKey : prefabKeys)
+                        {
+                            const bool isSelected = prefabKey == prefabValue->AssetKey;
+                            const std::string displayName = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(prefabKey);
+                            if (ImGui::Selectable((displayName + "##PrefabReferenceOption_" + prefabKey).c_str(), isSelected))
+                                (void)assignPrefabKey(prefabKey);
+                            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+                                ImGui::SetTooltip("%s", prefabKey.c_str());
+                            if (isSelected)
+                                ImGui::SetItemDefaultFocus();
+                        }
+                        ImGui::EndCombo();
+                    }
+
+                    if (ImGui::BeginDragDropTarget())
+                    {
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_PREFAB"))
+                        {
+                            if (payload->Data && payload->DataSize > 0)
+                            {
+                                const char* prefabKey = static_cast<const char*>(payload->Data);
+                                if (prefabKey && prefabKey[0])
+                                    (void)assignPrefabKey(prefabKey);
+                            }
+                        }
+                        ImGui::EndDragDropTarget();
+                    }
+
+                    if (!prefabValue->AssetKey.empty())
+                    {
+                        ImGui::SameLine();
+                        if (ImGui::Button("X##ClearPrefabReference"))
+                            (void)assignPrefabKey({});
+                    }
+                }
+                ImGui::PopID();
+            }
+        }
     }
 
     void DrawScriptComponentSections(Scene* scene,
@@ -408,6 +792,145 @@ namespace Limitless::EditorInspectorPanel
                 auto* scriptComponent = scene->GetScriptComponent(scriptComponentEntity);
                 if (!scriptComponent || scriptComponent->OwnerEntity != selectedEntity)
                     continue;
+
+                if (ManagedScriptEntry* managedScriptEntry = scriptComponent->TryGetManagedEntry())
+                {
+                    ImGui::PushID(static_cast<int>(static_cast<uint32_t>(scriptComponentEntity)));
+                    std::string scriptLabel = managedScriptEntry->ScriptClassName.empty()
+                        ? ("Managed Script Component " + std::to_string(scriptComponent->ComponentOrder + 1))
+                        : managedScriptEntry->ScriptClassName;
+                    const bool scriptOpen = BeginInspectorScriptSectionHeader(scriptLabel.c_str(), "ScriptComponentOptions", "...##ScriptComponentOptionsButton");
+                    if (ImGui::BeginPopup("ScriptComponentOptions"))
+                    {
+                        if (ImGui::MenuItem("Remove Component"))
+                            scriptComponentToRemove = scriptComponentEntity;
+                        ImGui::EndPopup();
+                    }
+
+                    if (scriptOpen)
+                    {
+                        const auto mutateManagedScriptEntry = [&](const char* mutationLabel, auto&& mutation) {
+                            if (undoService)
+                            {
+                                return undoService->ExecuteSceneMutation(mutationLabel, [&](Scene& mutableScene) {
+                                    auto* mutableScriptComponent = mutableScene.GetScriptComponent(scriptComponentEntity);
+                                    if (!mutableScriptComponent || mutableScriptComponent->OwnerEntity != selectedEntity)
+                                        return false;
+                                    ManagedScriptEntry* mutableManagedEntry = mutableScriptComponent->TryGetManagedEntry();
+                                    if (!mutableManagedEntry)
+                                        return false;
+                                    mutation(*mutableManagedEntry);
+                                    return true;
+                                });
+                            }
+
+                            auto* mutableScriptComponent = scene->GetScriptComponent(scriptComponentEntity);
+                            if (!mutableScriptComponent || mutableScriptComponent->OwnerEntity != selectedEntity)
+                                return false;
+                            ManagedScriptEntry* mutableManagedEntry = mutableScriptComponent->TryGetManagedEntry();
+                            if (!mutableManagedEntry)
+                                return false;
+                            mutation(*mutableManagedEntry);
+                            return true;
+                        };
+
+                        ImGui::TextUnformatted("Enabled");
+                        ImGui::Checkbox("##ManagedScriptEnabled", &managedScriptEntry->Enabled);
+
+                        std::string previewLabel = managedScriptEntry->ScriptClassName.empty()
+                            ? std::string("None")
+                            : (!managedScriptEntry->ScriptAssetRelativePath.empty() ? managedScriptEntry->ScriptAssetRelativePath : managedScriptEntry->ScriptClassName);
+                        ImGui::TextUnformatted("Class");
+                        if (ImGui::BeginCombo("##ManagedScriptClass", previewLabel.c_str()))
+                        {
+                            const bool noneSelected = managedScriptEntry->ScriptClassName.empty();
+                            if (ImGui::Selectable("None", noneSelected))
+                            {
+                                (void)mutateManagedScriptEntry("Change Managed Script Class", [&](ManagedScriptEntry& mutableEntry) {
+                                    mutableEntry.ScriptClassName.clear();
+                                    mutableEntry.ScriptAssetRelativePath.clear();
+                                    mutableEntry.ExposedProperties.clear();
+                                    mutableEntry.RuntimeExposedPropertiesRevision = 1;
+                                    mutableEntry.RuntimeInstanceId = 0;
+                                    mutableEntry.RuntimeInitialized = false;
+                                    mutableEntry.RuntimeUpdateCount = 0;
+                                    mutableEntry.RuntimeWarnedMissingHost = false;
+                                    mutableEntry.RuntimeWarnedMissingClass = false;
+                                });
+                            }
+                            if (noneSelected)
+                                ImGui::SetItemDefaultFocus();
+
+                            const auto& managedSnapshot = ManagedScriptHost::GetSnapshot();
+                            for (const auto& discoveredClass : managedSnapshot.Classes)
+                            {
+                                const bool classSelected = managedScriptEntry->ScriptClassName == discoveredClass.FullName;
+                                if (ImGui::Selectable(discoveredClass.FullName.c_str(), classSelected))
+                                {
+                                    (void)mutateManagedScriptEntry("Change Managed Script Class", [&](ManagedScriptEntry& mutableEntry) {
+                                        mutableEntry.ScriptClassName = discoveredClass.FullName;
+                                        mutableEntry.ScriptAssetRelativePath = discoveredClass.AssemblyPath.filename().generic_string();
+                                        mutableEntry.ExposedProperties.clear();
+                                        mutableEntry.RuntimeExposedPropertiesRevision = 1;
+                                        mutableEntry.RuntimeInstanceId = 0;
+                                        mutableEntry.RuntimeInitialized = false;
+                                        mutableEntry.RuntimeUpdateCount = 0;
+                                        mutableEntry.RuntimeWarnedMissingHost = false;
+                                        mutableEntry.RuntimeWarnedMissingClass = false;
+                                    });
+                                }
+                                if (classSelected)
+                                    ImGui::SetItemDefaultFocus();
+                            }
+                            ImGui::EndCombo();
+                        }
+
+                        if (!managedScriptEntry->ScriptAssetRelativePath.empty())
+                            ImGui::TextDisabled("Assembly: %s", managedScriptEntry->ScriptAssetRelativePath.c_str());
+                        if (managedScriptEntry->RuntimeWarnedMissingHost)
+                            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "Managed host is unavailable.");
+                        if (managedScriptEntry->RuntimeWarnedMissingClass)
+                            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "Selected managed class is not discovered in the current payload.");
+                        ImGui::TextDisabled("Runtime updates: %llu",
+                                            static_cast<unsigned long long>(managedScriptEntry->RuntimeUpdateCount));
+
+                        ImGui::Separator();
+                        std::vector<std::string> declaredFieldNames;
+                        std::string fieldSyncError;
+                        const bool syncedFromScript = SynchronizeManagedExposedPropertiesForInspector(*managedScriptEntry, declaredFieldNames, fieldSyncError);
+                        ImGui::TextUnformatted("Exposed Variables");
+                        if (managedScriptEntry->ScriptClassName.empty())
+                        {
+                            ImGui::TextDisabled("Assign a managed script class to view exposed variables.");
+                        }
+                        else if (!syncedFromScript)
+                        {
+                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.45f, 0.45f, 1.0f));
+                            ImGui::TextWrapped("%s", fieldSyncError.c_str());
+                            ImGui::PopStyleColor();
+                            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                            ImGui::TextWrapped("Supported managed public field types: float, int, bool, string, Limitless.Managed.Vector3, Limitless.Managed.Entity.");
+                            ImGui::PopStyleColor();
+                        }
+                        else if (declaredFieldNames.empty())
+                        {
+                            ImGui::TextDisabled("No supported public fields found on this managed script.");
+                        }
+                        else
+                        {
+                            DrawExposedScriptPropertyEditors(scene,
+                                                             selectedEntity,
+                                                             scriptComponentEntity,
+                                                             *scriptComponent,
+                                                             declaredFieldNames,
+                                                             undoService);
+                        }
+                        ImGui::TreePop();
+                    }
+
+                    ImGui::PopID();
+                    continue;
+                }
 
                 auto& scriptEntry = scriptComponent->Script;
                 ImGui::PushID(static_cast<int>(static_cast<uint32_t>(scriptComponentEntity)));
@@ -629,276 +1152,12 @@ namespace Limitless::EditorInspectorPanel
                     }
                     else
                     {
-                        for (const std::string& propertyName : declaredFieldNames)
-                        {
-                            auto propertyIterator = scriptEntry.ExposedProperties.find(propertyName);
-                            if (propertyIterator == scriptEntry.ExposedProperties.end())
-                                continue;
-
-                            auto& propertyValue = propertyIterator->second;
-                            const std::string propertyEditLabel = "Edit Script Property: " + propertyName;
-                            ImGui::PushID(propertyName.c_str());
-                            ImGui::TextUnformatted(propertyName.c_str());
-                            if (auto* floatValue = std::get_if<float>(&propertyValue))
-                            {
-                                ImGui::DragFloat("##ScriptPropertyValue", floatValue, 0.1f);
-                                if (undoService)
-                                {
-                                    if (ImGui::IsItemActivated())
-                                        undoService->BeginInteractiveSceneMutation();
-                                    if (ImGui::IsItemDeactivatedAfterEdit())
-                                        (void)undoService->CommitInteractiveSceneMutation(propertyEditLabel);
-                                }
-                            }
-                            else if (auto* integerValue = std::get_if<int32_t>(&propertyValue))
-                            {
-                                ImGui::DragInt("##ScriptPropertyValue", integerValue, 1.0f);
-                                if (undoService)
-                                {
-                                    if (ImGui::IsItemActivated())
-                                        undoService->BeginInteractiveSceneMutation();
-                                    if (ImGui::IsItemDeactivatedAfterEdit())
-                                        (void)undoService->CommitInteractiveSceneMutation(propertyEditLabel);
-                                }
-                            }
-                            else if (auto* booleanValue = std::get_if<bool>(&propertyValue))
-                            {
-                                ImGui::Checkbox("##ScriptPropertyValue", booleanValue);
-                                if (undoService)
-                                {
-                                    if (ImGui::IsItemActivated())
-                                        undoService->BeginInteractiveSceneMutation();
-                                    if (ImGui::IsItemDeactivatedAfterEdit())
-                                        (void)undoService->CommitInteractiveSceneMutation(propertyEditLabel);
-                                }
-                            }
-                            else if (auto* vectorValue = std::get_if<glm::vec3>(&propertyValue))
-                            {
-                                ImGui::DragFloat3("##ScriptPropertyValue", &vectorValue->x, 0.1f);
-                                if (undoService)
-                                {
-                                    if (ImGui::IsItemActivated())
-                                        undoService->BeginInteractiveSceneMutation();
-                                    if (ImGui::IsItemDeactivatedAfterEdit())
-                                        (void)undoService->CommitInteractiveSceneMutation(propertyEditLabel);
-                                }
-                            }
-                            else if (auto* stringValue = std::get_if<std::string>(&propertyValue))
-                            {
-                                std::array<char, 256> textBuffer{};
-                                std::snprintf(textBuffer.data(), textBuffer.size(), "%s", stringValue->c_str());
-                                if (ImGui::InputText("##ScriptPropertyValue", textBuffer.data(), textBuffer.size()))
-                                    *stringValue = textBuffer.data();
-                                if (undoService)
-                                {
-                                    if (ImGui::IsItemActivated())
-                                        undoService->BeginInteractiveSceneMutation();
-                                    if (ImGui::IsItemDeactivatedAfterEdit())
-                                        (void)undoService->CommitInteractiveSceneMutation(propertyEditLabel);
-                                }
-                            }
-                            else if (auto* entityValue = std::get_if<ScriptEntityReference>(&propertyValue))
-                            {
-                                auto assignEntityReference = [&](const std::string& tagValue, const std::string& prefabAssetKeyValue) {
-                                    if (undoService)
-                                    {
-                                        return undoService->ExecuteSceneMutation(propertyEditLabel, [&](Scene& mutableScene) {
-                                            auto* mutableScriptComponent = mutableScene.GetScriptComponent(scriptComponentEntity);
-                                            if (!mutableScriptComponent || mutableScriptComponent->OwnerEntity != selectedEntity)
-                                                return false;
-
-                                            auto& mutableEntry = mutableScriptComponent->Script;
-                                            auto propertyIt = mutableEntry.ExposedProperties.find(propertyName);
-                                            if (propertyIt == mutableEntry.ExposedProperties.end() ||
-                                                !std::holds_alternative<ScriptEntityReference>(propertyIt->second))
-                                            {
-                                                ScriptEntityReference referenceValue{};
-                                                referenceValue.Tag = tagValue;
-                                                referenceValue.PrefabAssetKey = prefabAssetKeyValue;
-                                                mutableEntry.ExposedProperties[propertyName] = std::move(referenceValue);
-                                                return true;
-                                            }
-
-                                            auto* mutableReference = std::get_if<ScriptEntityReference>(&propertyIt->second);
-                                            if (!mutableReference)
-                                                return false;
-                                            mutableReference->Tag = tagValue;
-                                            mutableReference->PrefabAssetKey = prefabAssetKeyValue;
-                                            return true;
-                                        });
-                                    }
-
-                                    entityValue->Tag = tagValue;
-                                    entityValue->PrefabAssetKey = prefabAssetKeyValue;
-                                    return true;
-                                };
-
-                                const std::string previewLabel = BuildEntityReferencePreviewLabel(scene, *entityValue);
-                                if (ImGui::BeginCombo("##ScriptPropertyValue", previewLabel.c_str()))
-                                {
-                                    const bool noneSelected = entityValue->Tag.empty() && entityValue->PrefabAssetKey.empty();
-                                    if (ImGui::Selectable("None (Entity/Prefab)", noneSelected))
-                                        (void)assignEntityReference({}, {});
-                                    if (noneSelected)
-                                        ImGui::SetItemDefaultFocus();
-
-                                    ImGui::Separator();
-                                    ImGui::TextDisabled("Scene Entities");
-                                    if (scene)
-                                    {
-                                        const auto& sceneRegistry = scene->GetRegistry();
-                                        auto entityView = sceneRegistry.view<TagComponent>();
-                                        for (entt::entity candidateEntity : entityView)
-                                        {
-                                            const auto& candidateTag = entityView.get<TagComponent>(candidateEntity).Tag;
-                                            const bool isSelected = entityValue->PrefabAssetKey.empty() && candidateTag == entityValue->Tag;
-                                            std::string optionLabel = candidateTag.empty() ? "Entity" : candidateTag;
-                                            optionLabel += "##EntityReferenceOption_" + std::to_string(static_cast<uint32_t>(candidateEntity));
-                                            if (ImGui::Selectable(optionLabel.c_str(), isSelected))
-                                                (void)assignEntityReference(candidateTag, {});
-                                            if (isSelected)
-                                                ImGui::SetItemDefaultFocus();
-                                        }
-                                    }
-
-                                    ImGui::Separator();
-                                    ImGui::TextDisabled("Prefab Assets");
-                                    const std::vector<std::string> prefabKeys = BuildPrefabReferencePickerKeys();
-                                    for (const std::string& prefabKey : prefabKeys)
-                                    {
-                                        const bool isSelected = prefabKey == entityValue->PrefabAssetKey;
-                                        const std::string displayName = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(prefabKey);
-                                        if (ImGui::Selectable((displayName + "##EntityReferencePrefabOption_" + prefabKey).c_str(), isSelected))
-                                            (void)assignEntityReference({}, prefabKey);
-                                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-                                            ImGui::SetTooltip("%s", prefabKey.c_str());
-                                        if (isSelected)
-                                            ImGui::SetItemDefaultFocus();
-                                    }
-                                    ImGui::EndCombo();
-                                }
-
-                                if (ImGui::BeginDragDropTarget())
-                                {
-                                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kSceneEntityPayload))
-                                    {
-                                        if (scene && payload->Data && payload->DataSize == sizeof(entt::entity))
-                                        {
-                                            const entt::entity droppedEntity = *static_cast<const entt::entity*>(payload->Data);
-                                            if (scene->IsValid(droppedEntity))
-                                            {
-                                                if (const auto* tagComponent = scene->GetRegistry().try_get<TagComponent>(droppedEntity))
-                                                    (void)assignEntityReference(tagComponent->Tag, {});
-                                            }
-                                        }
-                                    }
-                                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_PREFAB"))
-                                    {
-                                        if (payload->Data && payload->DataSize > 0)
-                                        {
-                                            const char* prefabKey = static_cast<const char*>(payload->Data);
-                                            if (prefabKey && prefabKey[0])
-                                                (void)assignEntityReference({}, prefabKey);
-                                        }
-                                    }
-                                    ImGui::EndDragDropTarget();
-                                }
-
-                                if (!entityValue->Tag.empty() || !entityValue->PrefabAssetKey.empty())
-                                {
-                                    ImGui::SameLine();
-                                    if (ImGui::Button("X##ClearEntityReference"))
-                                        (void)assignEntityReference({}, {});
-                                }
-
-                                const int matchingTagCount = CountEntitiesByTag(scene, entityValue->Tag);
-                                if (entityValue->PrefabAssetKey.empty() && !entityValue->Tag.empty() && matchingTagCount > 1)
-                                {
-                                    ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
-                                                       "Tag '%s' matches %d entities. Entity references by tag require unique tags.",
-                                                       entityValue->Tag.c_str(),
-                                                       matchingTagCount);
-                                }
-                            }
-                            else if (auto* prefabValue = std::get_if<ScriptPrefabReference>(&propertyValue))
-                            {
-                                ImGui::TextDisabled("Legacy prefab field. Prefer Limitless::Entity for new script references.");
-                                auto assignPrefabKey = [&](const std::string& prefabKey) {
-                                    if (undoService)
-                                    {
-                                        return undoService->ExecuteSceneMutation(propertyEditLabel, [&](Scene& mutableScene) {
-                                            auto* mutableScriptComponent = mutableScene.GetScriptComponent(scriptComponentEntity);
-                                            if (!mutableScriptComponent || mutableScriptComponent->OwnerEntity != selectedEntity)
-                                                return false;
-
-                                            auto& mutableEntry = mutableScriptComponent->Script;
-                                            auto propertyIt = mutableEntry.ExposedProperties.find(propertyName);
-                                            if (propertyIt == mutableEntry.ExposedProperties.end() ||
-                                                !std::holds_alternative<ScriptPrefabReference>(propertyIt->second))
-                                            {
-                                                mutableEntry.ExposedProperties[propertyName] = ScriptPrefabReference{ prefabKey };
-                                                return true;
-                                            }
-
-                                            auto* mutableReference = std::get_if<ScriptPrefabReference>(&propertyIt->second);
-                                            if (!mutableReference)
-                                                return false;
-                                            mutableReference->AssetKey = prefabKey;
-                                            return true;
-                                        });
-                                    }
-
-                                    prefabValue->AssetKey = prefabKey;
-                                    return true;
-                                };
-
-                                const std::string previewLabel = BuildPrefabReferencePreviewLabel(*prefabValue);
-                                if (ImGui::BeginCombo("##ScriptPropertyValue", previewLabel.c_str()))
-                                {
-                                    const bool noneSelected = prefabValue->AssetKey.empty();
-                                    if (ImGui::Selectable("None (Prefab)", noneSelected))
-                                        (void)assignPrefabKey({});
-                                    if (noneSelected)
-                                        ImGui::SetItemDefaultFocus();
-
-                                    const std::vector<std::string> prefabKeys = BuildPrefabReferencePickerKeys();
-                                    for (const std::string& prefabKey : prefabKeys)
-                                    {
-                                        const bool isSelected = prefabKey == prefabValue->AssetKey;
-                                        const std::string displayName = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(prefabKey);
-                                        if (ImGui::Selectable((displayName + "##PrefabReferenceOption_" + prefabKey).c_str(), isSelected))
-                                            (void)assignPrefabKey(prefabKey);
-                                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-                                            ImGui::SetTooltip("%s", prefabKey.c_str());
-                                        if (isSelected)
-                                            ImGui::SetItemDefaultFocus();
-                                    }
-                                    ImGui::EndCombo();
-                                }
-
-                                if (ImGui::BeginDragDropTarget())
-                                {
-                                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("ASSET_PREFAB"))
-                                    {
-                                        if (payload->Data && payload->DataSize > 0)
-                                        {
-                                            const char* prefabKey = static_cast<const char*>(payload->Data);
-                                            if (prefabKey && prefabKey[0])
-                                                (void)assignPrefabKey(prefabKey);
-                                        }
-                                    }
-                                    ImGui::EndDragDropTarget();
-                                }
-
-                                if (!prefabValue->AssetKey.empty())
-                                {
-                                    ImGui::SameLine();
-                                    if (ImGui::Button("X##ClearPrefabReference"))
-                                        (void)assignPrefabKey({});
-                                }
-                            }
-                            ImGui::PopID();
-                        }
+                        DrawExposedScriptPropertyEditors(scene,
+                                                         selectedEntity,
+                                                         scriptComponentEntity,
+                                                         *scriptComponent,
+                                                         declaredFieldNames,
+                                                         undoService);
                     }
 
                     ImGui::TreePop();

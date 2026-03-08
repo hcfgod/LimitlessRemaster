@@ -62,6 +62,7 @@ namespace Limitless::Project
         {
             std::filesystem::path RuntimeDirectory;
             std::filesystem::path ScriptCoreLibraryPath;
+            std::filesystem::path ManagedPayloadDirectory;
             std::vector<std::filesystem::path> DynamicLibrarySourceDirectories;
         };
 

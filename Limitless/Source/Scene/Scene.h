@@ -24,11 +24,12 @@
 namespace Limitless
 {
     class Physics2DWorld;
-    inline constexpr int kSceneSerializationVersion = 20;
+    inline constexpr int kSceneSerializationVersion = 21;
 
     struct DeferredStructuralMutation
     {
         uint64_t Sequence = 0;
+        std::function<void(Scene&)> Execute;
         std::function<void()> Apply;
         std::string DebugName;
     };
@@ -159,6 +160,8 @@ namespace Limitless
 
         entt::entity AttachScriptComponent(entt::entity owner);
         entt::entity AttachScriptComponent(entt::entity owner, NativeScriptEntry scriptEntry);
+        entt::entity AttachManagedScriptComponent(entt::entity owner);
+        entt::entity AttachManagedScriptComponent(entt::entity owner, ManagedScriptEntry scriptEntry);
         bool RemoveScriptComponent(entt::entity scriptComponentEntity);
         std::vector<entt::entity> GetScriptComponentEntities(entt::entity owner) const;
         ScriptComponent* GetScriptComponent(entt::entity scriptComponentEntity);

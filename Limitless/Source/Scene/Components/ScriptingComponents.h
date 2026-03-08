@@ -12,6 +12,12 @@
 
 namespace Limitless
 {
+    enum class ScriptBackend : uint8_t
+    {
+        Native = 0,
+        Managed = 1
+    };
+
     enum class ScriptExecutionPolicy : uint8_t
     {
         MainThread = 0,
@@ -86,11 +92,139 @@ namespace Limitless
         NativeScriptEntry& operator=(NativeScriptEntry&&) noexcept = default;
     };
 
+    struct ManagedScriptEntry
+    {
+        std::string ScriptClassName;
+        std::string ScriptAssetRelativePath;
+        bool Enabled = true;
+        std::unordered_map<std::string, ScriptPropertyValue> ExposedProperties;
+        uint64_t RuntimeExposedPropertiesRevision = 1;
+        uint64_t RuntimeInstanceId = 0;
+        bool RuntimeInitialized = false;
+        uint64_t RuntimeUpdateCount = 0;
+        bool RuntimeWarnedOnUpdateTransformMutation = false;
+        bool RuntimeWarnedMissingHost = false;
+        bool RuntimeWarnedMissingClass = false;
+
+        ManagedScriptEntry() = default;
+
+        ManagedScriptEntry(const ManagedScriptEntry& other)
+            : ScriptClassName(other.ScriptClassName),
+              ScriptAssetRelativePath(other.ScriptAssetRelativePath),
+              Enabled(other.Enabled),
+              ExposedProperties(other.ExposedProperties),
+              RuntimeExposedPropertiesRevision(1),
+              RuntimeInstanceId(0),
+              RuntimeInitialized(false),
+              RuntimeUpdateCount(0),
+              RuntimeWarnedOnUpdateTransformMutation(false),
+              RuntimeWarnedMissingHost(false),
+              RuntimeWarnedMissingClass(false)
+        {
+        }
+
+        ManagedScriptEntry& operator=(const ManagedScriptEntry& other)
+        {
+            if (this == &other)
+                return *this;
+            ScriptClassName = other.ScriptClassName;
+            ScriptAssetRelativePath = other.ScriptAssetRelativePath;
+            Enabled = other.Enabled;
+            ExposedProperties = other.ExposedProperties;
+            RuntimeExposedPropertiesRevision = 1;
+            RuntimeInstanceId = 0;
+            RuntimeInitialized = false;
+            RuntimeUpdateCount = 0;
+            RuntimeWarnedOnUpdateTransformMutation = false;
+            RuntimeWarnedMissingHost = false;
+            RuntimeWarnedMissingClass = false;
+            return *this;
+        }
+
+        ManagedScriptEntry(ManagedScriptEntry&&) noexcept = default;
+        ManagedScriptEntry& operator=(ManagedScriptEntry&&) noexcept = default;
+    };
+
     /// Native C++ behavior scripts attached to an entity (Unity-style list).
     struct ScriptComponent
     {
         entt::entity OwnerEntity = entt::null;
         int32_t ComponentOrder = 0;
+        ScriptBackend Backend = ScriptBackend::Native;
         NativeScriptEntry Script;
+        ManagedScriptEntry ManagedScript;
+
+        bool IsNativeBackend() const
+        {
+            return Backend == ScriptBackend::Native;
+        }
+
+        bool IsManagedBackend() const
+        {
+            return Backend == ScriptBackend::Managed;
+        }
+
+        NativeScriptEntry* TryGetNativeEntry()
+        {
+            return IsNativeBackend() ? &Script : nullptr;
+        }
+
+        const NativeScriptEntry* TryGetNativeEntry() const
+        {
+            return IsNativeBackend() ? &Script : nullptr;
+        }
+
+        ManagedScriptEntry* TryGetManagedEntry()
+        {
+            return IsManagedBackend() ? &ManagedScript : nullptr;
+        }
+
+        const ManagedScriptEntry* TryGetManagedEntry() const
+        {
+            return IsManagedBackend() ? &ManagedScript : nullptr;
+        }
+
+        std::unordered_map<std::string, ScriptPropertyValue>* TryGetExposedProperties()
+        {
+            if (IsManagedBackend())
+                return &ManagedScript.ExposedProperties;
+            return &Script.ExposedProperties;
+        }
+
+        const std::unordered_map<std::string, ScriptPropertyValue>* TryGetExposedProperties() const
+        {
+            if (IsManagedBackend())
+                return &ManagedScript.ExposedProperties;
+            return &Script.ExposedProperties;
+        }
+
+        uint64_t* TryGetRuntimeExposedPropertiesRevision()
+        {
+            if (IsManagedBackend())
+                return &ManagedScript.RuntimeExposedPropertiesRevision;
+            return &Script.RuntimeExposedPropertiesRevision;
+        }
+
+        const uint64_t* TryGetRuntimeExposedPropertiesRevision() const
+        {
+            if (IsManagedBackend())
+                return &ManagedScript.RuntimeExposedPropertiesRevision;
+            return &Script.RuntimeExposedPropertiesRevision;
+        }
+
+        const std::string& GetScriptClassName() const
+        {
+            return IsManagedBackend() ? ManagedScript.ScriptClassName : Script.ScriptClassName;
+        }
+
+        const std::string& GetScriptAssetRelativePath() const
+        {
+            return IsManagedBackend() ? ManagedScript.ScriptAssetRelativePath : Script.ScriptAssetRelativePath;
+        }
+
+        bool IsEnabled() const
+        {
+            return IsManagedBackend() ? ManagedScript.Enabled : Script.Enabled;
+        }
     };
 }

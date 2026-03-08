@@ -70,16 +70,20 @@ project "Editor"
 
     postbuildcommands
     {
-        "{COPY} \"%{wks.location}/Editor/config.json\" \"%{cfg.targetdir}\"",
-        "{COPY} \"%{wks.location}/Resources/LimitlessLogo.ico\" \"%{cfg.targetdir}\"",
-        "{COPY} \"%{wks.location}/Editor/imgui-default.ini\" \"%{cfg.targetdir}\"",
-        "{COPY} \"%{wks.location}/Editor/imgui.ini\" \"%{cfg.targetdir}\""
+        "{COPY} \"%{prj.location}/config.json\" \"%{cfg.targetdir}\"",
+        "{COPY} \"%{prj.location}/../Resources/LimitlessLogo.ico\" \"%{cfg.targetdir}\"",
+        "{COPY} \"%{prj.location}/imgui-default.ini\" \"%{cfg.targetdir}\"",
+        "{COPY} \"%{prj.location}/imgui.ini\" \"%{cfg.targetdir}\""
     }
 
     filter "system:windows"
         cppdialect "C++20"
         staticruntime "Off"
         systemversion "latest"
+        prebuildcommands
+        {
+            "\"%{prj.location}/../Scripts/build-managed-runtime-windows.bat\" %{cfg.buildcfg} %{cfg.platform} \"%{cfg.targetdir}\""
+        }
         -- Match Runtime behavior: prefer dynamic CRT and ignore static CRT defaults
         -- from prebuilt third-party libraries.
         ignoredefaultlibraries { "LIBCMT", "LIBCMTD" }
@@ -172,6 +176,10 @@ project "Editor"
     filter "system:macosx"
         cppdialect "C++20"
         staticruntime "Off"
+        prebuildcommands
+        {
+            "bash \"%{prj.location}/../Scripts/build-managed-runtime-unix.sh\" --config %{cfg.buildcfg} --platform %{cfg.platform} --output-dir \"%{cfg.targetdir}\""
+        }
 
         defines
         {
@@ -242,6 +250,10 @@ project "Editor"
     filter "system:linux"
         cppdialect "C++20"
         staticruntime "Off"
+        prebuildcommands
+        {
+            "bash \"%{prj.location}/../Scripts/build-managed-runtime-unix.sh\" --config %{cfg.buildcfg} --platform %{cfg.platform} --output-dir \"%{cfg.targetdir}\""
+        }
 
         defines
         {

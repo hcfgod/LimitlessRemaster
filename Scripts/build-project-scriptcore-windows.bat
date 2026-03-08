@@ -75,6 +75,8 @@ set "BUILD_FOLDER=%CFG_LOWER%_%PLATFORM_LOWER%-windows-%PLATFORM%"
 set "SDK_INCLUDE_DIR=%TOOLCHAIN_ROOT%\SDK\include"
 set "SDK_VENDOR_DIR=%TOOLCHAIN_ROOT%\SDK\vendor"
 set "SDK_LIB_DIR=%TOOLCHAIN_ROOT%\SDK\lib\%BUILD_FOLDER%"
+set "RUNTIME_TEMPLATE_DIR=%TOOLCHAIN_ROOT%\RuntimeTemplates\%BUILD_FOLDER%"
+set "MANAGED_BUILD_SCRIPT=%TOOLCHAIN_ROOT%\Scripts\build-managed-runtime-windows.bat"
 set "OUTPUT_DIR=%TOOLCHAIN_ROOT%\Build\%BUILD_FOLDER%\Editor"
 set "INTERMEDIATE_DIR=%TOOLCHAIN_ROOT%\Build\Intermediates\%BUILD_FOLDER%\ProjectScriptCore"
 set "OBJ_DIR=%INTERMEDIATE_DIR%\obj"
@@ -317,6 +319,17 @@ link /NOLOGO /DLL ^
 
 if errorlevel 1 (
     echo Error: Project ScriptCore link failed.
+    exit /b 1
+)
+
+if not exist "%MANAGED_BUILD_SCRIPT%" (
+    echo Error: Managed runtime build script not found: "%MANAGED_BUILD_SCRIPT%"
+    exit /b 1
+)
+
+call "%MANAGED_BUILD_SCRIPT%" %CONFIGURATION% %PLATFORM% "%RUNTIME_TEMPLATE_DIR%"
+if errorlevel 1 (
+    echo Error: Failed to refresh managed runtime payload in "%RUNTIME_TEMPLATE_DIR%".
     exit /b 1
 )
 

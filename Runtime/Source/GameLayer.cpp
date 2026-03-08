@@ -20,6 +20,7 @@
 #include "Scene/Scene.h"
 #include "Scene/SceneManager.h"
 #include "Scene/SceneRenderer.h"
+#include "Scripting/ManagedScriptHost.h"
 #include "Scripting/NativeScriptRegistry.h"
 #include "Scripting/ScriptableEntity.h"
 #include "Scripting/ScriptCoreApi.h"
@@ -70,6 +71,44 @@ namespace Limitless
             kRuntimeSceneBaseRoles |
             SceneRole::GameplayPrimary |
             SceneRole::ScriptQueryTarget;
+
+        std::vector<std::filesystem::path> BuildManagedDirectoryCandidates()
+        {
+            std::vector<std::filesystem::path> candidates;
+            auto addCandidate = [&](const std::filesystem::path& candidatePath) {
+                if (candidatePath.empty())
+                    return;
+                if (std::find(candidates.begin(), candidates.end(), candidatePath) != candidates.end())
+                    return;
+                candidates.push_back(candidatePath);
+            };
+
+            const auto& platformInfo = PlatformDetection::GetPlatformInfo();
+            if (!platformInfo.executablePath.empty())
+                addCandidate(std::filesystem::path(platformInfo.executablePath).parent_path() / "Managed");
+
+            std::error_code errorCode;
+            const std::filesystem::path currentPath = std::filesystem::current_path(errorCode);
+            if (!errorCode)
+                addCandidate(currentPath / "Managed");
+
+            return candidates;
+        }
+
+        void InitializeManagedScriptHost()
+        {
+            for (const auto& candidatePath : BuildManagedDirectoryCandidates())
+            {
+                std::string validationError;
+                if (!ManagedScriptPayload::ValidatePayloadDirectory(candidatePath, nullptr, &validationError))
+                    continue;
+
+                if (ManagedScriptHost::Initialize(candidatePath))
+                    return;
+            }
+
+            LT_INFO("GameLayer: managed scripting payload not found; managed discovery is disabled.");
+        }
 
         bool ForwardSceneTransitionToHost(SceneTransitionType transitionType, const char* sceneIdentifier, LoadSceneMode loadSceneMode)
         {
@@ -725,9 +764,11 @@ namespace Limitless
         if (sceneAssetKey.empty())
             return false;
 
+        const std::string requestedSceneAssetKey = sceneAssetKey;
+
         if (loadMode == LoadSceneMode::Additive)
         {
-            const SceneCollection::Handle existingHandle = FindLoadedSceneHandleByAssetKey(sceneAssetKey);
+            const SceneCollection::Handle existingHandle = FindLoadedSceneHandleByAssetKey(requestedSceneAssetKey);
             if (existingHandle != SceneCollection::InvalidHandle)
                 return true;
         }
@@ -736,7 +777,7 @@ namespace Limitless
             ClearLoadedScenes();
         }
 
-        auto loadResult = Scene::LoadFromFile(sceneAssetKey);
+        auto loadResult = Scene::LoadFromFile(requestedSceneAssetKey);
 
         if (!loadResult.IsSuccess())
         {
@@ -748,12 +789,11 @@ namespace Limitless
         const SceneRoleMask sceneRoles = shouldActivate ? kRuntimeSceneActiveRoles : kRuntimeSceneBaseRoles;
         const SceneCollection::Handle handle = m_SceneCollection.AddScene(
             std::move(loadResult.GetValue()),
-            sceneAssetKey,
+            requestedSceneAssetKey,
             SceneCollectionLifecycleState::Loading,
             sceneRoles);
         Scene* loadedScene = m_SceneCollection.GetScene(handle);
         Physics2DQueries::SetActiveSceneForScriptQueries(nullptr);
-
         if (!loadedScene)
             return false;
 
@@ -764,17 +804,21 @@ namespace Limitless
         m_SceneCollection.SetLifecycleState(handle, SceneCollectionLifecycleState::Active);
 
         if (shouldActivate)
-            ActivateLoadedScene(handle);
+            (void)ActivateLoadedScene(handle);
 
-        auto& registry = loadedScene->GetRegistry();
-        const size_t cameraCount = registry.storage<CameraComponent>().size();
-        const size_t spriteCount = registry.storage<SpriteComponent>().size();
-        const size_t grid2DCount = registry.storage<Grid2DComponent>().size();
-        const size_t tilemapLayerCount = registry.storage<TilemapLayerComponent>().size();
+        const auto& registry = loadedScene->GetRegistry();
+        const auto* cameraStorage = registry.storage<CameraComponent>();
+        const auto* spriteStorage = registry.storage<SpriteComponent>();
+        const auto* grid2DStorage = registry.storage<Grid2DComponent>();
+        const auto* tilemapLayerStorage = registry.storage<TilemapLayerComponent>();
+        const size_t cameraCount = cameraStorage ? cameraStorage->size() : 0;
+        const size_t spriteCount = spriteStorage ? spriteStorage->size() : 0;
+        const size_t grid2DCount = grid2DStorage ? grid2DStorage->size() : 0;
+        const size_t tilemapLayerCount = tilemapLayerStorage ? tilemapLayerStorage->size() : 0;
         LT_INFO("GameLayer: scene diagnostics -> cameras={}, sprites={}, grids={}, layers={}",
             cameraCount, spriteCount, grid2DCount, tilemapLayerCount);
 
-        LT_INFO("GameLayer: scene '{}' loaded.", sceneAssetKey);
+        LT_INFO("GameLayer: scene '{}' loaded.", requestedSceneAssetKey);
         return true;
     }
 
@@ -924,6 +968,7 @@ namespace Limitless
     void GameLayer::InitializeScriptCore()
     {
         NativeScriptRegistry::Clear();
+        InitializeManagedScriptHost();
 
         // Find ScriptCore library next to the executable.
         std::filesystem::path libraryPath;
@@ -1028,6 +1073,8 @@ namespace Limitless
 
     void GameLayer::ShutdownScriptCore()
     {
+        ManagedScriptHost::Shutdown();
+
         if (m_ScriptCoreLibraryHandle)
         {
             PlatformUtils::FreeLibrary(m_ScriptCoreLibraryHandle);

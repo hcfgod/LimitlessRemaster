@@ -72,8 +72,8 @@ namespace Limitless
                 auto* scriptComponent = registry.try_get<ScriptComponent>(scriptEntity);
                 if (!scriptComponent)
                     continue;
-                auto& scriptEntry = scriptComponent->Script;
-                if (!scriptEntry.Enabled || !scriptEntry.RuntimeInstance || !scriptEntry.RuntimeInitialized)
+                NativeScriptEntry* scriptEntry = scriptComponent->TryGetNativeEntry();
+                if (!scriptEntry || !scriptEntry->Enabled || !scriptEntry->RuntimeInstance || !scriptEntry->RuntimeInitialized)
                     continue;
 
                 const auto* tag = registry.try_get<TagComponent>(selfEntity);
@@ -82,26 +82,26 @@ namespace Limitless
                     if (isSensor)
                     {
                         if (dispatchEnter)
-                            scriptEntry.RuntimeInstance->DispatchTriggerEnter(other);
+                            scriptEntry->RuntimeInstance->DispatchTriggerEnter(other);
                         if (dispatchStay)
-                            scriptEntry.RuntimeInstance->DispatchTriggerStay(other);
+                            scriptEntry->RuntimeInstance->DispatchTriggerStay(other);
                         if (dispatchExit)
-                            scriptEntry.RuntimeInstance->DispatchTriggerExit(other);
+                            scriptEntry->RuntimeInstance->DispatchTriggerExit(other);
                     }
                     else
                     {
                         if (dispatchEnter)
-                            scriptEntry.RuntimeInstance->DispatchCollisionEnter(other);
+                            scriptEntry->RuntimeInstance->DispatchCollisionEnter(other);
                         if (dispatchStay)
-                            scriptEntry.RuntimeInstance->DispatchCollisionStay(other);
+                            scriptEntry->RuntimeInstance->DispatchCollisionStay(other);
                         if (dispatchExit)
-                            scriptEntry.RuntimeInstance->DispatchCollisionExit(other);
+                            scriptEntry->RuntimeInstance->DispatchCollisionExit(other);
                     }
                 }
                 catch (const std::exception& exception)
                 {
                     LT_WARN("Script '{}' on entity '{}' threw during {} callback: {}",
-                            scriptEntry.ScriptClassName,
+                            scriptEntry->ScriptClassName,
                             tag ? tag->Tag : "Entity",
                             isSensor ? "trigger" : "collision",
                             exception.what());
@@ -109,7 +109,7 @@ namespace Limitless
                 catch (...)
                 {
                     LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during {} callback",
-                            scriptEntry.ScriptClassName,
+                            scriptEntry->ScriptClassName,
                             tag ? tag->Tag : "Entity",
                             isSensor ? "trigger" : "collision");
                 }

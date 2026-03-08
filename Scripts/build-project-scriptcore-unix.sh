@@ -89,6 +89,8 @@ if [[ "$SYSTEM_NAME" == "darwin" ]]; then
 fi
 
 BUILD_FOLDER="${CONFIG_LOWER}_${PLATFORM_LOWER}-${SYSTEM_NAME}-${PLATFORM}"
+RUNTIME_TEMPLATE_DIR="$TOOLCHAIN_ROOT/RuntimeTemplates/$BUILD_FOLDER"
+MANAGED_BUILD_SCRIPT="$TOOLCHAIN_ROOT/Scripts/build-managed-runtime-unix.sh"
 OUTPUT_DIR="$TOOLCHAIN_ROOT/Build/$BUILD_FOLDER/Editor"
 INTERMEDIATE_DIR="$TOOLCHAIN_ROOT/Build/Intermediates/$BUILD_FOLDER/ProjectScriptCore"
 OBJ_DIR="$INTERMEDIATE_DIR/obj"
@@ -363,6 +365,13 @@ echo "Linking libScriptCore.${OUTPUT_EXTENSION}..."
     "${obj_files[@]}" \
     -L"$SDK_LIB_DIR" -lLimitless \
     -o "$OUTPUT_LIB"
+
+if [[ ! -f "$MANAGED_BUILD_SCRIPT" ]]; then
+    echo "Error: Managed runtime build script not found: $MANAGED_BUILD_SCRIPT"
+    exit 1
+fi
+
+bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$RUNTIME_TEMPLATE_DIR"
 
 echo "ScriptCore build completed successfully."
 echo "Output: $OUTPUT_LIB"

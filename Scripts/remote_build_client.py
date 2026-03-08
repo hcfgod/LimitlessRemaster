@@ -208,16 +208,20 @@ def main() -> int:
     runtime_dir = artifacts_dir / "Runtime"
     scriptcore_dir = artifacts_dir / "ScriptCore"
     scriptcore_path = scriptcore_dir / _scriptcore_name_for_target(args.target_os)
+    managed_payload_dir = runtime_dir / "Managed"
     if not runtime_dir.is_dir():
         raise RuntimeError(f"remote artifact missing Runtime directory: {runtime_dir}")
     if not scriptcore_path.is_file():
         raise RuntimeError(f"remote artifact missing ScriptCore library: {scriptcore_path}")
+    if not managed_payload_dir.is_dir():
+        raise RuntimeError(f"remote artifact missing managed payload directory: {managed_payload_dir}")
 
     manifest = {
         "targetOS": args.target_os,
         "targetArchitecture": args.target_arch,
         "runtimeDirectory": str(runtime_dir.resolve()),
         "scriptCoreLibraryPath": str(scriptcore_path.resolve()),
+        "managedPayloadDirectory": str(managed_payload_dir.resolve()),
         "dynamicLibraryDirectories": [str(runtime_dir.resolve())],
         "sourceJobId": job_id,
         "artifactSha256": artifact_sha256,

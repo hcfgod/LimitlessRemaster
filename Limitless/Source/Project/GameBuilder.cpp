@@ -1001,6 +1001,66 @@ namespace Limitless::Project
             return true;
         }
 
+        bool CopyDirectoryRecursive(const std::filesystem::path& sourceDirectory,
+                                    const std::filesystem::path& destinationDirectory,
+                                    GameBuildResult& result)
+        {
+            if (!std::filesystem::is_directory(sourceDirectory))
+                return true;
+
+            std::error_code errorCode;
+            std::filesystem::create_directories(destinationDirectory, errorCode);
+            if (errorCode)
+            {
+                result.StepLog.push_back("Failed to create directory '" + destinationDirectory.string() + "': " + errorCode.message());
+                return false;
+            }
+
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(sourceDirectory, errorCode))
+            {
+                if (errorCode)
+                {
+                    result.StepLog.push_back("Failed to enumerate directory '" + sourceDirectory.string() + "': " + errorCode.message());
+                    return false;
+                }
+
+                const std::filesystem::path relativePath = std::filesystem::relative(entry.path(), sourceDirectory, errorCode);
+                if (errorCode)
+                {
+                    result.StepLog.push_back("Failed to compute relative path while copying '" + sourceDirectory.string() + "': " + errorCode.message());
+                    return false;
+                }
+
+                const std::filesystem::path destinationPath = destinationDirectory / relativePath;
+                if (entry.is_directory())
+                {
+                    std::filesystem::create_directories(destinationPath, errorCode);
+                    if (errorCode)
+                    {
+                        result.StepLog.push_back("Failed to create directory '" + destinationPath.string() + "': " + errorCode.message());
+                        return false;
+                    }
+                    continue;
+                }
+
+                std::filesystem::create_directories(destinationPath.parent_path(), errorCode);
+                if (errorCode)
+                {
+                    result.StepLog.push_back("Failed to create directory '" + destinationPath.parent_path().string() + "': " + errorCode.message());
+                    return false;
+                }
+
+                std::filesystem::copy_file(entry.path(), destinationPath, std::filesystem::copy_options::overwrite_existing, errorCode);
+                if (errorCode)
+                {
+                    result.StepLog.push_back("Failed to copy file '" + entry.path().string() + "': " + errorCode.message());
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         /// Copy all files matching a pattern from a directory.
         size_t CopyDllsFromDirectory(const std::filesystem::path& sourceDirectory,
                                      const std::filesystem::path& destinationDirectory,
@@ -1639,6 +1699,8 @@ namespace Limitless::Project
                 layout.ScriptCoreLibraryPath = projectLocalScriptCore;
         }
 
+        layout.ManagedPayloadDirectory = layout.RuntimeDirectory / "Managed";
+
         layout.DynamicLibrarySourceDirectories.clear();
         layout.DynamicLibrarySourceDirectories.push_back(layout.RuntimeDirectory);
         if (targetOS == BuildTargetOS::Windows)
@@ -1670,6 +1732,7 @@ namespace Limitless::Project
 
         layout.RuntimeDirectory = remoteManifest.RuntimeDirectory;
         layout.ScriptCoreLibraryPath = remoteManifest.ScriptCoreLibraryPath;
+        layout.ManagedPayloadDirectory = remoteManifest.ManagedPayloadDirectory;
         layout.DynamicLibrarySourceDirectories = remoteManifest.DynamicLibraryDirectories;
         if (layout.DynamicLibrarySourceDirectories.empty())
             layout.DynamicLibrarySourceDirectories.push_back(layout.RuntimeDirectory);
@@ -1853,6 +1916,19 @@ namespace Limitless::Project
         else
         {
             result.StepLog.push_back("Warning: ScriptCore library not found at " + scriptCorePath.string());
+        }
+
+        const std::filesystem::path managedPayloadDirectory = layout.ManagedPayloadDirectory.empty()
+            ? (runtimeDir / "Managed")
+            : layout.ManagedPayloadDirectory;
+        if (std::filesystem::is_directory(managedPayloadDirectory))
+        {
+            if (!CopyDirectoryRecursive(managedPayloadDirectory, request.OutputDirectory / "Managed", result))
+            {
+                result.ErrorMessage = "Failed to copy managed scripting payload.";
+                return false;
+            }
+            result.StepLog.push_back("Copied managed scripting payload.");
         }
 
         // 4. Copy runtime dynamic libraries (shaderc, ffmpeg, etc.).
