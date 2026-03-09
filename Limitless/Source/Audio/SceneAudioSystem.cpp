@@ -440,13 +440,14 @@ namespace Limitless::Audio
 
             const bool shouldPlayOnStart =
                 audioSource.PlayOnStart &&
+                !audioSource.RuntimePlayOnStartConsumed &&
                 !audioSource.AudioClipKey.empty();
             const bool shouldPlayRequested =
                 audioSource.RuntimePlayRequested &&
                 !audioSource.AudioClipKey.empty();
             const bool shouldBePlaying = shouldPlayOnStart || shouldPlayRequested;
 
-            if (!shouldPlayOnStart)
+            if (!audioSource.PlayOnStart || audioSource.AudioClipKey.empty())
                 audioSource.RuntimePlayOnStartConsumed = false;
 
             if (shouldBePlaying && audioSource.RuntimeVoiceId == 0)
@@ -486,6 +487,8 @@ namespace Limitless::Audio
                     audioSource.RuntimePlaybackStarted = (audioSource.RuntimeVoiceId != 0);
                     if (shouldPlayOnStart)
                         audioSource.RuntimePlayOnStartConsumed = (audioSource.RuntimeVoiceId != 0);
+                    if (audioSource.RuntimeVoiceId != 0)
+                        audioSource.RuntimePlayRequested = false;
                 }
             }
             else if (shouldBePlaying && audioSource.RuntimeVoiceId != 0)
@@ -496,14 +499,6 @@ namespace Limitless::Audio
                     runtimePan,
                     audioSource.MixerGroup,
                     runtimePitch);
-            }
-            else if (!shouldBePlaying && audioSource.RuntimeVoiceId != 0)
-            {
-                AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
-                audioSource.RuntimeVoiceId = 0;
-                audioSource.RuntimePlaybackStarted = false;
-                audioSource.RuntimePlayRequested = false;
-                audioSource.RuntimePlayOnStartConsumed = false;
             }
         }
     }
