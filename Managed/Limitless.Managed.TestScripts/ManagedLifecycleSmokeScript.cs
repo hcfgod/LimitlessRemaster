@@ -11,7 +11,7 @@ public sealed class ManagedLifecycleSmokeScript : ScriptableEntity
     {
         m_UpdateCount = 0;
         m_LoggedFirstUpdate = false;
-        LogInfo($"OnCreate entity={EntityHandle} alive={IsEntityAlive}");
+        Debug.Log($"OnCreate entity={EntityHandle} alive={IsEntityAlive}");
     }
 
     public override void OnUpdate(float deltaTime)
@@ -20,12 +20,12 @@ public sealed class ManagedLifecycleSmokeScript : ScriptableEntity
         if (!m_LoggedFirstUpdate)
         {
             m_LoggedFirstUpdate = true;
-            LogInfo($"OnUpdate entity={EntityHandle} dt={deltaTime:0.000} count={m_UpdateCount}");
+            Debug.Log($"OnUpdate entity={EntityHandle} dt={deltaTime:0.000} count={m_UpdateCount}");
         }
     }
 
     public override void OnDestroy()
     {
-        LogInfo($"OnDestroy entity={EntityHandle} updates={m_UpdateCount}");
+        Debug.Log($"OnDestroy entity={EntityHandle} updates={m_UpdateCount}");
     }
 }

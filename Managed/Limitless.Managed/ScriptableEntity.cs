@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using Coral.Managed.Interop;
 
 namespace Limitless.Managed;
 
@@ -37,6 +36,8 @@ public abstract class ScriptableEntity
     public Entity Entity => new(EntityId);
     public Transform Transform => new(EntityId);
     public Camera? Camera => Entity.GetComponent<Camera>();
+    protected static DebugApi Debug => DebugApi.Shared;
+    protected static RandomApi Random => RandomApi.Shared;
 
     public bool IsEntityAlive
     {
@@ -244,54 +245,6 @@ public abstract class ScriptableEntity
         OnTriggerExit(new Entity(otherEntityHandle));
     }
 
-    protected void LogInfo(string message)
-    {
-        unsafe
-        {
-            NativeString nativeMessage = message ?? string.Empty;
-            try
-            {
-                ScriptBridge.LogInfoIcall(nativeMessage);
-            }
-            finally
-            {
-                nativeMessage.Dispose();
-            }
-        }
-    }
-
-    protected void LogWarning(string message)
-    {
-        unsafe
-        {
-            NativeString nativeMessage = message ?? string.Empty;
-            try
-            {
-                ScriptBridge.LogWarningIcall(nativeMessage);
-            }
-            finally
-            {
-                nativeMessage.Dispose();
-            }
-        }
-    }
-
-    protected void LogError(string message)
-    {
-        unsafe
-        {
-            NativeString nativeMessage = message ?? string.Empty;
-            try
-            {
-                ScriptBridge.LogErrorIcall(nativeMessage);
-            }
-            finally
-            {
-                nativeMessage.Dispose();
-            }
-        }
-    }
-
     private bool StopCoroutine(ulong identifier)
     {
         if (identifier == 0)
@@ -406,9 +359,13 @@ public abstract class ScriptableEntity
             {
                 isStillRunning = routine.MoveNext();
             }
+            catch (DebugAssertException)
+            {
+                throw;
+            }
             catch (Exception exception)
             {
-                LogError($"Coroutine failed: {exception.Message}");
+                Debug.LogException(exception);
                 return false;
             }
 
@@ -498,7 +455,7 @@ public abstract class ScriptableEntity
                 coroutineState.RemainingWaitSeconds = SanitizeWaitDurationSeconds((float)waitSeconds);
                 return true;
             default:
-                LogWarning($"Unsupported coroutine yield value '{yieldedValue.GetType().FullName}', treating as next frame wait.");
+                Debug.LogWarning($"Unsupported coroutine yield value '{yieldedValue.GetType().FullName}', treating as next frame wait.");
                 coroutineState.WaitingForFrames = true;
                 coroutineState.RemainingWaitFrames = 1;
                 return true;
