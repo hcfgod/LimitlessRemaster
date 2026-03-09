@@ -29,6 +29,8 @@ project "Limitless"
         forceincludes { "PrecompiledHeader.h" }
     filter "files:Vendor/Coral/Coral.Native/Source/**.cpp"
         forceincludes { "CoralPCH.hpp" }
+    filter { "files:Vendor/Coral/Coral.Native/Source/**.cpp", "system:linux or system:macosx" }
+        buildoptions { "-include CoralPCH.hpp" }
     filter {}
 
     files
@@ -58,7 +60,7 @@ project "Limitless"
     filter "files:Source/ImGui/ImGuiOpenGL3Backend.cpp"
         flags { "NoPCH" }
 
-    filter { "files:Vendor/**", "not files:Vendor/Coral/**" }
+    filter "files:Vendor/**"
         flags { "NoPCH" }
         -- Keep build logs focused on engine/game code.
         warnings "Off"
