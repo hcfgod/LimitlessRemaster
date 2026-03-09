@@ -911,12 +911,14 @@ namespace Limitless::EditorAnimationTimelinePanel
         }
     }
 
-    void Draw(bool& isOpen, const std::string& animationClipAssetKey, EditorUndoService* undoService)
+    void Draw(bool& isOpen, const std::string& animationClipAssetKey, EditorUndoService* undoService, bool requestFocus)
     {
         if (!isOpen)
             return;
 
         EditorPanelStyle::PushPanelVisualStyle();
+        if (requestFocus)
+            ImGui::SetNextWindowFocus();
         if (!ImGui::Begin("Animation Timeline", &isOpen))
         {
             ImGui::End();

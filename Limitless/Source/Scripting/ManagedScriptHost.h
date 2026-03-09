@@ -52,6 +52,11 @@ namespace Limitless::ManagedScriptHost
                                             const std::unordered_map<std::string, ScriptPropertyValue>& exposedProperties,
                                             uint64_t revision,
                                             std::string* errorMessage = nullptr);
+    bool ReadBackScriptExposedProperties(uint64_t instanceId,
+                                         Scene* scene,
+                                         std::unordered_map<std::string, ScriptPropertyValue>& exposedProperties,
+                                         uint64_t* revision,
+                                         std::string* errorMessage = nullptr);
     bool InvokeScriptOnCreate(uint64_t instanceId, Scene* scene, std::string* errorMessage = nullptr);
     bool InvokeScriptOnFixedUpdate(uint64_t instanceId, Scene* scene, float fixedDeltaTime, std::string* errorMessage = nullptr);
     bool InvokeScriptOnUpdate(uint64_t instanceId, Scene* scene, float deltaTime, std::string* errorMessage = nullptr);

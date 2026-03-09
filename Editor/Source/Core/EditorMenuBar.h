@@ -8,6 +8,11 @@
 namespace Limitless::EditorMenuBar
 {
     void Draw(EditorPlayModeState playModeState,
+              bool& showScenePanel,
+              bool& showInspectorPanel,
+              bool& showSceneView,
+              bool& showGameView,
+              bool& showProjectPanel,
               bool& showDemoWindow,
               bool& showAssetDiagnosticsWindow,
               bool& showPhysicsDiagnosticsWindow,
@@ -45,5 +50,6 @@ namespace Limitless::EditorMenuBar
               const std::function<void()>& onReturnFromPrefabMode,
               bool canApplyPrefabToInstances,
               const std::function<void()>& onApplyPrefabToInstances,
+              const std::function<void()>& onDrawLayoutsMenu,
               const std::function<void()>& onResetLayoutToDefault);
 }

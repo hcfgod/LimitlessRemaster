@@ -7,6 +7,11 @@
 namespace Limitless::EditorMenuBar
 {
     void Draw(EditorPlayModeState playModeState,
+              bool& showScenePanel,
+              bool& showInspectorPanel,
+              bool& showSceneView,
+              bool& showGameView,
+              bool& showProjectPanel,
               bool& showDemoWindow,
               bool& showAssetDiagnosticsWindow,
               bool& showPhysicsDiagnosticsWindow,
@@ -44,6 +49,7 @@ namespace Limitless::EditorMenuBar
               const std::function<void()>& onReturnFromPrefabMode,
               bool canApplyPrefabToInstances,
               const std::function<void()>& onApplyPrefabToInstances,
+              const std::function<void()>& onDrawLayoutsMenu,
               const std::function<void()>& onResetLayoutToDefault)
     {
         EditorPanelStyle::PushPanelVisualStyle();
@@ -118,10 +124,11 @@ namespace Limitless::EditorMenuBar
 
         if (ImGui::BeginMenu("View"))
         {
-            ImGui::MenuItem("Scene", nullptr, nullptr);
-            ImGui::MenuItem("Inspector", nullptr, nullptr);
-            ImGui::MenuItem("Viewport", nullptr, nullptr);
-            ImGui::MenuItem("Project", nullptr, nullptr);
+            ImGui::MenuItem("Scene", nullptr, &showScenePanel);
+            ImGui::MenuItem("Inspector", nullptr, &showInspectorPanel);
+            ImGui::MenuItem("Scene View", nullptr, &showSceneView);
+            ImGui::MenuItem("Game View", nullptr, &showGameView);
+            ImGui::MenuItem("Project", nullptr, &showProjectPanel);
             ImGui::EndMenu();
         }
 
@@ -140,6 +147,13 @@ namespace Limitless::EditorMenuBar
             ImGui::Separator();
             if (ImGui::MenuItem("Reset Layout to Default") && onResetLayoutToDefault)
                 onResetLayoutToDefault();
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Layouts"))
+        {
+            if (onDrawLayoutsMenu)
+                onDrawLayoutsMenu();
             ImGui::EndMenu();
         }
 

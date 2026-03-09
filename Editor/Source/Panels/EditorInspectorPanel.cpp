@@ -14,6 +14,7 @@ namespace Limitless::EditorInspectorPanel
 {
 
     void Draw(Scene* scene,
+              bool& isOpen,
               entt::entity selectedEntity,
               const char* texturePayloadId,
               std::string& selectedTextureAssetKey,
@@ -36,7 +37,13 @@ namespace Limitless::EditorInspectorPanel
         RestorePendingNativeScriptEditorSession();
 
         EditorPanelStyle::PushPanelVisualStyle();
-        ImGui::Begin("Inspector");
+        if (!ImGui::Begin("Inspector", &isOpen))
+        {
+            ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
+            DrawNativeScriptEditorWindow();
+            return;
+        }
 
         static entt::entity animationPanelSelectionOwner = entt::null;
         const bool hasValidSelectedEntity = scene && selectedEntity != entt::null && scene->IsValid(selectedEntity);

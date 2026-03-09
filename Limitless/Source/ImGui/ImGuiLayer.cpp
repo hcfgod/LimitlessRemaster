@@ -10,8 +10,12 @@
 #include <SDL3/SDL.h>
 #include <filesystem>
 
+#include <cmath>
+#include <system_error>
+
 // ImGui headers (backend expects imgui before their includes)
 #include "imgui/imgui.h"
+#include "imgui/imgui_internal.h"
 #include "imgui/backends/imgui_impl_sdl3.h"
 #include "imgui/backends/imgui_impl_opengl3.h"
 
@@ -22,6 +26,117 @@ namespace Limitless
 {
     namespace
     {
+        ImGuiID GetMainViewportDockspaceId(const ImGuiViewport* viewport)
+        {
+            if (viewport == nullptr)
+                return 0;
+
+            char label[32];
+            ImFormatString(label, IM_ARRAYSIZE(label), "WindowOverViewport_%08X", viewport->ID);
+            return ImHashStr("DockSpace", 0, ImHashStr(label));
+        }
+
+        float GetDockNodeAxisLength(const ImGuiDockNode* node, ImGuiAxis axis)
+        {
+            if (node == nullptr)
+                return 0.0f;
+
+            const float size = node->Size[axis];
+            if (size > 0.0f)
+                return size;
+
+            return node->SizeRef[axis];
+        }
+
+        void CaptureDockNodeSplitRatios(const ImGuiDockNode* node, std::unordered_map<unsigned int, float>& splitRatios)
+        {
+            if (node == nullptr || !node->IsSplitNode())
+                return;
+
+            const ImGuiAxis splitAxis = static_cast<ImGuiAxis>(node->SplitAxis);
+            if (splitAxis != ImGuiAxis_X && splitAxis != ImGuiAxis_Y)
+                return;
+
+            const ImGuiDockNode* child0 = node->ChildNodes[0];
+            const ImGuiDockNode* child1 = node->ChildNodes[1];
+            if (child0 == nullptr || child1 == nullptr)
+                return;
+
+            const float size0 = GetDockNodeAxisLength(child0, splitAxis);
+            const float size1 = GetDockNodeAxisLength(child1, splitAxis);
+            const float totalSize = ImMax(size0 + size1, 1.0f);
+            splitRatios[node->ID] = ImClamp(size0 / totalSize, 0.05f, 0.95f);
+
+            CaptureDockNodeSplitRatios(child0, splitRatios);
+            CaptureDockNodeSplitRatios(child1, splitRatios);
+        }
+
+        void ProjectDockNodeSizeRefs(ImGuiDockNode* node,
+                                     const ImVec2& targetSize,
+                                     const std::unordered_map<unsigned int, float>& splitRatios)
+        {
+            if (node == nullptr || !node->IsSplitNode())
+                return;
+
+            const ImGuiAxis splitAxis = static_cast<ImGuiAxis>(node->SplitAxis);
+            if (splitAxis != ImGuiAxis_X && splitAxis != ImGuiAxis_Y)
+                return;
+
+            ImGuiDockNode* child0 = node->ChildNodes[0];
+            ImGuiDockNode* child1 = node->ChildNodes[1];
+            if (child0 == nullptr || child1 == nullptr)
+                return;
+
+            ImGuiStyle& style = ImGui::GetStyle();
+            const float spacing = style.DockingSeparatorSize;
+            const float currentSize0 = GetDockNodeAxisLength(child0, splitAxis);
+            const float currentSize1 = GetDockNodeAxisLength(child1, splitAxis);
+            const float currentAvailable = ImMax(currentSize0 + currentSize1, 1.0f);
+            const float targetAvailable = ImMax(targetSize[splitAxis] - spacing, 1.0f);
+            const float targetMinEach = ImTrunc(ImMin(targetAvailable, style.WindowMinSize[splitAxis] * 2.0f) * 0.5f);
+            const bool child0HasCentralContent = child0->HasCentralNodeChild || child0->IsCentralNode();
+            const bool child1HasCentralContent = child1->HasCentralNodeChild || child1->IsCentralNode();
+
+            float splitRatio = currentSize0 / currentAvailable;
+            if (const auto ratioIt = splitRatios.find(node->ID); ratioIt != splitRatios.end())
+                splitRatio = ratioIt->second;
+            splitRatio = ImClamp(splitRatio, 0.05f, 0.95f);
+
+            float targetSize0 = ImTrunc(targetAvailable * splitRatio + 0.5f);
+            if (targetAvailable >= targetMinEach * 2.0f)
+                targetSize0 = ImClamp(targetSize0, targetMinEach, targetAvailable - targetMinEach);
+            else
+                targetSize0 = ImClamp(targetSize0, 1.0f, targetAvailable - 1.0f);
+
+            float targetSize1 = ImMax(1.0f, targetAvailable - targetSize0);
+
+            if (splitAxis == ImGuiAxis_X && child0HasCentralContent && !child1HasCentralContent)
+            {
+                const float maxPeripheralSize = ImMax(1.0f, targetAvailable - targetMinEach);
+                const float minPeripheralSize = ImMin(maxPeripheralSize, ImMax(targetMinEach, ImMax(400.0f, ImTrunc(targetAvailable * 0.45f))));
+                targetSize1 = ImClamp(ImMax(targetSize1, minPeripheralSize), 1.0f, targetAvailable - 1.0f);
+                targetSize0 = ImMax(1.0f, targetAvailable - targetSize1);
+
+                const float maxCentralSize = ImMax(1.0f, targetAvailable - ImMax(targetMinEach, ImTrunc(targetAvailable * 0.45f)));
+                if (targetSize0 > maxCentralSize)
+                {
+                    targetSize0 = maxCentralSize;
+                    targetSize1 = ImMax(1.0f, targetAvailable - targetSize0);
+                }
+            }
+
+            child0->SizeRef[splitAxis] = targetSize0;
+            child1->SizeRef[splitAxis] = targetSize1;
+
+            ImVec2 child0TargetSize = targetSize;
+            ImVec2 child1TargetSize = targetSize;
+            child0TargetSize[splitAxis] = targetSize0;
+            child1TargetSize[splitAxis] = targetSize1;
+
+            ProjectDockNodeSizeRefs(child0, child0TargetSize, splitRatios);
+            ProjectDockNodeSizeRefs(child1, child1TargetSize, splitRatios);
+        }
+
         std::filesystem::path ResolveImGuiLayoutDirectory()
         {
             const std::filesystem::path executablePath = PlatformDetection::GetExecutablePath();
@@ -241,6 +356,7 @@ namespace Limitless
         const std::filesystem::path defaultLayoutPath = ResolveDefaultLayoutPath(layoutDirectory);
         EnsureActiveLayoutExists(activeLayoutPath, defaultLayoutPath);
         m_LayoutIniPath = activeLayoutPath.string();
+        m_DefaultLayoutIniPath = defaultLayoutPath.string();
         io.IniFilename = m_LayoutIniPath.c_str();
 
         ApplyModernEditorImGuiTheme();
@@ -288,6 +404,54 @@ namespace Limitless
         );
 
         LT_CORE_INFO("ImGuiLayer attached successfully (OpenGL backend)");
+    }
+
+    bool ImGuiLayer::SetLayoutIniPath(const std::filesystem::path& layoutIniPath)
+    {
+        if (!m_Initialized)
+            return false;
+
+        std::error_code errorCode;
+        std::filesystem::create_directories(layoutIniPath.parent_path(), errorCode);
+        if (errorCode)
+            return false;
+
+        m_LayoutIniPath = layoutIniPath.string();
+        ImGui::GetIO().IniFilename = m_LayoutIniPath.c_str();
+        return true;
+    }
+
+    bool ImGuiLayer::LoadLayoutFromDisk(const std::filesystem::path& layoutIniPath)
+    {
+        if (!m_Initialized)
+            return false;
+
+        std::error_code errorCode;
+        if (!std::filesystem::exists(layoutIniPath, errorCode))
+            return false;
+
+        if (!SetLayoutIniPath(layoutIniPath))
+            return false;
+
+        m_DockSplitRatios.clear();
+        m_LastDockspaceWorkWidth = 0.0f;
+        m_LastDockspaceWorkHeight = 0.0f;
+        m_PendingLayoutLoadPath = layoutIniPath.string();
+        return true;
+    }
+
+    bool ImGuiLayer::SaveCurrentLayoutToDisk(const std::filesystem::path& layoutIniPath) const
+    {
+        if (!m_Initialized)
+            return false;
+
+        std::error_code errorCode;
+        std::filesystem::create_directories(layoutIniPath.parent_path(), errorCode);
+        if (errorCode)
+            return false;
+
+        ImGui::SaveIniSettingsToDisk(layoutIniPath.string().c_str());
+        return true;
     }
 
     void ImGuiLayer::OnDetach()
@@ -357,6 +521,50 @@ namespace Limitless
         }
 
         ImGui::NewFrame();
+
+        m_SubmittedDockspaceThisFrame = false;
+        bool loadedPendingLayoutThisFrame = false;
+        if (!m_PendingLayoutLoadPath.empty())
+        {
+            const std::string pendingLayoutPath = m_PendingLayoutLoadPath;
+            m_PendingLayoutLoadPath.clear();
+            ImGui::ClearIniSettings();
+            ImGui::LoadIniSettingsFromDisk(pendingLayoutPath.c_str());
+            loadedPendingLayoutThisFrame = true;
+        }
+
+        if (m_ShowDockspace)
+        {
+            ImGuiViewport* mainViewport = ImGui::GetMainViewport();
+            const ImGuiID dockspaceId = GetMainViewportDockspaceId(mainViewport);
+            if (mainViewport != nullptr)
+            {
+                ImGuiDockNode* dockspaceNode = ImGui::DockBuilderGetNode(dockspaceId);
+                if (dockspaceNode != nullptr)
+                {
+                    if (loadedPendingLayoutThisFrame || m_DockSplitRatios.empty())
+                        CaptureDockNodeSplitRatios(dockspaceNode, m_DockSplitRatios);
+
+                    const ImVec2 currentDockspaceSize = dockspaceNode->Size;
+                    const bool workSizeChanged = m_LastDockspaceWorkWidth > 0.0f &&
+                                                 m_LastDockspaceWorkHeight > 0.0f &&
+                                                 (std::fabs(m_LastDockspaceWorkWidth - mainViewport->WorkSize.x) > 0.5f ||
+                                                  std::fabs(m_LastDockspaceWorkHeight - mainViewport->WorkSize.y) > 0.5f);
+                    const bool dockspaceSizeDiffers = std::fabs(currentDockspaceSize.x - mainViewport->WorkSize.x) > 0.5f ||
+                                                      std::fabs(currentDockspaceSize.y - mainViewport->WorkSize.y) > 0.5f;
+                    const bool shouldProjectLayout = !m_DockSplitRatios.empty() &&
+                                                     (loadedPendingLayoutThisFrame || workSizeChanged || dockspaceSizeDiffers);
+                    if (shouldProjectLayout)
+                        ProjectDockNodeSizeRefs(dockspaceNode, mainViewport->WorkSize, m_DockSplitRatios);
+                }
+
+                m_LastDockspaceWorkWidth = mainViewport->WorkSize.x;
+                m_LastDockspaceWorkHeight = mainViewport->WorkSize.y;
+            }
+
+            ImGui::DockSpaceOverViewport(dockspaceId, mainViewport);
+            m_SubmittedDockspaceThisFrame = true;
+        }
     }
 
     void ImGuiLayer::EndFrame()
@@ -406,10 +614,13 @@ namespace Limitless
             return;
 
         // Default dockspace fills the viewport; windows can be docked into it.
-        if (m_ShowDockspace)
+        if (m_ShowDockspace && !m_SubmittedDockspaceThisFrame)
         {
-            ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+            ImGuiViewport* mainViewport = ImGui::GetMainViewport();
+            ImGui::DockSpaceOverViewport(GetMainViewportDockspaceId(mainViewport), mainViewport);
         }
+
+        m_SubmittedDockspaceThisFrame = false;
 
         if (m_ShowDemoWindow)
             ImGui::ShowDemoWindow(&m_ShowDemoWindow);

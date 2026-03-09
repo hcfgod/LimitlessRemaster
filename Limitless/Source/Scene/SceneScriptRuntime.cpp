@@ -830,6 +830,31 @@ namespace Limitless
             scriptEntry->RuntimeWarnedMissingClass = false;
         };
 
+        auto readBackManagedScriptExposedProperties = [&](entt::entity scriptEntity,
+                                                          size_t scriptIndex,
+                                                          std::string_view callbackName) {
+            ManagedScriptEntry* scriptEntry = tryGetManagedEntry(scriptEntity, scriptIndex);
+            if (!scriptEntry || scriptEntry->RuntimeInstanceId == 0)
+                return false;
+
+            std::string managedError;
+            if (!ManagedScriptHost::ReadBackScriptExposedProperties(scriptEntry->RuntimeInstanceId,
+                                                                    this,
+                                                                    scriptEntry->ExposedProperties,
+                                                                    &scriptEntry->RuntimeExposedPropertiesRevision,
+                                                                    &managedError))
+            {
+                std::string readBackLabel = std::string("ReadBackExposedProperties after ") + std::string(callbackName);
+                handleManagedScriptCallbackFailure(scriptEntity,
+                                                  scriptIndex,
+                                                  readBackLabel,
+                                                  managedError.empty() ? "unknown error" : managedError.c_str());
+                return false;
+            }
+
+            return true;
+        };
+
         const bool validateParallelScriptAccessMasks =
             ConfigManager::GetInstance().GetValue<bool>("ecs.mt.validate_parallel_script_access_masks", true);
         const bool warnOnParallelScriptAccessMaskMismatch =
@@ -1615,6 +1640,13 @@ namespace Limitless
                 if (!managedError.empty())
                     continue;
 
+                if (!readBackManagedScriptExposedProperties(entity, scriptIndex, "OnCreate"))
+                    continue;
+
+                scriptEntry = tryGetManagedEntry(entity, scriptIndex);
+                if (!scriptEntry || scriptEntry->RuntimeInstanceId == 0)
+                    continue;
+
                 scriptEntry->RuntimeInitialized = true;
             }
 
@@ -1645,6 +1677,13 @@ namespace Limitless
                 continue;
 
             if (!managedError.empty())
+                continue;
+
+            if (!readBackManagedScriptExposedProperties(entity, scriptIndex, "OnUpdate"))
+                continue;
+
+            scriptEntry = tryGetManagedEntry(entity, scriptIndex);
+            if (!scriptEntry || scriptEntry->RuntimeInstanceId == 0)
                 continue;
 
             const auto* transformAfterUpdate = m_Registry.try_get<TransformComponent>(entity);
@@ -2256,6 +2295,31 @@ namespace Limitless
             destroyManagedScriptRuntime(*scriptEntry);
             scriptEntry->RuntimeWarnedMissingHost = false;
             scriptEntry->RuntimeWarnedMissingClass = false;
+        };
+
+        auto readBackManagedScriptExposedProperties = [&](entt::entity scriptEntity,
+                                                          size_t scriptIndex,
+                                                          std::string_view callbackName) {
+            ManagedScriptEntry* scriptEntry = tryGetManagedEntry(scriptEntity, scriptIndex);
+            if (!scriptEntry || scriptEntry->RuntimeInstanceId == 0)
+                return false;
+
+            std::string managedError;
+            if (!ManagedScriptHost::ReadBackScriptExposedProperties(scriptEntry->RuntimeInstanceId,
+                                                                    this,
+                                                                    scriptEntry->ExposedProperties,
+                                                                    &scriptEntry->RuntimeExposedPropertiesRevision,
+                                                                    &managedError))
+            {
+                std::string readBackLabel = std::string("ReadBackExposedProperties after ") + std::string(callbackName);
+                handleManagedScriptCallbackFailure(scriptEntity,
+                                                  scriptIndex,
+                                                  readBackLabel,
+                                                  managedError.empty() ? "unknown error" : managedError.c_str());
+                return false;
+            }
+
+            return true;
         };
 
         const bool validateParallelScriptAccessMasks =
@@ -3010,6 +3074,13 @@ namespace Limitless
                 if (!managedError.empty())
                     continue;
 
+                if (!readBackManagedScriptExposedProperties(entity, scriptIndex, "OnCreate"))
+                    continue;
+
+                scriptEntry = tryGetManagedEntry(entity, scriptIndex);
+                if (!scriptEntry || scriptEntry->RuntimeInstanceId == 0)
+                    continue;
+
                 scriptEntry->RuntimeInitialized = true;
             }
 
@@ -3040,6 +3111,13 @@ namespace Limitless
                 continue;
 
             if (!managedError.empty())
+                continue;
+
+            if (!readBackManagedScriptExposedProperties(entity, scriptIndex, "OnFixedUpdate"))
+                continue;
+
+            scriptEntry = tryGetManagedEntry(entity, scriptIndex);
+            if (!scriptEntry || scriptEntry->RuntimeInstanceId == 0)
                 continue;
 
             const auto* transformAfterFixedUpdate = m_Registry.try_get<TransformComponent>(entity);

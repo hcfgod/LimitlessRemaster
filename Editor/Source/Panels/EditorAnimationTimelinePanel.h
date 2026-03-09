@@ -16,7 +16,7 @@ namespace Limitless
             bool IsPlaying = false;
         };
 
-        void Draw(bool& isOpen, const std::string& animationClipAssetKey, EditorUndoService* undoService);
+        void Draw(bool& isOpen, const std::string& animationClipAssetKey, EditorUndoService* undoService, bool requestFocus = false);
         bool ApplyPendingChanges(EditorUndoService* undoService);
         bool TryGetActivePreview(ActivePreview& outPreview);
     }

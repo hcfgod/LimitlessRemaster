@@ -606,6 +606,105 @@ namespace Limitless::ManagedScriptHost
             return false;
         }
 
+        bool ScriptPropertyValuesEqual(const ScriptPropertyValue& left, const ScriptPropertyValue& right)
+        {
+            if (left.index() != right.index())
+                return false;
+
+            if (const auto* floatValue = std::get_if<float>(&left))
+                return *floatValue == std::get<float>(right);
+            if (const auto* integerValue = std::get_if<int32_t>(&left))
+                return *integerValue == std::get<int32_t>(right);
+            if (const auto* booleanValue = std::get_if<bool>(&left))
+                return *booleanValue == std::get<bool>(right);
+            if (const auto* vectorValue = std::get_if<glm::vec3>(&left))
+            {
+                const glm::vec3& rightValue = std::get<glm::vec3>(right);
+                return vectorValue->x == rightValue.x && vectorValue->y == rightValue.y && vectorValue->z == rightValue.z;
+            }
+            if (const auto* stringValue = std::get_if<std::string>(&left))
+                return *stringValue == std::get<std::string>(right);
+            if (const auto* entityValue = std::get_if<ScriptEntityReference>(&left))
+            {
+                const auto& rightValue = std::get<ScriptEntityReference>(right);
+                return entityValue->Tag == rightValue.Tag && entityValue->PrefabAssetKey == rightValue.PrefabAssetKey;
+            }
+            if (const auto* prefabValue = std::get_if<Prefab>(&left))
+                return prefabValue->AssetKey == std::get<Prefab>(right).AssetKey;
+
+            return false;
+        }
+
+        bool TryReadRuntimeFieldValue(const RuntimeInstance& runtimeInstance,
+                                      Scene* scene,
+                                      const ReflectedFieldDefinition& fieldDefinition,
+                                      ScriptPropertyValue& outValue,
+                                      std::string* errorMessage)
+        {
+            try
+            {
+                switch (fieldDefinition.Type)
+                {
+                    case ScriptPropertyType::Float:
+                        outValue = runtimeInstance.Object.GetFieldValue<float>(fieldDefinition.Name);
+                        return true;
+                    case ScriptPropertyType::Integer:
+                        outValue = runtimeInstance.Object.GetFieldValue<int32_t>(fieldDefinition.Name);
+                        return true;
+                    case ScriptPropertyType::Boolean:
+                        outValue = runtimeInstance.Object.GetFieldValue<bool>(fieldDefinition.Name);
+                        return true;
+                    case ScriptPropertyType::Vector3:
+                    {
+                        const ManagedVector3 value = runtimeInstance.Object.GetFieldValue<ManagedVector3>(fieldDefinition.Name);
+                        outValue = ToGlmVector3(value);
+                        return true;
+                    }
+                    case ScriptPropertyType::String:
+                        outValue = runtimeInstance.Object.GetFieldValue<std::string>(fieldDefinition.Name);
+                        return true;
+                    case ScriptPropertyType::Entity:
+                    {
+                        ScriptEntityReference entityReference{};
+                        Coral::ManagedObject entityObject = runtimeInstance.Object.GetFieldValue<Coral::ManagedObject>(fieldDefinition.Name);
+                        if (entityObject.IsValid() && scene != nullptr)
+                        {
+                            const uint32_t entityHandle = entityObject.GetPropertyValue<uint32_t>("Handle");
+                            if (entityHandle != static_cast<uint32_t>(entt::null))
+                            {
+                                const entt::entity resolvedEntity = scene->ResolveEntityReference(static_cast<entt::entity>(entityHandle));
+                                if (resolvedEntity != entt::null && scene->IsValid(resolvedEntity))
+                                {
+                                    if (const auto* tagComponent = scene->GetRegistry().try_get<TagComponent>(resolvedEntity))
+                                        entityReference.Tag = tagComponent->Tag;
+                                }
+                            }
+                        }
+
+                        outValue = std::move(entityReference);
+                        return true;
+                    }
+                    case ScriptPropertyType::Prefab:
+                        outValue = Prefab{};
+                        return true;
+                }
+            }
+            catch (const std::exception& exception)
+            {
+                if (errorMessage != nullptr)
+                    *errorMessage = exception.what();
+                return false;
+            }
+            catch (...)
+            {
+                if (errorMessage != nullptr)
+                    *errorMessage = "non-standard exception while reading managed exposed properties";
+                return false;
+            }
+
+            return false;
+        }
+
         std::vector<ReflectedFieldDefinition> ReflectManagedFields(Coral::Type& type)
         {
             std::vector<ReflectedFieldDefinition> reflectedFields;
@@ -5503,6 +5602,72 @@ namespace Limitless::ManagedScriptHost
 
         runtimeInstance->LastSynchronizedExposedPropertiesRevision = revision;
         return ConsumeInvocationStatus(errorMessage);
+    }
+
+    bool ReadBackScriptExposedProperties(uint64_t instanceId,
+                                         Scene* scene,
+                                         std::unordered_map<std::string, ScriptPropertyValue>& exposedProperties,
+                                         uint64_t* revision,
+                                         std::string* errorMessage)
+    {
+        RuntimeInstance* runtimeInstance = FindMutableRuntimeInstance(instanceId);
+        if (runtimeInstance == nullptr)
+        {
+            if (errorMessage != nullptr)
+                *errorMessage = "managed runtime instance was not found";
+            return false;
+        }
+
+        const DiscoveredScriptClass* discoveredClass = FindDiscoveredClassMetadata(runtimeInstance->ClassName);
+        if (discoveredClass == nullptr)
+        {
+            if (errorMessage != nullptr)
+                *errorMessage = "managed class metadata was not found";
+            return false;
+        }
+
+        bool changed = false;
+        for (const ReflectedFieldDefinition& fieldDefinition : discoveredClass->ReflectedFields)
+        {
+            ScriptPropertyValue propertyValue = fieldDefinition.DefaultValue;
+            if (!TryReadRuntimeFieldValue(*runtimeInstance, scene, fieldDefinition, propertyValue, errorMessage))
+            {
+                if (errorMessage != nullptr && errorMessage->empty())
+                    *errorMessage = "failed reading managed field '" + fieldDefinition.Name + "'";
+                return false;
+            }
+
+            const auto propertyIterator = exposedProperties.find(fieldDefinition.Name);
+            if (propertyIterator == exposedProperties.end())
+            {
+                exposedProperties.emplace(fieldDefinition.Name, std::move(propertyValue));
+                changed = true;
+                continue;
+            }
+
+            if (ScriptPropertyValuesEqual(propertyIterator->second, propertyValue))
+                continue;
+
+            propertyIterator->second = std::move(propertyValue);
+            changed = true;
+        }
+
+        if (!ConsumeInvocationStatus(errorMessage))
+            return false;
+
+        if (changed)
+        {
+            if (revision != nullptr)
+                ++(*revision);
+
+            runtimeInstance->LastSynchronizedExposedPropertiesRevision = revision != nullptr
+                ? *revision
+                : runtimeInstance->LastSynchronizedExposedPropertiesRevision + 1;
+        }
+
+        if (errorMessage != nullptr)
+            errorMessage->clear();
+        return true;
     }
 
     bool InvokeScriptOnCreate(uint64_t instanceId, Scene* scene, std::string* errorMessage)

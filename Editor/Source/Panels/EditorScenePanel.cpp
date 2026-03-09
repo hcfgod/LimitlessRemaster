@@ -737,6 +737,7 @@ namespace Limitless::EditorScenePanel
     }
 
     void Draw(Scene* scene,
+              bool& isOpen,
               EditorScenePanelState& state,
               entt::entity& selectedEntity,
               std::string& selectedTextureAssetKey,
@@ -760,7 +761,12 @@ namespace Limitless::EditorScenePanel
               const std::function<bool(entt::entity)>& onUnpackPrefabEntity)
     {
         EditorPanelStyle::PushPanelVisualStyle();
-        ImGui::Begin("Scene");
+        if (!ImGui::Begin("Scene", &isOpen))
+        {
+            ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
+            return;
+        }
 
         state.DrawOrderEntities.clear();
         PruneInvalidEntitySelection(scene, state.MultiSelectedEntities);

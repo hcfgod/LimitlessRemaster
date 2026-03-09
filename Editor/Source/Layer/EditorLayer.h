@@ -15,6 +15,7 @@
 #include "EditorSpriteEditor.h"
 #include "EditorTilePalettePanel.h"
 #include "EditorViewportPanel.h"
+#include "Utilities/EditorLayoutManager.h"
 #include "Core/Concurrency/AsyncIO.h"
 #include "Undo/EditorUndoService.h"
 #include "Graphics/Texture.h"
@@ -67,6 +68,8 @@ namespace Limitless
 
         void DrawMenuBar();
         void ResetLayoutToDefault();
+        void DrawLayoutSavePopup();
+        void DrawLayoutDeletePopup();
         void DrawViewportPanel();
         void DrawScenePanel();
         void DrawInspectorPanel();
@@ -121,6 +124,15 @@ namespace Limitless
         bool EnsureSceneSwitchAllowed(const std::function<void()>& deferredSwitchAction);
         void BeginSceneSwitch();
         void PersistProjectSessionState();
+        Editor::EditorLayoutWindowState CaptureLayoutWindowState() const;
+        void ApplyLayoutWindowState(const Editor::EditorLayoutWindowState& state);
+        class ImGuiLayer* GetImGuiLayer() const;
+        bool SaveWorkingLayoutToDisk();
+        bool LoadLayoutByName(const std::string& layoutName);
+        bool SaveCurrentLayoutAs(const std::string& layoutName);
+        bool DeleteSavedLayout(const std::string& layoutName);
+        void RequestOpenSaveLayoutPopup(const std::string& initialLayoutName = {});
+        void RequestOpenDeleteLayoutPopup(const std::string& layoutName);
         void RefreshProjectRenderSettings();
         void ApplyProjectRenderSettings();
         void RefreshProjectPhysics2DSettings();
@@ -235,6 +247,11 @@ namespace Limitless
         std::filesystem::path m_SaveSceneFolderPath = "Scenes";
         std::array<char, 256> m_SaveSceneFileNameBuffer{};
 
+        bool m_ShowScenePanel = true;
+        bool m_ShowInspectorPanel = true;
+        bool m_ShowProjectPanel = true;
+        bool m_ShowSceneView = true;
+        bool m_ShowGameView = true;
         bool m_ShowDemoWindow = false;
         bool m_ShowProjectSettingsWindow = false;
         bool m_ShowAssetDiagnosticsWindow = false;
@@ -246,6 +263,13 @@ namespace Limitless
         bool m_ShowAnimationTimelinePanel = true;
         bool m_ShowAnimatorGraphPanel = true;
         bool m_ShowBuildSettingsWindow = false;
+        std::string m_ActiveLayoutName = Editor::EditorLayoutManager::GetDefaultLayoutName();
+        bool m_RequestOpenSaveLayoutPopup = false;
+        bool m_SaveLayoutPopupOpen = false;
+        bool m_RequestOpenDeleteLayoutPopup = false;
+        bool m_DeleteLayoutPopupOpen = false;
+        std::string m_PendingDeleteLayoutName;
+        std::array<char, 256> m_SaveLayoutNameBuffer{};
         bool m_ConsoleAutoScroll = true;
         bool m_ConsoleShowScriptLogs = true;
         bool m_ConsoleShowEngineLogs = true;

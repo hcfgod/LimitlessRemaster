@@ -3,7 +3,9 @@
 #include "Core/Layer.h"
 #include "Graphics/GraphicsContext.h"
 
+#include <filesystem>
 #include <string>
+#include <unordered_map>
 
 namespace Limitless
 {
@@ -28,6 +30,12 @@ namespace Limitless
         void BeginFrame();
         /// Called by Application after layer render (render ImGui draw data).
         void EndFrame();
+        const std::string& GetLayoutIniPath() const { return m_LayoutIniPath; }
+        const std::string& GetDefaultLayoutIniPath() const { return m_DefaultLayoutIniPath; }
+        bool SetLayoutIniPath(const std::filesystem::path& layoutIniPath);
+        bool LoadLayoutFromDisk(const std::filesystem::path& layoutIniPath);
+        bool SaveCurrentLayoutToDisk(const std::filesystem::path& layoutIniPath) const;
+        bool HasPendingLayoutLoad() const { return !m_PendingLayoutLoadPath.empty(); }
 
     private:
         void OnAttachOpenGL(class Window& window, class GraphicsContext* context);
@@ -36,7 +44,13 @@ namespace Limitless
         GraphicsAPI m_GraphicsAPI = GraphicsAPI::OpenGL;  ///< Active backend (set at attach).
         bool m_ShowDemoWindow = false;  ///< Toggle ImGui demo window (EditorLayer provides its own via menu).
         bool m_ShowDockspace = true;  ///< Toggle default dockspace (enabled by default).
+        bool m_SubmittedDockspaceThisFrame = false;
         std::string m_LayoutIniPath;  ///< Stable storage for ImGuiIO::IniFilename.
+        std::string m_DefaultLayoutIniPath;
+        std::string m_PendingLayoutLoadPath;
+        std::unordered_map<unsigned int, float> m_DockSplitRatios;
+        float m_LastDockspaceWorkWidth = 0.0f;
+        float m_LastDockspaceWorkHeight = 0.0f;
     };
 
 }  // namespace Limitless

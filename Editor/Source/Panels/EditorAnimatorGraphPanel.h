@@ -8,7 +8,7 @@ namespace Limitless
 
     namespace EditorAnimatorGraphPanel
     {
-        void Draw(bool& isOpen, const std::string& animatorControllerAssetKey, EditorUndoService* undoService);
+        void Draw(bool& isOpen, const std::string& animatorControllerAssetKey, EditorUndoService* undoService, bool requestFocus = false);
         bool ApplyPendingChanges(EditorUndoService* undoService);
     }
 }

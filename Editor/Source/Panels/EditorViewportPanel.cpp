@@ -2784,6 +2784,7 @@ namespace Limitless::EditorViewportPanel
     void Draw(uint32_t& sceneViewWidthPixels,
               uint32_t& sceneViewHeightPixels,
               std::shared_ptr<Framebuffer>& sceneViewFramebuffer,
+              bool& showSceneView,
               bool& sceneViewFocused,
               bool& sceneViewHovered,
               bool& sceneViewRectValid,
@@ -2792,6 +2793,7 @@ namespace Limitless::EditorViewportPanel
               uint32_t& gameViewWidthPixels,
               uint32_t& gameViewHeightPixels,
               std::shared_ptr<Framebuffer>& gameViewFramebuffer,
+              bool& showGameView,
               bool& gameViewFocused,
               bool& gameViewHovered,
               bool& gameViewRectValid,
@@ -2828,9 +2830,13 @@ namespace Limitless::EditorViewportPanel
               bool showGizmoToolbar)
     {
         (void)editorCameraController;
+        sceneViewFocused = false;
+        sceneViewHovered = false;
         sceneViewRectValid = false;
         sceneViewRectMinPixels = glm::vec2(0.0f);
         sceneViewRectMaxPixels = glm::vec2(0.0f);
+        gameViewFocused = false;
+        gameViewHovered = false;
         gameViewRectValid = false;
         gameViewRectMinPixels = glm::vec2(0.0f);
         gameViewRectMaxPixels = glm::vec2(0.0f);
@@ -2938,64 +2944,64 @@ namespace Limitless::EditorViewportPanel
         };
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        if (focusSceneViewRequested)
+        if (showSceneView)
         {
-            ImGui::SetNextWindowFocus();
-            focusSceneViewRequested = false;
-        }
-        ImGui::Begin("Scene View");
-
-        sceneViewFocused = ImGui::IsWindowFocused();
-        sceneViewHovered = ImGui::IsWindowHovered();
-        const bool skipSceneRender = ImGui::IsWindowCollapsed();
-        const ImVec2 sceneViewSize = ImGui::GetContentRegionAvail();
-        const uint32_t sceneWidth = sanitizeViewportDimension(sceneViewSize.x);
-        const uint32_t sceneHeight = sanitizeViewportDimension(sceneViewSize.y);
-
-        if (!skipSceneRender && sceneWidth > 0 && sceneHeight > 0)
-        {
-            ensureSceneViewFramebuffer(sceneWidth, sceneHeight);
-            sceneViewWidthPixels = sceneWidth;
-            sceneViewHeightPixels = sceneHeight;
-
-            if (sceneViewCamera)
-                sceneViewCamera->SetViewportSize(sceneWidth, sceneHeight);
-
-            const bool isSceneLoading = scene && scene->GetLoadState() == Scene::LoadState::Loading;
-            if (sceneViewCamera && scene && sceneViewFramebuffer && !isSceneLoading)
-                SceneRenderer::RenderToViewport(*scene, *sceneViewCamera, sceneViewFramebuffer, sceneWidth, sceneHeight);
-
-            if (sceneViewFramebuffer && sceneViewFramebuffer->GetColorAttachment())
+            if (focusSceneViewRequested)
             {
-                ImGui::Image(
-                    static_cast<ImTextureID>(GetTextureNativeHandle(sceneViewFramebuffer->GetColorAttachment())),
-                    ImVec2(static_cast<float>(sceneWidth), static_cast<float>(sceneHeight)),
-                    ImVec2(0, 1),
-                    ImVec2(1, 0));
-                const ImVec2 sceneRectMin = ImGui::GetItemRectMin();
-                const ImVec2 sceneRectMax = ImGui::GetItemRectMax();
-                sceneViewRectValid = true;
-                sceneViewRectMinPixels = glm::vec2(sceneRectMin.x, sceneRectMin.y);
-                sceneViewRectMaxPixels = glm::vec2(sceneRectMax.x, sceneRectMax.y);
+                ImGui::SetNextWindowFocus();
+                focusSceneViewRequested = false;
+            }
+            const bool sceneWindowVisible = ImGui::Begin("Scene View", &showSceneView);
 
-                if (scene && sceneViewCamera && !isSceneLoading)
+            sceneViewFocused = ImGui::IsWindowFocused();
+            sceneViewHovered = ImGui::IsWindowHovered();
+            const bool skipSceneRender = !sceneWindowVisible || ImGui::IsWindowCollapsed();
+            const ImVec2 sceneViewSize = ImGui::GetContentRegionAvail();
+            const uint32_t sceneWidth = sanitizeViewportDimension(sceneViewSize.x);
+            const uint32_t sceneHeight = sanitizeViewportDimension(sceneViewSize.y);
+
+            if (!skipSceneRender && sceneWidth > 0 && sceneHeight > 0)
+            {
+                ensureSceneViewFramebuffer(sceneWidth, sceneHeight);
+                sceneViewWidthPixels = sceneWidth;
+                sceneViewHeightPixels = sceneHeight;
+
+                if (sceneViewCamera)
+                    sceneViewCamera->SetViewportSize(sceneWidth, sceneHeight);
+
+                const bool isSceneLoading = scene && scene->GetLoadState() == Scene::LoadState::Loading;
+                if (sceneViewCamera && scene && sceneViewFramebuffer && !isSceneLoading)
+                    SceneRenderer::RenderToViewport(*scene, *sceneViewCamera, sceneViewFramebuffer, sceneWidth, sceneHeight);
+
+                if (sceneViewFramebuffer && sceneViewFramebuffer->GetColorAttachment())
                 {
-                    const ImVec2 viewportMin = sceneRectMin;
-                    const ImVec2 viewportMax = sceneRectMax;
-                    ImDrawList* drawList = ImGui::GetWindowDrawList();
-                    const bool physicsOverlayCapturedInput = DrawSelectedPhysicsOverlays(drawList,
-                                                                                         *scene,
-                                                                                         *sceneViewCamera,
-                                                                                         selectedEntity,
-                                                                                         viewportMin,
-                                                                                         viewportMax,
-                                                                                         static_cast<float>(sceneWidth),
-                                                                                         static_cast<float>(sceneHeight),
-                                                                                         playModeState,
-                                                                                         undoService);
-                    if (tilemapEditorState)
+                    ImGui::Image(
+                        static_cast<ImTextureID>(GetTextureNativeHandle(sceneViewFramebuffer->GetColorAttachment())),
+                        ImVec2(static_cast<float>(sceneWidth), static_cast<float>(sceneHeight)),
+                        ImVec2(0, 1),
+                        ImVec2(1, 0));
+                    const ImVec2 sceneRectMin = ImGui::GetItemRectMin();
+                    const ImVec2 sceneRectMax = ImGui::GetItemRectMax();
+                    sceneViewRectValid = true;
+                    sceneViewRectMinPixels = glm::vec2(sceneRectMin.x, sceneRectMin.y);
+                    sceneViewRectMaxPixels = glm::vec2(sceneRectMax.x, sceneRectMax.y);
+
+                    if (scene && sceneViewCamera && !isSceneLoading)
                     {
-                        // Grid2D + TilemapLayer editing.
+                        const ImVec2 viewportMin = sceneRectMin;
+                        const ImVec2 viewportMax = sceneRectMax;
+                        ImDrawList* drawList = ImGui::GetWindowDrawList();
+                        const bool physicsOverlayCapturedInput = DrawSelectedPhysicsOverlays(drawList,
+                                                                                             *scene,
+                                                                                             *sceneViewCamera,
+                                                                                             selectedEntity,
+                                                                                             viewportMin,
+                                                                                             viewportMax,
+                                                                                             static_cast<float>(sceneWidth),
+                                                                                             static_cast<float>(sceneHeight),
+                                                                                             playModeState,
+                                                                                             undoService);
+                        if (tilemapEditorState)
                         {
                             auto& reg = scene->GetRegistry();
                             entt::entity gridEntity = tilemapEditorState->ActiveGridEntity;
@@ -3015,15 +3021,17 @@ namespace Limitless::EditorViewportPanel
                                 for (entt::entity child : scene->GetChildren(selectedEntity))
                                 {
                                     if (reg.all_of<TilemapLayerComponent>(child))
-                                    { layerEntity = child; break; }
+                                    {
+                                        layerEntity = child;
+                                        break;
+                                    }
                                 }
                             }
                             else if (!preferredTargetsValid && reg.all_of<TilemapLayerComponent>(selectedEntity))
                             {
                                 layerEntity = selectedEntity;
                                 entt::entity parent = scene->GetParent(selectedEntity);
-                                if (parent != entt::null && scene->IsValid(parent) &&
-                                    reg.all_of<Grid2DComponent>(parent))
+                                if (parent != entt::null && scene->IsValid(parent) && reg.all_of<Grid2DComponent>(parent))
                                     gridEntity = parent;
                             }
 
@@ -3044,158 +3052,196 @@ namespace Limitless::EditorViewportPanel
                                     std::string{});
                             }
                         }
-                    }
 
-                    // --- Selection highlights for all multi-selected entities ---
-                    if (scenePanelState)
-                    {
-                        for (entt::entity entity : scenePanelState->MultiSelectedEntities)
+                        if (scenePanelState)
                         {
-                            const ImU32 highlightColor = (entity == selectedEntity)
-                                ? IM_COL32(255, 180, 50, 220)
-                                : IM_COL32(100, 180, 255, 180);
-                            DrawSelectionHighlight(drawList, *scene, *sceneViewCamera, entity,
-                                                   viewportMin, static_cast<float>(sceneWidth), static_cast<float>(sceneHeight),
-                                                   highlightColor);
+                            for (entt::entity entity : scenePanelState->MultiSelectedEntities)
+                            {
+                                const ImU32 highlightColor = (entity == selectedEntity)
+                                    ? IM_COL32(255, 180, 50, 220)
+                                    : IM_COL32(100, 180, 255, 180);
+                                DrawSelectionHighlight(drawList, *scene, *sceneViewCamera, entity,
+                                                       viewportMin, static_cast<float>(sceneWidth), static_cast<float>(sceneHeight),
+                                                       highlightColor);
+                            }
                         }
-                    }
-                    else if (selectedEntity != entt::null)
-                    {
-                        DrawSelectionHighlight(drawList, *scene, *sceneViewCamera, selectedEntity,
-                                               viewportMin, static_cast<float>(sceneWidth), static_cast<float>(sceneHeight),
-                                               IM_COL32(255, 180, 50, 220));
-                    }
+                        else if (selectedEntity != entt::null)
+                        {
+                            DrawSelectionHighlight(drawList, *scene, *sceneViewCamera, selectedEntity,
+                                                   viewportMin, static_cast<float>(sceneWidth), static_cast<float>(sceneHeight),
+                                                   IM_COL32(255, 180, 50, 220));
+                        }
 
-                    // --- Transform gizmos ---
-                    bool gizmoCapturedInput = physicsOverlayCapturedInput;
-                    if (gizmoState && !physicsOverlayCapturedInput)
-                    {
-                        static const std::vector<entt::entity> kEmptyEntities;
-                        const std::vector<entt::entity>& multiEntities = scenePanelState
-                            ? scenePanelState->MultiSelectedEntities
-                            : kEmptyEntities;
-                        gizmoCapturedInput = DrawAndHandleTransformGizmos(drawList,
-                            *scene,
-                            *sceneViewCamera,
-                            selectedEntity,
-                            multiEntities,
-                            viewportMin,
-                            viewportMax,
-                            static_cast<float>(sceneWidth),
-                            static_cast<float>(sceneHeight),
-                            playModeState,
-                            undoService,
-                            *gizmoState) || gizmoCapturedInput;
-                    }
+                        bool gizmoCapturedInput = physicsOverlayCapturedInput;
+                        if (gizmoState && !physicsOverlayCapturedInput)
+                        {
+                            static const std::vector<entt::entity> kEmptyEntities;
+                            const std::vector<entt::entity>& multiEntities = scenePanelState
+                                ? scenePanelState->MultiSelectedEntities
+                                : kEmptyEntities;
+                            gizmoCapturedInput = DrawAndHandleTransformGizmos(drawList,
+                                *scene,
+                                *sceneViewCamera,
+                                selectedEntity,
+                                multiEntities,
+                                viewportMin,
+                                viewportMax,
+                                static_cast<float>(sceneWidth),
+                                static_cast<float>(sceneHeight),
+                                playModeState,
+                                undoService,
+                                *gizmoState) || gizmoCapturedInput;
+                        }
 
-                    // --- Scene view entity picking (click to select) ---
-                    if (!gizmoCapturedInput && scene && sceneViewCamera)
-                    {
-                        HandleSceneViewPicking(*scene, *sceneViewCamera, selectedEntity, scenePanelState,
+                        if (!gizmoCapturedInput && scene && sceneViewCamera)
+                        {
+                            HandleSceneViewPicking(*scene, *sceneViewCamera, selectedEntity, scenePanelState,
+                                                   viewportMin, viewportMax,
+                                                   static_cast<float>(sceneWidth), static_cast<float>(sceneHeight),
+                                                   sceneViewHovered, gizmoState);
+                        }
+
+                        if (!gizmoCapturedInput && scene && sceneViewCamera)
+                        {
+                            HandleBoxSelection(drawList, *scene, *sceneViewCamera, selectedEntity, scenePanelState,
                                                viewportMin, viewportMax,
                                                static_cast<float>(sceneWidth), static_cast<float>(sceneHeight),
                                                sceneViewHovered, gizmoState);
-                    }
+                        }
 
-                    // --- Box (marquee) selection ---
-                    if (!gizmoCapturedInput && scene && sceneViewCamera)
-                    {
-                        HandleBoxSelection(drawList, *scene, *sceneViewCamera, selectedEntity, scenePanelState,
-                                           viewportMin, viewportMax,
-                                           static_cast<float>(sceneWidth), static_cast<float>(sceneHeight),
-                                           sceneViewHovered, gizmoState);
-                    }
-
-                    // --- Gizmo mode toolbar overlay ---
-                    if (gizmoState && showGizmoToolbar)
-                    {
-                        // Position toolbar so it doesn't overlap FPS overlay
-                        const ImVec2 toolbarViewportMin = showFpsOverlay
-                            ? ImVec2(viewportMin.x, viewportMin.y + 145.0f)
-                            : viewportMin;
-                        DrawGizmoToolbar(drawList, toolbarViewportMin, viewportMax, *gizmoState);
-                    }
-                }
-
-                // --- Keyboard shortcuts for gizmo mode (W/E/R/Q) ---
-                if (gizmoState)
-                    HandleGizmoKeyboardShortcuts(*gizmoState, sceneViewFocused || sceneViewHovered);
-
-                if (ImGui::BeginDragDropTarget())
-                {
-                    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(scenePayloadId))
-                    {
-                        const char* key = static_cast<const char*>(payload->Data);
-                        if (key && key[0] && onSceneDropped)
+                        if (gizmoState && showGizmoToolbar)
                         {
-                            onSceneDropped(key);
-                            scene = nullptr;
+                            const ImVec2 toolbarViewportMin = showFpsOverlay
+                                ? ImVec2(viewportMin.x, viewportMin.y + 145.0f)
+                                : viewportMin;
+                            DrawGizmoToolbar(drawList, toolbarViewportMin, viewportMax, *gizmoState);
                         }
                     }
-                    if (prefabPayloadId)
+
+                    if (gizmoState)
+                        HandleGizmoKeyboardShortcuts(*gizmoState, sceneViewFocused || sceneViewHovered);
+
+                    if (ImGui::BeginDragDropTarget())
                     {
-                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(prefabPayloadId))
+                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(scenePayloadId))
                         {
-                            std::string key;
-                            if (payload->Data && payload->DataSize > 0)
+                            const char* key = static_cast<const char*>(payload->Data);
+                            if (key && key[0] && onSceneDropped)
                             {
-                                const auto* keyChars = static_cast<const char*>(payload->Data);
-                                const int keyLength = std::max(0, payload->DataSize - 1);
-                                key.assign(keyChars, keyChars + keyLength);
+                                onSceneDropped(key);
+                                scene = nullptr;
                             }
-                            if (!key.empty() && onPrefabDropped)
+                        }
+                        if (prefabPayloadId)
+                        {
+                            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(prefabPayloadId))
                             {
-                                glm::vec3 worldPosition(0.0f);
-                                if (sceneViewCamera)
+                                std::string key;
+                                if (payload->Data && payload->DataSize > 0)
+                                {
+                                    const auto* keyChars = static_cast<const char*>(payload->Data);
+                                    const int keyLength = std::max(0, payload->DataSize - 1);
+                                    key.assign(keyChars, keyChars + keyLength);
+                                }
+                                if (!key.empty() && onPrefabDropped)
+                                {
+                                    glm::vec3 worldPosition(0.0f);
+                                    if (sceneViewCamera)
+                                    {
+                                        const ImVec2 viewportMin = ImGui::GetItemRectMin();
+                                        const ImVec2 viewportMax = ImGui::GetItemRectMax();
+                                        const ImVec2 mousePos = ImGui::GetMousePos();
+                                        if (!TryComputeDropWorldPosition(*sceneViewCamera, viewportMin, viewportMax, mousePos, worldPosition))
+                                            worldPosition = glm::vec3(0.0f);
+                                    }
+                                    onPrefabDropped(key, worldPosition);
+                                }
+                            }
+                        }
+                        if (materialPayloadId)
+                        {
+                            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(materialPayloadId))
+                            {
+                                const char* key = static_cast<const char*>(payload->Data);
+                                if (key && key[0] && scene && sceneViewCamera)
                                 {
                                     const ImVec2 viewportMin = ImGui::GetItemRectMin();
                                     const ImVec2 viewportMax = ImGui::GetItemRectMax();
                                     const ImVec2 mousePos = ImGui::GetMousePos();
-                                    if (!TryComputeDropWorldPosition(*sceneViewCamera, viewportMin, viewportMax, mousePos, worldPosition))
-                                        worldPosition = glm::vec3(0.0f);
+
+                                    entt::entity targetEntity = entt::null;
+                                    if (mousePos.x >= viewportMin.x && mousePos.x <= viewportMax.x &&
+                                        mousePos.y >= viewportMin.y && mousePos.y <= viewportMax.y)
+                                    {
+                                        const float viewportWidth = viewportMax.x - viewportMin.x;
+                                        const float viewportHeight = viewportMax.y - viewportMin.y;
+                                        const auto picked = PickTopmostSpriteEntityAtPoint(*scene, *sceneViewCamera, viewportMin, viewportWidth, viewportHeight, mousePos);
+                                        if (picked.has_value())
+                                            targetEntity = *picked;
+                                    }
+
+                                    if (targetEntity == entt::null && selectedEntity != entt::null && scene->IsValid(selectedEntity))
+                                        targetEntity = selectedEntity;
+
+                                    if (targetEntity != entt::null && scene->IsValid(targetEntity))
+                                    {
+                                        auto& registry = scene->GetRegistry();
+                                        if (registry.all_of<SpriteComponent>(targetEntity))
+                                        {
+                                            auto* material = registry.try_get<MaterialComponent>(targetEntity);
+                                            if (!material)
+                                                material = &registry.emplace<MaterialComponent>(targetEntity);
+
+                                            material->MaterialKey = key;
+                                            material->CachedMaterial.reset();
+                                            material->MaterialLoadAttempted = false;
+
+                                            selectedEntity = targetEntity;
+                                            selectedTextureAssetKey.clear();
+                                            cachedTextureAsset.reset();
+                                            selectedMaterialAssetKey.clear();
+                                            cachedMaterialAsset.reset();
+                                            selectedNativeScriptAssetKey.clear();
+                                        }
+                                    }
                                 }
-                                onPrefabDropped(key, worldPosition);
                             }
                         }
-                    }
-                    if (materialPayloadId)
-                    {
-                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(materialPayloadId))
+                        if (assetMovePayloadId)
                         {
-                            const char* key = static_cast<const char*>(payload->Data);
-                            if (key && key[0] && scene && sceneViewCamera)
+                            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(assetMovePayloadId))
                             {
-                                const ImVec2 viewportMin = ImGui::GetItemRectMin();
-                                const ImVec2 viewportMax = ImGui::GetItemRectMax();
-                                const ImVec2 mousePos = ImGui::GetMousePos();
-
-                                entt::entity targetEntity = entt::null;
-                                if (mousePos.x >= viewportMin.x && mousePos.x <= viewportMax.x &&
-                                    mousePos.y >= viewportMin.y && mousePos.y <= viewportMax.y)
+                                std::string assetKey;
+                                if (payload->Data && payload->DataSize > 0)
                                 {
-                                    const float viewportWidth = viewportMax.x - viewportMin.x;
-                                    const float viewportHeight = viewportMax.y - viewportMin.y;
-                                    const auto picked = PickTopmostSpriteEntityAtPoint(*scene, *sceneViewCamera, viewportMin, viewportWidth, viewportHeight, mousePos);
-                                    if (picked.has_value())
-                                        targetEntity = *picked;
+                                    const auto* keyChars = static_cast<const char*>(payload->Data);
+                                    const int keyLength = std::max(0, payload->DataSize - 1);
+                                    assetKey.assign(keyChars, keyChars + keyLength);
                                 }
 
-                                if (targetEntity == entt::null && selectedEntity != entt::null && scene->IsValid(selectedEntity))
-                                    targetEntity = selectedEntity;
-
-                                if (targetEntity != entt::null && scene->IsValid(targetEntity))
+                                if (!assetKey.empty() && scene && sceneViewCamera)
                                 {
-                                    auto& registry = scene->GetRegistry();
-                                    if (registry.all_of<SpriteComponent>(targetEntity))
+                                    const ImVec2 viewportMin = ImGui::GetItemRectMin();
+                                    const ImVec2 viewportMax = ImGui::GetItemRectMax();
+                                    const ImVec2 mousePos = ImGui::GetMousePos();
+
+                                    entt::entity targetEntity = entt::null;
+                                    if (mousePos.x >= viewportMin.x && mousePos.x <= viewportMax.x &&
+                                        mousePos.y >= viewportMin.y && mousePos.y <= viewportMax.y)
                                     {
-                                        auto* material = registry.try_get<MaterialComponent>(targetEntity);
-                                        if (!material)
-                                            material = &registry.emplace<MaterialComponent>(targetEntity);
+                                        const float viewportWidth = viewportMax.x - viewportMin.x;
+                                        const float viewportHeight = viewportMax.y - viewportMin.y;
+                                        const auto picked = PickTopmostSpriteEntityAtPoint(*scene, *sceneViewCamera, viewportMin, viewportWidth, viewportHeight, mousePos);
+                                        if (picked.has_value())
+                                            targetEntity = *picked;
+                                    }
 
-                                        material->MaterialKey = key;
-                                        material->CachedMaterial.reset();
-                                        material->MaterialLoadAttempted = false;
+                                    if (targetEntity == entt::null && selectedEntity != entt::null && scene->IsValid(selectedEntity))
+                                        targetEntity = selectedEntity;
 
+                                    if (targetEntity != entt::null && scene->IsValid(targetEntity) &&
+                                        TryAttachScriptAssetToEntity(scene, targetEntity, assetKey, undoService))
+                                    {
                                         selectedEntity = targetEntity;
                                         selectedTextureAssetKey.clear();
                                         cachedTextureAsset.reset();
@@ -3206,253 +3252,219 @@ namespace Limitless::EditorViewportPanel
                                 }
                             }
                         }
+                        ImGui::EndDragDropTarget();
                     }
-                    if (assetMovePayloadId)
+
+                    const bool sceneLoadingToastDrawn = drawLoadingOverlay(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+                    if (!sceneLoadingToastDrawn && !sceneViewCamera)
                     {
-                        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(assetMovePayloadId))
+                        const ImVec2 minPos = ImGui::GetItemRectMin();
+                        const ImVec2 maxPos = ImGui::GetItemRectMax();
+                        ImDrawList* drawList = ImGui::GetWindowDrawList();
+                        drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 180));
+
+                        const char* text = "Scene View: Editor camera is unavailable.";
+                        const ImVec2 textSize = ImGui::CalcTextSize(text);
+                        const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
+                        drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f), IM_COL32(255, 200, 120, 255), text);
+                    }
+
+                    if (showFpsOverlay)
+                    {
+                        const ImVec2 minPos = ImGui::GetItemRectMin();
+                        ImDrawList* drawList = ImGui::GetWindowDrawList();
+                        struct FpsOverlayHistory
                         {
-                            std::string assetKey;
-                            if (payload->Data && payload->DataSize > 0)
+                            std::array<float, 180> FrameTimesMs{};
+                            size_t NextIndex = 0;
+                            size_t SampleCount = 0;
+                        };
+                        static FpsOverlayHistory fpsHistory{};
+
+                        const float deltaTimeMs = std::max(0.0f, ImGui::GetIO().DeltaTime * 1000.0f);
+                        if (deltaTimeMs > 0.0f)
+                        {
+                            fpsHistory.FrameTimesMs[fpsHistory.NextIndex] = deltaTimeMs;
+                            fpsHistory.NextIndex = (fpsHistory.NextIndex + 1) % fpsHistory.FrameTimesMs.size();
+                            fpsHistory.SampleCount = std::min(fpsHistory.SampleCount + 1, fpsHistory.FrameTimesMs.size());
+                        }
+
+                        float minFrameMs = 0.0f;
+                        float maxFrameMs = 0.0f;
+                        float avgFrameMs = 0.0f;
+                        if (fpsHistory.SampleCount > 0)
+                        {
+                            minFrameMs = std::numeric_limits<float>::max();
+                            for (size_t sampleIndex = 0; sampleIndex < fpsHistory.SampleCount; ++sampleIndex)
                             {
-                                const auto* keyChars = static_cast<const char*>(payload->Data);
-                                const int keyLength = std::max(0, payload->DataSize - 1);
-                                assetKey.assign(keyChars, keyChars + keyLength);
+                                const size_t readIndex =
+                                    (fpsHistory.NextIndex + fpsHistory.FrameTimesMs.size() - fpsHistory.SampleCount + sampleIndex) %
+                                    fpsHistory.FrameTimesMs.size();
+                                const float sampleMs = fpsHistory.FrameTimesMs[readIndex];
+                                minFrameMs = std::min(minFrameMs, sampleMs);
+                                maxFrameMs = std::max(maxFrameMs, sampleMs);
+                                avgFrameMs += sampleMs;
+                            }
+                            avgFrameMs /= static_cast<float>(fpsHistory.SampleCount);
+                        }
+
+                        const float fps = (deltaTimeMs > 0.01f) ? (1000.0f / deltaTimeMs) : ImGui::GetIO().Framerate;
+                        const ImU32 statusColor = (deltaTimeMs <= 16.67f)
+                            ? IM_COL32(120, 255, 130, 255)
+                            : ((deltaTimeMs <= 33.33f) ? IM_COL32(255, 220, 100, 255) : IM_COL32(255, 120, 120, 255));
+
+                        const ImVec2 panelMin(minPos.x + 10.0f, minPos.y + 10.0f);
+                        const ImVec2 panelMax(panelMin.x + 280.0f, panelMin.y + 130.0f);
+                        drawList->AddRectFilled(panelMin, panelMax, IM_COL32(0, 0, 0, 165), 4.0f);
+                        drawList->AddRect(panelMin, panelMax, IM_COL32(255, 255, 255, 32), 4.0f);
+
+                        char titleBuffer[96]{};
+                        std::snprintf(titleBuffer, sizeof(titleBuffer), "FPS %d", static_cast<int>(std::round(fps)));
+                        drawList->AddText(ImVec2(panelMin.x + 8.0f, panelMin.y + 6.0f), statusColor, titleBuffer);
+
+                        char frameAvgBuffer[160]{};
+                        std::snprintf(frameAvgBuffer,
+                                      sizeof(frameAvgBuffer),
+                                      "Frame %.2f ms | Avg %.2f ms",
+                                      deltaTimeMs,
+                                      avgFrameMs);
+                        drawList->AddText(ImVec2(panelMin.x + 8.0f, panelMin.y + 24.0f), IM_COL32(215, 230, 255, 255), frameAvgBuffer);
+
+                        char minMaxBuffer[160]{};
+                        std::snprintf(minMaxBuffer,
+                                      sizeof(minMaxBuffer),
+                                      "Min %.2f ms | Max %.2f ms",
+                                      minFrameMs,
+                                      maxFrameMs);
+                        drawList->AddText(ImVec2(panelMin.x + 8.0f, panelMin.y + 40.0f), IM_COL32(215, 230, 255, 255), minMaxBuffer);
+
+                        const ImVec2 graphMin(panelMin.x + 8.0f, panelMin.y + 58.0f);
+                        const ImVec2 graphMax(panelMax.x - 8.0f, panelMax.y - 8.0f);
+                        drawList->AddRectFilled(graphMin, graphMax, IM_COL32(20, 24, 30, 220), 3.0f);
+                        drawList->AddRect(graphMin, graphMax, IM_COL32(255, 255, 255, 20), 3.0f);
+
+                        const float graphHeight = graphMax.y - graphMin.y;
+                        const float graphWidth = graphMax.x - graphMin.x;
+                        const float graphMaxMs = std::max(50.0f, maxFrameMs * 1.2f);
+                        auto msToY = [&](float milliseconds) {
+                            const float normalized = std::clamp(milliseconds / graphMaxMs, 0.0f, 1.0f);
+                            return graphMax.y - normalized * graphHeight;
+                        };
+
+                        const float y60 = msToY(16.67f);
+                        const float y30 = msToY(33.33f);
+                        drawList->AddLine(ImVec2(graphMin.x, y60), ImVec2(graphMax.x, y60), IM_COL32(110, 255, 120, 70), 1.0f);
+                        drawList->AddLine(ImVec2(graphMin.x, y30), ImVec2(graphMax.x, y30), IM_COL32(255, 220, 90, 70), 1.0f);
+
+                        if (fpsHistory.SampleCount >= 2)
+                        {
+                            const size_t baseIndex = (fpsHistory.NextIndex + fpsHistory.FrameTimesMs.size() - fpsHistory.SampleCount) % fpsHistory.FrameTimesMs.size();
+                            for (size_t pointIndex = 1; pointIndex < fpsHistory.SampleCount; ++pointIndex)
+                            {
+                                const size_t sampleIndexA = (baseIndex + pointIndex - 1) % fpsHistory.FrameTimesMs.size();
+                                const size_t sampleIndexB = (baseIndex + pointIndex) % fpsHistory.FrameTimesMs.size();
+                                const float sampleA = fpsHistory.FrameTimesMs[sampleIndexA];
+                                const float sampleB = fpsHistory.FrameTimesMs[sampleIndexB];
+
+                                const float xA = graphMin.x + (static_cast<float>(pointIndex - 1) / static_cast<float>(fpsHistory.SampleCount - 1)) * graphWidth;
+                                const float xB = graphMin.x + (static_cast<float>(pointIndex) / static_cast<float>(fpsHistory.SampleCount - 1)) * graphWidth;
+                                const float yA = msToY(sampleA);
+                                const float yB = msToY(sampleB);
+
+                                drawList->AddLine(ImVec2(xA, yA), ImVec2(xB, yB), IM_COL32(120, 200, 255, 220), 1.8f);
                             }
 
-                            if (!assetKey.empty() && scene && sceneViewCamera)
-                            {
-                                const ImVec2 viewportMin = ImGui::GetItemRectMin();
-                                const ImVec2 viewportMax = ImGui::GetItemRectMax();
-                                const ImVec2 mousePos = ImGui::GetMousePos();
-
-                                entt::entity targetEntity = entt::null;
-                                if (mousePos.x >= viewportMin.x && mousePos.x <= viewportMax.x &&
-                                    mousePos.y >= viewportMin.y && mousePos.y <= viewportMax.y)
-                                {
-                                    const float viewportWidth = viewportMax.x - viewportMin.x;
-                                    const float viewportHeight = viewportMax.y - viewportMin.y;
-                                    const auto picked = PickTopmostSpriteEntityAtPoint(*scene, *sceneViewCamera, viewportMin, viewportWidth, viewportHeight, mousePos);
-                                    if (picked.has_value())
-                                        targetEntity = *picked;
-                                }
-
-                                if (targetEntity == entt::null && selectedEntity != entt::null && scene->IsValid(selectedEntity))
-                                    targetEntity = selectedEntity;
-
-                                if (targetEntity != entt::null && scene->IsValid(targetEntity) &&
-                                    TryAttachScriptAssetToEntity(scene, targetEntity, assetKey, undoService))
-                                {
-                                    selectedEntity = targetEntity;
-                                    selectedTextureAssetKey.clear();
-                                    cachedTextureAsset.reset();
-                                    selectedMaterialAssetKey.clear();
-                                    cachedMaterialAsset.reset();
-                                    selectedNativeScriptAssetKey.clear();
-                                }
-                            }
+                            drawList->AddCircleFilled(ImVec2(graphMax.x, msToY(deltaTimeMs)), 2.5f, statusColor);
                         }
-                    }
-                    ImGui::EndDragDropTarget();
-                }
-
-                const bool sceneLoadingToastDrawn = drawLoadingOverlay(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
-                if (!sceneLoadingToastDrawn && !sceneViewCamera)
-                {
-                    const ImVec2 minPos = ImGui::GetItemRectMin();
-                    const ImVec2 maxPos = ImGui::GetItemRectMax();
-                    ImDrawList* drawList = ImGui::GetWindowDrawList();
-                    drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 180));
-
-                    const char* text = "Scene View: Editor camera is unavailable.";
-                    const ImVec2 textSize = ImGui::CalcTextSize(text);
-                    const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
-                    drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f), IM_COL32(255, 200, 120, 255), text);
-                }
-
-                if (showFpsOverlay)
-                {
-                    const ImVec2 minPos = ImGui::GetItemRectMin();
-                    ImDrawList* drawList = ImGui::GetWindowDrawList();
-                    struct FpsOverlayHistory
-                    {
-                        std::array<float, 180> FrameTimesMs{};
-                        size_t NextIndex = 0;
-                        size_t SampleCount = 0;
-                    };
-                    static FpsOverlayHistory fpsHistory{};
-
-                    const float deltaTimeMs = std::max(0.0f, ImGui::GetIO().DeltaTime * 1000.0f);
-                    if (deltaTimeMs > 0.0f)
-                    {
-                        fpsHistory.FrameTimesMs[fpsHistory.NextIndex] = deltaTimeMs;
-                        fpsHistory.NextIndex = (fpsHistory.NextIndex + 1) % fpsHistory.FrameTimesMs.size();
-                        fpsHistory.SampleCount = std::min(fpsHistory.SampleCount + 1, fpsHistory.FrameTimesMs.size());
-                    }
-
-                    float minFrameMs = 0.0f;
-                    float maxFrameMs = 0.0f;
-                    float avgFrameMs = 0.0f;
-                    if (fpsHistory.SampleCount > 0)
-                    {
-                        minFrameMs = std::numeric_limits<float>::max();
-                        for (size_t sampleIndex = 0; sampleIndex < fpsHistory.SampleCount; ++sampleIndex)
-                        {
-                            const size_t readIndex =
-                                (fpsHistory.NextIndex + fpsHistory.FrameTimesMs.size() - fpsHistory.SampleCount + sampleIndex) %
-                                fpsHistory.FrameTimesMs.size();
-                            const float sampleMs = fpsHistory.FrameTimesMs[readIndex];
-                            minFrameMs = std::min(minFrameMs, sampleMs);
-                            maxFrameMs = std::max(maxFrameMs, sampleMs);
-                            avgFrameMs += sampleMs;
-                        }
-                        avgFrameMs /= static_cast<float>(fpsHistory.SampleCount);
-                    }
-
-                    const float fps = (deltaTimeMs > 0.01f) ? (1000.0f / deltaTimeMs) : ImGui::GetIO().Framerate;
-                    const ImU32 statusColor = (deltaTimeMs <= 16.67f)
-                        ? IM_COL32(120, 255, 130, 255)
-                        : ((deltaTimeMs <= 33.33f) ? IM_COL32(255, 220, 100, 255) : IM_COL32(255, 120, 120, 255));
-
-                    const ImVec2 panelMin(minPos.x + 10.0f, minPos.y + 10.0f);
-                    const ImVec2 panelMax(panelMin.x + 280.0f, panelMin.y + 130.0f);
-                    drawList->AddRectFilled(panelMin, panelMax, IM_COL32(0, 0, 0, 165), 4.0f);
-                    drawList->AddRect(panelMin, panelMax, IM_COL32(255, 255, 255, 32), 4.0f);
-
-                    char titleBuffer[96]{};
-                    std::snprintf(titleBuffer, sizeof(titleBuffer), "FPS %d", static_cast<int>(std::round(fps)));
-                    drawList->AddText(ImVec2(panelMin.x + 8.0f, panelMin.y + 6.0f), statusColor, titleBuffer);
-
-                    char frameAvgBuffer[160]{};
-                    std::snprintf(frameAvgBuffer,
-                                  sizeof(frameAvgBuffer),
-                                  "Frame %.2f ms | Avg %.2f ms",
-                                  deltaTimeMs,
-                                  avgFrameMs);
-                    drawList->AddText(ImVec2(panelMin.x + 8.0f, panelMin.y + 24.0f), IM_COL32(215, 230, 255, 255), frameAvgBuffer);
-
-                    char minMaxBuffer[160]{};
-                    std::snprintf(minMaxBuffer,
-                                  sizeof(minMaxBuffer),
-                                  "Min %.2f ms | Max %.2f ms",
-                                  minFrameMs,
-                                  maxFrameMs);
-                    drawList->AddText(ImVec2(panelMin.x + 8.0f, panelMin.y + 40.0f), IM_COL32(215, 230, 255, 255), minMaxBuffer);
-
-                    const ImVec2 graphMin(panelMin.x + 8.0f, panelMin.y + 58.0f);
-                    const ImVec2 graphMax(panelMax.x - 8.0f, panelMax.y - 8.0f);
-                    drawList->AddRectFilled(graphMin, graphMax, IM_COL32(20, 24, 30, 220), 3.0f);
-                    drawList->AddRect(graphMin, graphMax, IM_COL32(255, 255, 255, 20), 3.0f);
-
-                    const float graphHeight = graphMax.y - graphMin.y;
-                    const float graphWidth = graphMax.x - graphMin.x;
-                    const float graphMaxMs = std::max(50.0f, maxFrameMs * 1.2f);
-                    auto msToY = [&](float milliseconds) {
-                        const float normalized = std::clamp(milliseconds / graphMaxMs, 0.0f, 1.0f);
-                        return graphMax.y - normalized * graphHeight;
-                    };
-
-                    const float y60 = msToY(16.67f);
-                    const float y30 = msToY(33.33f);
-                    drawList->AddLine(ImVec2(graphMin.x, y60), ImVec2(graphMax.x, y60), IM_COL32(110, 255, 120, 70), 1.0f);
-                    drawList->AddLine(ImVec2(graphMin.x, y30), ImVec2(graphMax.x, y30), IM_COL32(255, 220, 90, 70), 1.0f);
-
-                    if (fpsHistory.SampleCount >= 2)
-                    {
-                        const size_t baseIndex = (fpsHistory.NextIndex + fpsHistory.FrameTimesMs.size() - fpsHistory.SampleCount) % fpsHistory.FrameTimesMs.size();
-                        for (size_t pointIndex = 1; pointIndex < fpsHistory.SampleCount; ++pointIndex)
-                        {
-                            const size_t sampleIndexA = (baseIndex + pointIndex - 1) % fpsHistory.FrameTimesMs.size();
-                            const size_t sampleIndexB = (baseIndex + pointIndex) % fpsHistory.FrameTimesMs.size();
-                            const float sampleA = fpsHistory.FrameTimesMs[sampleIndexA];
-                            const float sampleB = fpsHistory.FrameTimesMs[sampleIndexB];
-
-                            const float xA = graphMin.x + (static_cast<float>(pointIndex - 1) / static_cast<float>(fpsHistory.SampleCount - 1)) * graphWidth;
-                            const float xB = graphMin.x + (static_cast<float>(pointIndex) / static_cast<float>(fpsHistory.SampleCount - 1)) * graphWidth;
-                            const float yA = msToY(sampleA);
-                            const float yB = msToY(sampleB);
-
-                            drawList->AddLine(ImVec2(xA, yA), ImVec2(xB, yB), IM_COL32(120, 200, 255, 220), 1.8f);
-                        }
-
-                        drawList->AddCircleFilled(ImVec2(graphMax.x, msToY(deltaTimeMs)), 2.5f, statusColor);
                     }
                 }
             }
-        }
 
-        ImGui::End();
+            ImGui::End();
+        }
+        else
+        {
+            focusSceneViewRequested = false;
+        }
         ImGui::PopStyleVar();
 
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        if (focusGameViewRequested)
-        {
-            ImGui::SetNextWindowFocus();
-            focusGameViewRequested = false;
-        }
-        ImGui::Begin("Game View");
         SceneRenderer::SetUiInputViewportRectPixels(0.0f, 0.0f, 0.0f, 0.0f, false);
-
-        gameViewFocused = ImGui::IsWindowFocused();
-        gameViewHovered = ImGui::IsWindowHovered();
-        const bool skipGameRender = ImGui::IsWindowCollapsed();
-        const ImVec2 gameViewSize = ImGui::GetContentRegionAvail();
-        const uint32_t gameWidth = sanitizeViewportDimension(gameViewSize.x);
-        const uint32_t gameHeight = sanitizeViewportDimension(gameViewSize.y);
-
-        if (!skipGameRender && gameWidth > 0 && gameHeight > 0)
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        if (showGameView)
         {
-            ensureGameViewFramebuffer(gameWidth, gameHeight);
-            gameViewWidthPixels = gameWidth;
-            gameViewHeightPixels = gameHeight;
-
-            if (gameViewCamera)
-                gameViewCamera->SetViewportSize(gameWidth, gameHeight);
-
-            const bool isSceneLoading = scene && scene->GetLoadState() == Scene::LoadState::Loading;
-            if (gameViewCamera && gameViewFramebuffer && !isSceneLoading)
+            if (focusGameViewRequested)
             {
-                if (renderGameView)
-                    renderGameView(*gameViewCamera, gameViewFramebuffer, gameWidth, gameHeight);
-                else if (scene)
-                    SceneRenderer::RenderToViewport(*scene, *gameViewCamera, gameViewFramebuffer, gameWidth, gameHeight);
+                ImGui::SetNextWindowFocus();
+                focusGameViewRequested = false;
             }
+            const bool gameWindowVisible = ImGui::Begin("Game View", &showGameView);
 
-            if (gameViewFramebuffer && gameViewFramebuffer->GetColorAttachment())
+            gameViewFocused = ImGui::IsWindowFocused();
+            gameViewHovered = ImGui::IsWindowHovered();
+            const bool skipGameRender = !gameWindowVisible || ImGui::IsWindowCollapsed();
+            const ImVec2 gameViewSize = ImGui::GetContentRegionAvail();
+            const uint32_t gameWidth = sanitizeViewportDimension(gameViewSize.x);
+            const uint32_t gameHeight = sanitizeViewportDimension(gameViewSize.y);
+
+            if (!skipGameRender && gameWidth > 0 && gameHeight > 0)
             {
-                ImGui::Image(
-                    static_cast<ImTextureID>(GetTextureNativeHandle(gameViewFramebuffer->GetColorAttachment())),
-                    ImVec2(static_cast<float>(gameWidth), static_cast<float>(gameHeight)),
-                    ImVec2(0, 1),
-                    ImVec2(1, 0));
-                const ImVec2 gameRectMin = ImGui::GetItemRectMin();
-                const ImVec2 gameRectMax = ImGui::GetItemRectMax();
-                gameViewRectValid = true;
-                gameViewRectMinPixels = glm::vec2(gameRectMin.x, gameRectMin.y);
-                gameViewRectMaxPixels = glm::vec2(gameRectMax.x, gameRectMax.y);
+                ensureGameViewFramebuffer(gameWidth, gameHeight);
+                gameViewWidthPixels = gameWidth;
+                gameViewHeightPixels = gameHeight;
 
-                const ImVec2 minPos = gameRectMin;
-                const ImVec2 maxPos = gameRectMax;
-                SceneRenderer::SetUiInputViewportRectPixels(
-                    minPos.x,
-                    minPos.y,
-                    maxPos.x - minPos.x,
-                    maxPos.y - minPos.y,
-                    true);
-                const bool gameLoadingToastDrawn = drawLoadingOverlay(minPos, maxPos);
-                if (!gameLoadingToastDrawn && showMissingGameplayCameraOverlay)
+                if (gameViewCamera)
+                    gameViewCamera->SetViewportSize(gameWidth, gameHeight);
+
+                const bool isSceneLoading = scene && scene->GetLoadState() == Scene::LoadState::Loading;
+                if (gameViewCamera && gameViewFramebuffer && !isSceneLoading)
                 {
-                    ImDrawList* drawList = ImGui::GetWindowDrawList();
-                    drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 180));
+                    if (renderGameView)
+                        renderGameView(*gameViewCamera, gameViewFramebuffer, gameWidth, gameHeight);
+                    else if (scene)
+                        SceneRenderer::RenderToViewport(*scene, *gameViewCamera, gameViewFramebuffer, gameWidth, gameHeight);
+                }
 
-                    const char* text = "Game View: No active gameplay camera.\nAdd a Camera Component to an entity and set it as Primary.";
-                    const ImVec2 textSize = ImGui::CalcTextSize(text);
-                    const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
-                    drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f), IM_COL32(255, 200, 120, 255), text);
+                if (gameViewFramebuffer && gameViewFramebuffer->GetColorAttachment())
+                {
+                    ImGui::Image(
+                        static_cast<ImTextureID>(GetTextureNativeHandle(gameViewFramebuffer->GetColorAttachment())),
+                        ImVec2(static_cast<float>(gameWidth), static_cast<float>(gameHeight)),
+                        ImVec2(0, 1),
+                        ImVec2(1, 0));
+                    const ImVec2 gameRectMin = ImGui::GetItemRectMin();
+                    const ImVec2 gameRectMax = ImGui::GetItemRectMax();
+                    gameViewRectValid = true;
+                    gameViewRectMinPixels = glm::vec2(gameRectMin.x, gameRectMin.y);
+                    gameViewRectMaxPixels = glm::vec2(gameRectMax.x, gameRectMax.y);
+
+                    const ImVec2 minPos = gameRectMin;
+                    const ImVec2 maxPos = gameRectMax;
+                    SceneRenderer::SetUiInputViewportRectPixels(
+                        minPos.x,
+                        minPos.y,
+                        maxPos.x - minPos.x,
+                        maxPos.y - minPos.y,
+                        true);
+                    const bool gameLoadingToastDrawn = drawLoadingOverlay(minPos, maxPos);
+                    if (!gameLoadingToastDrawn && showMissingGameplayCameraOverlay)
+                    {
+                        ImDrawList* drawList = ImGui::GetWindowDrawList();
+                        drawList->AddRectFilled(minPos, maxPos, IM_COL32(0, 0, 0, 180));
+
+                        const char* text = "Game View: No active gameplay camera.\nAdd a Camera Component to an entity and set it as Primary.";
+                        const ImVec2 textSize = ImGui::CalcTextSize(text);
+                        const ImVec2 center((minPos.x + maxPos.x) * 0.5f, (minPos.y + maxPos.y) * 0.5f);
+                        drawList->AddText(ImVec2(center.x - textSize.x * 0.5f, center.y - textSize.y * 0.5f), IM_COL32(255, 200, 120, 255), text);
+                    }
                 }
             }
-        }
 
-        ImGui::End();
+            ImGui::End();
+        }
+        else
+        {
+            focusGameViewRequested = false;
+        }
         ImGui::PopStyleVar();
     }
 }

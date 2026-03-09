@@ -80,41 +80,56 @@ namespace Limitless
                     if (!scriptEntry->Enabled || !scriptEntry->RuntimeInstance || !scriptEntry->RuntimeInitialized)
                         continue;
 
-                    try
-                    {
-                        if (isSensor)
+                    auto invokeNativeCallback = [&](bool shouldDispatch, auto&& callback, const char* callbackName) {
+                        if (!shouldDispatch)
+                            return;
+
+                        try
                         {
-                            if (dispatchEnter)
-                                scriptEntry->RuntimeInstance->DispatchTriggerEnter(other);
-                            if (dispatchStay)
-                                scriptEntry->RuntimeInstance->DispatchTriggerStay(other);
-                            if (dispatchExit)
-                                scriptEntry->RuntimeInstance->DispatchTriggerExit(other);
+                            callback(*scriptEntry->RuntimeInstance);
                         }
-                        else
+                        catch (const std::exception& exception)
                         {
-                            if (dispatchEnter)
-                                scriptEntry->RuntimeInstance->DispatchCollisionEnter(other);
-                            if (dispatchStay)
-                                scriptEntry->RuntimeInstance->DispatchCollisionStay(other);
-                            if (dispatchExit)
-                                scriptEntry->RuntimeInstance->DispatchCollisionExit(other);
+                            LT_WARN("Script '{}' on entity '{}' threw during {} callback: {}",
+                                    scriptEntry->ScriptClassName,
+                                    tag ? tag->Tag : "Entity",
+                                    callbackName,
+                                    exception.what());
+                            return;
                         }
-                    }
-                    catch (const std::exception& exception)
+                        catch (...)
+                        {
+                            LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during {} callback",
+                                    scriptEntry->ScriptClassName,
+                                    tag ? tag->Tag : "Entity",
+                                    callbackName);
+                            return;
+                        }
+                    };
+
+                    if (isSensor)
                     {
-                        LT_WARN("Script '{}' on entity '{}' threw during {} callback: {}",
-                                scriptEntry->ScriptClassName,
-                                tag ? tag->Tag : "Entity",
-                                isSensor ? "trigger" : "collision",
-                                exception.what());
+                        invokeNativeCallback(dispatchEnter,
+                                             [&](ScriptableEntity& runtimeInstance) { runtimeInstance.DispatchTriggerEnter(other); },
+                                             "OnTriggerEnter");
+                        invokeNativeCallback(dispatchStay,
+                                             [&](ScriptableEntity& runtimeInstance) { runtimeInstance.DispatchTriggerStay(other); },
+                                             "OnTriggerStay");
+                        invokeNativeCallback(dispatchExit,
+                                             [&](ScriptableEntity& runtimeInstance) { runtimeInstance.DispatchTriggerExit(other); },
+                                             "OnTriggerExit");
                     }
-                    catch (...)
+                    else
                     {
-                        LT_WARN("Script '{}' on entity '{}' threw a non-standard exception during {} callback",
-                                scriptEntry->ScriptClassName,
-                                tag ? tag->Tag : "Entity",
-                                isSensor ? "trigger" : "collision");
+                        invokeNativeCallback(dispatchEnter,
+                                             [&](ScriptableEntity& runtimeInstance) { runtimeInstance.DispatchCollisionEnter(other); },
+                                             "OnCollisionEnter");
+                        invokeNativeCallback(dispatchStay,
+                                             [&](ScriptableEntity& runtimeInstance) { runtimeInstance.DispatchCollisionStay(other); },
+                                             "OnCollisionStay");
+                        invokeNativeCallback(dispatchExit,
+                                             [&](ScriptableEntity& runtimeInstance) { runtimeInstance.DispatchCollisionExit(other); },
+                                             "OnCollisionExit");
                     }
                 }
                 else if (ManagedScriptEntry* scriptEntry = scriptComponent->TryGetManagedEntry())
@@ -131,6 +146,26 @@ namespace Limitless
                         {
                             LT_WARN("Managed script '{}' on entity '{}' failed during {} callback: {}",
                                     scriptEntry->ScriptClassName,
+                                    tag ? tag->Tag : "Entity",
+                                    callbackName,
+                                    managedError.empty() ? "unknown error" : managedError.c_str());
+                            return;
+                        }
+
+                        ScriptComponent* mutableScriptComponent = scene.GetScriptComponent(scriptEntity);
+                        ManagedScriptEntry* mutableScriptEntry = mutableScriptComponent ? mutableScriptComponent->TryGetManagedEntry() : nullptr;
+                        if (!mutableScriptEntry || mutableScriptEntry->RuntimeInstanceId == 0)
+                            return;
+
+                        managedError.clear();
+                        if (!ManagedScriptHost::ReadBackScriptExposedProperties(mutableScriptEntry->RuntimeInstanceId,
+                                                                                &scene,
+                                                                                mutableScriptEntry->ExposedProperties,
+                                                                                &mutableScriptEntry->RuntimeExposedPropertiesRevision,
+                                                                                &managedError))
+                        {
+                            LT_WARN("Managed script '{}' on entity '{}' failed during exposed property readback after {} callback: {}",
+                                    mutableScriptEntry->ScriptClassName,
                                     tag ? tag->Tag : "Entity",
                                     callbackName,
                                     managedError.empty() ? "unknown error" : managedError.c_str());

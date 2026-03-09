@@ -6,14 +6,21 @@
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetImportPipeline.h"
 #include "Assets/AssetPaths.h"
+#include "Assets/MaterialAsset.h"
 #include "Assets/SpriteImportSettings.h"
 #include "Assets/TextureAssetImporter.h"
 #include "Assets/TextureAsset.h"
 #include "Assets/TilePaletteAsset.h"
 #include "EditorTilePalettePanel.h"
 #include "Core/Debug/Log.h"
+#include "Graphics/Camera/PerspectiveCamera3D.h"
+#include "Graphics/Framebuffer.h"
 #include "Graphics/NativeRenderHandles.h"
+#include "Graphics/Texture.h"
 #include "ProjectAssetOperations.h"
+#include "Scene/Components/RenderingComponents.h"
+#include "Scene/Scene.h"
+#include "Scene/SceneRenderer.h"
 #include "imgui/imgui.h"
 
 #include <algorithm>
@@ -113,12 +120,25 @@ namespace Limitless::EditorProjectPanel
             Assets::TextureAsset::Ptr TextureAsset;
             std::chrono::steady_clock::time_point LoadTime = {};
         };
+        struct PrefabThumbnailCacheEntry
+        {
+            std::shared_ptr<Texture2D> PreviewTexture;
+            ImVec2 UvMin = ImVec2(0.0f, 1.0f);
+            ImVec2 UvMax = ImVec2(1.0f, 0.0f);
+            float SourceWidth = 1.0f;
+            float SourceHeight = 1.0f;
+            bool HasPreview = false;
+            std::chrono::steady_clock::time_point LoadTime = {};
+        };
         std::unordered_map<std::string, SpriteSettingsCacheEntry> gSpriteSettingsCache;
         std::unordered_map<std::string, TextureThumbnailCacheEntry> gTextureThumbnailCache;
+        std::unordered_map<std::string, PrefabThumbnailCacheEntry> gPrefabThumbnailCache;
         std::string gProjectSearchFilterLower;
         std::unordered_map<std::string, bool> gProjectSearchMatchCache;
         constexpr std::chrono::milliseconds kSpriteSettingsCacheLifetime(2000);
         constexpr std::chrono::milliseconds kTextureThumbnailCacheLifetime(2000);
+        constexpr std::chrono::milliseconds kPrefabThumbnailCacheLifetime(2000);
+        constexpr uint32_t kPrefabThumbnailSnapshotSize = 256;
 
         struct AssetTypeBadgeInfo
         {
@@ -233,6 +253,199 @@ namespace Limitless::EditorProjectPanel
             entry.LoadTime = now;
             auto [insertedIt, _] = gTextureThumbnailCache.insert_or_assign(textureAssetKey, std::move(entry));
             return insertedIt->second.TextureAsset;
+        }
+
+        std::string NormalizeLooseAssetKey(std::string assetKey)
+        {
+            for (char& character : assetKey)
+            {
+                if (character == '\\')
+                    character = '/';
+            }
+
+            auto trim = [](std::string_view value) -> std::string {
+                size_t begin = 0;
+                size_t end = value.size();
+                while (begin < end && std::isspace(static_cast<unsigned char>(value[begin])) != 0)
+                    ++begin;
+                while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1])) != 0)
+                    --end;
+                return std::string(value.substr(begin, end - begin));
+            };
+
+            std::string collapsed;
+            collapsed.reserve(assetKey.size());
+            bool previousWasSeparator = false;
+            for (const char character : assetKey)
+            {
+                if (character == '/')
+                {
+                    if (!previousWasSeparator)
+                        collapsed.push_back('/');
+                    previousWasSeparator = true;
+                }
+                else
+                {
+                    collapsed.push_back(character);
+                    previousWasSeparator = false;
+                }
+            }
+
+            std::string rebuilt;
+            size_t segmentStart = 0;
+            while (segmentStart < collapsed.size())
+            {
+                const size_t separator = collapsed.find('/', segmentStart);
+                const bool hasSeparator = separator != std::string::npos;
+                const size_t segmentEnd = hasSeparator ? separator : collapsed.size();
+                const std::string trimmedSegment = trim(std::string_view(collapsed).substr(segmentStart, segmentEnd - segmentStart));
+                rebuilt += trimmedSegment;
+                if (hasSeparator)
+                {
+                    rebuilt.push_back('/');
+                    segmentStart = separator + 1;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            return rebuilt;
+        }
+
+        Result<std::unique_ptr<Scene>> LoadPrefabSceneForThumbnail(const std::string& prefabAssetKey)
+        {
+            auto loadedSceneResult = Scene::LoadFromFile(prefabAssetKey);
+            if (!loadedSceneResult.IsFailure())
+                return loadedSceneResult;
+
+            if (const auto resolvedPathResult = Assets::ResolveAssetKeyToPath(prefabAssetKey); resolvedPathResult.IsSuccess())
+            {
+                auto resolvedLoadResult = Scene::LoadFromFile(resolvedPathResult.GetValue());
+                if (!resolvedLoadResult.IsFailure())
+                    return resolvedLoadResult;
+            }
+
+            const std::string normalizedKey = NormalizeLooseAssetKey(prefabAssetKey);
+            if (!normalizedKey.empty() && normalizedKey != prefabAssetKey)
+            {
+                auto normalizedLoadResult = Scene::LoadFromFile(normalizedKey);
+                if (!normalizedLoadResult.IsFailure())
+                    return normalizedLoadResult;
+
+                if (const auto normalizedResolvedPathResult = Assets::ResolveAssetKeyToPath(normalizedKey); normalizedResolvedPathResult.IsSuccess())
+                {
+                    auto normalizedResolvedLoadResult = Scene::LoadFromFile(normalizedResolvedPathResult.GetValue());
+                    if (!normalizedResolvedLoadResult.IsFailure())
+                        return normalizedResolvedLoadResult;
+                }
+            }
+
+            return loadedSceneResult;
+        }
+
+        void PreloadPrefabThumbnailSceneAssets(Scene& prefabScene)
+        {
+            auto& registry = prefabScene.GetRegistry();
+
+            auto spriteView = registry.view<SpriteComponent>();
+            for (entt::entity entity : spriteView)
+            {
+                const auto& sprite = spriteView.get<SpriteComponent>(entity);
+                if (!sprite.TextureKey.empty())
+                    (void)GetCachedThumbnailTextureAsset(sprite.TextureKey);
+            }
+
+            auto materialView = registry.view<MaterialComponent>();
+            for (entt::entity entity : materialView)
+            {
+                const auto& material = materialView.get<MaterialComponent>(entity);
+                if (!material.MaterialKey.empty())
+                    (void)Assets::MaterialAsset::LoadBlocking(material.MaterialKey);
+            }
+        }
+
+        void ConfigurePrefabThumbnailCamera(const Scene& prefabScene, PerspectiveCamera3D& previewCamera)
+        {
+            if (const auto& bookmark = prefabScene.GetEditorCameraBookmark(); bookmark.has_value())
+            {
+                previewCamera.SetPosition(bookmark->Position);
+                previewCamera.SetYawPitchDegrees(bookmark->YawDegrees, bookmark->PitchDegrees);
+            }
+            else
+            {
+                previewCamera.SetPosition(glm::vec3(0.0f, 0.0f, 5.0f));
+                previewCamera.SetYawPitchDegrees(-90.0f, 0.0f);
+            }
+        }
+
+        bool TryPopulatePrefabSnapshotThumbnail(Scene& prefabScene, PrefabThumbnailCacheEntry& entry)
+        {
+            PreloadPrefabThumbnailSceneAssets(prefabScene);
+
+            FramebufferSpecification specification{};
+            specification.Width = kPrefabThumbnailSnapshotSize;
+            specification.Height = kPrefabThumbnailSnapshotSize;
+            specification.Samples = 1;
+            specification.DepthAttachment = true;
+            specification.StencilAttachment = false;
+
+            std::shared_ptr<Framebuffer> framebuffer = Framebuffer::Create(specification);
+            if (!framebuffer)
+                return false;
+
+            PerspectiveCamera3D previewCamera(
+                CameraId{ 1 },
+                "PrefabThumbnailPreview",
+                CameraUsage::Editor,
+                kPrefabThumbnailSnapshotSize,
+                kPrefabThumbnailSnapshotSize);
+            ConfigurePrefabThumbnailCamera(prefabScene, previewCamera);
+            SceneRenderer::RenderToViewport(
+                prefabScene,
+                previewCamera,
+                framebuffer,
+                kPrefabThumbnailSnapshotSize,
+                kPrefabThumbnailSnapshotSize);
+
+            std::shared_ptr<Texture2D> previewTexture = framebuffer->GetColorAttachment();
+            if (!previewTexture)
+                return false;
+
+            entry.PreviewTexture = previewTexture;
+            entry.UvMin = ImVec2(0.0f, 1.0f);
+            entry.UvMax = ImVec2(1.0f, 0.0f);
+            entry.SourceWidth = static_cast<float>(std::max(1u, previewTexture->GetWidth()));
+            entry.SourceHeight = static_cast<float>(std::max(1u, previewTexture->GetHeight()));
+            entry.HasPreview = true;
+            return true;
+        }
+
+        const PrefabThumbnailCacheEntry* GetCachedPrefabThumbnail(const std::string& prefabAssetKey)
+        {
+            if (prefabAssetKey.empty())
+                return nullptr;
+
+            const auto now = std::chrono::steady_clock::now();
+            if (auto it = gPrefabThumbnailCache.find(prefabAssetKey); it != gPrefabThumbnailCache.end())
+            {
+                if ((now - it->second.LoadTime) < kPrefabThumbnailCacheLifetime)
+                    return it->second.HasPreview ? &it->second : nullptr;
+            }
+
+            PrefabThumbnailCacheEntry entry;
+            entry.LoadTime = now;
+
+            const auto loadedSceneResult = LoadPrefabSceneForThumbnail(prefabAssetKey);
+            if (loadedSceneResult.IsSuccess() && loadedSceneResult.GetValue())
+            {
+                Scene& prefabScene = *loadedSceneResult.GetValue();
+                (void)TryPopulatePrefabSnapshotThumbnail(prefabScene, entry);
+            }
+
+            auto [insertedIt, _] = gPrefabThumbnailCache.insert_or_assign(prefabAssetKey, std::move(entry));
+            return insertedIt->second.HasPreview ? &insertedIt->second : nullptr;
         }
 
         std::string ToLowerAscii(std::string value)
@@ -414,6 +627,9 @@ namespace Limitless::EditorProjectPanel
         {
             gProjectAssetDirectoryCache.clear();
             gTextureThumbnailCache.clear();
+            gPrefabThumbnailCache.clear();
+            gSpriteSettingsCache.clear();
+            gProjectSearchMatchCache.clear();
         }
 
         void MoveAssetOrFolderToTargetFolder(const char* assetOrFolderKey,
@@ -1667,6 +1883,7 @@ namespace Limitless::EditorProjectPanel
                         state.SelectionAnchorAssetKey = assetKey;
                         clearAssetSelection();
                         selectedAnimationClipAssetKey = assetKey;
+                        state.RequestFocusAnimationClipEditor = true;
                     }
                     else if (isAnimatorController && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
                     {
@@ -1675,6 +1892,7 @@ namespace Limitless::EditorProjectPanel
                         state.SelectionAnchorAssetKey = assetKey;
                         clearAssetSelection();
                         selectedAnimatorControllerAssetKey = assetKey;
+                        state.RequestFocusAnimatorControllerEditor = true;
                     }
                     else if (isScriptAssetFile && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
                     {
@@ -2479,7 +2697,8 @@ namespace Limitless::EditorProjectPanel
         }
     }
 
-    void Draw(EditorProjectPanelState& state,
+    void Draw(bool& isOpen,
+              EditorProjectPanelState& state,
               entt::entity& selectedEntity,
               std::string& selectedTextureAssetKey,
               Assets::TextureAsset::Ptr& cachedTextureAsset,
@@ -2517,10 +2736,18 @@ namespace Limitless::EditorProjectPanel
               const std::function<void(const std::string&)>& onNativeScriptAssetActivated)
     {
         EditorPanelStyle::PushPanelVisualStyle();
-        ImGui::Begin("Project");
+        if (!ImGui::Begin("Project", &isOpen))
+        {
+            gProjectSearchMatchCache.clear();
+            ImGui::End();
+            EditorPanelStyle::PopPanelVisualStyle();
+            return;
+        }
         state.TreeExpansionStateChanged = false;
         state.BrowseLocationChanged = false;
         state.GridScaleChanged = false;
+        state.RequestFocusAnimationClipEditor = false;
+        state.RequestFocusAnimatorControllerEditor = false;
         state.HoveredFolderRelativePathForExternalDrop.clear();
         gProjectSearchFilterLower = ToLowerAscii(std::string(state.SearchBuffer.data()));
         gProjectSearchMatchCache.clear();
@@ -3443,6 +3670,7 @@ namespace Limitless::EditorProjectPanel
                             state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
                             clearPrimaryAssetSelection();
                             selectedAnimationClipAssetKey = entry.PrimaryAssetKey;
+                            state.RequestFocusAnimationClipEditor = true;
                         }
                         else if (entry.IsAnimatorController && hovered && ImGui::IsMouseDoubleClicked(0))
                         {
@@ -3450,6 +3678,7 @@ namespace Limitless::EditorProjectPanel
                             state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
                             clearPrimaryAssetSelection();
                             selectedAnimatorControllerAssetKey = entry.PrimaryAssetKey;
+                            state.RequestFocusAnimatorControllerEditor = true;
                         }
                         else if ((entry.IsNativeScriptFile || entry.IsManagedScriptFile) && hovered && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
                         {
@@ -3655,12 +3884,38 @@ namespace Limitless::EditorProjectPanel
                     drawList->AddRect(previewMin, previewMax, IM_COL32(48, 61, 90, 220), 6.0f, 0, 1.0f);
 
                     const AssetTypeBadgeInfo& badge = *entry.Badge;
-                    const ImVec2 badgeTextSize = ImGui::GetFont()->CalcTextSizeA(badgeFontSize, 100000.0f, 0.0f, badge.Label);
-                    const ImVec2 badgeMin(tileMin.x + badgeOffsetX, tileMin.y + badgeOffsetY);
-                    const ImVec2 badgeMax(badgeMin.x + badgeTextSize.x + badgePadX * 2.0f, badgeMin.y + badgeTextSize.y + badgePadY * 2.0f);
-                    drawList->AddRectFilled(badgeMin, badgeMax, badge.FillColor, 5.0f);
-                    drawList->AddRect(badgeMin, badgeMax, badge.BorderColor, 5.0f, 0, 1.0f);
-                    drawList->AddText(ImVec2(badgeMin.x + badgePadX, badgeMin.y + badgePadY), badge.TextColor, badge.Label);
+
+                    const auto drawThumbnailImage = [&](const std::shared_ptr<Texture>& textureHandle,
+                                                        const float sourceWidth,
+                                                        const float sourceHeight,
+                                                        const ImVec2& uvMin,
+                                                        const ImVec2& uvMax) -> bool {
+                        if (!textureHandle)
+                            return false;
+
+                        const float imageInset = 4.0f;
+                        const float previewWidth = std::max(1.0f, (previewMax.x - previewMin.x) - imageInset * 2.0f);
+                        const float previewInnerHeight = std::max(1.0f, (previewMax.y - previewMin.y) - imageInset * 2.0f);
+                        const float clampedSourceWidth = std::max(1.0f, sourceWidth);
+                        const float clampedSourceHeight = std::max(1.0f, sourceHeight);
+                        const float scale = std::min(previewWidth / clampedSourceWidth, previewInnerHeight / clampedSourceHeight);
+                        const float drawWidth = std::max(1.0f, clampedSourceWidth * scale);
+                        const float drawHeight = std::max(1.0f, clampedSourceHeight * scale);
+                        const ImVec2 imageMin(
+                            previewMin.x + imageInset + (previewWidth - drawWidth) * 0.5f,
+                            previewMin.y + imageInset + (previewInnerHeight - drawHeight) * 0.5f);
+                        const ImVec2 imageMax(imageMin.x + drawWidth, imageMin.y + drawHeight);
+                        drawList->AddImage(
+                            static_cast<ImTextureID>(GetTextureNativeHandle(textureHandle)),
+                            imageMin,
+                            imageMax,
+                            uvMin,
+                            uvMax,
+                            IM_COL32_WHITE);
+                        return true;
+                    };
+
+                    bool drewPreviewImage = false;
 
                     if (entry.IsTexture)
                     {
@@ -3668,8 +3923,8 @@ namespace Limitless::EditorProjectPanel
                         {
                             if (const auto& textureHandle = textureAsset->GetTexture(); textureHandle)
                             {
-                                const float textureWidth = static_cast<float>(std::max(1u, textureHandle->GetWidth()));
-                                const float textureHeight = static_cast<float>(std::max(1u, textureHandle->GetHeight()));
+                                float textureWidth = static_cast<float>(std::max(1u, textureHandle->GetWidth()));
+                                float textureHeight = static_cast<float>(std::max(1u, textureHandle->GetHeight()));
                                 ImVec2 uvMin = entry.ThumbnailUvMin;
                                 ImVec2 uvMax = entry.ThumbnailUvMax;
                                 if (entry.HasThumbnailSubRect)
@@ -3680,27 +3935,27 @@ namespace Limitless::EditorProjectPanel
                                         textureHandle->GetHeight());
                                     uvMin = ImVec2(subUvs.x, 1.0f - subUvs.y);
                                     uvMax = ImVec2(subUvs.z, 1.0f - subUvs.w);
+                                    textureWidth = static_cast<float>(std::max(1, entry.ThumbnailRectPixels.z));
+                                    textureHeight = static_cast<float>(std::max(1, entry.ThumbnailRectPixels.w));
                                 }
-                                const float previewWidth = previewMax.x - previewMin.x;
-                                const float previewInnerHeight = previewMax.y - previewMin.y;
-                                const float scale = std::min(previewWidth / textureWidth, previewInnerHeight / textureHeight);
-                                const float drawWidth = std::max(1.0f, textureWidth * scale);
-                                const float drawHeight = std::max(1.0f, textureHeight * scale);
-                                const ImVec2 imageMin(
-                                    previewMin.x + (previewWidth - drawWidth) * 0.5f,
-                                    previewMin.y + (previewInnerHeight - drawHeight) * 0.5f);
-                                const ImVec2 imageMax(imageMin.x + drawWidth, imageMin.y + drawHeight);
-                                drawList->AddImage(
-                                    static_cast<ImTextureID>(GetTextureNativeHandle(textureHandle)),
-                                    imageMin,
-                                    imageMax,
-                                    uvMin,
-                                    uvMax,
-                                    IM_COL32_WHITE);
+                                drewPreviewImage = drawThumbnailImage(textureHandle, textureWidth, textureHeight, uvMin, uvMax);
                             }
                         }
                     }
-                    else if (entry.IsDirectory)
+                    else if (entry.IsPrefab)
+                    {
+                        if (const PrefabThumbnailCacheEntry* prefabThumbnail = GetCachedPrefabThumbnail(entry.PrimaryAssetKey))
+                        {
+                            drewPreviewImage = drawThumbnailImage(
+                                prefabThumbnail->PreviewTexture,
+                                prefabThumbnail->SourceWidth,
+                                prefabThumbnail->SourceHeight,
+                                prefabThumbnail->UvMin,
+                                prefabThumbnail->UvMax);
+                        }
+                    }
+
+                    if (!drewPreviewImage && entry.IsDirectory)
                     {
                         const char* folderGlyph = "DIR";
                         const ImVec2 glyphSize = ImGui::CalcTextSize(folderGlyph);
@@ -3710,9 +3965,14 @@ namespace Limitless::EditorProjectPanel
                             IM_COL32(130, 170, 235, 255),
                             folderGlyph);
                     }
-                    else
+                    else if (!drewPreviewImage)
                     {
-                        drawList->AddText(ImVec2(previewMin.x + tileTextPadX, previewMin.y + tileTextPadX), badge.TextColor, badge.Label);
+                        const ImVec2 fallbackTextSize = ImGui::CalcTextSize(badge.Label);
+                        drawList->AddText(
+                            ImVec2(previewMin.x + (previewMax.x - previewMin.x - fallbackTextSize.x) * 0.5f,
+                                   previewMin.y + (previewMax.y - previewMin.y - fallbackTextSize.y) * 0.5f),
+                            badge.TextColor,
+                            badge.Label);
                     }
 
                     const std::string secondaryText = entry.IsDirectory
@@ -3867,6 +4127,7 @@ namespace Limitless::EditorProjectPanel
                             state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
                             clearPrimaryAssetSelection();
                             selectedAnimationClipAssetKey = entry.PrimaryAssetKey;
+                            state.RequestFocusAnimationClipEditor = true;
                         }
                         else if (entry.IsAnimatorController && hovered && ImGui::IsMouseDoubleClicked(0))
                         {
@@ -3874,6 +4135,7 @@ namespace Limitless::EditorProjectPanel
                             state.SelectionAnchorAssetKey = entry.PrimaryAssetKey;
                             clearPrimaryAssetSelection();
                             selectedAnimatorControllerAssetKey = entry.PrimaryAssetKey;
+                            state.RequestFocusAnimatorControllerEditor = true;
                         }
                         else if ((entry.IsNativeScriptFile || entry.IsManagedScriptFile) && hovered && ImGui::IsMouseDoubleClicked(0) && onNativeScriptAssetActivated)
                         {

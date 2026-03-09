@@ -16,6 +16,10 @@ namespace Limitless::EditorProjectDialog
         bool IsOpen = false;
         bool RequestOpenPopup = false;
         ProjectDialogMode Mode = ProjectDialogMode::Open;
+        int ActiveRecentProjectMenuIndex = -1;
+        int RecentProjectMenuOpenedFrame = -1;
+        float RecentProjectMenuAnchorX = 0.0f;
+        float RecentProjectMenuAnchorY = 0.0f;
 
         std::array<char, 512> ProjectRootPathBuffer{};
         std::array<char, 256> ProjectNameBuffer{};

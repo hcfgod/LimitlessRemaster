@@ -30,6 +30,8 @@ namespace Limitless
         std::vector<std::string> MultiSelectedAssetKeys;
         // Multi-select state for texture sub-sprites (virtual keys: "Texture.png#idx").
         std::vector<std::string> MultiSelectedSubSpriteKeys;
+        bool RequestFocusAnimationClipEditor = false;
+        bool RequestFocusAnimatorControllerEditor = false;
 
         std::string SelectionAnchorAssetKey;
         std::string SubSpriteSelectionAnchorKey;
@@ -98,7 +100,8 @@ namespace Limitless
     namespace EditorProjectPanel
     {
         /// Draws the full Project panel tree and folder popup workflow.
-        void Draw(EditorProjectPanelState& state,
+        void Draw(bool& isOpen,
+                  EditorProjectPanelState& state,
                   entt::entity& selectedEntity,
                   std::string& selectedTextureAssetKey,
                   Assets::TextureAsset::Ptr& cachedTextureAsset,

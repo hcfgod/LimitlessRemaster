@@ -74,13 +74,16 @@ namespace Limitless
         constexpr const char* kDefaultSceneFileName = "SampleScene.scene.json";
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 7;
+        constexpr uint32_t kEditorSessionStateVersion = 8;
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
         struct EditorSessionStateData final
         {
+            bool HasPersistedState = false;
             std::string LastOpenedSceneAssetKey;
+            std::string ActiveLayoutName = Editor::EditorLayoutManager::GetDefaultLayoutName();
             EditorInspectorPanel::NativeScriptEditorSessionState NativeScriptEditorState;
+            Editor::EditorLayoutWindowState LayoutWindowState = Editor::EditorLayoutManager::CreateDefaultWindowState();
             bool ShowProjectSettingsWindow = false;
             bool ShowAssetDiagnosticsWindow = false;
             bool ShowPerformancePanel = false;
@@ -258,10 +261,15 @@ namespace Limitless
                 }
 
                 EditorSessionStateData state{};
+                state.HasPersistedState = true;
                 const uint32_t version = root.value("version", 0u);
                 if (version == 1)
                 {
                     state.LastOpenedSceneAssetKey = root.value("lastOpenedSceneAssetKey", std::string{});
+                    state.LayoutWindowState.ShowProjectSettingsWindow = state.ShowProjectSettingsWindow;
+                    state.LayoutWindowState.ShowAssetDiagnosticsWindow = state.ShowAssetDiagnosticsWindow;
+                    state.LayoutWindowState.ShowPerformancePanel = state.ShowPerformancePanel;
+                    state.LayoutWindowState.ShowConsoleWindow = state.ShowConsoleWindow;
                     return state;
                 }
 
@@ -271,6 +279,29 @@ namespace Limitless
                 }
 
                 state.LastOpenedSceneAssetKey = root.value("lastOpenedSceneAssetKey", std::string{});
+                if (version >= 8)
+                {
+                    state.ActiveLayoutName = Editor::EditorLayoutManager::NormalizeLayoutName(
+                        root.value("activeLayoutName", Editor::EditorLayoutManager::GetDefaultLayoutName()));
+                    state.LayoutWindowState.ShowScenePanel = root.value("showScenePanel", state.LayoutWindowState.ShowScenePanel);
+                    state.LayoutWindowState.ShowInspectorPanel = root.value("showInspectorPanel", state.LayoutWindowState.ShowInspectorPanel);
+                    state.LayoutWindowState.ShowProjectPanel = root.value("showProjectPanel", state.LayoutWindowState.ShowProjectPanel);
+                    state.LayoutWindowState.ShowSceneView = root.value("showSceneView", state.LayoutWindowState.ShowSceneView);
+                    state.LayoutWindowState.ShowGameView = root.value("showGameView", state.LayoutWindowState.ShowGameView);
+                    state.LayoutWindowState.ShowProjectSettingsWindow = root.value("showProjectSettingsWindow", state.LayoutWindowState.ShowProjectSettingsWindow);
+                    state.LayoutWindowState.ShowBuildSettingsWindow = root.value("showBuildSettingsWindow", state.LayoutWindowState.ShowBuildSettingsWindow);
+                    state.LayoutWindowState.ShowAssetDiagnosticsWindow = root.value("showAssetDiagnosticsWindow", state.LayoutWindowState.ShowAssetDiagnosticsWindow);
+                    state.LayoutWindowState.ShowPhysicsDiagnosticsWindow = root.value("showPhysicsDiagnosticsWindow", state.LayoutWindowState.ShowPhysicsDiagnosticsWindow);
+                    state.LayoutWindowState.ShowConsoleWindow = root.value("showConsoleWindow", state.LayoutWindowState.ShowConsoleWindow);
+                    state.LayoutWindowState.ShowEditorFpsOverlay = root.value("showEditorFpsOverlay", state.LayoutWindowState.ShowEditorFpsOverlay);
+                    state.LayoutWindowState.ShowGizmoToolbar = root.value("showGizmoToolbar", state.LayoutWindowState.ShowGizmoToolbar);
+                    state.LayoutWindowState.ShowPerformancePanel = root.value("showPerformancePanel", state.LayoutWindowState.ShowPerformancePanel);
+                    state.LayoutWindowState.ShowAnimationTimelinePanel = root.value("showAnimationTimelinePanel", state.LayoutWindowState.ShowAnimationTimelinePanel);
+                    state.LayoutWindowState.ShowAnimatorGraphPanel = root.value("showAnimatorGraphPanel", state.LayoutWindowState.ShowAnimatorGraphPanel);
+                    state.LayoutWindowState.ShowTilePalettePanel = root.value("showTilePalettePanel", state.LayoutWindowState.ShowTilePalettePanel);
+                    state.LayoutWindowState.ShowSpriteEditorWindow = root.value("showSpriteEditorWindow", state.LayoutWindowState.ShowSpriteEditorWindow);
+                    state.LayoutWindowState.ShowDemoWindow = root.value("showDemoWindow", state.LayoutWindowState.ShowDemoWindow);
+                }
                 state.NativeScriptEditorState.IsOpen = root.value("nativeScriptEditorIsOpen", false);
                 state.NativeScriptEditorState.LastEditedScriptClassName = root.value("nativeScriptEditorLastClassName", std::string{});
                 state.NativeScriptEditorState.LastEditedScriptAssetRelativePath = root.value("nativeScriptEditorLastAssetRelativePath", std::string{});
@@ -300,6 +331,13 @@ namespace Limitless
                     state.ProjectActiveFolderRelativePath = root.value("projectActiveFolderRelativePath", std::string{});
                 if (version >= 7)
                     state.ProjectGridScale = root.value("projectGridScale", 1.0f);
+                if (version < 8)
+                {
+                    state.LayoutWindowState.ShowProjectSettingsWindow = state.ShowProjectSettingsWindow;
+                    state.LayoutWindowState.ShowAssetDiagnosticsWindow = state.ShowAssetDiagnosticsWindow;
+                    state.LayoutWindowState.ShowPerformancePanel = state.ShowPerformancePanel;
+                    state.LayoutWindowState.ShowConsoleWindow = state.ShowConsoleWindow;
+                }
                 return state;
             }
             catch (...)
@@ -333,14 +371,29 @@ namespace Limitless
                 nlohmann::json root;
                 root["version"] = kEditorSessionStateVersion;
                 root["lastOpenedSceneAssetKey"] = state.LastOpenedSceneAssetKey;
+                root["activeLayoutName"] = state.ActiveLayoutName;
                 root["nativeScriptEditorIsOpen"] = state.NativeScriptEditorState.IsOpen;
                 root["nativeScriptEditorLastClassName"] = state.NativeScriptEditorState.LastEditedScriptClassName;
                 root["nativeScriptEditorLastAssetRelativePath"] = state.NativeScriptEditorState.LastEditedScriptAssetRelativePath;
                 root["nativeScriptEditorShowDebugInfo"] = state.NativeScriptEditorState.ShowDebugInfo;
+                root["showScenePanel"] = state.LayoutWindowState.ShowScenePanel;
+                root["showInspectorPanel"] = state.LayoutWindowState.ShowInspectorPanel;
+                root["showProjectPanel"] = state.LayoutWindowState.ShowProjectPanel;
+                root["showSceneView"] = state.LayoutWindowState.ShowSceneView;
+                root["showGameView"] = state.LayoutWindowState.ShowGameView;
                 root["showProjectSettingsWindow"] = state.ShowProjectSettingsWindow;
+                root["showBuildSettingsWindow"] = state.LayoutWindowState.ShowBuildSettingsWindow;
                 root["showAssetDiagnosticsWindow"] = state.ShowAssetDiagnosticsWindow;
+                root["showPhysicsDiagnosticsWindow"] = state.LayoutWindowState.ShowPhysicsDiagnosticsWindow;
                 root["showPerformancePanel"] = state.ShowPerformancePanel;
                 root["showConsoleWindow"] = state.ShowConsoleWindow;
+                root["showEditorFpsOverlay"] = state.LayoutWindowState.ShowEditorFpsOverlay;
+                root["showGizmoToolbar"] = state.LayoutWindowState.ShowGizmoToolbar;
+                root["showAnimationTimelinePanel"] = state.LayoutWindowState.ShowAnimationTimelinePanel;
+                root["showAnimatorGraphPanel"] = state.LayoutWindowState.ShowAnimatorGraphPanel;
+                root["showTilePalettePanel"] = state.LayoutWindowState.ShowTilePalettePanel;
+                root["showSpriteEditorWindow"] = state.LayoutWindowState.ShowSpriteEditorWindow;
+                root["showDemoWindow"] = state.LayoutWindowState.ShowDemoWindow;
                 root["projectAssetsRootExpanded"] = state.ProjectAssetsRootExpanded;
                 root["projectActiveFolderRelativePath"] = state.ProjectActiveFolderRelativePath;
                 root["projectGridScale"] = state.ProjectGridScale;
@@ -795,6 +848,18 @@ namespace Limitless
             const bool defaultSceneWasMissing = !initialProjectDefinition.has_value() ||
                 isMissingSceneAssetKey(initialProjectDefinition->DefaultScene.Key);
             const EditorSessionStateData sessionState = ReadProjectSessionState(projectRoot);
+            m_ActiveLayoutName = Editor::EditorLayoutManager::NormalizeLayoutName(sessionState.ActiveLayoutName);
+            if (m_ActiveLayoutName.empty())
+                m_ActiveLayoutName = Editor::EditorLayoutManager::GetDefaultLayoutName();
+            {
+                Editor::EditorLayoutManager layoutManager;
+                if (m_ActiveLayoutName != Editor::EditorLayoutManager::GetDefaultLayoutName() &&
+                    !layoutManager.IsCustomLayoutName(m_ActiveLayoutName))
+                {
+                    m_ActiveLayoutName = Editor::EditorLayoutManager::GetDefaultLayoutName();
+                }
+            }
+            ApplyLayoutWindowState(sessionState.LayoutWindowState);
             EditorInspectorPanel::ApplyNativeScriptEditorSessionState(sessionState.NativeScriptEditorState);
             m_ShowProjectSettingsWindow = sessionState.ShowProjectSettingsWindow;
             m_ShowAssetDiagnosticsWindow = sessionState.ShowAssetDiagnosticsWindow;
@@ -804,6 +869,21 @@ namespace Limitless
             m_ProjectPanelState.ActiveFolderRelativePath = std::filesystem::path(sessionState.ProjectActiveFolderRelativePath);
             m_ProjectPanelState.GridScale = std::clamp(sessionState.ProjectGridScale, 0.0f, 1.80f);
             m_ProjectPanelState.ExpandedFolderState = sessionState.ProjectFolderExpansionState;
+            if (ImGuiLayer* imguiLayer = GetImGuiLayer())
+            {
+                const std::filesystem::path workingLayoutPath = Editor::EditorLayoutManager::GetProjectWorkingLayoutPath(projectRoot);
+                std::error_code layoutError;
+                const bool hasWorkingLayout = !workingLayoutPath.empty() && std::filesystem::exists(workingLayoutPath, layoutError);
+                if (hasWorkingLayout)
+                {
+                    if (!imguiLayer->SetLayoutIniPath(workingLayoutPath) || !imguiLayer->LoadLayoutFromDisk(workingLayoutPath))
+                        LT_WARN("Failed to restore working editor layout for project '{}'.", projectRoot.string());
+                }
+                else if (!LoadLayoutByName(m_ActiveLayoutName))
+                {
+                    LT_WARN("Failed to load editor layout '{}'. Falling back to current ImGui state.", m_ActiveLayoutName);
+                }
+            }
             const std::string lastOpenedSceneAssetKey = sessionState.LastOpenedSceneAssetKey;
             if (!lastOpenedSceneAssetKey.empty())
             {
@@ -929,6 +1009,8 @@ namespace Limitless
         DrawPerformancePanel();
         DrawConsolePanel();
         DrawSaveScenePopup();
+        DrawLayoutSavePopup();
+        DrawLayoutDeletePopup();
         DrawSceneSwitchConfirmationPopup();
 
         if (m_ShowDemoWindow)
@@ -964,6 +1046,11 @@ namespace Limitless
 
         EditorMenuBar::Draw(
             m_PlayModeState,
+            m_ShowScenePanel,
+            m_ShowInspectorPanel,
+            m_ShowSceneView,
+            m_ShowGameView,
+            m_ShowProjectPanel,
             m_ShowDemoWindow,
             m_ShowAssetDiagnosticsWindow,
             m_ShowPhysicsDiagnosticsWindow,
@@ -1045,53 +1132,48 @@ namespace Limitless
             [this]() { (void)ReturnFromPrefabMode(false); },
             canApplyPrefabToInstances,
             [this]() { (void)ApplyPrefabStageChangesToInstances(); },
+            [this]() {
+                Editor::EditorLayoutManager layoutManager;
+                const std::vector<Editor::EditorLayoutDescriptor> layouts = layoutManager.ListLayouts();
+                ImGui::TextDisabled("Current: %s", m_ActiveLayoutName.c_str());
+                ImGui::Separator();
+
+                for (const auto& layout : layouts)
+                {
+                    const bool selected = layout.Name == m_ActiveLayoutName;
+                    if (ImGui::MenuItem(layout.Name.c_str(), nullptr, selected))
+                        (void)LoadLayoutByName(layout.Name);
+                }
+
+                ImGui::Separator();
+                const bool activeCustomLayout = layoutManager.IsCustomLayoutName(m_ActiveLayoutName);
+                ImGui::BeginDisabled(!activeCustomLayout);
+                if (ImGui::MenuItem("Save Layout"))
+                    (void)SaveCurrentLayoutAs(m_ActiveLayoutName);
+                ImGui::EndDisabled();
+
+                if (ImGui::MenuItem("Save Layout As..."))
+                    RequestOpenSaveLayoutPopup();
+
+                ImGui::BeginDisabled(!activeCustomLayout);
+                if (ImGui::MenuItem("Delete Layout..."))
+                    RequestOpenDeleteLayoutPopup(m_ActiveLayoutName);
+                ImGui::EndDisabled();
+
+                if (ImGui::MenuItem("Revert to Default"))
+                    ResetLayoutToDefault();
+            },
             [this]() { ResetLayoutToDefault(); });
     }
 
     void EditorLayer::ResetLayoutToDefault()
     {
-        std::filesystem::path activeLayoutPath = "imgui.ini";
-        if (const ImGuiIO& io = ImGui::GetIO(); io.IniFilename && io.IniFilename[0] != '\0')
-            activeLayoutPath = io.IniFilename;
-
-        std::filesystem::path defaultLayoutPath = activeLayoutPath.parent_path() / "imgui-default.ini";
-        std::error_code errorCode;
-        if (!std::filesystem::exists(defaultLayoutPath, errorCode))
+        if (!LoadLayoutByName(Editor::EditorLayoutManager::GetDefaultLayoutName()))
         {
-            // Dev fallback when the default layout wasn't copied beside the output binary.
-            std::filesystem::path probe = activeLayoutPath.parent_path();
-            for (int depth = 0; depth < 8 && !probe.empty(); ++depth)
-            {
-                defaultLayoutPath = probe / "Editor" / "imgui-default.ini";
-                errorCode.clear();
-                if (std::filesystem::exists(defaultLayoutPath, errorCode))
-                    break;
-
-                const std::filesystem::path parent = probe.parent_path();
-                if (parent == probe)
-                    break;
-                probe = parent;
-            }
-        }
-
-        if (!std::filesystem::exists(defaultLayoutPath, errorCode))
-        {
-            LT_WARN("Reset Layout failed: '{}' was not found.", defaultLayoutPath.string());
+            LT_WARN("Editor layout reset to default failed.");
             return;
         }
 
-        std::filesystem::copy_file(
-            defaultLayoutPath,
-            activeLayoutPath,
-            std::filesystem::copy_options::overwrite_existing,
-            errorCode);
-        if (errorCode)
-        {
-            LT_WARN("Reset Layout failed while writing '{}': {}", activeLayoutPath.string(), errorCode.message());
-            return;
-        }
-
-        ImGui::LoadIniSettingsFromDisk(activeLayoutPath.string().c_str());
         LT_INFO("Editor layout reset to default.");
     }
 
@@ -1519,6 +1601,7 @@ namespace Limitless
             m_SceneViewWidthPixels,
             m_SceneViewHeightPixels,
             m_SceneViewFramebuffer,
+            m_ShowSceneView,
             m_SceneViewFocused,
             m_SceneViewHovered,
             m_SceneViewRectValid,
@@ -1527,6 +1610,7 @@ namespace Limitless
             m_GameViewWidthPixels,
             m_GameViewHeightPixels,
             m_GameViewFramebuffer,
+            m_ShowGameView,
             m_GameViewFocused,
             m_GameViewHovered,
             m_GameViewRectValid,
@@ -1569,6 +1653,9 @@ namespace Limitless
 
     void EditorLayer::DrawScenePanel()
     {
+        if (!m_ShowScenePanel)
+            return;
+
         std::string sceneRootDisplayName = SceneDisplayNameFromFileName(kDefaultSceneFileName);
         if (!m_CurrentSceneAssetKey.empty())
         {
@@ -1580,6 +1667,7 @@ namespace Limitless
 
         EditorScenePanel::Draw(
             m_Scene.get(),
+            m_ShowScenePanel,
             m_ScenePanelState,
             m_SelectedEntity,
             m_SelectedTextureAssetKey,
@@ -1605,8 +1693,12 @@ namespace Limitless
 
     void EditorLayer::DrawInspectorPanel()
     {
+        if (!m_ShowInspectorPanel)
+            return;
+
         EditorInspectorPanel::Draw(
             m_Scene.get(),
+            m_ShowInspectorPanel,
             m_SelectedEntity,
             kAssetTexturePayload,
             m_SelectedTextureAssetKey,
@@ -1629,10 +1721,14 @@ namespace Limitless
 
     void EditorLayer::DrawProjectPanel()
     {
+        if (!m_ShowProjectPanel)
+            return;
+
         const std::string prevClipKey = m_SelectedAnimationClipAssetKey;
         const std::string prevControllerKey = m_SelectedAnimatorControllerAssetKey;
 
         EditorProjectPanel::Draw(
+            m_ShowProjectPanel,
             m_ProjectPanelState,
             m_SelectedEntity,
             m_SelectedTextureAssetKey,
@@ -2258,11 +2354,19 @@ namespace Limitless
             m_ShowAnimationTimelinePanel = true;
         if (!m_SelectedAnimatorControllerAssetKey.empty() && m_SelectedAnimatorControllerAssetKey != prevControllerKey)
             m_ShowAnimatorGraphPanel = true;
+        if (m_ProjectPanelState.RequestFocusAnimationClipEditor && !m_SelectedAnimationClipAssetKey.empty())
+            m_ShowAnimationTimelinePanel = true;
+        if (m_ProjectPanelState.RequestFocusAnimatorControllerEditor && !m_SelectedAnimatorControllerAssetKey.empty())
+            m_ShowAnimatorGraphPanel = true;
     }
 
     void EditorLayer::DrawAnimationTimelinePanel()
     {
-        EditorAnimationTimelinePanel::Draw(m_ShowAnimationTimelinePanel, m_SelectedAnimationClipAssetKey, &m_EditorUndoService);
+        EditorAnimationTimelinePanel::Draw(
+            m_ShowAnimationTimelinePanel,
+            m_SelectedAnimationClipAssetKey,
+            &m_EditorUndoService,
+            m_ProjectPanelState.RequestFocusAnimationClipEditor);
     }
 
     void EditorLayer::ApplyAnimationTimelinePreviewToSelectedEntity()
@@ -2361,7 +2465,11 @@ namespace Limitless
 
     void EditorLayer::DrawAnimatorGraphPanel()
     {
-        EditorAnimatorGraphPanel::Draw(m_ShowAnimatorGraphPanel, m_SelectedAnimatorControllerAssetKey, &m_EditorUndoService);
+        EditorAnimatorGraphPanel::Draw(
+            m_ShowAnimatorGraphPanel,
+            m_SelectedAnimatorControllerAssetKey,
+            &m_EditorUndoService,
+            m_ProjectPanelState.RequestFocusAnimatorControllerEditor);
     }
 
     void EditorLayer::DrawSpriteEditorPanel()

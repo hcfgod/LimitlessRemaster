@@ -3,8 +3,10 @@
 
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetPaths.h"
+#include "Core/Application.h"
 #include "Core/Debug/Log.h"
 #include "EditorInspectorPanel.h"
+#include "ImGui/ImGuiLayer.h"
 #include "Project/ProjectManager.h"
 #include "imgui/imgui.h"
 
@@ -15,6 +17,7 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace Limitless
@@ -23,13 +26,16 @@ namespace Limitless
     {
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 7;
+        constexpr uint32_t kEditorSessionStateVersion = 8;
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
         struct EditorSessionStateData final
         {
+            bool HasPersistedState = false;
             std::string LastOpenedSceneAssetKey;
+            std::string ActiveLayoutName = Editor::EditorLayoutManager::GetDefaultLayoutName();
             EditorInspectorPanel::NativeScriptEditorSessionState NativeScriptEditorState;
+            Editor::EditorLayoutWindowState LayoutWindowState = Editor::EditorLayoutManager::CreateDefaultWindowState();
             bool ShowProjectSettingsWindow = false;
             bool ShowAssetDiagnosticsWindow = false;
             bool ShowPerformancePanel = false;
@@ -219,14 +225,29 @@ namespace Limitless
                 nlohmann::json root;
                 root["version"] = kEditorSessionStateVersion;
                 root["lastOpenedSceneAssetKey"] = state.LastOpenedSceneAssetKey;
+                root["activeLayoutName"] = state.ActiveLayoutName;
                 root["nativeScriptEditorIsOpen"] = state.NativeScriptEditorState.IsOpen;
                 root["nativeScriptEditorLastClassName"] = state.NativeScriptEditorState.LastEditedScriptClassName;
                 root["nativeScriptEditorLastAssetRelativePath"] = state.NativeScriptEditorState.LastEditedScriptAssetRelativePath;
                 root["nativeScriptEditorShowDebugInfo"] = state.NativeScriptEditorState.ShowDebugInfo;
+                root["showScenePanel"] = state.LayoutWindowState.ShowScenePanel;
+                root["showInspectorPanel"] = state.LayoutWindowState.ShowInspectorPanel;
+                root["showProjectPanel"] = state.LayoutWindowState.ShowProjectPanel;
+                root["showSceneView"] = state.LayoutWindowState.ShowSceneView;
+                root["showGameView"] = state.LayoutWindowState.ShowGameView;
                 root["showProjectSettingsWindow"] = state.ShowProjectSettingsWindow;
+                root["showBuildSettingsWindow"] = state.LayoutWindowState.ShowBuildSettingsWindow;
                 root["showAssetDiagnosticsWindow"] = state.ShowAssetDiagnosticsWindow;
+                root["showPhysicsDiagnosticsWindow"] = state.LayoutWindowState.ShowPhysicsDiagnosticsWindow;
                 root["showPerformancePanel"] = state.ShowPerformancePanel;
                 root["showConsoleWindow"] = state.ShowConsoleWindow;
+                root["showEditorFpsOverlay"] = state.LayoutWindowState.ShowEditorFpsOverlay;
+                root["showGizmoToolbar"] = state.LayoutWindowState.ShowGizmoToolbar;
+                root["showAnimationTimelinePanel"] = state.LayoutWindowState.ShowAnimationTimelinePanel;
+                root["showAnimatorGraphPanel"] = state.LayoutWindowState.ShowAnimatorGraphPanel;
+                root["showTilePalettePanel"] = state.LayoutWindowState.ShowTilePalettePanel;
+                root["showSpriteEditorWindow"] = state.LayoutWindowState.ShowSpriteEditorWindow;
+                root["showDemoWindow"] = state.LayoutWindowState.ShowDemoWindow;
                 root["projectAssetsRootExpanded"] = state.ProjectAssetsRootExpanded;
                 root["projectActiveFolderRelativePath"] = state.ProjectActiveFolderRelativePath;
                 root["projectGridScale"] = state.ProjectGridScale;
@@ -261,6 +282,259 @@ namespace Limitless
                 // Session state persistence is best-effort.
             }
         }
+    }
+
+    Editor::EditorLayoutWindowState EditorLayer::CaptureLayoutWindowState() const
+    {
+        Editor::EditorLayoutWindowState state{};
+        state.ShowScenePanel = m_ShowScenePanel;
+        state.ShowInspectorPanel = m_ShowInspectorPanel;
+        state.ShowProjectPanel = m_ShowProjectPanel;
+        state.ShowSceneView = m_ShowSceneView;
+        state.ShowGameView = m_ShowGameView;
+        state.ShowProjectSettingsWindow = m_ShowProjectSettingsWindow;
+        state.ShowBuildSettingsWindow = m_ShowBuildSettingsWindow;
+        state.ShowAssetDiagnosticsWindow = m_ShowAssetDiagnosticsWindow;
+        state.ShowPhysicsDiagnosticsWindow = m_ShowPhysicsDiagnosticsWindow;
+        state.ShowConsoleWindow = m_ShowConsoleWindow;
+        state.ShowEditorFpsOverlay = m_ShowEditorFpsOverlay;
+        state.ShowGizmoToolbar = m_ShowGizmoToolbar;
+        state.ShowPerformancePanel = m_ShowPerformancePanel;
+        state.ShowAnimationTimelinePanel = m_ShowAnimationTimelinePanel;
+        state.ShowAnimatorGraphPanel = m_ShowAnimatorGraphPanel;
+        state.ShowTilePalettePanel = m_TilePaletteState.PanelOpen;
+        state.ShowSpriteEditorWindow = m_SpriteEditorState.Open;
+        state.ShowDemoWindow = m_ShowDemoWindow;
+        return state;
+    }
+
+    void EditorLayer::ApplyLayoutWindowState(const Editor::EditorLayoutWindowState& state)
+    {
+        m_ShowScenePanel = state.ShowScenePanel;
+        m_ShowInspectorPanel = state.ShowInspectorPanel;
+        m_ShowProjectPanel = state.ShowProjectPanel;
+        m_ShowSceneView = state.ShowSceneView;
+        m_ShowGameView = state.ShowGameView;
+        m_ShowProjectSettingsWindow = state.ShowProjectSettingsWindow;
+        m_ShowBuildSettingsWindow = state.ShowBuildSettingsWindow;
+        m_ShowAssetDiagnosticsWindow = state.ShowAssetDiagnosticsWindow;
+        m_ShowPhysicsDiagnosticsWindow = state.ShowPhysicsDiagnosticsWindow;
+        m_ShowConsoleWindow = state.ShowConsoleWindow;
+        m_ShowEditorFpsOverlay = state.ShowEditorFpsOverlay;
+        m_ShowGizmoToolbar = state.ShowGizmoToolbar;
+        m_ShowPerformancePanel = state.ShowPerformancePanel;
+        m_ShowAnimationTimelinePanel = state.ShowAnimationTimelinePanel;
+        m_ShowAnimatorGraphPanel = state.ShowAnimatorGraphPanel;
+        m_TilePaletteState.PanelOpen = state.ShowTilePalettePanel;
+        m_SpriteEditorState.Open = state.ShowSpriteEditorWindow;
+        m_ShowDemoWindow = state.ShowDemoWindow;
+    }
+
+    ImGuiLayer* EditorLayer::GetImGuiLayer() const
+    {
+        LayerRef imguiLayerRef = Application::GetInstance().GetLayerStack().GetLayer("ImGuiLayer");
+        if (!imguiLayerRef)
+            return nullptr;
+        return dynamic_cast<ImGuiLayer*>(imguiLayerRef.get());
+    }
+
+    bool EditorLayer::SaveWorkingLayoutToDisk()
+    {
+        const auto& projectManager = Project::ProjectManager::GetInstance();
+        if (!projectManager.HasOpenProject())
+            return false;
+
+        ImGuiLayer* imguiLayer = GetImGuiLayer();
+        if (!imguiLayer)
+            return false;
+
+        if (imguiLayer->HasPendingLayoutLoad())
+            return true;
+
+        const std::filesystem::path workingLayoutPath = Editor::EditorLayoutManager::GetProjectWorkingLayoutPath(projectManager.GetProjectRoot());
+        if (workingLayoutPath.empty())
+            return false;
+
+        if (imguiLayer->GetLayoutIniPath() != workingLayoutPath.string() && !imguiLayer->SetLayoutIniPath(workingLayoutPath))
+            return false;
+
+        return imguiLayer->SaveCurrentLayoutToDisk(workingLayoutPath);
+    }
+
+    bool EditorLayer::LoadLayoutByName(const std::string& layoutName)
+    {
+        const auto& projectManager = Project::ProjectManager::GetInstance();
+        if (!projectManager.HasOpenProject())
+            return false;
+
+        ImGuiLayer* imguiLayer = GetImGuiLayer();
+        if (!imguiLayer)
+            return false;
+
+        Editor::EditorLayoutManager layoutManager;
+        std::string normalizedLayoutName = Editor::EditorLayoutManager::NormalizeLayoutName(layoutName);
+        if (normalizedLayoutName.empty())
+            normalizedLayoutName = Editor::EditorLayoutManager::GetDefaultLayoutName();
+
+        const std::filesystem::path projectRoot = projectManager.GetProjectRoot();
+        const std::filesystem::path workingLayoutPath = Editor::EditorLayoutManager::GetProjectWorkingLayoutPath(projectRoot);
+        const std::filesystem::path defaultLayoutPath = imguiLayer->GetDefaultLayoutIniPath();
+        Editor::EditorLayoutWindowState windowState = Editor::EditorLayoutManager::CreateDefaultWindowState();
+
+        std::string resolvedLayoutName = normalizedLayoutName;
+        if (!layoutManager.LoadLayoutToPath(resolvedLayoutName, defaultLayoutPath, workingLayoutPath, windowState))
+        {
+            resolvedLayoutName = Editor::EditorLayoutManager::GetDefaultLayoutName();
+            if (!layoutManager.LoadLayoutToPath(resolvedLayoutName, defaultLayoutPath, workingLayoutPath, windowState))
+                return false;
+        }
+
+        if (!imguiLayer->SetLayoutIniPath(workingLayoutPath))
+            return false;
+        if (!imguiLayer->LoadLayoutFromDisk(workingLayoutPath))
+            return false;
+
+        ApplyLayoutWindowState(windowState);
+        m_ActiveLayoutName = resolvedLayoutName;
+        PersistProjectSessionState();
+        return true;
+    }
+
+    bool EditorLayer::SaveCurrentLayoutAs(const std::string& layoutName)
+    {
+        const auto& projectManager = Project::ProjectManager::GetInstance();
+        if (!projectManager.HasOpenProject())
+            return false;
+
+        const std::string normalizedLayoutName = Editor::EditorLayoutManager::NormalizeLayoutName(layoutName);
+        if (normalizedLayoutName.empty() || normalizedLayoutName == Editor::EditorLayoutManager::GetDefaultLayoutName())
+            return false;
+
+        if (!SaveWorkingLayoutToDisk())
+            return false;
+
+        Editor::EditorLayoutManager layoutManager;
+        const std::filesystem::path workingLayoutPath = Editor::EditorLayoutManager::GetProjectWorkingLayoutPath(projectManager.GetProjectRoot());
+        if (!layoutManager.SaveCustomLayout(normalizedLayoutName, workingLayoutPath, CaptureLayoutWindowState()))
+            return false;
+
+        m_ActiveLayoutName = normalizedLayoutName;
+        PersistProjectSessionState();
+        return true;
+    }
+
+    bool EditorLayer::DeleteSavedLayout(const std::string& layoutName)
+    {
+        const std::string normalizedLayoutName = Editor::EditorLayoutManager::NormalizeLayoutName(layoutName);
+        if (normalizedLayoutName.empty() || normalizedLayoutName == Editor::EditorLayoutManager::GetDefaultLayoutName())
+            return false;
+
+        Editor::EditorLayoutManager layoutManager;
+        if (!layoutManager.DeleteCustomLayout(normalizedLayoutName))
+            return false;
+
+        if (m_ActiveLayoutName == normalizedLayoutName)
+            return LoadLayoutByName(Editor::EditorLayoutManager::GetDefaultLayoutName());
+
+        PersistProjectSessionState();
+        return true;
+    }
+
+    void EditorLayer::RequestOpenSaveLayoutPopup(const std::string& initialLayoutName)
+    {
+        std::fill(m_SaveLayoutNameBuffer.begin(), m_SaveLayoutNameBuffer.end(), '\0');
+        std::string popupName = initialLayoutName;
+        if (popupName.empty() && m_ActiveLayoutName != Editor::EditorLayoutManager::GetDefaultLayoutName())
+            popupName = m_ActiveLayoutName;
+        const size_t copyCount = std::min(popupName.size(), m_SaveLayoutNameBuffer.size() - 1);
+        std::copy_n(popupName.c_str(), copyCount, m_SaveLayoutNameBuffer.begin());
+        m_SaveLayoutNameBuffer[copyCount] = '\0';
+        m_RequestOpenSaveLayoutPopup = true;
+    }
+
+    void EditorLayer::RequestOpenDeleteLayoutPopup(const std::string& layoutName)
+    {
+        const std::string normalizedLayoutName = Editor::EditorLayoutManager::NormalizeLayoutName(layoutName);
+        if (normalizedLayoutName.empty() || normalizedLayoutName == Editor::EditorLayoutManager::GetDefaultLayoutName())
+            return;
+        m_PendingDeleteLayoutName = normalizedLayoutName;
+        m_RequestOpenDeleteLayoutPopup = true;
+    }
+
+    void EditorLayer::DrawLayoutSavePopup()
+    {
+        if (m_RequestOpenSaveLayoutPopup)
+        {
+            ImGui::OpenPopup("Save Layout As");
+            m_RequestOpenSaveLayoutPopup = false;
+            m_SaveLayoutPopupOpen = true;
+        }
+
+        if (!m_SaveLayoutPopupOpen)
+            return;
+
+        if (!ImGui::BeginPopupModal("Save Layout As", &m_SaveLayoutPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+            return;
+
+        ImGui::Text("Save the current editor layout as a named preset.");
+        ImGui::Separator();
+        ImGui::InputText("Layout Name", m_SaveLayoutNameBuffer.data(), m_SaveLayoutNameBuffer.size());
+
+        bool closePopup = false;
+        if (ImGui::Button("Save", ImVec2(120.0f, 0.0f)))
+        {
+            if (SaveCurrentLayoutAs(m_SaveLayoutNameBuffer.data()))
+                closePopup = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
+            closePopup = true;
+
+        if (closePopup)
+        {
+            m_SaveLayoutPopupOpen = false;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+
+    void EditorLayer::DrawLayoutDeletePopup()
+    {
+        if (m_RequestOpenDeleteLayoutPopup)
+        {
+            ImGui::OpenPopup("Delete Layout");
+            m_RequestOpenDeleteLayoutPopup = false;
+            m_DeleteLayoutPopupOpen = true;
+        }
+
+        if (!m_DeleteLayoutPopupOpen)
+            return;
+
+        if (!ImGui::BeginPopupModal("Delete Layout", &m_DeleteLayoutPopupOpen, ImGuiWindowFlags_AlwaysAutoResize))
+            return;
+
+        ImGui::Text("Delete layout '%s'?", m_PendingDeleteLayoutName.c_str());
+        ImGui::Separator();
+
+        bool closePopup = false;
+        if (ImGui::Button("Delete", ImVec2(120.0f, 0.0f)))
+        {
+            (void)DeleteSavedLayout(m_PendingDeleteLayoutName);
+            closePopup = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
+            closePopup = true;
+
+        if (closePopup)
+        {
+            m_DeleteLayoutPopupOpen = false;
+            m_PendingDeleteLayoutName.clear();
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
     }
 
     void EditorLayer::DrawSaveScenePopup()
@@ -447,6 +721,8 @@ namespace Limitless
         else
             state.LastOpenedSceneAssetKey = m_CurrentSceneAssetKey;
         EditorInspectorPanel::GetNativeScriptEditorSessionState(state.NativeScriptEditorState);
+        state.ActiveLayoutName = m_ActiveLayoutName;
+        state.LayoutWindowState = CaptureLayoutWindowState();
         state.ShowProjectSettingsWindow = m_ShowProjectSettingsWindow;
         state.ShowAssetDiagnosticsWindow = m_ShowAssetDiagnosticsWindow;
         state.ShowPerformancePanel = m_ShowPerformancePanel;
@@ -456,6 +732,7 @@ namespace Limitless
         state.ProjectGridScale = m_ProjectPanelState.GridScale;
         state.ProjectFolderExpansionState = m_ProjectPanelState.ExpandedFolderState;
         WriteProjectSessionState(projectManager.GetProjectRoot(), state);
+        (void)SaveWorkingLayoutToDisk();
     }
 
     void EditorLayer::ProcessPendingSceneTransitions()

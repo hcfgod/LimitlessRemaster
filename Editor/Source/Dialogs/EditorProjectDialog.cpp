@@ -158,7 +158,10 @@ namespace Limitless::EditorProjectDialog
         // ── Sidebar mode button (full-width, highlighted when active) ───────
         bool SidebarButton(const char* label, bool isActive)
         {
-            const float w = ImGui::GetContentRegionAvail().x;
+            static constexpr float kSidebarButtonHorizontalInset = 10.0f;
+            const float cursorX = ImGui::GetCursorPosX();
+            ImGui::SetCursorPosX(cursorX + kSidebarButtonHorizontalInset);
+            const float w = std::max(0.0f, ImGui::GetContentRegionAvail().x - kSidebarButtonHorizontalInset);
             if (isActive)
             {
                 ImGui::PushStyleColor(ImGuiCol_Button, kAccent);
@@ -185,6 +188,10 @@ namespace Limitless::EditorProjectDialog
         state.IsOpen = true;
         state.RequestOpenPopup = true;
         state.Mode = mode;
+        state.ActiveRecentProjectMenuIndex = -1;
+        state.RecentProjectMenuOpenedFrame = -1;
+        state.RecentProjectMenuAnchorX = 0.0f;
+        state.RecentProjectMenuAnchorY = 0.0f;
         state.StatusMessage.clear();
         state.StatusIsError = false;
 
@@ -261,20 +268,31 @@ namespace Limitless::EditorProjectDialog
             dl->AddRectFilled(cardMin, cardMax, ImGui::ColorConvertFloat4ToU32(kCardBg), kCardRounding);
             dl->AddRect(cardMin, cardMax, ImGui::ColorConvertFloat4ToU32(kCardBorder), kCardRounding);
 
-            // Invisible selectable for hover/click detection
-            ImGui::SetCursorScreenPos(cardMin);
-            const std::string selId = "###recentCard_" + std::to_string(i);
-            if (ImGui::InvisibleButton(selId.c_str(), ImVec2(cardW, kRowHeight)))
+            const float btnH = 26.0f;
+            const float menuBtnW = 34.0f;
+            const float menuBtnRightMargin = 12.0f;
+            const float selectionReservedW = menuBtnW + menuBtnRightMargin + 12.0f;
+            const ImVec2 windowPos = ImGui::GetWindowPos();
+            const float btnLocalY = (cardMin.y - windowPos.y) + (kRowHeight - btnH) * 0.5f;
+            const float menuLocalX = (cardMax.x - windowPos.x) - menuBtnW - menuBtnRightMargin;
+            const ImVec2 menuBtnScreenMin = ImVec2(windowPos.x + menuLocalX, windowPos.y + btnLocalY);
+            const ImVec2 menuBtnScreenMax = ImVec2(menuBtnScreenMin.x + menuBtnW, menuBtnScreenMin.y + btnH);
+            const ImVec2 selectionScreenMax = ImVec2(cardMax.x - selectionReservedW, cardMax.y);
+
+            const bool actionMenuOpen = state.ActiveRecentProjectMenuIndex >= 0;
+            const bool selectionHovered = !actionMenuOpen && ImGui::IsMouseHoveringRect(cardMin, selectionScreenMax);
+            if (selectionHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             {
                 CopyText(state.ProjectRootPathBuffer, e.ProjectRoot);
                 state.Mode = ProjectDialogMode::Open;
             }
-            const bool hovered = ImGui::IsItemHovered();
+            const bool menuHovered = ImGui::IsMouseHoveringRect(menuBtnScreenMin, menuBtnScreenMax);
+            const bool hovered = !actionMenuOpen && ImGui::IsMouseHoveringRect(cardMin, cardMax);
             if (hovered)
             {
                 dl->AddRectFilled(cardMin, cardMax, ImGui::ColorConvertFloat4ToU32(kRowHover), kCardRounding);
             }
-            if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            if (selectionHovered && !menuHovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             {
                 if (TryOpenRecentProject(state, e))
                 {
@@ -292,30 +310,22 @@ namespace Limitless::EditorProjectDialog
             const ImVec2 pathPos = ImVec2(cardMin.x + 20.0f, cardMin.y + 34.0f);
             dl->AddText(pathPos, ImGui::ColorConvertFloat4ToU32(kTextSecondary), e.ProjectRoot.c_str());
 
-            // Action buttons – use local cursor coords so we stay inside the
-            // child window's content rect and avoid the ImGui assertion about
-            // SetCursorScreenPos extending parent boundaries.
-            const float btnW = 60.0f;
-            const float btnH = 26.0f;
-            const ImVec2 windowPos = ImGui::GetWindowPos();
-            const float btnLocalY = (cardMin.y - windowPos.y) + (kRowHeight - btnH) * 0.5f;
-            const float removeLocalX = (cardMax.x - windowPos.x) - btnW - 12.0f;
-            const float openLocalX = removeLocalX - btnW - 8.0f;
-
-            ImGui::SetCursorPos(ImVec2(openLocalX, btnLocalY));
-            if (AccentButton(("Open###open_" + std::to_string(i)).c_str(), ImVec2(btnW, btnH)))
+            ImGui::SetCursorPos(ImVec2(menuLocalX, btnLocalY));
+            DefaultButton(("...##menu_" + std::to_string(i)).c_str(), ImVec2(menuBtnW, btnH));
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
             {
-                if (TryOpenRecentProject(state, e))
+                if (state.ActiveRecentProjectMenuIndex == static_cast<int>(i))
                 {
-                    opened = true;
-                    keepOpen = false;
+                    state.ActiveRecentProjectMenuIndex = -1;
+                    state.RecentProjectMenuOpenedFrame = -1;
                 }
-            }
-
-            ImGui::SetCursorPos(ImVec2(removeLocalX, btnLocalY));
-            if (DefaultButton(("Remove###rm_" + std::to_string(i)).c_str(), ImVec2(btnW, btnH)))
-            {
-                recent.Remove(std::filesystem::path(e.ProjectRoot));
+                else
+                {
+                    state.ActiveRecentProjectMenuIndex = static_cast<int>(i);
+                    state.RecentProjectMenuOpenedFrame = ImGui::GetFrameCount();
+                    state.RecentProjectMenuAnchorX = menuBtnScreenMax.x;
+                    state.RecentProjectMenuAnchorY = menuBtnScreenMin.y;
+                }
             }
 
             // Advance cursor past card using Dummy to properly grow the content rect
@@ -324,6 +334,70 @@ namespace Limitless::EditorProjectDialog
 
             ImGui::PopID();
         }
+
+        return opened;
+    }
+
+    static bool DrawRecentProjectActionMenu(EditorProjectDialogState& state, bool& keepOpen)
+    {
+        auto& recent = Editor::EditorRecentProjects::GetInstance();
+        recent.EnsureLoaded();
+
+        const auto entries = recent.GetEntries();
+        if (state.ActiveRecentProjectMenuIndex < 0 || state.ActiveRecentProjectMenuIndex >= static_cast<int>(entries.size()))
+        {
+            state.ActiveRecentProjectMenuIndex = -1;
+            state.RecentProjectMenuOpenedFrame = -1;
+            return false;
+        }
+
+        bool opened = false;
+        const auto& activeEntry = entries[static_cast<size_t>(state.ActiveRecentProjectMenuIndex)];
+        const int currentFrame = ImGui::GetFrameCount();
+
+        ImGui::SetNextWindowPos(ImVec2(state.RecentProjectMenuAnchorX, state.RecentProjectMenuAnchorY), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, kCardRounding);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 8.0f));
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, kSidebarBg);
+        ImGui::PushStyleColor(ImGuiCol_Border, kCardBorder);
+
+        const ImGuiWindowFlags menuFlags =
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize |
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
+            ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoDocking;
+
+        if (ImGui::Begin("##RecentProjectActionMenu", nullptr, menuFlags))
+        {
+            const bool menuHovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+
+            if (AccentButton("Open##recentMenuOpen", ImVec2(140.0f, 0.0f)))
+            {
+                if (TryOpenRecentProject(state, activeEntry))
+                {
+                    opened = true;
+                    keepOpen = false;
+                }
+                state.ActiveRecentProjectMenuIndex = -1;
+                state.RecentProjectMenuOpenedFrame = -1;
+            }
+
+            if (DefaultButton("Remove##recentMenuRemove", ImVec2(140.0f, 0.0f)))
+            {
+                recent.Remove(std::filesystem::path(activeEntry.ProjectRoot));
+                state.ActiveRecentProjectMenuIndex = -1;
+                state.RecentProjectMenuOpenedFrame = -1;
+            }
+
+            if (currentFrame > state.RecentProjectMenuOpenedFrame && !menuHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            {
+                state.ActiveRecentProjectMenuIndex = -1;
+                state.RecentProjectMenuOpenedFrame = -1;
+            }
+        }
+        ImGui::End();
+        ImGui::PopStyleColor(2);
+        ImGui::PopStyleVar(2);
 
         return opened;
     }
@@ -570,7 +644,10 @@ namespace Limitless::EditorProjectDialog
         const ImGuiIO& io = ImGui::GetIO();
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(io.DisplaySize);
-        ImGui::SetNextWindowFocus();
+        if (state.ActiveRecentProjectMenuIndex < 0)
+        {
+            ImGui::SetNextWindowFocus();
+        }
 
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
@@ -698,6 +775,11 @@ namespace Limitless::EditorProjectDialog
 
         ImGui::PopStyleColor();
         ImGui::PopStyleVar(3);
+
+        if (DrawRecentProjectActionMenu(state, keepOpen))
+        {
+            openedOrCreated = true;
+        }
 
         state.IsOpen = keepOpen;
         return openedOrCreated;

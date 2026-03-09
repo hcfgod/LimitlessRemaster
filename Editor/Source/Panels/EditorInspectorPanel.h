@@ -29,6 +29,7 @@ namespace Limitless
         void OnNativeScriptAssetRenamed(const std::string& oldAssetKey, const std::string& newAssetKey);
 
         void Draw(Scene* scene,
+                  bool& isOpen,
                   entt::entity selectedEntity,
                   const char* texturePayloadId,
                   std::string& selectedTextureAssetKey,

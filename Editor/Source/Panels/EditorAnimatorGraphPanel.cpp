@@ -553,12 +553,14 @@ namespace Limitless::EditorAnimatorGraphPanel
         }
     }
 
-    void Draw(bool& isOpen, const std::string& animatorControllerAssetKey, EditorUndoService* undoService)
+    void Draw(bool& isOpen, const std::string& animatorControllerAssetKey, EditorUndoService* undoService, bool requestFocus)
     {
         if (!isOpen)
             return;
 
         EditorPanelStyle::PushPanelVisualStyle();
+        if (requestFocus)
+            ImGui::SetNextWindowFocus();
         if (!ImGui::Begin("Animator Graph", &isOpen))
         {
             ImGui::End();

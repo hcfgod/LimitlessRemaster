@@ -236,13 +236,13 @@ namespace Limitless
 
         // Runtime dispatch wrappers used by scene physics integration.
         // Keep callback virtuals protected for script authors.
-        void DispatchCollisionEnter(const Entity& other) { OnCollisionEnter(other); }
-        void DispatchCollisionStay(const Entity& other) { OnCollisionStay(other); }
-        void DispatchCollisionExit(const Entity& other) { OnCollisionExit(other); }
-        void DispatchTriggerEnter(const Entity& other) { OnTriggerEnter(other); }
-        void DispatchTriggerStay(const Entity& other) { OnTriggerStay(other); }
-        void DispatchTriggerExit(const Entity& other) { OnTriggerExit(other); }
-        void DispatchUIButtonClicked(const Entity& buttonEntity) { OnUIButtonClicked(buttonEntity); }
+        void DispatchCollisionEnter(const Entity& other) { DispatchRuntimeCallback([&]() { OnCollisionEnter(other); }); }
+        void DispatchCollisionStay(const Entity& other) { DispatchRuntimeCallback([&]() { OnCollisionStay(other); }); }
+        void DispatchCollisionExit(const Entity& other) { DispatchRuntimeCallback([&]() { OnCollisionExit(other); }); }
+        void DispatchTriggerEnter(const Entity& other) { DispatchRuntimeCallback([&]() { OnTriggerEnter(other); }); }
+        void DispatchTriggerStay(const Entity& other) { DispatchRuntimeCallback([&]() { OnTriggerStay(other); }); }
+        void DispatchTriggerExit(const Entity& other) { DispatchRuntimeCallback([&]() { OnTriggerExit(other); }); }
+        void DispatchUIButtonClicked(const Entity& buttonEntity) { DispatchRuntimeCallback([&]() { OnUIButtonClicked(buttonEntity); }); }
 
         /// Unsubscribe all ScriptEvent subscriptions made via Subscribe().
         /// Called automatically by the runtime before OnDestroy.
@@ -360,6 +360,16 @@ namespace Limitless
         }
 
     private:
+        template<typename Callback>
+        void DispatchRuntimeCallback(Callback&& callback)
+        {
+            OnSynchronizeExposedFields();
+            MarkExposedPropertySyncComplete();
+            std::forward<Callback>(callback)();
+            OnWriteBackExposedFields();
+            MarkExposedPropertySyncComplete();
+        }
+
         bool HasPendingExposedPropertySync() const
         {
             return m_ExposedPropertiesRevision != nullptr &&

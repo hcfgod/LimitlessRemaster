@@ -34,6 +34,7 @@ namespace Limitless
     namespace EditorScenePanel
     {
         void Draw(Scene* scene,
+                  bool& isOpen,
                   EditorScenePanelState& state,
                   entt::entity& selectedEntity,
                   std::string& selectedTextureAssetKey,
