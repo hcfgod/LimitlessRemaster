@@ -23,7 +23,11 @@ jobs:
             if (Test-Path "Limitless\Vendor\Coral") {
               Remove-Item -Recurse -Force "Limitless\Vendor\Coral"
             }
-            git clone --depth 1 https://github.com/hcfgod/Coral.git "Limitless\Vendor\Coral"
+            git clone https://github.com/hcfgod/Coral.git "Limitless\Vendor\Coral"
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+            git -C "Limitless\Vendor\Coral" checkout c8e0d53356dd0310595e83b700b469086af63a54
             if ($LASTEXITCODE -ne 0) {
               exit $LASTEXITCODE
             }
@@ -209,7 +213,11 @@ jobs:
             if (Test-Path "Limitless\Vendor\Coral") {
               Remove-Item -Recurse -Force "Limitless\Vendor\Coral"
             }
-            git clone --depth 1 https://github.com/hcfgod/Coral.git "Limitless\Vendor\Coral"
+            git clone https://github.com/hcfgod/Coral.git "Limitless\Vendor\Coral"
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+            git -C "Limitless\Vendor\Coral" checkout c8e0d53356dd0310595e83b700b469086af63a54
             if ($LASTEXITCODE -ne 0) {
               exit $LASTEXITCODE
             }
