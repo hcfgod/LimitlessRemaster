@@ -695,7 +695,7 @@ namespace Limitless::EditorProjectSettingsPanel
             if (ImGui::BeginTabItem("Physics 2D"))
             {
                 ImGui::TextUnformatted("Gravity");
-                ImGui::DragFloat2("##PhysicsGravity", &state.Physics2D.GravityX, 0.05f, -100.0f, 100.0f);
+                EditorPanelStyle::DragFloatNWithAxisLabels("##PhysicsGravity", &state.Physics2D.GravityX, 2, 0.05f, -100.0f, 100.0f);
                 ImGui::TextUnformatted("Velocity Sub Steps");
                 ImGui::SliderInt("##PhysicsVelocitySubSteps", &state.Physics2D.VelocitySubSteps, 1, 24);
                 ImGui::TextUnformatted("Enable Sleep");

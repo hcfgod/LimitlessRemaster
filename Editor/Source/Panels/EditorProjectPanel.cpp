@@ -3809,15 +3809,10 @@ namespace Limitless::EditorProjectPanel
                 const float previewInset = 10.0f * gridScale;
                 const float previewTopOffset = 24.0f * gridScale;
                 const float previewHeight = 96.0f * gridScale;
-                const float badgeOffsetX = 10.0f * gridScale;
-                const float badgeOffsetY = 10.0f * gridScale;
-                const float badgePadX = 7.0f * gridScale;
-                const float badgePadY = 4.0f * gridScale;
                 const float tileTextPadX = 12.0f * gridScale;
                 const float textBlockTopPadding = 10.0f * gridScale;
                 const float textLineGap = std::max(1.0f, 2.0f * gridScale);
                 const float textBlockBottomPadding = 12.0f * gridScale;
-                const float badgeFontSize = ImGui::GetFontSize();
                 const float nameLineHeight = ImGui::GetTextLineHeight();
                 const float pathLineHeight = ImGui::GetTextLineHeight();
                 const float tileHeight =
@@ -4080,10 +4075,19 @@ namespace Limitless::EditorProjectPanel
 
                         const float perforationWidth = std::max(2.0f, stripWidth * 0.06f);
                         const float perforationStep = std::max(5.0f, stripHeight * 0.24f);
-                        for (float y = stripMin.y + 3.0f; y < stripMax.y - 3.0f; y += perforationStep)
+                        const float perforationStartY = stripMin.y + 3.0f;
+                        const float perforationEndY = stripMax.y - 3.0f;
+                        if (perforationStartY < perforationEndY)
                         {
-                            drawList->AddRectFilled(ImVec2(stripMin.x + 2.0f, y), ImVec2(stripMin.x + 2.0f + perforationWidth, std::min(stripMax.y - 2.0f, y + 2.0f)), IM_COL32(255, 220, 216, 190), 1.0f);
-                            drawList->AddRectFilled(ImVec2(stripMax.x - 2.0f - perforationWidth, y), ImVec2(stripMax.x - 2.0f, std::min(stripMax.y - 2.0f, y + 2.0f)), IM_COL32(255, 220, 216, 190), 1.0f);
+                            const int perforationCount = std::max(0, static_cast<int>((perforationEndY - perforationStartY) / perforationStep));
+                            for (int perforationIndex = 0; perforationIndex <= perforationCount; ++perforationIndex)
+                            {
+                                const float y = perforationStartY + static_cast<float>(perforationIndex) * perforationStep;
+                                if (y >= perforationEndY)
+                                    break;
+                                drawList->AddRectFilled(ImVec2(stripMin.x + 2.0f, y), ImVec2(stripMin.x + 2.0f + perforationWidth, std::min(stripMax.y - 2.0f, y + 2.0f)), IM_COL32(255, 220, 216, 190), 1.0f);
+                                drawList->AddRectFilled(ImVec2(stripMax.x - 2.0f - perforationWidth, y), ImVec2(stripMax.x - 2.0f, std::min(stripMax.y - 2.0f, y + 2.0f)), IM_COL32(255, 220, 216, 190), 1.0f);
+                            }
                         }
 
                         const ImVec2 playA(stripMin.x + stripWidth * 0.40f, stripMin.y + stripHeight * 0.26f);

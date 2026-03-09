@@ -1,6 +1,7 @@
 #include "EditorInspectorPanelEntityComponents.h"
 
 #include "EditorAssetNaming.h"
+#include "EditorPanelStyle.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/SpriteImportSettings.h"
@@ -113,6 +114,36 @@ namespace Limitless::EditorInspectorPanel
             (void)undoService->ExecuteValueMutation(label, beforeValue, afterValue, std::move(applyCallback));
         }
 
+        template<typename TValue, typename TApply>
+        void TrackInteractiveVectorValueMutation(EditorUndoService* undoService,
+                                                 const char* label,
+                                                 const EditorPanelStyle::AxisVectorDragState& interactionState,
+                                                 const TValue& currentValue,
+                                                 TApply&& applyValue)
+        {
+            if (!undoService || !label || interactionState.InteractionId == 0)
+                return;
+
+            using DecayedValueType = std::decay_t<TValue>;
+            static std::unordered_map<ImGuiID, DecayedValueType> beforeValues;
+            if (interactionState.Activated)
+                beforeValues[interactionState.InteractionId] = currentValue;
+
+            if (!interactionState.DeactivatedAfterEdit)
+                return;
+
+            const auto beforeIt = beforeValues.find(interactionState.InteractionId);
+            if (beforeIt == beforeValues.end())
+                return;
+
+            const DecayedValueType beforeValue = beforeIt->second;
+            beforeValues.erase(beforeIt);
+
+            const DecayedValueType afterValue = currentValue;
+            std::function<bool(const DecayedValueType&)> applyCallback = std::forward<TApply>(applyValue);
+            (void)undoService->ExecuteValueMutation(label, beforeValue, afterValue, std::move(applyCallback));
+        }
+
         template<typename TComponent, typename TValue>
         void TrackInteractiveMemberMutation(EditorUndoService* undoService,
                                             const char* label,
@@ -122,6 +153,33 @@ namespace Limitless::EditorInspectorPanel
                                             const std::function<void(Scene&, TComponent&)>& onApply = {})
         {
             TrackInteractiveValueMutation(undoService, label, currentValue, [undoService, entity, member, onApply](const TValue& value) {
+                if (!undoService)
+                    return false;
+                Scene* activeScene = undoService->GetActiveScene();
+                if (!activeScene || !activeScene->IsValid(entity))
+                    return false;
+
+                auto* component = activeScene->GetRegistry().try_get<TComponent>(entity);
+                if (!component)
+                    return false;
+
+                component->*member = value;
+                if (onApply)
+                    onApply(*activeScene, *component);
+                return true;
+            });
+        }
+
+        template<typename TComponent, typename TValue>
+        void TrackInteractiveVectorMemberMutation(EditorUndoService* undoService,
+                                                  const char* label,
+                                                  const EditorPanelStyle::AxisVectorDragState& interactionState,
+                                                  entt::entity entity,
+                                                  TValue TComponent::* member,
+                                                  const TValue& currentValue,
+                                                  const std::function<void(Scene&, TComponent&)>& onApply = {})
+        {
+            TrackInteractiveVectorValueMutation(undoService, label, interactionState, currentValue, [undoService, entity, member, onApply](const TValue& value) {
                 if (!undoService)
                     return false;
                 Scene* activeScene = undoService->GetActiveScene();
@@ -537,12 +595,14 @@ namespace Limitless::EditorInspectorPanel
             if (transformOpen)
             {
                 ImGui::TextUnformatted("Position");
-                const bool positionChanged = ImGui::DragFloat3("##TransformPosition", &transform->Position.x, 0.1f);
+                EditorPanelStyle::AxisVectorDragState positionInteractionState{};
+                const bool positionChanged = EditorPanelStyle::DragFloatNWithAxisLabels("##TransformPosition", &transform->Position.x, 3, 0.1f, 0.0f, 0.0f, "%.3f", 0, &positionInteractionState);
                 if (positionChanged && scene)
                     scene->MarkTransformDirty(selectedEntity);
-                TrackInteractiveMemberMutation<TransformComponent>(
+                TrackInteractiveVectorMemberMutation<TransformComponent>(
                     undoService,
                     "Edit Transform Position",
+                    positionInteractionState,
                     selectedEntity,
                     &TransformComponent::Position,
                     transform->Position,
@@ -550,12 +610,14 @@ namespace Limitless::EditorInspectorPanel
                         activeScene.MarkTransformDirty(selectedEntity);
                     });
                 ImGui::TextUnformatted("Rotation");
-                const bool rotationChanged = ImGui::DragFloat3("##TransformRotation", &transform->Rotation.x, 1.0f);
+                EditorPanelStyle::AxisVectorDragState rotationInteractionState{};
+                const bool rotationChanged = EditorPanelStyle::DragFloatNWithAxisLabels("##TransformRotation", &transform->Rotation.x, 3, 1.0f, 0.0f, 0.0f, "%.3f", 0, &rotationInteractionState);
                 if (rotationChanged && scene)
                     scene->MarkTransformDirty(selectedEntity);
-                TrackInteractiveMemberMutation<TransformComponent>(
+                TrackInteractiveVectorMemberMutation<TransformComponent>(
                     undoService,
                     "Edit Transform Rotation",
+                    rotationInteractionState,
                     selectedEntity,
                     &TransformComponent::Rotation,
                     transform->Rotation,
@@ -563,12 +625,14 @@ namespace Limitless::EditorInspectorPanel
                         activeScene.MarkTransformDirty(selectedEntity);
                     });
                 ImGui::TextUnformatted("Scale");
-                const bool scaleChanged = ImGui::DragFloat3("##TransformScale", &transform->Scale.x, 0.1f);
+                EditorPanelStyle::AxisVectorDragState scaleInteractionState{};
+                const bool scaleChanged = EditorPanelStyle::DragFloatNWithAxisLabels("##TransformScale", &transform->Scale.x, 3, 0.1f, 0.0f, 0.0f, "%.3f", 0, &scaleInteractionState);
                 if (scaleChanged && scene)
                     scene->MarkTransformDirty(selectedEntity);
-                TrackInteractiveMemberMutation<TransformComponent>(
+                TrackInteractiveVectorMemberMutation<TransformComponent>(
                     undoService,
                     "Edit Transform Scale",
+                    scaleInteractionState,
                     selectedEntity,
                     &TransformComponent::Scale,
                     transform->Scale,
@@ -606,12 +670,14 @@ namespace Limitless::EditorInspectorPanel
                     undoService, "Edit Canvas Sort Order", selectedEntity, &CanvasComponent::SortOrder, canvas->SortOrder);
 
                 ImGui::TextUnformatted("Reference Resolution");
-                ImGui::DragFloat2("##CanvasReferenceResolution", &canvas->ReferenceResolution.x, 1.0f, 1.0f, 16384.0f, "%.0f");
+                EditorPanelStyle::AxisVectorDragState referenceResolutionInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##CanvasReferenceResolution", &canvas->ReferenceResolution.x, 2, 1.0f, 1.0f, 16384.0f, "%.0f", 0, &referenceResolutionInteractionState);
                 canvas->ReferenceResolution.x = std::max(1.0f, canvas->ReferenceResolution.x);
                 canvas->ReferenceResolution.y = std::max(1.0f, canvas->ReferenceResolution.y);
-                TrackInteractiveMemberMutation<CanvasComponent>(
+                TrackInteractiveVectorMemberMutation<CanvasComponent>(
                     undoService,
                     "Edit Canvas Reference Resolution",
+                    referenceResolutionInteractionState,
                     selectedEntity,
                     &CanvasComponent::ReferenceResolution,
                     canvas->ReferenceResolution);
@@ -712,18 +778,20 @@ namespace Limitless::EditorInspectorPanel
                 });
 
                 ImGui::TextUnformatted("Anchor Min");
-                ImGui::DragFloat2("##RectTransformAnchorMin", &rectTransform->AnchorMin.x, 0.01f, 0.0f, 1.0f);
+                EditorPanelStyle::AxisVectorDragState anchorMinInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##RectTransformAnchorMin", &rectTransform->AnchorMin.x, 2, 0.01f, 0.0f, 1.0f, "%.3f", 0, &anchorMinInteractionState);
                 rectTransform->AnchorMin.x = std::clamp(rectTransform->AnchorMin.x, 0.0f, 1.0f);
                 rectTransform->AnchorMin.y = std::clamp(rectTransform->AnchorMin.y, 0.0f, 1.0f);
-                TrackInteractiveMemberMutation<RectTransformComponent>(
-                    undoService, "Edit RectTransform Anchor Min", selectedEntity, &RectTransformComponent::AnchorMin, rectTransform->AnchorMin);
+                TrackInteractiveVectorMemberMutation<RectTransformComponent>(
+                    undoService, "Edit RectTransform Anchor Min", anchorMinInteractionState, selectedEntity, &RectTransformComponent::AnchorMin, rectTransform->AnchorMin);
 
                 ImGui::TextUnformatted("Anchor Max");
-                ImGui::DragFloat2("##RectTransformAnchorMax", &rectTransform->AnchorMax.x, 0.01f, 0.0f, 1.0f);
+                EditorPanelStyle::AxisVectorDragState anchorMaxInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##RectTransformAnchorMax", &rectTransform->AnchorMax.x, 2, 0.01f, 0.0f, 1.0f, "%.3f", 0, &anchorMaxInteractionState);
                 rectTransform->AnchorMax.x = std::clamp(rectTransform->AnchorMax.x, 0.0f, 1.0f);
                 rectTransform->AnchorMax.y = std::clamp(rectTransform->AnchorMax.y, 0.0f, 1.0f);
-                TrackInteractiveMemberMutation<RectTransformComponent>(
-                    undoService, "Edit RectTransform Anchor Max", selectedEntity, &RectTransformComponent::AnchorMax, rectTransform->AnchorMax);
+                TrackInteractiveVectorMemberMutation<RectTransformComponent>(
+                    undoService, "Edit RectTransform Anchor Max", anchorMaxInteractionState, selectedEntity, &RectTransformComponent::AnchorMax, rectTransform->AnchorMax);
 
                 if (rectTransform->AnchorMin.x > rectTransform->AnchorMax.x)
                     std::swap(rectTransform->AnchorMin.x, rectTransform->AnchorMax.x);
@@ -731,22 +799,26 @@ namespace Limitless::EditorInspectorPanel
                     std::swap(rectTransform->AnchorMin.y, rectTransform->AnchorMax.y);
 
                 ImGui::TextUnformatted("Pivot");
-                ImGui::DragFloat2("##RectTransformPivot", &rectTransform->Pivot.x, 0.01f, 0.0f, 1.0f);
+                EditorPanelStyle::AxisVectorDragState pivotInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##RectTransformPivot", &rectTransform->Pivot.x, 2, 0.01f, 0.0f, 1.0f, "%.3f", 0, &pivotInteractionState);
                 rectTransform->Pivot.x = std::clamp(rectTransform->Pivot.x, 0.0f, 1.0f);
                 rectTransform->Pivot.y = std::clamp(rectTransform->Pivot.y, 0.0f, 1.0f);
-                TrackInteractiveMemberMutation<RectTransformComponent>(
-                    undoService, "Edit RectTransform Pivot", selectedEntity, &RectTransformComponent::Pivot, rectTransform->Pivot);
+                TrackInteractiveVectorMemberMutation<RectTransformComponent>(
+                    undoService, "Edit RectTransform Pivot", pivotInteractionState, selectedEntity, &RectTransformComponent::Pivot, rectTransform->Pivot);
 
                 ImGui::TextUnformatted("Size Delta");
-                ImGui::DragFloat2("##RectTransformSizeDelta", &rectTransform->SizeDelta.x, 1.0f, -16384.0f, 16384.0f);
-                TrackInteractiveMemberMutation<RectTransformComponent>(
-                    undoService, "Edit RectTransform Size Delta", selectedEntity, &RectTransformComponent::SizeDelta, rectTransform->SizeDelta);
+                EditorPanelStyle::AxisVectorDragState sizeDeltaInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##RectTransformSizeDelta", &rectTransform->SizeDelta.x, 2, 1.0f, -16384.0f, 16384.0f, "%.3f", 0, &sizeDeltaInteractionState);
+                TrackInteractiveVectorMemberMutation<RectTransformComponent>(
+                    undoService, "Edit RectTransform Size Delta", sizeDeltaInteractionState, selectedEntity, &RectTransformComponent::SizeDelta, rectTransform->SizeDelta);
 
                 ImGui::TextUnformatted("Anchored Position");
-                ImGui::DragFloat2("##RectTransformAnchoredPosition", &rectTransform->AnchoredPosition.x, 1.0f);
-                TrackInteractiveMemberMutation<RectTransformComponent>(
+                EditorPanelStyle::AxisVectorDragState anchoredPositionInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##RectTransformAnchoredPosition", &rectTransform->AnchoredPosition.x, 2, 1.0f, 0.0f, 0.0f, "%.3f", 0, &anchoredPositionInteractionState);
+                TrackInteractiveVectorMemberMutation<RectTransformComponent>(
                     undoService,
                     "Edit RectTransform Anchored Position",
+                    anchoredPositionInteractionState,
                     selectedEntity,
                     &RectTransformComponent::AnchoredPosition,
                     rectTransform->AnchoredPosition);
@@ -785,11 +857,12 @@ namespace Limitless::EditorInspectorPanel
                     TrackInteractiveMemberMutation<SpriteComponent>(
                         undoService, "Edit Sprite Color", selectedEntity, &SpriteComponent::Color, sprite->Color);
                     ImGui::TextUnformatted("Tiling Factor");
-                    ImGui::DragFloat2("##SpriteTilingFactor", &sprite->TilingFactor.x, 0.05f, 0.001f, 100.0f, "%.3f");
+                    EditorPanelStyle::AxisVectorDragState tilingFactorInteractionState{};
+                    EditorPanelStyle::DragFloatNWithAxisLabels("##SpriteTilingFactor", &sprite->TilingFactor.x, 2, 0.05f, 0.001f, 100.0f, "%.3f", 0, &tilingFactorInteractionState);
                     sprite->TilingFactor.x = std::max(0.001f, sprite->TilingFactor.x);
                     sprite->TilingFactor.y = std::max(0.001f, sprite->TilingFactor.y);
-                    TrackInteractiveMemberMutation<SpriteComponent>(
-                        undoService, "Edit Sprite Tiling Factor", selectedEntity, &SpriteComponent::TilingFactor, sprite->TilingFactor);
+                    TrackInteractiveVectorMemberMutation<SpriteComponent>(
+                        undoService, "Edit Sprite Tiling Factor", tilingFactorInteractionState, selectedEntity, &SpriteComponent::TilingFactor, sprite->TilingFactor);
                     ImGui::TextUnformatted("Render Order");
                     ImGui::DragInt("##SpriteRenderOrder", &sprite->RenderOrder, 1.0f);
                     TrackInteractiveMemberMutation<SpriteComponent>(
@@ -1610,13 +1683,15 @@ namespace Limitless::EditorInspectorPanel
             if (grid2DOpen)
             {
                 ImGui::TextUnformatted("Cell Size");
-                ImGui::DragFloat2("##Grid2DCellSize", &grid2D->CellSize.x, 0.05f, 0.001f, 100.0f);
-                TrackInteractiveMemberMutation<Grid2DComponent>(
-                    undoService, "Edit Grid2D Cell Size", selectedEntity, &Grid2DComponent::CellSize, grid2D->CellSize);
+                EditorPanelStyle::AxisVectorDragState cellSizeInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##Grid2DCellSize", &grid2D->CellSize.x, 2, 0.05f, 0.001f, 100.0f, "%.3f", 0, &cellSizeInteractionState);
+                TrackInteractiveVectorMemberMutation<Grid2DComponent>(
+                    undoService, "Edit Grid2D Cell Size", cellSizeInteractionState, selectedEntity, &Grid2DComponent::CellSize, grid2D->CellSize);
                 ImGui::TextUnformatted("Cell Gap");
-                ImGui::DragFloat2("##Grid2DCellGap", &grid2D->CellGap.x, 0.01f, 0.0f, 10.0f);
-                TrackInteractiveMemberMutation<Grid2DComponent>(
-                    undoService, "Edit Grid2D Cell Gap", selectedEntity, &Grid2DComponent::CellGap, grid2D->CellGap);
+                EditorPanelStyle::AxisVectorDragState cellGapInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##Grid2DCellGap", &grid2D->CellGap.x, 2, 0.01f, 0.0f, 10.0f, "%.3f", 0, &cellGapInteractionState);
+                TrackInteractiveVectorMemberMutation<Grid2DComponent>(
+                    undoService, "Edit Grid2D Cell Gap", cellGapInteractionState, selectedEntity, &Grid2DComponent::CellGap, grid2D->CellGap);
 
                 ImGui::Separator();
                 if (ImGui::Button("Add Layer"))
@@ -2269,13 +2344,15 @@ namespace Limitless::EditorInspectorPanel
             if (boxColliderOpen)
             {
                 ImGui::TextUnformatted("Offset");
-                ImGui::DragFloat2("##BoxColliderOffset", &boxCollider2D->Offset.x, 0.01f);
-                TrackInteractiveMemberMutation<BoxCollider2DComponent>(
-                    undoService, "Edit BoxCollider2D Offset", selectedEntity, &BoxCollider2DComponent::Offset, boxCollider2D->Offset);
+                EditorPanelStyle::AxisVectorDragState boxOffsetInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##BoxColliderOffset", &boxCollider2D->Offset.x, 2, 0.01f, 0.0f, 0.0f, "%.3f", 0, &boxOffsetInteractionState);
+                TrackInteractiveVectorMemberMutation<BoxCollider2DComponent>(
+                    undoService, "Edit BoxCollider2D Offset", boxOffsetInteractionState, selectedEntity, &BoxCollider2DComponent::Offset, boxCollider2D->Offset);
                 ImGui::TextUnformatted("Size");
-                ImGui::DragFloat2("##BoxColliderSize", &boxCollider2D->Size.x, 0.01f, 0.001f, 1000.0f);
-                TrackInteractiveMemberMutation<BoxCollider2DComponent>(
-                    undoService, "Edit BoxCollider2D Size", selectedEntity, &BoxCollider2DComponent::Size, boxCollider2D->Size);
+                EditorPanelStyle::AxisVectorDragState boxSizeInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##BoxColliderSize", &boxCollider2D->Size.x, 2, 0.01f, 0.001f, 1000.0f, "%.3f", 0, &boxSizeInteractionState);
+                TrackInteractiveVectorMemberMutation<BoxCollider2DComponent>(
+                    undoService, "Edit BoxCollider2D Size", boxSizeInteractionState, selectedEntity, &BoxCollider2DComponent::Size, boxCollider2D->Size);
                 ImGui::TextUnformatted("Density");
                 ImGui::DragFloat("##BoxColliderDensity", &boxCollider2D->Density, 0.01f, 0.0f, 1000.0f);
                 TrackInteractiveMemberMutation<BoxCollider2DComponent>(
@@ -2319,9 +2396,10 @@ namespace Limitless::EditorInspectorPanel
             if (circleColliderOpen)
             {
                 ImGui::TextUnformatted("Offset");
-                ImGui::DragFloat2("##CircleColliderOffset", &circleCollider2D->Offset.x, 0.01f);
-                TrackInteractiveMemberMutation<CircleCollider2DComponent>(
-                    undoService, "Edit CircleCollider2D Offset", selectedEntity, &CircleCollider2DComponent::Offset, circleCollider2D->Offset);
+                EditorPanelStyle::AxisVectorDragState circleOffsetInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##CircleColliderOffset", &circleCollider2D->Offset.x, 2, 0.01f, 0.0f, 0.0f, "%.3f", 0, &circleOffsetInteractionState);
+                TrackInteractiveVectorMemberMutation<CircleCollider2DComponent>(
+                    undoService, "Edit CircleCollider2D Offset", circleOffsetInteractionState, selectedEntity, &CircleCollider2DComponent::Offset, circleCollider2D->Offset);
                 ImGui::TextUnformatted("Radius");
                 ImGui::DragFloat("##CircleColliderRadius", &circleCollider2D->Radius, 0.01f, 0.001f, 1000.0f);
                 TrackInteractiveMemberMutation<CircleCollider2DComponent>(
@@ -2369,9 +2447,10 @@ namespace Limitless::EditorInspectorPanel
             if (polygonColliderOpen)
             {
                 ImGui::TextUnformatted("Offset");
-                ImGui::DragFloat2("##PolygonColliderOffset", &polygonCollider2D->Offset.x, 0.01f);
-                TrackInteractiveMemberMutation<PolygonCollider2DComponent>(
-                    undoService, "Edit PolygonCollider2D Offset", selectedEntity, &PolygonCollider2DComponent::Offset, polygonCollider2D->Offset);
+                EditorPanelStyle::AxisVectorDragState polygonOffsetInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##PolygonColliderOffset", &polygonCollider2D->Offset.x, 2, 0.01f, 0.0f, 0.0f, "%.3f", 0, &polygonOffsetInteractionState);
+                TrackInteractiveVectorMemberMutation<PolygonCollider2DComponent>(
+                    undoService, "Edit PolygonCollider2D Offset", polygonOffsetInteractionState, selectedEntity, &PolygonCollider2DComponent::Offset, polygonCollider2D->Offset);
 
                 if (ImGui::Button("Add Point##PolygonCollider2D"))
                 {
@@ -2400,10 +2479,12 @@ namespace Limitless::EditorInspectorPanel
                 {
                     ImGui::PushID(static_cast<int>(pointIndex));
                     ImGui::TextUnformatted("Point");
-                    ImGui::DragFloat2("##PolygonColliderPoint", &polygonCollider2D->Points[pointIndex].x, 0.01f, -10000.0f, 10000.0f, "%.3f");
-                    TrackInteractiveValueMutation(
+                    EditorPanelStyle::AxisVectorDragState polygonPointInteractionState{};
+                    EditorPanelStyle::DragFloatNWithAxisLabels("##PolygonColliderPoint", &polygonCollider2D->Points[pointIndex].x, 2, 0.01f, -10000.0f, 10000.0f, "%.3f", 0, &polygonPointInteractionState);
+                    TrackInteractiveVectorValueMutation(
                         undoService,
                         "Edit Polygon Collider Point",
+                        polygonPointInteractionState,
                         polygonCollider2D->Points[pointIndex],
                         [undoService, selectedEntity, pointIndex](const glm::vec2& value) {
                             if (!undoService)
@@ -2480,17 +2561,20 @@ namespace Limitless::EditorInspectorPanel
             if (edgeColliderOpen)
             {
                 ImGui::TextUnformatted("Offset");
-                ImGui::DragFloat2("##EdgeColliderOffset", &edgeCollider2D->Offset.x, 0.01f);
-                TrackInteractiveMemberMutation<EdgeCollider2DComponent>(
-                    undoService, "Edit EdgeCollider2D Offset", selectedEntity, &EdgeCollider2DComponent::Offset, edgeCollider2D->Offset);
+                EditorPanelStyle::AxisVectorDragState edgeOffsetInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##EdgeColliderOffset", &edgeCollider2D->Offset.x, 2, 0.01f, 0.0f, 0.0f, "%.3f", 0, &edgeOffsetInteractionState);
+                TrackInteractiveVectorMemberMutation<EdgeCollider2DComponent>(
+                    undoService, "Edit EdgeCollider2D Offset", edgeOffsetInteractionState, selectedEntity, &EdgeCollider2DComponent::Offset, edgeCollider2D->Offset);
                 ImGui::TextUnformatted("Point A");
-                ImGui::DragFloat2("##EdgeColliderPointA", &edgeCollider2D->PointA.x, 0.01f);
-                TrackInteractiveMemberMutation<EdgeCollider2DComponent>(
-                    undoService, "Edit EdgeCollider2D Point A", selectedEntity, &EdgeCollider2DComponent::PointA, edgeCollider2D->PointA);
+                EditorPanelStyle::AxisVectorDragState edgePointAInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##EdgeColliderPointA", &edgeCollider2D->PointA.x, 2, 0.01f, 0.0f, 0.0f, "%.3f", 0, &edgePointAInteractionState);
+                TrackInteractiveVectorMemberMutation<EdgeCollider2DComponent>(
+                    undoService, "Edit EdgeCollider2D Point A", edgePointAInteractionState, selectedEntity, &EdgeCollider2DComponent::PointA, edgeCollider2D->PointA);
                 ImGui::TextUnformatted("Point B");
-                ImGui::DragFloat2("##EdgeColliderPointB", &edgeCollider2D->PointB.x, 0.01f);
-                TrackInteractiveMemberMutation<EdgeCollider2DComponent>(
-                    undoService, "Edit EdgeCollider2D Point B", selectedEntity, &EdgeCollider2DComponent::PointB, edgeCollider2D->PointB);
+                EditorPanelStyle::AxisVectorDragState edgePointBInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##EdgeColliderPointB", &edgeCollider2D->PointB.x, 2, 0.01f, 0.0f, 0.0f, "%.3f", 0, &edgePointBInteractionState);
+                TrackInteractiveVectorMemberMutation<EdgeCollider2DComponent>(
+                    undoService, "Edit EdgeCollider2D Point B", edgePointBInteractionState, selectedEntity, &EdgeCollider2DComponent::PointB, edgeCollider2D->PointB);
                 ImGui::TextUnformatted("Friction");
                 ImGui::DragFloat("##EdgeColliderFriction", &edgeCollider2D->Friction, 0.01f, 0.0f, 1.0f);
                 TrackInteractiveMemberMutation<EdgeCollider2DComponent>(
@@ -2530,14 +2614,16 @@ namespace Limitless::EditorInspectorPanel
             if (capsuleColliderOpen)
             {
                 ImGui::TextUnformatted("Offset");
-                ImGui::DragFloat2("##CapsuleColliderOffset", &capsuleCollider2D->Offset.x, 0.01f);
-                TrackInteractiveMemberMutation<CapsuleCollider2DComponent>(
-                    undoService, "Edit CapsuleCollider2D Offset", selectedEntity, &CapsuleCollider2DComponent::Offset, capsuleCollider2D->Offset);
+                EditorPanelStyle::AxisVectorDragState capsuleOffsetInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##CapsuleColliderOffset", &capsuleCollider2D->Offset.x, 2, 0.01f, 0.0f, 0.0f, "%.3f", 0, &capsuleOffsetInteractionState);
+                TrackInteractiveVectorMemberMutation<CapsuleCollider2DComponent>(
+                    undoService, "Edit CapsuleCollider2D Offset", capsuleOffsetInteractionState, selectedEntity, &CapsuleCollider2DComponent::Offset, capsuleCollider2D->Offset);
                 ImGui::TextUnformatted("Size");
-                ImGui::DragFloat2("##CapsuleColliderSize", &capsuleCollider2D->Size.x, 0.01f, 0.001f, 1000.0f);
+                EditorPanelStyle::AxisVectorDragState capsuleSizeInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##CapsuleColliderSize", &capsuleCollider2D->Size.x, 2, 0.01f, 0.001f, 1000.0f, "%.3f", 0, &capsuleSizeInteractionState);
                 capsuleCollider2D->Size = glm::max(capsuleCollider2D->Size, glm::vec2(0.001f));
-                TrackInteractiveMemberMutation<CapsuleCollider2DComponent>(
-                    undoService, "Edit CapsuleCollider2D Size", selectedEntity, &CapsuleCollider2DComponent::Size, capsuleCollider2D->Size);
+                TrackInteractiveVectorMemberMutation<CapsuleCollider2DComponent>(
+                    undoService, "Edit CapsuleCollider2D Size", capsuleSizeInteractionState, selectedEntity, &CapsuleCollider2DComponent::Size, capsuleCollider2D->Size);
                 int capsuleDirection = capsuleCollider2D->Direction == CapsuleCollider2DComponent::Orientation::Horizontal ? 1 : 0;
                 const char* capsuleDirectionNames[] = { "Vertical", "Horizontal" };
                 ImGui::TextUnformatted("Direction");
@@ -2618,11 +2704,13 @@ namespace Limitless::EditorInspectorPanel
                 if (!directionalLight->UseEntityRotation)
                 {
                     ImGui::TextUnformatted("Direction");
-                    ImGui::DragFloat2("##DirectionalLightDirection", &directionalLight->Direction.x, 0.01f, -1.0f, 1.0f, "%.3f");
+                    EditorPanelStyle::AxisVectorDragState lightDirectionInteractionState{};
+                    EditorPanelStyle::DragFloatNWithAxisLabels("##DirectionalLightDirection", &directionalLight->Direction.x, 2, 0.01f, -1.0f, 1.0f, "%.3f", 0, &lightDirectionInteractionState);
                     directionalLight->Direction = NormalizeDirectionOrFallback(directionalLight->Direction);
-                    TrackInteractiveMemberMutation<DirectionalLight2DComponent>(
+                    TrackInteractiveVectorMemberMutation<DirectionalLight2DComponent>(
                         undoService,
                         "Edit Directional Light Direction",
+                        lightDirectionInteractionState,
                         selectedEntity,
                         &DirectionalLight2DComponent::Direction,
                         directionalLight->Direction);
@@ -2806,10 +2894,12 @@ namespace Limitless::EditorInspectorPanel
                     {
                         ImGui::PushID(static_cast<int>(pointIndex));
                         ImGui::TextUnformatted("Point");
-                        ImGui::DragFloat2("##Point", &shadowOccluder->PolygonPoints[pointIndex].x, 0.01f, -10000.0f, 10000.0f, "%.3f");
-                        TrackInteractiveValueMutation(
+                        EditorPanelStyle::AxisVectorDragState shadowPointInteractionState{};
+                        EditorPanelStyle::DragFloatNWithAxisLabels("##Point", &shadowOccluder->PolygonPoints[pointIndex].x, 2, 0.01f, -10000.0f, 10000.0f, "%.3f", 0, &shadowPointInteractionState);
+                        TrackInteractiveVectorValueMutation(
                             undoService,
                             "Edit Shadow Occluder Point",
+                            shadowPointInteractionState,
                             shadowOccluder->PolygonPoints[pointIndex],
                             [undoService, selectedEntity, pointIndex](const glm::vec2& value) {
                                 if (!undoService)
@@ -2904,25 +2994,29 @@ namespace Limitless::EditorInspectorPanel
                 TrackInteractiveMemberMutation<Joint2DComponent>(
                     undoService, "Edit Joint2D Collide Connected", selectedEntity, &Joint2DComponent::CollideConnected, joint2D->CollideConnected);
                 ImGui::TextUnformatted("Anchor A");
-                ImGui::DragFloat2("##Joint2DAnchorA", &joint2D->AnchorA.x, 0.01f);
-                TrackInteractiveMemberMutation<Joint2DComponent>(
-                    undoService, "Edit Joint2D Anchor A", selectedEntity, &Joint2DComponent::AnchorA, joint2D->AnchorA);
+                EditorPanelStyle::AxisVectorDragState anchorAInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##Joint2DAnchorA", &joint2D->AnchorA.x, 2, 0.01f, 0.0f, 0.0f, "%.3f", 0, &anchorAInteractionState);
+                TrackInteractiveVectorMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Anchor A", anchorAInteractionState, selectedEntity, &Joint2DComponent::AnchorA, joint2D->AnchorA);
                 ImGui::TextUnformatted("Anchor B");
-                ImGui::DragFloat2("##Joint2DAnchorB", &joint2D->AnchorB.x, 0.01f);
-                TrackInteractiveMemberMutation<Joint2DComponent>(
-                    undoService, "Edit Joint2D Anchor B", selectedEntity, &Joint2DComponent::AnchorB, joint2D->AnchorB);
+                EditorPanelStyle::AxisVectorDragState anchorBInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##Joint2DAnchorB", &joint2D->AnchorB.x, 2, 0.01f, 0.0f, 0.0f, "%.3f", 0, &anchorBInteractionState);
+                TrackInteractiveVectorMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Anchor B", anchorBInteractionState, selectedEntity, &Joint2DComponent::AnchorB, joint2D->AnchorB);
                 ImGui::TextUnformatted("Axis");
-                ImGui::DragFloat2("##Joint2DAxis", &joint2D->Axis.x, 0.01f);
-                TrackInteractiveMemberMutation<Joint2DComponent>(
-                    undoService, "Edit Joint2D Axis", selectedEntity, &Joint2DComponent::Axis, joint2D->Axis);
+                EditorPanelStyle::AxisVectorDragState axisInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##Joint2DAxis", &joint2D->Axis.x, 2, 0.01f, 0.0f, 0.0f, "%.3f", 0, &axisInteractionState);
+                TrackInteractiveVectorMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Axis", axisInteractionState, selectedEntity, &Joint2DComponent::Axis, joint2D->Axis);
                 ImGui::TextUnformatted("Enable Limit");
                 ImGui::Checkbox("##Joint2DEnableLimit", &joint2D->EnableLimit);
                 TrackInteractiveMemberMutation<Joint2DComponent>(
                     undoService, "Edit Joint2D Enable Limit", selectedEntity, &Joint2DComponent::EnableLimit, joint2D->EnableLimit);
                 ImGui::TextUnformatted("Limits");
-                ImGui::DragFloat2("##Joint2DLimits", &joint2D->Limits.x, 0.01f);
-                TrackInteractiveMemberMutation<Joint2DComponent>(
-                    undoService, "Edit Joint2D Limits", selectedEntity, &Joint2DComponent::Limits, joint2D->Limits);
+                EditorPanelStyle::AxisVectorDragState limitsInteractionState{};
+                EditorPanelStyle::DragFloatNWithAxisLabels("##Joint2DLimits", &joint2D->Limits.x, 2, 0.01f, 0.0f, 0.0f, "%.3f", 0, &limitsInteractionState);
+                TrackInteractiveVectorMemberMutation<Joint2DComponent>(
+                    undoService, "Edit Joint2D Limits", limitsInteractionState, selectedEntity, &Joint2DComponent::Limits, joint2D->Limits);
                 ImGui::TextUnformatted("Enable Motor");
                 ImGui::Checkbox("##Joint2DEnableMotor", &joint2D->EnableMotor);
                 TrackInteractiveMemberMutation<Joint2DComponent>(
@@ -3569,14 +3663,16 @@ namespace Limitless::EditorInspectorPanel
                     else
                     {
                         ImGui::TextUnformatted("Spawn Offset Min");
-                        ImGui::DragFloat2("##ParticleSpawnOffsetMin", &particleEmitter->SpawnOffsetMin.x, 0.01f, -1000.0f, 1000.0f, "%.3f");
-                        TrackInteractiveMemberMutation<ParticleEmitterComponent>(
-                            undoService, "Edit Particle Spawn Offset Min", selectedEntity, &ParticleEmitterComponent::SpawnOffsetMin, particleEmitter->SpawnOffsetMin);
+                        EditorPanelStyle::AxisVectorDragState spawnOffsetMinInteractionState{};
+                        EditorPanelStyle::DragFloatNWithAxisLabels("##ParticleSpawnOffsetMin", &particleEmitter->SpawnOffsetMin.x, 2, 0.01f, -1000.0f, 1000.0f, "%.3f", 0, &spawnOffsetMinInteractionState);
+                        TrackInteractiveVectorMemberMutation<ParticleEmitterComponent>(
+                            undoService, "Edit Particle Spawn Offset Min", spawnOffsetMinInteractionState, selectedEntity, &ParticleEmitterComponent::SpawnOffsetMin, particleEmitter->SpawnOffsetMin);
 
                         ImGui::TextUnformatted("Spawn Offset Max");
-                        ImGui::DragFloat2("##ParticleSpawnOffsetMax", &particleEmitter->SpawnOffsetMax.x, 0.01f, -1000.0f, 1000.0f, "%.3f");
-                        TrackInteractiveMemberMutation<ParticleEmitterComponent>(
-                            undoService, "Edit Particle Spawn Offset Max", selectedEntity, &ParticleEmitterComponent::SpawnOffsetMax, particleEmitter->SpawnOffsetMax);
+                        EditorPanelStyle::AxisVectorDragState spawnOffsetMaxInteractionState{};
+                        EditorPanelStyle::DragFloatNWithAxisLabels("##ParticleSpawnOffsetMax", &particleEmitter->SpawnOffsetMax.x, 2, 0.01f, -1000.0f, 1000.0f, "%.3f", 0, &spawnOffsetMaxInteractionState);
+                        TrackInteractiveVectorMemberMutation<ParticleEmitterComponent>(
+                            undoService, "Edit Particle Spawn Offset Max", spawnOffsetMaxInteractionState, selectedEntity, &ParticleEmitterComponent::SpawnOffsetMax, particleEmitter->SpawnOffsetMax);
                     }
 
                     ImGui::TreePop();

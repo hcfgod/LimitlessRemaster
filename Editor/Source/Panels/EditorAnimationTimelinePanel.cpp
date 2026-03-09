@@ -668,7 +668,7 @@ namespace Limitless::EditorAnimationTimelinePanel
             if (!valueArray.is_array() || valueArray.size() != 2)
                 valueArray = json::array({0.0f, 0.0f});
             float value[2] = {valueArray[0].get<float>(), valueArray[1].get<float>()};
-            if (ImGui::DragFloat2(label, value, speed))
+            if (EditorPanelStyle::DragFloatNWithAxisLabels(label, value, 2, speed))
                 valueArray = json::array({value[0], value[1]});
         }
 
@@ -677,7 +677,7 @@ namespace Limitless::EditorAnimationTimelinePanel
             if (!valueArray.is_array() || valueArray.size() != 3)
                 valueArray = json::array({0.0f, 0.0f, 0.0f});
             float value[3] = {valueArray[0].get<float>(), valueArray[1].get<float>(), valueArray[2].get<float>()};
-            if (ImGui::DragFloat3(label, value, speed))
+            if (EditorPanelStyle::DragFloatNWithAxisLabels(label, value, 3, speed))
                 valueArray = json::array({value[0], value[1], value[2]});
         }
 

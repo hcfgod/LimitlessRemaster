@@ -2,6 +2,7 @@
 
 #include "EditorAssetNaming.h"
 #include "EditorInspectorPanel.h"
+#include "EditorPanelStyle.h"
 #include "EditorInspectorPanelNativeScriptEditor.h"
 #include "Undo/EditorUndoService.h"
 #include "Assets/AssetDatabase.h"
@@ -545,14 +546,19 @@ namespace Limitless::EditorInspectorPanel
             return true;
         }
 
-        void HandleInteractiveScriptPropertyUndo(EditorUndoService* undoService, const std::string& propertyEditLabel)
+        void HandleInteractiveScriptPropertyUndo(EditorUndoService* undoService,
+                                                 const std::string& propertyEditLabel,
+                                                 const EditorPanelStyle::AxisVectorDragState* interactionState = nullptr)
         {
             if (!undoService)
                 return;
 
-            if (ImGui::IsItemActivated())
+            const bool activated = interactionState ? interactionState->Activated : ImGui::IsItemActivated();
+            const bool deactivatedAfterEdit = interactionState ? interactionState->DeactivatedAfterEdit : ImGui::IsItemDeactivatedAfterEdit();
+
+            if (activated)
                 undoService->BeginInteractiveSceneMutation();
-            if (ImGui::IsItemDeactivatedAfterEdit())
+            if (deactivatedAfterEdit)
                 (void)undoService->CommitInteractiveSceneMutation(propertyEditLabel);
         }
 
@@ -620,9 +626,10 @@ namespace Limitless::EditorInspectorPanel
                 }
                 else if (auto* vectorValue = std::get_if<glm::vec3>(&propertyValue))
                 {
-                    if (ImGui::DragFloat3("##ScriptPropertyValue", &vectorValue->x, 0.1f))
+                    EditorPanelStyle::AxisVectorDragState vectorInteractionState{};
+                    if (EditorPanelStyle::DragFloatNWithAxisLabels("##ScriptPropertyValue", &vectorValue->x, 3, 0.1f, 0.0f, 0.0f, "%.3f", 0, &vectorInteractionState))
                         IncrementScriptPropertyRevision(scriptComponent);
-                    HandleInteractiveScriptPropertyUndo(undoService, propertyEditLabel);
+                    HandleInteractiveScriptPropertyUndo(undoService, propertyEditLabel, &vectorInteractionState);
                 }
                 else if (auto* stringValue = std::get_if<std::string>(&propertyValue))
                 {
