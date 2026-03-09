@@ -1,6 +1,7 @@
 #include "Audio/SceneAudioSystem.h"
 
 #include "Assets/AudioClipAsset.h"
+#include "Assets/AudioClipAssetImporter.h"
 #include "Audio/AudioEngine.h"
 #include "Scene/Components/AudioComponents.h"
 #include "Scene/Components/CoreComponents.h"
@@ -23,6 +24,12 @@ namespace Limitless::Audio
         {
             static std::unordered_map<std::string, Async::Task<Assets::AudioClipAsset::Ptr>> pendingAudioClipLoads;
             return pendingAudioClipLoads;
+        }
+
+        std::unordered_map<std::string, Assets::AudioClipAsset::Ptr>& GetRuntimeAudioClipCache()
+        {
+            static std::unordered_map<std::string, Assets::AudioClipAsset::Ptr> runtimeAudioClipCache;
+            return runtimeAudioClipCache;
         }
 
         glm::vec3 ComputeEntityWorldPosition3D(const Scene& scene, entt::entity entity)
@@ -453,14 +460,22 @@ namespace Limitless::Audio
             if (shouldBePlaying && audioSource.RuntimeVoiceId == 0)
             {
                 auto& pendingAudioClipLoads = GetPendingAudioClipLoads();
-                auto clipAsset = std::dynamic_pointer_cast<Assets::AudioClipAsset>(
-                    Assets::AssetManager::GetCachedByKey(audioSource.AudioClipKey));
+                auto& runtimeAudioClipCache = GetRuntimeAudioClipCache();
+                auto clipAssetIt = runtimeAudioClipCache.find(audioSource.AudioClipKey);
+                auto clipAsset = (clipAssetIt != runtimeAudioClipCache.end()) ? clipAssetIt->second : nullptr;
+                if (!clipAsset)
+                {
+                    clipAsset = std::dynamic_pointer_cast<Assets::AudioClipAsset>(
+                        Assets::AssetManager::GetCachedByKey(audioSource.AudioClipKey));
+                    if (clipAsset)
+                        runtimeAudioClipCache[audioSource.AudioClipKey] = clipAsset;
+                }
                 if (!clipAsset)
                 {
                     auto pendingIt = pendingAudioClipLoads.find(audioSource.AudioClipKey);
                     if (pendingIt == pendingAudioClipLoads.end())
                     {
-                        pendingAudioClipLoads.emplace(audioSource.AudioClipKey, Assets::AudioClipAsset::LoadAsync(audioSource.AudioClipKey));
+                        pendingAudioClipLoads.emplace(audioSource.AudioClipKey, Assets::AssetManager::LoadAsync<Assets::AudioClipAsset>(audioSource.AudioClipKey));
                         continue;
                     }
 
@@ -468,6 +483,8 @@ namespace Limitless::Audio
                         continue;
 
                     clipAsset = pendingIt->second.Get();
+                    if (clipAsset)
+                        runtimeAudioClipCache[audioSource.AudioClipKey] = clipAsset;
                     pendingAudioClipLoads.erase(pendingIt);
                 }
                 else

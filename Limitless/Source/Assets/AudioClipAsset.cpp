@@ -130,8 +130,10 @@ namespace Limitless::Assets
                 }
 
                 AssetLoadProgress::ClearProgress(assetPath);
-                Ptr created(new AudioClipAsset(assetPath, guid, clip, settings));
-                promise.set_value(created);
+                auto asset = AssetManager::GetOrLoad<AudioClipAsset>(assetPath, [&]() -> Ptr {
+                    return Ptr(new AudioClipAsset(assetPath, guid, clip, settings));
+                });
+                promise.set_value(std::move(asset));
             }
             catch (const std::exception& e)
             {
