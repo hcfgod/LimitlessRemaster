@@ -1,5 +1,6 @@
 #include "EditorInspectorPanelAssetInspectors.h"
 
+#include "EditorAssetPreview.h"
 #include "EditorAssetNaming.h"
 #include "EditorInspectorPanel.h"
 
@@ -331,6 +332,8 @@ namespace Limitless::EditorInspectorPanel
                 (void)cachedMaterialAsset->Reload();
             else
                 cachedMaterialAsset = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(materialKey);
+
+            EditorAssetPreview::InvalidateCachedMaterialPreview(materialKey);
 
             return cachedMaterialAsset != nullptr;
         }
@@ -1843,6 +1846,41 @@ namespace Limitless::EditorInspectorPanel
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
+
+        if (const EditorAssetPreview::MaterialPreviewData* materialPreview = EditorAssetPreview::GetCachedMaterialPreview(selectedMaterialAssetKey))
+        {
+            const float previewSize = 256.0f;
+            const float aspect = materialPreview->SourceHeight / std::max(1.0f, materialPreview->SourceWidth);
+            const ImVec4 tintColor(1.0f, 1.0f, 1.0f, 1.0f);
+            const ImVec4 borderColor(0.4f, 0.4f, 0.4f, 1.0f);
+            ImGui::TextDisabled("Preview");
+            if (aspect > 1.0f)
+            {
+                const float width = previewSize / aspect;
+                ImGui::Image(
+                    static_cast<ImTextureID>(GetTextureNativeHandle(materialPreview->PreviewTexture)),
+                    ImVec2(width, previewSize),
+                    materialPreview->UvMin,
+                    materialPreview->UvMax,
+                    tintColor,
+                    borderColor);
+            }
+            else
+            {
+                const float height = previewSize * aspect;
+                ImGui::Image(
+                    static_cast<ImTextureID>(GetTextureNativeHandle(materialPreview->PreviewTexture)),
+                    ImVec2(previewSize, height),
+                    materialPreview->UvMin,
+                    materialPreview->UvMax,
+                    tintColor,
+                    borderColor);
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+        }
 
         // Keep implementation in dedicated module. This function intentionally
         // remains behavior-identical to the previous in-file implementation.

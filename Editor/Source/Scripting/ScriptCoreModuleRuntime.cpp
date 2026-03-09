@@ -68,6 +68,7 @@ namespace Limitless::ScriptCoreModuleRuntime
             std::filesystem::file_time_type LastWriteTime{};
             std::filesystem::path LastRejectedSourcePath;
             std::filesystem::file_time_type LastRejectedSourceWriteTime{};
+            std::unordered_set<std::string> LoggedRejectedValidationFailures;
         };
 
         struct GameplayInputRoutingState final
@@ -81,6 +82,28 @@ namespace Limitless::ScriptCoreModuleRuntime
         RuntimeState s_RuntimeState;
         ManagedRuntimeState s_ManagedRuntimeState;
         GameplayInputRoutingState s_GameplayInputRoutingState;
+
+        void ResetManagedRuntimeState()
+        {
+            s_ManagedRuntimeState = {};
+        }
+
+        void LogRejectedManagedPayloadCandidateOnce(const std::filesystem::path& candidatePath, const std::string& validationError)
+        {
+#if defined(LT_CONFIG_DEBUG)
+            if (validationError.empty())
+                return;
+
+            const std::string failureKey = candidatePath.lexically_normal().string() + "\n" + validationError;
+            if (!s_ManagedRuntimeState.LoggedRejectedValidationFailures.emplace(failureKey).second)
+                return;
+
+            LT_INFO("Managed scripting: rejected candidate '{}' ({})", candidatePath.string(), validationError);
+#else
+            (void)candidatePath;
+            (void)validationError;
+#endif
+        }
 
         bool ShouldSuppressGameplayInput()
         {
@@ -379,11 +402,6 @@ namespace Limitless::ScriptCoreModuleRuntime
 #endif
         }
 
-        void ResetManagedRuntimeState()
-        {
-            s_ManagedRuntimeState = {};
-        }
-
         bool SelectManagedPayloadCandidate(const std::vector<std::filesystem::path>& candidatePaths,
                                            std::filesystem::path& outSourceDirectory,
                                            std::filesystem::path& outManifestPath,
@@ -400,10 +418,7 @@ namespace Limitless::ScriptCoreModuleRuntime
                 std::string validationError;
                 if (!ManagedScriptPayload::ValidatePayloadDirectory(candidatePath, nullptr, &validationError))
                 {
-#if defined(LT_CONFIG_DEBUG)
-                    if (!validationError.empty())
-                        LT_INFO("Managed scripting: rejected candidate '{}' ({})", candidatePath.string(), validationError);
-#endif
+                    LogRejectedManagedPayloadCandidateOnce(candidatePath, validationError);
                     continue;
                 }
 

@@ -1,5 +1,6 @@
 #include "EditorProjectPanel.h"
 
+#include "EditorAssetPreview.h"
 #include "EditorAssetNaming.h"
 #include "EditorInspectorPanel.h"
 #include "EditorPanelStyle.h"
@@ -3915,6 +3916,375 @@ namespace Limitless::EditorProjectPanel
                         return true;
                     };
 
+                    const auto drawFolderThumbnail = [&]() {
+                        const float previewWidth = previewMax.x - previewMin.x;
+                        const float previewHeightInner = previewMax.y - previewMin.y;
+                        const float iconWidth = std::max(20.0f, std::min(previewWidth * 0.66f, previewWidth - 18.0f));
+                        const float iconHeight = std::max(16.0f, std::min(previewHeightInner * 0.46f, previewHeightInner - 20.0f));
+                        const float tabWidth = std::max(12.0f, iconWidth * 0.36f);
+                        const float tabHeight = std::max(6.0f, iconHeight * 0.28f);
+                        const float bodyTopOffset = tabHeight * 0.72f;
+
+                        const ImVec2 bodyMin(
+                            previewMin.x + (previewWidth - iconWidth) * 0.5f,
+                            previewMin.y + (previewHeightInner - (iconHeight + bodyTopOffset)) * 0.5f + bodyTopOffset);
+                        const ImVec2 bodyMax(bodyMin.x + iconWidth, bodyMin.y + iconHeight);
+                        const ImVec2 tabMin(bodyMin.x + iconWidth * 0.08f, bodyMin.y - bodyTopOffset);
+                        const ImVec2 tabMax(tabMin.x + tabWidth, tabMin.y + tabHeight);
+
+                        drawList->AddRectFilled(
+                            ImVec2(bodyMin.x + 1.0f, bodyMin.y + 2.0f),
+                            ImVec2(bodyMax.x + 1.0f, bodyMax.y + 2.0f),
+                            IM_COL32(0, 0, 0, 40),
+                            6.0f);
+                        drawList->AddRectFilled(bodyMin, bodyMax, IM_COL32(214, 168, 78, 255), 6.0f);
+                        drawList->AddRect(bodyMin, bodyMax, IM_COL32(245, 208, 120, 255), 6.0f, 0, 1.0f);
+                        drawList->AddRectFilled(tabMin, tabMax, IM_COL32(232, 189, 97, 255), 5.0f);
+                        drawList->AddRect(tabMin, tabMax, IM_COL32(248, 217, 140, 255), 5.0f, 0, 1.0f);
+
+                        const ImVec2 accentMin(bodyMin.x + iconWidth * 0.08f, bodyMin.y + iconHeight * 0.22f);
+                        const ImVec2 accentMax(bodyMax.x - iconWidth * 0.10f, accentMin.y + std::max(2.0f, iconHeight * 0.12f));
+                        drawList->AddRectFilled(accentMin, accentMax, IM_COL32(246, 223, 168, 90), 3.0f);
+                    };
+
+                    const auto drawSceneThumbnail = [&]() {
+                        const float previewWidth = previewMax.x - previewMin.x;
+                        const float previewHeightInner = previewMax.y - previewMin.y;
+                        const float frameWidth = std::max(22.0f, std::min(previewWidth * 0.70f, previewWidth - 18.0f));
+                        const float frameHeight = std::max(18.0f, std::min(previewHeightInner * 0.56f, previewHeightInner - 18.0f));
+                        const ImVec2 frameMin(
+                            previewMin.x + (previewWidth - frameWidth) * 0.5f,
+                            previewMin.y + (previewHeightInner - frameHeight) * 0.5f);
+                        const ImVec2 frameMax(frameMin.x + frameWidth, frameMin.y + frameHeight);
+                        const float innerInset = 3.0f;
+                        const ImVec2 innerMin(frameMin.x + innerInset, frameMin.y + innerInset);
+                        const ImVec2 innerMax(frameMax.x - innerInset, frameMax.y - innerInset);
+
+                        drawList->AddRectFilled(
+                            ImVec2(frameMin.x + 1.0f, frameMin.y + 2.0f),
+                            ImVec2(frameMax.x + 1.0f, frameMax.y + 2.0f),
+                            IM_COL32(0, 0, 0, 36),
+                            6.0f);
+                        drawList->AddRectFilled(frameMin, frameMax, IM_COL32(67, 96, 132, 255), 6.0f);
+                        drawList->AddRect(frameMin, frameMax, IM_COL32(129, 169, 220, 255), 6.0f, 0, 1.0f);
+                        drawList->AddRectFilledMultiColor(
+                            innerMin,
+                            innerMax,
+                            IM_COL32(94, 148, 214, 255),
+                            IM_COL32(94, 148, 214, 255),
+                            IM_COL32(42, 69, 110, 255),
+                            IM_COL32(42, 69, 110, 255));
+
+                        const ImVec2 sunCenter(innerMax.x - frameWidth * 0.18f, innerMin.y + frameHeight * 0.22f);
+                        drawList->AddCircleFilled(sunCenter, std::max(2.0f, frameHeight * 0.08f), IM_COL32(255, 220, 136, 255), 16);
+
+                        drawList->AddTriangleFilled(
+                            ImVec2(innerMin.x + frameWidth * 0.12f, innerMax.y - frameHeight * 0.08f),
+                            ImVec2(innerMin.x + frameWidth * 0.40f, innerMin.y + frameHeight * 0.32f),
+                            ImVec2(innerMin.x + frameWidth * 0.68f, innerMax.y - frameHeight * 0.08f),
+                            IM_COL32(98, 185, 132, 255));
+                        drawList->AddTriangleFilled(
+                            ImVec2(innerMin.x + frameWidth * 0.38f, innerMax.y - frameHeight * 0.08f),
+                            ImVec2(innerMin.x + frameWidth * 0.62f, innerMin.y + frameHeight * 0.18f),
+                            ImVec2(innerMin.x + frameWidth * 0.88f, innerMax.y - frameHeight * 0.08f),
+                            IM_COL32(66, 142, 102, 255));
+
+                        const ImVec2 groundMin(innerMin.x, innerMax.y - std::max(3.0f, frameHeight * 0.16f));
+                        drawList->AddRectFilled(groundMin, innerMax, IM_COL32(44, 92, 67, 255), 0.0f);
+                    };
+
+                    const auto drawAudioThumbnail = [&]() {
+                        const float previewWidth = previewMax.x - previewMin.x;
+                        const float previewHeightInner = previewMax.y - previewMin.y;
+                        const float iconHeight = std::max(18.0f, std::min(previewHeightInner * 0.52f, previewHeightInner - 18.0f));
+                        const float bodyWidth = std::max(8.0f, iconHeight * 0.22f);
+                        const float bodyHeight = std::max(12.0f, iconHeight * 0.52f);
+                        const float coneWidth = std::max(10.0f, iconHeight * 0.34f);
+                        const float totalWidth = bodyWidth + coneWidth + iconHeight * 0.46f;
+                        const ImVec2 iconMin(
+                            previewMin.x + (previewWidth - totalWidth) * 0.5f,
+                            previewMin.y + (previewHeightInner - iconHeight) * 0.5f);
+
+                        const ImVec2 bodyMin(iconMin.x, iconMin.y + (iconHeight - bodyHeight) * 0.5f);
+                        const ImVec2 bodyMax(bodyMin.x + bodyWidth, bodyMin.y + bodyHeight);
+                        const ImVec2 coneTop(bodyMax.x + coneWidth, iconMin.y + iconHeight * 0.18f);
+                        const ImVec2 coneMid(bodyMax.x + coneWidth, iconMin.y + iconHeight * 0.82f);
+                        const ImVec2 coneJoin(bodyMax.x, iconMin.y + iconHeight * 0.50f);
+
+                        drawList->AddRectFilled(bodyMin, bodyMax, IM_COL32(178, 134, 219, 255), 3.0f);
+                        drawList->AddRect(bodyMin, bodyMax, IM_COL32(220, 190, 248, 255), 3.0f, 0, 1.0f);
+                        drawList->AddTriangleFilled(coneTop, coneMid, coneJoin, IM_COL32(198, 154, 236, 255));
+                        drawList->AddTriangle(coneTop, coneMid, coneJoin, IM_COL32(228, 200, 250, 255), 1.0f);
+
+                        const ImVec2 waveCenter(bodyMax.x + coneWidth + 2.0f, iconMin.y + iconHeight * 0.50f);
+                        const float waveRadiusA = std::max(4.0f, iconHeight * 0.18f);
+                        const float waveRadiusB = std::max(6.0f, iconHeight * 0.28f);
+                        drawList->PathArcTo(waveCenter, waveRadiusA, -0.85f, 0.85f, 18);
+                        drawList->PathStroke(IM_COL32(214, 181, 245, 255), 0, 2.0f);
+                        drawList->PathArcTo(waveCenter, waveRadiusB, -0.85f, 0.85f, 18);
+                        drawList->PathStroke(IM_COL32(174, 130, 224, 255), 0, 2.0f);
+                    };
+
+                    const auto drawInputThumbnail = [&]() {
+                        const float previewWidth = previewMax.x - previewMin.x;
+                        const float previewHeightInner = previewMax.y - previewMin.y;
+                        const float deviceWidth = std::max(24.0f, std::min(previewWidth * 0.68f, previewWidth - 18.0f));
+                        const float deviceHeight = std::max(16.0f, std::min(previewHeightInner * 0.40f, previewHeightInner - 20.0f));
+                        const ImVec2 deviceMin(
+                            previewMin.x + (previewWidth - deviceWidth) * 0.5f,
+                            previewMin.y + (previewHeightInner - deviceHeight) * 0.5f);
+                        const ImVec2 deviceMax(deviceMin.x + deviceWidth, deviceMin.y + deviceHeight);
+
+                        drawList->AddRectFilled(
+                            ImVec2(deviceMin.x + 1.0f, deviceMin.y + 2.0f),
+                            ImVec2(deviceMax.x + 1.0f, deviceMax.y + 2.0f),
+                            IM_COL32(0, 0, 0, 34),
+                            5.0f);
+                        drawList->AddRectFilled(deviceMin, deviceMax, IM_COL32(82, 148, 88, 255), 5.0f);
+                        drawList->AddRect(deviceMin, deviceMax, IM_COL32(145, 214, 151, 255), 5.0f, 0, 1.0f);
+
+                        const ImVec2 dpadCenter(deviceMin.x + deviceWidth * 0.24f, deviceMin.y + deviceHeight * 0.52f);
+                        const float dpadArm = std::max(2.0f, deviceHeight * 0.12f);
+                        const float dpadLength = std::max(4.0f, deviceHeight * 0.24f);
+                        drawList->AddRectFilled(ImVec2(dpadCenter.x - dpadArm, dpadCenter.y - dpadLength), ImVec2(dpadCenter.x + dpadArm, dpadCenter.y + dpadLength), IM_COL32(219, 244, 221, 220), 1.5f);
+                        drawList->AddRectFilled(ImVec2(dpadCenter.x - dpadLength, dpadCenter.y - dpadArm), ImVec2(dpadCenter.x + dpadLength, dpadCenter.y + dpadArm), IM_COL32(219, 244, 221, 220), 1.5f);
+
+                        const ImVec2 buttonA(deviceMin.x + deviceWidth * 0.72f, deviceMin.y + deviceHeight * 0.42f);
+                        const ImVec2 buttonB(deviceMin.x + deviceWidth * 0.82f, deviceMin.y + deviceHeight * 0.58f);
+                        drawList->AddCircleFilled(buttonA, std::max(2.0f, deviceHeight * 0.10f), IM_COL32(220, 245, 223, 230), 16);
+                        drawList->AddCircleFilled(buttonB, std::max(2.0f, deviceHeight * 0.10f), IM_COL32(198, 233, 202, 210), 16);
+
+                        const ImVec2 cableStart(deviceMin.x + deviceWidth * 0.44f, deviceMin.y);
+                        const ImVec2 cablePeak(deviceMin.x + deviceWidth * 0.54f, deviceMin.y - std::max(5.0f, deviceHeight * 0.30f));
+                        const ImVec2 cableEnd(deviceMin.x + deviceWidth * 0.64f, deviceMin.y + 2.0f);
+                        drawList->AddBezierCubic(cableStart, cablePeak, cablePeak, cableEnd, IM_COL32(186, 235, 190, 180), 1.5f, 20);
+                    };
+
+                    const auto drawAnimationClipThumbnail = [&]() {
+                        const float previewWidth = previewMax.x - previewMin.x;
+                        const float previewHeightInner = previewMax.y - previewMin.y;
+                        const float stripWidth = std::max(24.0f, std::min(previewWidth * 0.72f, previewWidth - 18.0f));
+                        const float stripHeight = std::max(16.0f, std::min(previewHeightInner * 0.46f, previewHeightInner - 20.0f));
+                        const ImVec2 stripMin(
+                            previewMin.x + (previewWidth - stripWidth) * 0.5f,
+                            previewMin.y + (previewHeightInner - stripHeight) * 0.5f);
+                        const ImVec2 stripMax(stripMin.x + stripWidth, stripMin.y + stripHeight);
+
+                        drawList->AddRectFilled(
+                            ImVec2(stripMin.x + 1.0f, stripMin.y + 2.0f),
+                            ImVec2(stripMax.x + 1.0f, stripMax.y + 2.0f),
+                            IM_COL32(0, 0, 0, 34),
+                            5.0f);
+                        drawList->AddRectFilled(stripMin, stripMax, IM_COL32(201, 90, 84, 255), 5.0f);
+                        drawList->AddRect(stripMin, stripMax, IM_COL32(244, 145, 138, 255), 5.0f, 0, 1.0f);
+
+                        const float perforationWidth = std::max(2.0f, stripWidth * 0.06f);
+                        const float perforationStep = std::max(5.0f, stripHeight * 0.24f);
+                        for (float y = stripMin.y + 3.0f; y < stripMax.y - 3.0f; y += perforationStep)
+                        {
+                            drawList->AddRectFilled(ImVec2(stripMin.x + 2.0f, y), ImVec2(stripMin.x + 2.0f + perforationWidth, std::min(stripMax.y - 2.0f, y + 2.0f)), IM_COL32(255, 220, 216, 190), 1.0f);
+                            drawList->AddRectFilled(ImVec2(stripMax.x - 2.0f - perforationWidth, y), ImVec2(stripMax.x - 2.0f, std::min(stripMax.y - 2.0f, y + 2.0f)), IM_COL32(255, 220, 216, 190), 1.0f);
+                        }
+
+                        const ImVec2 playA(stripMin.x + stripWidth * 0.40f, stripMin.y + stripHeight * 0.26f);
+                        const ImVec2 playB(stripMin.x + stripWidth * 0.40f, stripMax.y - stripHeight * 0.26f);
+                        const ImVec2 playC(stripMax.x - stripWidth * 0.28f, stripMin.y + stripHeight * 0.50f);
+                        drawList->AddTriangleFilled(playA, playB, playC, IM_COL32(255, 232, 228, 230));
+                    };
+
+                    const auto drawAnimatorControllerThumbnail = [&]() {
+                        const float previewWidth = previewMax.x - previewMin.x;
+                        const float previewHeightInner = previewMax.y - previewMin.y;
+                        const float nodeRadius = std::max(3.0f, std::min(previewHeightInner * 0.10f, 6.0f));
+                        const ImVec2 leftNode(previewMin.x + previewWidth * 0.26f, previewMin.y + previewHeightInner * 0.52f);
+                        const ImVec2 topRightNode(previewMin.x + previewWidth * 0.66f, previewMin.y + previewHeightInner * 0.30f);
+                        const ImVec2 bottomRightNode(previewMin.x + previewWidth * 0.72f, previewMin.y + previewHeightInner * 0.68f);
+
+                        drawList->AddBezierCubic(
+                            leftNode,
+                            ImVec2(previewMin.x + previewWidth * 0.42f, leftNode.y - previewHeightInner * 0.14f),
+                            ImVec2(previewMin.x + previewWidth * 0.52f, topRightNode.y + previewHeightInner * 0.04f),
+                            topRightNode,
+                            IM_COL32(238, 134, 158, 220),
+                            2.0f,
+                            18);
+                        drawList->AddBezierCubic(
+                            leftNode,
+                            ImVec2(previewMin.x + previewWidth * 0.44f, leftNode.y + previewHeightInner * 0.12f),
+                            ImVec2(previewMin.x + previewWidth * 0.54f, bottomRightNode.y - previewHeightInner * 0.06f),
+                            bottomRightNode,
+                            IM_COL32(214, 106, 136, 210),
+                            2.0f,
+                            18);
+
+                        drawList->AddCircleFilled(leftNode, nodeRadius, IM_COL32(255, 196, 211, 255), 16);
+                        drawList->AddCircleFilled(topRightNode, nodeRadius, IM_COL32(255, 154, 182, 255), 16);
+                        drawList->AddCircleFilled(bottomRightNode, nodeRadius, IM_COL32(233, 110, 145, 255), 16);
+                        drawList->AddCircle(leftNode, nodeRadius + 1.0f, IM_COL32(255, 225, 231, 180), 16, 1.0f);
+                        drawList->AddCircle(topRightNode, nodeRadius + 1.0f, IM_COL32(255, 209, 220, 180), 16, 1.0f);
+                        drawList->AddCircle(bottomRightNode, nodeRadius + 1.0f, IM_COL32(255, 196, 211, 170), 16, 1.0f);
+                    };
+
+                    const auto drawScriptDocumentThumbnail = [&](const ImU32 bodyColor,
+                                                                 const ImU32 borderColorLocal,
+                                                                 const ImU32 accentColor,
+                                                                 const char* label) {
+                        const float previewWidth = previewMax.x - previewMin.x;
+                        const float previewHeightInner = previewMax.y - previewMin.y;
+                        const float docWidth = std::max(18.0f, std::min(previewWidth * 0.42f, previewWidth - 24.0f));
+                        const float docHeight = std::max(22.0f, std::min(previewHeightInner * 0.62f, previewHeightInner - 16.0f));
+                        const float foldSize = std::max(5.0f, std::min(docWidth * 0.24f, docHeight * 0.22f));
+                        const ImVec2 docMin(
+                            previewMin.x + (previewWidth - docWidth) * 0.5f,
+                            previewMin.y + (previewHeightInner - docHeight) * 0.5f);
+                        const ImVec2 docMax(docMin.x + docWidth, docMin.y + docHeight);
+                        const ImVec2 foldA(docMax.x - foldSize, docMin.y);
+                        const ImVec2 foldB(docMax.x, docMin.y + foldSize);
+                        const ImVec2 foldC(docMax.x - foldSize, docMin.y + foldSize);
+
+                        drawList->AddRectFilled(
+                            ImVec2(docMin.x + 1.0f, docMin.y + 2.0f),
+                            ImVec2(docMax.x + 1.0f, docMax.y + 2.0f),
+                            IM_COL32(0, 0, 0, 34),
+                            5.0f);
+                        drawList->AddRectFilled(docMin, docMax, bodyColor, 5.0f);
+                        drawList->AddRect(docMin, docMax, borderColorLocal, 5.0f, 0, 1.0f);
+                        drawList->AddTriangleFilled(foldA, ImVec2(docMax.x, docMin.y), foldB, accentColor);
+                        drawList->AddLine(foldA, foldB, borderColorLocal, 1.0f);
+                        drawList->AddLine(foldA, foldC, borderColorLocal, 1.0f);
+
+                        const float lineInsetX = std::max(4.0f, docWidth * 0.16f);
+                        const float lineStartY = docMin.y + docHeight * 0.24f;
+                        const float lineStep = std::max(3.0f, docHeight * 0.13f);
+                        for (int32_t lineIndex = 0; lineIndex < 3; ++lineIndex)
+                        {
+                            const float lineY = lineStartY + static_cast<float>(lineIndex) * lineStep;
+                            drawList->AddLine(
+                                ImVec2(docMin.x + lineInsetX, lineY),
+                                ImVec2(docMax.x - lineInsetX - (lineIndex == 2 ? docWidth * 0.12f : 0.0f), lineY),
+                                accentColor,
+                                1.0f);
+                        }
+
+                        const ImVec2 labelSize = ImGui::CalcTextSize(label);
+                        drawList->AddText(
+                            ImVec2(docMin.x + (docWidth - labelSize.x) * 0.5f,
+                                   docMax.y - docHeight * 0.28f - labelSize.y * 0.5f),
+                            borderColorLocal,
+                            label);
+                    };
+
+                    const auto drawManagedScriptThumbnail = [&]() {
+                        drawScriptDocumentThumbnail(
+                            IM_COL32(74, 120, 64, 255),
+                            IM_COL32(186, 232, 177, 255),
+                            IM_COL32(214, 244, 208, 210),
+                            "C#");
+                    };
+
+                    const auto drawNativeScriptThumbnail = [&]() {
+                        drawScriptDocumentThumbnail(
+                            IM_COL32(148, 128, 44, 255),
+                            IM_COL32(241, 224, 132, 255),
+                            IM_COL32(255, 242, 188, 210),
+                            "C++");
+                    };
+
+                    const auto drawTilesetThumbnail = [&]() {
+                        const float previewWidth = previewMax.x - previewMin.x;
+                        const float previewHeightInner = previewMax.y - previewMin.y;
+                        const float boardSize = std::max(20.0f, std::min(std::min(previewWidth, previewHeightInner) * 0.62f, std::min(previewWidth, previewHeightInner) - 16.0f));
+                        const ImVec2 boardMin(
+                            previewMin.x + (previewWidth - boardSize) * 0.5f,
+                            previewMin.y + (previewHeightInner - boardSize) * 0.5f);
+                        const ImVec2 boardMax(boardMin.x + boardSize, boardMin.y + boardSize);
+                        const float cellSize = boardSize / 3.0f;
+                        constexpr ImU32 tileColors[9] = {
+                            IM_COL32(182, 140, 86, 255), IM_COL32(92, 156, 104, 255), IM_COL32(78, 132, 198, 255),
+                            IM_COL32(206, 96, 92, 255),  IM_COL32(218, 178, 92, 255), IM_COL32(126, 108, 198, 255),
+                            IM_COL32(88, 168, 170, 255), IM_COL32(176, 118, 84, 255), IM_COL32(116, 184, 124, 255)
+                        };
+
+                        drawList->AddRectFilled(
+                            ImVec2(boardMin.x + 1.0f, boardMin.y + 2.0f),
+                            ImVec2(boardMax.x + 1.0f, boardMax.y + 2.0f),
+                            IM_COL32(0, 0, 0, 34),
+                            5.0f);
+                        for (int32_t row = 0; row < 3; ++row)
+                        {
+                            for (int32_t column = 0; column < 3; ++column)
+                            {
+                                const int32_t colorIndex = row * 3 + column;
+                                const ImVec2 cellMin(boardMin.x + cellSize * static_cast<float>(column), boardMin.y + cellSize * static_cast<float>(row));
+                                const ImVec2 cellMax(cellMin.x + cellSize - 1.0f, cellMin.y + cellSize - 1.0f);
+                                drawList->AddRectFilled(cellMin, cellMax, tileColors[colorIndex], 2.0f);
+                            }
+                        }
+                        drawList->AddRect(boardMin, boardMax, IM_COL32(234, 216, 180, 200), 5.0f, 0, 1.0f);
+                    };
+
+                    const auto drawTilePaletteThumbnail = [&]() {
+                        const float previewWidth = previewMax.x - previewMin.x;
+                        const float previewHeightInner = previewMax.y - previewMin.y;
+                        const float paletteWidth = std::max(24.0f, std::min(previewWidth * 0.68f, previewWidth - 16.0f));
+                        const float paletteHeight = std::max(18.0f, std::min(previewHeightInner * 0.52f, previewHeightInner - 18.0f));
+                        const ImVec2 paletteMin(
+                            previewMin.x + (previewWidth - paletteWidth) * 0.5f,
+                            previewMin.y + (previewHeightInner - paletteHeight) * 0.5f);
+                        const ImVec2 paletteMax(paletteMin.x + paletteWidth, paletteMin.y + paletteHeight);
+                        const float swatchWidth = paletteWidth / 4.0f;
+                        constexpr ImU32 swatchColors[4] = {
+                            IM_COL32(234, 109, 103, 255),
+                            IM_COL32(242, 191, 92, 255),
+                            IM_COL32(104, 186, 122, 255),
+                            IM_COL32(92, 156, 230, 255)
+                        };
+
+                        drawList->AddRectFilled(
+                            ImVec2(paletteMin.x + 1.0f, paletteMin.y + 2.0f),
+                            ImVec2(paletteMax.x + 1.0f, paletteMax.y + 2.0f),
+                            IM_COL32(0, 0, 0, 34),
+                            6.0f);
+                        drawList->AddRectFilled(paletteMin, paletteMax, IM_COL32(88, 74, 52, 255), 6.0f);
+                        for (int32_t swatchIndex = 0; swatchIndex < 4; ++swatchIndex)
+                        {
+                            const ImVec2 swatchMin(paletteMin.x + swatchWidth * static_cast<float>(swatchIndex), paletteMin.y);
+                            const ImVec2 swatchMax(swatchMin.x + swatchWidth, paletteMax.y - paletteHeight * 0.22f);
+                            drawList->AddRectFilled(swatchMin, swatchMax, swatchColors[swatchIndex], swatchIndex == 0 || swatchIndex == 3 ? 6.0f : 0.0f);
+                        }
+                        drawList->AddRect(paletteMin, paletteMax, IM_COL32(236, 220, 193, 190), 6.0f, 0, 1.0f);
+                        drawList->AddLine(
+                            ImVec2(paletteMin.x + paletteWidth * 0.18f, paletteMax.y - paletteHeight * 0.18f),
+                            ImVec2(paletteMax.x - paletteWidth * 0.18f, paletteMax.y - paletteHeight * 0.18f),
+                            IM_COL32(249, 236, 214, 180),
+                            2.0f);
+                    };
+
+                    const auto drawAudioMixerThumbnail = [&]() {
+                        const float previewWidth = previewMax.x - previewMin.x;
+                        const float previewHeightInner = previewMax.y - previewMin.y;
+                        const float sliderHeight = std::max(20.0f, std::min(previewHeightInner * 0.56f, previewHeightInner - 16.0f));
+                        const float sliderTop = previewMin.y + (previewHeightInner - sliderHeight) * 0.5f;
+                        const float trackSpacing = previewWidth * 0.20f;
+                        const float startX = previewMin.x + previewWidth * 0.30f;
+                        const float trackBottom = sliderTop + sliderHeight;
+                        const float knobRadius = std::max(3.0f, sliderHeight * 0.08f);
+                        const float knobOffsets[3] = { 0.28f, 0.56f, 0.40f };
+
+                        for (int32_t trackIndex = 0; trackIndex < 3; ++trackIndex)
+                        {
+                            const float trackX = startX + trackSpacing * static_cast<float>(trackIndex);
+                            drawList->AddLine(
+                                ImVec2(trackX, sliderTop),
+                                ImVec2(trackX, trackBottom),
+                                IM_COL32(194, 152, 224, 210),
+                                2.0f);
+                            const float knobY = sliderTop + sliderHeight * knobOffsets[trackIndex];
+                            drawList->AddCircleFilled(ImVec2(trackX, knobY), knobRadius + 1.0f, IM_COL32(106, 69, 138, 255), 16);
+                            drawList->AddCircleFilled(ImVec2(trackX, knobY), knobRadius, IM_COL32(234, 204, 255, 255), 16);
+                        }
+                    };
+
                     bool drewPreviewImage = false;
 
                     if (entry.IsTexture)
@@ -3942,6 +4312,18 @@ namespace Limitless::EditorProjectPanel
                             }
                         }
                     }
+                    else if (entry.IsMaterial)
+                    {
+                        if (const EditorAssetPreview::MaterialPreviewData* materialPreview = EditorAssetPreview::GetCachedMaterialPreview(entry.PrimaryAssetKey))
+                        {
+                            drewPreviewImage = drawThumbnailImage(
+                                materialPreview->PreviewTexture,
+                                materialPreview->SourceWidth,
+                                materialPreview->SourceHeight,
+                                materialPreview->UvMin,
+                                materialPreview->UvMax);
+                        }
+                    }
                     else if (entry.IsPrefab)
                     {
                         if (const PrefabThumbnailCacheEntry* prefabThumbnail = GetCachedPrefabThumbnail(entry.PrimaryAssetKey))
@@ -3957,13 +4339,47 @@ namespace Limitless::EditorProjectPanel
 
                     if (!drewPreviewImage && entry.IsDirectory)
                     {
-                        const char* folderGlyph = "DIR";
-                        const ImVec2 glyphSize = ImGui::CalcTextSize(folderGlyph);
-                        drawList->AddText(
-                            ImVec2(previewMin.x + (previewMax.x - previewMin.x - glyphSize.x) * 0.5f,
-                                   previewMin.y + (previewMax.y - previewMin.y - glyphSize.y) * 0.5f),
-                            IM_COL32(130, 170, 235, 255),
-                            folderGlyph);
+                        drawFolderThumbnail();
+                    }
+                    else if (!drewPreviewImage && entry.IsScene)
+                    {
+                        drawSceneThumbnail();
+                    }
+                    else if (!drewPreviewImage && entry.IsAudio)
+                    {
+                        drawAudioThumbnail();
+                    }
+                    else if (!drewPreviewImage && entry.IsInputActions)
+                    {
+                        drawInputThumbnail();
+                    }
+                    else if (!drewPreviewImage && entry.IsAnimationClip)
+                    {
+                        drawAnimationClipThumbnail();
+                    }
+                    else if (!drewPreviewImage && entry.IsAnimatorController)
+                    {
+                        drawAnimatorControllerThumbnail();
+                    }
+                    else if (!drewPreviewImage && entry.IsTileset)
+                    {
+                        drawTilesetThumbnail();
+                    }
+                    else if (!drewPreviewImage && entry.IsTilePalette)
+                    {
+                        drawTilePaletteThumbnail();
+                    }
+                    else if (!drewPreviewImage && entry.IsAudioMixer)
+                    {
+                        drawAudioMixerThumbnail();
+                    }
+                    else if (!drewPreviewImage && entry.IsManagedScriptFile)
+                    {
+                        drawManagedScriptThumbnail();
+                    }
+                    else if (!drewPreviewImage && entry.IsNativeScriptFile)
+                    {
+                        drawNativeScriptThumbnail();
                     }
                     else if (!drewPreviewImage)
                     {
