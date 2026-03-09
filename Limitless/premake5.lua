@@ -58,7 +58,7 @@ project "Limitless"
     filter "files:Source/ImGui/ImGuiOpenGL3Backend.cpp"
         flags { "NoPCH" }
 
-    filter "files:Vendor/**"
+    filter { "files:Vendor/**", "not files:Vendor/Coral/**" }
         flags { "NoPCH" }
         -- Keep build logs focused on engine/game code.
         warnings "Off"
