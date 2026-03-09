@@ -21,7 +21,7 @@ jobs:
           if (Test-Path "Limitless\Vendor\Coral") {
             Remove-Item -Recurse -Force "Limitless\Vendor\Coral"
           }
-          git clone --depth 1 https://github.com/StudioCherno/Coral.git "Limitless\Vendor\Coral"
+          git clone --depth 1 https://github.com/hcfgod/Coral.git "Limitless\Vendor\Coral"
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }

@@ -29,7 +29,7 @@ jobs:
         run: |
           if [ ! -f "Limitless/Vendor/Coral/Coral.Native/Include/Coral/Assembly.hpp" ]; then
             rm -rf Limitless/Vendor/Coral
-            git clone --depth 1 https://github.com/StudioCherno/Coral.git Limitless/Vendor/Coral
+            git clone --depth 1 https://github.com/hcfgod/Coral.git Limitless/Vendor/Coral
             rm -rf Limitless/Vendor/Coral/.git
           fi
           test -f "Limitless/Vendor/Coral/Coral.Native/Include/Coral/Assembly.hpp"
@@ -101,7 +101,7 @@ jobs:
         run: |
           if [ ! -f "Limitless/Vendor/Coral/Coral.Native/Include/Coral/Assembly.hpp" ]; then
             rm -rf Limitless/Vendor/Coral
-            git clone --depth 1 https://github.com/StudioCherno/Coral.git Limitless/Vendor/Coral
+            git clone --depth 1 https://github.com/hcfgod/Coral.git Limitless/Vendor/Coral
             rm -rf Limitless/Vendor/Coral/.git
           fi
           test -f "Limitless/Vendor/Coral/Coral.Native/Include/Coral/Assembly.hpp"
