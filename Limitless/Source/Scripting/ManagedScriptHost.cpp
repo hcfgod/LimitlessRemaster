@@ -2,6 +2,7 @@
 
 #include "Core/Debug/Log.h"
 #include "Audio/AudioEngine.h"
+#include "Scripting/Random.h"
 #include "Scene/Components/AudioComponents.h"
 #include "Scene/Components/CoreComponents.h"
 #include "Scene/Components/PhysicsComponents.h"
@@ -875,6 +876,26 @@ namespace Limitless::ManagedScriptHost
         void ManagedLogErrorIcall(Coral::String message)
         {
             LT_ERROR("{}: {}", BuildManagedLogPrefix(), ToUtf8Borrowed(message));
+        }
+
+        void ManagedSetRandomSeedIcall(uint32_t seed)
+        {
+            Random::SetSeed(seed);
+        }
+
+        int32_t ManagedRandomRangeIntIcall(int32_t minInclusive, int32_t maxExclusive)
+        {
+            return Random::Range(minInclusive, maxExclusive);
+        }
+
+        float ManagedRandomRangeFloatIcall(float minInclusive, float maxInclusive)
+        {
+            return Random::Range(minInclusive, maxInclusive);
+        }
+
+        float ManagedRandomValueIcall()
+        {
+            return Random::Value();
         }
 
         bool ManagedLoadSceneIcall(Coral::String sceneIdentifier, int loadMode)
@@ -4550,6 +4571,10 @@ namespace Limitless::ManagedScriptHost
             contractAssembly.AddInternalCall(kScriptBridgeTypeName, "LogInfoIcall", reinterpret_cast<void*>(&ManagedLogInfoIcall));
             contractAssembly.AddInternalCall(kScriptBridgeTypeName, "LogWarningIcall", reinterpret_cast<void*>(&ManagedLogWarningIcall));
             contractAssembly.AddInternalCall(kScriptBridgeTypeName, "LogErrorIcall", reinterpret_cast<void*>(&ManagedLogErrorIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRandomSeedIcall", reinterpret_cast<void*>(&ManagedSetRandomSeedIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "RandomRangeIntIcall", reinterpret_cast<void*>(&ManagedRandomRangeIntIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "RandomRangeFloatIcall", reinterpret_cast<void*>(&ManagedRandomRangeFloatIcall));
+            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "RandomValueIcall", reinterpret_cast<void*>(&ManagedRandomValueIcall));
             contractAssembly.AddInternalCall(kScriptBridgeTypeName, "LoadSceneIcall", reinterpret_cast<void*>(&ManagedLoadSceneIcall));
             contractAssembly.AddInternalCall(kScriptBridgeTypeName, "ReloadCurrentSceneIcall", reinterpret_cast<void*>(&ManagedReloadCurrentSceneIcall));
             contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetActiveSceneIcall", reinterpret_cast<void*>(&ManagedSetActiveSceneIcall));
@@ -5482,17 +5507,17 @@ namespace Limitless::ManagedScriptHost
 
     bool InvokeScriptOnCreate(uint64_t instanceId, Scene* scene, std::string* errorMessage)
     {
-        return InvokeRuntimeMethod(instanceId, scene, "OnCreate", "non-standard exception during OnCreate", errorMessage);
+        return InvokeRuntimeMethod(instanceId, scene, "DispatchCreateInternal", "non-standard exception during OnCreate", errorMessage);
     }
 
     bool InvokeScriptOnFixedUpdate(uint64_t instanceId, Scene* scene, float fixedDeltaTime, std::string* errorMessage)
     {
-        return InvokeRuntimeMethod(instanceId, scene, "OnFixedUpdate", "non-standard exception during OnFixedUpdate", errorMessage, fixedDeltaTime);
+        return InvokeRuntimeMethod(instanceId, scene, "DispatchFixedUpdateInternal", "non-standard exception during OnFixedUpdate", errorMessage, fixedDeltaTime);
     }
 
     bool InvokeScriptOnUpdate(uint64_t instanceId, Scene* scene, float deltaTime, std::string* errorMessage)
     {
-        return InvokeRuntimeMethod(instanceId, scene, "OnUpdate", "non-standard exception during OnUpdate", errorMessage, deltaTime);
+        return InvokeRuntimeMethod(instanceId, scene, "DispatchUpdateInternal", "non-standard exception during OnUpdate", errorMessage, deltaTime);
     }
 
     bool InvokeScriptOnCollisionEnter(uint64_t instanceId, Scene* scene, uint32_t otherEntityHandle, std::string* errorMessage)
@@ -5527,7 +5552,7 @@ namespace Limitless::ManagedScriptHost
 
     bool InvokeScriptOnDestroy(uint64_t instanceId, Scene* scene, std::string* errorMessage)
     {
-        return InvokeRuntimeMethod(instanceId, scene, "OnDestroy", "non-standard exception during OnDestroy", errorMessage);
+        return InvokeRuntimeMethod(instanceId, scene, "DispatchDestroyInternal", "non-standard exception during OnDestroy", errorMessage);
     }
 
     void DestroyScriptInstance(uint64_t instanceId)

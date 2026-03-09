@@ -8,6 +8,10 @@ internal static class ScriptBridge
     internal static unsafe delegate*<NativeString, void> LogInfoIcall;
     internal static unsafe delegate*<NativeString, void> LogWarningIcall;
     internal static unsafe delegate*<NativeString, void> LogErrorIcall;
+    internal static unsafe delegate*<uint, void> SetRandomSeedIcall;
+    internal static unsafe delegate*<int, int, int> RandomRangeIntIcall;
+    internal static unsafe delegate*<float, float, float> RandomRangeFloatIcall;
+    internal static unsafe delegate*<float> RandomValueIcall;
     internal static unsafe delegate*<NativeString, int, bool> LoadSceneIcall;
     internal static unsafe delegate*<bool> ReloadCurrentSceneIcall;
     internal static unsafe delegate*<NativeString, bool> SetActiveSceneIcall;

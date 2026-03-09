@@ -3318,159 +3318,256 @@ TEST_SUITE("Scene And Editor Flows")
         CHECK_FALSE(validationError.empty());
         CHECK(validationError.find("API version mismatch") != std::string::npos);
 
+        manifestJson["apiVersion"] = Limitless::ManagedScriptPayload::HostApiVersion;
+        writeTextFile(payloadDirectory / Limitless::ManagedScriptPayload::PayloadManifestFileName, manifestJson.dump(2));
+
+        std::filesystem::remove(payloadDirectory / "Limitless.Managed.runtimeconfig.json", errorCode);
+        errorCode.clear();
+
+        CHECK_FALSE(Limitless::ManagedScriptPayload::ValidatePayloadDirectory(payloadDirectory, nullptr, &validationError));
+        CHECK_FALSE(validationError.empty());
+        CHECK(validationError.find("missing required file") != std::string::npos);
+
         std::filesystem::remove_all(payloadDirectory.parent_path(), errorCode);
     }
 
-    TEST_CASE("Managed script components preserve authored data and reset runtime state across clone serialization and prefab instantiation")
+    TEST_CASE("Scene load accepts legacy singular native and managed script fields")
     {
         Limitless::Scene scene;
         auto& registry = scene.GetRegistry();
 
-        const entt::entity root = scene.CreateEntity("ManagedRoot");
+        const entt::entity root = scene.CreateEntity("LegacyScriptRoot");
         REQUIRE_FALSE(IsNullEntity(root));
-        const entt::entity target = scene.CreateEntity("ManagedTarget");
-        REQUIRE_FALSE(IsNullEntity(target));
 
-        Limitless::ManagedScriptEntry managedScriptEntry{};
-        managedScriptEntry.ScriptClassName = "Game.ManagedBootstrap";
-        managedScriptEntry.ScriptAssetRelativePath = "Gameplay/Core/ManagedBootstrap";
-        managedScriptEntry.Enabled = true;
-        managedScriptEntry.ExposedProperties["DisplayName"] = std::string("ManagedRoot");
-        managedScriptEntry.ExposedProperties["Counter"] = int32_t(7);
-        managedScriptEntry.ExposedProperties["EnabledFlag"] = true;
-        managedScriptEntry.ExposedProperties["SpawnOffset"] = glm::vec3(1.0f, 2.0f, 3.0f);
-        managedScriptEntry.ExposedProperties["Target"] = Limitless::ScriptEntityReference{ "ManagedTarget" };
-        managedScriptEntry.RuntimeInstanceId = 42;
-        managedScriptEntry.RuntimeInitialized = true;
-        managedScriptEntry.RuntimeUpdateCount = 99;
-        managedScriptEntry.RuntimeWarnedMissingHost = true;
-        managedScriptEntry.RuntimeWarnedMissingClass = true;
+        auto& nativeScript = AttachScriptEntry(scene, root);
+        nativeScript.ScriptClassName = "LegacyNativeScript";
+        nativeScript.ScriptAssetRelativePath = "Gameplay/Legacy/LegacyNativeScript";
+        nativeScript.Enabled = false;
+        nativeScript.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
+        nativeScript.DeclaredReadAccessMask = 3;
+        nativeScript.DeclaredWriteAccessMask = 5;
+        nativeScript.ExposedProperties["Counter"] = int32_t(12);
 
-        const entt::entity scriptEntity = scene.AttachManagedScriptComponent(root, std::move(managedScriptEntry));
-        REQUIRE_FALSE(IsNullEntity(scriptEntity));
-        REQUIRE(registry.all_of<Limitless::ScriptComponent>(scriptEntity));
+        Limitless::ManagedScriptEntry managedScript{};
+        managedScript.ScriptClassName = "Game.ManagedBootstrap";
+        managedScript.ScriptAssetRelativePath = "Gameplay/Legacy/ManagedBootstrap";
+        managedScript.Enabled = false;
+        managedScript.ExposedProperties["DisplayName"] = std::string("LegacyRoot");
 
-        auto clone = scene.Clone();
-        REQUIRE(clone != nullptr);
+        const entt::entity managedScriptEntity = scene.AttachManagedScriptComponent(root, std::move(managedScript));
+        REQUIRE_FALSE(IsNullEntity(managedScriptEntity));
+        REQUIRE(registry.all_of<Limitless::ScriptComponent>(managedScriptEntity));
 
-        const entt::entity clonedRoot = FindEntityByTag(*clone, "ManagedRoot");
-        REQUIRE_FALSE(IsNullEntity(clonedRoot));
-        const auto clonedScriptEntities = clone->GetScriptComponentEntities(clonedRoot);
-        REQUIRE(clonedScriptEntities.size() == 1);
-        const auto& clonedScriptComponent = clone->GetRegistry().get<Limitless::ScriptComponent>(clonedScriptEntities.front());
-        const auto* clonedManagedScript = clonedScriptComponent.TryGetManagedEntry();
-        REQUIRE(clonedManagedScript != nullptr);
-        CHECK(clonedManagedScript->ScriptClassName == "Game.ManagedBootstrap");
-        CHECK(clonedManagedScript->ScriptAssetRelativePath == "Gameplay/Core/ManagedBootstrap");
-        REQUIRE(clonedManagedScript->ExposedProperties.contains("DisplayName"));
-        const auto* clonedDisplayName = std::get_if<std::string>(&clonedManagedScript->ExposedProperties.at("DisplayName"));
-        REQUIRE(clonedDisplayName != nullptr);
-        CHECK(*clonedDisplayName == "ManagedRoot");
-        REQUIRE(clonedManagedScript->ExposedProperties.contains("Counter"));
-        const auto* clonedCounter = std::get_if<int32_t>(&clonedManagedScript->ExposedProperties.at("Counter"));
-        REQUIRE(clonedCounter != nullptr);
-        CHECK(*clonedCounter == 7);
-        REQUIRE(clonedManagedScript->ExposedProperties.contains("EnabledFlag"));
-        const auto* clonedEnabledFlag = std::get_if<bool>(&clonedManagedScript->ExposedProperties.at("EnabledFlag"));
-        REQUIRE(clonedEnabledFlag != nullptr);
-        CHECK(*clonedEnabledFlag == true);
-        REQUIRE(clonedManagedScript->ExposedProperties.contains("SpawnOffset"));
-        const auto* clonedSpawnOffset = std::get_if<glm::vec3>(&clonedManagedScript->ExposedProperties.at("SpawnOffset"));
-        REQUIRE(clonedSpawnOffset != nullptr);
-        CHECK(*clonedSpawnOffset == glm::vec3(1.0f, 2.0f, 3.0f));
-        REQUIRE(clonedManagedScript->ExposedProperties.contains("Target"));
-        const auto* clonedTarget = std::get_if<Limitless::ScriptEntityReference>(&clonedManagedScript->ExposedProperties.at("Target"));
-        REQUIRE(clonedTarget != nullptr);
-        CHECK(clonedTarget->Tag == "ManagedTarget");
-        CHECK(clonedManagedScript->RuntimeInstanceId == 0);
-        CHECK(clonedManagedScript->RuntimeInitialized == false);
-        CHECK(clonedManagedScript->RuntimeUpdateCount == 0);
-        CHECK(clonedManagedScript->RuntimeWarnedMissingHost == false);
-        CHECK(clonedManagedScript->RuntimeWarnedMissingClass == false);
-
-        const std::filesystem::path tempScenePath = MakeTempScenePath("ManagedScriptRoundTrip.scene.json");
+        const std::filesystem::path scenePath = MakeTempScenePath("LegacyScriptCompatibility.scene.json");
         std::error_code errorCode;
-        std::filesystem::create_directories(tempScenePath.parent_path(), errorCode);
+        std::filesystem::create_directories(scenePath.parent_path(), errorCode);
         REQUIRE(!errorCode);
 
-        const auto saveResult = scene.SaveToFile(tempScenePath);
+        const auto saveResult = scene.SaveToFile(scenePath);
         REQUIRE(saveResult.IsSuccess());
 
-        const auto loadResult = Limitless::Scene::LoadFromFile(tempScenePath);
+        std::ifstream sceneFile(scenePath, std::ios::binary);
+        REQUIRE(sceneFile.is_open());
+        nlohmann::json rootJson;
+        sceneFile >> rootJson;
+        sceneFile.close();
+
+        REQUIRE(rootJson.is_object());
+        REQUIRE(rootJson.contains("Entities"));
+        REQUIRE(rootJson["Entities"].is_array());
+
+        nlohmann::json* legacyEntityJson = nullptr;
+        for (auto& entityJson : rootJson["Entities"])
+        {
+            if (entityJson.is_object() && entityJson.value("Tag", std::string{}) == "LegacyScriptRoot")
+            {
+                legacyEntityJson = &entityJson;
+                break;
+            }
+        }
+
+        REQUIRE(legacyEntityJson != nullptr);
+        REQUIRE(legacyEntityJson->contains("NativeScripts"));
+        REQUIRE((*legacyEntityJson)["NativeScripts"].is_array());
+        REQUIRE((*legacyEntityJson)["NativeScripts"].size() == 1);
+        REQUIRE(legacyEntityJson->contains("ManagedScripts"));
+        REQUIRE((*legacyEntityJson)["ManagedScripts"].is_array());
+        REQUIRE((*legacyEntityJson)["ManagedScripts"].size() == 1);
+
+        (*legacyEntityJson)["NativeScript"] = (*legacyEntityJson)["NativeScripts"].front();
+        legacyEntityJson->erase("NativeScripts");
+        (*legacyEntityJson)["ManagedScript"] = (*legacyEntityJson)["ManagedScripts"].front();
+        legacyEntityJson->erase("ManagedScripts");
+
+        std::ofstream legacySceneFile(scenePath, std::ios::binary | std::ios::trunc);
+        REQUIRE(legacySceneFile.is_open());
+        legacySceneFile << rootJson.dump(2);
+        legacySceneFile.close();
+
+        const auto loadResult = Limitless::Scene::LoadFromFile(scenePath);
         REQUIRE(loadResult.IsSuccess());
         REQUIRE(loadResult.GetValue() != nullptr);
 
-        const entt::entity loadedRoot = FindEntityByTag(*loadResult.GetValue(), "ManagedRoot");
+        const auto& loadedScene = *loadResult.GetValue();
+        const auto& loadedRegistry = loadedScene.GetRegistry();
+        const entt::entity loadedRoot = FindEntityByTag(loadedScene, "LegacyScriptRoot");
         REQUIRE_FALSE(IsNullEntity(loadedRoot));
-        const auto loadedScriptEntities = loadResult.GetValue()->GetScriptComponentEntities(loadedRoot);
-        REQUIRE(loadedScriptEntities.size() == 1);
-        const auto& loadedScriptComponent = loadResult.GetValue()->GetRegistry().get<Limitless::ScriptComponent>(loadedScriptEntities.front());
-        const auto* loadedManagedScript = loadedScriptComponent.TryGetManagedEntry();
+
+        const auto loadedScriptEntities = loadedScene.GetScriptComponentEntities(loadedRoot);
+        REQUIRE(loadedScriptEntities.size() == 2);
+
+        const Limitless::NativeScriptEntry* loadedNativeScript = nullptr;
+        const Limitless::ManagedScriptEntry* loadedManagedScript = nullptr;
+        for (const entt::entity scriptEntity : loadedScriptEntities)
+        {
+            const auto& scriptComponent = loadedRegistry.get<Limitless::ScriptComponent>(scriptEntity);
+            if (const auto* nativeEntry = scriptComponent.TryGetNativeEntry())
+                loadedNativeScript = nativeEntry;
+            else if (const auto* managedEntry = scriptComponent.TryGetManagedEntry())
+                loadedManagedScript = managedEntry;
+        }
+
+        REQUIRE(loadedNativeScript != nullptr);
+        CHECK(loadedNativeScript->ScriptClassName == "LegacyNativeScript");
+        CHECK(loadedNativeScript->ScriptAssetRelativePath == "Gameplay/Legacy/LegacyNativeScript");
+        CHECK(loadedNativeScript->Enabled == false);
+        CHECK(loadedNativeScript->ExecutionPolicy == Limitless::ScriptExecutionPolicy::ParallelSafe);
+        CHECK(loadedNativeScript->DeclaredReadAccessMask == 3);
+        CHECK(loadedNativeScript->DeclaredWriteAccessMask == 5);
+        REQUIRE(loadedNativeScript->ExposedProperties.contains("Counter"));
+        const auto* loadedCounter = std::get_if<int32_t>(&loadedNativeScript->ExposedProperties.at("Counter"));
+        REQUIRE(loadedCounter != nullptr);
+        CHECK(*loadedCounter == 12);
+        CHECK(loadedNativeScript->RuntimeInitialized == false);
+        CHECK(loadedNativeScript->RuntimeUpdateCount == 0);
+        CHECK(loadedNativeScript->RuntimeWarnedMissingCompiledScript == false);
+
         REQUIRE(loadedManagedScript != nullptr);
         CHECK(loadedManagedScript->ScriptClassName == "Game.ManagedBootstrap");
-        CHECK(loadedManagedScript->ScriptAssetRelativePath == "Gameplay/Core/ManagedBootstrap");
+        CHECK(loadedManagedScript->ScriptAssetRelativePath == "Gameplay/Legacy/ManagedBootstrap");
+        CHECK(loadedManagedScript->Enabled == false);
         REQUIRE(loadedManagedScript->ExposedProperties.contains("DisplayName"));
         const auto* loadedDisplayName = std::get_if<std::string>(&loadedManagedScript->ExposedProperties.at("DisplayName"));
         REQUIRE(loadedDisplayName != nullptr);
-        CHECK(*loadedDisplayName == "ManagedRoot");
-        REQUIRE(loadedManagedScript->ExposedProperties.contains("Counter"));
-        const auto* loadedCounter = std::get_if<int32_t>(&loadedManagedScript->ExposedProperties.at("Counter"));
-        REQUIRE(loadedCounter != nullptr);
-        CHECK(*loadedCounter == 7);
-        REQUIRE(loadedManagedScript->ExposedProperties.contains("EnabledFlag"));
-        const auto* loadedEnabledFlag = std::get_if<bool>(&loadedManagedScript->ExposedProperties.at("EnabledFlag"));
-        REQUIRE(loadedEnabledFlag != nullptr);
-        CHECK(*loadedEnabledFlag == true);
-        REQUIRE(loadedManagedScript->ExposedProperties.contains("SpawnOffset"));
-        const auto* loadedSpawnOffset = std::get_if<glm::vec3>(&loadedManagedScript->ExposedProperties.at("SpawnOffset"));
-        REQUIRE(loadedSpawnOffset != nullptr);
-        CHECK(*loadedSpawnOffset == glm::vec3(1.0f, 2.0f, 3.0f));
-        REQUIRE(loadedManagedScript->ExposedProperties.contains("Target"));
-        const auto* loadedTarget = std::get_if<Limitless::ScriptEntityReference>(&loadedManagedScript->ExposedProperties.at("Target"));
-        REQUIRE(loadedTarget != nullptr);
-        CHECK(loadedTarget->Tag == "ManagedTarget");
+        CHECK(*loadedDisplayName == "LegacyRoot");
         CHECK(loadedManagedScript->RuntimeInstanceId == 0);
         CHECK(loadedManagedScript->RuntimeInitialized == false);
         CHECK(loadedManagedScript->RuntimeUpdateCount == 0);
         CHECK(loadedManagedScript->RuntimeWarnedMissingHost == false);
         CHECK(loadedManagedScript->RuntimeWarnedMissingClass == false);
 
-        Limitless::Scene destinationScene;
-        const entt::entity instantiatedRoot = destinationScene.InstantiatePrefab(tempScenePath.string());
-        REQUIRE_FALSE(IsNullEntity(instantiatedRoot));
-        const auto instantiatedScriptEntities = destinationScene.GetScriptComponentEntities(instantiatedRoot);
-        REQUIRE(instantiatedScriptEntities.size() == 1);
-        const auto& instantiatedScriptComponent = destinationScene.GetRegistry().get<Limitless::ScriptComponent>(instantiatedScriptEntities.front());
-        const auto* instantiatedManagedScript = instantiatedScriptComponent.TryGetManagedEntry();
-        REQUIRE(instantiatedManagedScript != nullptr);
-        CHECK(instantiatedManagedScript->ScriptClassName == "Game.ManagedBootstrap");
-        CHECK(instantiatedManagedScript->ScriptAssetRelativePath == "Gameplay/Core/ManagedBootstrap");
-        REQUIRE(instantiatedManagedScript->ExposedProperties.contains("DisplayName"));
-        const auto* instantiatedDisplayName = std::get_if<std::string>(&instantiatedManagedScript->ExposedProperties.at("DisplayName"));
-        REQUIRE(instantiatedDisplayName != nullptr);
-        CHECK(*instantiatedDisplayName == "ManagedRoot");
-        REQUIRE(instantiatedManagedScript->ExposedProperties.contains("Counter"));
-        const auto* instantiatedCounter = std::get_if<int32_t>(&instantiatedManagedScript->ExposedProperties.at("Counter"));
-        REQUIRE(instantiatedCounter != nullptr);
-        CHECK(*instantiatedCounter == 7);
-        REQUIRE(instantiatedManagedScript->ExposedProperties.contains("EnabledFlag"));
-        const auto* instantiatedEnabledFlag = std::get_if<bool>(&instantiatedManagedScript->ExposedProperties.at("EnabledFlag"));
-        REQUIRE(instantiatedEnabledFlag != nullptr);
-        CHECK(*instantiatedEnabledFlag == true);
-        REQUIRE(instantiatedManagedScript->ExposedProperties.contains("SpawnOffset"));
-        const auto* instantiatedSpawnOffset = std::get_if<glm::vec3>(&instantiatedManagedScript->ExposedProperties.at("SpawnOffset"));
-        REQUIRE(instantiatedSpawnOffset != nullptr);
-        CHECK(*instantiatedSpawnOffset == glm::vec3(1.0f, 2.0f, 3.0f));
-        REQUIRE(instantiatedManagedScript->ExposedProperties.contains("Target"));
-        const auto* instantiatedTarget = std::get_if<Limitless::ScriptEntityReference>(&instantiatedManagedScript->ExposedProperties.at("Target"));
-        REQUIRE(instantiatedTarget != nullptr);
-        CHECK(instantiatedTarget->Tag == "ManagedTarget");
-        CHECK(instantiatedManagedScript->RuntimeInstanceId == 0);
-        CHECK(instantiatedManagedScript->RuntimeInitialized == false);
-        CHECK(instantiatedManagedScript->RuntimeUpdateCount == 0);
-        CHECK(instantiatedManagedScript->RuntimeWarnedMissingHost == false);
-        CHECK(instantiatedManagedScript->RuntimeWarnedMissingClass == false);
+        std::filesystem::remove(scenePath, errorCode);
+    }
 
-        std::filesystem::remove(tempScenePath, errorCode);
+    TEST_CASE("Mixed native and managed script components preserve authored data across clone serialization and prefab instantiation")
+    {
+        Limitless::Scene scene;
+        auto& registry = scene.GetRegistry();
+
+        const entt::entity root = scene.CreateEntity("MixedScriptRoot");
+        REQUIRE_FALSE(IsNullEntity(root));
+        const entt::entity target = scene.CreateEntity("MixedScriptTarget");
+        REQUIRE_FALSE(IsNullEntity(target));
+
+        auto& nativeScript = AttachScriptEntry(scene, root);
+        nativeScript.ScriptClassName = "MixedNativeScript";
+        nativeScript.ScriptAssetRelativePath = "Gameplay/Mixed/MixedNativeScript";
+        nativeScript.Enabled = true;
+        nativeScript.ExecutionPolicy = Limitless::ScriptExecutionPolicy::MainThread;
+        nativeScript.ExposedProperties["Speed"] = 3.5f;
+        nativeScript.RuntimeInitialized = true;
+        nativeScript.RuntimeUpdateCount = 11;
+        nativeScript.RuntimeWarnedMissingCompiledScript = true;
+
+        Limitless::ManagedScriptEntry managedScript{};
+        managedScript.ScriptClassName = "Game.ManagedBootstrap";
+        managedScript.ScriptAssetRelativePath = "Gameplay/Mixed/MixedManagedScript";
+        managedScript.Enabled = true;
+        managedScript.ExposedProperties["Target"] = Limitless::ScriptEntityReference{ "MixedScriptTarget" };
+        managedScript.ExposedProperties["Count"] = int32_t(2);
+        managedScript.RuntimeInstanceId = 99;
+        managedScript.RuntimeInitialized = true;
+        managedScript.RuntimeUpdateCount = 13;
+        managedScript.RuntimeWarnedMissingHost = true;
+        managedScript.RuntimeWarnedMissingClass = true;
+
+        const entt::entity managedScriptEntity = scene.AttachManagedScriptComponent(root, std::move(managedScript));
+        REQUIRE_FALSE(IsNullEntity(managedScriptEntity));
+        REQUIRE(registry.all_of<Limitless::ScriptComponent>(managedScriptEntity));
+
+        const auto verifyMixedScripts = [](const Limitless::Scene& inspectedScene, entt::entity ownerEntity) {
+            const auto& inspectedRegistry = inspectedScene.GetRegistry();
+            const auto scriptEntities = inspectedScene.GetScriptComponentEntities(ownerEntity);
+            REQUIRE(scriptEntities.size() == 2);
+
+            const Limitless::NativeScriptEntry* foundNativeScript = nullptr;
+            const Limitless::ManagedScriptEntry* foundManagedScript = nullptr;
+            for (const entt::entity scriptEntity : scriptEntities)
+            {
+                const auto& scriptComponent = inspectedRegistry.get<Limitless::ScriptComponent>(scriptEntity);
+                if (const auto* nativeEntry = scriptComponent.TryGetNativeEntry())
+                    foundNativeScript = nativeEntry;
+                else if (const auto* managedEntry = scriptComponent.TryGetManagedEntry())
+                    foundManagedScript = managedEntry;
+            }
+
+            REQUIRE(foundNativeScript != nullptr);
+            CHECK(foundNativeScript->ScriptClassName == "MixedNativeScript");
+            CHECK(foundNativeScript->ScriptAssetRelativePath == "Gameplay/Mixed/MixedNativeScript");
+            CHECK(foundNativeScript->Enabled == true);
+            REQUIRE(foundNativeScript->ExposedProperties.contains("Speed"));
+            const auto* foundSpeed = std::get_if<float>(&foundNativeScript->ExposedProperties.at("Speed"));
+            REQUIRE(foundSpeed != nullptr);
+            CHECK(*foundSpeed == doctest::Approx(3.5f));
+            CHECK(foundNativeScript->RuntimeInitialized == false);
+            CHECK(foundNativeScript->RuntimeUpdateCount == 0);
+            CHECK(foundNativeScript->RuntimeWarnedMissingCompiledScript == false);
+
+            REQUIRE(foundManagedScript != nullptr);
+            CHECK(foundManagedScript->ScriptClassName == "Game.ManagedBootstrap");
+            CHECK(foundManagedScript->ScriptAssetRelativePath == "Gameplay/Mixed/MixedManagedScript");
+            CHECK(foundManagedScript->Enabled == true);
+            REQUIRE(foundManagedScript->ExposedProperties.contains("Count"));
+            const auto* foundCount = std::get_if<int32_t>(&foundManagedScript->ExposedProperties.at("Count"));
+            REQUIRE(foundCount != nullptr);
+            CHECK(*foundCount == 2);
+            REQUIRE(foundManagedScript->ExposedProperties.contains("Target"));
+            const auto* foundTarget = std::get_if<Limitless::ScriptEntityReference>(&foundManagedScript->ExposedProperties.at("Target"));
+            REQUIRE(foundTarget != nullptr);
+            CHECK(foundTarget->Tag == "MixedScriptTarget");
+            CHECK(foundManagedScript->RuntimeInstanceId == 0);
+            CHECK(foundManagedScript->RuntimeInitialized == false);
+            CHECK(foundManagedScript->RuntimeUpdateCount == 0);
+            CHECK(foundManagedScript->RuntimeWarnedMissingHost == false);
+            CHECK(foundManagedScript->RuntimeWarnedMissingClass == false);
+        };
+
+        auto clone = scene.Clone();
+        REQUIRE(clone != nullptr);
+        const entt::entity clonedRoot = FindEntityByTag(*clone, "MixedScriptRoot");
+        REQUIRE_FALSE(IsNullEntity(clonedRoot));
+        verifyMixedScripts(*clone, clonedRoot);
+
+        const std::filesystem::path scenePath = MakeTempScenePath("MixedBackendScripts.scene.json");
+        std::error_code errorCode;
+        std::filesystem::create_directories(scenePath.parent_path(), errorCode);
+        REQUIRE(!errorCode);
+
+        const auto saveResult = scene.SaveToFile(scenePath);
+        REQUIRE(saveResult.IsSuccess());
+
+        const auto loadResult = Limitless::Scene::LoadFromFile(scenePath);
+        REQUIRE(loadResult.IsSuccess());
+        REQUIRE(loadResult.GetValue() != nullptr);
+        const entt::entity loadedRoot = FindEntityByTag(*loadResult.GetValue(), "MixedScriptRoot");
+        REQUIRE_FALSE(IsNullEntity(loadedRoot));
+        verifyMixedScripts(*loadResult.GetValue(), loadedRoot);
+
+        Limitless::Scene destinationScene;
+        const entt::entity instantiatedRoot = destinationScene.InstantiatePrefab(scenePath.string());
+        REQUIRE_FALSE(IsNullEntity(instantiatedRoot));
+        verifyMixedScripts(destinationScene, instantiatedRoot);
+
+        std::filesystem::remove(scenePath, errorCode);
     }
 }

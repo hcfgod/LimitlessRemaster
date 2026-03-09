@@ -15,6 +15,15 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Ensure Coral vendor sources
+      run: |
+        if [ ! -f "Limitless/Vendor/Coral/Coral.Native/Include/Coral/Assembly.hpp" ]; then
+          rm -rf Limitless/Vendor/Coral
+          git clone --depth 1 https://github.com/StudioCherno/Coral.git Limitless/Vendor/Coral
+          rm -rf Limitless/Vendor/Coral/.git
+        fi
+        test -f "Limitless/Vendor/Coral/Coral.Native/Include/Coral/Assembly.hpp"
+
     - name: Ensure Unix build scripts are executable
       run: |
         chmod +x Scripts/build-unix.sh

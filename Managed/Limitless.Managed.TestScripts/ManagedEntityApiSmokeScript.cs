@@ -1,3 +1,4 @@
+using System.Collections;
 using Limitless.Managed;
 
 namespace Limitless.Managed.TestScripts;
@@ -7,6 +8,13 @@ public sealed class ManagedEntityApiSmokeScript : ScriptableEntity
     private Vector3 m_OriginalPosition;
     private bool m_HasTransform;
     private string m_OriginalTag = string.Empty;
+    private Coroutine? m_SmokeCoroutine;
+    private int m_CoroutineStepCount;
+    private int m_LastRandomInt;
+    private float m_LastRandomFloat;
+    private float m_LastRandomValue;
+    private bool m_StopCoroutineSucceeded;
+    private bool m_StopCoroutineRunningAfterStop;
 
     public override void OnCreate()
     {
@@ -23,6 +31,7 @@ public sealed class ManagedEntityApiSmokeScript : ScriptableEntity
         bool hasRigidbody2D = TryGetComponent(out Rigidbody2D rigidbody2D);
         LogInfo($"EntityApi step 5 tryGetRigidbody2D={hasRigidbody2D}");
         LogExpandedComponentAccess();
+        LogRandomAndCoroutineApi();
 
         LogInfo($"EntityApi OnCreate handle={Entity.Handle} alive={Entity.IsAlive} tag='{m_OriginalTag}' hasTransform={m_HasTransform} entityHasTransform={entityHasTransform} entityGetTransform={(transformFromEntity != null)} hasRigidbody2D={hasRigidbody2D} position={m_OriginalPosition}");
 
@@ -48,7 +57,7 @@ public sealed class ManagedEntityApiSmokeScript : ScriptableEntity
         if (m_HasTransform)
             Transform.Position = m_OriginalPosition;
 
-        LogInfo($"EntityApi OnDestroy handle={Entity.Handle} finalTag='{Entity.Tag}' finalPosition={(m_HasTransform ? Transform.Position : Vector3.Zero)}");
+        LogInfo($"EntityApi OnDestroy handle={Entity.Handle} finalTag='{Entity.Tag}' finalPosition={(m_HasTransform ? Transform.Position : Vector3.Zero)} coroutineSteps={m_CoroutineStepCount} coroutineRunning={IsCoroutineRunning(m_SmokeCoroutine)} randomInt={m_LastRandomInt} randomFloat={m_LastRandomFloat:0.###} randomValue={m_LastRandomValue:0.###} stopSucceeded={m_StopCoroutineSucceeded} stopRunningAfterStop={m_StopCoroutineRunningAfterStop}");
     }
 
     private void LogExpandedComponentAccess()
@@ -136,6 +145,59 @@ public sealed class ManagedEntityApiSmokeScript : ScriptableEntity
                 : string.Empty;
             LogInfo($"EntityApi TilemapLayer size={width}x{height} cellCount={tilemapLayer.CellCount} renderOrder={renderOrder} collision={tilemapLayer.CollisionEnabled} castShadows={tilemapLayer.CastShadows} tableCount={tilemapLayer.TileTableEntryCount} firstTileId={firstCellTileId} firstTileKey='{firstCellAssetKey}' table0='{firstTileTableEntry}'");
         }
+    }
+
+    private void LogRandomAndCoroutineApi()
+    {
+        Random.InitState(1337);
+        m_LastRandomInt = Random.Range(2, 7);
+        m_LastRandomFloat = Random.Range(0.5f, 1.5f);
+        m_LastRandomValue = Random.Value;
+        LogInfo($"EntityApi Random int={m_LastRandomInt} float={m_LastRandomFloat:0.###} value={m_LastRandomValue:0.###}");
+
+        m_SmokeCoroutine = StartCoroutine(CoroutineSmoke());
+        LogInfo($"EntityApi Coroutine start valid={(m_SmokeCoroutine != null && m_SmokeCoroutine.IsValid)} running={IsCoroutineRunning(m_SmokeCoroutine)}");
+
+        Coroutine stoppedCoroutine = StartCoroutine(StoppedCoroutineSmoke());
+        m_StopCoroutineSucceeded = StopCoroutine(stoppedCoroutine);
+        m_StopCoroutineRunningAfterStop = IsCoroutineRunning(stoppedCoroutine);
+        LogInfo($"EntityApi Coroutine stopImmediate valid={stoppedCoroutine.IsValid} stopped={m_StopCoroutineSucceeded} runningAfterStop={m_StopCoroutineRunningAfterStop}");
+    }
+
+    private IEnumerator CoroutineSmoke()
+    {
+        m_CoroutineStepCount++;
+        LogInfo($"EntityApi Coroutine step {m_CoroutineStepCount} yield=null");
+        yield return null;
+
+        m_CoroutineStepCount++;
+        LogInfo($"EntityApi Coroutine step {m_CoroutineStepCount} yield=WaitForFrames");
+        yield return WaitForFrames.NextFrame();
+
+        m_CoroutineStepCount++;
+        LogInfo($"EntityApi Coroutine step {m_CoroutineStepCount} yield=WaitForSeconds");
+        yield return new WaitForSeconds(0.0f);
+
+        Coroutine childCoroutine = StartCoroutine(CoroutineChildSmoke());
+        LogInfo($"EntityApi Coroutine childStart valid={childCoroutine.IsValid} running={IsCoroutineRunning(childCoroutine)}");
+        yield return childCoroutine;
+
+        m_CoroutineStepCount++;
+        LogInfo($"EntityApi Coroutine step {m_CoroutineStepCount} childCompleted={!IsCoroutineRunning(childCoroutine)}");
+    }
+
+    private IEnumerator CoroutineChildSmoke()
+    {
+        LogInfo("EntityApi Coroutine child step 1");
+        yield return null;
+        LogInfo("EntityApi Coroutine child step 2");
+    }
+
+    private IEnumerator StoppedCoroutineSmoke()
+    {
+        LogInfo("EntityApi Coroutine stopProbe step 1");
+        yield return null;
+        LogInfo("EntityApi Coroutine stopProbe step 2");
     }
 
     private void LogComponentAccess<T>(string label) where T : EntityComponent
