@@ -76,6 +76,10 @@ MANAGED_PROJECT_CSPROJ=""
 MANAGED_PROJECT_ASSEMBLY_FILE=""
 SCRIPT_ASSEMBLIES_JSON='["Limitless.Managed.TestScripts.dll"]'
 mkdir -p "$MANAGED_OUTPUT_DIR"
+if [[ "${LT_SKIP_MANAGED_RUNTIME_BUILD:-0}" == "1" ]]; then
+    echo "Skipping managed scripting artifact build because LT_SKIP_MANAGED_RUNTIME_BUILD=1."
+    exit 0
+fi
 mkdir -p "$MANAGED_LOCK_ROOT"
 
 while ! mkdir "$MANAGED_LOCK_DIR" 2>/dev/null; do
