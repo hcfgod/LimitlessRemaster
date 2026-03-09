@@ -384,6 +384,7 @@ namespace Limitless::Audio
             {
                 audioSource.RuntimeVoiceId = 0;
                 audioSource.RuntimePlaybackStarted = false;
+                audioSource.RuntimePlayRequested = false;
             }
 
             if (!entityEnabled)
@@ -392,6 +393,7 @@ namespace Limitless::Audio
                     AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
                 audioSource.RuntimeVoiceId = 0;
                 audioSource.RuntimePlaybackStarted = false;
+                audioSource.RuntimePlayRequested = false;
                 audioSource.RuntimePlayOnStartConsumed = false;
                 audioSource.RuntimeHasPreviousWorldPosition = false;
                 audioSource.RuntimePreviousWorldPosition = glm::vec3(0.0f);
@@ -439,11 +441,15 @@ namespace Limitless::Audio
             const bool shouldPlayOnStart =
                 audioSource.PlayOnStart &&
                 !audioSource.AudioClipKey.empty();
+            const bool shouldPlayRequested =
+                audioSource.RuntimePlayRequested &&
+                !audioSource.AudioClipKey.empty();
+            const bool shouldBePlaying = shouldPlayOnStart || shouldPlayRequested;
 
             if (!shouldPlayOnStart)
                 audioSource.RuntimePlayOnStartConsumed = false;
 
-            if (shouldPlayOnStart && !audioSource.RuntimePlayOnStartConsumed)
+            if (shouldBePlaying && audioSource.RuntimeVoiceId == 0)
             {
                 auto& pendingAudioClipLoads = GetPendingAudioClipLoads();
                 auto clipAsset = std::dynamic_pointer_cast<Assets::AudioClipAsset>(
@@ -478,10 +484,11 @@ namespace Limitless::Audio
                         runtimePan,
                         runtimePitch);
                     audioSource.RuntimePlaybackStarted = (audioSource.RuntimeVoiceId != 0);
-                    audioSource.RuntimePlayOnStartConsumed = (audioSource.RuntimeVoiceId != 0);
+                    if (shouldPlayOnStart)
+                        audioSource.RuntimePlayOnStartConsumed = (audioSource.RuntimeVoiceId != 0);
                 }
             }
-            else if (shouldPlayOnStart && audioSource.RuntimeVoiceId != 0)
+            else if (shouldBePlaying && audioSource.RuntimeVoiceId != 0)
             {
                 (void)AudioEngine::GetInstance().SetVoiceMixParameters(
                     audioSource.RuntimeVoiceId,
@@ -490,11 +497,12 @@ namespace Limitless::Audio
                     audioSource.MixerGroup,
                     runtimePitch);
             }
-            else if (!shouldPlayOnStart && audioSource.RuntimeVoiceId != 0)
+            else if (!shouldBePlaying && audioSource.RuntimeVoiceId != 0)
             {
                 AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
                 audioSource.RuntimeVoiceId = 0;
                 audioSource.RuntimePlaybackStarted = false;
+                audioSource.RuntimePlayRequested = false;
                 audioSource.RuntimePlayOnStartConsumed = false;
             }
         }
@@ -522,6 +530,7 @@ namespace Limitless::Audio
                 AudioEngine::GetInstance().Stop(audioSource.RuntimeVoiceId);
             audioSource.RuntimeVoiceId = 0;
             audioSource.RuntimePlaybackStarted = false;
+            audioSource.RuntimePlayRequested = false;
             audioSource.RuntimePlayOnStartConsumed = false;
             audioSource.RuntimeHasPreviousWorldPosition = false;
             audioSource.RuntimePreviousWorldPosition = glm::vec3(0.0f);

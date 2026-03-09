@@ -67,6 +67,7 @@ namespace Limitless
         // Runtime-only state (not serialized).
         uint32_t RuntimeVoiceId = 0;
         bool RuntimePlaybackStarted = false;
+        bool RuntimePlayRequested = false;
         bool RuntimePlayOnStartConsumed = false;
         bool RuntimeHasPreviousWorldPosition = false;
         glm::vec3 RuntimePreviousWorldPosition = glm::vec3(0.0f);

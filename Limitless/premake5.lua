@@ -1,3 +1,5 @@
+local projectRoot = _SCRIPT_DIR
+
 project "Limitless"
     location "."
     kind "StaticLib"
@@ -68,30 +70,30 @@ project "Limitless"
 
     includedirs
     {
-        "Source",
-        "Vendor/",
-        "Vendor/Coral/Coral.Native/Include",
-        "Vendor/Coral/Coral.Native/Source",
-        "Vendor/Coral/NetCore",
-        "Vendor/Zstd/include",
-        "Vendor/glad",
-        "Vendor/spdlog",
-        "Vendor/doctest",
-        "Vendor/SDL3",
-        "Vendor/ffmpeg/include",
-        "Vendor/imgui",
+        path.join(projectRoot, "Source"),
+        path.join(projectRoot, "Vendor"),
+        path.join(projectRoot, "Vendor/Coral/Coral.Native/Include"),
+        path.join(projectRoot, "Vendor/Coral/Coral.Native/Source"),
+        path.join(projectRoot, "Vendor/Coral/NetCore"),
+        path.join(projectRoot, "Vendor/Zstd/include"),
+        path.join(projectRoot, "Vendor/glad"),
+        path.join(projectRoot, "Vendor/spdlog"),
+        path.join(projectRoot, "Vendor/doctest"),
+        path.join(projectRoot, "Vendor/SDL3"),
+        path.join(projectRoot, "Vendor/ffmpeg/include"),
+        path.join(projectRoot, "Vendor/imgui"),
 
         -- Shader toolchain (vendored). These are used by the shader system for
         -- compilation (shaderc) and reflection/transpilation (SPIRV-Cross).
-        "Vendor/shaderc/libshaderc/include",
-        "Vendor/SPIRV-Cross",
-        "Vendor/msdf-atlas-gen/msdf-atlas-gen",
-        "Vendor/msdf-atlas-gen/msdfgen",
-        "Vendor/msdf-atlas-gen/msdfgen/include",
-        "Vendor/msdf-atlas-gen/msdfgen/freetype/include",
+        path.join(projectRoot, "Vendor/shaderc/libshaderc/include"),
+        path.join(projectRoot, "Vendor/SPIRV-Cross"),
+        path.join(projectRoot, "Vendor/msdf-atlas-gen/msdf-atlas-gen"),
+        path.join(projectRoot, "Vendor/msdf-atlas-gen/msdfgen"),
+        path.join(projectRoot, "Vendor/msdf-atlas-gen/msdfgen/include"),
+        path.join(projectRoot, "Vendor/msdf-atlas-gen/msdfgen/freetype/include"),
 
         -- Vulkan headers + loader import library (vendored).
-        "Vendor/VulkanSDK/include"
+        path.join(projectRoot, "Vendor/VulkanSDK/include")
     }
 
     links
@@ -112,7 +114,7 @@ project "Limitless"
 
         includedirs
         {
-            "Vendor/box2d/include"
+            path.join(projectRoot, "Vendor/box2d/include")
         }
 
         defines
@@ -128,18 +130,18 @@ project "Limitless"
 
         libdirs
         {
-            "Vendor/SDL3/SDL3Libs",
-            "Vendor/box2d/libs",
+            path.join(projectRoot, "Vendor/SDL3/SDL3Libs"),
+            path.join(projectRoot, "Vendor/box2d/libs"),
 
             -- shaderc ships prebuilt .lib files in this folder in our vendor drop.
-            "Vendor/shaderc/libs",
+            path.join(projectRoot, "Vendor/shaderc/libs"),
 
             -- Vulkan loader import library.
-            "Vendor/VulkanSDK/lib"
+            path.join(projectRoot, "Vendor/VulkanSDK/lib")
         }
 
         -- FFmpeg (optional): drop import libs into `Vendor/ffmpeg/libs` and DLLs into `Vendor/ffmpeg/dlls`.
-        local ffmpegLibDir = "Vendor/ffmpeg/libs"
+        local ffmpegLibDir = path.join(projectRoot, "Vendor/ffmpeg/libs")
         local ffmpegLibs = os.matchfiles(ffmpegLibDir .. "/*.lib")
         if #ffmpegLibs > 0 then
             defines { "LT_ENABLE_FFMPEG" }
@@ -287,7 +289,7 @@ project "Limitless"
         libdirs
         {
             "/usr/local/lib",
-            "Vendor/box2d/libs/linux"
+            path.join(projectRoot, "Vendor/box2d/libs/linux")
         }
 
     -- Ensure C sources are treated as C (not C++).

@@ -1,12 +1,10 @@
 namespace Limitless.Managed;
 
-public sealed class Rigidbody2D
+public sealed class Rigidbody2D : EntityComponent
 {
-    private readonly uint m_EntityHandle;
-
     internal Rigidbody2D(uint entityHandle)
+        : base(entityHandle)
     {
-        m_EntityHandle = entityHandle;
     }
 
     public Rigidbody2DBodyType BodyType
@@ -15,14 +13,14 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                return (Rigidbody2DBodyType)ScriptBridge.GetRigidbody2DBodyTypeIcall(m_EntityHandle);
+                return (Rigidbody2DBodyType)ScriptBridge.GetRigidbody2DBodyTypeIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DBodyTypeIcall(m_EntityHandle, (int)value);
+                ScriptBridge.SetRigidbody2DBodyTypeIcall(EntityHandle, (int)value);
             }
         }
     }
@@ -33,14 +31,14 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                return ScriptBridge.GetRigidbody2DFreezePositionXIcall(m_EntityHandle);
+                return ScriptBridge.GetRigidbody2DFreezePositionXIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DFreezePositionXIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DFreezePositionXIcall(EntityHandle, value);
             }
         }
     }
@@ -51,14 +49,14 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                return ScriptBridge.GetRigidbody2DFreezePositionYIcall(m_EntityHandle);
+                return ScriptBridge.GetRigidbody2DFreezePositionYIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DFreezePositionYIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DFreezePositionYIcall(EntityHandle, value);
             }
         }
     }
@@ -69,14 +67,14 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                return ScriptBridge.GetRigidbody2DFixedRotationIcall(m_EntityHandle);
+                return ScriptBridge.GetRigidbody2DFixedRotationIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DFixedRotationIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DFixedRotationIcall(EntityHandle, value);
             }
         }
     }
@@ -89,14 +87,14 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                return ScriptBridge.GetRigidbody2DUseCCDIcall(m_EntityHandle);
+                return ScriptBridge.GetRigidbody2DUseCCDIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DUseCCDIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DUseCCDIcall(EntityHandle, value);
             }
         }
     }
@@ -107,14 +105,14 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                return ScriptBridge.GetRigidbody2DEnableSleepIcall(m_EntityHandle);
+                return ScriptBridge.GetRigidbody2DEnableSleepIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DEnableSleepIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DEnableSleepIcall(EntityHandle, value);
             }
         }
     }
@@ -125,14 +123,14 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                return ScriptBridge.GetRigidbody2DStartAwakeIcall(m_EntityHandle);
+                return ScriptBridge.GetRigidbody2DStartAwakeIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DStartAwakeIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DStartAwakeIcall(EntityHandle, value);
             }
         }
     }
@@ -143,14 +141,14 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                return ScriptBridge.GetRigidbody2DInterpolateIcall(m_EntityHandle);
+                return ScriptBridge.GetRigidbody2DInterpolateIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DInterpolateIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DInterpolateIcall(EntityHandle, value);
             }
         }
     }
@@ -161,14 +159,14 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                return ScriptBridge.GetRigidbody2DHighContactQualityIcall(m_EntityHandle);
+                return ScriptBridge.GetRigidbody2DHighContactQualityIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DHighContactQualityIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DHighContactQualityIcall(EntityHandle, value);
             }
         }
     }
@@ -179,14 +177,14 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                return ScriptBridge.GetRigidbody2DExtraSolverSubStepsIcall(m_EntityHandle);
+                return ScriptBridge.GetRigidbody2DExtraSolverSubStepsIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DExtraSolverSubStepsIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DExtraSolverSubStepsIcall(EntityHandle, value);
             }
         }
     }
@@ -197,14 +195,14 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                return ScriptBridge.GetRigidbody2DGravityScaleIcall(m_EntityHandle);
+                return ScriptBridge.GetRigidbody2DGravityScaleIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DGravityScaleIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DGravityScaleIcall(EntityHandle, value);
             }
         }
     }
@@ -215,14 +213,14 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                return ScriptBridge.GetRigidbody2DLinearDampingIcall(m_EntityHandle);
+                return ScriptBridge.GetRigidbody2DLinearDampingIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DLinearDampingIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DLinearDampingIcall(EntityHandle, value);
             }
         }
     }
@@ -233,14 +231,14 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                return ScriptBridge.GetRigidbody2DAngularDampingIcall(m_EntityHandle);
+                return ScriptBridge.GetRigidbody2DAngularDampingIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DAngularDampingIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DAngularDampingIcall(EntityHandle, value);
             }
         }
     }
@@ -251,14 +249,14 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                return ScriptBridge.GetRigidbody2DLinearVelocityIcall(m_EntityHandle);
+                return ScriptBridge.GetRigidbody2DLinearVelocityIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DLinearVelocityIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DLinearVelocityIcall(EntityHandle, value);
             }
         }
     }
@@ -270,7 +268,7 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DLinearVelocityXIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DLinearVelocityXIcall(EntityHandle, value);
             }
         }
     }
@@ -282,7 +280,7 @@ public sealed class Rigidbody2D
         {
             unsafe
             {
-                ScriptBridge.SetRigidbody2DLinearVelocityYIcall(m_EntityHandle, value);
+                ScriptBridge.SetRigidbody2DLinearVelocityYIcall(EntityHandle, value);
             }
         }
     }
@@ -291,7 +289,7 @@ public sealed class Rigidbody2D
     {
         unsafe
         {
-            ScriptBridge.AddRigidbody2DLinearVelocityIcall(m_EntityHandle, deltaVelocity);
+            ScriptBridge.AddRigidbody2DLinearVelocityIcall(EntityHandle, deltaVelocity);
         }
     }
 
@@ -299,7 +297,7 @@ public sealed class Rigidbody2D
     {
         unsafe
         {
-            return ScriptBridge.GetRigidbody2DContactCountIcall(m_EntityHandle, includeSensorContacts);
+            return ScriptBridge.GetRigidbody2DContactCountIcall(EntityHandle, includeSensorContacts);
         }
     }
 
@@ -307,7 +305,7 @@ public sealed class Rigidbody2D
     {
         unsafe
         {
-            return ScriptBridge.HasContactWithEntityIcall(m_EntityHandle, other.Handle, includeSensorContacts);
+            return ScriptBridge.HasContactWithEntityIcall(EntityHandle, other.Handle, includeSensorContacts);
         }
     }
 
@@ -315,13 +313,13 @@ public sealed class Rigidbody2D
     {
         unsafe
         {
-            int count = checked((int)ScriptBridge.GetContactEntityCountIcall(m_EntityHandle, includeSensorContacts));
+            int count = checked((int)ScriptBridge.GetContactEntityCountIcall(EntityHandle, includeSensorContacts));
             if (count == 0)
                 return [];
 
             Entity[] result = new Entity[count];
             for (int i = 0; i < count; i++)
-                result[i] = new Entity(ScriptBridge.GetContactEntityAtIcall(m_EntityHandle, includeSensorContacts, checked((uint)i)));
+                result[i] = new Entity(ScriptBridge.GetContactEntityAtIcall(EntityHandle, includeSensorContacts, checked((uint)i)));
             return result;
         }
     }

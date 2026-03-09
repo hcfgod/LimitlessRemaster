@@ -15,13 +15,13 @@ public sealed class ManagedReflectedFieldsSmokeScript : ScriptableEntity
     {
         LogInfo($"ReflectedFields OnCreate speed={Speed} counter={Counter} enabled={EnabledFlag} name='{DisplayName}' offset={SpawnOffset} targetAlive={(Target != null && Target.IsAlive)} targetHandle={(Target != null ? Target.Handle : Entity.NullHandle)}");
 
-        if (EnabledFlag && Entity.HasTransform)
+        if (EnabledFlag && HasComponent<Transform>())
             Transform.Position = SpawnOffset;
     }
 
     public override void OnUpdate(float deltaTime)
     {
-        if (!EnabledFlag || !Entity.HasTransform)
+        if (!EnabledFlag || !HasComponent<Transform>())
             return;
 
         Vector3 position = Transform.Position;
@@ -31,6 +31,6 @@ public sealed class ManagedReflectedFieldsSmokeScript : ScriptableEntity
 
     public override void OnDestroy()
     {
-        LogInfo($"ReflectedFields OnDestroy counter={Counter} name='{DisplayName}' finalPosition={(Entity.HasTransform ? Transform.Position : Vector3.Zero)}");
+        LogInfo($"ReflectedFields OnDestroy counter={Counter} name='{DisplayName}' finalPosition={(HasComponent<Transform>() ? Transform.Position : Vector3.Zero)}");
     }
 }

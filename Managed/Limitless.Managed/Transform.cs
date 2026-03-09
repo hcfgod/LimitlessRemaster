@@ -1,12 +1,10 @@
 namespace Limitless.Managed;
 
-public sealed class Transform
+public sealed class Transform : EntityComponent
 {
-    private readonly uint m_EntityHandle;
-
     internal Transform(uint entityHandle)
+        : base(entityHandle)
     {
-        m_EntityHandle = entityHandle;
     }
 
     public Vector3 Position
@@ -15,14 +13,14 @@ public sealed class Transform
         {
             unsafe
             {
-                return ScriptBridge.GetTransformPositionIcall(m_EntityHandle);
+                return ScriptBridge.GetTransformPositionIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetTransformPositionIcall(m_EntityHandle, value);
+                ScriptBridge.SetTransformPositionIcall(EntityHandle, value);
             }
         }
     }
@@ -33,14 +31,14 @@ public sealed class Transform
         {
             unsafe
             {
-                return ScriptBridge.GetTransformRotationIcall(m_EntityHandle);
+                return ScriptBridge.GetTransformRotationIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetTransformRotationIcall(m_EntityHandle, value);
+                ScriptBridge.SetTransformRotationIcall(EntityHandle, value);
             }
         }
     }
@@ -51,14 +49,14 @@ public sealed class Transform
         {
             unsafe
             {
-                return ScriptBridge.GetTransformScaleIcall(m_EntityHandle);
+                return ScriptBridge.GetTransformScaleIcall(EntityHandle);
             }
         }
         set
         {
             unsafe
             {
-                ScriptBridge.SetTransformScaleIcall(m_EntityHandle, value);
+                ScriptBridge.SetTransformScaleIcall(EntityHandle, value);
             }
         }
     }

@@ -9,7 +9,7 @@ public abstract class ScriptableEntity
     public uint EntityHandle => EntityId;
     public Entity Entity => new(EntityId);
     public Transform Transform => new(EntityId);
-    public Rigidbody2D Rigidbody2D => new(EntityId);
+    public Camera? Camera => Entity.GetComponent<Camera>();
 
     public bool IsEntityAlive
     {
@@ -22,21 +22,59 @@ public abstract class ScriptableEntity
         }
     }
 
-    protected Entity FindEntityByTag(string tag)
+    protected bool HasComponent<T>() where T : EntityComponent
     {
-        unsafe
-        {
-            NativeString nativeTag = tag ?? string.Empty;
-            try
-            {
-                uint entityHandle = ScriptBridge.FindEntityByTagIcall(nativeTag);
-                return new Entity(entityHandle);
-            }
-            finally
-            {
-                nativeTag.Dispose();
-            }
-        }
+        return Entity.HasComponent<T>();
+    }
+
+    protected T? GetComponent<T>() where T : EntityComponent
+    {
+        return Entity.GetComponent<T>();
+    }
+
+    protected bool TryGetComponent<T>(out T component) where T : EntityComponent
+    {
+        return Entity.TryGetComponent(out component);
+    }
+
+    protected static Entity FindEntityByTag(string tag)
+    {
+        return Entity.FindEntityByTag(tag);
+    }
+
+    protected Entity CreateEntity(string name = "Entity")
+    {
+        return Entity.Create(name);
+    }
+
+    protected bool DestroyEntity(Entity entity)
+    {
+        return entity != null && entity.Destroy();
+    }
+
+    protected Entity GetParent()
+    {
+        return Entity.Parent;
+    }
+
+    protected Entity GetParent(Entity entity)
+    {
+        return entity?.Parent ?? Entity.Null;
+    }
+
+    protected void SetParent(Entity? parent)
+    {
+        Entity.SetParent(parent);
+    }
+
+    protected Entity[] GetChildren()
+    {
+        return Entity.GetChildren();
+    }
+
+    protected Entity[] GetChildren(Entity entity)
+    {
+        return entity?.GetChildren() ?? System.Array.Empty<Entity>();
     }
 
     public virtual void OnCreate()

@@ -58,6 +58,8 @@ $runtimeTemplateDirectory = Join-Path $toolchainRoot "RuntimeTemplates\$platform
 $sdkIncludeRoot = Join-Path $toolchainRoot "SDK\include"
 $sdkVendorRoot = Join-Path $toolchainRoot "SDK\vendor"
 $sdkLibRoot = Join-Path $toolchainRoot "SDK\lib\$platformFolder"
+$toolchainManagedRoot = Join-Path $toolchainRoot "Managed"
+$toolchainCoralManagedRoot = Join-Path $toolchainRoot "Limitless\Vendor\Coral\Coral.Managed"
 
 if (!(Test-Path -LiteralPath $editorBuildDirectory)) {
     throw "Editor build output not found: $editorBuildDirectory. Build the Editor first."
@@ -108,6 +110,27 @@ Copy-IfExists -Source (Join-Path $repoRoot "Scripts\build-project-scriptcore-win
 Copy-IfExists -Source (Join-Path $repoRoot "Scripts\build-project-scriptcore-unix.sh") -Destination (Join-Path $toolchainRoot "Scripts\build-project-scriptcore-unix.sh")
 Copy-IfExists -Source (Join-Path $repoRoot "Scripts\build-managed-runtime-windows.bat") -Destination (Join-Path $toolchainRoot "Scripts\build-managed-runtime-windows.bat")
 Copy-IfExists -Source (Join-Path $repoRoot "Scripts\build-managed-runtime-unix.sh") -Destination (Join-Path $toolchainRoot "Scripts\build-managed-runtime-unix.sh")
+Copy-IfExists -Source (Join-Path $repoRoot "Scripts\generate-managed-project-csproj-windows.ps1") -Destination (Join-Path $toolchainRoot "Scripts\generate-managed-project-csproj-windows.ps1")
+Copy-IfExists -Source (Join-Path $repoRoot "Scripts\generate-managed-project-csproj-unix.sh") -Destination (Join-Path $toolchainRoot "Scripts\generate-managed-project-csproj-unix.sh")
+
+Write-Host "Copying managed engine project sources..."
+New-Item -ItemType Directory -Path (Join-Path $toolchainManagedRoot "Limitless.Managed") -Force | Out-Null
+& robocopy (Join-Path $repoRoot "Managed\Limitless.Managed") (Join-Path $toolchainManagedRoot "Limitless.Managed") *.cs *.csproj /S /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+if ($LASTEXITCODE -ge 8) {
+    throw "Failed to copy managed engine project sources from 'Managed/Limitless.Managed' (robocopy exit code $LASTEXITCODE)."
+}
+
+New-Item -ItemType Directory -Path (Join-Path $toolchainManagedRoot "Limitless.Managed.TestScripts") -Force | Out-Null
+& robocopy (Join-Path $repoRoot "Managed\Limitless.Managed.TestScripts") (Join-Path $toolchainManagedRoot "Limitless.Managed.TestScripts") *.cs *.csproj /S /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+if ($LASTEXITCODE -ge 8) {
+    throw "Failed to copy managed engine test script project sources from 'Managed/Limitless.Managed.TestScripts' (robocopy exit code $LASTEXITCODE)."
+}
+
+New-Item -ItemType Directory -Path $toolchainCoralManagedRoot -Force | Out-Null
+& robocopy (Join-Path $repoRoot "Limitless\Vendor\Coral\Coral.Managed") $toolchainCoralManagedRoot *.cs *.csproj /S /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+if ($LASTEXITCODE -ge 8) {
+    throw "Failed to copy Coral managed project sources from 'Limitless/Vendor/Coral/Coral.Managed' (robocopy exit code $LASTEXITCODE)."
+}
 
 Write-Host "Copying SDK headers (no engine .cpp source)..."
 New-Item -ItemType Directory -Path $sdkIncludeRoot -Force | Out-Null
@@ -201,9 +224,13 @@ This folder is consumed by the editor when Build Backend is set to InternalToolc
 
 Required paths:
 - Scripts/build-project-scriptcore-windows.bat
+- Scripts/generate-managed-project-csproj-windows.ps1
 - SDK/include/* (public engine scripting headers)
 - SDK/vendor/* (third-party headers)
 - SDK/lib/<config-platform>/*.lib (includes Limitless + ScriptCoreHostGlue)
+- Managed/Limitless.Managed/*
+- Managed/Limitless.Managed.TestScripts/*
+- Limitless/Vendor/Coral/Coral.Managed/*
 - RuntimeTemplates/<config-platform>/*
 - Build/Generated/ScriptCore/
 

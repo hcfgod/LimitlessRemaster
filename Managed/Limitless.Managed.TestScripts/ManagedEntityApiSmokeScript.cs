@@ -10,17 +10,30 @@ public sealed class ManagedEntityApiSmokeScript : ScriptableEntity
 
     public override void OnCreate()
     {
-        m_HasTransform = Entity.HasTransform;
-        m_OriginalTag = Entity.HasTag ? Entity.Tag : string.Empty;
-        m_OriginalPosition = m_HasTransform ? Transform.Position : Vector3.Zero;
+        LogInfo("EntityApi step 0 start");
+        bool entityHasTransform = Entity.HasComponent<Transform>();
+        LogInfo($"EntityApi step 1 entityHasTransform={entityHasTransform}");
+        Transform? transformFromEntity = Entity.GetComponent<Transform>();
+        LogInfo($"EntityApi step 2 entityGetTransform={(transformFromEntity != null)}");
+        m_HasTransform = TryGetComponent(out Transform transform);
+        LogInfo($"EntityApi step 3 tryGetTransform={m_HasTransform}");
+        m_OriginalTag = Entity.Tag;
+        LogInfo($"EntityApi step 4 tag='{m_OriginalTag}'");
+        m_OriginalPosition = m_HasTransform ? transform.Position : Vector3.Zero;
+        bool hasRigidbody2D = TryGetComponent(out Rigidbody2D rigidbody2D);
+        LogInfo($"EntityApi step 5 tryGetRigidbody2D={hasRigidbody2D}");
+        LogExpandedComponentAccess();
 
-        LogInfo($"EntityApi OnCreate handle={Entity.Handle} alive={Entity.IsAlive} hasTag={Entity.HasTag} tag='{m_OriginalTag}' hasTransform={m_HasTransform} position={m_OriginalPosition}");
+        LogInfo($"EntityApi OnCreate handle={Entity.Handle} alive={Entity.IsAlive} tag='{m_OriginalTag}' hasTransform={m_HasTransform} entityHasTransform={entityHasTransform} entityGetTransform={(transformFromEntity != null)} hasRigidbody2D={hasRigidbody2D} position={m_OriginalPosition}");
 
-        if (Entity.HasTag && !string.IsNullOrWhiteSpace(m_OriginalTag))
+        if (!string.IsNullOrWhiteSpace(m_OriginalTag))
         {
-            Entity found = FindEntityByTag(m_OriginalTag);
+            Entity found = Entity.FindEntityByTag(m_OriginalTag);
             LogInfo($"EntityApi FindEntityByTag('{m_OriginalTag}') => {found.Handle} alive={found.IsAlive}");
         }
+
+        if (hasRigidbody2D)
+            LogInfo($"EntityApi Rigidbody2D bodyType={rigidbody2D.BodyType} velocity={rigidbody2D.LinearVelocity}");
 
         if (m_HasTransform)
         {
@@ -35,6 +48,101 @@ public sealed class ManagedEntityApiSmokeScript : ScriptableEntity
         if (m_HasTransform)
             Transform.Position = m_OriginalPosition;
 
-        LogInfo($"EntityApi OnDestroy handle={Entity.Handle} finalTag='{(Entity.HasTag ? Entity.Tag : string.Empty)}' finalPosition={(m_HasTransform ? Transform.Position : Vector3.Zero)}");
+        LogInfo($"EntityApi OnDestroy handle={Entity.Handle} finalTag='{Entity.Tag}' finalPosition={(m_HasTransform ? Transform.Position : Vector3.Zero)}");
+    }
+
+    private void LogExpandedComponentAccess()
+    {
+        LogComponentAccess<AudioListener2D>(nameof(AudioListener2D));
+        LogComponentAccess<AudioListener3D>(nameof(AudioListener3D));
+        LogComponentAccess<AudioSource>(nameof(AudioSource));
+        LogComponentAccess<Animator>(nameof(Animator));
+        LogComponentAccess<AnimationEventReceiver>(nameof(AnimationEventReceiver));
+        LogComponentAccess<ParticleEmitter>(nameof(ParticleEmitter));
+        LogComponentAccess<Grid2D>(nameof(Grid2D));
+        LogComponentAccess<TilemapLayer>(nameof(TilemapLayer));
+
+        if (Entity.TryGetComponent(out AudioSource audioSource))
+        {
+            float volume = audioSource.Volume;
+            float pitch = audioSource.Pitch;
+            bool muted = audioSource.Muted;
+            bool isPlaying = audioSource.IsPlaying;
+            audioSource.Volume = volume;
+            audioSource.Pitch = pitch;
+            audioSource.Muted = muted;
+            LogInfo($"EntityApi AudioSource clip='{audioSource.ClipKey}' volume={volume} pitch={pitch} muted={muted} playing={isPlaying} loop={audioSource.Loop} playOnStart={audioSource.PlayOnStart} playbackSpace={audioSource.PlaybackSpace}");
+        }
+
+        if (Entity.TryGetComponent(out Animator animator))
+        {
+            float playbackSpeed = animator.PlaybackSpeed;
+            bool enabled = animator.Enabled;
+            animator.PlaybackSpeed = playbackSpeed;
+            animator.Enabled = enabled;
+            LogInfo($"EntityApi Animator controller='{animator.ControllerKey}' defaultClip='{animator.DefaultClipKey}' enabled={enabled} playbackSpeed={playbackSpeed} currentState='{animator.CurrentStateName}' currentClip='{animator.CurrentClipKey}' stateTime={animator.StateTimeSeconds:0.###} duration={animator.CurrentStateDurationSeconds:0.###}");
+        }
+
+        if (Entity.TryGetComponent(out AnimationEventReceiver animationEventReceiver))
+        {
+            int eventCount = animationEventReceiver.EventCount;
+            LogInfo($"EntityApi AnimationEventReceiver enabled={animationEventReceiver.Enabled} eventCount={eventCount}");
+            if (eventCount > 0)
+            {
+                AnimationEvent firstEvent = animationEventReceiver.GetEvent(0);
+                LogInfo($"EntityApi AnimationEventReceiver firstEvent name='{firstEvent.Name}' string='{firstEvent.StringPayload}' float={firstEvent.FloatPayload:0.###} int={firstEvent.IntegerPayload} bool={firstEvent.BooleanPayload} time={firstEvent.TimeSeconds:0.###} normalized={firstEvent.NormalizedTime:0.###}");
+            }
+        }
+
+        if (Entity.TryGetComponent(out ParticleEmitter particleEmitter))
+        {
+            float spawnRate = particleEmitter.SpawnRate;
+            int maxParticles = particleEmitter.MaxParticles;
+            particleEmitter.SpawnRate = spawnRate;
+            particleEmitter.MaxParticles = maxParticles;
+            particleEmitter.Emit(0);
+            LogInfo($"EntityApi ParticleEmitter playing={particleEmitter.IsPlaying} paused={particleEmitter.IsPaused} alive={particleEmitter.AliveParticleCount} spawnRate={spawnRate} lifetimeMin={particleEmitter.LifetimeMin} lifetimeMax={particleEmitter.LifetimeMax} maxParticles={maxParticles} texture='{particleEmitter.TextureKey}'");
+        }
+
+        if (Entity.TryGetComponent(out Grid2D grid2D))
+        {
+            Vector2 cellSize = grid2D.CellSize;
+            Vector2 cellGap = grid2D.CellGap;
+            grid2D.CellSize = cellSize;
+            grid2D.CellGap = cellGap;
+            LogInfo($"EntityApi Grid2D cellSize={cellSize} cellGap={cellGap}");
+        }
+
+        if (Entity.TryGetComponent(out TilemapLayer tilemapLayer))
+        {
+            int width = tilemapLayer.GridWidth;
+            int height = tilemapLayer.GridHeight;
+            int renderOrder = tilemapLayer.RenderOrder;
+            tilemapLayer.RenderOrder = renderOrder;
+            tilemapLayer.ResizeGrid(width, height);
+
+            string firstCellAssetKey = string.Empty;
+            int firstCellTileId = 0;
+            if (tilemapLayer.IsCellInBounds(0, 0))
+            {
+                firstCellTileId = tilemapLayer.GetTileId(0, 0);
+                firstCellAssetKey = tilemapLayer.GetTileAssetKey(0, 0);
+                tilemapLayer.SetTileId(0, 0, firstCellTileId);
+                tilemapLayer.SetTileAssetKey(0, 0, firstCellAssetKey);
+            }
+
+            string firstTileTableEntry = tilemapLayer.TileTableEntryCount > 0
+                ? tilemapLayer.GetTileTableEntry(0)
+                : string.Empty;
+            LogInfo($"EntityApi TilemapLayer size={width}x{height} cellCount={tilemapLayer.CellCount} renderOrder={renderOrder} collision={tilemapLayer.CollisionEnabled} castShadows={tilemapLayer.CastShadows} tableCount={tilemapLayer.TileTableEntryCount} firstTileId={firstCellTileId} firstTileKey='{firstCellAssetKey}' table0='{firstTileTableEntry}'");
+        }
+    }
+
+    private void LogComponentAccess<T>(string label) where T : EntityComponent
+    {
+        bool hasComponent = Entity.HasComponent<T>();
+        T? component = Entity.GetComponent<T>();
+        bool tryGetComponent = Entity.TryGetComponent(out T resolvedComponent);
+        LogInfo($"EntityApi component {label} has={hasComponent} get={(component != null)} try={tryGetComponent} resolved={(tryGetComponent && resolvedComponent != null)}");
     }
 }
