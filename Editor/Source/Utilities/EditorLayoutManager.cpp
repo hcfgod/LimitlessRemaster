@@ -300,11 +300,8 @@ namespace Limitless::Editor
                 if (name.empty() || name == GetDefaultLayoutName())
                     continue;
 
-                EditorLayoutDescriptor descriptor{};
-                descriptor.Name = name;
-                descriptor.IsDefault = false;
-                descriptor.IsProtected = false;
-                layouts.emplace_back(std::move(descriptor), entry.path());
+                const std::filesystem::path layoutDirectory = entry.path();
+                layouts.emplace_back(EditorLayoutDescriptor{ name, false, false }, layoutDirectory);
             }
             catch (...)
             {
