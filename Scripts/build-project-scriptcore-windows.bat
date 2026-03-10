@@ -83,6 +83,7 @@ set "INTERMEDIATE_DIR=%TOOLCHAIN_ROOT%\Build\Intermediates\%BUILD_FOLDER%\Projec
 set "OBJ_DIR=%INTERMEDIATE_DIR%\obj"
 set "DEP_DIR=%INTERMEDIATE_DIR%\dep"
 set "SNAPSHOT_DIR=%INTERMEDIATE_DIR%\ScriptSourcesSnapshot"
+rem (staging directory removed - managed build goes directly to output, then robocopy to other destinations)
 
 if not exist "%SDK_INCLUDE_DIR%\Limitless.h" (
     echo Error: SDK include root is missing Limitless headers: "%SDK_INCLUDE_DIR%\Limitless.h"
@@ -108,6 +109,8 @@ if not exist "%INTERMEDIATE_DIR%" mkdir "%INTERMEDIATE_DIR%"
 if not exist "%OBJ_DIR%" mkdir "%OBJ_DIR%"
 if not exist "%DEP_DIR%" mkdir "%DEP_DIR%"
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
+if not exist "%PROJECT_LOCAL_OUTPUT_DIR%" mkdir "%PROJECT_LOCAL_OUTPUT_DIR%"
+if not exist "%RUNTIME_TEMPLATE_DIR%" mkdir "%RUNTIME_TEMPLATE_DIR%"
 
 rem --- Clean mode: wipe object and dep caches ---
 if "%FORCE_CLEAN%"=="1" (
@@ -118,48 +121,84 @@ if "%FORCE_CLEAN%"=="1" (
     mkdir "%DEP_DIR%"
 )
 
-rem --- Snapshot generated sources ---
+rem --- Snapshot generated sources (incremental, preserves timestamps) ---
+if not exist "%SNAPSHOT_DIR%" mkdir "%SNAPSHOT_DIR%"
+if exist "%GENERATED_DIR%" (
+    robocopy "%GENERATED_DIR%" "%SNAPSHOT_DIR%" /MIR /NJH /NJS /NFL /NDL /NC /NS /NP /DCOPY:T /COPY:DAT >nul
+    if !ERRORLEVEL! GEQ 8 (
+        echo Error: Failed to create script source snapshot.
+        exit /b 1
+    )
+)
+
+set "OBJ_RSP=%INTERMEDIATE_DIR%\ObjectFiles.rsp"
+set "SCAN_STATS_FILE=%INTERMEDIATE_DIR%\IncrementalScan.env"
+set "PRUNE_STATS_FILE=%INTERMEDIATE_DIR%\PruneStats.env"
+set "LINK_STATS_FILE=%INTERMEDIATE_DIR%\LinkDecision.env"
+set "NEEDS_COMPILE_COUNT=0"
+set "SKIPPED_COUNT=0"
+set "OBJECT_LIST_CHANGED=0"
+set "PRUNED_COUNT=0"
+set "LINK_REQUIRED=1"
+
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$sourceDir = [IO.Path]::GetFullPath('%GENERATED_DIR%');" ^
+    "$ErrorActionPreference = 'Stop';" ^
     "$snapshotDir = [IO.Path]::GetFullPath('%SNAPSHOT_DIR%');" ^
-    "if (Test-Path -LiteralPath $snapshotDir) { Remove-Item -LiteralPath $snapshotDir -Recurse -Force -ErrorAction Stop };" ^
-    "New-Item -ItemType Directory -Path $snapshotDir -Force | Out-Null;" ^
-    "if (Test-Path -LiteralPath $sourceDir) {" ^
-    "    Get-ChildItem -Path $sourceDir -Force -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $snapshotDir -Recurse -Force -ErrorAction Stop }" ^
-    "}"
+    "$objDir = [IO.Path]::GetFullPath('%OBJ_DIR%');" ^
+    "$depDir = [IO.Path]::GetFullPath('%DEP_DIR%');" ^
+    "$objRspPath = [IO.Path]::GetFullPath('%OBJ_RSP%');" ^
+    "$scanStatsPath = [IO.Path]::GetFullPath('%SCAN_STATS_FILE%');" ^
+    "$cppFiles = @(Get-ChildItem -Path $snapshotDir -Recurse -Filter '*.cpp' -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne 'ScriptCoreHostGlue.cpp' });" ^
+    "if ($cppFiles.Count -eq 0) { $dummyCpp = Join-Path $snapshotDir 'DummyScriptCoreTranslationUnit.cpp'; Set-Content -Path $dummyCpp -Value '// Auto-generated fallback translation unit.' -Encoding Ascii; $cppFiles = @(Get-Item $dummyCpp); }" ^
+    "$needsCompileCount = 0;" ^
+    "$skippedCount = 0;" ^
+    "$objFiles = @();" ^
+    "foreach ($cpp in $cppFiles) {" ^
+    "    $relPath = $cpp.FullName.Substring($snapshotDir.Length).TrimStart('\','/');" ^
+    "    $safeName = $relPath -replace '[\\/ ]','_';" ^
+    "    $safeName = [IO.Path]::ChangeExtension($safeName, '.obj');" ^
+    "    $objPath = Join-Path $objDir $safeName;" ^
+    "    $depPath = Join-Path $depDir ([IO.Path]::ChangeExtension($safeName, '.dep'));" ^
+    "    $objFiles += $objPath;" ^
+    "    $needsCompile = $true;" ^
+    "    if (Test-Path -LiteralPath $objPath) {" ^
+    "        $objTime = (Get-Item $objPath).LastWriteTimeUtc;" ^
+    "        if ($cpp.LastWriteTimeUtc -le $objTime) {" ^
+    "            $needsCompile = $false;" ^
+    "            if (Test-Path -LiteralPath $depPath) {" ^
+    "                $deps = Get-Content -LiteralPath $depPath -ErrorAction SilentlyContinue;" ^
+    "                foreach ($d in $deps) {" ^
+    "                    $d = $d.Trim();" ^
+    "                    if ($d -ne '' -and (Test-Path -LiteralPath $d) -and (Get-Item $d).LastWriteTimeUtc -gt $objTime) {" ^
+    "                        $needsCompile = $true;" ^
+    "                        break;" ^
+    "                    }" ^
+    "                }" ^
+    "            } else {" ^
+    "                $needsCompile = $true;" ^
+    "            }" ^
+    "        }" ^
+    "    }" ^
+    "    if ($needsCompile) { $needsCompileCount++ } else { $skippedCount++ }" ^
+    "}" ^
+    "$objRspLines = $objFiles | ForEach-Object { '\"' + $_ + '\"' };" ^
+    "$newRspContent = ($objRspLines -join \"`n\");" ^
+    "$objectListChanged = 0;" ^
+    "$existingRspContent = $null;" ^
+    "if (Test-Path -LiteralPath $objRspPath) { $existingRspContent = [IO.File]::ReadAllText($objRspPath) }" ^
+    "if ($existingRspContent -ne $newRspContent) { [IO.File]::WriteAllText($objRspPath, $newRspContent, [Text.UTF8Encoding]::new($false)); $objectListChanged = 1 }" ^
+    "$stats = @(" ^
+    "    'NEEDS_COMPILE_COUNT=' + $needsCompileCount," ^
+    "    'SKIPPED_COUNT=' + $skippedCount," ^
+    "    'OBJECT_LIST_CHANGED=' + $objectListChanged" ^
+    ");" ^
+    "Set-Content -Path $scanStatsPath -Value $stats -Encoding Ascii;"
 if errorlevel 1 (
-    echo Error: Failed to create script source snapshot.
+    echo Error: Failed to analyze incremental ScriptCore inputs.
     exit /b 1
 )
 
-rem --- Locate Visual Studio ---
-set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
-set "VSINSTALL="
-if exist "%VSWHERE%" (
-    for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -requiresAny -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath`) do (
-        if not defined VSINSTALL set "VSINSTALL=%%i"
-    )
-)
-if not defined VSINSTALL (
-    echo Error: Could not locate Visual Studio installation with C++ tools.
-    exit /b 1
-)
-
-if /I "%PLATFORM%"=="ARM64" (
-    if exist "%VSINSTALL%\VC\Auxiliary\Build\vcvarsamd64_arm64.bat" (
-        call "%VSINSTALL%\VC\Auxiliary\Build\vcvarsamd64_arm64.bat" >nul 2>&1
-    ) else (
-        call "%VSINSTALL%\VC\Auxiliary\Build\vcvarsarm64.bat" >nul 2>&1
-    )
-) else (
-    call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
-)
-if errorlevel 1 (
-    echo Error: Failed to initialize MSVC build environment.
-    exit /b 1
-)
-
-echo Building project ScriptCore module (incremental)...
+for /f "usebackq tokens=1,2 delims==" %%A in ("%SCAN_STATS_FILE%") do set "%%A=%%B"
 
 rem -------------------------------------------------------------------------
 rem  INCREMENTAL COMPILE — PowerShell orchestrator
@@ -171,114 +210,119 @@ rem  /showIncludes output to update the dep file.  At the end, write an
 rem  object-file response file for the linker and report how many files were
 rem  compiled vs skipped.
 rem -------------------------------------------------------------------------
-set "OBJ_RSP=%INTERMEDIATE_DIR%\ObjectFiles.rsp"
-
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$ErrorActionPreference = 'Stop';" ^
-    "$snapshotDir = [IO.Path]::GetFullPath('%SNAPSHOT_DIR%');" ^
-    "$objDir      = [IO.Path]::GetFullPath('%OBJ_DIR%');" ^
-    "$depDir      = [IO.Path]::GetFullPath('%DEP_DIR%');" ^
-    "$objRspPath  = [IO.Path]::GetFullPath('%OBJ_RSP%');" ^
-    "" ^
-    "$cppFiles = @(Get-ChildItem -Path $snapshotDir -Recurse -Filter '*.cpp' -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne 'ScriptCoreHostGlue.cpp' });" ^
-    "if ($cppFiles.Count -eq 0) {" ^
-    "    $dummyCpp = Join-Path $snapshotDir 'DummyScriptCoreTranslationUnit.cpp';" ^
-    "    Set-Content -Path $dummyCpp -Value '// Auto-generated fallback translation unit.' -Encoding Ascii;" ^
-    "    $cppFiles = @(Get-Item $dummyCpp);" ^
-    "}" ^
-    "" ^
-    "$compiledCount = 0;" ^
-    "$skippedCount  = 0;" ^
-    "$failedCount   = 0;" ^
-    "$objFiles      = @();" ^
-    "" ^
-    "foreach ($cpp in $cppFiles) {" ^
-    "    $relPath = $cpp.FullName.Substring($snapshotDir.Length).TrimStart('\','/');" ^
-    "    $safeName = $relPath -replace '[\\/ ]','_';" ^
-    "    $safeName = [IO.Path]::ChangeExtension($safeName, '.obj');" ^
-    "    $objPath = Join-Path $objDir $safeName;" ^
-    "    $depPath = Join-Path $depDir ([IO.Path]::ChangeExtension($safeName, '.dep'));" ^
-    "    $objFiles += $objPath;" ^
-    "" ^
-    "    $needsCompile = $true;" ^
-    "    if (Test-Path -LiteralPath $objPath) {" ^
-    "        $objTime = (Get-Item $objPath).LastWriteTimeUtc;" ^
-    "        if ($cpp.LastWriteTimeUtc -le $objTime) {" ^
-    "            $needsCompile = $false;" ^
-    "            if (Test-Path -LiteralPath $depPath) {" ^
-    "                $deps = Get-Content -LiteralPath $depPath -ErrorAction SilentlyContinue;" ^
-    "                foreach ($d in $deps) {" ^
-    "                    $d = $d.Trim();" ^
-    "                    if ($d -ne '' -and (Test-Path -LiteralPath $d)) {" ^
-    "                        if ((Get-Item $d).LastWriteTimeUtc -gt $objTime) {" ^
-    "                            $needsCompile = $true;" ^
-    "                            break;" ^
-    "                        }" ^
-    "                    }" ^
-    "                }" ^
-    "            } else {" ^
-    "                $needsCompile = $true;" ^
-    "            }" ^
-    "        }" ^
-    "    }" ^
-    "" ^
-    "    if (-not $needsCompile) {" ^
-    "        $skippedCount++;" ^
-    "        continue;" ^
-    "    }" ^
-    "" ^
-    "    $compileArgs = @(" ^
-    "        '/nologo','/std:c++20','/EHsc','/MD','/c','/bigobj','/utf-8','/FS'," ^
-    "        '/showIncludes'," ^
-    "        '/D%CONFIG_DEFINE%','/D%ARCH_DEFINE%','/DLT_PLATFORM_WINDOWS','/DSCRIPTCORE_EXPORTS','/D_UNICODE','/DUNICODE'," ^
-    "        '/I%SDK_INCLUDE_DIR%'," ^
-    "        '/I%SDK_VENDOR_DIR%'," ^
-    "        '/I%SDK_VENDOR_DIR%\box2d\include'," ^
-    "        '/I%SDK_VENDOR_DIR%\glad'," ^
-    "        '/I%SDK_VENDOR_DIR%\spdlog'," ^
-    "        '/I%SDK_VENDOR_DIR%\doctest'," ^
-    "        '/I%SDK_VENDOR_DIR%\SDL3'," ^
-    "        '/I%SDK_VENDOR_DIR%\ffmpeg\include'," ^
-    "        '/I%SDK_VENDOR_DIR%\imgui'," ^
-    "        '/I%SDK_VENDOR_DIR%\glm'," ^
-    "        \"/I$snapshotDir\"," ^
-    "        \"/I%GENERATED_DIR%\"," ^
-    "        \"/Fo$objPath\"," ^
-    "        $cpp.FullName" ^
-    "    );" ^
-    "" ^
-    "    $rawOutput = & cl @compileArgs 2>&1;" ^
-    "    $exitCode = $LASTEXITCODE;" ^
-    "" ^
-    "    $headerDeps = @();" ^
-    "    foreach ($line in $rawOutput) {" ^
-    "        $s = \"$line\";" ^
-    "        if ($s -match '^Note: including file:\\s*(.+)$') {" ^
-    "            $headerDeps += $Matches[1].Trim();" ^
-    "        } else {" ^
-    "            if ($s.Trim() -ne '') { Write-Host $s }" ^
-    "        }" ^
-    "    }" ^
-    "" ^
-    "    if ($exitCode -ne 0) {" ^
-    "        Write-Host \"Error: compilation failed for $($cpp.Name) (exit code $exitCode)\";" ^
-    "        $failedCount++;" ^
-    "        if (Test-Path -LiteralPath $objPath) { Remove-Item -LiteralPath $objPath -Force -ErrorAction SilentlyContinue }" ^
-    "        if (Test-Path -LiteralPath $depPath) { Remove-Item -LiteralPath $depPath -Force -ErrorAction SilentlyContinue }" ^
-    "    } else {" ^
-    "        $compiledCount++;" ^
-    "        Set-Content -Path $depPath -Value ($headerDeps -join \"`n\") -Encoding Ascii;" ^
-    "    }" ^
-    "}" ^
-    "" ^
-    "Write-Host \"Incremental compile: $compiledCount compiled, $skippedCount up-to-date, $failedCount failed.\";" ^
-    "if ($failedCount -gt 0) { exit 1 }" ^
-    "" ^
-    "$objRspLines = $objFiles | ForEach-Object { '\"' + $_ + '\"' };" ^
-    "Set-Content -Path $objRspPath -Value ($objRspLines -join \"`n\") -Encoding Ascii;"
-if errorlevel 1 (
-    echo Error: Incremental compilation failed.
-    exit /b 1
+if "%NEEDS_COMPILE_COUNT%"=="0" (
+    echo Incremental compile: 0 compiled, %SKIPPED_COUNT% up-to-date, 0 failed.
+) else (
+    echo Building project ScriptCore module (incremental)...
+    call :prepare_msvc_env
+    if errorlevel 1 exit /b 1
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "$ErrorActionPreference = 'Stop';" ^
+        "$snapshotDir = [IO.Path]::GetFullPath('%SNAPSHOT_DIR%');" ^
+        "$objDir      = [IO.Path]::GetFullPath('%OBJ_DIR%');" ^
+        "$depDir      = [IO.Path]::GetFullPath('%DEP_DIR%');" ^
+        "$objRspPath  = [IO.Path]::GetFullPath('%OBJ_RSP%');" ^
+        "" ^
+        "$cppFiles = @(Get-ChildItem -Path $snapshotDir -Recurse -Filter '*.cpp' -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne 'ScriptCoreHostGlue.cpp' });" ^
+        "if ($cppFiles.Count -eq 0) {" ^
+        "    $dummyCpp = Join-Path $snapshotDir 'DummyScriptCoreTranslationUnit.cpp';" ^
+        "    Set-Content -Path $dummyCpp -Value '// Auto-generated fallback translation unit.' -Encoding Ascii;" ^
+        "    $cppFiles = @(Get-Item $dummyCpp);" ^
+        "}" ^
+        "" ^
+        "$compiledCount = 0;" ^
+        "$skippedCount  = 0;" ^
+        "$failedCount   = 0;" ^
+        "$objFiles      = @();" ^
+        "" ^
+        "foreach ($cpp in $cppFiles) {" ^
+        "    $relPath = $cpp.FullName.Substring($snapshotDir.Length).TrimStart('\','/');" ^
+        "    $safeName = $relPath -replace '[\\/ ]','_';" ^
+        "    $safeName = [IO.Path]::ChangeExtension($safeName, '.obj');" ^
+        "    $objPath = Join-Path $objDir $safeName;" ^
+        "    $depPath = Join-Path $depDir ([IO.Path]::ChangeExtension($safeName, '.dep'));" ^
+        "    $objFiles += $objPath;" ^
+        "" ^
+        "    $needsCompile = $true;" ^
+        "    if (Test-Path -LiteralPath $objPath) {" ^
+        "        $objTime = (Get-Item $objPath).LastWriteTimeUtc;" ^
+        "        if ($cpp.LastWriteTimeUtc -le $objTime) {" ^
+        "            $needsCompile = $false;" ^
+        "            if (Test-Path -LiteralPath $depPath) {" ^
+        "                $deps = Get-Content -LiteralPath $depPath -ErrorAction SilentlyContinue;" ^
+        "                foreach ($d in $deps) {" ^
+        "                    $d = $d.Trim();" ^
+        "                    if ($d -ne '' -and (Test-Path -LiteralPath $d)) {" ^
+        "                        if ((Get-Item $d).LastWriteTimeUtc -gt $objTime) {" ^
+        "                            $needsCompile = $true;" ^
+        "                            break;" ^
+        "                        }" ^
+        "                    }" ^
+        "                }" ^
+        "            } else {" ^
+        "                $needsCompile = $true;" ^
+        "            }" ^
+        "        }" ^
+        "    }" ^
+        "" ^
+        "    if (-not $needsCompile) {" ^
+        "        $skippedCount++;" ^
+        "        continue;" ^
+        "    }" ^
+        "" ^
+        "    $compileArgs = @(" ^
+        "        '/nologo','/std:c++20','/EHsc','/MD','/c','/bigobj','/utf-8','/FS'," ^
+        "        '/showIncludes'," ^
+        "        '/D%CONFIG_DEFINE%','/D%ARCH_DEFINE%','/DLT_PLATFORM_WINDOWS','/DSCRIPTCORE_EXPORTS','/D_UNICODE','/DUNICODE'," ^
+        "        '/I%SDK_INCLUDE_DIR%'," ^
+        "        '/I%SDK_VENDOR_DIR%'," ^
+        "        '/I%SDK_VENDOR_DIR%\box2d\include'," ^
+        "        '/I%SDK_VENDOR_DIR%\glad'," ^
+        "        '/I%SDK_VENDOR_DIR%\spdlog'," ^
+        "        '/I%SDK_VENDOR_DIR%\doctest'," ^
+        "        '/I%SDK_VENDOR_DIR%\SDL3'," ^
+        "        '/I%SDK_VENDOR_DIR%\ffmpeg\include'," ^
+        "        '/I%SDK_VENDOR_DIR%\imgui'," ^
+        "        '/I%SDK_VENDOR_DIR%\glm'," ^
+        "        \"/I$snapshotDir\"," ^
+        "        \"/I%GENERATED_DIR%\"," ^
+        "        \"/Fo$objPath\"," ^
+        "        $cpp.FullName" ^
+        "    );" ^
+        "" ^
+        "    $rawOutput = & cl @compileArgs 2>&1;" ^
+        "    $exitCode = $LASTEXITCODE;" ^
+        "" ^
+        "    $headerDeps = @();" ^
+        "    foreach ($line in $rawOutput) {" ^
+        "        $s = \"$line\";" ^
+        "        if ($s -match '^Note: including file:\\s*(.+)$') {" ^
+        "            $headerDeps += $Matches[1].Trim();" ^
+        "        } else {" ^
+        "            if ($s.Trim() -ne '') { Write-Host $s }" ^
+        "        }" ^
+        "    }" ^
+        "" ^
+        "    if ($exitCode -ne 0) {" ^
+        "        Write-Host \"Error: compilation failed for $($cpp.Name) (exit code $exitCode)\";" ^
+        "        $failedCount++;" ^
+        "        if (Test-Path -LiteralPath $objPath) { Remove-Item -LiteralPath $objPath -Force -ErrorAction SilentlyContinue }" ^
+        "        if (Test-Path -LiteralPath $depPath) { Remove-Item -LiteralPath $depPath -Force -ErrorAction SilentlyContinue }" ^
+        "    } else {" ^
+        "        $compiledCount++;" ^
+        "        Set-Content -Path $depPath -Value ($headerDeps -join \"`n\") -Encoding Ascii;" ^
+        "    }" ^
+        "}" ^
+        "" ^
+        "Write-Host \"Incremental compile: $compiledCount compiled, $skippedCount up-to-date, $failedCount failed.\";" ^
+        "if ($failedCount -gt 0) { exit 1 }" ^
+        "" ^
+        "$objRspLines = $objFiles | ForEach-Object { '\"' + $_ + '\"' };" ^
+        "Set-Content -Path $objRspPath -Value ($objRspLines -join \"`n\") -Encoding Ascii;"
+    if errorlevel 1 (
+        echo Error: Incremental compilation failed.
+        exit /b 1
+    )
 )
 
 rem --- Prune stale .obj files whose source no longer exists ---
@@ -286,6 +330,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$objDir = [IO.Path]::GetFullPath('%OBJ_DIR%');" ^
     "$objRspPath = [IO.Path]::GetFullPath('%OBJ_RSP%');" ^
     "$depDir = [IO.Path]::GetFullPath('%DEP_DIR%');" ^
+    "$statsPath = [IO.Path]::GetFullPath('%PRUNE_STATS_FILE%');" ^
     "$expectedObjs = @{};" ^
     "if (Test-Path -LiteralPath $objRspPath) {" ^
     "    Get-Content -LiteralPath $objRspPath | ForEach-Object { $expectedObjs[$_.Trim('\"').Trim()] = $true }" ^
@@ -299,38 +344,73 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "        $pruned++;" ^
     "    }" ^
     "};" ^
-    "if ($pruned -gt 0) { Write-Host \"Pruned $pruned stale object file(s).\" }"
-
-rem --- Link all object files into ScriptCore.dll ---
-echo Linking ScriptCore.dll...
-link /NOLOGO /DLL ^
-   /MACHINE:%PLATFORM% ^
-   /OPT:NOREF /OPT:NOICF ^
-   /OUT:"%OUTPUT_DIR%\ScriptCore.dll" ^
-   /IMPLIB:"%OUTPUT_DIR%\ScriptCore.lib" ^
-   /PDB:"%OUTPUT_DIR%\ScriptCore.pdb" ^
-   @"%OBJ_RSP%" ^
-   /LIBPATH:"%SDK_LIB_DIR%" ^
-   /WHOLEARCHIVE:ScriptCoreHostGlue.lib ^
-   Limitless.lib VendorSpirvCross.lib VendorZstd.lib freetype.lib msdfgen.lib msdf-atlas-gen.lib ^
-   ScriptCoreHostGlue.lib ^
-   SDL3-static.lib vulkan-1.lib shaderc_shared.lib box2D.lib ^
-   avcodec.lib avformat.lib avutil.lib swresample.lib ^
-   user32.lib gdi32.lib winmm.lib imm32.lib ole32.lib oleaut32.lib uuid.lib version.lib advapi32.lib setupapi.lib shell32.lib psapi.lib
+    "if ($pruned -gt 0) { Write-Host \"Pruned $pruned stale object file(s).\" }" ^
+    "Set-Content -Path $statsPath -Value ('PRUNED_COUNT=' + $pruned) -Encoding Ascii;"
 
 if errorlevel 1 (
-    echo Error: Project ScriptCore link failed.
+    echo Error: Failed to prune stale object files.
     exit /b 1
+)
+
+for /f "usebackq tokens=1,2 delims==" %%A in ("%PRUNE_STATS_FILE%") do set "%%A=%%B"
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$objRspPath = [IO.Path]::GetFullPath('%OBJ_RSP%');" ^
+    "$linkStatsPath = [IO.Path]::GetFullPath('%LINK_STATS_FILE%');" ^
+    "$dllPath = [IO.Path]::GetFullPath('%OUTPUT_DIR%\ScriptCore.dll');" ^
+    "$libPath = [IO.Path]::GetFullPath('%OUTPUT_DIR%\ScriptCore.lib');" ^
+    "$pdbPath = [IO.Path]::GetFullPath('%OUTPUT_DIR%\ScriptCore.pdb');" ^
+    "$linkRequired = 0;" ^
+    "if ('%NEEDS_COMPILE_COUNT%' -ne '0' -or '%OBJECT_LIST_CHANGED%' -ne '0' -or '%PRUNED_COUNT%' -ne '0') { $linkRequired = 1 }" ^
+    "elseif (-not (Test-Path -LiteralPath $dllPath) -or -not (Test-Path -LiteralPath $libPath) -or -not (Test-Path -LiteralPath $pdbPath)) { $linkRequired = 1 }" ^
+    "elseif (Test-Path -LiteralPath $objRspPath) {" ^
+    "    $outputTime = @((Get-Item -LiteralPath $dllPath).LastWriteTimeUtc, (Get-Item -LiteralPath $libPath).LastWriteTimeUtc, (Get-Item -LiteralPath $pdbPath).LastWriteTimeUtc) | Sort-Object | Select-Object -First 1;" ^
+    "    foreach ($objLine in Get-Content -LiteralPath $objRspPath) {" ^
+    "        $objPath = $objLine.Trim('\"').Trim();" ^
+    "        if ($objPath -eq '') { continue }" ^
+    "        if (-not (Test-Path -LiteralPath $objPath)) { $linkRequired = 1; break }" ^
+    "        if ((Get-Item -LiteralPath $objPath).LastWriteTimeUtc -gt $outputTime) { $linkRequired = 1; break }" ^
+    "    }" ^
+    "}" ^
+    "else { $linkRequired = 1 }" ^
+    "Set-Content -Path $linkStatsPath -Value ('LINK_REQUIRED=' + $linkRequired) -Encoding Ascii;"
+if errorlevel 1 (
+    echo Error: Failed to determine ScriptCore link state.
+    exit /b 1
+)
+
+for /f "usebackq tokens=1,2 delims==" %%A in ("%LINK_STATS_FILE%") do set "%%A=%%B"
+
+rem --- Link all object files into ScriptCore.dll ---
+if "%LINK_REQUIRED%"=="0" (
+    echo ScriptCore.dll is up-to-date; skipping relink.
+) else (
+    call :prepare_msvc_env
+    if errorlevel 1 exit /b 1
+    echo Linking ScriptCore.dll...
+    link /NOLOGO /DLL ^
+       /MACHINE:%PLATFORM% ^
+       /OPT:NOREF /OPT:NOICF ^
+       /OUT:"%OUTPUT_DIR%\ScriptCore.dll" ^
+       /IMPLIB:"%OUTPUT_DIR%\ScriptCore.lib" ^
+       /PDB:"%OUTPUT_DIR%\ScriptCore.pdb" ^
+       @"%OBJ_RSP%" ^
+       /LIBPATH:"%SDK_LIB_DIR%" ^
+       /WHOLEARCHIVE:ScriptCoreHostGlue.lib ^
+       Limitless.lib VendorSpirvCross.lib VendorZstd.lib freetype.lib msdfgen.lib msdf-atlas-gen.lib ^
+       ScriptCoreHostGlue.lib ^
+       SDL3-static.lib vulkan-1.lib shaderc_shared.lib box2D.lib ^
+       avcodec.lib avformat.lib avutil.lib swresample.lib ^
+       user32.lib gdi32.lib winmm.lib imm32.lib ole32.lib oleaut32.lib uuid.lib version.lib advapi32.lib setupapi.lib shell32.lib psapi.lib
+
+    if errorlevel 1 (
+        echo Error: Project ScriptCore link failed.
+        exit /b 1
+    )
 )
 
 if not exist "%MANAGED_BUILD_SCRIPT%" (
     echo Error: Managed runtime build script not found: "%MANAGED_BUILD_SCRIPT%"
-    exit /b 1
-)
-
-call "%MANAGED_BUILD_SCRIPT%" %CONFIGURATION% %PLATFORM% "%OUTPUT_DIR%" "%PROJECT_ROOT%"
-if errorlevel 1 (
-    echo Error: Failed to refresh managed runtime payload in "%OUTPUT_DIR%".
     exit /b 1
 )
 
@@ -340,12 +420,49 @@ if errorlevel 1 (
     exit /b 1
 )
 
-call "%MANAGED_BUILD_SCRIPT%" %CONFIGURATION% %PLATFORM% "%RUNTIME_TEMPLATE_DIR%" "%PROJECT_ROOT%"
-if errorlevel 1 (
-    echo Error: Failed to refresh managed runtime payload in "%RUNTIME_TEMPLATE_DIR%".
+if not exist "%OUTPUT_DIR%\Managed" mkdir "%OUTPUT_DIR%\Managed"
+robocopy "%PROJECT_LOCAL_OUTPUT_DIR%\Managed" "%OUTPUT_DIR%\Managed" /MIR /NJH /NJS /NFL /NDL /NC /NS /NP >nul
+if %ERRORLEVEL% GEQ 8 (
+    echo Error: Failed to copy managed runtime payload to "%OUTPUT_DIR%".
+    exit /b 1
+)
+
+if not exist "%RUNTIME_TEMPLATE_DIR%\Managed" mkdir "%RUNTIME_TEMPLATE_DIR%\Managed"
+robocopy "%PROJECT_LOCAL_OUTPUT_DIR%\Managed" "%RUNTIME_TEMPLATE_DIR%\Managed" /MIR /NJH /NJS /NFL /NDL /NC /NS /NP >nul
+if %ERRORLEVEL% GEQ 8 (
+    echo Error: Failed to copy managed runtime payload to "%RUNTIME_TEMPLATE_DIR%".
     exit /b 1
 )
 
 echo ScriptCore build completed successfully.
 echo Output directory: %OUTPUT_DIR%
+exit /b 0
+
+:prepare_msvc_env
+if defined LT_SCRIPTCORE_MSVC_READY exit /b 0
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+set "VSINSTALL="
+if exist "%VSWHERE%" (
+    for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -requiresAny -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath`) do (
+        if not defined VSINSTALL set "VSINSTALL=%%i"
+    )
+)
+if not defined VSINSTALL (
+    echo Error: Could not locate Visual Studio installation with C++ tools.
+    exit /b 1
+)
+if /I "%PLATFORM%"=="ARM64" (
+    if exist "%VSINSTALL%\VC\Auxiliary\Build\vcvarsamd64_arm64.bat" (
+        call "%VSINSTALL%\VC\Auxiliary\Build\vcvarsamd64_arm64.bat" >nul 2>&1
+    ) else (
+        call "%VSINSTALL%\VC\Auxiliary\Build\vcvarsarm64.bat" >nul 2>&1
+    )
+) else (
+    call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
+)
+if errorlevel 1 (
+    echo Error: Failed to initialize MSVC build environment.
+    exit /b 1
+)
+set "LT_SCRIPTCORE_MSVC_READY=1"
 exit /b 0

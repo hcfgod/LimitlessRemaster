@@ -2847,6 +2847,8 @@ namespace Limitless::EditorViewportPanel
             return static_cast<uint32_t>(std::floor(value));
         };
 
+        std::string pendingDroppedSceneAssetKey;
+
         auto drawLoadingOverlay = [&scene](const ImVec2& minPos, const ImVec2& maxPos) -> bool {
             const LoadingScreen::Context ctx = LoadingScreen::BuildContext(
                 scene, Renderer2D::Default().IsShaderReady(), Renderer2D::GetDefaultShaderKey());
@@ -3127,10 +3129,7 @@ namespace Limitless::EditorViewportPanel
                         {
                             const char* key = static_cast<const char*>(payload->Data);
                             if (key && key[0] && onSceneDropped)
-                            {
-                                onSceneDropped(key);
-                                scene = nullptr;
-                            }
+                                pendingDroppedSceneAssetKey = key;
                         }
                         if (prefabPayloadId)
                         {
@@ -3381,6 +3380,12 @@ namespace Limitless::EditorViewportPanel
             }
 
             ImGui::End();
+
+            if (!pendingDroppedSceneAssetKey.empty() && onSceneDropped)
+            {
+                onSceneDropped(pendingDroppedSceneAssetKey);
+                scene = nullptr;
+            }
         }
         else
         {

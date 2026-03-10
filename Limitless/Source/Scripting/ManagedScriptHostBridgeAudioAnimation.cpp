@@ -11,255 +11,54 @@ namespace Limitless::ManagedScriptHost
 
     namespace Internal
     {
-        bool ManagedHasAudioListener2DComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedAudioListener2DComponent(entityHandle) != nullptr;
-        }
+        LT_MANAGED_COMPONENT_HAS(HasAudioListener2DComponentIcall, TryGetManagedAudioListener2DComponent);
+        LT_MANAGED_COMPONENT_GET(GetAudioListener2DEnabledIcall, bool, TryGetManagedAudioListener2DComponent, component->Enabled, true);
+        LT_MANAGED_COMPONENT_SET(SetAudioListener2DEnabledIcall, bool, TryGetManagedAudioListener2DComponent, component->Enabled = value;);
+        LT_MANAGED_COMPONENT_GET(GetAudioListener2DUsePrimaryCameraPositionIcall, bool, TryGetManagedAudioListener2DComponent, component->UsePrimaryCameraPosition, true);
+        LT_MANAGED_COMPONENT_SET(SetAudioListener2DUsePrimaryCameraPositionIcall, bool, TryGetManagedAudioListener2DComponent, component->UsePrimaryCameraPosition = value;);
 
-        bool ManagedGetAudioListener2DEnabledIcall(uint32_t entityHandle)
-        {
-            const auto* listener = TryGetManagedAudioListener2DComponent(entityHandle);
-            return listener ? listener->Enabled : true;
-        }
+        LT_MANAGED_COMPONENT_HAS(HasAudioListener3DComponentIcall, TryGetManagedAudioListener3DComponent);
+        LT_MANAGED_COMPONENT_GET(GetAudioListener3DEnabledIcall, bool, TryGetManagedAudioListener3DComponent, component->Enabled, true);
+        LT_MANAGED_COMPONENT_SET(SetAudioListener3DEnabledIcall, bool, TryGetManagedAudioListener3DComponent, component->Enabled = value;);
+        LT_MANAGED_COMPONENT_GET(GetAudioListener3DUsePrimaryCameraTransformIcall, bool, TryGetManagedAudioListener3DComponent, component->UsePrimaryCameraTransform, true);
+        LT_MANAGED_COMPONENT_SET(SetAudioListener3DUsePrimaryCameraTransformIcall, bool, TryGetManagedAudioListener3DComponent, component->UsePrimaryCameraTransform = value;);
 
-        void ManagedSetAudioListener2DEnabledIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* listener = TryGetManagedAudioListener2DComponent(entityHandle))
-                listener->Enabled = value;
-        }
-
-        bool ManagedGetAudioListener2DUsePrimaryCameraPositionIcall(uint32_t entityHandle)
-        {
-            const auto* listener = TryGetManagedAudioListener2DComponent(entityHandle);
-            return listener ? listener->UsePrimaryCameraPosition : true;
-        }
-
-        void ManagedSetAudioListener2DUsePrimaryCameraPositionIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* listener = TryGetManagedAudioListener2DComponent(entityHandle))
-                listener->UsePrimaryCameraPosition = value;
-        }
-
-        bool ManagedHasAudioListener3DComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedAudioListener3DComponent(entityHandle) != nullptr;
-        }
-
-        bool ManagedGetAudioListener3DEnabledIcall(uint32_t entityHandle)
-        {
-            const auto* listener = TryGetManagedAudioListener3DComponent(entityHandle);
-            return listener ? listener->Enabled : true;
-        }
-
-        void ManagedSetAudioListener3DEnabledIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* listener = TryGetManagedAudioListener3DComponent(entityHandle))
-                listener->Enabled = value;
-        }
-
-        bool ManagedGetAudioListener3DUsePrimaryCameraTransformIcall(uint32_t entityHandle)
-        {
-            const auto* listener = TryGetManagedAudioListener3DComponent(entityHandle);
-            return listener ? listener->UsePrimaryCameraTransform : true;
-        }
-
-        void ManagedSetAudioListener3DUsePrimaryCameraTransformIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* listener = TryGetManagedAudioListener3DComponent(entityHandle))
-                listener->UsePrimaryCameraTransform = value;
-        }
-
-        bool ManagedHasAudioSourceComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedAudioSourceComponent(entityHandle) != nullptr;
-        }
-
-        Coral::String ManagedGetAudioSourceClipKeyIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? Coral::String::New(audioSource->AudioClipKey) : Coral::String::New("");
-        }
-
-        void ManagedSetAudioSourceClipKeyIcall(uint32_t entityHandle, Coral::String value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-                audioSource->AudioClipKey = ToUtf8Borrowed(value);
-        }
-
-        float ManagedGetAudioSourceVolumeIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? audioSource->Volume : 1.0f;
-        }
-
-        void ManagedSetAudioSourceVolumeIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-                audioSource->Volume = std::max(0.0f, value);
-        }
-
-        float ManagedGetAudioSourcePitchIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? audioSource->Pitch : 1.0f;
-        }
-
-        void ManagedSetAudioSourcePitchIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-                audioSource->Pitch = std::max(0.01f, value);
-        }
-
-        bool ManagedGetAudioSourcePlayOnStartIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? audioSource->PlayOnStart : true;
-        }
-
-        void ManagedSetAudioSourcePlayOnStartIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-                audioSource->PlayOnStart = value;
-        }
-
-        bool ManagedGetAudioSourceLoopIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? audioSource->Loop : false;
-        }
-
-        void ManagedSetAudioSourceLoopIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-                audioSource->Loop = value;
-        }
-
-        bool ManagedGetAudioSourceMutedIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? audioSource->Muted : false;
-        }
-
-        void ManagedSetAudioSourceMutedIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-                audioSource->Muted = value;
-        }
-
-        int ManagedGetAudioSourcePlaybackSpaceIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? static_cast<int>(audioSource->Space) : static_cast<int>(AudioSourceComponent::PlaybackSpace::Global);
-        }
-
-        void ManagedSetAudioSourcePlaybackSpaceIcall(uint32_t entityHandle, int value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-                audioSource->Space = static_cast<AudioSourceComponent::PlaybackSpace>(value);
-        }
-
-        Coral::String ManagedGetAudioSourceMixerGroupIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? Coral::String::New(audioSource->MixerGroup) : Coral::String::New("SFX");
-        }
-
-        void ManagedSetAudioSourceMixerGroupIcall(uint32_t entityHandle, Coral::String value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-            {
-                audioSource->MixerGroup = ToUtf8Borrowed(value);
-                if (audioSource->MixerGroup.empty())
-                    audioSource->MixerGroup = "SFX";
-            }
-        }
-
-        float ManagedGetAudioSourceSpatialMinDistanceIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? audioSource->SpatialMinDistance : 1.0f;
-        }
-
-        void ManagedSetAudioSourceSpatialMinDistanceIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-            {
-                audioSource->SpatialMinDistance = std::max(0.001f, value);
-                audioSource->SpatialMaxDistance = std::max(audioSource->SpatialMinDistance, audioSource->SpatialMaxDistance);
-            }
-        }
-
-        float ManagedGetAudioSourceSpatialMaxDistanceIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? audioSource->SpatialMaxDistance : 20.0f;
-        }
-
-        void ManagedSetAudioSourceSpatialMaxDistanceIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-                audioSource->SpatialMaxDistance = std::max(audioSource->SpatialMinDistance, value);
-        }
-
-        float ManagedGetAudioSourceSpatialRolloffExponentIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? audioSource->SpatialRolloffExponent : 1.0f;
-        }
-
-        void ManagedSetAudioSourceSpatialRolloffExponentIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-                audioSource->SpatialRolloffExponent = std::max(0.01f, value);
-        }
-
-        float ManagedGetAudioSourceStereoPanStrengthIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? audioSource->StereoPanStrength : 1.0f;
-        }
-
-        void ManagedSetAudioSourceStereoPanStrengthIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-                audioSource->StereoPanStrength = std::clamp(value, 0.0f, 1.0f);
-        }
-
-        int ManagedGetAudioSourceSpatialRolloffModeIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? static_cast<int>(audioSource->SpatialRolloffMode) : static_cast<int>(AudioSourceComponent::RolloffMode::Linear);
-        }
-
-        void ManagedSetAudioSourceSpatialRolloffModeIcall(uint32_t entityHandle, int value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-                audioSource->SpatialRolloffMode = static_cast<AudioSourceComponent::RolloffMode>(value);
-        }
-
-        float ManagedGetAudioSourceDopplerFactorIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? audioSource->DopplerFactor : 1.0f;
-        }
-
-        void ManagedSetAudioSourceDopplerFactorIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-                audioSource->DopplerFactor = std::max(0.0f, value);
-        }
-
-        bool ManagedGetAudioSourceEnableDirectionalAttenuationIcall(uint32_t entityHandle)
-        {
-            const auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle);
-            return audioSource ? audioSource->EnableDirectionalAttenuation : false;
-        }
-
-        void ManagedSetAudioSourceEnableDirectionalAttenuationIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* audioSource = TryGetManagedAudioSourceComponent(entityHandle))
-                audioSource->EnableDirectionalAttenuation = value;
-        }
+        LT_MANAGED_COMPONENT_HAS(HasAudioSourceComponentIcall, TryGetManagedAudioSourceComponent);
+        LT_MANAGED_COMPONENT_GET(GetAudioSourceClipKeyIcall, Coral::String, TryGetManagedAudioSourceComponent, Coral::String::New(component->AudioClipKey), Coral::String::New(""));
+        LT_MANAGED_COMPONENT_SET(SetAudioSourceClipKeyIcall, Coral::String, TryGetManagedAudioSourceComponent, component->AudioClipKey = ToUtf8Borrowed(value););
+        LT_MANAGED_COMPONENT_GET(GetAudioSourceVolumeIcall, float, TryGetManagedAudioSourceComponent, component->Volume, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetAudioSourceVolumeIcall, float, TryGetManagedAudioSourceComponent, component->Volume = std::max(0.0f, value););
+        LT_MANAGED_COMPONENT_GET(GetAudioSourcePitchIcall, float, TryGetManagedAudioSourceComponent, component->Pitch, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetAudioSourcePitchIcall, float, TryGetManagedAudioSourceComponent, component->Pitch = std::max(0.01f, value););
+        LT_MANAGED_COMPONENT_GET(GetAudioSourcePlayOnStartIcall, bool, TryGetManagedAudioSourceComponent, component->PlayOnStart, true);
+        LT_MANAGED_COMPONENT_SET(SetAudioSourcePlayOnStartIcall, bool, TryGetManagedAudioSourceComponent, component->PlayOnStart = value;);
+        LT_MANAGED_COMPONENT_GET(GetAudioSourceLoopIcall, bool, TryGetManagedAudioSourceComponent, component->Loop, false);
+        LT_MANAGED_COMPONENT_SET(SetAudioSourceLoopIcall, bool, TryGetManagedAudioSourceComponent, component->Loop = value;);
+        LT_MANAGED_COMPONENT_GET(GetAudioSourceMutedIcall, bool, TryGetManagedAudioSourceComponent, component->Muted, false);
+        LT_MANAGED_COMPONENT_SET(SetAudioSourceMutedIcall, bool, TryGetManagedAudioSourceComponent, component->Muted = value;);
+        LT_MANAGED_COMPONENT_GET(GetAudioSourcePlaybackSpaceIcall, int, TryGetManagedAudioSourceComponent, static_cast<int>(component->Space), static_cast<int>(AudioSourceComponent::PlaybackSpace::Global));
+        LT_MANAGED_COMPONENT_SET(SetAudioSourcePlaybackSpaceIcall, int, TryGetManagedAudioSourceComponent, component->Space = static_cast<AudioSourceComponent::PlaybackSpace>(value););
+        LT_MANAGED_COMPONENT_GET(GetAudioSourceMixerGroupIcall, Coral::String, TryGetManagedAudioSourceComponent, Coral::String::New(component->MixerGroup), Coral::String::New("SFX"));
+        LT_MANAGED_COMPONENT_SET(SetAudioSourceMixerGroupIcall, Coral::String, TryGetManagedAudioSourceComponent,
+            component->MixerGroup = ToUtf8Borrowed(value);
+            if (component->MixerGroup.empty())
+                component->MixerGroup = "SFX";);
+        LT_MANAGED_COMPONENT_GET(GetAudioSourceSpatialMinDistanceIcall, float, TryGetManagedAudioSourceComponent, component->SpatialMinDistance, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetAudioSourceSpatialMinDistanceIcall, float, TryGetManagedAudioSourceComponent,
+            component->SpatialMinDistance = std::max(0.001f, value);
+            component->SpatialMaxDistance = std::max(component->SpatialMinDistance, component->SpatialMaxDistance););
+        LT_MANAGED_COMPONENT_GET(GetAudioSourceSpatialMaxDistanceIcall, float, TryGetManagedAudioSourceComponent, component->SpatialMaxDistance, 20.0f);
+        LT_MANAGED_COMPONENT_SET(SetAudioSourceSpatialMaxDistanceIcall, float, TryGetManagedAudioSourceComponent, component->SpatialMaxDistance = std::max(component->SpatialMinDistance, value););
+        LT_MANAGED_COMPONENT_GET(GetAudioSourceSpatialRolloffExponentIcall, float, TryGetManagedAudioSourceComponent, component->SpatialRolloffExponent, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetAudioSourceSpatialRolloffExponentIcall, float, TryGetManagedAudioSourceComponent, component->SpatialRolloffExponent = std::max(0.01f, value););
+        LT_MANAGED_COMPONENT_GET(GetAudioSourceStereoPanStrengthIcall, float, TryGetManagedAudioSourceComponent, component->StereoPanStrength, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetAudioSourceStereoPanStrengthIcall, float, TryGetManagedAudioSourceComponent, component->StereoPanStrength = std::clamp(value, 0.0f, 1.0f););
+        LT_MANAGED_COMPONENT_GET(GetAudioSourceSpatialRolloffModeIcall, int, TryGetManagedAudioSourceComponent, static_cast<int>(component->SpatialRolloffMode), static_cast<int>(AudioSourceComponent::RolloffMode::Linear));
+        LT_MANAGED_COMPONENT_SET(SetAudioSourceSpatialRolloffModeIcall, int, TryGetManagedAudioSourceComponent, component->SpatialRolloffMode = static_cast<AudioSourceComponent::RolloffMode>(value););
+        LT_MANAGED_COMPONENT_GET(GetAudioSourceDopplerFactorIcall, float, TryGetManagedAudioSourceComponent, component->DopplerFactor, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetAudioSourceDopplerFactorIcall, float, TryGetManagedAudioSourceComponent, component->DopplerFactor = std::max(0.0f, value););
+        LT_MANAGED_COMPONENT_GET(GetAudioSourceEnableDirectionalAttenuationIcall, bool, TryGetManagedAudioSourceComponent, component->EnableDirectionalAttenuation, false);
+        LT_MANAGED_COMPONENT_SET(SetAudioSourceEnableDirectionalAttenuationIcall, bool, TryGetManagedAudioSourceComponent, component->EnableDirectionalAttenuation = value;);
 
         float ManagedGetAudioSourceDirectionalInnerAngleDegreesIcall(uint32_t entityHandle)
         {
@@ -610,28 +409,10 @@ namespace Limitless::ManagedScriptHost
             return animator ? animator->RuntimeCurrentStateDurationSeconds : 0.0f;
         }
 
-        bool ManagedHasAnimationEventReceiverComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedAnimationEventReceiverComponent(entityHandle) != nullptr;
-        }
-
-        bool ManagedGetAnimationEventReceiverEnabledIcall(uint32_t entityHandle)
-        {
-            const auto* receiver = TryGetManagedAnimationEventReceiverComponent(entityHandle);
-            return receiver ? receiver->Enabled : true;
-        }
-
-        void ManagedSetAnimationEventReceiverEnabledIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* receiver = TryGetManagedAnimationEventReceiverComponent(entityHandle))
-                receiver->Enabled = value;
-        }
-
-        int ManagedGetAnimationEventReceiverDispatchedEventCountIcall(uint32_t entityHandle)
-        {
-            const auto* receiver = TryGetManagedAnimationEventReceiverComponent(entityHandle);
-            return receiver ? static_cast<int>(receiver->RuntimeDispatchedEvents.size()) : 0;
-        }
+        LT_MANAGED_COMPONENT_HAS(HasAnimationEventReceiverComponentIcall, TryGetManagedAnimationEventReceiverComponent);
+        LT_MANAGED_COMPONENT_GET(GetAnimationEventReceiverEnabledIcall, bool, TryGetManagedAnimationEventReceiverComponent, component->Enabled, true);
+        LT_MANAGED_COMPONENT_SET(SetAnimationEventReceiverEnabledIcall, bool, TryGetManagedAnimationEventReceiverComponent, component->Enabled = value;);
+        LT_MANAGED_COMPONENT_GET(GetAnimationEventReceiverDispatchedEventCountIcall, int, TryGetManagedAnimationEventReceiverComponent, static_cast<int>(component->RuntimeDispatchedEvents.size()), 0);
 
         Coral::String ManagedGetAnimationEventReceiverEventNameIcall(uint32_t entityHandle, int index)
         {
@@ -689,145 +470,31 @@ namespace Limitless::ManagedScriptHost
             return receiver->RuntimeDispatchedEvents[static_cast<size_t>(index)].NormalizedTime;
         }
 
-        bool ManagedHasParticleEmitterComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedParticleEmitterComponent(entityHandle) != nullptr;
-        }
-
-        float ManagedGetParticleEmitterSpawnRateIcall(uint32_t entityHandle)
-        {
-            const auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle);
-            return emitter ? emitter->SpawnRate : 10.0f;
-        }
-
-        void ManagedSetParticleEmitterSpawnRateIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle))
-                emitter->SpawnRate = std::max(0.0f, value);
-        }
-
-        float ManagedGetParticleEmitterLifetimeMinIcall(uint32_t entityHandle)
-        {
-            const auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle);
-            return emitter ? emitter->LifetimeMin : 1.0f;
-        }
-
-        void ManagedSetParticleEmitterLifetimeMinIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle))
-            {
-                emitter->LifetimeMin = std::max(0.0f, value);
-                emitter->LifetimeMax = std::max(emitter->LifetimeMin, emitter->LifetimeMax);
-            }
-        }
-
-        float ManagedGetParticleEmitterLifetimeMaxIcall(uint32_t entityHandle)
-        {
-            const auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle);
-            return emitter ? emitter->LifetimeMax : 2.0f;
-        }
-
-        void ManagedSetParticleEmitterLifetimeMaxIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle))
-                emitter->LifetimeMax = std::max(emitter->LifetimeMin, value);
-        }
-
-        bool ManagedGetParticleEmitterLoopingIcall(uint32_t entityHandle)
-        {
-            const auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle);
-            return emitter ? emitter->Looping : true;
-        }
-
-        void ManagedSetParticleEmitterLoopingIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle))
-                emitter->Looping = value;
-        }
-
-        float ManagedGetParticleEmitterDurationIcall(uint32_t entityHandle)
-        {
-            const auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle);
-            return emitter ? emitter->Duration : 5.0f;
-        }
-
-        void ManagedSetParticleEmitterDurationIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle))
-                emitter->Duration = std::max(0.0f, value);
-        }
-
-        bool ManagedGetParticleEmitterPlayOnStartIcall(uint32_t entityHandle)
-        {
-            const auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle);
-            return emitter ? emitter->PlayOnStart : true;
-        }
-
-        void ManagedSetParticleEmitterPlayOnStartIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle))
-                emitter->PlayOnStart = value;
-        }
-
-        bool ManagedGetParticleEmitterBurstEnabledIcall(uint32_t entityHandle)
-        {
-            const auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle);
-            return emitter ? emitter->BurstEnabled : false;
-        }
-
-        void ManagedSetParticleEmitterBurstEnabledIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle))
-                emitter->BurstEnabled = value;
-        }
-
-        int ManagedGetParticleEmitterBurstCountIcall(uint32_t entityHandle)
-        {
-            const auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle);
-            return emitter ? static_cast<int>(emitter->BurstCount) : 10;
-        }
-
-        void ManagedSetParticleEmitterBurstCountIcall(uint32_t entityHandle, int value)
-        {
-            if (auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle))
-                emitter->BurstCount = static_cast<uint32_t>(std::clamp(value, 0, static_cast<int>(ParticleEmitterComponent::kMaxParticlesCap)));
-        }
-
-        ManagedVector2 ManagedGetParticleEmitterSpawnOffsetMinIcall(uint32_t entityHandle)
-        {
-            const auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle);
-            return emitter ? ToManagedVector2(emitter->SpawnOffsetMin) : ManagedVector2{};
-        }
-
-        void ManagedSetParticleEmitterSpawnOffsetMinIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle))
-                emitter->SpawnOffsetMin = ToGlmVector2(value);
-        }
-
-        ManagedVector2 ManagedGetParticleEmitterSpawnOffsetMaxIcall(uint32_t entityHandle)
-        {
-            const auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle);
-            return emitter ? ToManagedVector2(emitter->SpawnOffsetMax) : ManagedVector2{};
-        }
-
-        void ManagedSetParticleEmitterSpawnOffsetMaxIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle))
-                emitter->SpawnOffsetMax = ToGlmVector2(value);
-        }
-
-        bool ManagedGetParticleEmitterUseRadialSpawnIcall(uint32_t entityHandle)
-        {
-            const auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle);
-            return emitter ? emitter->UseRadialSpawn : false;
-        }
-
-        void ManagedSetParticleEmitterUseRadialSpawnIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* emitter = TryGetManagedParticleEmitterComponent(entityHandle))
-                emitter->UseRadialSpawn = value;
-        }
+        LT_MANAGED_COMPONENT_HAS(HasParticleEmitterComponentIcall, TryGetManagedParticleEmitterComponent);
+        LT_MANAGED_COMPONENT_GET(GetParticleEmitterSpawnRateIcall, float, TryGetManagedParticleEmitterComponent, component->SpawnRate, 10.0f);
+        LT_MANAGED_COMPONENT_SET(SetParticleEmitterSpawnRateIcall, float, TryGetManagedParticleEmitterComponent, component->SpawnRate = std::max(0.0f, value););
+        LT_MANAGED_COMPONENT_GET(GetParticleEmitterLifetimeMinIcall, float, TryGetManagedParticleEmitterComponent, component->LifetimeMin, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetParticleEmitterLifetimeMinIcall, float, TryGetManagedParticleEmitterComponent,
+            component->LifetimeMin = std::max(0.0f, value);
+            component->LifetimeMax = std::max(component->LifetimeMin, component->LifetimeMax););
+        LT_MANAGED_COMPONENT_GET(GetParticleEmitterLifetimeMaxIcall, float, TryGetManagedParticleEmitterComponent, component->LifetimeMax, 2.0f);
+        LT_MANAGED_COMPONENT_SET(SetParticleEmitterLifetimeMaxIcall, float, TryGetManagedParticleEmitterComponent, component->LifetimeMax = std::max(component->LifetimeMin, value););
+        LT_MANAGED_COMPONENT_GET(GetParticleEmitterLoopingIcall, bool, TryGetManagedParticleEmitterComponent, component->Looping, true);
+        LT_MANAGED_COMPONENT_SET(SetParticleEmitterLoopingIcall, bool, TryGetManagedParticleEmitterComponent, component->Looping = value;);
+        LT_MANAGED_COMPONENT_GET(GetParticleEmitterDurationIcall, float, TryGetManagedParticleEmitterComponent, component->Duration, 5.0f);
+        LT_MANAGED_COMPONENT_SET(SetParticleEmitterDurationIcall, float, TryGetManagedParticleEmitterComponent, component->Duration = std::max(0.0f, value););
+        LT_MANAGED_COMPONENT_GET(GetParticleEmitterPlayOnStartIcall, bool, TryGetManagedParticleEmitterComponent, component->PlayOnStart, true);
+        LT_MANAGED_COMPONENT_SET(SetParticleEmitterPlayOnStartIcall, bool, TryGetManagedParticleEmitterComponent, component->PlayOnStart = value;);
+        LT_MANAGED_COMPONENT_GET(GetParticleEmitterBurstEnabledIcall, bool, TryGetManagedParticleEmitterComponent, component->BurstEnabled, false);
+        LT_MANAGED_COMPONENT_SET(SetParticleEmitterBurstEnabledIcall, bool, TryGetManagedParticleEmitterComponent, component->BurstEnabled = value;);
+        LT_MANAGED_COMPONENT_GET(GetParticleEmitterBurstCountIcall, int, TryGetManagedParticleEmitterComponent, static_cast<int>(component->BurstCount), 10);
+        LT_MANAGED_COMPONENT_SET(SetParticleEmitterBurstCountIcall, int, TryGetManagedParticleEmitterComponent, component->BurstCount = static_cast<uint32_t>(std::clamp(value, 0, static_cast<int>(ParticleEmitterComponent::kMaxParticlesCap))););
+        LT_MANAGED_COMPONENT_GET(GetParticleEmitterSpawnOffsetMinIcall, ManagedVector2, TryGetManagedParticleEmitterComponent, ToManagedVector2(component->SpawnOffsetMin), ManagedVector2{});
+        LT_MANAGED_COMPONENT_SET(SetParticleEmitterSpawnOffsetMinIcall, ManagedVector2, TryGetManagedParticleEmitterComponent, component->SpawnOffsetMin = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetParticleEmitterSpawnOffsetMaxIcall, ManagedVector2, TryGetManagedParticleEmitterComponent, ToManagedVector2(component->SpawnOffsetMax), ManagedVector2{});
+        LT_MANAGED_COMPONENT_SET(SetParticleEmitterSpawnOffsetMaxIcall, ManagedVector2, TryGetManagedParticleEmitterComponent, component->SpawnOffsetMax = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetParticleEmitterUseRadialSpawnIcall, bool, TryGetManagedParticleEmitterComponent, component->UseRadialSpawn, false);
+        LT_MANAGED_COMPONENT_SET(SetParticleEmitterUseRadialSpawnIcall, bool, TryGetManagedParticleEmitterComponent, component->UseRadialSpawn = value;);
 
         float ManagedGetParticleEmitterSpawnRadiusMinIcall(uint32_t entityHandle)
         {
@@ -1138,167 +805,169 @@ namespace Limitless::ManagedScriptHost
 
         void RegisterAudioAnimationInternalCalls(Coral::ManagedAssembly& contractAssembly)
         {
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasAudioListener2DComponentIcall", reinterpret_cast<void*>(&ManagedHasAudioListener2DComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioListener2DEnabledIcall", reinterpret_cast<void*>(&ManagedGetAudioListener2DEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioListener2DEnabledIcall", reinterpret_cast<void*>(&ManagedSetAudioListener2DEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioListener2DUsePrimaryCameraPositionIcall", reinterpret_cast<void*>(&ManagedGetAudioListener2DUsePrimaryCameraPositionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioListener2DUsePrimaryCameraPositionIcall", reinterpret_cast<void*>(&ManagedSetAudioListener2DUsePrimaryCameraPositionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasAudioListener3DComponentIcall", reinterpret_cast<void*>(&ManagedHasAudioListener3DComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioListener3DEnabledIcall", reinterpret_cast<void*>(&ManagedGetAudioListener3DEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioListener3DEnabledIcall", reinterpret_cast<void*>(&ManagedSetAudioListener3DEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioListener3DUsePrimaryCameraTransformIcall", reinterpret_cast<void*>(&ManagedGetAudioListener3DUsePrimaryCameraTransformIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioListener3DUsePrimaryCameraTransformIcall", reinterpret_cast<void*>(&ManagedSetAudioListener3DUsePrimaryCameraTransformIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasAudioSourceComponentIcall", reinterpret_cast<void*>(&ManagedHasAudioSourceComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceClipKeyIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceClipKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceClipKeyIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceClipKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceVolumeIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceVolumeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceVolumeIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceVolumeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourcePitchIcall", reinterpret_cast<void*>(&ManagedGetAudioSourcePitchIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourcePitchIcall", reinterpret_cast<void*>(&ManagedSetAudioSourcePitchIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourcePlayOnStartIcall", reinterpret_cast<void*>(&ManagedGetAudioSourcePlayOnStartIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourcePlayOnStartIcall", reinterpret_cast<void*>(&ManagedSetAudioSourcePlayOnStartIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceLoopIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceLoopIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceLoopIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceLoopIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceMutedIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceMutedIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceMutedIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceMutedIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourcePlaybackSpaceIcall", reinterpret_cast<void*>(&ManagedGetAudioSourcePlaybackSpaceIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourcePlaybackSpaceIcall", reinterpret_cast<void*>(&ManagedSetAudioSourcePlaybackSpaceIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceMixerGroupIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceMixerGroupIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceMixerGroupIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceMixerGroupIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceSpatialMinDistanceIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceSpatialMinDistanceIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceSpatialMinDistanceIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceSpatialMinDistanceIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceSpatialMaxDistanceIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceSpatialMaxDistanceIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceSpatialMaxDistanceIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceSpatialMaxDistanceIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceSpatialRolloffExponentIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceSpatialRolloffExponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceSpatialRolloffExponentIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceSpatialRolloffExponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceStereoPanStrengthIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceStereoPanStrengthIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceStereoPanStrengthIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceStereoPanStrengthIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceSpatialRolloffModeIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceSpatialRolloffModeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceSpatialRolloffModeIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceSpatialRolloffModeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceDopplerFactorIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceDopplerFactorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceDopplerFactorIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceDopplerFactorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceEnableDirectionalAttenuationIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceEnableDirectionalAttenuationIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceEnableDirectionalAttenuationIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceEnableDirectionalAttenuationIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceDirectionalInnerAngleDegreesIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceDirectionalInnerAngleDegreesIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceDirectionalInnerAngleDegreesIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceDirectionalInnerAngleDegreesIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceDirectionalOuterAngleDegreesIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceDirectionalOuterAngleDegreesIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceDirectionalOuterAngleDegreesIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceDirectionalOuterAngleDegreesIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceDirectionalOuterVolumeIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceDirectionalOuterVolumeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceDirectionalOuterVolumeIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceDirectionalOuterVolumeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceAttenuationCurveKeyIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceAttenuationCurveKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAudioSourceAttenuationCurveKeyIcall", reinterpret_cast<void*>(&ManagedSetAudioSourceAttenuationCurveKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAudioSourceIsPlayingIcall", reinterpret_cast<void*>(&ManagedGetAudioSourceIsPlayingIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "RequestAudioSourcePlayIcall", reinterpret_cast<void*>(&ManagedRequestAudioSourcePlayIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "StopAudioSourceIcall", reinterpret_cast<void*>(&ManagedStopAudioSourceIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasAnimatorComponentIcall", reinterpret_cast<void*>(&ManagedHasAnimatorComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimatorControllerKeyIcall", reinterpret_cast<void*>(&ManagedGetAnimatorControllerKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAnimatorControllerKeyIcall", reinterpret_cast<void*>(&ManagedSetAnimatorControllerKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimatorDefaultClipKeyIcall", reinterpret_cast<void*>(&ManagedGetAnimatorDefaultClipKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAnimatorDefaultClipKeyIcall", reinterpret_cast<void*>(&ManagedSetAnimatorDefaultClipKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimatorPlaybackSpeedIcall", reinterpret_cast<void*>(&ManagedGetAnimatorPlaybackSpeedIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAnimatorPlaybackSpeedIcall", reinterpret_cast<void*>(&ManagedSetAnimatorPlaybackSpeedIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimatorEnabledIcall", reinterpret_cast<void*>(&ManagedGetAnimatorEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAnimatorEnabledIcall", reinterpret_cast<void*>(&ManagedSetAnimatorEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimatorApplyToSpriteIcall", reinterpret_cast<void*>(&ManagedGetAnimatorApplyToSpriteIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAnimatorApplyToSpriteIcall", reinterpret_cast<void*>(&ManagedSetAnimatorApplyToSpriteIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimatorApplyToTransformIcall", reinterpret_cast<void*>(&ManagedGetAnimatorApplyToTransformIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAnimatorApplyToTransformIcall", reinterpret_cast<void*>(&ManagedSetAnimatorApplyToTransformIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimatorAutoPlayIcall", reinterpret_cast<void*>(&ManagedGetAnimatorAutoPlayIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAnimatorAutoPlayIcall", reinterpret_cast<void*>(&ManagedSetAnimatorAutoPlayIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "PlayAnimatorStateIcall", reinterpret_cast<void*>(&ManagedPlayAnimatorStateIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "PlayAnimatorClipIcall", reinterpret_cast<void*>(&ManagedPlayAnimatorClipIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAnimatorBoolParameterIcall", reinterpret_cast<void*>(&ManagedSetAnimatorBoolParameterIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimatorBoolParameterIcall", reinterpret_cast<void*>(&ManagedGetAnimatorBoolParameterIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAnimatorFloatParameterIcall", reinterpret_cast<void*>(&ManagedSetAnimatorFloatParameterIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimatorFloatParameterIcall", reinterpret_cast<void*>(&ManagedGetAnimatorFloatParameterIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAnimatorIntegerParameterIcall", reinterpret_cast<void*>(&ManagedSetAnimatorIntegerParameterIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimatorIntegerParameterIcall", reinterpret_cast<void*>(&ManagedGetAnimatorIntegerParameterIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAnimatorTriggerParameterIcall", reinterpret_cast<void*>(&ManagedSetAnimatorTriggerParameterIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "ResetAnimatorTriggerParameterIcall", reinterpret_cast<void*>(&ManagedResetAnimatorTriggerParameterIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimatorCurrentStateNameIcall", reinterpret_cast<void*>(&ManagedGetAnimatorCurrentStateNameIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimatorCurrentClipKeyIcall", reinterpret_cast<void*>(&ManagedGetAnimatorCurrentClipKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimatorStateTimeSecondsIcall", reinterpret_cast<void*>(&ManagedGetAnimatorStateTimeSecondsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimatorCurrentStateDurationSecondsIcall", reinterpret_cast<void*>(&ManagedGetAnimatorCurrentStateDurationSecondsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasAnimationEventReceiverComponentIcall", reinterpret_cast<void*>(&ManagedHasAnimationEventReceiverComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimationEventReceiverEnabledIcall", reinterpret_cast<void*>(&ManagedGetAnimationEventReceiverEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetAnimationEventReceiverEnabledIcall", reinterpret_cast<void*>(&ManagedSetAnimationEventReceiverEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimationEventReceiverDispatchedEventCountIcall", reinterpret_cast<void*>(&ManagedGetAnimationEventReceiverDispatchedEventCountIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimationEventReceiverEventNameIcall", reinterpret_cast<void*>(&ManagedGetAnimationEventReceiverEventNameIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimationEventReceiverEventStringPayloadIcall", reinterpret_cast<void*>(&ManagedGetAnimationEventReceiverEventStringPayloadIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimationEventReceiverEventFloatPayloadIcall", reinterpret_cast<void*>(&ManagedGetAnimationEventReceiverEventFloatPayloadIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimationEventReceiverEventIntegerPayloadIcall", reinterpret_cast<void*>(&ManagedGetAnimationEventReceiverEventIntegerPayloadIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimationEventReceiverEventBooleanPayloadIcall", reinterpret_cast<void*>(&ManagedGetAnimationEventReceiverEventBooleanPayloadIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimationEventReceiverEventTimeSecondsIcall", reinterpret_cast<void*>(&ManagedGetAnimationEventReceiverEventTimeSecondsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetAnimationEventReceiverEventNormalizedTimeIcall", reinterpret_cast<void*>(&ManagedGetAnimationEventReceiverEventNormalizedTimeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasParticleEmitterComponentIcall", reinterpret_cast<void*>(&ManagedHasParticleEmitterComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterSpawnRateIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterSpawnRateIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterSpawnRateIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterSpawnRateIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterLifetimeMinIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterLifetimeMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterLifetimeMinIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterLifetimeMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterLifetimeMaxIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterLifetimeMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterLifetimeMaxIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterLifetimeMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterLoopingIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterLoopingIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterLoopingIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterLoopingIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterDurationIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterDurationIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterDurationIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterDurationIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterPlayOnStartIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterPlayOnStartIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterPlayOnStartIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterPlayOnStartIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterBurstEnabledIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterBurstEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterBurstEnabledIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterBurstEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterBurstCountIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterBurstCountIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterBurstCountIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterBurstCountIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterSpawnOffsetMinIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterSpawnOffsetMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterSpawnOffsetMinIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterSpawnOffsetMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterSpawnOffsetMaxIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterSpawnOffsetMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterSpawnOffsetMaxIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterSpawnOffsetMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterUseRadialSpawnIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterUseRadialSpawnIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterUseRadialSpawnIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterUseRadialSpawnIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterSpawnRadiusMinIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterSpawnRadiusMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterSpawnRadiusMinIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterSpawnRadiusMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterSpawnRadiusMaxIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterSpawnRadiusMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterSpawnRadiusMaxIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterSpawnRadiusMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterSpeedMinIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterSpeedMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterSpeedMinIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterSpeedMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterSpeedMaxIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterSpeedMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterSpeedMaxIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterSpeedMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterAngleMinIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterAngleMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterAngleMinIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterAngleMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterAngleMaxIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterAngleMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterAngleMaxIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterAngleMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterRadialVelocityIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterRadialVelocityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterRadialVelocityIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterRadialVelocityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterGravityModifierIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterGravityModifierIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterGravityModifierIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterGravityModifierIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterStartSizeMinIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterStartSizeMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterStartSizeMinIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterStartSizeMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterStartSizeMaxIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterStartSizeMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterStartSizeMaxIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterStartSizeMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterEndSizeIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterEndSizeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterEndSizeIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterEndSizeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterStartColorIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterStartColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterStartColorIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterStartColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterEndColorIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterEndColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterEndColorIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterEndColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterStartRotationMinIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterStartRotationMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterStartRotationMinIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterStartRotationMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterStartRotationMaxIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterStartRotationMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterStartRotationMaxIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterStartRotationMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterRotationSpeedMinIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterRotationSpeedMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterRotationSpeedMinIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterRotationSpeedMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterRotationSpeedMaxIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterRotationSpeedMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterRotationSpeedMaxIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterRotationSpeedMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterTextureKeyIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterTextureKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterTextureKeyIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterTextureKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterMaxParticlesIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterMaxParticlesIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParticleEmitterMaxParticlesIcall", reinterpret_cast<void*>(&ManagedSetParticleEmitterMaxParticlesIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterIsPlayingIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterIsPlayingIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterIsPausedIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterIsPausedIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParticleEmitterAliveParticleCountIcall", reinterpret_cast<void*>(&ManagedGetParticleEmitterAliveParticleCountIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "PlayParticleEmitterIcall", reinterpret_cast<void*>(&ManagedPlayParticleEmitterIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "StopParticleEmitterIcall", reinterpret_cast<void*>(&ManagedStopParticleEmitterIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "PauseParticleEmitterIcall", reinterpret_cast<void*>(&ManagedPauseParticleEmitterIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "ResumeParticleEmitterIcall", reinterpret_cast<void*>(&ManagedResumeParticleEmitterIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "EmitParticleEmitterIcall", reinterpret_cast<void*>(&ManagedEmitParticleEmitterIcall));
+            RegisterInternalCallBatch(contractAssembly, {
+                LT_MANAGED_INTERNAL_CALL(HasAudioListener2DComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioListener2DEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioListener2DEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioListener2DUsePrimaryCameraPositionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioListener2DUsePrimaryCameraPositionIcall),
+                LT_MANAGED_INTERNAL_CALL(HasAudioListener3DComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioListener3DEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioListener3DEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioListener3DUsePrimaryCameraTransformIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioListener3DUsePrimaryCameraTransformIcall),
+                LT_MANAGED_INTERNAL_CALL(HasAudioSourceComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceClipKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceClipKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceVolumeIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceVolumeIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourcePitchIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourcePitchIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourcePlayOnStartIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourcePlayOnStartIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceLoopIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceLoopIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceMutedIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceMutedIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourcePlaybackSpaceIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourcePlaybackSpaceIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceMixerGroupIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceMixerGroupIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceSpatialMinDistanceIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceSpatialMinDistanceIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceSpatialMaxDistanceIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceSpatialMaxDistanceIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceSpatialRolloffExponentIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceSpatialRolloffExponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceStereoPanStrengthIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceStereoPanStrengthIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceSpatialRolloffModeIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceSpatialRolloffModeIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceDopplerFactorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceDopplerFactorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceEnableDirectionalAttenuationIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceEnableDirectionalAttenuationIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceDirectionalInnerAngleDegreesIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceDirectionalInnerAngleDegreesIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceDirectionalOuterAngleDegreesIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceDirectionalOuterAngleDegreesIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceDirectionalOuterVolumeIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceDirectionalOuterVolumeIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceAttenuationCurveKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAudioSourceAttenuationCurveKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAudioSourceIsPlayingIcall),
+                LT_MANAGED_INTERNAL_CALL(RequestAudioSourcePlayIcall),
+                LT_MANAGED_INTERNAL_CALL(StopAudioSourceIcall),
+                LT_MANAGED_INTERNAL_CALL(HasAnimatorComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimatorControllerKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAnimatorControllerKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimatorDefaultClipKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAnimatorDefaultClipKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimatorPlaybackSpeedIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAnimatorPlaybackSpeedIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimatorEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAnimatorEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimatorApplyToSpriteIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAnimatorApplyToSpriteIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimatorApplyToTransformIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAnimatorApplyToTransformIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimatorAutoPlayIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAnimatorAutoPlayIcall),
+                LT_MANAGED_INTERNAL_CALL(PlayAnimatorStateIcall),
+                LT_MANAGED_INTERNAL_CALL(PlayAnimatorClipIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAnimatorBoolParameterIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimatorBoolParameterIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAnimatorFloatParameterIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimatorFloatParameterIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAnimatorIntegerParameterIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimatorIntegerParameterIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAnimatorTriggerParameterIcall),
+                LT_MANAGED_INTERNAL_CALL(ResetAnimatorTriggerParameterIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimatorCurrentStateNameIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimatorCurrentClipKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimatorStateTimeSecondsIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimatorCurrentStateDurationSecondsIcall),
+                LT_MANAGED_INTERNAL_CALL(HasAnimationEventReceiverComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimationEventReceiverEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(SetAnimationEventReceiverEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimationEventReceiverDispatchedEventCountIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimationEventReceiverEventNameIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimationEventReceiverEventStringPayloadIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimationEventReceiverEventFloatPayloadIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimationEventReceiverEventIntegerPayloadIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimationEventReceiverEventBooleanPayloadIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimationEventReceiverEventTimeSecondsIcall),
+                LT_MANAGED_INTERNAL_CALL(GetAnimationEventReceiverEventNormalizedTimeIcall),
+                LT_MANAGED_INTERNAL_CALL(HasParticleEmitterComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterSpawnRateIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterSpawnRateIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterLifetimeMinIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterLifetimeMinIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterLifetimeMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterLifetimeMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterLoopingIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterLoopingIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterDurationIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterDurationIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterPlayOnStartIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterPlayOnStartIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterBurstEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterBurstEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterBurstCountIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterBurstCountIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterSpawnOffsetMinIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterSpawnOffsetMinIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterSpawnOffsetMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterSpawnOffsetMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterUseRadialSpawnIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterUseRadialSpawnIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterSpawnRadiusMinIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterSpawnRadiusMinIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterSpawnRadiusMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterSpawnRadiusMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterSpeedMinIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterSpeedMinIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterSpeedMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterSpeedMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterAngleMinIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterAngleMinIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterAngleMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterAngleMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterRadialVelocityIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterRadialVelocityIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterGravityModifierIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterGravityModifierIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterStartSizeMinIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterStartSizeMinIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterStartSizeMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterStartSizeMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterEndSizeIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterEndSizeIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterStartColorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterStartColorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterEndColorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterEndColorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterStartRotationMinIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterStartRotationMinIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterStartRotationMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterStartRotationMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterRotationSpeedMinIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterRotationSpeedMinIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterRotationSpeedMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterRotationSpeedMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterTextureKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterTextureKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterMaxParticlesIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParticleEmitterMaxParticlesIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterIsPlayingIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterIsPausedIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParticleEmitterAliveParticleCountIcall),
+                LT_MANAGED_INTERNAL_CALL(PlayParticleEmitterIcall),
+                LT_MANAGED_INTERNAL_CALL(StopParticleEmitterIcall),
+                LT_MANAGED_INTERNAL_CALL(PauseParticleEmitterIcall),
+                LT_MANAGED_INTERNAL_CALL(ResumeParticleEmitterIcall),
+                LT_MANAGED_INTERNAL_CALL(EmitParticleEmitterIcall)
+            });
         }
     }
 }

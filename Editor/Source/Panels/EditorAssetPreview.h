@@ -3,8 +3,10 @@
 #include "Graphics/Texture.h"
 #include "imgui/imgui.h"
 
+#include <chrono>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 namespace Limitless::EditorAssetPreview
 {
@@ -18,6 +20,16 @@ namespace Limitless::EditorAssetPreview
         bool HasPreview = false;
     };
 
-    const MaterialPreviewData* GetCachedMaterialPreview(const std::string& materialAssetKey);
-    void InvalidateCachedMaterialPreview(const std::string& materialAssetKey);
+    struct MaterialPreviewCacheEntry : MaterialPreviewData
+    {
+        std::chrono::steady_clock::time_point LoadTime = {};
+    };
+
+    struct MaterialPreviewCache
+    {
+        std::unordered_map<std::string, MaterialPreviewCacheEntry> Entries;
+    };
+
+    const MaterialPreviewData* GetCachedMaterialPreview(MaterialPreviewCache& cache, const std::string& materialAssetKey);
+    void InvalidateCachedMaterialPreview(MaterialPreviewCache& cache, const std::string& materialAssetKey);
 }

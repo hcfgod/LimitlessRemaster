@@ -372,11 +372,15 @@ if [[ ! -f "$MANAGED_BUILD_SCRIPT" ]]; then
     exit 1
 fi
 
-bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$OUTPUT_DIR" --project-root "$PROJECT_ROOT"
-
 bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$PROJECT_LOCAL_OUTPUT_DIR" --project-root "$PROJECT_ROOT"
 
-bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$RUNTIME_TEMPLATE_DIR" --project-root "$PROJECT_ROOT"
+rm -rf "$OUTPUT_DIR/Managed"
+mkdir -p "$OUTPUT_DIR/Managed"
+tar -C "$PROJECT_LOCAL_OUTPUT_DIR/Managed" -cf - . | tar -C "$OUTPUT_DIR/Managed" -xpf -
+
+rm -rf "$RUNTIME_TEMPLATE_DIR/Managed"
+mkdir -p "$RUNTIME_TEMPLATE_DIR/Managed"
+tar -C "$PROJECT_LOCAL_OUTPUT_DIR/Managed" -cf - . | tar -C "$RUNTIME_TEMPLATE_DIR/Managed" -xpf -
 
 echo "ScriptCore build completed successfully."
 echo "Output: $OUTPUT_LIB"

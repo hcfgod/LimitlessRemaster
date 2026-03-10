@@ -15,6 +15,7 @@
 #include <Coral/String.hpp>
 #include <Coral/Type.hpp>
 
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -89,6 +90,14 @@ namespace Limitless::ManagedScriptHost::Internal
         std::string LastManagedExceptionMessage;
     };
 
+    using InternalCallRegistrar = void (*)(Coral::ManagedAssembly& contractAssembly);
+
+    struct InternalCallBinding final
+    {
+        const char* MethodName = nullptr;
+        void* Function = nullptr;
+    };
+
     extern HostState s_HostState;
 
     std::string ToLower(std::string value);
@@ -152,9 +161,35 @@ namespace Limitless::ManagedScriptHost::Internal
     std::string BuildManagedLogPrefix();
     void LogCoralMessage(std::string_view message, Coral::MessageLevel level);
     void CaptureManagedException(std::string_view message);
+    void RegisterInternalCallBatch(Coral::ManagedAssembly& contractAssembly,
+                                   std::initializer_list<InternalCallBinding> bindings);
     void RegisterScenePhysicsInternalCalls(Coral::ManagedAssembly& contractAssembly);
     void RegisterRenderingUiInternalCalls(Coral::ManagedAssembly& contractAssembly);
     void RegisterAudioAnimationInternalCalls(Coral::ManagedAssembly& contractAssembly);
     void RegisterGridPhysicsInternalCalls(Coral::ManagedAssembly& contractAssembly);
     void RegisterInternalCalls(Coral::ManagedAssembly& contractAssembly);
 }
+
+#define LT_MANAGED_INTERNAL_CALL(methodName) ::Limitless::ManagedScriptHost::Internal::InternalCallBinding{ #methodName, reinterpret_cast<void*>(&Managed##methodName) }
+
+#define LT_MANAGED_COMPONENT_HAS(methodName, accessor) \
+    bool Managed##methodName(uint32_t entityHandle) \
+    { \
+        return accessor(entityHandle) != nullptr; \
+    }
+
+#define LT_MANAGED_COMPONENT_GET(methodName, returnType, accessor, valueExpression, ...) \
+    returnType Managed##methodName(uint32_t entityHandle) \
+    { \
+        const auto* component = accessor(entityHandle); \
+        return component ? (valueExpression) : __VA_ARGS__; \
+    }
+
+#define LT_MANAGED_COMPONENT_SET(methodName, valueType, accessor, ...) \
+    void Managed##methodName(uint32_t entityHandle, valueType value) \
+    { \
+        if (auto* component = accessor(entityHandle)) \
+        { \
+            __VA_ARGS__ \
+        } \
+    }

@@ -237,6 +237,7 @@ namespace Limitless
         Audio::StopAudioSourcesInScene(m_Scene.get());
         Audio::StopAudioSourcesInScene(m_EditSceneStored.get());
         m_EditSceneStoredAssetKey = m_CurrentSceneAssetKey;
+        m_EditModeSelectedEntityBeforePlay = m_SelectedEntity;
 
         EditorPlayMode::Enter(
             m_PlayModeState,
@@ -299,6 +300,7 @@ namespace Limitless
         Audio::StopAudioSourcesInScene(m_Scene.get());
         Audio::StopAudioSourcesInScene(m_EditSceneStored.get());
         m_EditSceneStoredAssetKey = m_CurrentSceneAssetKey;
+        m_EditModeSelectedEntityBeforePlay = m_SelectedEntity;
 
         EditorPlayMode::EnterSimulate(
             m_PlayModeState,
@@ -338,6 +340,17 @@ namespace Limitless
             m_SelectedEntity,
             m_SelectedTextureAssetKey,
             m_CachedTextureAsset);
+
+        if (m_Scene && m_Scene->IsValid(m_EditModeSelectedEntityBeforePlay))
+            m_SelectedEntity = m_EditModeSelectedEntityBeforePlay;
+        else
+            m_SelectedEntity = entt::null;
+
+        m_ScenePanelState.MultiSelectedEntities.clear();
+        if (m_SelectedEntity != entt::null)
+            m_ScenePanelState.MultiSelectedEntities.push_back(m_SelectedEntity);
+        m_ScenePanelState.SelectionAnchorEntity = m_SelectedEntity;
+        m_EditModeSelectedEntityBeforePlay = entt::null;
 
         // Restore the edit scene identity after Play Mode runtime scene changes.
         m_CurrentSceneAssetKey = m_EditSceneStoredAssetKey;

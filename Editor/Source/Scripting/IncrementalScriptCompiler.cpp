@@ -22,7 +22,7 @@ namespace Limitless
         std::transform(extStr.begin(), extStr.end(), extStr.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-        return extStr == ".cpp" || extStr == ".h" || extStr == ".hpp";
+        return extStr == ".cpp" || extStr == ".h" || extStr == ".hpp" || extStr == ".cs";
     }
 
     static int64_t NowMs()

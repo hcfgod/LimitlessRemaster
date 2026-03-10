@@ -30,11 +30,6 @@ namespace Limitless::EditorTilePalettePanel
     static constexpr const char* kSubSpritePayloadId = "SUB_SPRITE_KEY";
     static constexpr const char* kTexturePayloadId   = "ASSET_TEXTURE";
 
-    /// Cached palette asset key list so we don't scan the database every frame.
-    static std::vector<std::string> s_CachedPaletteKeys;
-    static bool s_PaletteKeysDirty = true;
-    static uint64_t s_CachedPaletteKeysRevision = 0;
-
     static bool IsAssetKeyUnderOpenProjectAssets(const std::string& assetKey)
     {
         if (assetKey.empty())
@@ -73,25 +68,25 @@ namespace Limitless::EditorTilePalettePanel
         return !(relText == ".." || relText.rfind("../", 0) == 0);
     }
 
-    static const std::vector<std::string>& GetCachedPaletteAssetKeys()
+    static const std::vector<std::string>& GetCachedPaletteAssetKeys(TilePaletteState& state)
     {
         const uint64_t currentDatabaseRevision = Assets::AssetDatabase::GetInstance().GetRevision();
-        if (s_PaletteKeysDirty || currentDatabaseRevision != s_CachedPaletteKeysRevision)
+        if (state.PaletteKeysDirty || currentDatabaseRevision != state.CachedPaletteKeysRevision)
         {
-            s_CachedPaletteKeys.clear();
+            state.CachedPaletteKeys.clear();
             const auto records = Assets::AssetDatabase::GetInstance().GetAllRecords();
             for (const auto& record : records)
             {
                 if (record.Type != Assets::AssetType::TilePalette)
                     continue;
                 if (IsAssetKeyUnderOpenProjectAssets(record.Key))
-                    s_CachedPaletteKeys.push_back(record.Key);
+                    state.CachedPaletteKeys.push_back(record.Key);
             }
-            std::sort(s_CachedPaletteKeys.begin(), s_CachedPaletteKeys.end());
-            s_CachedPaletteKeysRevision = currentDatabaseRevision;
-            s_PaletteKeysDirty = false;
+            std::sort(state.CachedPaletteKeys.begin(), state.CachedPaletteKeys.end());
+            state.CachedPaletteKeysRevision = currentDatabaseRevision;
+            state.PaletteKeysDirty = false;
         }
-        return s_CachedPaletteKeys;
+        return state.CachedPaletteKeys;
     }
 
     /// Rebuild the per-tile render info cache from the loaded palette data.
@@ -265,7 +260,7 @@ namespace Limitless::EditorTilePalettePanel
         state.CachedPaletteData = std::move(paletteData);
         state.PaletteDataLoaded = true;
         state.TileRenderInfoDirty = true;
-        s_PaletteKeysDirty = true;
+        state.PaletteKeysDirty = true;
     }
 
     /// Find the Grid2D entity and active layer entity from the scene context.
@@ -388,7 +383,7 @@ namespace Limitless::EditorTilePalettePanel
         }
 
         // ---- Palette selector ------------------------------------------------
-        const auto& paletteKeys = GetCachedPaletteAssetKeys();
+        const auto& paletteKeys = GetCachedPaletteAssetKeys(state);
 
         {
             const std::string activeLabel = state.ActivePaletteKey.empty()
@@ -796,9 +791,9 @@ namespace Limitless::EditorTilePalettePanel
         EditorPanelStyle::PopPanelVisualStyle();
     }
 
-    void InvalidatePaletteKeyCache()
+    void InvalidatePaletteKeyCache(TilePaletteState& state)
     {
-        s_PaletteKeysDirty = true;
-        s_CachedPaletteKeysRevision = 0;
+        state.PaletteKeysDirty = true;
+        state.CachedPaletteKeysRevision = 0;
     }
 }

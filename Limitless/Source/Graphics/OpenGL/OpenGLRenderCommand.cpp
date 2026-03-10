@@ -7,6 +7,7 @@
 #include "Graphics/Framebuffer.h"
 #include "Graphics/NativeRenderHandles.h"
 #include "Graphics/RenderPipeline.h"
+#include "Graphics/OpenGL/OpenGLRenderCommandTestHooks.h"
 #include "Core/Error.h"
 #include "Core/Debug/Log.h"
 
@@ -1166,4 +1167,53 @@ namespace Limitless
         LT_CORE_DEBUG("CustomCommand: {}", m_Name);
     }
 
-} // namespace Limitless 
+    OpenGLRenderCommandTestHooks::RuntimeStateSnapshot OpenGLRenderCommandTestHooks::GetRuntimeStateSnapshot()
+    {
+        const auto& state = GetOpenGLRenderCommandRuntimeState();
+        RuntimeStateSnapshot snapshot{};
+        snapshot.Program = state.GLState.Program;
+        snapshot.VertexArray = state.GLState.VertexArray;
+        snapshot.ActiveTextureUnit = state.GLState.ActiveTextureUnit;
+        for (size_t index = 0; index < snapshot.BoundTexture2D.size(); ++index)
+            snapshot.BoundTexture2D[index] = state.GLState.BoundTexture2D[index];
+        snapshot.Renderer2DProgram = state.Renderer2DUniforms.Program;
+        snapshot.ViewProjectionLocation = state.Renderer2DUniforms.ViewProjectionLocation;
+        snapshot.ModelLocation = state.Renderer2DUniforms.ModelLocation;
+        snapshot.HasViewProjection = state.Renderer2DUniforms.HasViewProjection;
+        snapshot.UniformProgramCount = state.UniformLocations.size();
+        for (const auto& [program, locations] : state.UniformLocations)
+        {
+            (void)program;
+            snapshot.UniformLocationCount += locations.size();
+        }
+        return snapshot;
+    }
+
+    void OpenGLRenderCommandTestHooks::SetRuntimeStateSnapshot(const RuntimeStateSnapshot& snapshot)
+    {
+        auto& state = GetOpenGLRenderCommandRuntimeState();
+        state.GLState.Program = snapshot.Program;
+        state.GLState.VertexArray = snapshot.VertexArray;
+        state.GLState.ActiveTextureUnit = snapshot.ActiveTextureUnit;
+        for (size_t index = 0; index < state.GLState.BoundTexture2D.size(); ++index)
+            state.GLState.BoundTexture2D[index] = snapshot.BoundTexture2D[index];
+        state.Renderer2DUniforms.Program = snapshot.Renderer2DProgram;
+        state.Renderer2DUniforms.ViewProjectionLocation = snapshot.ViewProjectionLocation;
+        state.Renderer2DUniforms.ModelLocation = snapshot.ModelLocation;
+        state.Renderer2DUniforms.HasViewProjection = snapshot.HasViewProjection;
+        state.Renderer2DUniforms.LastViewProjection = glm::mat4(1.0f);
+        state.UniformLocations.clear();
+        if (snapshot.UniformProgramCount > 0 || snapshot.UniformLocationCount > 0)
+        {
+            auto& programLocations = state.UniformLocations[static_cast<GLuint>(snapshot.Renderer2DProgram != 0 ? snapshot.Renderer2DProgram : 1u)];
+            for (size_t index = 0; index < snapshot.UniformLocationCount; ++index)
+                programLocations.emplace(std::to_string(index), static_cast<GLint>(index));
+        }
+    }
+
+    void OpenGLRenderCommandTestHooks::ResetRuntimeState()
+    {
+        GetOpenGLRenderCommandRuntimeState() = OpenGLRenderCommandRuntimeState{};
+    }
+
+} // namespace Limitless

@@ -94,7 +94,13 @@ $csprojLines = @(
     ('    <RootNamespace>{0}</RootNamespace>' -f $escapedAssemblyName),
     '    <EnableDynamicLoading>true</EnableDynamicLoading>',
     '  </PropertyGroup>',
-    '  <ItemGroup>',
+    '  <ItemGroup Condition="''$(LimitlessManagedReferencePath)'' != ''''">',
+    '    <Reference Include="Limitless.Managed">',
+    '      <HintPath>$(LimitlessManagedReferencePath)</HintPath>',
+    '      <Private>true</Private>',
+    '    </Reference>',
+    '  </ItemGroup>',
+    '  <ItemGroup Condition="''$(LimitlessManagedReferencePath)'' == ''''">',
     ('    <ProjectReference Include="{0}" />' -f $escapedContractPath),
     '  </ItemGroup>',
     '  <ItemGroup>'
@@ -103,5 +109,16 @@ $csprojLines += $compileItems
 $csprojLines += '  </ItemGroup>'
 $csprojLines += '</Project>'
 
-Set-Content -LiteralPath $csprojPath -Value $csprojLines -Encoding UTF8
+$newContent = ($csprojLines -join [Environment]::NewLine) + [Environment]::NewLine
+$existingContent = $null
+if (Test-Path -LiteralPath $csprojPath)
+{
+    $existingContent = [IO.File]::ReadAllText($csprojPath)
+}
+
+if ($existingContent -ne $newContent)
+{
+    [IO.File]::WriteAllText($csprojPath, $newContent, [Text.UTF8Encoding]::new($false))
+}
+
 Write-Output ($csprojPath + '|' + $assemblyName + '.dll')

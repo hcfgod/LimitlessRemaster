@@ -7,9 +7,20 @@
 #include <array>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+namespace Limitless::EditorAssetPreview
+{
+    struct MaterialPreviewCache;
+}
+
+namespace Limitless::EditorProjectPanel::Internal
+{
+    struct ProjectPanelCacheState;
+}
 
 namespace Limitless
 {
@@ -52,6 +63,8 @@ namespace Limitless
 
         // Persisted expansion state for the Project tree.
         std::unordered_map<std::string, bool> ExpandedFolderState;
+        std::unordered_map<std::string, bool> SearchMatchCache;
+        std::shared_ptr<EditorProjectPanel::Internal::ProjectPanelCacheState> CacheState;
         EditorProjectFolderPopup FolderPopupPending = EditorProjectFolderPopup::None;
 
         bool CreateFolderPopupOpen = false;
@@ -86,6 +99,7 @@ namespace Limitless
         std::array<char, 256> FolderPopupBuffer{};
         std::array<char, 256> RenameAssetBuffer{};
         std::array<char, 256> SearchBuffer{};
+        std::string SearchFilterLower;
         std::array<char, 256> CreateNativeScriptClassNameBuffer{};
         std::array<char, 256> CreateManagedScriptClassNameBuffer{};
         std::array<char, 256> CreateMaterialNameBuffer{};
@@ -99,9 +113,12 @@ namespace Limitless
 
     namespace EditorProjectPanel
     {
+        void InvalidateProjectDirectoryCache(EditorProjectPanelState& state);
+
         /// Draws the full Project panel tree and folder popup workflow.
         void Draw(bool& isOpen,
                   EditorProjectPanelState& state,
+                  EditorAssetPreview::MaterialPreviewCache& materialPreviewCache,
                   entt::entity& selectedEntity,
                   std::string& selectedTextureAssetKey,
                   Assets::TextureAsset::Ptr& cachedTextureAsset,

@@ -38,7 +38,8 @@ namespace Limitless::EditorInspectorPanel
 
         bool BeginInspectorScriptSectionHeader(const char* label,
                                                const char* popupId,
-                                               const char* optionsButtonId)
+                                               const char* optionsButtonId,
+                                               const char* stateKeySuffix)
         {
             ImGui::Spacing();
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f, 10.0f));
@@ -46,10 +47,12 @@ namespace Limitless::EditorInspectorPanel
             ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.12f, 0.19f, 0.29f, 0.96f));
             ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.18f, 0.27f, 0.41f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.24f, 0.34f, 0.50f, 1.0f));
-            const bool isOpen = ImGui::TreeNodeEx(label,
-                                                  ImGuiTreeNodeFlags_DefaultOpen |
-                                                      ImGuiTreeNodeFlags_Framed |
-                                                      ImGuiTreeNodeFlags_AllowItemOverlap);
+            const bool isOpen = BeginPersistentTreeNode(
+                stateKeySuffix ? stateKeySuffix : label,
+                label,
+                ImGuiTreeNodeFlags_DefaultOpen |
+                    ImGuiTreeNodeFlags_Framed |
+                    ImGuiTreeNodeFlags_AllowItemOverlap);
             ImGui::PopStyleColor(3);
             ImGui::PopStyleVar(2);
 
@@ -895,7 +898,12 @@ namespace Limitless::EditorInspectorPanel
                     std::string scriptLabel = managedDisplayName.empty()
                         ? ("Managed Script Component " + std::to_string(scriptComponent->ComponentOrder + 1))
                         : managedDisplayName;
-                    const bool scriptOpen = BeginInspectorScriptSectionHeader(scriptLabel.c_str(), "ScriptComponentOptions", "...##ScriptComponentOptionsButton");
+                    const std::string scriptStateKey = "ManagedScriptComponent." + std::to_string(scriptComponent->ComponentOrder);
+                    const bool scriptOpen = BeginInspectorScriptSectionHeader(
+                        scriptLabel.c_str(),
+                        "ScriptComponentOptions",
+                        "...##ScriptComponentOptionsButton",
+                        scriptStateKey.c_str());
                     if (ImGui::BeginPopup("ScriptComponentOptions"))
                     {
                         if (ImGui::MenuItem("Remove Component"))
@@ -1086,7 +1094,12 @@ namespace Limitless::EditorInspectorPanel
                 std::string scriptLabel = scriptEntry.ScriptClassName.empty()
                     ? ("Script Component " + std::to_string(scriptComponent->ComponentOrder + 1))
                     : scriptEntry.ScriptClassName;
-                const bool scriptOpen = BeginInspectorScriptSectionHeader(scriptLabel.c_str(), "ScriptComponentOptions", "...##ScriptComponentOptionsButton");
+                const std::string scriptStateKey = "NativeScriptComponent." + std::to_string(scriptComponent->ComponentOrder);
+                const bool scriptOpen = BeginInspectorScriptSectionHeader(
+                    scriptLabel.c_str(),
+                    "ScriptComponentOptions",
+                    "...##ScriptComponentOptionsButton",
+                    scriptStateKey.c_str());
                 if (ImGui::BeginPopup("ScriptComponentOptions"))
                 {
                     bool showDebugInfo = GetNativeScriptDebugInfoEnabled();
@@ -1218,7 +1231,10 @@ namespace Limitless::EditorInspectorPanel
                             (void)TriggerNativeScriptBuildFromInspector();
                     }
 
-                    const bool executionAndAccessOpen = ImGui::TreeNodeEx("Execution & Access", ImGuiTreeNodeFlags_DefaultOpen);
+                    const bool executionAndAccessOpen = BeginPersistentTreeNode(
+                        (scriptStateKey + ".ExecutionAndAccess").c_str(),
+                        "Execution & Access",
+                        ImGuiTreeNodeFlags_DefaultOpen);
                     if (executionAndAccessOpen)
                     {
                         ImGui::TextUnformatted("Execution Policy");
@@ -1231,14 +1247,20 @@ namespace Limitless::EditorInspectorPanel
                         }
                         ImGui::TextDisabled("ParallelSafe scripts should declare accurate read/write access masks.");
 
-                        const bool readAccessOpen = ImGui::TreeNodeEx("Declared Read Access", ImGuiTreeNodeFlags_DefaultOpen);
+                        const bool readAccessOpen = BeginPersistentTreeNode(
+                            (scriptStateKey + ".DeclaredReadAccess").c_str(),
+                            "Declared Read Access",
+                            ImGuiTreeNodeFlags_DefaultOpen);
                         if (readAccessOpen)
                         {
                             DrawAccessMaskEditor("NativeScriptDeclaredReadAccessMask", scriptEntry.DeclaredReadAccessMask);
                             ImGui::TreePop();
                         }
 
-                        const bool writeAccessOpen = ImGui::TreeNodeEx("Declared Write Access", ImGuiTreeNodeFlags_DefaultOpen);
+                        const bool writeAccessOpen = BeginPersistentTreeNode(
+                            (scriptStateKey + ".DeclaredWriteAccess").c_str(),
+                            "Declared Write Access",
+                            ImGuiTreeNodeFlags_DefaultOpen);
                         if (writeAccessOpen)
                         {
                             DrawAccessMaskEditor("NativeScriptDeclaredWriteAccessMask", scriptEntry.DeclaredWriteAccessMask);

@@ -63,7 +63,13 @@ CONTRACT_CSPROJ="$REPO_ROOT/Managed/Limitless.Managed/Limitless.Managed.csproj"
     printf '    <RootNamespace>%s</RootNamespace>\n' "$(xml_escape "$MANAGED_PROJECT_ASSEMBLY_NAME")"
     echo '    <EnableDynamicLoading>true</EnableDynamicLoading>'
     echo '  </PropertyGroup>'
-    echo '  <ItemGroup>'
+    echo '  <ItemGroup Condition="''$(LimitlessManagedReferencePath)'' != ''''">'
+    echo '    <Reference Include="Limitless.Managed">'
+    echo '      <HintPath>$(LimitlessManagedReferencePath)</HintPath>'
+    echo '      <Private>true</Private>'
+    echo '    </Reference>'
+    echo '  </ItemGroup>'
+    echo '  <ItemGroup Condition="''$(LimitlessManagedReferencePath)'' == ''''">'
     printf '    <ProjectReference Include="%s" />\n' "$(xml_escape "$CONTRACT_CSPROJ")"
     echo '  </ItemGroup>'
     echo '  <ItemGroup>'

@@ -26,7 +26,7 @@ namespace Limitless
     {
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 8;
+        constexpr uint32_t kEditorSessionStateVersion = 9;
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
         struct EditorSessionStateData final
@@ -44,6 +44,7 @@ namespace Limitless
             std::string ProjectActiveFolderRelativePath;
             float ProjectGridScale = 1.0f;
             std::unordered_map<std::string, bool> ProjectFolderExpansionState;
+            std::unordered_map<std::string, bool> InspectorFoldoutState;
         };
 
         std::string NormalizeSlashes(std::string pathText)
@@ -256,6 +257,11 @@ namespace Limitless
                 for (const auto& [folderPath, expanded] : state.ProjectFolderExpansionState)
                     folderExpansionRoot[folderPath] = expanded;
                 root["projectFolderExpansionState"] = std::move(folderExpansionRoot);
+
+                nlohmann::json inspectorFoldoutRoot = nlohmann::json::object();
+                for (const auto& [foldoutKey, expanded] : state.InspectorFoldoutState)
+                    inspectorFoldoutRoot[foldoutKey] = expanded;
+                root["inspectorFoldoutState"] = std::move(inspectorFoldoutRoot);
 
                 const std::filesystem::path tmpPath = statePath.string() + ".tmp";
                 {
@@ -721,6 +727,7 @@ namespace Limitless
         else
             state.LastOpenedSceneAssetKey = m_CurrentSceneAssetKey;
         EditorInspectorPanel::GetNativeScriptEditorSessionState(state.NativeScriptEditorState);
+        EditorInspectorPanel::GetPersistentFoldoutState(state.InspectorFoldoutState);
         state.ActiveLayoutName = m_ActiveLayoutName;
         state.LayoutWindowState = CaptureLayoutWindowState();
         state.ShowProjectSettingsWindow = m_ShowProjectSettingsWindow;

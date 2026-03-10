@@ -59,12 +59,27 @@ namespace Limitless::ManagedScriptHost
             s_HostState.LastManagedExceptionMessage.assign(message.begin(), message.end());
         }
 
+        void RegisterInternalCallBatch(Coral::ManagedAssembly& contractAssembly,
+                                       std::initializer_list<InternalCallBinding> bindings)
+        {
+            for (const InternalCallBinding& binding : bindings)
+            {
+                if (binding.MethodName == nullptr || binding.Function == nullptr)
+                    continue;
+                contractAssembly.AddInternalCall(kScriptBridgeTypeName, binding.MethodName, binding.Function);
+            }
+        }
+
         void RegisterInternalCalls(Coral::ManagedAssembly& contractAssembly)
         {
-            RegisterScenePhysicsInternalCalls(contractAssembly);
-            RegisterAudioAnimationInternalCalls(contractAssembly);
-            RegisterRenderingUiInternalCalls(contractAssembly);
-            RegisterGridPhysicsInternalCalls(contractAssembly);
+            const InternalCallRegistrar registrars[] = {
+                &RegisterScenePhysicsInternalCalls,
+                &RegisterAudioAnimationInternalCalls,
+                &RegisterRenderingUiInternalCalls,
+                &RegisterGridPhysicsInternalCalls
+            };
+            for (InternalCallRegistrar registrar : registrars)
+                registrar(contractAssembly);
             contractAssembly.UploadInternalCalls();
         }
 

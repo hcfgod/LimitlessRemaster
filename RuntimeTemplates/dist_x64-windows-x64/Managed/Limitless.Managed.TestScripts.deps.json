@@ -8,24 +8,13 @@
     ".NETCoreApp,Version=v9.0": {
       "Limitless.Managed.TestScripts/1.0.0": {
         "dependencies": {
-          "Limitless.Managed": "1.0.0",
-          "Coral.Managed.Reference": "1.0.0.0"
+          "Limitless.Managed": "1.0.0.0"
         },
         "runtime": {
           "Limitless.Managed.TestScripts.dll": {}
         }
       },
-      "Coral.Managed/1.0.0": {
-        "runtime": {
-          "Coral.Managed.dll": {
-            "fileVersion": "0.0.0.0"
-          }
-        }
-      },
-      "Limitless.Managed/1.0.0": {
-        "dependencies": {
-          "Coral.Managed": "1.0.0"
-        },
+      "Limitless.Managed/1.0.0.0": {
         "runtime": {
           "Limitless.Managed.dll": {
             "assemblyVersion": "1.0.0.0",
@@ -33,7 +22,7 @@
           }
         }
       },
-      "Coral.Managed.Reference/1.0.0.0": {
+      "Coral.Managed/1.0.0.0": {
         "runtime": {
           "Coral.Managed.dll": {
             "assemblyVersion": "1.0.0.0",
@@ -49,17 +38,12 @@
       "serviceable": false,
       "sha512": ""
     },
-    "Coral.Managed/1.0.0": {
-      "type": "project",
+    "Limitless.Managed/1.0.0.0": {
+      "type": "reference",
       "serviceable": false,
       "sha512": ""
     },
-    "Limitless.Managed/1.0.0": {
-      "type": "project",
-      "serviceable": false,
-      "sha512": ""
-    },
-    "Coral.Managed.Reference/1.0.0.0": {
+    "Coral.Managed/1.0.0.0": {
       "type": "reference",
       "serviceable": false,
       "sha512": ""

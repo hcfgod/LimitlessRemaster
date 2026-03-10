@@ -3,6 +3,7 @@
 #include "Limitless.h"
 #include "Assets/MaterialAsset.h"
 #include "Assets/TextureAsset.h"
+#include "EditorAssetPreview.h"
 #include "EditorPlayMode.h"
 #include "EditorAnimationTimelinePanel.h"
 #include "EditorAnimatorGraphPanel.h"
@@ -197,6 +198,7 @@ namespace Limitless
         bool m_ScriptSafeModeActive = false;
         std::string m_ScriptSafeModeMessage;
         entt::entity m_SelectedEntity = entt::null;
+        entt::entity m_EditModeSelectedEntityBeforePlay = entt::null;
 
         /// Selected texture asset key when user double-clicks a texture in the Project panel (e.g. "Assets/Textures/X.png").
         /// When non-empty, the Inspector shows the texture and its spec; entity selection is ignored.
@@ -285,6 +287,7 @@ namespace Limitless
         float m_PhysicsDiagnosticsRecentPeakHoldSeconds = 0.0f;
         EditorScenePanelState m_ScenePanelState;
         EditorProjectPanelState m_ProjectPanelState;
+        EditorAssetPreview::MaterialPreviewCache m_MaterialPreviewCache;
         EditorProjectDialog::EditorProjectDialogState m_ProjectDialogState;
         EditorProjectSettingsPanel::EditorProjectSettingsPanelState m_ProjectSettingsPanelState;
         Project::RenderSettings m_ProjectRenderSettings{};

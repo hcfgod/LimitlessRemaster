@@ -10,31 +10,35 @@
 
 namespace Limitless::EditorProjectPanel
 {
-    void InvalidateProjectDirectoryCache();
+    void InvalidateProjectDirectoryCache(EditorProjectPanelState& state);
     void CopyTextToBuffer(std::array<char, 256>& destination, const char* source);
 
     std::string SanitizeScriptClassBaseName(std::string value);
     std::string SanitizeManagedScriptClassName(std::string value);
 
-    bool CreateNativeScriptPairInAssets(const std::filesystem::path& assetsDirectory,
+    bool CreateNativeScriptPairInAssets(EditorProjectPanelState& state,
+                                        const std::filesystem::path& assetsDirectory,
                                         const std::filesystem::path& parentRelativePath,
                                         const std::string& requestedClassName,
                                         std::string& outCreatedSourceAssetKey,
                                         std::string& outError);
 
-    bool CreateManagedScriptInAssets(const std::filesystem::path& assetsDirectory,
+    bool CreateManagedScriptInAssets(EditorProjectPanelState& state,
+                                     const std::filesystem::path& assetsDirectory,
                                      const std::filesystem::path& parentRelativePath,
                                      const std::string& requestedClassName,
                                      std::string& outCreatedAssetKey,
                                      std::string& outError);
 
-    bool RenameNativeScriptPairInAssets(const std::filesystem::path& assetsDirectory,
+    bool RenameNativeScriptPairInAssets(EditorProjectPanelState& state,
+                                        const std::filesystem::path& assetsDirectory,
                                         const std::filesystem::path& scriptRelativePath,
                                         const std::string& newDisplayName,
                                         std::filesystem::path& outNewHeaderRelativePath,
                                         std::filesystem::path& outNewSourceRelativePath);
 
-    bool DeleteNativeScriptPairInAssets(const std::filesystem::path& assetsDirectory,
+    bool DeleteNativeScriptPairInAssets(EditorProjectPanelState& state,
+                                        const std::filesystem::path& assetsDirectory,
                                         const std::filesystem::path& scriptRelativePath);
 
     void DrawProjectFolderPopups(const std::filesystem::path& assetsDirectory,

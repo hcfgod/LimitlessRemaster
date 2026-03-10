@@ -1,6 +1,7 @@
 #include "EditorInspectorPanelEntityComponents.h"
 
 #include "EditorAssetNaming.h"
+#include "EditorInspectorPanel.h"
 #include "EditorPanelStyle.h"
 #include "Assets/AssetDatabase.h"
 #include "Assets/AssetPaths.h"
@@ -40,10 +41,12 @@ namespace Limitless::EditorInspectorPanel
             ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.11f, 0.17f, 0.27f, 0.96f));
             ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.16f, 0.24f, 0.38f, 1.0f));
             ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.20f, 0.29f, 0.44f, 1.0f));
-            const bool isOpen = ImGui::TreeNodeEx(label,
-                                                  ImGuiTreeNodeFlags_DefaultOpen |
-                                                      ImGuiTreeNodeFlags_Framed |
-                                                      ImGuiTreeNodeFlags_AllowItemOverlap);
+            const bool isOpen = BeginPersistentTreeNode(
+                popupId ? popupId : label,
+                label,
+                ImGuiTreeNodeFlags_DefaultOpen |
+                    ImGuiTreeNodeFlags_Framed |
+                    ImGuiTreeNodeFlags_AllowItemOverlap);
             ImGui::PopStyleColor(3);
             ImGui::PopStyleVar(2);
 
@@ -1191,7 +1194,7 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::EndPopup();
                 }
 
-                if (ImGui::TreeNodeEx("Parameter Overrides", ImGuiTreeNodeFlags_DefaultOpen))
+                if (BeginPersistentTreeNode("Animator.ParameterOverrides", "Parameter Overrides", ImGuiTreeNodeFlags_DefaultOpen))
                 {
                     if (ImGui::Button("Add Bool"))
                     {
@@ -1434,7 +1437,7 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 ImGui::Separator();
-                const bool runtimeOpen = ImGui::TreeNodeEx("Runtime", ImGuiTreeNodeFlags_DefaultOpen);
+                const bool runtimeOpen = BeginPersistentTreeNode("Animator.Runtime", "Runtime", ImGuiTreeNodeFlags_DefaultOpen);
                 if (runtimeOpen)
                 {
                     ImGui::Text("State: %s", animator->RuntimeCurrentStateName.empty() ? "<none>" : animator->RuntimeCurrentStateName.c_str());
@@ -3468,7 +3471,7 @@ namespace Limitless::EditorInspectorPanel
                     ImGui::BulletText("Slider Background");
                     ImGui::BulletText("Slider Fill");
                     ImGui::BulletText("Slider Handle");
-                    if (ImGui::TreeNodeEx("Fallback Colors (Used Only Without Visual Children)"))
+                    if (BeginPersistentTreeNode("UISlider.FallbackColors", "Fallback Colors (Used Only Without Visual Children)"))
                     {
                         ImGui::TextUnformatted("Background Color");
                         ImGui::ColorEdit4("##UISliderBackgroundColorFallback", &uiSlider->BackgroundColor.r);
@@ -3587,7 +3590,7 @@ namespace Limitless::EditorInspectorPanel
                 ImGui::Separator();
 
                 // -- Emission --
-                if (ImGui::TreeNodeEx("Emission##ParticleEmitter", ImGuiTreeNodeFlags_DefaultOpen))
+                if (BeginPersistentTreeNode("ParticleEmitter.Emission", "Emission##ParticleEmitter", ImGuiTreeNodeFlags_DefaultOpen))
                 {
                     ImGui::TextUnformatted("Spawn Rate");
                     ImGui::DragFloat("##ParticleSpawnRate", &particleEmitter->SpawnRate, 0.5f, 0.0f, 10000.0f);
@@ -3679,7 +3682,7 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 // -- Velocity --
-                if (ImGui::TreeNodeEx("Velocity##ParticleEmitter", ImGuiTreeNodeFlags_DefaultOpen))
+                if (BeginPersistentTreeNode("ParticleEmitter.Velocity", "Velocity##ParticleEmitter", ImGuiTreeNodeFlags_DefaultOpen))
                 {
                     ImGui::TextUnformatted("Speed Min");
                     ImGui::DragFloat("##ParticleSpeedMin", &particleEmitter->SpeedMin, 0.5f, 0.0f, 10000.0f);
@@ -3717,7 +3720,7 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 // -- Appearance --
-                if (ImGui::TreeNodeEx("Appearance##ParticleEmitter", ImGuiTreeNodeFlags_DefaultOpen))
+                if (BeginPersistentTreeNode("ParticleEmitter.Appearance", "Appearance##ParticleEmitter", ImGuiTreeNodeFlags_DefaultOpen))
                 {
                     ImGui::TextUnformatted("Start Size Min");
                     ImGui::DragFloat("##ParticleStartSizeMin", &particleEmitter->StartSizeMin, 0.01f, 0.001f, 100.0f);
@@ -3751,7 +3754,7 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 // -- Rotation --
-                if (ImGui::TreeNodeEx("Rotation##ParticleEmitter"))
+                if (BeginPersistentTreeNode("ParticleEmitter.Rotation", "Rotation##ParticleEmitter"))
                 {
                     ImGui::TextUnformatted("Start Rotation Min");
                     ImGui::DragFloat("##ParticleStartRotationMin", &particleEmitter->StartRotationMin, 1.0f, -360.0f, 360.0f);
@@ -3777,7 +3780,7 @@ namespace Limitless::EditorInspectorPanel
                 }
 
                 // -- Texture --
-                if (ImGui::TreeNodeEx("Texture##ParticleEmitter"))
+                if (BeginPersistentTreeNode("ParticleEmitter.Texture", "Texture##ParticleEmitter"))
                 {
                     const auto assignParticleTextureKey = [&](const std::string& textureKey) {
                         const std::string beforeTextureKey = particleEmitter->TextureKey;

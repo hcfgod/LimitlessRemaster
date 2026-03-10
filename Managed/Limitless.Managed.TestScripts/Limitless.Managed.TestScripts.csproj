@@ -11,6 +11,17 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="obj\**\*.cs;bin\**\*.cs" />
+    <EmbeddedResource Remove="obj\**\*;bin\**\*" />
+    <None Remove="obj\**\*;bin\**\*" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(LimitlessManagedReferencePath)' != ''">
+    <Reference Include="Limitless.Managed">
+      <HintPath>$(LimitlessManagedReferencePath)</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup Condition="'$(LimitlessManagedReferencePath)' == ''">
     <ProjectReference Include="..\Limitless.Managed\Limitless.Managed.csproj" />
   </ItemGroup>
 </Project>

@@ -49,6 +49,7 @@ namespace Limitless
         EditorProjectPanel::Draw(
             m_ShowProjectPanel,
             m_ProjectPanelState,
+            m_MaterialPreviewCache,
             m_SelectedEntity,
             m_SelectedTextureAssetKey,
             m_CachedTextureAsset,

@@ -488,224 +488,45 @@ namespace Limitless::ManagedScriptHost
             cameraComponent->FieldOfViewYDegrees = fieldOfViewYDegrees;
         }
 
-        bool ManagedHasBoxCollider2DComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedBoxCollider2DComponent(entityHandle) != nullptr;
-        }
+        LT_MANAGED_COMPONENT_HAS(HasBoxCollider2DComponentIcall, TryGetManagedBoxCollider2DComponent);
+        LT_MANAGED_COMPONENT_GET(GetBoxCollider2DOffsetIcall, ManagedVector2, TryGetManagedBoxCollider2DComponent, ToManagedVector2(component->Offset), ManagedVector2{});
+        LT_MANAGED_COMPONENT_SET(SetBoxCollider2DOffsetIcall, ManagedVector2, TryGetManagedBoxCollider2DComponent, component->Offset = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetBoxCollider2DSizeIcall, ManagedVector2, TryGetManagedBoxCollider2DComponent, ToManagedVector2(component->Size), ManagedVector2{ 1.0f, 1.0f });
+        LT_MANAGED_COMPONENT_SET(SetBoxCollider2DSizeIcall, ManagedVector2, TryGetManagedBoxCollider2DComponent, component->Size = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetBoxCollider2DDensityIcall, float, TryGetManagedBoxCollider2DComponent, component->Density, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetBoxCollider2DDensityIcall, float, TryGetManagedBoxCollider2DComponent, component->Density = value;);
+        LT_MANAGED_COMPONENT_GET(GetBoxCollider2DFrictionIcall, float, TryGetManagedBoxCollider2DComponent, component->Friction, 0.5f);
+        LT_MANAGED_COMPONENT_SET(SetBoxCollider2DFrictionIcall, float, TryGetManagedBoxCollider2DComponent, component->Friction = value;);
+        LT_MANAGED_COMPONENT_GET(GetBoxCollider2DRestitutionIcall, float, TryGetManagedBoxCollider2DComponent, component->Restitution, 0.0f);
+        LT_MANAGED_COMPONENT_SET(SetBoxCollider2DRestitutionIcall, float, TryGetManagedBoxCollider2DComponent, component->Restitution = value;);
+        LT_MANAGED_COMPONENT_GET(GetBoxCollider2DIsSensorIcall, bool, TryGetManagedBoxCollider2DComponent, component->IsSensor, false);
+        LT_MANAGED_COMPONENT_SET(SetBoxCollider2DIsSensorIcall, bool, TryGetManagedBoxCollider2DComponent, component->IsSensor = value;);
+        LT_MANAGED_COMPONENT_GET(GetBoxCollider2DCollisionLayerIcall, uint64_t, TryGetManagedBoxCollider2DComponent, component->CollisionLayer, 1ull);
+        LT_MANAGED_COMPONENT_SET(SetBoxCollider2DCollisionLayerIcall, uint64_t, TryGetManagedBoxCollider2DComponent, component->CollisionLayer = value;);
+        LT_MANAGED_COMPONENT_GET(GetBoxCollider2DCollisionMaskIcall, uint64_t, TryGetManagedBoxCollider2DComponent, component->CollisionMask, ~0ull);
+        LT_MANAGED_COMPONENT_SET(SetBoxCollider2DCollisionMaskIcall, uint64_t, TryGetManagedBoxCollider2DComponent, component->CollisionMask = value;);
 
-        ManagedVector2 ManagedGetBoxCollider2DOffsetIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle);
-            return collider ? ToManagedVector2(collider->Offset) : ManagedVector2{};
-        }
+        LT_MANAGED_COMPONENT_HAS(HasCircleCollider2DComponentIcall, TryGetManagedCircleCollider2DComponent);
+        LT_MANAGED_COMPONENT_GET(GetCircleCollider2DOffsetIcall, ManagedVector2, TryGetManagedCircleCollider2DComponent, ToManagedVector2(component->Offset), ManagedVector2{});
+        LT_MANAGED_COMPONENT_SET(SetCircleCollider2DOffsetIcall, ManagedVector2, TryGetManagedCircleCollider2DComponent, component->Offset = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetCircleCollider2DRadiusIcall, float, TryGetManagedCircleCollider2DComponent, component->Radius, 0.5f);
+        LT_MANAGED_COMPONENT_SET(SetCircleCollider2DRadiusIcall, float, TryGetManagedCircleCollider2DComponent, component->Radius = value;);
+        LT_MANAGED_COMPONENT_GET(GetCircleCollider2DDensityIcall, float, TryGetManagedCircleCollider2DComponent, component->Density, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetCircleCollider2DDensityIcall, float, TryGetManagedCircleCollider2DComponent, component->Density = value;);
+        LT_MANAGED_COMPONENT_GET(GetCircleCollider2DFrictionIcall, float, TryGetManagedCircleCollider2DComponent, component->Friction, 0.5f);
+        LT_MANAGED_COMPONENT_SET(SetCircleCollider2DFrictionIcall, float, TryGetManagedCircleCollider2DComponent, component->Friction = value;);
+        LT_MANAGED_COMPONENT_GET(GetCircleCollider2DRestitutionIcall, float, TryGetManagedCircleCollider2DComponent, component->Restitution, 0.0f);
+        LT_MANAGED_COMPONENT_SET(SetCircleCollider2DRestitutionIcall, float, TryGetManagedCircleCollider2DComponent, component->Restitution = value;);
+        LT_MANAGED_COMPONENT_GET(GetCircleCollider2DIsSensorIcall, bool, TryGetManagedCircleCollider2DComponent, component->IsSensor, false);
+        LT_MANAGED_COMPONENT_SET(SetCircleCollider2DIsSensorIcall, bool, TryGetManagedCircleCollider2DComponent, component->IsSensor = value;);
+        LT_MANAGED_COMPONENT_GET(GetCircleCollider2DCollisionLayerIcall, uint64_t, TryGetManagedCircleCollider2DComponent, component->CollisionLayer, 1ull);
+        LT_MANAGED_COMPONENT_SET(SetCircleCollider2DCollisionLayerIcall, uint64_t, TryGetManagedCircleCollider2DComponent, component->CollisionLayer = value;);
+        LT_MANAGED_COMPONENT_GET(GetCircleCollider2DCollisionMaskIcall, uint64_t, TryGetManagedCircleCollider2DComponent, component->CollisionMask, ~0ull);
+        LT_MANAGED_COMPONENT_SET(SetCircleCollider2DCollisionMaskIcall, uint64_t, TryGetManagedCircleCollider2DComponent, component->CollisionMask = value;);
 
-        void ManagedSetBoxCollider2DOffsetIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle))
-                collider->Offset = ToGlmVector2(value);
-        }
-
-        ManagedVector2 ManagedGetBoxCollider2DSizeIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle);
-            return collider ? ToManagedVector2(collider->Size) : ManagedVector2{ 1.0f, 1.0f };
-        }
-
-        void ManagedSetBoxCollider2DSizeIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle))
-                collider->Size = ToGlmVector2(value);
-        }
-
-        float ManagedGetBoxCollider2DDensityIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle);
-            return collider ? collider->Density : 1.0f;
-        }
-
-        void ManagedSetBoxCollider2DDensityIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle))
-                collider->Density = value;
-        }
-
-        float ManagedGetBoxCollider2DFrictionIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle);
-            return collider ? collider->Friction : 0.5f;
-        }
-
-        void ManagedSetBoxCollider2DFrictionIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle))
-                collider->Friction = value;
-        }
-
-        float ManagedGetBoxCollider2DRestitutionIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle);
-            return collider ? collider->Restitution : 0.0f;
-        }
-
-        void ManagedSetBoxCollider2DRestitutionIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle))
-                collider->Restitution = value;
-        }
-
-        bool ManagedGetBoxCollider2DIsSensorIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle);
-            return collider ? collider->IsSensor : false;
-        }
-
-        void ManagedSetBoxCollider2DIsSensorIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle))
-                collider->IsSensor = value;
-        }
-
-        uint64_t ManagedGetBoxCollider2DCollisionLayerIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle);
-            return collider ? collider->CollisionLayer : 1ull;
-        }
-
-        void ManagedSetBoxCollider2DCollisionLayerIcall(uint32_t entityHandle, uint64_t value)
-        {
-            if (auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle))
-                collider->CollisionLayer = value;
-        }
-
-        uint64_t ManagedGetBoxCollider2DCollisionMaskIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle);
-            return collider ? collider->CollisionMask : ~0ull;
-        }
-
-        void ManagedSetBoxCollider2DCollisionMaskIcall(uint32_t entityHandle, uint64_t value)
-        {
-            if (auto* collider = TryGetManagedBoxCollider2DComponent(entityHandle))
-                collider->CollisionMask = value;
-        }
-
-        bool ManagedHasCircleCollider2DComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedCircleCollider2DComponent(entityHandle) != nullptr;
-        }
-
-        ManagedVector2 ManagedGetCircleCollider2DOffsetIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle);
-            return collider ? ToManagedVector2(collider->Offset) : ManagedVector2{};
-        }
-
-        void ManagedSetCircleCollider2DOffsetIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle))
-                collider->Offset = ToGlmVector2(value);
-        }
-
-        float ManagedGetCircleCollider2DRadiusIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle);
-            return collider ? collider->Radius : 0.5f;
-        }
-
-        void ManagedSetCircleCollider2DRadiusIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle))
-                collider->Radius = value;
-        }
-
-        float ManagedGetCircleCollider2DDensityIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle);
-            return collider ? collider->Density : 1.0f;
-        }
-
-        void ManagedSetCircleCollider2DDensityIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle))
-                collider->Density = value;
-        }
-
-        float ManagedGetCircleCollider2DFrictionIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle);
-            return collider ? collider->Friction : 0.5f;
-        }
-
-        void ManagedSetCircleCollider2DFrictionIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle))
-                collider->Friction = value;
-        }
-
-        float ManagedGetCircleCollider2DRestitutionIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle);
-            return collider ? collider->Restitution : 0.0f;
-        }
-
-        void ManagedSetCircleCollider2DRestitutionIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle))
-                collider->Restitution = value;
-        }
-
-        bool ManagedGetCircleCollider2DIsSensorIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle);
-            return collider ? collider->IsSensor : false;
-        }
-
-        void ManagedSetCircleCollider2DIsSensorIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle))
-                collider->IsSensor = value;
-        }
-
-        uint64_t ManagedGetCircleCollider2DCollisionLayerIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle);
-            return collider ? collider->CollisionLayer : 1ull;
-        }
-
-        void ManagedSetCircleCollider2DCollisionLayerIcall(uint32_t entityHandle, uint64_t value)
-        {
-            if (auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle))
-                collider->CollisionLayer = value;
-        }
-
-        uint64_t ManagedGetCircleCollider2DCollisionMaskIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle);
-            return collider ? collider->CollisionMask : ~0ull;
-        }
-
-        void ManagedSetCircleCollider2DCollisionMaskIcall(uint32_t entityHandle, uint64_t value)
-        {
-            if (auto* collider = TryGetManagedCircleCollider2DComponent(entityHandle))
-                collider->CollisionMask = value;
-        }
-
-        bool ManagedHasPolygonCollider2DComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedPolygonCollider2DComponent(entityHandle) != nullptr;
-        }
-
-        ManagedVector2 ManagedGetPolygonCollider2DOffsetIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedPolygonCollider2DComponent(entityHandle);
-            return collider ? ToManagedVector2(collider->Offset) : ManagedVector2{};
-        }
-
-        void ManagedSetPolygonCollider2DOffsetIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* collider = TryGetManagedPolygonCollider2DComponent(entityHandle))
-                collider->Offset = ToGlmVector2(value);
-        }
+        LT_MANAGED_COMPONENT_HAS(HasPolygonCollider2DComponentIcall, TryGetManagedPolygonCollider2DComponent);
+        LT_MANAGED_COMPONENT_GET(GetPolygonCollider2DOffsetIcall, ManagedVector2, TryGetManagedPolygonCollider2DComponent, ToManagedVector2(component->Offset), ManagedVector2{});
+        LT_MANAGED_COMPONENT_SET(SetPolygonCollider2DOffsetIcall, ManagedVector2, TryGetManagedPolygonCollider2DComponent, component->Offset = ToGlmVector2(value););
 
         int ManagedGetPolygonCollider2DPointCountIcall(uint32_t entityHandle)
         {
@@ -739,309 +560,60 @@ namespace Limitless::ManagedScriptHost
                 collider->Points[static_cast<size_t>(index)] = ToGlmVector2(value);
             }
         }
+        LT_MANAGED_COMPONENT_GET(GetPolygonCollider2DDensityIcall, float, TryGetManagedPolygonCollider2DComponent, component->Density, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetPolygonCollider2DDensityIcall, float, TryGetManagedPolygonCollider2DComponent, component->Density = value;);
+        LT_MANAGED_COMPONENT_GET(GetPolygonCollider2DFrictionIcall, float, TryGetManagedPolygonCollider2DComponent, component->Friction, 0.5f);
+        LT_MANAGED_COMPONENT_SET(SetPolygonCollider2DFrictionIcall, float, TryGetManagedPolygonCollider2DComponent, component->Friction = value;);
+        LT_MANAGED_COMPONENT_GET(GetPolygonCollider2DRestitutionIcall, float, TryGetManagedPolygonCollider2DComponent, component->Restitution, 0.0f);
+        LT_MANAGED_COMPONENT_SET(SetPolygonCollider2DRestitutionIcall, float, TryGetManagedPolygonCollider2DComponent, component->Restitution = value;);
+        LT_MANAGED_COMPONENT_GET(GetPolygonCollider2DIsSensorIcall, bool, TryGetManagedPolygonCollider2DComponent, component->IsSensor, false);
+        LT_MANAGED_COMPONENT_SET(SetPolygonCollider2DIsSensorIcall, bool, TryGetManagedPolygonCollider2DComponent, component->IsSensor = value;);
+        LT_MANAGED_COMPONENT_GET(GetPolygonCollider2DCollisionLayerIcall, uint64_t, TryGetManagedPolygonCollider2DComponent, component->CollisionLayer, 1ull);
+        LT_MANAGED_COMPONENT_SET(SetPolygonCollider2DCollisionLayerIcall, uint64_t, TryGetManagedPolygonCollider2DComponent, component->CollisionLayer = value;);
+        LT_MANAGED_COMPONENT_GET(GetPolygonCollider2DCollisionMaskIcall, uint64_t, TryGetManagedPolygonCollider2DComponent, component->CollisionMask, ~0ull);
+        LT_MANAGED_COMPONENT_SET(SetPolygonCollider2DCollisionMaskIcall, uint64_t, TryGetManagedPolygonCollider2DComponent, component->CollisionMask = value;);
 
-        float ManagedGetPolygonCollider2DDensityIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedPolygonCollider2DComponent(entityHandle);
-            return collider ? collider->Density : 1.0f;
-        }
+        LT_MANAGED_COMPONENT_HAS(HasEdgeCollider2DComponentIcall, TryGetManagedEdgeCollider2DComponent);
+        LT_MANAGED_COMPONENT_GET(GetEdgeCollider2DOffsetIcall, ManagedVector2, TryGetManagedEdgeCollider2DComponent, ToManagedVector2(component->Offset), ManagedVector2{});
+        LT_MANAGED_COMPONENT_SET(SetEdgeCollider2DOffsetIcall, ManagedVector2, TryGetManagedEdgeCollider2DComponent, component->Offset = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetEdgeCollider2DPointAIcall, ManagedVector2, TryGetManagedEdgeCollider2DComponent, ToManagedVector2(component->PointA), ManagedVector2{ -0.5f, 0.0f });
+        LT_MANAGED_COMPONENT_SET(SetEdgeCollider2DPointAIcall, ManagedVector2, TryGetManagedEdgeCollider2DComponent, component->PointA = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetEdgeCollider2DPointBIcall, ManagedVector2, TryGetManagedEdgeCollider2DComponent, ToManagedVector2(component->PointB), ManagedVector2{ 0.5f, 0.0f });
+        LT_MANAGED_COMPONENT_SET(SetEdgeCollider2DPointBIcall, ManagedVector2, TryGetManagedEdgeCollider2DComponent, component->PointB = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetEdgeCollider2DFrictionIcall, float, TryGetManagedEdgeCollider2DComponent, component->Friction, 0.5f);
+        LT_MANAGED_COMPONENT_SET(SetEdgeCollider2DFrictionIcall, float, TryGetManagedEdgeCollider2DComponent, component->Friction = value;);
+        LT_MANAGED_COMPONENT_GET(GetEdgeCollider2DRestitutionIcall, float, TryGetManagedEdgeCollider2DComponent, component->Restitution, 0.0f);
+        LT_MANAGED_COMPONENT_SET(SetEdgeCollider2DRestitutionIcall, float, TryGetManagedEdgeCollider2DComponent, component->Restitution = value;);
+        LT_MANAGED_COMPONENT_GET(GetEdgeCollider2DIsSensorIcall, bool, TryGetManagedEdgeCollider2DComponent, component->IsSensor, false);
+        LT_MANAGED_COMPONENT_SET(SetEdgeCollider2DIsSensorIcall, bool, TryGetManagedEdgeCollider2DComponent, component->IsSensor = value;);
+        LT_MANAGED_COMPONENT_GET(GetEdgeCollider2DCollisionLayerIcall, uint64_t, TryGetManagedEdgeCollider2DComponent, component->CollisionLayer, 1ull);
+        LT_MANAGED_COMPONENT_SET(SetEdgeCollider2DCollisionLayerIcall, uint64_t, TryGetManagedEdgeCollider2DComponent, component->CollisionLayer = value;);
+        LT_MANAGED_COMPONENT_GET(GetEdgeCollider2DCollisionMaskIcall, uint64_t, TryGetManagedEdgeCollider2DComponent, component->CollisionMask, ~0ull);
+        LT_MANAGED_COMPONENT_SET(SetEdgeCollider2DCollisionMaskIcall, uint64_t, TryGetManagedEdgeCollider2DComponent, component->CollisionMask = value;);
 
-        void ManagedSetPolygonCollider2DDensityIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedPolygonCollider2DComponent(entityHandle))
-                collider->Density = value;
-        }
+        LT_MANAGED_COMPONENT_HAS(HasCapsuleCollider2DComponentIcall, TryGetManagedCapsuleCollider2DComponent);
+        LT_MANAGED_COMPONENT_GET(GetCapsuleCollider2DOffsetIcall, ManagedVector2, TryGetManagedCapsuleCollider2DComponent, ToManagedVector2(component->Offset), ManagedVector2{});
+        LT_MANAGED_COMPONENT_SET(SetCapsuleCollider2DOffsetIcall, ManagedVector2, TryGetManagedCapsuleCollider2DComponent, component->Offset = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetCapsuleCollider2DSizeIcall, ManagedVector2, TryGetManagedCapsuleCollider2DComponent, ToManagedVector2(component->Size), ManagedVector2{ 1.0f, 2.0f });
+        LT_MANAGED_COMPONENT_SET(SetCapsuleCollider2DSizeIcall, ManagedVector2, TryGetManagedCapsuleCollider2DComponent, component->Size = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetCapsuleCollider2DDirectionIcall, int, TryGetManagedCapsuleCollider2DComponent, static_cast<int>(component->Direction), static_cast<int>(CapsuleCollider2DComponent::Orientation::Vertical));
+        LT_MANAGED_COMPONENT_SET(SetCapsuleCollider2DDirectionIcall, int, TryGetManagedCapsuleCollider2DComponent, component->Direction = static_cast<CapsuleCollider2DComponent::Orientation>(value););
+        LT_MANAGED_COMPONENT_GET(GetCapsuleCollider2DDensityIcall, float, TryGetManagedCapsuleCollider2DComponent, component->Density, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetCapsuleCollider2DDensityIcall, float, TryGetManagedCapsuleCollider2DComponent, component->Density = value;);
+        LT_MANAGED_COMPONENT_GET(GetCapsuleCollider2DFrictionIcall, float, TryGetManagedCapsuleCollider2DComponent, component->Friction, 0.5f);
+        LT_MANAGED_COMPONENT_SET(SetCapsuleCollider2DFrictionIcall, float, TryGetManagedCapsuleCollider2DComponent, component->Friction = value;);
+        LT_MANAGED_COMPONENT_GET(GetCapsuleCollider2DRestitutionIcall, float, TryGetManagedCapsuleCollider2DComponent, component->Restitution, 0.0f);
+        LT_MANAGED_COMPONENT_SET(SetCapsuleCollider2DRestitutionIcall, float, TryGetManagedCapsuleCollider2DComponent, component->Restitution = value;);
+        LT_MANAGED_COMPONENT_GET(GetCapsuleCollider2DIsSensorIcall, bool, TryGetManagedCapsuleCollider2DComponent, component->IsSensor, false);
+        LT_MANAGED_COMPONENT_SET(SetCapsuleCollider2DIsSensorIcall, bool, TryGetManagedCapsuleCollider2DComponent, component->IsSensor = value;);
+        LT_MANAGED_COMPONENT_GET(GetCapsuleCollider2DCollisionLayerIcall, uint64_t, TryGetManagedCapsuleCollider2DComponent, component->CollisionLayer, 1ull);
+        LT_MANAGED_COMPONENT_SET(SetCapsuleCollider2DCollisionLayerIcall, uint64_t, TryGetManagedCapsuleCollider2DComponent, component->CollisionLayer = value;);
+        LT_MANAGED_COMPONENT_GET(GetCapsuleCollider2DCollisionMaskIcall, uint64_t, TryGetManagedCapsuleCollider2DComponent, component->CollisionMask, ~0ull);
+        LT_MANAGED_COMPONENT_SET(SetCapsuleCollider2DCollisionMaskIcall, uint64_t, TryGetManagedCapsuleCollider2DComponent, component->CollisionMask = value;);
 
-        float ManagedGetPolygonCollider2DFrictionIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedPolygonCollider2DComponent(entityHandle);
-            return collider ? collider->Friction : 0.5f;
-        }
-
-        void ManagedSetPolygonCollider2DFrictionIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedPolygonCollider2DComponent(entityHandle))
-                collider->Friction = value;
-        }
-
-        float ManagedGetPolygonCollider2DRestitutionIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedPolygonCollider2DComponent(entityHandle);
-            return collider ? collider->Restitution : 0.0f;
-        }
-
-        void ManagedSetPolygonCollider2DRestitutionIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedPolygonCollider2DComponent(entityHandle))
-                collider->Restitution = value;
-        }
-
-        bool ManagedGetPolygonCollider2DIsSensorIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedPolygonCollider2DComponent(entityHandle);
-            return collider ? collider->IsSensor : false;
-        }
-
-        void ManagedSetPolygonCollider2DIsSensorIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* collider = TryGetManagedPolygonCollider2DComponent(entityHandle))
-                collider->IsSensor = value;
-        }
-
-        uint64_t ManagedGetPolygonCollider2DCollisionLayerIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedPolygonCollider2DComponent(entityHandle);
-            return collider ? collider->CollisionLayer : 1ull;
-        }
-
-        void ManagedSetPolygonCollider2DCollisionLayerIcall(uint32_t entityHandle, uint64_t value)
-        {
-            if (auto* collider = TryGetManagedPolygonCollider2DComponent(entityHandle))
-                collider->CollisionLayer = value;
-        }
-
-        uint64_t ManagedGetPolygonCollider2DCollisionMaskIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedPolygonCollider2DComponent(entityHandle);
-            return collider ? collider->CollisionMask : ~0ull;
-        }
-
-        void ManagedSetPolygonCollider2DCollisionMaskIcall(uint32_t entityHandle, uint64_t value)
-        {
-            if (auto* collider = TryGetManagedPolygonCollider2DComponent(entityHandle))
-                collider->CollisionMask = value;
-        }
-
-        bool ManagedHasEdgeCollider2DComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedEdgeCollider2DComponent(entityHandle) != nullptr;
-        }
-
-        ManagedVector2 ManagedGetEdgeCollider2DOffsetIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle);
-            return collider ? ToManagedVector2(collider->Offset) : ManagedVector2{};
-        }
-
-        void ManagedSetEdgeCollider2DOffsetIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle))
-                collider->Offset = ToGlmVector2(value);
-        }
-
-        ManagedVector2 ManagedGetEdgeCollider2DPointAIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle);
-            return collider ? ToManagedVector2(collider->PointA) : ManagedVector2{ -0.5f, 0.0f };
-        }
-
-        void ManagedSetEdgeCollider2DPointAIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle))
-                collider->PointA = ToGlmVector2(value);
-        }
-
-        ManagedVector2 ManagedGetEdgeCollider2DPointBIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle);
-            return collider ? ToManagedVector2(collider->PointB) : ManagedVector2{ 0.5f, 0.0f };
-        }
-
-        void ManagedSetEdgeCollider2DPointBIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle))
-                collider->PointB = ToGlmVector2(value);
-        }
-
-        float ManagedGetEdgeCollider2DFrictionIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle);
-            return collider ? collider->Friction : 0.5f;
-        }
-
-        void ManagedSetEdgeCollider2DFrictionIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle))
-                collider->Friction = value;
-        }
-
-        float ManagedGetEdgeCollider2DRestitutionIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle);
-            return collider ? collider->Restitution : 0.0f;
-        }
-
-        void ManagedSetEdgeCollider2DRestitutionIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle))
-                collider->Restitution = value;
-        }
-
-        bool ManagedGetEdgeCollider2DIsSensorIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle);
-            return collider ? collider->IsSensor : false;
-        }
-
-        void ManagedSetEdgeCollider2DIsSensorIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle))
-                collider->IsSensor = value;
-        }
-
-        uint64_t ManagedGetEdgeCollider2DCollisionLayerIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle);
-            return collider ? collider->CollisionLayer : 1ull;
-        }
-
-        void ManagedSetEdgeCollider2DCollisionLayerIcall(uint32_t entityHandle, uint64_t value)
-        {
-            if (auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle))
-                collider->CollisionLayer = value;
-        }
-
-        uint64_t ManagedGetEdgeCollider2DCollisionMaskIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle);
-            return collider ? collider->CollisionMask : ~0ull;
-        }
-
-        void ManagedSetEdgeCollider2DCollisionMaskIcall(uint32_t entityHandle, uint64_t value)
-        {
-            if (auto* collider = TryGetManagedEdgeCollider2DComponent(entityHandle))
-                collider->CollisionMask = value;
-        }
-
-        bool ManagedHasCapsuleCollider2DComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedCapsuleCollider2DComponent(entityHandle) != nullptr;
-        }
-
-        ManagedVector2 ManagedGetCapsuleCollider2DOffsetIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle);
-            return collider ? ToManagedVector2(collider->Offset) : ManagedVector2{};
-        }
-
-        void ManagedSetCapsuleCollider2DOffsetIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle))
-                collider->Offset = ToGlmVector2(value);
-        }
-
-        ManagedVector2 ManagedGetCapsuleCollider2DSizeIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle);
-            return collider ? ToManagedVector2(collider->Size) : ManagedVector2{ 1.0f, 2.0f };
-        }
-
-        void ManagedSetCapsuleCollider2DSizeIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle))
-                collider->Size = ToGlmVector2(value);
-        }
-
-        int ManagedGetCapsuleCollider2DDirectionIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle);
-            return collider ? static_cast<int>(collider->Direction) : static_cast<int>(CapsuleCollider2DComponent::Orientation::Vertical);
-        }
-
-        void ManagedSetCapsuleCollider2DDirectionIcall(uint32_t entityHandle, int value)
-        {
-            if (auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle))
-                collider->Direction = static_cast<CapsuleCollider2DComponent::Orientation>(value);
-        }
-
-        float ManagedGetCapsuleCollider2DDensityIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle);
-            return collider ? collider->Density : 1.0f;
-        }
-
-        void ManagedSetCapsuleCollider2DDensityIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle))
-                collider->Density = value;
-        }
-
-        float ManagedGetCapsuleCollider2DFrictionIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle);
-            return collider ? collider->Friction : 0.5f;
-        }
-
-        void ManagedSetCapsuleCollider2DFrictionIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle))
-                collider->Friction = value;
-        }
-
-        float ManagedGetCapsuleCollider2DRestitutionIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle);
-            return collider ? collider->Restitution : 0.0f;
-        }
-
-        void ManagedSetCapsuleCollider2DRestitutionIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle))
-                collider->Restitution = value;
-        }
-
-        bool ManagedGetCapsuleCollider2DIsSensorIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle);
-            return collider ? collider->IsSensor : false;
-        }
-
-        void ManagedSetCapsuleCollider2DIsSensorIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle))
-                collider->IsSensor = value;
-        }
-
-        uint64_t ManagedGetCapsuleCollider2DCollisionLayerIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle);
-            return collider ? collider->CollisionLayer : 1ull;
-        }
-
-        void ManagedSetCapsuleCollider2DCollisionLayerIcall(uint32_t entityHandle, uint64_t value)
-        {
-            if (auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle))
-                collider->CollisionLayer = value;
-        }
-
-        uint64_t ManagedGetCapsuleCollider2DCollisionMaskIcall(uint32_t entityHandle)
-        {
-            const auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle);
-            return collider ? collider->CollisionMask : ~0ull;
-        }
-
-        void ManagedSetCapsuleCollider2DCollisionMaskIcall(uint32_t entityHandle, uint64_t value)
-        {
-            if (auto* collider = TryGetManagedCapsuleCollider2DComponent(entityHandle))
-                collider->CollisionMask = value;
-        }
-
-        bool ManagedHasJoint2DComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedJoint2DComponent(entityHandle) != nullptr;
-        }
-
-        int ManagedGetJoint2DTypeIcall(uint32_t entityHandle)
-        {
-            const auto* joint = TryGetManagedJoint2DComponent(entityHandle);
-            return joint ? static_cast<int>(joint->Type) : static_cast<int>(Joint2DComponent::JointType::Distance);
-        }
-
-        void ManagedSetJoint2DTypeIcall(uint32_t entityHandle, int value)
-        {
-            if (auto* joint = TryGetManagedJoint2DComponent(entityHandle))
-                joint->Type = static_cast<Joint2DComponent::JointType>(value);
-        }
+        LT_MANAGED_COMPONENT_HAS(HasJoint2DComponentIcall, TryGetManagedJoint2DComponent);
+        LT_MANAGED_COMPONENT_GET(GetJoint2DTypeIcall, int, TryGetManagedJoint2DComponent, static_cast<int>(component->Type), static_cast<int>(Joint2DComponent::JointType::Distance));
+        LT_MANAGED_COMPONENT_SET(SetJoint2DTypeIcall, int, TryGetManagedJoint2DComponent, component->Type = static_cast<Joint2DComponent::JointType>(value););
 
         uint32_t ManagedGetJoint2DConnectedEntityIcall(uint32_t entityHandle)
         {
@@ -1068,315 +640,198 @@ namespace Limitless::ManagedScriptHost
             }
         }
 
-        bool ManagedGetJoint2DCollideConnectedIcall(uint32_t entityHandle)
-        {
-            const auto* joint = TryGetManagedJoint2DComponent(entityHandle);
-            return joint ? joint->CollideConnected : false;
-        }
-
-        void ManagedSetJoint2DCollideConnectedIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* joint = TryGetManagedJoint2DComponent(entityHandle))
-                joint->CollideConnected = value;
-        }
-
-        ManagedVector2 ManagedGetJoint2DAnchorAIcall(uint32_t entityHandle)
-        {
-            const auto* joint = TryGetManagedJoint2DComponent(entityHandle);
-            return joint ? ToManagedVector2(joint->AnchorA) : ManagedVector2{};
-        }
-
-        void ManagedSetJoint2DAnchorAIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* joint = TryGetManagedJoint2DComponent(entityHandle))
-                joint->AnchorA = ToGlmVector2(value);
-        }
-
-        ManagedVector2 ManagedGetJoint2DAnchorBIcall(uint32_t entityHandle)
-        {
-            const auto* joint = TryGetManagedJoint2DComponent(entityHandle);
-            return joint ? ToManagedVector2(joint->AnchorB) : ManagedVector2{};
-        }
-
-        void ManagedSetJoint2DAnchorBIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* joint = TryGetManagedJoint2DComponent(entityHandle))
-                joint->AnchorB = ToGlmVector2(value);
-        }
-
-        ManagedVector2 ManagedGetJoint2DAxisIcall(uint32_t entityHandle)
-        {
-            const auto* joint = TryGetManagedJoint2DComponent(entityHandle);
-            return joint ? ToManagedVector2(joint->Axis) : ManagedVector2{ 1.0f, 0.0f };
-        }
-
-        void ManagedSetJoint2DAxisIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* joint = TryGetManagedJoint2DComponent(entityHandle))
-                joint->Axis = ToGlmVector2(value);
-        }
-
-        bool ManagedGetJoint2DEnableLimitIcall(uint32_t entityHandle)
-        {
-            const auto* joint = TryGetManagedJoint2DComponent(entityHandle);
-            return joint ? joint->EnableLimit : false;
-        }
-
-        void ManagedSetJoint2DEnableLimitIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* joint = TryGetManagedJoint2DComponent(entityHandle))
-                joint->EnableLimit = value;
-        }
-
-        ManagedVector2 ManagedGetJoint2DLimitsIcall(uint32_t entityHandle)
-        {
-            const auto* joint = TryGetManagedJoint2DComponent(entityHandle);
-            return joint ? ToManagedVector2(joint->Limits) : ManagedVector2{ -1.0f, 1.0f };
-        }
-
-        void ManagedSetJoint2DLimitsIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* joint = TryGetManagedJoint2DComponent(entityHandle))
-                joint->Limits = ToGlmVector2(value);
-        }
-
-        bool ManagedGetJoint2DEnableMotorIcall(uint32_t entityHandle)
-        {
-            const auto* joint = TryGetManagedJoint2DComponent(entityHandle);
-            return joint ? joint->EnableMotor : false;
-        }
-
-        void ManagedSetJoint2DEnableMotorIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* joint = TryGetManagedJoint2DComponent(entityHandle))
-                joint->EnableMotor = value;
-        }
-
-        float ManagedGetJoint2DMotorSpeedIcall(uint32_t entityHandle)
-        {
-            const auto* joint = TryGetManagedJoint2DComponent(entityHandle);
-            return joint ? joint->MotorSpeed : 0.0f;
-        }
-
-        void ManagedSetJoint2DMotorSpeedIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* joint = TryGetManagedJoint2DComponent(entityHandle))
-                joint->MotorSpeed = value;
-        }
-
-        float ManagedGetJoint2DMaxMotorForceOrTorqueIcall(uint32_t entityHandle)
-        {
-            const auto* joint = TryGetManagedJoint2DComponent(entityHandle);
-            return joint ? joint->MaxMotorForceOrTorque : 10.0f;
-        }
-
-        void ManagedSetJoint2DMaxMotorForceOrTorqueIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* joint = TryGetManagedJoint2DComponent(entityHandle))
-                joint->MaxMotorForceOrTorque = value;
-        }
-
-        bool ManagedGetJoint2DEnableSpringIcall(uint32_t entityHandle)
-        {
-            const auto* joint = TryGetManagedJoint2DComponent(entityHandle);
-            return joint ? joint->EnableSpring : false;
-        }
-
-        void ManagedSetJoint2DEnableSpringIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* joint = TryGetManagedJoint2DComponent(entityHandle))
-                joint->EnableSpring = value;
-        }
-
-        float ManagedGetJoint2DHertzIcall(uint32_t entityHandle)
-        {
-            const auto* joint = TryGetManagedJoint2DComponent(entityHandle);
-            return joint ? joint->Hertz : 5.0f;
-        }
-
-        void ManagedSetJoint2DHertzIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* joint = TryGetManagedJoint2DComponent(entityHandle))
-                joint->Hertz = value;
-        }
-
-        float ManagedGetJoint2DDampingRatioIcall(uint32_t entityHandle)
-        {
-            const auto* joint = TryGetManagedJoint2DComponent(entityHandle);
-            return joint ? joint->DampingRatio : 0.7f;
-        }
-
-        void ManagedSetJoint2DDampingRatioIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* joint = TryGetManagedJoint2DComponent(entityHandle))
-                joint->DampingRatio = value;
-        }
+        LT_MANAGED_COMPONENT_GET(GetJoint2DCollideConnectedIcall, bool, TryGetManagedJoint2DComponent, component->CollideConnected, false);
+        LT_MANAGED_COMPONENT_SET(SetJoint2DCollideConnectedIcall, bool, TryGetManagedJoint2DComponent, component->CollideConnected = value;);
+        LT_MANAGED_COMPONENT_GET(GetJoint2DAnchorAIcall, ManagedVector2, TryGetManagedJoint2DComponent, ToManagedVector2(component->AnchorA), ManagedVector2{});
+        LT_MANAGED_COMPONENT_SET(SetJoint2DAnchorAIcall, ManagedVector2, TryGetManagedJoint2DComponent, component->AnchorA = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetJoint2DAnchorBIcall, ManagedVector2, TryGetManagedJoint2DComponent, ToManagedVector2(component->AnchorB), ManagedVector2{});
+        LT_MANAGED_COMPONENT_SET(SetJoint2DAnchorBIcall, ManagedVector2, TryGetManagedJoint2DComponent, component->AnchorB = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetJoint2DAxisIcall, ManagedVector2, TryGetManagedJoint2DComponent, ToManagedVector2(component->Axis), ManagedVector2{ 1.0f, 0.0f });
+        LT_MANAGED_COMPONENT_SET(SetJoint2DAxisIcall, ManagedVector2, TryGetManagedJoint2DComponent, component->Axis = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetJoint2DEnableLimitIcall, bool, TryGetManagedJoint2DComponent, component->EnableLimit, false);
+        LT_MANAGED_COMPONENT_SET(SetJoint2DEnableLimitIcall, bool, TryGetManagedJoint2DComponent, component->EnableLimit = value;);
+        LT_MANAGED_COMPONENT_GET(GetJoint2DLimitsIcall, ManagedVector2, TryGetManagedJoint2DComponent, ToManagedVector2(component->Limits), ManagedVector2{ -1.0f, 1.0f });
+        LT_MANAGED_COMPONENT_SET(SetJoint2DLimitsIcall, ManagedVector2, TryGetManagedJoint2DComponent, component->Limits = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetJoint2DEnableMotorIcall, bool, TryGetManagedJoint2DComponent, component->EnableMotor, false);
+        LT_MANAGED_COMPONENT_SET(SetJoint2DEnableMotorIcall, bool, TryGetManagedJoint2DComponent, component->EnableMotor = value;);
+        LT_MANAGED_COMPONENT_GET(GetJoint2DMotorSpeedIcall, float, TryGetManagedJoint2DComponent, component->MotorSpeed, 0.0f);
+        LT_MANAGED_COMPONENT_SET(SetJoint2DMotorSpeedIcall, float, TryGetManagedJoint2DComponent, component->MotorSpeed = value;);
+        LT_MANAGED_COMPONENT_GET(GetJoint2DMaxMotorForceOrTorqueIcall, float, TryGetManagedJoint2DComponent, component->MaxMotorForceOrTorque, 10.0f);
+        LT_MANAGED_COMPONENT_SET(SetJoint2DMaxMotorForceOrTorqueIcall, float, TryGetManagedJoint2DComponent, component->MaxMotorForceOrTorque = value;);
+        LT_MANAGED_COMPONENT_GET(GetJoint2DEnableSpringIcall, bool, TryGetManagedJoint2DComponent, component->EnableSpring, false);
+        LT_MANAGED_COMPONENT_SET(SetJoint2DEnableSpringIcall, bool, TryGetManagedJoint2DComponent, component->EnableSpring = value;);
+        LT_MANAGED_COMPONENT_GET(GetJoint2DHertzIcall, float, TryGetManagedJoint2DComponent, component->Hertz, 5.0f);
+        LT_MANAGED_COMPONENT_SET(SetJoint2DHertzIcall, float, TryGetManagedJoint2DComponent, component->Hertz = value;);
+        LT_MANAGED_COMPONENT_GET(GetJoint2DDampingRatioIcall, float, TryGetManagedJoint2DComponent, component->DampingRatio, 0.7f);
+        LT_MANAGED_COMPONENT_SET(SetJoint2DDampingRatioIcall, float, TryGetManagedJoint2DComponent, component->DampingRatio = value;);
 
         void RegisterScenePhysicsInternalCalls(Coral::ManagedAssembly& contractAssembly)
         {
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "LogInfoIcall", reinterpret_cast<void*>(&ManagedLogInfoIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "LogWarningIcall", reinterpret_cast<void*>(&ManagedLogWarningIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "LogErrorIcall", reinterpret_cast<void*>(&ManagedLogErrorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRandomSeedIcall", reinterpret_cast<void*>(&ManagedSetRandomSeedIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "RandomRangeIntIcall", reinterpret_cast<void*>(&ManagedRandomRangeIntIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "RandomRangeFloatIcall", reinterpret_cast<void*>(&ManagedRandomRangeFloatIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "RandomValueIcall", reinterpret_cast<void*>(&ManagedRandomValueIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "LoadSceneIcall", reinterpret_cast<void*>(&ManagedLoadSceneIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "ReloadCurrentSceneIcall", reinterpret_cast<void*>(&ManagedReloadCurrentSceneIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetActiveSceneIcall", reinterpret_cast<void*>(&ManagedSetActiveSceneIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "UnloadSceneIcall", reinterpret_cast<void*>(&ManagedUnloadSceneIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "CreateEntityIcall", reinterpret_cast<void*>(&ManagedCreateEntityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "DestroyEntityIcall", reinterpret_cast<void*>(&ManagedDestroyEntityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "EntityExistsIcall", reinterpret_cast<void*>(&ManagedEntityExistsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetEntityEnabledIcall", reinterpret_cast<void*>(&ManagedGetEntityEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetEntityEnabledIcall", reinterpret_cast<void*>(&ManagedSetEntityEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "IsEntityEnabledInHierarchyIcall", reinterpret_cast<void*>(&ManagedIsEntityEnabledInHierarchyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetParentIcall", reinterpret_cast<void*>(&ManagedSetParentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetParentIcall", reinterpret_cast<void*>(&ManagedGetParentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetChildCountIcall", reinterpret_cast<void*>(&ManagedGetChildCountIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetChildAtIcall", reinterpret_cast<void*>(&ManagedGetChildAtIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "FindEntityByTagIcall", reinterpret_cast<void*>(&ManagedFindEntityByTagIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasTagComponentIcall", reinterpret_cast<void*>(&ManagedHasTagComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetTagIcall", reinterpret_cast<void*>(&ManagedGetTagIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetTagIcall", reinterpret_cast<void*>(&ManagedSetTagIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasTransformComponentIcall", reinterpret_cast<void*>(&ManagedHasTransformComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetTransformPositionIcall", reinterpret_cast<void*>(&ManagedGetTransformPositionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetTransformPositionIcall", reinterpret_cast<void*>(&ManagedSetTransformPositionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetTransformRotationIcall", reinterpret_cast<void*>(&ManagedGetTransformRotationIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetTransformRotationIcall", reinterpret_cast<void*>(&ManagedSetTransformRotationIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetTransformScaleIcall", reinterpret_cast<void*>(&ManagedGetTransformScaleIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetTransformScaleIcall", reinterpret_cast<void*>(&ManagedSetTransformScaleIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasCameraComponentIcall", reinterpret_cast<void*>(&ManagedHasCameraComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCameraProjectionIcall", reinterpret_cast<void*>(&ManagedGetCameraProjectionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCameraProjectionIcall", reinterpret_cast<void*>(&ManagedSetCameraProjectionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCameraPrimaryIcall", reinterpret_cast<void*>(&ManagedGetCameraPrimaryIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCameraPrimaryIcall", reinterpret_cast<void*>(&ManagedSetCameraPrimaryIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCameraZoomIcall", reinterpret_cast<void*>(&ManagedGetCameraZoomIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCameraZoomIcall", reinterpret_cast<void*>(&ManagedSetCameraZoomIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCameraNearPlaneIcall", reinterpret_cast<void*>(&ManagedGetCameraNearPlaneIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCameraNearPlaneIcall", reinterpret_cast<void*>(&ManagedSetCameraNearPlaneIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCameraFarPlaneIcall", reinterpret_cast<void*>(&ManagedGetCameraFarPlaneIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCameraFarPlaneIcall", reinterpret_cast<void*>(&ManagedSetCameraFarPlaneIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCameraFieldOfViewYDegreesIcall", reinterpret_cast<void*>(&ManagedGetCameraFieldOfViewYDegreesIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCameraFieldOfViewYDegreesIcall", reinterpret_cast<void*>(&ManagedSetCameraFieldOfViewYDegreesIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasBoxCollider2DComponentIcall", reinterpret_cast<void*>(&ManagedHasBoxCollider2DComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetBoxCollider2DOffsetIcall", reinterpret_cast<void*>(&ManagedGetBoxCollider2DOffsetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetBoxCollider2DOffsetIcall", reinterpret_cast<void*>(&ManagedSetBoxCollider2DOffsetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetBoxCollider2DSizeIcall", reinterpret_cast<void*>(&ManagedGetBoxCollider2DSizeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetBoxCollider2DSizeIcall", reinterpret_cast<void*>(&ManagedSetBoxCollider2DSizeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetBoxCollider2DDensityIcall", reinterpret_cast<void*>(&ManagedGetBoxCollider2DDensityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetBoxCollider2DDensityIcall", reinterpret_cast<void*>(&ManagedSetBoxCollider2DDensityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetBoxCollider2DFrictionIcall", reinterpret_cast<void*>(&ManagedGetBoxCollider2DFrictionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetBoxCollider2DFrictionIcall", reinterpret_cast<void*>(&ManagedSetBoxCollider2DFrictionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetBoxCollider2DRestitutionIcall", reinterpret_cast<void*>(&ManagedGetBoxCollider2DRestitutionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetBoxCollider2DRestitutionIcall", reinterpret_cast<void*>(&ManagedSetBoxCollider2DRestitutionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetBoxCollider2DIsSensorIcall", reinterpret_cast<void*>(&ManagedGetBoxCollider2DIsSensorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetBoxCollider2DIsSensorIcall", reinterpret_cast<void*>(&ManagedSetBoxCollider2DIsSensorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetBoxCollider2DCollisionLayerIcall", reinterpret_cast<void*>(&ManagedGetBoxCollider2DCollisionLayerIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetBoxCollider2DCollisionLayerIcall", reinterpret_cast<void*>(&ManagedSetBoxCollider2DCollisionLayerIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetBoxCollider2DCollisionMaskIcall", reinterpret_cast<void*>(&ManagedGetBoxCollider2DCollisionMaskIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetBoxCollider2DCollisionMaskIcall", reinterpret_cast<void*>(&ManagedSetBoxCollider2DCollisionMaskIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasCircleCollider2DComponentIcall", reinterpret_cast<void*>(&ManagedHasCircleCollider2DComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCircleCollider2DOffsetIcall", reinterpret_cast<void*>(&ManagedGetCircleCollider2DOffsetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCircleCollider2DOffsetIcall", reinterpret_cast<void*>(&ManagedSetCircleCollider2DOffsetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCircleCollider2DRadiusIcall", reinterpret_cast<void*>(&ManagedGetCircleCollider2DRadiusIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCircleCollider2DRadiusIcall", reinterpret_cast<void*>(&ManagedSetCircleCollider2DRadiusIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCircleCollider2DDensityIcall", reinterpret_cast<void*>(&ManagedGetCircleCollider2DDensityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCircleCollider2DDensityIcall", reinterpret_cast<void*>(&ManagedSetCircleCollider2DDensityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCircleCollider2DFrictionIcall", reinterpret_cast<void*>(&ManagedGetCircleCollider2DFrictionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCircleCollider2DFrictionIcall", reinterpret_cast<void*>(&ManagedSetCircleCollider2DFrictionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCircleCollider2DRestitutionIcall", reinterpret_cast<void*>(&ManagedGetCircleCollider2DRestitutionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCircleCollider2DRestitutionIcall", reinterpret_cast<void*>(&ManagedSetCircleCollider2DRestitutionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCircleCollider2DIsSensorIcall", reinterpret_cast<void*>(&ManagedGetCircleCollider2DIsSensorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCircleCollider2DIsSensorIcall", reinterpret_cast<void*>(&ManagedSetCircleCollider2DIsSensorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCircleCollider2DCollisionLayerIcall", reinterpret_cast<void*>(&ManagedGetCircleCollider2DCollisionLayerIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCircleCollider2DCollisionLayerIcall", reinterpret_cast<void*>(&ManagedSetCircleCollider2DCollisionLayerIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCircleCollider2DCollisionMaskIcall", reinterpret_cast<void*>(&ManagedGetCircleCollider2DCollisionMaskIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCircleCollider2DCollisionMaskIcall", reinterpret_cast<void*>(&ManagedSetCircleCollider2DCollisionMaskIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasPolygonCollider2DComponentIcall", reinterpret_cast<void*>(&ManagedHasPolygonCollider2DComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPolygonCollider2DOffsetIcall", reinterpret_cast<void*>(&ManagedGetPolygonCollider2DOffsetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPolygonCollider2DOffsetIcall", reinterpret_cast<void*>(&ManagedSetPolygonCollider2DOffsetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPolygonCollider2DPointCountIcall", reinterpret_cast<void*>(&ManagedGetPolygonCollider2DPointCountIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPolygonCollider2DPointCountIcall", reinterpret_cast<void*>(&ManagedSetPolygonCollider2DPointCountIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPolygonCollider2DPointIcall", reinterpret_cast<void*>(&ManagedGetPolygonCollider2DPointIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPolygonCollider2DPointIcall", reinterpret_cast<void*>(&ManagedSetPolygonCollider2DPointIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPolygonCollider2DDensityIcall", reinterpret_cast<void*>(&ManagedGetPolygonCollider2DDensityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPolygonCollider2DDensityIcall", reinterpret_cast<void*>(&ManagedSetPolygonCollider2DDensityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPolygonCollider2DFrictionIcall", reinterpret_cast<void*>(&ManagedGetPolygonCollider2DFrictionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPolygonCollider2DFrictionIcall", reinterpret_cast<void*>(&ManagedSetPolygonCollider2DFrictionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPolygonCollider2DRestitutionIcall", reinterpret_cast<void*>(&ManagedGetPolygonCollider2DRestitutionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPolygonCollider2DRestitutionIcall", reinterpret_cast<void*>(&ManagedSetPolygonCollider2DRestitutionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPolygonCollider2DIsSensorIcall", reinterpret_cast<void*>(&ManagedGetPolygonCollider2DIsSensorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPolygonCollider2DIsSensorIcall", reinterpret_cast<void*>(&ManagedSetPolygonCollider2DIsSensorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPolygonCollider2DCollisionLayerIcall", reinterpret_cast<void*>(&ManagedGetPolygonCollider2DCollisionLayerIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPolygonCollider2DCollisionLayerIcall", reinterpret_cast<void*>(&ManagedSetPolygonCollider2DCollisionLayerIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPolygonCollider2DCollisionMaskIcall", reinterpret_cast<void*>(&ManagedGetPolygonCollider2DCollisionMaskIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPolygonCollider2DCollisionMaskIcall", reinterpret_cast<void*>(&ManagedSetPolygonCollider2DCollisionMaskIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasEdgeCollider2DComponentIcall", reinterpret_cast<void*>(&ManagedHasEdgeCollider2DComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetEdgeCollider2DOffsetIcall", reinterpret_cast<void*>(&ManagedGetEdgeCollider2DOffsetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetEdgeCollider2DOffsetIcall", reinterpret_cast<void*>(&ManagedSetEdgeCollider2DOffsetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetEdgeCollider2DPointAIcall", reinterpret_cast<void*>(&ManagedGetEdgeCollider2DPointAIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetEdgeCollider2DPointAIcall", reinterpret_cast<void*>(&ManagedSetEdgeCollider2DPointAIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetEdgeCollider2DPointBIcall", reinterpret_cast<void*>(&ManagedGetEdgeCollider2DPointBIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetEdgeCollider2DPointBIcall", reinterpret_cast<void*>(&ManagedSetEdgeCollider2DPointBIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetEdgeCollider2DFrictionIcall", reinterpret_cast<void*>(&ManagedGetEdgeCollider2DFrictionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetEdgeCollider2DFrictionIcall", reinterpret_cast<void*>(&ManagedSetEdgeCollider2DFrictionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetEdgeCollider2DRestitutionIcall", reinterpret_cast<void*>(&ManagedGetEdgeCollider2DRestitutionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetEdgeCollider2DRestitutionIcall", reinterpret_cast<void*>(&ManagedSetEdgeCollider2DRestitutionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetEdgeCollider2DIsSensorIcall", reinterpret_cast<void*>(&ManagedGetEdgeCollider2DIsSensorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetEdgeCollider2DIsSensorIcall", reinterpret_cast<void*>(&ManagedSetEdgeCollider2DIsSensorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetEdgeCollider2DCollisionLayerIcall", reinterpret_cast<void*>(&ManagedGetEdgeCollider2DCollisionLayerIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetEdgeCollider2DCollisionLayerIcall", reinterpret_cast<void*>(&ManagedSetEdgeCollider2DCollisionLayerIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetEdgeCollider2DCollisionMaskIcall", reinterpret_cast<void*>(&ManagedGetEdgeCollider2DCollisionMaskIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetEdgeCollider2DCollisionMaskIcall", reinterpret_cast<void*>(&ManagedSetEdgeCollider2DCollisionMaskIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasCapsuleCollider2DComponentIcall", reinterpret_cast<void*>(&ManagedHasCapsuleCollider2DComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCapsuleCollider2DOffsetIcall", reinterpret_cast<void*>(&ManagedGetCapsuleCollider2DOffsetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCapsuleCollider2DOffsetIcall", reinterpret_cast<void*>(&ManagedSetCapsuleCollider2DOffsetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCapsuleCollider2DSizeIcall", reinterpret_cast<void*>(&ManagedGetCapsuleCollider2DSizeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCapsuleCollider2DSizeIcall", reinterpret_cast<void*>(&ManagedSetCapsuleCollider2DSizeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCapsuleCollider2DDirectionIcall", reinterpret_cast<void*>(&ManagedGetCapsuleCollider2DDirectionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCapsuleCollider2DDirectionIcall", reinterpret_cast<void*>(&ManagedSetCapsuleCollider2DDirectionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCapsuleCollider2DDensityIcall", reinterpret_cast<void*>(&ManagedGetCapsuleCollider2DDensityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCapsuleCollider2DDensityIcall", reinterpret_cast<void*>(&ManagedSetCapsuleCollider2DDensityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCapsuleCollider2DFrictionIcall", reinterpret_cast<void*>(&ManagedGetCapsuleCollider2DFrictionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCapsuleCollider2DFrictionIcall", reinterpret_cast<void*>(&ManagedSetCapsuleCollider2DFrictionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCapsuleCollider2DRestitutionIcall", reinterpret_cast<void*>(&ManagedGetCapsuleCollider2DRestitutionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCapsuleCollider2DRestitutionIcall", reinterpret_cast<void*>(&ManagedSetCapsuleCollider2DRestitutionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCapsuleCollider2DIsSensorIcall", reinterpret_cast<void*>(&ManagedGetCapsuleCollider2DIsSensorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCapsuleCollider2DIsSensorIcall", reinterpret_cast<void*>(&ManagedSetCapsuleCollider2DIsSensorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCapsuleCollider2DCollisionLayerIcall", reinterpret_cast<void*>(&ManagedGetCapsuleCollider2DCollisionLayerIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCapsuleCollider2DCollisionLayerIcall", reinterpret_cast<void*>(&ManagedSetCapsuleCollider2DCollisionLayerIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCapsuleCollider2DCollisionMaskIcall", reinterpret_cast<void*>(&ManagedGetCapsuleCollider2DCollisionMaskIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCapsuleCollider2DCollisionMaskIcall", reinterpret_cast<void*>(&ManagedSetCapsuleCollider2DCollisionMaskIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasJoint2DComponentIcall", reinterpret_cast<void*>(&ManagedHasJoint2DComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetJoint2DTypeIcall", reinterpret_cast<void*>(&ManagedGetJoint2DTypeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetJoint2DTypeIcall", reinterpret_cast<void*>(&ManagedSetJoint2DTypeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetJoint2DConnectedEntityIcall", reinterpret_cast<void*>(&ManagedGetJoint2DConnectedEntityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetJoint2DConnectedEntityIcall", reinterpret_cast<void*>(&ManagedSetJoint2DConnectedEntityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetJoint2DCollideConnectedIcall", reinterpret_cast<void*>(&ManagedGetJoint2DCollideConnectedIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetJoint2DCollideConnectedIcall", reinterpret_cast<void*>(&ManagedSetJoint2DCollideConnectedIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetJoint2DAnchorAIcall", reinterpret_cast<void*>(&ManagedGetJoint2DAnchorAIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetJoint2DAnchorAIcall", reinterpret_cast<void*>(&ManagedSetJoint2DAnchorAIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetJoint2DAnchorBIcall", reinterpret_cast<void*>(&ManagedGetJoint2DAnchorBIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetJoint2DAnchorBIcall", reinterpret_cast<void*>(&ManagedSetJoint2DAnchorBIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetJoint2DAxisIcall", reinterpret_cast<void*>(&ManagedGetJoint2DAxisIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetJoint2DAxisIcall", reinterpret_cast<void*>(&ManagedSetJoint2DAxisIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetJoint2DEnableLimitIcall", reinterpret_cast<void*>(&ManagedGetJoint2DEnableLimitIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetJoint2DEnableLimitIcall", reinterpret_cast<void*>(&ManagedSetJoint2DEnableLimitIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetJoint2DLimitsIcall", reinterpret_cast<void*>(&ManagedGetJoint2DLimitsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetJoint2DLimitsIcall", reinterpret_cast<void*>(&ManagedSetJoint2DLimitsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetJoint2DEnableMotorIcall", reinterpret_cast<void*>(&ManagedGetJoint2DEnableMotorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetJoint2DEnableMotorIcall", reinterpret_cast<void*>(&ManagedSetJoint2DEnableMotorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetJoint2DMotorSpeedIcall", reinterpret_cast<void*>(&ManagedGetJoint2DMotorSpeedIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetJoint2DMotorSpeedIcall", reinterpret_cast<void*>(&ManagedSetJoint2DMotorSpeedIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetJoint2DMaxMotorForceOrTorqueIcall", reinterpret_cast<void*>(&ManagedGetJoint2DMaxMotorForceOrTorqueIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetJoint2DMaxMotorForceOrTorqueIcall", reinterpret_cast<void*>(&ManagedSetJoint2DMaxMotorForceOrTorqueIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetJoint2DEnableSpringIcall", reinterpret_cast<void*>(&ManagedGetJoint2DEnableSpringIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetJoint2DEnableSpringIcall", reinterpret_cast<void*>(&ManagedSetJoint2DEnableSpringIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetJoint2DHertzIcall", reinterpret_cast<void*>(&ManagedGetJoint2DHertzIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetJoint2DHertzIcall", reinterpret_cast<void*>(&ManagedSetJoint2DHertzIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetJoint2DDampingRatioIcall", reinterpret_cast<void*>(&ManagedGetJoint2DDampingRatioIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetJoint2DDampingRatioIcall", reinterpret_cast<void*>(&ManagedSetJoint2DDampingRatioIcall));
+            RegisterInternalCallBatch(contractAssembly, {
+                LT_MANAGED_INTERNAL_CALL(LogInfoIcall),
+                LT_MANAGED_INTERNAL_CALL(LogWarningIcall),
+                LT_MANAGED_INTERNAL_CALL(LogErrorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetRandomSeedIcall),
+                LT_MANAGED_INTERNAL_CALL(RandomRangeIntIcall),
+                LT_MANAGED_INTERNAL_CALL(RandomRangeFloatIcall),
+                LT_MANAGED_INTERNAL_CALL(RandomValueIcall),
+                LT_MANAGED_INTERNAL_CALL(LoadSceneIcall),
+                LT_MANAGED_INTERNAL_CALL(ReloadCurrentSceneIcall),
+                LT_MANAGED_INTERNAL_CALL(SetActiveSceneIcall),
+                LT_MANAGED_INTERNAL_CALL(UnloadSceneIcall),
+                LT_MANAGED_INTERNAL_CALL(CreateEntityIcall),
+                LT_MANAGED_INTERNAL_CALL(DestroyEntityIcall),
+                LT_MANAGED_INTERNAL_CALL(EntityExistsIcall),
+                LT_MANAGED_INTERNAL_CALL(GetEntityEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(SetEntityEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(IsEntityEnabledInHierarchyIcall),
+                LT_MANAGED_INTERNAL_CALL(SetParentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetParentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetChildCountIcall),
+                LT_MANAGED_INTERNAL_CALL(GetChildAtIcall),
+                LT_MANAGED_INTERNAL_CALL(FindEntityByTagIcall),
+                LT_MANAGED_INTERNAL_CALL(HasTagComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetTagIcall),
+                LT_MANAGED_INTERNAL_CALL(SetTagIcall),
+                LT_MANAGED_INTERNAL_CALL(HasTransformComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetTransformPositionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetTransformPositionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetTransformRotationIcall),
+                LT_MANAGED_INTERNAL_CALL(SetTransformRotationIcall),
+                LT_MANAGED_INTERNAL_CALL(GetTransformScaleIcall),
+                LT_MANAGED_INTERNAL_CALL(SetTransformScaleIcall),
+                LT_MANAGED_INTERNAL_CALL(HasCameraComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCameraProjectionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCameraProjectionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCameraPrimaryIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCameraPrimaryIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCameraZoomIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCameraZoomIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCameraNearPlaneIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCameraNearPlaneIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCameraFarPlaneIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCameraFarPlaneIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCameraFieldOfViewYDegreesIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCameraFieldOfViewYDegreesIcall),
+                LT_MANAGED_INTERNAL_CALL(HasBoxCollider2DComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetBoxCollider2DOffsetIcall),
+                LT_MANAGED_INTERNAL_CALL(SetBoxCollider2DOffsetIcall),
+                LT_MANAGED_INTERNAL_CALL(GetBoxCollider2DSizeIcall),
+                LT_MANAGED_INTERNAL_CALL(SetBoxCollider2DSizeIcall),
+                LT_MANAGED_INTERNAL_CALL(GetBoxCollider2DDensityIcall),
+                LT_MANAGED_INTERNAL_CALL(SetBoxCollider2DDensityIcall),
+                LT_MANAGED_INTERNAL_CALL(GetBoxCollider2DFrictionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetBoxCollider2DFrictionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetBoxCollider2DRestitutionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetBoxCollider2DRestitutionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetBoxCollider2DIsSensorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetBoxCollider2DIsSensorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetBoxCollider2DCollisionLayerIcall),
+                LT_MANAGED_INTERNAL_CALL(SetBoxCollider2DCollisionLayerIcall),
+                LT_MANAGED_INTERNAL_CALL(GetBoxCollider2DCollisionMaskIcall),
+                LT_MANAGED_INTERNAL_CALL(SetBoxCollider2DCollisionMaskIcall),
+                LT_MANAGED_INTERNAL_CALL(HasCircleCollider2DComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCircleCollider2DOffsetIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCircleCollider2DOffsetIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCircleCollider2DRadiusIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCircleCollider2DRadiusIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCircleCollider2DDensityIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCircleCollider2DDensityIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCircleCollider2DFrictionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCircleCollider2DFrictionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCircleCollider2DRestitutionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCircleCollider2DRestitutionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCircleCollider2DIsSensorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCircleCollider2DIsSensorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCircleCollider2DCollisionLayerIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCircleCollider2DCollisionLayerIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCircleCollider2DCollisionMaskIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCircleCollider2DCollisionMaskIcall),
+                LT_MANAGED_INTERNAL_CALL(HasPolygonCollider2DComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPolygonCollider2DOffsetIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPolygonCollider2DOffsetIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPolygonCollider2DPointCountIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPolygonCollider2DPointCountIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPolygonCollider2DPointIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPolygonCollider2DPointIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPolygonCollider2DDensityIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPolygonCollider2DDensityIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPolygonCollider2DFrictionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPolygonCollider2DFrictionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPolygonCollider2DRestitutionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPolygonCollider2DRestitutionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPolygonCollider2DIsSensorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPolygonCollider2DIsSensorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPolygonCollider2DCollisionLayerIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPolygonCollider2DCollisionLayerIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPolygonCollider2DCollisionMaskIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPolygonCollider2DCollisionMaskIcall),
+                LT_MANAGED_INTERNAL_CALL(HasEdgeCollider2DComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetEdgeCollider2DOffsetIcall),
+                LT_MANAGED_INTERNAL_CALL(SetEdgeCollider2DOffsetIcall),
+                LT_MANAGED_INTERNAL_CALL(GetEdgeCollider2DPointAIcall),
+                LT_MANAGED_INTERNAL_CALL(SetEdgeCollider2DPointAIcall),
+                LT_MANAGED_INTERNAL_CALL(GetEdgeCollider2DPointBIcall),
+                LT_MANAGED_INTERNAL_CALL(SetEdgeCollider2DPointBIcall),
+                LT_MANAGED_INTERNAL_CALL(GetEdgeCollider2DFrictionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetEdgeCollider2DFrictionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetEdgeCollider2DRestitutionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetEdgeCollider2DRestitutionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetEdgeCollider2DIsSensorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetEdgeCollider2DIsSensorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetEdgeCollider2DCollisionLayerIcall),
+                LT_MANAGED_INTERNAL_CALL(SetEdgeCollider2DCollisionLayerIcall),
+                LT_MANAGED_INTERNAL_CALL(GetEdgeCollider2DCollisionMaskIcall),
+                LT_MANAGED_INTERNAL_CALL(SetEdgeCollider2DCollisionMaskIcall),
+                LT_MANAGED_INTERNAL_CALL(HasCapsuleCollider2DComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCapsuleCollider2DOffsetIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCapsuleCollider2DOffsetIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCapsuleCollider2DSizeIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCapsuleCollider2DSizeIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCapsuleCollider2DDirectionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCapsuleCollider2DDirectionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCapsuleCollider2DDensityIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCapsuleCollider2DDensityIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCapsuleCollider2DFrictionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCapsuleCollider2DFrictionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCapsuleCollider2DRestitutionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCapsuleCollider2DRestitutionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCapsuleCollider2DIsSensorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCapsuleCollider2DIsSensorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCapsuleCollider2DCollisionLayerIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCapsuleCollider2DCollisionLayerIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCapsuleCollider2DCollisionMaskIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCapsuleCollider2DCollisionMaskIcall),
+                LT_MANAGED_INTERNAL_CALL(HasJoint2DComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetJoint2DTypeIcall),
+                LT_MANAGED_INTERNAL_CALL(SetJoint2DTypeIcall),
+                LT_MANAGED_INTERNAL_CALL(GetJoint2DConnectedEntityIcall),
+                LT_MANAGED_INTERNAL_CALL(SetJoint2DConnectedEntityIcall),
+                LT_MANAGED_INTERNAL_CALL(GetJoint2DCollideConnectedIcall),
+                LT_MANAGED_INTERNAL_CALL(SetJoint2DCollideConnectedIcall),
+                LT_MANAGED_INTERNAL_CALL(GetJoint2DAnchorAIcall),
+                LT_MANAGED_INTERNAL_CALL(SetJoint2DAnchorAIcall),
+                LT_MANAGED_INTERNAL_CALL(GetJoint2DAnchorBIcall),
+                LT_MANAGED_INTERNAL_CALL(SetJoint2DAnchorBIcall),
+                LT_MANAGED_INTERNAL_CALL(GetJoint2DAxisIcall),
+                LT_MANAGED_INTERNAL_CALL(SetJoint2DAxisIcall),
+                LT_MANAGED_INTERNAL_CALL(GetJoint2DEnableLimitIcall),
+                LT_MANAGED_INTERNAL_CALL(SetJoint2DEnableLimitIcall),
+                LT_MANAGED_INTERNAL_CALL(GetJoint2DLimitsIcall),
+                LT_MANAGED_INTERNAL_CALL(SetJoint2DLimitsIcall),
+                LT_MANAGED_INTERNAL_CALL(GetJoint2DEnableMotorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetJoint2DEnableMotorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetJoint2DMotorSpeedIcall),
+                LT_MANAGED_INTERNAL_CALL(SetJoint2DMotorSpeedIcall),
+                LT_MANAGED_INTERNAL_CALL(GetJoint2DMaxMotorForceOrTorqueIcall),
+                LT_MANAGED_INTERNAL_CALL(SetJoint2DMaxMotorForceOrTorqueIcall),
+                LT_MANAGED_INTERNAL_CALL(GetJoint2DEnableSpringIcall),
+                LT_MANAGED_INTERNAL_CALL(SetJoint2DEnableSpringIcall),
+                LT_MANAGED_INTERNAL_CALL(GetJoint2DHertzIcall),
+                LT_MANAGED_INTERNAL_CALL(SetJoint2DHertzIcall),
+                LT_MANAGED_INTERNAL_CALL(GetJoint2DDampingRatioIcall),
+                LT_MANAGED_INTERNAL_CALL(SetJoint2DDampingRatioIcall)
+            });
         }
     }
 }

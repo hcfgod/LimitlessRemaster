@@ -8,1061 +8,325 @@ namespace Limitless::ManagedScriptHost
 
     namespace Internal
     {
-        bool ManagedHasSpriteComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedSpriteComponent(entityHandle) != nullptr;
-        }
-
-        Coral::String ManagedGetSpriteTextureKeyIcall(uint32_t entityHandle)
-        {
-            const auto* sprite = TryGetManagedSpriteComponent(entityHandle);
-            return sprite ? Coral::String::New(sprite->TextureKey) : Coral::String::New("");
-        }
-
-        void ManagedSetSpriteTextureKeyIcall(uint32_t entityHandle, Coral::String textureKey)
-        {
-            if (auto* sprite = TryGetManagedSpriteComponent(entityHandle))
-                sprite->TextureKey = ToUtf8Borrowed(textureKey);
-        }
-
-        ManagedVector4 ManagedGetSpriteColorIcall(uint32_t entityHandle)
-        {
-            const auto* sprite = TryGetManagedSpriteComponent(entityHandle);
-            return sprite ? ToManagedVector4(sprite->Color) : ManagedVector4{ 1.0f, 1.0f, 1.0f, 1.0f };
-        }
-
-        void ManagedSetSpriteColorIcall(uint32_t entityHandle, ManagedVector4 value)
-        {
-            if (auto* sprite = TryGetManagedSpriteComponent(entityHandle))
-                sprite->Color = ToGlmVector4(value);
-        }
-
-        ManagedVector2 ManagedGetSpriteTilingFactorIcall(uint32_t entityHandle)
-        {
-            const auto* sprite = TryGetManagedSpriteComponent(entityHandle);
-            return sprite ? ToManagedVector2(sprite->TilingFactor) : ManagedVector2{ 1.0f, 1.0f };
-        }
-
-        void ManagedSetSpriteTilingFactorIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* sprite = TryGetManagedSpriteComponent(entityHandle))
-                sprite->TilingFactor = ToGlmVector2(value);
-        }
-
-        int ManagedGetSpriteRenderOrderIcall(uint32_t entityHandle)
-        {
-            const auto* sprite = TryGetManagedSpriteComponent(entityHandle);
-            return sprite ? sprite->RenderOrder : 0;
-        }
-
-        void ManagedSetSpriteRenderOrderIcall(uint32_t entityHandle, int value)
-        {
-            if (auto* sprite = TryGetManagedSpriteComponent(entityHandle))
-                sprite->RenderOrder = value;
-        }
-
-        bool ManagedGetSpriteCastShadowsIcall(uint32_t entityHandle)
-        {
-            const auto* sprite = TryGetManagedSpriteComponent(entityHandle);
-            return sprite ? sprite->CastShadows : true;
-        }
-
-        void ManagedSetSpriteCastShadowsIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* sprite = TryGetManagedSpriteComponent(entityHandle))
-                sprite->CastShadows = value;
-        }
-
-        bool ManagedGetSpriteReceiveShadowsIcall(uint32_t entityHandle)
-        {
-            const auto* sprite = TryGetManagedSpriteComponent(entityHandle);
-            return sprite ? sprite->ReceiveShadows : true;
-        }
-
-        void ManagedSetSpriteReceiveShadowsIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* sprite = TryGetManagedSpriteComponent(entityHandle))
-                sprite->ReceiveShadows = value;
-        }
-
-        int ManagedGetSpriteSubSpriteIndexIcall(uint32_t entityHandle)
-        {
-            const auto* sprite = TryGetManagedSpriteComponent(entityHandle);
-            return sprite ? sprite->SubSpriteIndex : -1;
-        }
-
-        void ManagedSetSpriteSubSpriteIndexIcall(uint32_t entityHandle, int value)
-        {
-            if (auto* sprite = TryGetManagedSpriteComponent(entityHandle))
-                sprite->SubSpriteIndex = value;
-        }
-
-        ManagedVector2 ManagedGetSpriteUvMinIcall(uint32_t entityHandle)
-        {
-            const auto* sprite = TryGetManagedSpriteComponent(entityHandle);
-            return sprite ? ToManagedVector2(sprite->UvMin) : ManagedVector2{};
-        }
-
-        void ManagedSetSpriteUvMinIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* sprite = TryGetManagedSpriteComponent(entityHandle))
-                sprite->UvMin = ToGlmVector2(value);
-        }
-
-        ManagedVector2 ManagedGetSpriteUvMaxIcall(uint32_t entityHandle)
-        {
-            const auto* sprite = TryGetManagedSpriteComponent(entityHandle);
-            return sprite ? ToManagedVector2(sprite->UvMax) : ManagedVector2{ 1.0f, 1.0f };
-        }
-
-        void ManagedSetSpriteUvMaxIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* sprite = TryGetManagedSpriteComponent(entityHandle))
-                sprite->UvMax = ToGlmVector2(value);
-        }
-
-        bool ManagedHasMaterialComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedMaterialComponent(entityHandle) != nullptr;
-        }
-
-        Coral::String ManagedGetMaterialKeyIcall(uint32_t entityHandle)
-        {
-            const auto* material = TryGetManagedMaterialComponent(entityHandle);
-            return material ? Coral::String::New(material->MaterialKey) : Coral::String::New("");
-        }
-
-        void ManagedSetMaterialKeyIcall(uint32_t entityHandle, Coral::String materialKey)
-        {
-            if (auto* material = TryGetManagedMaterialComponent(entityHandle))
-                material->MaterialKey = ToUtf8Borrowed(materialKey);
-        }
-
-        bool ManagedHasCanvasComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedCanvasComponent(entityHandle) != nullptr;
-        }
-
-        int ManagedGetCanvasRenderModeIcall(uint32_t entityHandle)
-        {
-            const auto* canvas = TryGetManagedCanvasComponent(entityHandle);
-            return canvas ? static_cast<int>(canvas->Mode) : static_cast<int>(CanvasComponent::RenderMode::ScreenSpace);
-        }
-
-        void ManagedSetCanvasRenderModeIcall(uint32_t entityHandle, int value)
-        {
-            if (auto* canvas = TryGetManagedCanvasComponent(entityHandle))
-                canvas->Mode = static_cast<CanvasComponent::RenderMode>(value);
-        }
-
-        int ManagedGetCanvasSortOrderIcall(uint32_t entityHandle)
-        {
-            const auto* canvas = TryGetManagedCanvasComponent(entityHandle);
-            return canvas ? canvas->SortOrder : 0;
-        }
-
-        void ManagedSetCanvasSortOrderIcall(uint32_t entityHandle, int value)
-        {
-            if (auto* canvas = TryGetManagedCanvasComponent(entityHandle))
-                canvas->SortOrder = value;
-        }
-
-        ManagedVector2 ManagedGetCanvasReferenceResolutionIcall(uint32_t entityHandle)
-        {
-            const auto* canvas = TryGetManagedCanvasComponent(entityHandle);
-            return canvas ? ToManagedVector2(canvas->ReferenceResolution) : ManagedVector2{ 1920.0f, 1080.0f };
-        }
-
-        void ManagedSetCanvasReferenceResolutionIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* canvas = TryGetManagedCanvasComponent(entityHandle))
-                canvas->ReferenceResolution = ToGlmVector2(value);
-        }
-
-        bool ManagedHasRectTransformComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedRectTransformComponent(entityHandle) != nullptr;
-        }
-
-        ManagedVector2 ManagedGetRectTransformAnchorMinIcall(uint32_t entityHandle)
-        {
-            const auto* rectTransform = TryGetManagedRectTransformComponent(entityHandle);
-            return rectTransform ? ToManagedVector2(rectTransform->AnchorMin) : ManagedVector2{ 0.5f, 0.5f };
-        }
-
-        void ManagedSetRectTransformAnchorMinIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* rectTransform = TryGetManagedRectTransformComponent(entityHandle))
-                rectTransform->AnchorMin = ToGlmVector2(value);
-        }
-
-        ManagedVector2 ManagedGetRectTransformAnchorMaxIcall(uint32_t entityHandle)
-        {
-            const auto* rectTransform = TryGetManagedRectTransformComponent(entityHandle);
-            return rectTransform ? ToManagedVector2(rectTransform->AnchorMax) : ManagedVector2{ 0.5f, 0.5f };
-        }
-
-        void ManagedSetRectTransformAnchorMaxIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* rectTransform = TryGetManagedRectTransformComponent(entityHandle))
-                rectTransform->AnchorMax = ToGlmVector2(value);
-        }
-
-        ManagedVector2 ManagedGetRectTransformPivotIcall(uint32_t entityHandle)
-        {
-            const auto* rectTransform = TryGetManagedRectTransformComponent(entityHandle);
-            return rectTransform ? ToManagedVector2(rectTransform->Pivot) : ManagedVector2{ 0.5f, 0.5f };
-        }
-
-        void ManagedSetRectTransformPivotIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* rectTransform = TryGetManagedRectTransformComponent(entityHandle))
-                rectTransform->Pivot = ToGlmVector2(value);
-        }
-
-        ManagedVector2 ManagedGetRectTransformSizeDeltaIcall(uint32_t entityHandle)
-        {
-            const auto* rectTransform = TryGetManagedRectTransformComponent(entityHandle);
-            return rectTransform ? ToManagedVector2(rectTransform->SizeDelta) : ManagedVector2{ 100.0f, 40.0f };
-        }
-
-        void ManagedSetRectTransformSizeDeltaIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* rectTransform = TryGetManagedRectTransformComponent(entityHandle))
-                rectTransform->SizeDelta = ToGlmVector2(value);
-        }
-
-        ManagedVector2 ManagedGetRectTransformAnchoredPositionIcall(uint32_t entityHandle)
-        {
-            const auto* rectTransform = TryGetManagedRectTransformComponent(entityHandle);
-            return rectTransform ? ToManagedVector2(rectTransform->AnchoredPosition) : ManagedVector2{};
-        }
-
-        void ManagedSetRectTransformAnchoredPositionIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* rectTransform = TryGetManagedRectTransformComponent(entityHandle))
-                rectTransform->AnchoredPosition = ToGlmVector2(value);
-        }
-
-        bool ManagedHasDirectionalLight2DComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedDirectionalLight2DComponent(entityHandle) != nullptr;
-        }
-
-        bool ManagedGetDirectionalLight2DEnabledIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle);
-            return light ? light->Enabled : true;
-        }
-
-        void ManagedSetDirectionalLight2DEnabledIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle))
-                light->Enabled = value;
-        }
-
-        ManagedVector3 ManagedGetDirectionalLight2DColorIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle);
-            return light ? ToManagedVector3(light->Color) : ManagedVector3{ 1.0f, 1.0f, 1.0f };
-        }
-
-        void ManagedSetDirectionalLight2DColorIcall(uint32_t entityHandle, ManagedVector3 value)
-        {
-            if (auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle))
-                light->Color = ToGlmVector3(value);
-        }
-
-        float ManagedGetDirectionalLight2DIntensityIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle);
-            return light ? light->Intensity : 1.0f;
-        }
-
-        void ManagedSetDirectionalLight2DIntensityIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle))
-                light->Intensity = value;
-        }
-
-        bool ManagedGetDirectionalLight2DUseEntityRotationIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle);
-            return light ? light->UseEntityRotation : true;
-        }
-
-        void ManagedSetDirectionalLight2DUseEntityRotationIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle))
-                light->UseEntityRotation = value;
-        }
-
-        ManagedVector2 ManagedGetDirectionalLight2DDirectionIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle);
-            return light ? ToManagedVector2(light->Direction) : ManagedVector2{ 0.0f, -1.0f };
-        }
-
-        void ManagedSetDirectionalLight2DDirectionIcall(uint32_t entityHandle, ManagedVector2 value)
-        {
-            if (auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle))
-                light->Direction = ToGlmVector2(value);
-        }
-
-        bool ManagedGetDirectionalLight2DCastShadowsIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle);
-            return light ? light->CastShadows : true;
-        }
-
-        void ManagedSetDirectionalLight2DCastShadowsIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle))
-                light->CastShadows = value;
-        }
-
-        float ManagedGetDirectionalLight2DShadowStrengthIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle);
-            return light ? light->ShadowStrength : 1.0f;
-        }
-
-        void ManagedSetDirectionalLight2DShadowStrengthIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle))
-                light->ShadowStrength = value;
-        }
-
-        float ManagedGetDirectionalLight2DShadowSoftnessIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle);
-            return light ? light->ShadowSoftness : 1.0f;
-        }
-
-        void ManagedSetDirectionalLight2DShadowSoftnessIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle))
-                light->ShadowSoftness = value;
-        }
-
-        int ManagedGetDirectionalLight2DShadowSamplesIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle);
-            return light ? light->ShadowSamples : 8;
-        }
-
-        void ManagedSetDirectionalLight2DShadowSamplesIcall(uint32_t entityHandle, int value)
-        {
-            if (auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle))
-                light->ShadowSamples = value;
-        }
-
-        float ManagedGetDirectionalLight2DShadowDistanceIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle);
-            return light ? light->ShadowDistance : 25.0f;
-        }
-
-        void ManagedSetDirectionalLight2DShadowDistanceIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle))
-                light->ShadowDistance = value;
-        }
-
-        float ManagedGetDirectionalLight2DShadowBiasIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle);
-            return light ? light->ShadowBias : 0.02f;
-        }
-
-        void ManagedSetDirectionalLight2DShadowBiasIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* light = TryGetManagedDirectionalLight2DComponent(entityHandle))
-                light->ShadowBias = value;
-        }
-
-        bool ManagedHasPointLight2DComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedPointLight2DComponent(entityHandle) != nullptr;
-        }
-
-        bool ManagedGetPointLight2DEnabledIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedPointLight2DComponent(entityHandle);
-            return light ? light->Enabled : true;
-        }
-
-        void ManagedSetPointLight2DEnabledIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* light = TryGetManagedPointLight2DComponent(entityHandle))
-                light->Enabled = value;
-        }
-
-        ManagedVector3 ManagedGetPointLight2DColorIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedPointLight2DComponent(entityHandle);
-            return light ? ToManagedVector3(light->Color) : ManagedVector3{ 1.0f, 1.0f, 1.0f };
-        }
-
-        void ManagedSetPointLight2DColorIcall(uint32_t entityHandle, ManagedVector3 value)
-        {
-            if (auto* light = TryGetManagedPointLight2DComponent(entityHandle))
-                light->Color = ToGlmVector3(value);
-        }
-
-        float ManagedGetPointLight2DIntensityIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedPointLight2DComponent(entityHandle);
-            return light ? light->Intensity : 1.0f;
-        }
-
-        void ManagedSetPointLight2DIntensityIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* light = TryGetManagedPointLight2DComponent(entityHandle))
-                light->Intensity = value;
-        }
-
-        float ManagedGetPointLight2DRadiusIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedPointLight2DComponent(entityHandle);
-            return light ? light->Radius : 5.0f;
-        }
-
-        void ManagedSetPointLight2DRadiusIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* light = TryGetManagedPointLight2DComponent(entityHandle))
-                light->Radius = value;
-        }
-
-        float ManagedGetPointLight2DFalloffIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedPointLight2DComponent(entityHandle);
-            return light ? light->Falloff : 2.0f;
-        }
-
-        void ManagedSetPointLight2DFalloffIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* light = TryGetManagedPointLight2DComponent(entityHandle))
-                light->Falloff = value;
-        }
-
-        bool ManagedGetPointLight2DCastShadowsIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedPointLight2DComponent(entityHandle);
-            return light ? light->CastShadows : true;
-        }
-
-        void ManagedSetPointLight2DCastShadowsIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* light = TryGetManagedPointLight2DComponent(entityHandle))
-                light->CastShadows = value;
-        }
-
-        float ManagedGetPointLight2DShadowStrengthIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedPointLight2DComponent(entityHandle);
-            return light ? light->ShadowStrength : 1.0f;
-        }
-
-        void ManagedSetPointLight2DShadowStrengthIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* light = TryGetManagedPointLight2DComponent(entityHandle))
-                light->ShadowStrength = value;
-        }
-
-        float ManagedGetPointLight2DShadowSoftnessIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedPointLight2DComponent(entityHandle);
-            return light ? light->ShadowSoftness : 1.0f;
-        }
-
-        void ManagedSetPointLight2DShadowSoftnessIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* light = TryGetManagedPointLight2DComponent(entityHandle))
-                light->ShadowSoftness = value;
-        }
-
-        int ManagedGetPointLight2DShadowSamplesIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedPointLight2DComponent(entityHandle);
-            return light ? light->ShadowSamples : 8;
-        }
-
-        void ManagedSetPointLight2DShadowSamplesIcall(uint32_t entityHandle, int value)
-        {
-            if (auto* light = TryGetManagedPointLight2DComponent(entityHandle))
-                light->ShadowSamples = value;
-        }
-
-        float ManagedGetPointLight2DShadowBiasIcall(uint32_t entityHandle)
-        {
-            const auto* light = TryGetManagedPointLight2DComponent(entityHandle);
-            return light ? light->ShadowBias : 0.0015f;
-        }
-
-        void ManagedSetPointLight2DShadowBiasIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* light = TryGetManagedPointLight2DComponent(entityHandle))
-                light->ShadowBias = value;
-        }
-
-        bool ManagedHasUIImageComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedUIImageComponent(entityHandle) != nullptr;
-        }
-
-        bool ManagedGetUIImageRaycastTargetIcall(uint32_t entityHandle)
-        {
-            const auto* image = TryGetManagedUIImageComponent(entityHandle);
-            return image ? image->RaycastTarget : true;
-        }
-
-        void ManagedSetUIImageRaycastTargetIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* image = TryGetManagedUIImageComponent(entityHandle))
-                image->RaycastTarget = value;
-        }
-
-        bool ManagedHasUIPanelComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedUIPanelComponent(entityHandle) != nullptr;
-        }
-
-        ManagedVector4 ManagedGetUIPanelBackgroundColorIcall(uint32_t entityHandle)
-        {
-            const auto* panel = TryGetManagedUIPanelComponent(entityHandle);
-            return panel ? ToManagedVector4(panel->BackgroundColor) : ManagedVector4{ 0.12f, 0.12f, 0.12f, 0.9f };
-        }
-
-        void ManagedSetUIPanelBackgroundColorIcall(uint32_t entityHandle, ManagedVector4 value)
-        {
-            if (auto* panel = TryGetManagedUIPanelComponent(entityHandle))
-                panel->BackgroundColor = ToGlmVector4(value);
-        }
-
-        bool ManagedGetUIPanelUseSpriteTextureIcall(uint32_t entityHandle)
-        {
-            const auto* panel = TryGetManagedUIPanelComponent(entityHandle);
-            return panel ? panel->UseSpriteTexture : false;
-        }
-
-        void ManagedSetUIPanelUseSpriteTextureIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* panel = TryGetManagedUIPanelComponent(entityHandle))
-                panel->UseSpriteTexture = value;
-        }
-
-        bool ManagedGetUIPanelRaycastTargetIcall(uint32_t entityHandle)
-        {
-            const auto* panel = TryGetManagedUIPanelComponent(entityHandle);
-            return panel ? panel->RaycastTarget : false;
-        }
-
-        void ManagedSetUIPanelRaycastTargetIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* panel = TryGetManagedUIPanelComponent(entityHandle))
-                panel->RaycastTarget = value;
-        }
-
-        bool ManagedHasUITextComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedUITextComponent(entityHandle) != nullptr;
-        }
-
-        Coral::String ManagedGetUITextValueIcall(uint32_t entityHandle)
-        {
-            const auto* text = TryGetManagedUITextComponent(entityHandle);
-            return text ? Coral::String::New(text->Text) : Coral::String::New("");
-        }
-
-        void ManagedSetUITextValueIcall(uint32_t entityHandle, Coral::String value)
-        {
-            if (auto* text = TryGetManagedUITextComponent(entityHandle))
-                text->Text = ToUtf8Borrowed(value);
-        }
-
-        Coral::String ManagedGetUITextFontFilePathIcall(uint32_t entityHandle)
-        {
-            const auto* text = TryGetManagedUITextComponent(entityHandle);
-            return text ? Coral::String::New(text->FontFilePath) : Coral::String::New("");
-        }
-
-        void ManagedSetUITextFontFilePathIcall(uint32_t entityHandle, Coral::String value)
-        {
-            if (auto* text = TryGetManagedUITextComponent(entityHandle))
-                text->FontFilePath = ToUtf8Borrowed(value);
-        }
-
-        float ManagedGetUITextFontSizeIcall(uint32_t entityHandle)
-        {
-            const auto* text = TryGetManagedUITextComponent(entityHandle);
-            return text ? text->FontSize : 32.0f;
-        }
-
-        void ManagedSetUITextFontSizeIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* text = TryGetManagedUITextComponent(entityHandle))
-                text->FontSize = value;
-        }
-
-        ManagedVector4 ManagedGetUITextColorIcall(uint32_t entityHandle)
-        {
-            const auto* text = TryGetManagedUITextComponent(entityHandle);
-            return text ? ToManagedVector4(text->Color) : ManagedVector4{ 1.0f, 1.0f, 1.0f, 1.0f };
-        }
-
-        void ManagedSetUITextColorIcall(uint32_t entityHandle, ManagedVector4 value)
-        {
-            if (auto* text = TryGetManagedUITextComponent(entityHandle))
-                text->Color = ToGlmVector4(value);
-        }
-
-        bool ManagedGetUITextRaycastTargetIcall(uint32_t entityHandle)
-        {
-            const auto* text = TryGetManagedUITextComponent(entityHandle);
-            return text ? text->RaycastTarget : false;
-        }
-
-        void ManagedSetUITextRaycastTargetIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* text = TryGetManagedUITextComponent(entityHandle))
-                text->RaycastTarget = value;
-        }
-
-        bool ManagedHasUIButtonComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedUIButtonComponent(entityHandle) != nullptr;
-        }
-
-        bool ManagedGetUIButtonInteractableIcall(uint32_t entityHandle)
-        {
-            const auto* button = TryGetManagedUIButtonComponent(entityHandle);
-            return button ? button->Interactable : true;
-        }
-
-        void ManagedSetUIButtonInteractableIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* button = TryGetManagedUIButtonComponent(entityHandle))
-                button->Interactable = value;
-        }
-
-        bool ManagedGetUIButtonUseStateColorsIcall(uint32_t entityHandle)
-        {
-            const auto* button = TryGetManagedUIButtonComponent(entityHandle);
-            return button ? button->UseStateColors : true;
-        }
-
-        void ManagedSetUIButtonUseStateColorsIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* button = TryGetManagedUIButtonComponent(entityHandle))
-                button->UseStateColors = value;
-        }
-
-        ManagedVector4 ManagedGetUIButtonNormalColorIcall(uint32_t entityHandle)
-        {
-            const auto* button = TryGetManagedUIButtonComponent(entityHandle);
-            return button ? ToManagedVector4(button->NormalColor) : ManagedVector4{ 0.82f, 0.82f, 0.82f, 1.0f };
-        }
-
-        void ManagedSetUIButtonNormalColorIcall(uint32_t entityHandle, ManagedVector4 value)
-        {
-            if (auto* button = TryGetManagedUIButtonComponent(entityHandle))
-                button->NormalColor = ToGlmVector4(value);
-        }
-
-        ManagedVector4 ManagedGetUIButtonHoveredColorIcall(uint32_t entityHandle)
-        {
-            const auto* button = TryGetManagedUIButtonComponent(entityHandle);
-            return button ? ToManagedVector4(button->HoveredColor) : ManagedVector4{ 0.92f, 0.92f, 0.92f, 1.0f };
-        }
-
-        void ManagedSetUIButtonHoveredColorIcall(uint32_t entityHandle, ManagedVector4 value)
-        {
-            if (auto* button = TryGetManagedUIButtonComponent(entityHandle))
-                button->HoveredColor = ToGlmVector4(value);
-        }
-
-        ManagedVector4 ManagedGetUIButtonPressedColorIcall(uint32_t entityHandle)
-        {
-            const auto* button = TryGetManagedUIButtonComponent(entityHandle);
-            return button ? ToManagedVector4(button->PressedColor) : ManagedVector4{ 0.72f, 0.72f, 0.72f, 1.0f };
-        }
-
-        void ManagedSetUIButtonPressedColorIcall(uint32_t entityHandle, ManagedVector4 value)
-        {
-            if (auto* button = TryGetManagedUIButtonComponent(entityHandle))
-                button->PressedColor = ToGlmVector4(value);
-        }
-
-        ManagedVector4 ManagedGetUIButtonDisabledColorIcall(uint32_t entityHandle)
-        {
-            const auto* button = TryGetManagedUIButtonComponent(entityHandle);
-            return button ? ToManagedVector4(button->DisabledColor) : ManagedVector4{ 0.45f, 0.45f, 0.45f, 1.0f };
-        }
-
-        void ManagedSetUIButtonDisabledColorIcall(uint32_t entityHandle, ManagedVector4 value)
-        {
-            if (auto* button = TryGetManagedUIButtonComponent(entityHandle))
-                button->DisabledColor = ToGlmVector4(value);
-        }
-
-        bool ManagedGetUIButtonIsHoveredIcall(uint32_t entityHandle)
-        {
-            const auto* button = TryGetManagedUIButtonComponent(entityHandle);
-            return button ? button->IsHovered : false;
-        }
-
-        bool ManagedGetUIButtonIsPressedIcall(uint32_t entityHandle)
-        {
-            const auto* button = TryGetManagedUIButtonComponent(entityHandle);
-            return button ? button->IsPressed : false;
-        }
-
-        Coral::String ManagedGetUIButtonOnClickEventIcall(uint32_t entityHandle)
-        {
-            const auto* button = TryGetManagedUIButtonComponent(entityHandle);
-            return button ? Coral::String::New(button->OnClickEvent) : Coral::String::New("");
-        }
-
-        void ManagedSetUIButtonOnClickEventIcall(uint32_t entityHandle, Coral::String value)
-        {
-            if (auto* button = TryGetManagedUIButtonComponent(entityHandle))
-                button->OnClickEvent = ToUtf8Borrowed(value);
-        }
-
-        Coral::String ManagedGetUIButtonOnHoverEnterEventIcall(uint32_t entityHandle)
-        {
-            const auto* button = TryGetManagedUIButtonComponent(entityHandle);
-            return button ? Coral::String::New(button->OnHoverEnterEvent) : Coral::String::New("");
-        }
-
-        void ManagedSetUIButtonOnHoverEnterEventIcall(uint32_t entityHandle, Coral::String value)
-        {
-            if (auto* button = TryGetManagedUIButtonComponent(entityHandle))
-                button->OnHoverEnterEvent = ToUtf8Borrowed(value);
-        }
-
-        Coral::String ManagedGetUIButtonOnHoverExitEventIcall(uint32_t entityHandle)
-        {
-            const auto* button = TryGetManagedUIButtonComponent(entityHandle);
-            return button ? Coral::String::New(button->OnHoverExitEvent) : Coral::String::New("");
-        }
-
-        void ManagedSetUIButtonOnHoverExitEventIcall(uint32_t entityHandle, Coral::String value)
-        {
-            if (auto* button = TryGetManagedUIButtonComponent(entityHandle))
-                button->OnHoverExitEvent = ToUtf8Borrowed(value);
-        }
-
-        Coral::String ManagedGetUIButtonOnPressedEventIcall(uint32_t entityHandle)
-        {
-            const auto* button = TryGetManagedUIButtonComponent(entityHandle);
-            return button ? Coral::String::New(button->OnPressedEvent) : Coral::String::New("");
-        }
-
-        void ManagedSetUIButtonOnPressedEventIcall(uint32_t entityHandle, Coral::String value)
-        {
-            if (auto* button = TryGetManagedUIButtonComponent(entityHandle))
-                button->OnPressedEvent = ToUtf8Borrowed(value);
-        }
-
-        bool ManagedHasUISliderComponentIcall(uint32_t entityHandle)
-        {
-            return TryGetManagedUISliderComponent(entityHandle) != nullptr;
-        }
-
-        bool ManagedGetUISliderInteractableIcall(uint32_t entityHandle)
-        {
-            const auto* slider = TryGetManagedUISliderComponent(entityHandle);
-            return slider ? slider->Interactable : true;
-        }
-
-        void ManagedSetUISliderInteractableIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* slider = TryGetManagedUISliderComponent(entityHandle))
-                slider->Interactable = value;
-        }
-
-        float ManagedGetUISliderMinValueIcall(uint32_t entityHandle)
-        {
-            const auto* slider = TryGetManagedUISliderComponent(entityHandle);
-            return slider ? slider->MinValue : 0.0f;
-        }
-
-        void ManagedSetUISliderMinValueIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* slider = TryGetManagedUISliderComponent(entityHandle))
-                slider->MinValue = value;
-        }
-
-        float ManagedGetUISliderMaxValueIcall(uint32_t entityHandle)
-        {
-            const auto* slider = TryGetManagedUISliderComponent(entityHandle);
-            return slider ? slider->MaxValue : 1.0f;
-        }
-
-        void ManagedSetUISliderMaxValueIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* slider = TryGetManagedUISliderComponent(entityHandle))
-                slider->MaxValue = value;
-        }
-
-        float ManagedGetUISliderValueIcall(uint32_t entityHandle)
-        {
-            const auto* slider = TryGetManagedUISliderComponent(entityHandle);
-            return slider ? slider->Value : 0.0f;
-        }
-
-        void ManagedSetUISliderValueIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* slider = TryGetManagedUISliderComponent(entityHandle))
-                slider->Value = value;
-        }
-
-        ManagedVector4 ManagedGetUISliderBackgroundColorIcall(uint32_t entityHandle)
-        {
-            const auto* slider = TryGetManagedUISliderComponent(entityHandle);
-            return slider ? ToManagedVector4(slider->BackgroundColor) : ManagedVector4{ 0.22f, 0.22f, 0.22f, 1.0f };
-        }
-
-        void ManagedSetUISliderBackgroundColorIcall(uint32_t entityHandle, ManagedVector4 value)
-        {
-            if (auto* slider = TryGetManagedUISliderComponent(entityHandle))
-                slider->BackgroundColor = ToGlmVector4(value);
-        }
-
-        ManagedVector4 ManagedGetUISliderFillColorIcall(uint32_t entityHandle)
-        {
-            const auto* slider = TryGetManagedUISliderComponent(entityHandle);
-            return slider ? ToManagedVector4(slider->FillColor) : ManagedVector4{ 0.22f, 0.72f, 1.0f, 0.95f };
-        }
-
-        void ManagedSetUISliderFillColorIcall(uint32_t entityHandle, ManagedVector4 value)
-        {
-            if (auto* slider = TryGetManagedUISliderComponent(entityHandle))
-                slider->FillColor = ToGlmVector4(value);
-        }
-
-        ManagedVector4 ManagedGetUISliderHandleColorIcall(uint32_t entityHandle)
-        {
-            const auto* slider = TryGetManagedUISliderComponent(entityHandle);
-            return slider ? ToManagedVector4(slider->HandleColor) : ManagedVector4{ 0.92f, 0.92f, 0.92f, 1.0f };
-        }
-
-        void ManagedSetUISliderHandleColorIcall(uint32_t entityHandle, ManagedVector4 value)
-        {
-            if (auto* slider = TryGetManagedUISliderComponent(entityHandle))
-                slider->HandleColor = ToGlmVector4(value);
-        }
-
-        float ManagedGetUISliderHandleWidthIcall(uint32_t entityHandle)
-        {
-            const auto* slider = TryGetManagedUISliderComponent(entityHandle);
-            return slider ? slider->HandleWidth : 16.0f;
-        }
-
-        void ManagedSetUISliderHandleWidthIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* slider = TryGetManagedUISliderComponent(entityHandle))
-                slider->HandleWidth = value;
-        }
-
-        float ManagedGetUISliderHandleHeightMultiplierIcall(uint32_t entityHandle)
-        {
-            const auto* slider = TryGetManagedUISliderComponent(entityHandle);
-            return slider ? slider->HandleHeightMultiplier : 1.25f;
-        }
-
-        void ManagedSetUISliderHandleHeightMultiplierIcall(uint32_t entityHandle, float value)
-        {
-            if (auto* slider = TryGetManagedUISliderComponent(entityHandle))
-                slider->HandleHeightMultiplier = value;
-        }
-
-        bool ManagedGetUISliderShowHandleIcall(uint32_t entityHandle)
-        {
-            const auto* slider = TryGetManagedUISliderComponent(entityHandle);
-            return slider ? slider->ShowHandle : true;
-        }
-
-        void ManagedSetUISliderShowHandleIcall(uint32_t entityHandle, bool value)
-        {
-            if (auto* slider = TryGetManagedUISliderComponent(entityHandle))
-                slider->ShowHandle = value;
-        }
-
-        bool ManagedGetUISliderRuntimeDraggingIcall(uint32_t entityHandle)
-        {
-            const auto* slider = TryGetManagedUISliderComponent(entityHandle);
-            return slider ? slider->RuntimeDragging : false;
-        }
-
-        Coral::String ManagedGetUISliderOnValueChangedEventIcall(uint32_t entityHandle)
-        {
-            const auto* slider = TryGetManagedUISliderComponent(entityHandle);
-            return slider ? Coral::String::New(slider->OnValueChangedEvent) : Coral::String::New("");
-        }
-
-        void ManagedSetUISliderOnValueChangedEventIcall(uint32_t entityHandle, Coral::String value)
-        {
-            if (auto* slider = TryGetManagedUISliderComponent(entityHandle))
-                slider->OnValueChangedEvent = ToUtf8Borrowed(value);
-        }
+        LT_MANAGED_COMPONENT_HAS(HasSpriteComponentIcall, TryGetManagedSpriteComponent);
+        LT_MANAGED_COMPONENT_GET(GetSpriteTextureKeyIcall, Coral::String, TryGetManagedSpriteComponent, Coral::String::New(component->TextureKey), Coral::String::New(""));
+        LT_MANAGED_COMPONENT_SET(SetSpriteTextureKeyIcall, Coral::String, TryGetManagedSpriteComponent, component->TextureKey = ToUtf8Borrowed(value););
+        LT_MANAGED_COMPONENT_GET(GetSpriteColorIcall, ManagedVector4, TryGetManagedSpriteComponent, ToManagedVector4(component->Color), ManagedVector4{ 1.0f, 1.0f, 1.0f, 1.0f });
+        LT_MANAGED_COMPONENT_SET(SetSpriteColorIcall, ManagedVector4, TryGetManagedSpriteComponent, component->Color = ToGlmVector4(value););
+        LT_MANAGED_COMPONENT_GET(GetSpriteTilingFactorIcall, ManagedVector2, TryGetManagedSpriteComponent, ToManagedVector2(component->TilingFactor), ManagedVector2{ 1.0f, 1.0f });
+        LT_MANAGED_COMPONENT_SET(SetSpriteTilingFactorIcall, ManagedVector2, TryGetManagedSpriteComponent, component->TilingFactor = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetSpriteRenderOrderIcall, int, TryGetManagedSpriteComponent, component->RenderOrder, 0);
+        LT_MANAGED_COMPONENT_SET(SetSpriteRenderOrderIcall, int, TryGetManagedSpriteComponent, component->RenderOrder = value;);
+        LT_MANAGED_COMPONENT_GET(GetSpriteCastShadowsIcall, bool, TryGetManagedSpriteComponent, component->CastShadows, true);
+        LT_MANAGED_COMPONENT_SET(SetSpriteCastShadowsIcall, bool, TryGetManagedSpriteComponent, component->CastShadows = value;);
+        LT_MANAGED_COMPONENT_GET(GetSpriteReceiveShadowsIcall, bool, TryGetManagedSpriteComponent, component->ReceiveShadows, true);
+        LT_MANAGED_COMPONENT_SET(SetSpriteReceiveShadowsIcall, bool, TryGetManagedSpriteComponent, component->ReceiveShadows = value;);
+        LT_MANAGED_COMPONENT_GET(GetSpriteSubSpriteIndexIcall, int, TryGetManagedSpriteComponent, component->SubSpriteIndex, -1);
+        LT_MANAGED_COMPONENT_SET(SetSpriteSubSpriteIndexIcall, int, TryGetManagedSpriteComponent, component->SubSpriteIndex = value;);
+        LT_MANAGED_COMPONENT_GET(GetSpriteUvMinIcall, ManagedVector2, TryGetManagedSpriteComponent, ToManagedVector2(component->UvMin), ManagedVector2{});
+        LT_MANAGED_COMPONENT_SET(SetSpriteUvMinIcall, ManagedVector2, TryGetManagedSpriteComponent, component->UvMin = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetSpriteUvMaxIcall, ManagedVector2, TryGetManagedSpriteComponent, ToManagedVector2(component->UvMax), ManagedVector2{ 1.0f, 1.0f });
+        LT_MANAGED_COMPONENT_SET(SetSpriteUvMaxIcall, ManagedVector2, TryGetManagedSpriteComponent, component->UvMax = ToGlmVector2(value););
+
+        LT_MANAGED_COMPONENT_HAS(HasMaterialComponentIcall, TryGetManagedMaterialComponent);
+        LT_MANAGED_COMPONENT_GET(GetMaterialKeyIcall, Coral::String, TryGetManagedMaterialComponent, Coral::String::New(component->MaterialKey), Coral::String::New(""));
+        LT_MANAGED_COMPONENT_SET(SetMaterialKeyIcall, Coral::String, TryGetManagedMaterialComponent, component->MaterialKey = ToUtf8Borrowed(value););
+
+        LT_MANAGED_COMPONENT_HAS(HasCanvasComponentIcall, TryGetManagedCanvasComponent);
+        LT_MANAGED_COMPONENT_GET(GetCanvasRenderModeIcall, int, TryGetManagedCanvasComponent, static_cast<int>(component->Mode), static_cast<int>(CanvasComponent::RenderMode::ScreenSpace));
+        LT_MANAGED_COMPONENT_SET(SetCanvasRenderModeIcall, int, TryGetManagedCanvasComponent, component->Mode = static_cast<CanvasComponent::RenderMode>(value););
+        LT_MANAGED_COMPONENT_GET(GetCanvasSortOrderIcall, int, TryGetManagedCanvasComponent, component->SortOrder, 0);
+        LT_MANAGED_COMPONENT_SET(SetCanvasSortOrderIcall, int, TryGetManagedCanvasComponent, component->SortOrder = value;);
+        LT_MANAGED_COMPONENT_GET(GetCanvasReferenceResolutionIcall, ManagedVector2, TryGetManagedCanvasComponent, ToManagedVector2(component->ReferenceResolution), ManagedVector2{ 1920.0f, 1080.0f });
+        LT_MANAGED_COMPONENT_SET(SetCanvasReferenceResolutionIcall, ManagedVector2, TryGetManagedCanvasComponent, component->ReferenceResolution = ToGlmVector2(value););
+
+        LT_MANAGED_COMPONENT_HAS(HasRectTransformComponentIcall, TryGetManagedRectTransformComponent);
+        LT_MANAGED_COMPONENT_GET(GetRectTransformAnchorMinIcall, ManagedVector2, TryGetManagedRectTransformComponent, ToManagedVector2(component->AnchorMin), ManagedVector2{ 0.5f, 0.5f });
+        LT_MANAGED_COMPONENT_SET(SetRectTransformAnchorMinIcall, ManagedVector2, TryGetManagedRectTransformComponent, component->AnchorMin = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetRectTransformAnchorMaxIcall, ManagedVector2, TryGetManagedRectTransformComponent, ToManagedVector2(component->AnchorMax), ManagedVector2{ 0.5f, 0.5f });
+        LT_MANAGED_COMPONENT_SET(SetRectTransformAnchorMaxIcall, ManagedVector2, TryGetManagedRectTransformComponent, component->AnchorMax = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetRectTransformPivotIcall, ManagedVector2, TryGetManagedRectTransformComponent, ToManagedVector2(component->Pivot), ManagedVector2{ 0.5f, 0.5f });
+        LT_MANAGED_COMPONENT_SET(SetRectTransformPivotIcall, ManagedVector2, TryGetManagedRectTransformComponent, component->Pivot = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetRectTransformSizeDeltaIcall, ManagedVector2, TryGetManagedRectTransformComponent, ToManagedVector2(component->SizeDelta), ManagedVector2{ 100.0f, 40.0f });
+        LT_MANAGED_COMPONENT_SET(SetRectTransformSizeDeltaIcall, ManagedVector2, TryGetManagedRectTransformComponent, component->SizeDelta = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetRectTransformAnchoredPositionIcall, ManagedVector2, TryGetManagedRectTransformComponent, ToManagedVector2(component->AnchoredPosition), ManagedVector2{});
+        LT_MANAGED_COMPONENT_SET(SetRectTransformAnchoredPositionIcall, ManagedVector2, TryGetManagedRectTransformComponent, component->AnchoredPosition = ToGlmVector2(value););
+
+        LT_MANAGED_COMPONENT_HAS(HasDirectionalLight2DComponentIcall, TryGetManagedDirectionalLight2DComponent);
+        LT_MANAGED_COMPONENT_GET(GetDirectionalLight2DEnabledIcall, bool, TryGetManagedDirectionalLight2DComponent, component->Enabled, true);
+        LT_MANAGED_COMPONENT_SET(SetDirectionalLight2DEnabledIcall, bool, TryGetManagedDirectionalLight2DComponent, component->Enabled = value;);
+        LT_MANAGED_COMPONENT_GET(GetDirectionalLight2DColorIcall, ManagedVector3, TryGetManagedDirectionalLight2DComponent, ToManagedVector3(component->Color), ManagedVector3{ 1.0f, 1.0f, 1.0f });
+        LT_MANAGED_COMPONENT_SET(SetDirectionalLight2DColorIcall, ManagedVector3, TryGetManagedDirectionalLight2DComponent, component->Color = ToGlmVector3(value););
+        LT_MANAGED_COMPONENT_GET(GetDirectionalLight2DIntensityIcall, float, TryGetManagedDirectionalLight2DComponent, component->Intensity, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetDirectionalLight2DIntensityIcall, float, TryGetManagedDirectionalLight2DComponent, component->Intensity = value;);
+        LT_MANAGED_COMPONENT_GET(GetDirectionalLight2DUseEntityRotationIcall, bool, TryGetManagedDirectionalLight2DComponent, component->UseEntityRotation, true);
+        LT_MANAGED_COMPONENT_SET(SetDirectionalLight2DUseEntityRotationIcall, bool, TryGetManagedDirectionalLight2DComponent, component->UseEntityRotation = value;);
+        LT_MANAGED_COMPONENT_GET(GetDirectionalLight2DDirectionIcall, ManagedVector2, TryGetManagedDirectionalLight2DComponent, ToManagedVector2(component->Direction), ManagedVector2{ 0.0f, -1.0f });
+        LT_MANAGED_COMPONENT_SET(SetDirectionalLight2DDirectionIcall, ManagedVector2, TryGetManagedDirectionalLight2DComponent, component->Direction = ToGlmVector2(value););
+        LT_MANAGED_COMPONENT_GET(GetDirectionalLight2DCastShadowsIcall, bool, TryGetManagedDirectionalLight2DComponent, component->CastShadows, true);
+        LT_MANAGED_COMPONENT_SET(SetDirectionalLight2DCastShadowsIcall, bool, TryGetManagedDirectionalLight2DComponent, component->CastShadows = value;);
+        LT_MANAGED_COMPONENT_GET(GetDirectionalLight2DShadowStrengthIcall, float, TryGetManagedDirectionalLight2DComponent, component->ShadowStrength, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetDirectionalLight2DShadowStrengthIcall, float, TryGetManagedDirectionalLight2DComponent, component->ShadowStrength = value;);
+        LT_MANAGED_COMPONENT_GET(GetDirectionalLight2DShadowSoftnessIcall, float, TryGetManagedDirectionalLight2DComponent, component->ShadowSoftness, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetDirectionalLight2DShadowSoftnessIcall, float, TryGetManagedDirectionalLight2DComponent, component->ShadowSoftness = value;);
+        LT_MANAGED_COMPONENT_GET(GetDirectionalLight2DShadowSamplesIcall, int, TryGetManagedDirectionalLight2DComponent, component->ShadowSamples, 8);
+        LT_MANAGED_COMPONENT_SET(SetDirectionalLight2DShadowSamplesIcall, int, TryGetManagedDirectionalLight2DComponent, component->ShadowSamples = value;);
+        LT_MANAGED_COMPONENT_GET(GetDirectionalLight2DShadowDistanceIcall, float, TryGetManagedDirectionalLight2DComponent, component->ShadowDistance, 25.0f);
+        LT_MANAGED_COMPONENT_SET(SetDirectionalLight2DShadowDistanceIcall, float, TryGetManagedDirectionalLight2DComponent, component->ShadowDistance = value;);
+        LT_MANAGED_COMPONENT_GET(GetDirectionalLight2DShadowBiasIcall, float, TryGetManagedDirectionalLight2DComponent, component->ShadowBias, 0.02f);
+        LT_MANAGED_COMPONENT_SET(SetDirectionalLight2DShadowBiasIcall, float, TryGetManagedDirectionalLight2DComponent, component->ShadowBias = value;);
+
+        LT_MANAGED_COMPONENT_HAS(HasPointLight2DComponentIcall, TryGetManagedPointLight2DComponent);
+        LT_MANAGED_COMPONENT_GET(GetPointLight2DEnabledIcall, bool, TryGetManagedPointLight2DComponent, component->Enabled, true);
+        LT_MANAGED_COMPONENT_SET(SetPointLight2DEnabledIcall, bool, TryGetManagedPointLight2DComponent, component->Enabled = value;);
+        LT_MANAGED_COMPONENT_GET(GetPointLight2DColorIcall, ManagedVector3, TryGetManagedPointLight2DComponent, ToManagedVector3(component->Color), ManagedVector3{ 1.0f, 1.0f, 1.0f });
+        LT_MANAGED_COMPONENT_SET(SetPointLight2DColorIcall, ManagedVector3, TryGetManagedPointLight2DComponent, component->Color = ToGlmVector3(value););
+        LT_MANAGED_COMPONENT_GET(GetPointLight2DIntensityIcall, float, TryGetManagedPointLight2DComponent, component->Intensity, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetPointLight2DIntensityIcall, float, TryGetManagedPointLight2DComponent, component->Intensity = value;);
+        LT_MANAGED_COMPONENT_GET(GetPointLight2DRadiusIcall, float, TryGetManagedPointLight2DComponent, component->Radius, 5.0f);
+        LT_MANAGED_COMPONENT_SET(SetPointLight2DRadiusIcall, float, TryGetManagedPointLight2DComponent, component->Radius = value;);
+        LT_MANAGED_COMPONENT_GET(GetPointLight2DFalloffIcall, float, TryGetManagedPointLight2DComponent, component->Falloff, 2.0f);
+        LT_MANAGED_COMPONENT_SET(SetPointLight2DFalloffIcall, float, TryGetManagedPointLight2DComponent, component->Falloff = value;);
+        LT_MANAGED_COMPONENT_GET(GetPointLight2DCastShadowsIcall, bool, TryGetManagedPointLight2DComponent, component->CastShadows, true);
+        LT_MANAGED_COMPONENT_SET(SetPointLight2DCastShadowsIcall, bool, TryGetManagedPointLight2DComponent, component->CastShadows = value;);
+        LT_MANAGED_COMPONENT_GET(GetPointLight2DShadowStrengthIcall, float, TryGetManagedPointLight2DComponent, component->ShadowStrength, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetPointLight2DShadowStrengthIcall, float, TryGetManagedPointLight2DComponent, component->ShadowStrength = value;);
+        LT_MANAGED_COMPONENT_GET(GetPointLight2DShadowSoftnessIcall, float, TryGetManagedPointLight2DComponent, component->ShadowSoftness, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetPointLight2DShadowSoftnessIcall, float, TryGetManagedPointLight2DComponent, component->ShadowSoftness = value;);
+        LT_MANAGED_COMPONENT_GET(GetPointLight2DShadowSamplesIcall, int, TryGetManagedPointLight2DComponent, component->ShadowSamples, 8);
+        LT_MANAGED_COMPONENT_SET(SetPointLight2DShadowSamplesIcall, int, TryGetManagedPointLight2DComponent, component->ShadowSamples = value;);
+        LT_MANAGED_COMPONENT_GET(GetPointLight2DShadowBiasIcall, float, TryGetManagedPointLight2DComponent, component->ShadowBias, 0.0015f);
+        LT_MANAGED_COMPONENT_SET(SetPointLight2DShadowBiasIcall, float, TryGetManagedPointLight2DComponent, component->ShadowBias = value;);
+
+        LT_MANAGED_COMPONENT_HAS(HasUIImageComponentIcall, TryGetManagedUIImageComponent);
+        LT_MANAGED_COMPONENT_GET(GetUIImageRaycastTargetIcall, bool, TryGetManagedUIImageComponent, component->RaycastTarget, true);
+        LT_MANAGED_COMPONENT_SET(SetUIImageRaycastTargetIcall, bool, TryGetManagedUIImageComponent, component->RaycastTarget = value;);
+
+        LT_MANAGED_COMPONENT_HAS(HasUIPanelComponentIcall, TryGetManagedUIPanelComponent);
+        LT_MANAGED_COMPONENT_GET(GetUIPanelBackgroundColorIcall, ManagedVector4, TryGetManagedUIPanelComponent, ToManagedVector4(component->BackgroundColor), ManagedVector4{ 0.12f, 0.12f, 0.12f, 0.9f });
+        LT_MANAGED_COMPONENT_SET(SetUIPanelBackgroundColorIcall, ManagedVector4, TryGetManagedUIPanelComponent, component->BackgroundColor = ToGlmVector4(value););
+        LT_MANAGED_COMPONENT_GET(GetUIPanelUseSpriteTextureIcall, bool, TryGetManagedUIPanelComponent, component->UseSpriteTexture, false);
+        LT_MANAGED_COMPONENT_SET(SetUIPanelUseSpriteTextureIcall, bool, TryGetManagedUIPanelComponent, component->UseSpriteTexture = value;);
+        LT_MANAGED_COMPONENT_GET(GetUIPanelRaycastTargetIcall, bool, TryGetManagedUIPanelComponent, component->RaycastTarget, false);
+        LT_MANAGED_COMPONENT_SET(SetUIPanelRaycastTargetIcall, bool, TryGetManagedUIPanelComponent, component->RaycastTarget = value;);
+
+        LT_MANAGED_COMPONENT_HAS(HasUITextComponentIcall, TryGetManagedUITextComponent);
+        LT_MANAGED_COMPONENT_GET(GetUITextValueIcall, Coral::String, TryGetManagedUITextComponent, Coral::String::New(component->Text), Coral::String::New(""));
+        LT_MANAGED_COMPONENT_SET(SetUITextValueIcall, Coral::String, TryGetManagedUITextComponent, component->Text = ToUtf8Borrowed(value););
+        LT_MANAGED_COMPONENT_GET(GetUITextFontFilePathIcall, Coral::String, TryGetManagedUITextComponent, Coral::String::New(component->FontFilePath), Coral::String::New(""));
+        LT_MANAGED_COMPONENT_SET(SetUITextFontFilePathIcall, Coral::String, TryGetManagedUITextComponent, component->FontFilePath = ToUtf8Borrowed(value););
+        LT_MANAGED_COMPONENT_GET(GetUITextFontSizeIcall, float, TryGetManagedUITextComponent, component->FontSize, 32.0f);
+        LT_MANAGED_COMPONENT_SET(SetUITextFontSizeIcall, float, TryGetManagedUITextComponent, component->FontSize = value;);
+        LT_MANAGED_COMPONENT_GET(GetUITextColorIcall, ManagedVector4, TryGetManagedUITextComponent, ToManagedVector4(component->Color), ManagedVector4{ 1.0f, 1.0f, 1.0f, 1.0f });
+        LT_MANAGED_COMPONENT_SET(SetUITextColorIcall, ManagedVector4, TryGetManagedUITextComponent, component->Color = ToGlmVector4(value););
+        LT_MANAGED_COMPONENT_GET(GetUITextRaycastTargetIcall, bool, TryGetManagedUITextComponent, component->RaycastTarget, false);
+        LT_MANAGED_COMPONENT_SET(SetUITextRaycastTargetIcall, bool, TryGetManagedUITextComponent, component->RaycastTarget = value;);
+
+        LT_MANAGED_COMPONENT_HAS(HasUIButtonComponentIcall, TryGetManagedUIButtonComponent);
+        LT_MANAGED_COMPONENT_GET(GetUIButtonInteractableIcall, bool, TryGetManagedUIButtonComponent, component->Interactable, true);
+        LT_MANAGED_COMPONENT_SET(SetUIButtonInteractableIcall, bool, TryGetManagedUIButtonComponent, component->Interactable = value;);
+        LT_MANAGED_COMPONENT_GET(GetUIButtonUseStateColorsIcall, bool, TryGetManagedUIButtonComponent, component->UseStateColors, true);
+        LT_MANAGED_COMPONENT_SET(SetUIButtonUseStateColorsIcall, bool, TryGetManagedUIButtonComponent, component->UseStateColors = value;);
+        LT_MANAGED_COMPONENT_GET(GetUIButtonNormalColorIcall, ManagedVector4, TryGetManagedUIButtonComponent, ToManagedVector4(component->NormalColor), ManagedVector4{ 0.82f, 0.82f, 0.82f, 1.0f });
+        LT_MANAGED_COMPONENT_SET(SetUIButtonNormalColorIcall, ManagedVector4, TryGetManagedUIButtonComponent, component->NormalColor = ToGlmVector4(value););
+        LT_MANAGED_COMPONENT_GET(GetUIButtonHoveredColorIcall, ManagedVector4, TryGetManagedUIButtonComponent, ToManagedVector4(component->HoveredColor), ManagedVector4{ 0.92f, 0.92f, 0.92f, 1.0f });
+        LT_MANAGED_COMPONENT_SET(SetUIButtonHoveredColorIcall, ManagedVector4, TryGetManagedUIButtonComponent, component->HoveredColor = ToGlmVector4(value););
+        LT_MANAGED_COMPONENT_GET(GetUIButtonPressedColorIcall, ManagedVector4, TryGetManagedUIButtonComponent, ToManagedVector4(component->PressedColor), ManagedVector4{ 0.72f, 0.72f, 0.72f, 1.0f });
+        LT_MANAGED_COMPONENT_SET(SetUIButtonPressedColorIcall, ManagedVector4, TryGetManagedUIButtonComponent, component->PressedColor = ToGlmVector4(value););
+        LT_MANAGED_COMPONENT_GET(GetUIButtonDisabledColorIcall, ManagedVector4, TryGetManagedUIButtonComponent, ToManagedVector4(component->DisabledColor), ManagedVector4{ 0.45f, 0.45f, 0.45f, 1.0f });
+        LT_MANAGED_COMPONENT_SET(SetUIButtonDisabledColorIcall, ManagedVector4, TryGetManagedUIButtonComponent, component->DisabledColor = ToGlmVector4(value););
+        LT_MANAGED_COMPONENT_GET(GetUIButtonIsHoveredIcall, bool, TryGetManagedUIButtonComponent, component->IsHovered, false);
+        LT_MANAGED_COMPONENT_GET(GetUIButtonIsPressedIcall, bool, TryGetManagedUIButtonComponent, component->IsPressed, false);
+        LT_MANAGED_COMPONENT_GET(GetUIButtonOnClickEventIcall, Coral::String, TryGetManagedUIButtonComponent, Coral::String::New(component->OnClickEvent), Coral::String::New(""));
+        LT_MANAGED_COMPONENT_SET(SetUIButtonOnClickEventIcall, Coral::String, TryGetManagedUIButtonComponent, component->OnClickEvent = ToUtf8Borrowed(value););
+        LT_MANAGED_COMPONENT_GET(GetUIButtonOnHoverEnterEventIcall, Coral::String, TryGetManagedUIButtonComponent, Coral::String::New(component->OnHoverEnterEvent), Coral::String::New(""));
+        LT_MANAGED_COMPONENT_SET(SetUIButtonOnHoverEnterEventIcall, Coral::String, TryGetManagedUIButtonComponent, component->OnHoverEnterEvent = ToUtf8Borrowed(value););
+        LT_MANAGED_COMPONENT_GET(GetUIButtonOnHoverExitEventIcall, Coral::String, TryGetManagedUIButtonComponent, Coral::String::New(component->OnHoverExitEvent), Coral::String::New(""));
+        LT_MANAGED_COMPONENT_SET(SetUIButtonOnHoverExitEventIcall, Coral::String, TryGetManagedUIButtonComponent, component->OnHoverExitEvent = ToUtf8Borrowed(value););
+        LT_MANAGED_COMPONENT_GET(GetUIButtonOnPressedEventIcall, Coral::String, TryGetManagedUIButtonComponent, Coral::String::New(component->OnPressedEvent), Coral::String::New(""));
+        LT_MANAGED_COMPONENT_SET(SetUIButtonOnPressedEventIcall, Coral::String, TryGetManagedUIButtonComponent, component->OnPressedEvent = ToUtf8Borrowed(value););
+
+        LT_MANAGED_COMPONENT_HAS(HasUISliderComponentIcall, TryGetManagedUISliderComponent);
+        LT_MANAGED_COMPONENT_GET(GetUISliderInteractableIcall, bool, TryGetManagedUISliderComponent, component->Interactable, true);
+        LT_MANAGED_COMPONENT_SET(SetUISliderInteractableIcall, bool, TryGetManagedUISliderComponent, component->Interactable = value;);
+        LT_MANAGED_COMPONENT_GET(GetUISliderMinValueIcall, float, TryGetManagedUISliderComponent, component->MinValue, 0.0f);
+        LT_MANAGED_COMPONENT_SET(SetUISliderMinValueIcall, float, TryGetManagedUISliderComponent, component->MinValue = value;);
+        LT_MANAGED_COMPONENT_GET(GetUISliderMaxValueIcall, float, TryGetManagedUISliderComponent, component->MaxValue, 1.0f);
+        LT_MANAGED_COMPONENT_SET(SetUISliderMaxValueIcall, float, TryGetManagedUISliderComponent, component->MaxValue = value;);
+        LT_MANAGED_COMPONENT_GET(GetUISliderValueIcall, float, TryGetManagedUISliderComponent, component->Value, 0.0f);
+        LT_MANAGED_COMPONENT_SET(SetUISliderValueIcall, float, TryGetManagedUISliderComponent, component->Value = value;);
+        LT_MANAGED_COMPONENT_GET(GetUISliderBackgroundColorIcall, ManagedVector4, TryGetManagedUISliderComponent, ToManagedVector4(component->BackgroundColor), ManagedVector4{ 0.22f, 0.22f, 0.22f, 1.0f });
+        LT_MANAGED_COMPONENT_SET(SetUISliderBackgroundColorIcall, ManagedVector4, TryGetManagedUISliderComponent, component->BackgroundColor = ToGlmVector4(value););
+        LT_MANAGED_COMPONENT_GET(GetUISliderFillColorIcall, ManagedVector4, TryGetManagedUISliderComponent, ToManagedVector4(component->FillColor), ManagedVector4{ 0.22f, 0.72f, 1.0f, 0.95f });
+        LT_MANAGED_COMPONENT_SET(SetUISliderFillColorIcall, ManagedVector4, TryGetManagedUISliderComponent, component->FillColor = ToGlmVector4(value););
+        LT_MANAGED_COMPONENT_GET(GetUISliderHandleColorIcall, ManagedVector4, TryGetManagedUISliderComponent, ToManagedVector4(component->HandleColor), ManagedVector4{ 0.92f, 0.92f, 0.92f, 1.0f });
+        LT_MANAGED_COMPONENT_SET(SetUISliderHandleColorIcall, ManagedVector4, TryGetManagedUISliderComponent, component->HandleColor = ToGlmVector4(value););
+        LT_MANAGED_COMPONENT_GET(GetUISliderHandleWidthIcall, float, TryGetManagedUISliderComponent, component->HandleWidth, 16.0f);
+        LT_MANAGED_COMPONENT_SET(SetUISliderHandleWidthIcall, float, TryGetManagedUISliderComponent, component->HandleWidth = value;);
+        LT_MANAGED_COMPONENT_GET(GetUISliderHandleHeightMultiplierIcall, float, TryGetManagedUISliderComponent, component->HandleHeightMultiplier, 1.25f);
+        LT_MANAGED_COMPONENT_SET(SetUISliderHandleHeightMultiplierIcall, float, TryGetManagedUISliderComponent, component->HandleHeightMultiplier = value;);
+        LT_MANAGED_COMPONENT_GET(GetUISliderShowHandleIcall, bool, TryGetManagedUISliderComponent, component->ShowHandle, true);
+        LT_MANAGED_COMPONENT_SET(SetUISliderShowHandleIcall, bool, TryGetManagedUISliderComponent, component->ShowHandle = value;);
+        LT_MANAGED_COMPONENT_GET(GetUISliderRuntimeDraggingIcall, bool, TryGetManagedUISliderComponent, component->RuntimeDragging, false);
+        LT_MANAGED_COMPONENT_GET(GetUISliderOnValueChangedEventIcall, Coral::String, TryGetManagedUISliderComponent, Coral::String::New(component->OnValueChangedEvent), Coral::String::New(""));
+        LT_MANAGED_COMPONENT_SET(SetUISliderOnValueChangedEventIcall, Coral::String, TryGetManagedUISliderComponent, component->OnValueChangedEvent = ToUtf8Borrowed(value););
 
         void RegisterRenderingUiInternalCalls(Coral::ManagedAssembly& contractAssembly)
         {
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasSpriteComponentIcall", reinterpret_cast<void*>(&ManagedHasSpriteComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetSpriteTextureKeyIcall", reinterpret_cast<void*>(&ManagedGetSpriteTextureKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetSpriteTextureKeyIcall", reinterpret_cast<void*>(&ManagedSetSpriteTextureKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetSpriteColorIcall", reinterpret_cast<void*>(&ManagedGetSpriteColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetSpriteColorIcall", reinterpret_cast<void*>(&ManagedSetSpriteColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetSpriteTilingFactorIcall", reinterpret_cast<void*>(&ManagedGetSpriteTilingFactorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetSpriteTilingFactorIcall", reinterpret_cast<void*>(&ManagedSetSpriteTilingFactorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetSpriteRenderOrderIcall", reinterpret_cast<void*>(&ManagedGetSpriteRenderOrderIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetSpriteRenderOrderIcall", reinterpret_cast<void*>(&ManagedSetSpriteRenderOrderIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetSpriteCastShadowsIcall", reinterpret_cast<void*>(&ManagedGetSpriteCastShadowsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetSpriteCastShadowsIcall", reinterpret_cast<void*>(&ManagedSetSpriteCastShadowsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetSpriteReceiveShadowsIcall", reinterpret_cast<void*>(&ManagedGetSpriteReceiveShadowsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetSpriteReceiveShadowsIcall", reinterpret_cast<void*>(&ManagedSetSpriteReceiveShadowsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetSpriteSubSpriteIndexIcall", reinterpret_cast<void*>(&ManagedGetSpriteSubSpriteIndexIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetSpriteSubSpriteIndexIcall", reinterpret_cast<void*>(&ManagedSetSpriteSubSpriteIndexIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetSpriteUvMinIcall", reinterpret_cast<void*>(&ManagedGetSpriteUvMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetSpriteUvMinIcall", reinterpret_cast<void*>(&ManagedSetSpriteUvMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetSpriteUvMaxIcall", reinterpret_cast<void*>(&ManagedGetSpriteUvMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetSpriteUvMaxIcall", reinterpret_cast<void*>(&ManagedSetSpriteUvMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasMaterialComponentIcall", reinterpret_cast<void*>(&ManagedHasMaterialComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetMaterialKeyIcall", reinterpret_cast<void*>(&ManagedGetMaterialKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetMaterialKeyIcall", reinterpret_cast<void*>(&ManagedSetMaterialKeyIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasCanvasComponentIcall", reinterpret_cast<void*>(&ManagedHasCanvasComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCanvasRenderModeIcall", reinterpret_cast<void*>(&ManagedGetCanvasRenderModeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCanvasRenderModeIcall", reinterpret_cast<void*>(&ManagedSetCanvasRenderModeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCanvasSortOrderIcall", reinterpret_cast<void*>(&ManagedGetCanvasSortOrderIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCanvasSortOrderIcall", reinterpret_cast<void*>(&ManagedSetCanvasSortOrderIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetCanvasReferenceResolutionIcall", reinterpret_cast<void*>(&ManagedGetCanvasReferenceResolutionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetCanvasReferenceResolutionIcall", reinterpret_cast<void*>(&ManagedSetCanvasReferenceResolutionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasRectTransformComponentIcall", reinterpret_cast<void*>(&ManagedHasRectTransformComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRectTransformAnchorMinIcall", reinterpret_cast<void*>(&ManagedGetRectTransformAnchorMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRectTransformAnchorMinIcall", reinterpret_cast<void*>(&ManagedSetRectTransformAnchorMinIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRectTransformAnchorMaxIcall", reinterpret_cast<void*>(&ManagedGetRectTransformAnchorMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRectTransformAnchorMaxIcall", reinterpret_cast<void*>(&ManagedSetRectTransformAnchorMaxIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRectTransformPivotIcall", reinterpret_cast<void*>(&ManagedGetRectTransformPivotIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRectTransformPivotIcall", reinterpret_cast<void*>(&ManagedSetRectTransformPivotIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRectTransformSizeDeltaIcall", reinterpret_cast<void*>(&ManagedGetRectTransformSizeDeltaIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRectTransformSizeDeltaIcall", reinterpret_cast<void*>(&ManagedSetRectTransformSizeDeltaIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetRectTransformAnchoredPositionIcall", reinterpret_cast<void*>(&ManagedGetRectTransformAnchoredPositionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetRectTransformAnchoredPositionIcall", reinterpret_cast<void*>(&ManagedSetRectTransformAnchoredPositionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasDirectionalLight2DComponentIcall", reinterpret_cast<void*>(&ManagedHasDirectionalLight2DComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetDirectionalLight2DEnabledIcall", reinterpret_cast<void*>(&ManagedGetDirectionalLight2DEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetDirectionalLight2DEnabledIcall", reinterpret_cast<void*>(&ManagedSetDirectionalLight2DEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetDirectionalLight2DColorIcall", reinterpret_cast<void*>(&ManagedGetDirectionalLight2DColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetDirectionalLight2DColorIcall", reinterpret_cast<void*>(&ManagedSetDirectionalLight2DColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetDirectionalLight2DIntensityIcall", reinterpret_cast<void*>(&ManagedGetDirectionalLight2DIntensityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetDirectionalLight2DIntensityIcall", reinterpret_cast<void*>(&ManagedSetDirectionalLight2DIntensityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetDirectionalLight2DUseEntityRotationIcall", reinterpret_cast<void*>(&ManagedGetDirectionalLight2DUseEntityRotationIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetDirectionalLight2DUseEntityRotationIcall", reinterpret_cast<void*>(&ManagedSetDirectionalLight2DUseEntityRotationIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetDirectionalLight2DDirectionIcall", reinterpret_cast<void*>(&ManagedGetDirectionalLight2DDirectionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetDirectionalLight2DDirectionIcall", reinterpret_cast<void*>(&ManagedSetDirectionalLight2DDirectionIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetDirectionalLight2DCastShadowsIcall", reinterpret_cast<void*>(&ManagedGetDirectionalLight2DCastShadowsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetDirectionalLight2DCastShadowsIcall", reinterpret_cast<void*>(&ManagedSetDirectionalLight2DCastShadowsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetDirectionalLight2DShadowStrengthIcall", reinterpret_cast<void*>(&ManagedGetDirectionalLight2DShadowStrengthIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetDirectionalLight2DShadowStrengthIcall", reinterpret_cast<void*>(&ManagedSetDirectionalLight2DShadowStrengthIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetDirectionalLight2DShadowSoftnessIcall", reinterpret_cast<void*>(&ManagedGetDirectionalLight2DShadowSoftnessIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetDirectionalLight2DShadowSoftnessIcall", reinterpret_cast<void*>(&ManagedSetDirectionalLight2DShadowSoftnessIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetDirectionalLight2DShadowSamplesIcall", reinterpret_cast<void*>(&ManagedGetDirectionalLight2DShadowSamplesIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetDirectionalLight2DShadowSamplesIcall", reinterpret_cast<void*>(&ManagedSetDirectionalLight2DShadowSamplesIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetDirectionalLight2DShadowDistanceIcall", reinterpret_cast<void*>(&ManagedGetDirectionalLight2DShadowDistanceIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetDirectionalLight2DShadowDistanceIcall", reinterpret_cast<void*>(&ManagedSetDirectionalLight2DShadowDistanceIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetDirectionalLight2DShadowBiasIcall", reinterpret_cast<void*>(&ManagedGetDirectionalLight2DShadowBiasIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetDirectionalLight2DShadowBiasIcall", reinterpret_cast<void*>(&ManagedSetDirectionalLight2DShadowBiasIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasPointLight2DComponentIcall", reinterpret_cast<void*>(&ManagedHasPointLight2DComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPointLight2DEnabledIcall", reinterpret_cast<void*>(&ManagedGetPointLight2DEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPointLight2DEnabledIcall", reinterpret_cast<void*>(&ManagedSetPointLight2DEnabledIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPointLight2DColorIcall", reinterpret_cast<void*>(&ManagedGetPointLight2DColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPointLight2DColorIcall", reinterpret_cast<void*>(&ManagedSetPointLight2DColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPointLight2DIntensityIcall", reinterpret_cast<void*>(&ManagedGetPointLight2DIntensityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPointLight2DIntensityIcall", reinterpret_cast<void*>(&ManagedSetPointLight2DIntensityIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPointLight2DRadiusIcall", reinterpret_cast<void*>(&ManagedGetPointLight2DRadiusIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPointLight2DRadiusIcall", reinterpret_cast<void*>(&ManagedSetPointLight2DRadiusIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPointLight2DFalloffIcall", reinterpret_cast<void*>(&ManagedGetPointLight2DFalloffIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPointLight2DFalloffIcall", reinterpret_cast<void*>(&ManagedSetPointLight2DFalloffIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPointLight2DCastShadowsIcall", reinterpret_cast<void*>(&ManagedGetPointLight2DCastShadowsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPointLight2DCastShadowsIcall", reinterpret_cast<void*>(&ManagedSetPointLight2DCastShadowsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPointLight2DShadowStrengthIcall", reinterpret_cast<void*>(&ManagedGetPointLight2DShadowStrengthIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPointLight2DShadowStrengthIcall", reinterpret_cast<void*>(&ManagedSetPointLight2DShadowStrengthIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPointLight2DShadowSoftnessIcall", reinterpret_cast<void*>(&ManagedGetPointLight2DShadowSoftnessIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPointLight2DShadowSoftnessIcall", reinterpret_cast<void*>(&ManagedSetPointLight2DShadowSoftnessIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPointLight2DShadowSamplesIcall", reinterpret_cast<void*>(&ManagedGetPointLight2DShadowSamplesIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPointLight2DShadowSamplesIcall", reinterpret_cast<void*>(&ManagedSetPointLight2DShadowSamplesIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetPointLight2DShadowBiasIcall", reinterpret_cast<void*>(&ManagedGetPointLight2DShadowBiasIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetPointLight2DShadowBiasIcall", reinterpret_cast<void*>(&ManagedSetPointLight2DShadowBiasIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasUIImageComponentIcall", reinterpret_cast<void*>(&ManagedHasUIImageComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIImageRaycastTargetIcall", reinterpret_cast<void*>(&ManagedGetUIImageRaycastTargetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUIImageRaycastTargetIcall", reinterpret_cast<void*>(&ManagedSetUIImageRaycastTargetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasUIPanelComponentIcall", reinterpret_cast<void*>(&ManagedHasUIPanelComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIPanelBackgroundColorIcall", reinterpret_cast<void*>(&ManagedGetUIPanelBackgroundColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUIPanelBackgroundColorIcall", reinterpret_cast<void*>(&ManagedSetUIPanelBackgroundColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIPanelUseSpriteTextureIcall", reinterpret_cast<void*>(&ManagedGetUIPanelUseSpriteTextureIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUIPanelUseSpriteTextureIcall", reinterpret_cast<void*>(&ManagedSetUIPanelUseSpriteTextureIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIPanelRaycastTargetIcall", reinterpret_cast<void*>(&ManagedGetUIPanelRaycastTargetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUIPanelRaycastTargetIcall", reinterpret_cast<void*>(&ManagedSetUIPanelRaycastTargetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasUITextComponentIcall", reinterpret_cast<void*>(&ManagedHasUITextComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUITextValueIcall", reinterpret_cast<void*>(&ManagedGetUITextValueIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUITextValueIcall", reinterpret_cast<void*>(&ManagedSetUITextValueIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUITextFontFilePathIcall", reinterpret_cast<void*>(&ManagedGetUITextFontFilePathIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUITextFontFilePathIcall", reinterpret_cast<void*>(&ManagedSetUITextFontFilePathIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUITextFontSizeIcall", reinterpret_cast<void*>(&ManagedGetUITextFontSizeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUITextFontSizeIcall", reinterpret_cast<void*>(&ManagedSetUITextFontSizeIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUITextColorIcall", reinterpret_cast<void*>(&ManagedGetUITextColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUITextColorIcall", reinterpret_cast<void*>(&ManagedSetUITextColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUITextRaycastTargetIcall", reinterpret_cast<void*>(&ManagedGetUITextRaycastTargetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUITextRaycastTargetIcall", reinterpret_cast<void*>(&ManagedSetUITextRaycastTargetIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasUIButtonComponentIcall", reinterpret_cast<void*>(&ManagedHasUIButtonComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIButtonInteractableIcall", reinterpret_cast<void*>(&ManagedGetUIButtonInteractableIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUIButtonInteractableIcall", reinterpret_cast<void*>(&ManagedSetUIButtonInteractableIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIButtonUseStateColorsIcall", reinterpret_cast<void*>(&ManagedGetUIButtonUseStateColorsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUIButtonUseStateColorsIcall", reinterpret_cast<void*>(&ManagedSetUIButtonUseStateColorsIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIButtonNormalColorIcall", reinterpret_cast<void*>(&ManagedGetUIButtonNormalColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUIButtonNormalColorIcall", reinterpret_cast<void*>(&ManagedSetUIButtonNormalColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIButtonHoveredColorIcall", reinterpret_cast<void*>(&ManagedGetUIButtonHoveredColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUIButtonHoveredColorIcall", reinterpret_cast<void*>(&ManagedSetUIButtonHoveredColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIButtonPressedColorIcall", reinterpret_cast<void*>(&ManagedGetUIButtonPressedColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUIButtonPressedColorIcall", reinterpret_cast<void*>(&ManagedSetUIButtonPressedColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIButtonDisabledColorIcall", reinterpret_cast<void*>(&ManagedGetUIButtonDisabledColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUIButtonDisabledColorIcall", reinterpret_cast<void*>(&ManagedSetUIButtonDisabledColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIButtonIsHoveredIcall", reinterpret_cast<void*>(&ManagedGetUIButtonIsHoveredIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIButtonIsPressedIcall", reinterpret_cast<void*>(&ManagedGetUIButtonIsPressedIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIButtonOnClickEventIcall", reinterpret_cast<void*>(&ManagedGetUIButtonOnClickEventIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUIButtonOnClickEventIcall", reinterpret_cast<void*>(&ManagedSetUIButtonOnClickEventIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIButtonOnHoverEnterEventIcall", reinterpret_cast<void*>(&ManagedGetUIButtonOnHoverEnterEventIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUIButtonOnHoverEnterEventIcall", reinterpret_cast<void*>(&ManagedSetUIButtonOnHoverEnterEventIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIButtonOnHoverExitEventIcall", reinterpret_cast<void*>(&ManagedGetUIButtonOnHoverExitEventIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUIButtonOnHoverExitEventIcall", reinterpret_cast<void*>(&ManagedSetUIButtonOnHoverExitEventIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUIButtonOnPressedEventIcall", reinterpret_cast<void*>(&ManagedGetUIButtonOnPressedEventIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUIButtonOnPressedEventIcall", reinterpret_cast<void*>(&ManagedSetUIButtonOnPressedEventIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "HasUISliderComponentIcall", reinterpret_cast<void*>(&ManagedHasUISliderComponentIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUISliderInteractableIcall", reinterpret_cast<void*>(&ManagedGetUISliderInteractableIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUISliderInteractableIcall", reinterpret_cast<void*>(&ManagedSetUISliderInteractableIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUISliderMinValueIcall", reinterpret_cast<void*>(&ManagedGetUISliderMinValueIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUISliderMinValueIcall", reinterpret_cast<void*>(&ManagedSetUISliderMinValueIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUISliderMaxValueIcall", reinterpret_cast<void*>(&ManagedGetUISliderMaxValueIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUISliderMaxValueIcall", reinterpret_cast<void*>(&ManagedSetUISliderMaxValueIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUISliderValueIcall", reinterpret_cast<void*>(&ManagedGetUISliderValueIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUISliderValueIcall", reinterpret_cast<void*>(&ManagedSetUISliderValueIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUISliderBackgroundColorIcall", reinterpret_cast<void*>(&ManagedGetUISliderBackgroundColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUISliderBackgroundColorIcall", reinterpret_cast<void*>(&ManagedSetUISliderBackgroundColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUISliderFillColorIcall", reinterpret_cast<void*>(&ManagedGetUISliderFillColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUISliderFillColorIcall", reinterpret_cast<void*>(&ManagedSetUISliderFillColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUISliderHandleColorIcall", reinterpret_cast<void*>(&ManagedGetUISliderHandleColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUISliderHandleColorIcall", reinterpret_cast<void*>(&ManagedSetUISliderHandleColorIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUISliderHandleWidthIcall", reinterpret_cast<void*>(&ManagedGetUISliderHandleWidthIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUISliderHandleWidthIcall", reinterpret_cast<void*>(&ManagedSetUISliderHandleWidthIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUISliderHandleHeightMultiplierIcall", reinterpret_cast<void*>(&ManagedGetUISliderHandleHeightMultiplierIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUISliderHandleHeightMultiplierIcall", reinterpret_cast<void*>(&ManagedSetUISliderHandleHeightMultiplierIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUISliderShowHandleIcall", reinterpret_cast<void*>(&ManagedGetUISliderShowHandleIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUISliderShowHandleIcall", reinterpret_cast<void*>(&ManagedSetUISliderShowHandleIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUISliderRuntimeDraggingIcall", reinterpret_cast<void*>(&ManagedGetUISliderRuntimeDraggingIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "GetUISliderOnValueChangedEventIcall", reinterpret_cast<void*>(&ManagedGetUISliderOnValueChangedEventIcall));
-            contractAssembly.AddInternalCall(kScriptBridgeTypeName, "SetUISliderOnValueChangedEventIcall", reinterpret_cast<void*>(&ManagedSetUISliderOnValueChangedEventIcall));
+            RegisterInternalCallBatch(contractAssembly, {
+                LT_MANAGED_INTERNAL_CALL(HasSpriteComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetSpriteTextureKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(SetSpriteTextureKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(GetSpriteColorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetSpriteColorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetSpriteTilingFactorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetSpriteTilingFactorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetSpriteRenderOrderIcall),
+                LT_MANAGED_INTERNAL_CALL(SetSpriteRenderOrderIcall),
+                LT_MANAGED_INTERNAL_CALL(GetSpriteCastShadowsIcall),
+                LT_MANAGED_INTERNAL_CALL(SetSpriteCastShadowsIcall),
+                LT_MANAGED_INTERNAL_CALL(GetSpriteReceiveShadowsIcall),
+                LT_MANAGED_INTERNAL_CALL(SetSpriteReceiveShadowsIcall),
+                LT_MANAGED_INTERNAL_CALL(GetSpriteSubSpriteIndexIcall),
+                LT_MANAGED_INTERNAL_CALL(SetSpriteSubSpriteIndexIcall),
+                LT_MANAGED_INTERNAL_CALL(GetSpriteUvMinIcall),
+                LT_MANAGED_INTERNAL_CALL(SetSpriteUvMinIcall),
+                LT_MANAGED_INTERNAL_CALL(GetSpriteUvMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(SetSpriteUvMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(HasMaterialComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetMaterialKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(SetMaterialKeyIcall),
+                LT_MANAGED_INTERNAL_CALL(HasCanvasComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCanvasRenderModeIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCanvasRenderModeIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCanvasSortOrderIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCanvasSortOrderIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCanvasReferenceResolutionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCanvasReferenceResolutionIcall),
+                LT_MANAGED_INTERNAL_CALL(HasRectTransformComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetRectTransformAnchorMinIcall),
+                LT_MANAGED_INTERNAL_CALL(SetRectTransformAnchorMinIcall),
+                LT_MANAGED_INTERNAL_CALL(GetRectTransformAnchorMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(SetRectTransformAnchorMaxIcall),
+                LT_MANAGED_INTERNAL_CALL(GetRectTransformPivotIcall),
+                LT_MANAGED_INTERNAL_CALL(SetRectTransformPivotIcall),
+                LT_MANAGED_INTERNAL_CALL(GetRectTransformSizeDeltaIcall),
+                LT_MANAGED_INTERNAL_CALL(SetRectTransformSizeDeltaIcall),
+                LT_MANAGED_INTERNAL_CALL(GetRectTransformAnchoredPositionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetRectTransformAnchoredPositionIcall),
+                LT_MANAGED_INTERNAL_CALL(HasDirectionalLight2DComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetDirectionalLight2DEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(SetDirectionalLight2DEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(GetDirectionalLight2DColorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetDirectionalLight2DColorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetDirectionalLight2DIntensityIcall),
+                LT_MANAGED_INTERNAL_CALL(SetDirectionalLight2DIntensityIcall),
+                LT_MANAGED_INTERNAL_CALL(GetDirectionalLight2DUseEntityRotationIcall),
+                LT_MANAGED_INTERNAL_CALL(SetDirectionalLight2DUseEntityRotationIcall),
+                LT_MANAGED_INTERNAL_CALL(GetDirectionalLight2DDirectionIcall),
+                LT_MANAGED_INTERNAL_CALL(SetDirectionalLight2DDirectionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetDirectionalLight2DCastShadowsIcall),
+                LT_MANAGED_INTERNAL_CALL(SetDirectionalLight2DCastShadowsIcall),
+                LT_MANAGED_INTERNAL_CALL(GetDirectionalLight2DShadowStrengthIcall),
+                LT_MANAGED_INTERNAL_CALL(SetDirectionalLight2DShadowStrengthIcall),
+                LT_MANAGED_INTERNAL_CALL(GetDirectionalLight2DShadowSoftnessIcall),
+                LT_MANAGED_INTERNAL_CALL(SetDirectionalLight2DShadowSoftnessIcall),
+                LT_MANAGED_INTERNAL_CALL(GetDirectionalLight2DShadowSamplesIcall),
+                LT_MANAGED_INTERNAL_CALL(SetDirectionalLight2DShadowSamplesIcall),
+                LT_MANAGED_INTERNAL_CALL(GetDirectionalLight2DShadowDistanceIcall),
+                LT_MANAGED_INTERNAL_CALL(SetDirectionalLight2DShadowDistanceIcall),
+                LT_MANAGED_INTERNAL_CALL(GetDirectionalLight2DShadowBiasIcall),
+                LT_MANAGED_INTERNAL_CALL(SetDirectionalLight2DShadowBiasIcall),
+                LT_MANAGED_INTERNAL_CALL(HasPointLight2DComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPointLight2DEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPointLight2DEnabledIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPointLight2DColorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPointLight2DColorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPointLight2DIntensityIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPointLight2DIntensityIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPointLight2DRadiusIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPointLight2DRadiusIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPointLight2DFalloffIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPointLight2DFalloffIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPointLight2DCastShadowsIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPointLight2DCastShadowsIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPointLight2DShadowStrengthIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPointLight2DShadowStrengthIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPointLight2DShadowSoftnessIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPointLight2DShadowSoftnessIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPointLight2DShadowSamplesIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPointLight2DShadowSamplesIcall),
+                LT_MANAGED_INTERNAL_CALL(GetPointLight2DShadowBiasIcall),
+                LT_MANAGED_INTERNAL_CALL(SetPointLight2DShadowBiasIcall),
+                LT_MANAGED_INTERNAL_CALL(HasUIImageComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIImageRaycastTargetIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUIImageRaycastTargetIcall),
+                LT_MANAGED_INTERNAL_CALL(HasUIPanelComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIPanelBackgroundColorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUIPanelBackgroundColorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIPanelUseSpriteTextureIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUIPanelUseSpriteTextureIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIPanelRaycastTargetIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUIPanelRaycastTargetIcall),
+                LT_MANAGED_INTERNAL_CALL(HasUITextComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUITextValueIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUITextValueIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUITextFontFilePathIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUITextFontFilePathIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUITextFontSizeIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUITextFontSizeIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUITextColorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUITextColorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUITextRaycastTargetIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUITextRaycastTargetIcall),
+                LT_MANAGED_INTERNAL_CALL(HasUIButtonComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIButtonInteractableIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUIButtonInteractableIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIButtonUseStateColorsIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUIButtonUseStateColorsIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIButtonNormalColorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUIButtonNormalColorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIButtonHoveredColorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUIButtonHoveredColorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIButtonPressedColorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUIButtonPressedColorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIButtonDisabledColorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUIButtonDisabledColorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIButtonIsHoveredIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIButtonIsPressedIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIButtonOnClickEventIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUIButtonOnClickEventIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIButtonOnHoverEnterEventIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUIButtonOnHoverEnterEventIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIButtonOnHoverExitEventIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUIButtonOnHoverExitEventIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUIButtonOnPressedEventIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUIButtonOnPressedEventIcall),
+                LT_MANAGED_INTERNAL_CALL(HasUISliderComponentIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUISliderInteractableIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUISliderInteractableIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUISliderMinValueIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUISliderMinValueIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUISliderMaxValueIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUISliderMaxValueIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUISliderValueIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUISliderValueIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUISliderBackgroundColorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUISliderBackgroundColorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUISliderFillColorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUISliderFillColorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUISliderHandleColorIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUISliderHandleColorIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUISliderHandleWidthIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUISliderHandleWidthIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUISliderHandleHeightMultiplierIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUISliderHandleHeightMultiplierIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUISliderShowHandleIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUISliderShowHandleIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUISliderRuntimeDraggingIcall),
+                LT_MANAGED_INTERNAL_CALL(GetUISliderOnValueChangedEventIcall),
+                LT_MANAGED_INTERNAL_CALL(SetUISliderOnValueChangedEventIcall)
+            });
         }
     }
 }

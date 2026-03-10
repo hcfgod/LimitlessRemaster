@@ -315,6 +315,7 @@ namespace Limitless::EditorInspectorPanel
         }
 
         bool SaveMaterialJsonAndReload(const std::string& materialKey,
+                                       EditorAssetPreview::MaterialPreviewCache& materialPreviewCache,
                                        Assets::MaterialAsset::Ptr& cachedMaterialAsset,
                                        const nlohmann::json& jsonToSave,
                                        const std::filesystem::path& resolvedPath)
@@ -333,7 +334,7 @@ namespace Limitless::EditorInspectorPanel
             else
                 cachedMaterialAsset = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(materialKey);
 
-            EditorAssetPreview::InvalidateCachedMaterialPreview(materialKey);
+            EditorAssetPreview::InvalidateCachedMaterialPreview(materialPreviewCache, materialKey);
 
             return cachedMaterialAsset != nullptr;
         }
@@ -1811,6 +1812,7 @@ namespace Limitless::EditorInspectorPanel
 
     void DrawMaterialInspector(const char* texturePayloadId,
                                const char* shaderPayloadId,
+                               EditorAssetPreview::MaterialPreviewCache& materialPreviewCache,
                                std::string& selectedMaterialAssetKey,
                                Assets::MaterialAsset::Ptr& cachedMaterialAsset)
     {
@@ -1847,7 +1849,7 @@ namespace Limitless::EditorInspectorPanel
         ImGui::Separator();
         ImGui::Spacing();
 
-        if (const EditorAssetPreview::MaterialPreviewData* materialPreview = EditorAssetPreview::GetCachedMaterialPreview(selectedMaterialAssetKey))
+        if (const EditorAssetPreview::MaterialPreviewData* materialPreview = EditorAssetPreview::GetCachedMaterialPreview(materialPreviewCache, selectedMaterialAssetKey))
         {
             const float previewSize = 256.0f;
             const float aspect = materialPreview->SourceHeight / std::max(1.0f, materialPreview->SourceWidth);
@@ -1921,7 +1923,7 @@ namespace Limitless::EditorInspectorPanel
                             { "guid", shaderAsset->GetGuid() },
                             { "key", shaderAsset->GetKey() }
                         };
-                        (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+                        (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, materialPreviewCache, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
                     }
                 }
             }
@@ -1946,7 +1948,7 @@ namespace Limitless::EditorInspectorPanel
                             { "guid", shaderAsset->GetGuid() },
                             { "key", shaderAsset->GetKey() }
                         };
-                        (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+                        (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, materialPreviewCache, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
                     }
                     ImGui::CloseCurrentPopup();
                 }
@@ -2057,7 +2059,7 @@ namespace Limitless::EditorInspectorPanel
             nlohmann::json* slotObject = getSlotObject(slot, true);
             (*slotObject)["texture"] = textureRef;
 
-            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, materialPreviewCache, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
         };
 
         auto clearTextureForSlot = [&](const TextureSlotDescriptor& slot) {
@@ -2074,7 +2076,7 @@ namespace Limitless::EditorInspectorPanel
                     s_State.Json["textureSlots"].erase(slot.Id);
             }
 
-            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, materialPreviewCache, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
         };
 
         auto hasSamplerOverrideForSlot = [&](const TextureSlotDescriptor& slot) -> bool {
@@ -2111,7 +2113,7 @@ namespace Limitless::EditorInspectorPanel
                     s_State.Json["textureSlots"].erase(slot.Id);
             }
 
-            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, materialPreviewCache, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
         };
 
         auto getSpecObjectForSlot = [&](const TextureSlotDescriptor& slot, bool createIfMissing) -> nlohmann::json* {
@@ -2160,7 +2162,7 @@ namespace Limitless::EditorInspectorPanel
                 (*spec)["minFilter"] = (minFilter == 0) ? "Nearest" : "Linear";
                 if (slot.IsAlbedo)
                     (*getSlotObject(slot, true))["spec"] = *spec;
-                (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+                (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, materialPreviewCache, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
             }
 
             int magFilter = getFilterIndex(spec->value("magFilter", "Linear").c_str());
@@ -2169,7 +2171,7 @@ namespace Limitless::EditorInspectorPanel
                 (*spec)["magFilter"] = (magFilter == 0) ? "Nearest" : "Linear";
                 if (slot.IsAlbedo)
                     (*getSlotObject(slot, true))["spec"] = *spec;
-                (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+                (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, materialPreviewCache, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
             }
 
             const char* wrapNames[] = { "Repeat", "Clamp To Edge" };
@@ -2179,7 +2181,7 @@ namespace Limitless::EditorInspectorPanel
                 (*spec)["wrapU"] = (wrapU == 1) ? "ClampToEdge" : "Repeat";
                 if (slot.IsAlbedo)
                     (*getSlotObject(slot, true))["spec"] = *spec;
-                (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+                (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, materialPreviewCache, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
             }
 
             int wrapV = getWrapIndex(spec->value("wrapV", "Repeat").c_str());
@@ -2188,7 +2190,7 @@ namespace Limitless::EditorInspectorPanel
                 (*spec)["wrapV"] = (wrapV == 1) ? "ClampToEdge" : "Repeat";
                 if (slot.IsAlbedo)
                     (*getSlotObject(slot, true))["spec"] = *spec;
-                (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+                (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, materialPreviewCache, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
             }
 
             bool generateMipmaps = spec->value("generateMipmaps", false);
@@ -2197,7 +2199,7 @@ namespace Limitless::EditorInspectorPanel
                 (*spec)["generateMipmaps"] = generateMipmaps;
                 if (slot.IsAlbedo)
                     (*getSlotObject(slot, true))["spec"] = *spec;
-                (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+                (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, materialPreviewCache, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
             }
         };
 
@@ -2326,21 +2328,21 @@ namespace Limitless::EditorInspectorPanel
         if (ImGui::DragFloat("Normal Strength", &normalStrength, 0.01f, 0.0f, 8.0f, "%.2f"))
         {
             s_State.Json["normalStrength"] = std::clamp(normalStrength, 0.0f, 8.0f);
-            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, materialPreviewCache, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
         }
 
         float roughness = s_State.Json.value("roughness", 0.5f);
         if (ImGui::SliderFloat("Roughness", &roughness, 0.0f, 1.0f, "%.2f"))
         {
             s_State.Json["roughness"] = std::clamp(roughness, 0.0f, 1.0f);
-            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, materialPreviewCache, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
         }
 
         float specularIntensity = s_State.Json.value("specularIntensity", s_State.Json.value("specular", 0.5f));
         if (ImGui::DragFloat("Specular Intensity", &specularIntensity, 0.01f, 0.0f, 8.0f, "%.2f"))
         {
             s_State.Json["specularIntensity"] = std::clamp(specularIntensity, 0.0f, 8.0f);
-            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
+            (void)SaveMaterialJsonAndReload(selectedMaterialAssetKey, materialPreviewCache, cachedMaterialAsset, s_State.Json, s_State.ResolvedPath);
         }
     }
 

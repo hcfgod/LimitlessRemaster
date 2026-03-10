@@ -147,7 +147,8 @@ namespace Limitless::EditorProjectPanel
         return sanitized;
     }
 
-    bool CreateNativeScriptPairInAssets(const std::filesystem::path& assetsDirectory,
+    bool CreateNativeScriptPairInAssets(EditorProjectPanelState& state,
+                                        const std::filesystem::path& assetsDirectory,
                                         const std::filesystem::path& parentRelativePath,
                                         const std::string& requestedClassName,
                                         std::string& outCreatedSourceAssetKey,
@@ -227,11 +228,12 @@ namespace Limitless::EditorProjectPanel
         (void)Assets::AssetImportPipeline::ReimportChanged(true);
         outCreatedSourceAssetKey = "Assets/" + (parentRelativePath / (className + ".cpp")).generic_string();
         outError.clear();
-        InvalidateProjectDirectoryCache();
+        InvalidateProjectDirectoryCache(state);
         return true;
     }
 
-    bool CreateManagedScriptInAssets(const std::filesystem::path& assetsDirectory,
+    bool CreateManagedScriptInAssets(EditorProjectPanelState& state,
+                                     const std::filesystem::path& assetsDirectory,
                                      const std::filesystem::path& parentRelativePath,
                                      const std::string& requestedClassName,
                                      std::string& outCreatedAssetKey,
@@ -287,11 +289,12 @@ namespace Limitless::EditorProjectPanel
         (void)Assets::AssetImportPipeline::ReimportChanged(true);
         outCreatedAssetKey = "Assets/" + (parentRelativePath / (className + ".cs")).generic_string();
         outError.clear();
-        InvalidateProjectDirectoryCache();
+        InvalidateProjectDirectoryCache(state);
         return true;
     }
 
-    bool RenameNativeScriptPairInAssets(const std::filesystem::path& assetsDirectory,
+    bool RenameNativeScriptPairInAssets(EditorProjectPanelState& state,
+                                        const std::filesystem::path& assetsDirectory,
                                         const std::filesystem::path& scriptRelativePath,
                                         const std::string& newDisplayName,
                                         std::filesystem::path& outNewHeaderRelativePath,
@@ -343,11 +346,13 @@ namespace Limitless::EditorProjectPanel
         (void)ReplaceWholeWordInFile(newHeaderPath, oldClassName, newClassName);
         (void)ReplaceWholeWordInFile(newSourcePath, oldClassName, newClassName);
         (void)Assets::AssetImportPipeline::ReimportChanged(true);
-        InvalidateProjectDirectoryCache();
+        InvalidateProjectDirectoryCache(state);
         return true;
     }
 
-    bool DeleteNativeScriptPairInAssets(const std::filesystem::path& assetsDirectory, const std::filesystem::path& scriptRelativePath)
+    bool DeleteNativeScriptPairInAssets(EditorProjectPanelState& state,
+                                        const std::filesystem::path& assetsDirectory,
+                                        const std::filesystem::path& scriptRelativePath)
     {
         const std::filesystem::path baseRelativePath = scriptRelativePath.parent_path() / scriptRelativePath.stem();
         const std::filesystem::path headerPath = assetsDirectory / (baseRelativePath.string() + ".h");
@@ -371,7 +376,7 @@ namespace Limitless::EditorProjectPanel
         if (removedAny)
         {
             (void)Assets::AssetImportPipeline::ReimportChanged(true);
-            InvalidateProjectDirectoryCache();
+            InvalidateProjectDirectoryCache(state);
         }
         return removedAny;
     }
@@ -418,7 +423,7 @@ namespace Limitless::EditorProjectPanel
                 {
                     if (ProjectAssetOperations::CreateFolderInDirectory(assetsDirectory, state.FolderPopupParent, state.FolderPopupBuffer.data()))
                     {
-                        InvalidateProjectDirectoryCache();
+                        InvalidateProjectDirectoryCache(state);
                         LT_INFO("Created folder {}", state.FolderPopupBuffer.data());
                     }
                     state.CreateFolderPopupOpen = false;
@@ -448,7 +453,7 @@ namespace Limitless::EditorProjectPanel
                 {
                     if (ProjectAssetOperations::RenameFolderInAssets(assetsDirectory, state.FolderPopupParent, state.FolderPopupBuffer.data()))
                     {
-                        InvalidateProjectDirectoryCache();
+                        InvalidateProjectDirectoryCache(state);
                         LT_INFO("Renamed folder to {}", state.FolderPopupBuffer.data());
                     }
                     state.RenameFolderPopupOpen = false;
@@ -561,6 +566,7 @@ namespace Limitless::EditorProjectPanel
                         std::filesystem::path newHeaderRelativePath;
                         std::filesystem::path newSourceRelativePath;
                         if (RenameNativeScriptPairInAssets(
+                                state,
                                 assetsDirectory,
                                 state.RenameAssetRelativePath,
                                 state.RenameAssetBuffer.data(),
@@ -586,7 +592,7 @@ namespace Limitless::EditorProjectPanel
                                 state.RenameAssetBuffer.data(),
                                 &newAssetRelativePath))
                         {
-                            InvalidateProjectDirectoryCache();
+                            InvalidateProjectDirectoryCache(state);
                             if (onAssetRenamed)
                             {
                                 const std::string newAssetKey = "Assets/" + newAssetRelativePath.generic_string();
@@ -629,6 +635,7 @@ namespace Limitless::EditorProjectPanel
                 std::string createdScriptAssetKey;
                 std::string createError;
                 if (CreateNativeScriptPairInAssets(
+                        state,
                         assetsDirectory,
                         state.CreateNativeScriptParentRelativePath,
                         state.CreateNativeScriptClassNameBuffer.data(),
@@ -666,6 +673,7 @@ namespace Limitless::EditorProjectPanel
                 std::string createdScriptAssetKey;
                 std::string createError;
                 if (CreateManagedScriptInAssets(
+                        state,
                         assetsDirectory,
                         state.CreateManagedScriptParentRelativePath,
                         state.CreateManagedScriptClassNameBuffer.data(),
@@ -794,7 +802,7 @@ namespace Limitless::EditorProjectPanel
                             const std::filesystem::path relPath = std::filesystem::relative(filePath, rootResult.GetValue());
                             const std::string assetKey = relPath.generic_string();
                             Assets::AssetDatabase::GetInstance().ImportOrUpdate(assetKey, Assets::AssetType::TilePalette);
-                            EditorTilePalettePanel::InvalidatePaletteKeyCache();
+                            InvalidateProjectDirectoryCache(state);
                         }
                     }
                     state.CreateTilePalettePopupOpen = false;

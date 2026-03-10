@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EditorAssetPreview.h"
 #include "Assets/MaterialAsset.h"
 #include "Assets/TextureAsset.h"
 
@@ -17,6 +18,7 @@ namespace Limitless
 
         void DrawMaterialInspector(const char* texturePayloadId,
                                    const char* shaderPayloadId,
+                                   EditorAssetPreview::MaterialPreviewCache& materialPreviewCache,
                                    std::string& selectedMaterialAssetKey,
                                    Assets::MaterialAsset::Ptr& cachedMaterialAsset);
 

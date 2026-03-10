@@ -74,7 +74,7 @@ namespace Limitless
         constexpr const char* kDefaultSceneFileName = "SampleScene.scene.json";
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 8;
+        constexpr uint32_t kEditorSessionStateVersion = 9;
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
         struct EditorSessionStateData final
@@ -92,6 +92,7 @@ namespace Limitless
             std::string ProjectActiveFolderRelativePath;
             float ProjectGridScale = 1.0f;
             std::unordered_map<std::string, bool> ProjectFolderExpansionState;
+            std::unordered_map<std::string, bool> InspectorFoldoutState;
         };
 
         std::string NormalizeSlashes(std::string pathText)
@@ -273,7 +274,7 @@ namespace Limitless
                     return state;
                 }
 
-                if (version != 3 && version != 4 && version != 5 && version != 6 && version != kEditorSessionStateVersion)
+                if (version != 3 && version != 4 && version != 5 && version != 6 && version != 8 && version != kEditorSessionStateVersion)
                 {
                     return {};
                 }
@@ -331,6 +332,19 @@ namespace Limitless
                     state.ProjectActiveFolderRelativePath = root.value("projectActiveFolderRelativePath", std::string{});
                 if (version >= 7)
                     state.ProjectGridScale = root.value("projectGridScale", 1.0f);
+                if (version >= 9)
+                {
+                    if (const auto inspectorFoldoutStateIt = root.find("inspectorFoldoutState");
+                        inspectorFoldoutStateIt != root.end() && inspectorFoldoutStateIt->is_object())
+                    {
+                        for (auto stateIt = inspectorFoldoutStateIt->begin(); stateIt != inspectorFoldoutStateIt->end(); ++stateIt)
+                        {
+                            if (!stateIt.value().is_boolean())
+                                continue;
+                            state.InspectorFoldoutState[stateIt.key()] = stateIt.value().get<bool>();
+                        }
+                    }
+                }
                 if (version < 8)
                 {
                     state.LayoutWindowState.ShowProjectSettingsWindow = state.ShowProjectSettingsWindow;
@@ -402,6 +416,11 @@ namespace Limitless
                 for (const auto& [folderPath, expanded] : state.ProjectFolderExpansionState)
                     folderExpansionRoot[folderPath] = expanded;
                 root["projectFolderExpansionState"] = std::move(folderExpansionRoot);
+
+                nlohmann::json inspectorFoldoutRoot = nlohmann::json::object();
+                for (const auto& [foldoutKey, expanded] : state.InspectorFoldoutState)
+                    inspectorFoldoutRoot[foldoutKey] = expanded;
+                root["inspectorFoldoutState"] = std::move(inspectorFoldoutRoot);
 
                 const std::filesystem::path tmpPath = statePath.string() + ".tmp";
                 {
@@ -803,11 +822,13 @@ namespace Limitless
             m_ProjectSettingsPanelState.Loaded = false;
             m_ProjectSettingsPanelState.StatusMessage.clear();
             m_ProjectSettingsPanelState.StatusIsError = false;
+            EditorProjectPanel::InvalidateProjectDirectoryCache(m_ProjectPanelState);
+            m_MaterialPreviewCache.Entries.clear();
 
             // Reset tile palette selection/caches so stale keys from the previous project never linger.
             m_TilePaletteState.ActivePaletteKey.clear();
             m_TilePaletteState.InvalidateCache();
-            EditorTilePalettePanel::InvalidatePaletteKeyCache();
+            EditorTilePalettePanel::InvalidatePaletteKeyCache(m_TilePaletteState);
 
             // Apply project-level input settings at project open so runtime input defaults are active immediately.
             const auto inputSettingsResult = Project::LoadInputSettings(projectRoot);
@@ -861,6 +882,7 @@ namespace Limitless
             }
             ApplyLayoutWindowState(sessionState.LayoutWindowState);
             EditorInspectorPanel::ApplyNativeScriptEditorSessionState(sessionState.NativeScriptEditorState);
+            EditorInspectorPanel::ApplyPersistentFoldoutState(sessionState.InspectorFoldoutState);
             m_ShowProjectSettingsWindow = sessionState.ShowProjectSettingsWindow;
             m_ShowAssetDiagnosticsWindow = sessionState.ShowAssetDiagnosticsWindow;
             m_ShowPerformancePanel = sessionState.ShowPerformancePanel;
@@ -1570,6 +1592,7 @@ namespace Limitless
 
         EditorInspectorPanel::Draw(
             m_Scene.get(),
+            m_CurrentSceneAssetKey,
             m_ShowInspectorPanel,
             m_SelectedEntity,
             kAssetTexturePayload,
@@ -1579,6 +1602,7 @@ namespace Limitless
             kAssetMaterialPayload,
             kAssetShaderPayload,
             kAssetFontPayload,
+            m_MaterialPreviewCache,
             m_SelectedMaterialAssetKey,
             m_CachedMaterialAsset,
             m_SelectedNativeScriptAssetKey,

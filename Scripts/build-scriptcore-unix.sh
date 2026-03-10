@@ -274,14 +274,14 @@ else
 fi
 
 if [[ -n "$PROJECT_LOCAL_OUTPUT_DIR" ]]; then
-    bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$PROJECT_LOCAL_OUTPUT_DIR" --project-root "$OPEN_PROJECT_ROOT"
+    rm -rf "$PROJECT_LOCAL_OUTPUT_DIR/Managed"
+    mkdir -p "$PROJECT_LOCAL_OUTPUT_DIR/Managed"
+    tar -C "$OUTPUT_DIR/Managed" -cf - . | tar -C "$PROJECT_LOCAL_OUTPUT_DIR/Managed" -xpf -
 fi
 
-if [[ -n "$OPEN_PROJECT_ROOT" ]]; then
-    bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$RUNTIME_TEMPLATE_DIR" --project-root "$OPEN_PROJECT_ROOT"
-else
-    bash "$MANAGED_BUILD_SCRIPT" --config "$CONFIGURATION" --platform "$PLATFORM" --output-dir "$RUNTIME_TEMPLATE_DIR"
-fi
+rm -rf "$RUNTIME_TEMPLATE_DIR/Managed"
+mkdir -p "$RUNTIME_TEMPLATE_DIR/Managed"
+tar -C "$OUTPUT_DIR/Managed" -cf - . | tar -C "$RUNTIME_TEMPLATE_DIR/Managed" -xpf -
 
 echo "ScriptCore build completed successfully."
 echo "Output directory: Build/${CFG_SHORTNAME}-${SYSTEM_NAME}-${PLATFORM}/Editor/"

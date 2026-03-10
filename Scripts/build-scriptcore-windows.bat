@@ -89,18 +89,21 @@ if errorlevel 1 (
 )
 
 if not "%PROJECT_LOCAL_OUTPUT_DIR%"=="" (
-    call "%MANAGED_BUILD_SCRIPT%" %CONFIGURATION% %PLATFORM% "%PROJECT_LOCAL_OUTPUT_DIR%" "%PROJECT_ROOT%"
-    if errorlevel 1 (
+    if not exist "%PROJECT_LOCAL_OUTPUT_DIR%\Managed" mkdir "%PROJECT_LOCAL_OUTPUT_DIR%\Managed"
+    robocopy "%OUTPUT_DIR%\Managed" "%PROJECT_LOCAL_OUTPUT_DIR%\Managed" /MIR /NJH /NJS /NFL /NDL /NC /NS /NP >nul
+    if !ERRORLEVEL! GEQ 8 (
         echo Error: Failed to refresh managed runtime payload in "%PROJECT_LOCAL_OUTPUT_DIR%".
         exit /b 1
     )
 )
 
-call "%MANAGED_BUILD_SCRIPT%" %CONFIGURATION% %PLATFORM% "%RUNTIME_TEMPLATE_DIR%" "%PROJECT_ROOT%"
-if errorlevel 1 (
+if not exist "%RUNTIME_TEMPLATE_DIR%\Managed" mkdir "%RUNTIME_TEMPLATE_DIR%\Managed"
+robocopy "%OUTPUT_DIR%\Managed" "%RUNTIME_TEMPLATE_DIR%\Managed" /MIR /NJH /NJS /NFL /NDL /NC /NS /NP >nul
+if %ERRORLEVEL% GEQ 8 (
     echo Error: Failed to refresh managed runtime payload in "%RUNTIME_TEMPLATE_DIR%".
     exit /b 1
 )
 
 echo ScriptCore build completed successfully!
 endlocal
+exit /b 0

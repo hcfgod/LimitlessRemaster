@@ -700,23 +700,8 @@ namespace Limitless::EditorInspectorPanel
                 return false;
             }
 
-            std::error_code createDirectoriesError;
-            for (const std::filesystem::path& generatedDirectory : generatedDirectories)
-            {
-                std::filesystem::remove_all(generatedDirectory, createDirectoriesError);
-                if (createDirectoriesError)
-                {
-                    outError = "Cannot clear generated ScriptCore mirror directory '" + generatedDirectory.string() + "': " + createDirectoriesError.message();
-                    return false;
-                }
-
-                std::filesystem::create_directories(generatedDirectory, createDirectoriesError);
-                if (createDirectoriesError)
-                {
-                    outError = "Cannot create generated ScriptCore mirror directory '" + generatedDirectory.string() + "': " + createDirectoriesError.message();
-                    return false;
-                }
-            }
+            std::vector<std::pair<std::filesystem::path, std::filesystem::path>> filesToMirror;
+            std::set<std::filesystem::path> expectedRelativePaths;
 
             for (const auto& entry : std::filesystem::recursive_directory_iterator(assetsRoot.value(), std::filesystem::directory_options::skip_permission_denied))
             {
@@ -739,31 +724,69 @@ namespace Limitless::EditorInspectorPanel
                 if (relativeError || relativeHeaderPath.empty())
                     continue;
 
-                for (const std::filesystem::path& generatedDirectory : generatedDirectories)
+                filesToMirror.push_back({sourceCppPath, relativeCppPath});
+                filesToMirror.push_back({sourceHeaderPath, relativeHeaderPath});
+                expectedRelativePaths.insert(relativeCppPath);
+                expectedRelativePaths.insert(relativeHeaderPath);
+            }
+
+            std::error_code mirrorError;
+            for (const std::filesystem::path& generatedDirectory : generatedDirectories)
+            {
+                std::filesystem::create_directories(generatedDirectory, mirrorError);
+                if (mirrorError)
                 {
-                    const std::filesystem::path destinationCppPath = generatedDirectory / relativeCppPath;
-                    const std::filesystem::path destinationHeaderPath = generatedDirectory / relativeHeaderPath;
+                    outError = "Cannot create generated ScriptCore mirror directory '" + generatedDirectory.string() + "': " + mirrorError.message();
+                    return false;
+                }
 
-                    std::filesystem::create_directories(destinationCppPath.parent_path(), createDirectoriesError);
-                    if (createDirectoriesError)
+                for (const auto& [sourcePath, relativePath] : filesToMirror)
+                {
+                    const std::filesystem::path destPath = generatedDirectory / relativePath;
+
+                    std::filesystem::create_directories(destPath.parent_path(), mirrorError);
+                    if (mirrorError)
                     {
-                        outError = "Failed to create generated script directory '" + destinationCppPath.parent_path().string() + "': " + createDirectoriesError.message();
+                        outError = "Failed to create generated script directory '" + destPath.parent_path().string() + "': " + mirrorError.message();
                         return false;
                     }
 
-                    std::error_code copyError;
-                    std::filesystem::copy_file(sourceCppPath, destinationCppPath, std::filesystem::copy_options::overwrite_existing, copyError);
-                    if (copyError)
+                    bool needsCopy = true;
+                    if (std::filesystem::exists(destPath, mirrorError))
                     {
-                        outError = "Failed to mirror source file '" + sourceCppPath.string() + "' to '" + destinationCppPath.string() + "': " + copyError.message();
-                        return false;
+                        const auto srcTime = std::filesystem::last_write_time(sourcePath, mirrorError);
+                        if (!mirrorError)
+                        {
+                            const auto dstTime = std::filesystem::last_write_time(destPath, mirrorError);
+                            if (!mirrorError && srcTime <= dstTime)
+                                needsCopy = false;
+                        }
+                        mirrorError.clear();
                     }
 
-                    std::filesystem::copy_file(sourceHeaderPath, destinationHeaderPath, std::filesystem::copy_options::overwrite_existing, copyError);
-                    if (copyError)
+                    if (needsCopy)
                     {
-                        outError = "Failed to mirror header file '" + sourceHeaderPath.string() + "' to '" + destinationHeaderPath.string() + "': " + copyError.message();
-                        return false;
+                        std::filesystem::copy_file(sourcePath, destPath, std::filesystem::copy_options::overwrite_existing, mirrorError);
+                        if (mirrorError)
+                        {
+                            outError = "Failed to mirror file '" + sourcePath.string() + "' to '" + destPath.string() + "': " + mirrorError.message();
+                            return false;
+                        }
+                    }
+                }
+
+                if (std::filesystem::exists(generatedDirectory))
+                {
+                    for (const auto& existingEntry : std::filesystem::recursive_directory_iterator(generatedDirectory, std::filesystem::directory_options::skip_permission_denied))
+                    {
+                        if (!existingEntry.is_regular_file())
+                            continue;
+                        std::error_code relErr;
+                        const std::filesystem::path relPath = std::filesystem::relative(existingEntry.path(), generatedDirectory, relErr);
+                        if (relErr)
+                            continue;
+                        if (expectedRelativePaths.find(relPath) == expectedRelativePaths.end())
+                            std::filesystem::remove(existingEntry.path(), relErr);
                     }
                 }
             }

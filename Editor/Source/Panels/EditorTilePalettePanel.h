@@ -4,6 +4,7 @@
 #include "Assets/TilePaletteAsset.h"
 #include "Assets/TextureAsset.h"
 
+#include <cstdint>
 #include <glm/glm.hpp>
 
 #include <string>
@@ -25,6 +26,9 @@ namespace Limitless::EditorTilePalettePanel
 
         /// Currently selected palette asset key.
         std::string ActivePaletteKey;
+        std::vector<std::string> CachedPaletteKeys;
+        bool PaletteKeysDirty = true;
+        uint64_t CachedPaletteKeysRevision = 0;
 
         /// Cached palette data loaded from disk.
         Assets::TilePaletteData CachedPaletteData;
@@ -76,5 +80,5 @@ namespace Limitless::EditorTilePalettePanel
                               EditorUndoService* undoService);
 
     /// Call after creating or deleting a TilePalette asset so the dropdown refreshes.
-    void InvalidatePaletteKeyCache();
+    void InvalidatePaletteKeyCache(TilePaletteState& state);
 }
