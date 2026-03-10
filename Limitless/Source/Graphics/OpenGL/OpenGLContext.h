@@ -35,6 +35,7 @@ namespace Limitless {
         void MakeCurrent() override;
         void Init(void* nativeWindow, GraphicsAPI api) override;
         void SwapBuffers() override;
+        void SetViewport(int x, int y, int width, int height) override;
         void* GetNativeContext() override { return m_Context; }
         GraphicsAPI GetAPI() const override { return GraphicsAPI::OpenGL; }
 

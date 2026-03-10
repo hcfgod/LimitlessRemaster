@@ -974,25 +974,17 @@ namespace Limitless
                 const float normalStrength = draw.NormalStrength;
                 const int receiveShadows = draw.ReceiveShadows ? 1 : 0;
                 const glm::vec2 casterEntityId = draw.CasterEntityId;
-                Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, viewProjection, model, color, normalStrength, receiveShadows, casterEntityId, shadowAlphaCutoff](GraphicsContext*) {
-                    if (!shaderRef || !vertexArrayRef || !albedoRef || !normalRef)
-                        return;
-
-                    shaderRef->Bind();
-                    vertexArrayRef->Bind();
-                    albedoRef->Bind(0);
-                    normalRef->Bind(1);
-
-                    shaderRef->SetMat4("u_ViewProjection", viewProjection);
-                    shaderRef->SetMat4("u_Model", model);
-                    shaderRef->SetFloat4("u_Color", color);
-                    shaderRef->SetFloat("u_NormalStrength", normalStrength);
-                    shaderRef->SetInt("u_ReceiveShadows", receiveShadows);
-                    shaderRef->SetFloat2("u_CasterEntityId", casterEntityId);
-                    shaderRef->SetFloat("u_ShadowAlphaCutoff", shadowAlphaCutoff);
-                    shaderRef->SetInt("u_AlbedoTexture", 0);
-                    shaderRef->SetInt("u_NormalTexture", 1);
-                }, "Lighting2D/NormalPassSprite"));
+                RenderBindingSet bindings{};
+                bindings.Textures.push_back(RenderTextureBinding{ "u_AlbedoTexture", albedoRef, 0u });
+                bindings.Textures.push_back(RenderTextureBinding{ "u_NormalTexture", normalRef, 1u });
+                bindings.Parameters.push_back(RenderParameterBinding{ "u_ViewProjection", viewProjection });
+                bindings.Parameters.push_back(RenderParameterBinding{ "u_Model", model });
+                bindings.Parameters.push_back(RenderParameterBinding{ "u_Color", color });
+                bindings.Parameters.push_back(RenderParameterBinding{ "u_NormalStrength", normalStrength });
+                bindings.Parameters.push_back(RenderParameterBinding{ "u_ReceiveShadows", static_cast<int32_t>(receiveShadows) });
+                bindings.Parameters.push_back(RenderParameterBinding{ "u_CasterEntityId", casterEntityId });
+                bindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowAlphaCutoff", shadowAlphaCutoff });
+                Renderer::GetInstance().SubmitCommand(std::make_unique<ApplyRenderBindingsCommand>(shaderRef, vertexArrayRef, std::move(bindings)));
                 Renderer::GetInstance().SubmitCommand(std::make_unique<DrawArraysCommand>(DrawMode::TriangleStrip, 0, 4));
             }
 
@@ -1656,41 +1648,27 @@ namespace Limitless
                 segmentCasterIds.push_back(shadowSegments[i].CasterEntityId);
             }
 
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, entityIdRef, lightColor, intensity, shadowDirection, shadingDirection, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowDistance, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segmentEndpoints = std::move(segmentEndpoints), segmentCasterIds = std::move(segmentCasterIds)](GraphicsContext*) {
-                if (!shaderRef || !vertexArrayRef || !albedoRef || !normalRef || !entityIdRef)
-                    return;
-
-                shaderRef->Bind();
-                vertexArrayRef->Bind();
-                albedoRef->Bind(0);
-                normalRef->Bind(1);
-                entityIdRef->Bind(2);
-
-                shaderRef->SetInt("u_AlbedoTexture", 0);
-                shaderRef->SetInt("u_NormalTexture", 1);
-                shaderRef->SetInt("u_EntityIdTexture", 2);
-                shaderRef->SetFloat2("u_ViewportSize", glm::vec2(static_cast<float>(width), static_cast<float>(height)));
-                shaderRef->SetFloat3("u_LightColor", lightColor);
-                shaderRef->SetFloat("u_LightIntensity", intensity);
-                shaderRef->SetFloat2("u_LightDirection", shadowDirection);
-                shaderRef->SetFloat2("u_ShadingLightDirection", shadingDirection);
-                shaderRef->SetInt("u_UseShadows", useShadows);
-                shaderRef->SetFloat("u_ShadowStrength", shadowStrength);
-                shaderRef->SetFloat("u_ShadowSoftness", shadowSoftness);
-                shaderRef->SetInt("u_ShadowSamples", shadowSamples);
-                shaderRef->SetFloat("u_ShadowDistance", shadowDistance);
-                shaderRef->SetFloat("u_ShadowBias", shadowBias);
-                shaderRef->SetFloat("u_ShadowAlphaCutoff", shadowAlphaCutoff);
-                shaderRef->SetFloat("u_ShadowSegmentSnapPixels", shadowSegmentSnapPixelsClamped);
-
-                const int segmentCount = static_cast<int>(segmentEndpoints.size());
-                shaderRef->SetInt("u_ShadowSegmentCount", segmentCount);
-                if (segmentCount > 0)
-                {
-                    shaderRef->SetFloat4Array("u_ShadowSegments", segmentEndpoints.data(), static_cast<uint32_t>(segmentCount));
-                    shaderRef->SetFloat2Array("u_ShadowSegmentCasterIds", segmentCasterIds.data(), static_cast<uint32_t>(segmentCount));
-                }
-            }, "Lighting2D/DirectionalLightPass"));
+            RenderBindingSet directionalBindings{};
+            directionalBindings.Textures.push_back(RenderTextureBinding{ "u_AlbedoTexture", albedoRef, 0u });
+            directionalBindings.Textures.push_back(RenderTextureBinding{ "u_NormalTexture", normalRef, 1u });
+            directionalBindings.Textures.push_back(RenderTextureBinding{ "u_EntityIdTexture", entityIdRef, 2u });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ViewportSize", glm::vec2(static_cast<float>(width), static_cast<float>(height)) });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_LightColor", lightColor });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_LightIntensity", intensity });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_LightDirection", shadowDirection });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadingLightDirection", shadingDirection });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_UseShadows", static_cast<int32_t>(useShadows) });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowStrength", shadowStrength });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSoftness", shadowSoftness });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSamples", static_cast<int32_t>(shadowSamples) });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowDistance", shadowDistance });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowBias", shadowBias });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowAlphaCutoff", shadowAlphaCutoff });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSegmentSnapPixels", shadowSegmentSnapPixelsClamped });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSegmentCount", static_cast<int32_t>(segmentEndpoints.size()) });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSegments", std::move(segmentEndpoints) });
+            directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSegmentCasterIds", std::move(segmentCasterIds) });
+            Renderer::GetInstance().SubmitCommand(std::make_unique<ApplyRenderBindingsCommand>(shaderRef, vertexArrayRef, std::move(directionalBindings)));
             Renderer::GetInstance().SubmitCommand(std::make_unique<DrawArraysCommand>(DrawMode::TriangleStrip, 0, 4));
         }
 
@@ -1735,41 +1713,27 @@ namespace Limitless
                 segmentCasterIds.push_back(shadowSegments[i].CasterEntityId);
             }
 
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, normalRef, entityIdRef, lightColor, intensity, lightPosition, lightRadius, lightFalloff, useShadows, shadowStrength, shadowSoftness, shadowSamples, shadowBias, shadowAlphaCutoff, shadowSegmentSnapPixelsClamped, width, height, segmentEndpoints = std::move(segmentEndpoints), segmentCasterIds = std::move(segmentCasterIds)](GraphicsContext*) {
-                if (!shaderRef || !vertexArrayRef || !albedoRef || !normalRef || !entityIdRef)
-                    return;
-
-                shaderRef->Bind();
-                vertexArrayRef->Bind();
-                albedoRef->Bind(0);
-                normalRef->Bind(1);
-                entityIdRef->Bind(2);
-
-                shaderRef->SetInt("u_AlbedoTexture", 0);
-                shaderRef->SetInt("u_NormalTexture", 1);
-                shaderRef->SetInt("u_EntityIdTexture", 2);
-                shaderRef->SetFloat2("u_ViewportSize", glm::vec2(static_cast<float>(width), static_cast<float>(height)));
-                shaderRef->SetFloat3("u_LightColor", lightColor);
-                shaderRef->SetFloat("u_LightIntensity", intensity);
-                shaderRef->SetFloat2("u_LightPosition", lightPosition);
-                shaderRef->SetFloat("u_LightRadius", lightRadius);
-                shaderRef->SetFloat("u_LightFalloff", lightFalloff);
-                shaderRef->SetInt("u_UseShadows", useShadows);
-                shaderRef->SetFloat("u_ShadowStrength", shadowStrength);
-                shaderRef->SetFloat("u_ShadowSoftness", shadowSoftness);
-                shaderRef->SetInt("u_ShadowSamples", shadowSamples);
-                shaderRef->SetFloat("u_ShadowBias", shadowBias);
-                shaderRef->SetFloat("u_ShadowAlphaCutoff", shadowAlphaCutoff);
-                shaderRef->SetFloat("u_ShadowSegmentSnapPixels", shadowSegmentSnapPixelsClamped);
-
-                const int segmentCount = static_cast<int>(segmentEndpoints.size());
-                shaderRef->SetInt("u_ShadowSegmentCount", segmentCount);
-                if (segmentCount > 0)
-                {
-                    shaderRef->SetFloat4Array("u_ShadowSegments", segmentEndpoints.data(), static_cast<uint32_t>(segmentCount));
-                    shaderRef->SetFloat2Array("u_ShadowSegmentCasterIds", segmentCasterIds.data(), static_cast<uint32_t>(segmentCount));
-                }
-            }, "Lighting2D/PointLightPass"));
+            RenderBindingSet pointBindings{};
+            pointBindings.Textures.push_back(RenderTextureBinding{ "u_AlbedoTexture", albedoRef, 0u });
+            pointBindings.Textures.push_back(RenderTextureBinding{ "u_NormalTexture", normalRef, 1u });
+            pointBindings.Textures.push_back(RenderTextureBinding{ "u_EntityIdTexture", entityIdRef, 2u });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_ViewportSize", glm::vec2(static_cast<float>(width), static_cast<float>(height)) });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_LightColor", lightColor });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_LightIntensity", intensity });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_LightPosition", lightPosition });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_LightRadius", lightRadius });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_LightFalloff", lightFalloff });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_UseShadows", static_cast<int32_t>(useShadows) });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowStrength", shadowStrength });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSoftness", shadowSoftness });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSamples", static_cast<int32_t>(shadowSamples) });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowBias", shadowBias });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowAlphaCutoff", shadowAlphaCutoff });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSegmentSnapPixels", shadowSegmentSnapPixelsClamped });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSegmentCount", static_cast<int32_t>(segmentEndpoints.size()) });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSegments", std::move(segmentEndpoints) });
+            pointBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSegmentCasterIds", std::move(segmentCasterIds) });
+            Renderer::GetInstance().SubmitCommand(std::make_unique<ApplyRenderBindingsCommand>(shaderRef, vertexArrayRef, std::move(pointBindings)));
             Renderer::GetInstance().SubmitCommand(std::make_unique<DrawArraysCommand>(DrawMode::TriangleStrip, 0, 4));
         }
 
@@ -1784,17 +1748,10 @@ namespace Limitless
             auto vertexArrayRef = g_State->UnitQuadVertexArray;
             auto albedoRef = albedoTexture;
             auto lightRef = lightTexture;
-            Renderer::GetInstance().SubmitCommand(std::make_unique<CustomCommand>([shaderRef, vertexArrayRef, albedoRef, lightRef](GraphicsContext*) {
-                if (!shaderRef || !vertexArrayRef || !albedoRef || !lightRef)
-                    return;
-
-                shaderRef->Bind();
-                vertexArrayRef->Bind();
-                albedoRef->Bind(0);
-                lightRef->Bind(1);
-                shaderRef->SetInt("u_AlbedoTexture", 0);
-                shaderRef->SetInt("u_LightTexture", 1);
-            }, "Lighting2D/CompositePass"));
+            RenderBindingSet compositeBindings{};
+            compositeBindings.Textures.push_back(RenderTextureBinding{ "u_AlbedoTexture", albedoRef, 0u });
+            compositeBindings.Textures.push_back(RenderTextureBinding{ "u_LightTexture", lightRef, 1u });
+            Renderer::GetInstance().SubmitCommand(std::make_unique<ApplyRenderBindingsCommand>(shaderRef, vertexArrayRef, std::move(compositeBindings)));
             Renderer::GetInstance().SubmitCommand(std::make_unique<DrawArraysCommand>(DrawMode::TriangleStrip, 0, 4));
         }
 

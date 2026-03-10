@@ -898,9 +898,8 @@ namespace Limitless
     // RenderCommands utility functions
     namespace RenderCommands
     {
-        std::unique_ptr<ClearCommand> CreateClearCommand(
-            bool clearColor, bool clearDepth, bool clearStencil,
-            float r, float g, float b, float a)
+        std::unique_ptr<ClearCommand> CreateClearCommand(bool clearColor, bool clearDepth, bool clearStencil,
+                                                         float r, float g, float b, float a)
         {
             ClearCommand::ClearFlags flags;
             flags.color = clearColor;
@@ -910,60 +909,13 @@ namespace Limitless
             return std::make_unique<ClearCommand>(flags, r, g, b, a);
         }
 
-        std::unique_ptr<SetViewportCommand> CreateViewportCommand(int x, int y, int width, int height)
-        {
-            return std::make_unique<SetViewportCommand>(x, y, width, height);
-        }
-
-        std::vector<std::unique_ptr<RenderCommand>> CreateDrawSequence(
-            std::shared_ptr<Shader> shader,
-            std::shared_ptr<VertexArray> vertexArray,
-            DrawMode mode, uint32_t count, uint32_t first)
-        {
-            std::vector<std::unique_ptr<RenderCommand>> commands;
-            
-            if (shader)
-                commands.push_back(std::make_unique<BindShaderCommand>(shader));
-            
-            if (vertexArray)
-                commands.push_back(std::make_unique<BindVertexArrayCommand>(vertexArray));
-            
-            commands.push_back(std::make_unique<DrawArraysCommand>(mode, first, count));
-            
-            return commands;
-        }
-
-        std::vector<std::unique_ptr<RenderCommand>> CreateIndexedDrawSequence(
-            std::shared_ptr<Shader> shader,
-            std::shared_ptr<VertexArray> vertexArray,
-            std::shared_ptr<IndexBuffer> indexBuffer,
-            DrawMode mode, uint32_t count, IndexType indexType, void* indices)
-        {
-            std::vector<std::unique_ptr<RenderCommand>> commands;
-            
-            if (shader)
-                commands.push_back(std::make_unique<BindShaderCommand>(shader));
-            
-            if (vertexArray)
-                commands.push_back(std::make_unique<BindVertexArrayCommand>(vertexArray));
-            
-            if (indexBuffer)
-                commands.push_back(std::make_unique<BindIndexBufferCommand>(indexBuffer));
-            
-            commands.push_back(std::make_unique<DrawIndexedCommand>(mode, count, indexType, indices));
-            
-            return commands;
-        }
-
         std::vector<std::unique_ptr<RenderCommand>> CreateDebugGroupSequence(const std::string& name)
         {
             std::vector<std::unique_ptr<RenderCommand>> commands;
             
             commands.push_back(std::make_unique<PushDebugGroupCommand>(name));
-            // Note: PopDebugGroupCommand should be added when the group ends
             
             return commands;
         }
     }
-
-} // namespace Limitless 
+} // namespace Limitless

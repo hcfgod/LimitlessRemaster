@@ -3,7 +3,6 @@
 #include "Core/ConfigManager.h"
 #include "Core/Input/InputSystem.h"
 #include "Core/Error.h"
-#include "Graphics/RenderCommand.h"
 #include "Graphics/Renderer.h"
 #include "Platform/Platform.h"
 #include <SDL3/SDL.h>
@@ -735,7 +734,7 @@ namespace Limitless
                 auto& renderer = Renderer::GetInstance();
                 if (renderer.IsInitialized() && widthPixels > 0 && heightPixels > 0)
                 {
-                    renderer.SubmitCommand(std::make_unique<SetViewportCommand>(0, 0, static_cast<int>(widthPixels), static_cast<int>(heightPixels)));
+                    renderer.SetViewport(0, 0, static_cast<int>(widthPixels), static_cast<int>(heightPixels));
                 }
 
                 // Notify the engine-side event system so layers/cameras can react.

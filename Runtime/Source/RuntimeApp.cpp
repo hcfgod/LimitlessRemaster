@@ -1,5 +1,4 @@
 #include "RuntimeApp.h"
-#include "TestLayer.h"
 #include "GameLayer.h"
 
 #include "Platform/Platform.h"
@@ -43,12 +42,6 @@ namespace Limitless
             LT_INFO("Shipped game detected (GameBootstrap.json found). Starting GameLayer.");
             auto gameLayer = CreateLayer<GameLayer>();
             PushLayer(gameLayer);
-        }
-        else
-        {
-            LT_INFO("Development runtime mode. Starting TestLayer.");
-            auto testLayer = CreateLayer<TestLayer>();
-            PushLayer(testLayer);
         }
 
         return true;

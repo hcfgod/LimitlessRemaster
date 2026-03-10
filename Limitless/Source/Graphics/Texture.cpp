@@ -11,13 +11,13 @@ namespace Limitless
 {
     std::shared_ptr<Texture2D> Texture2D::CreateFromFile(const std::string& path, const TextureSpecification& specification)
     {
-        auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        auto& renderer = Renderer::GetInstance();
+        const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
             case GraphicsAPI::OpenGL:
             default:
             {
-                auto& renderer = Renderer::GetInstance();
                 return renderer.SubmitResourceAndWait("CreateTexture2D/FromFile", [&](GraphicsContext*) -> std::shared_ptr<Texture2D> {
                     return std::make_shared<OpenGLTexture2D>(path, specification);
                 });
@@ -31,13 +31,13 @@ namespace Limitless
         const void* rgbaPixels,
         const TextureSpecification& specification)
     {
-        auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        auto& renderer = Renderer::GetInstance();
+        const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
             case GraphicsAPI::OpenGL:
             default:
             {
-                auto& renderer = Renderer::GetInstance();
                 LT_VERIFY(rgbaPixels != nullptr, "Texture2D::CreateFromRGBA8: rgbaPixels is null");
                 LT_VERIFY(width > 0 && height > 0, "Texture2D::CreateFromRGBA8: texture size must be non-zero");
 
@@ -91,13 +91,13 @@ namespace Limitless
             copied.push_back(CopiedMip{ mip.Width, mip.Height, offset });
         }
 
-        auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        auto& renderer = Renderer::GetInstance();
+        const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
             case GraphicsAPI::OpenGL:
             default:
             {
-                auto& renderer = Renderer::GetInstance();
                 return renderer.SubmitResourceAndWait("CreateTexture2D/FromRGBA8MipChain", [specification, copied = std::move(copied), pixels = std::move(allPixels)](GraphicsContext*) mutable -> std::shared_ptr<Texture2D> {
                     std::vector<TextureMipLevelRGBA8View> views;
                     views.reserve(copied.size());
@@ -119,13 +119,13 @@ namespace Limitless
         const std::string& path,
         const TextureSpecification& specification)
     {
-        auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        auto& renderer = Renderer::GetInstance();
+        const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
             case GraphicsAPI::OpenGL:
             default:
             {
-                auto& renderer = Renderer::GetInstance();
                 return renderer.SubmitResourceAsync("CreateTexture2DAsync/FromFile", [path, specification](GraphicsContext*) -> std::shared_ptr<Texture2D> {
                     return std::make_shared<OpenGLTexture2D>(path, specification);
                 });
@@ -139,7 +139,8 @@ namespace Limitless
         const void* rgbaPixels,
         const TextureSpecification& specification)
     {
-        auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        auto& renderer = Renderer::GetInstance();
+        const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
             case GraphicsAPI::OpenGL:
@@ -148,7 +149,6 @@ namespace Limitless
                 LT_VERIFY(rgbaPixels != nullptr, "Texture2D::CreateFromRGBA8Async: rgbaPixels is null");
                 LT_VERIFY(width > 0 && height > 0, "Texture2D::CreateFromRGBA8Async: texture size must be non-zero");
 
-                auto& renderer = Renderer::GetInstance();
                 // Copy pixels for safety: caller memory may go out of scope before the render thread executes.
                 std::vector<uint8_t> pixelBytes(static_cast<const uint8_t*>(rgbaPixels),
                                                 static_cast<const uint8_t*>(rgbaPixels) + (width * height * 4));
@@ -166,13 +166,13 @@ namespace Limitless
     {
         LT_VERIFY(width > 0 && height > 0, "Texture2D::CreateForRenderTarget: dimensions must be non-zero");
 
-        auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        auto& renderer = Renderer::GetInstance();
+        const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
             case GraphicsAPI::OpenGL:
             default:
             {
-                auto& renderer = Renderer::GetInstance();
                 return renderer.SubmitResourceAndWait("CreateTexture2D/ForRenderTarget", [width, height](GraphicsContext*) -> std::shared_ptr<Texture2D> {
                     return std::make_shared<OpenGLTexture2D>(width, height);
                 });

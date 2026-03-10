@@ -302,24 +302,8 @@ namespace Limitless
             bool clearColor = true, bool clearDepth = true, bool clearStencil = false,
             float r = 0.0f, float g = 0.0f, float b = 0.0f, float a = 1.0f);
 
-        // Create a viewport command
-        std::unique_ptr<SetViewportCommand> CreateViewportCommand(int x, int y, int width, int height);
-
-        // Create a draw command sequence
-        std::vector<std::unique_ptr<RenderCommand>> CreateDrawSequence(
-            std::shared_ptr<Shader> shader,
-            std::shared_ptr<VertexArray> vertexArray,
-            uint32_t mode, uint32_t count, uint32_t first = 0);
-
-        // Create an indexed draw command sequence
-        std::vector<std::unique_ptr<RenderCommand>> CreateIndexedDrawSequence(
-            std::shared_ptr<Shader> shader,
-            std::shared_ptr<VertexArray> vertexArray,
-            std::shared_ptr<IndexBuffer> indexBuffer,
-            uint32_t mode, uint32_t count, uint32_t indexType, void* indices = nullptr);
-
         // Create a debug group command sequence
         std::vector<std::unique_ptr<RenderCommand>> CreateDebugGroupSequence(const std::string& name);
     };
 
-} // namespace Limitless 
+} // namespace Limitless

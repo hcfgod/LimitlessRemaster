@@ -310,6 +310,12 @@ namespace Limitless {
         return std::make_unique<OpenGLSharedContext>(dummyWindow, shared);
     }
 
+    void OpenGLContext::SetViewport(int x, int y, int width, int height)
+    {
+        ScopedCurrentContext scope(*this);
+        glViewport(x, y, width, height);
+    }
+
     void OpenGLContext::SwapBuffers() {
         SDL_GL_SwapWindow(m_Window);
     }

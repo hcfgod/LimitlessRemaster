@@ -8,13 +8,13 @@ namespace Limitless
 {
     std::shared_ptr<VertexArray> VertexArray::Create()
     {
-        auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        auto& renderer = Renderer::GetInstance();
+        const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
             case GraphicsAPI::OpenGL:
             default:
             {
-                auto& renderer = Renderer::GetInstance();
                 // VAOs are not shared across OpenGL contexts; creation must happen on the primary context.
                 return renderer.SubmitPrimaryResourceAndWait("CreateVertexArray", [&](GraphicsContext*) -> std::shared_ptr<VertexArray> {
                     return std::make_shared<OpenGLVertexArray>();

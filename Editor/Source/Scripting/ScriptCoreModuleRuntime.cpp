@@ -801,6 +801,94 @@ namespace Limitless::ScriptCoreModuleRuntime
             return toWrite;
         }
 
+        bool ForwardScriptParallelExecutionStateToHost()
+        {
+            return Scene::IsCurrentThreadParallelScriptExecution();
+        }
+
+        template<typename TCallback>
+        bool ConnectOptionalScriptCoreBridge(void* libraryHandle, const char* exportName, TCallback callback)
+        {
+            if (!libraryHandle || !exportName || exportName[0] == '\0')
+                return false;
+
+            using SetterFunction = void (*)(TCallback callbackValue);
+            auto setter = reinterpret_cast<SetterFunction>(PlatformUtils::GetProcAddress(libraryHandle, exportName));
+            if (!setter)
+                return false;
+
+            setter(callback);
+            return true;
+        }
+
+        void BindLoadedScriptCoreHostBridges(void* libraryHandle)
+        {
+            ConnectOptionalScriptCoreBridge<SceneTransitionBridgeCallback>(libraryHandle, "LT_SetSceneTransitionBridge", &ForwardSceneTransitionToHost);
+            ConnectOptionalScriptCoreBridge<InputActionAxis1DBridgeCallback>(libraryHandle, "LT_SetInputActionAxis1DBridge", &ForwardInputActionAxis1DToHost);
+            ConnectOptionalScriptCoreBridge<InputActionAxis2DBridgeCallback>(libraryHandle, "LT_SetInputActionAxis2DBridge", &ForwardInputActionAxis2DToHost);
+            ConnectOptionalScriptCoreBridge<InputActionPressedBridgeCallback>(libraryHandle, "LT_SetInputActionPressedBridge", &ForwardInputActionPressedToHost);
+            ConnectOptionalScriptCoreBridge<InputActionExistsBridgeCallback>(libraryHandle, "LT_SetInputActionExistsBridge", &ForwardInputActionExistsToHost);
+            ConnectOptionalScriptCoreBridge<InputActionTriggerBridgeCallback>(libraryHandle, "LT_SetInputActionStartedBridge", &ForwardInputActionStartedToHost);
+            ConnectOptionalScriptCoreBridge<InputActionTriggerBridgeCallback>(libraryHandle, "LT_SetInputActionPerformedBridge", &ForwardInputActionPerformedToHost);
+            ConnectOptionalScriptCoreBridge<InputActionTriggerBridgeCallback>(libraryHandle, "LT_SetInputActionCanceledBridge", &ForwardInputActionCanceledToHost);
+            ConnectOptionalScriptCoreBridge<InputActionTriggerBridgeCallback>(libraryHandle, "LT_SetInputActionButtonBridge", &ForwardInputActionButtonToHost);
+            ConnectOptionalScriptCoreBridge<Physics2DRaycastBridgeCallback>(libraryHandle, "LT_SetPhysics2DRaycastBridge", &ForwardPhysics2DRaycastToHost);
+            ConnectOptionalScriptCoreBridge<ScriptLogBridgeCallback>(libraryHandle, "LT_SetScriptLogBridge", &ForwardScriptLogToHost);
+            ConnectOptionalScriptCoreBridge<ScriptCreateEntityBridgeCallback>(libraryHandle, "LT_SetScriptCreateEntityBridge", &ForwardScriptCreateEntityToHost);
+            ConnectOptionalScriptCoreBridge<ScriptDestroyEntityBridgeCallback>(libraryHandle, "LT_SetScriptDestroyEntityBridge", &ForwardScriptDestroyEntityToHost);
+            ConnectOptionalScriptCoreBridge<ScriptInstantiatePrefabBridgeCallback>(libraryHandle, "LT_SetScriptInstantiatePrefabBridge", &ForwardScriptInstantiatePrefabToHost);
+            ConnectOptionalScriptCoreBridge<ScriptResolveEntityReferenceBridgeCallback>(libraryHandle, "LT_SetScriptResolveEntityReferenceBridge", &ForwardScriptResolveEntityReferenceToHost);
+            ConnectOptionalScriptCoreBridge<ScriptGetContactEntityHandlesBridgeCallback>(libraryHandle, "LT_SetScriptContactEntityHandlesBridge", &ForwardScriptContactEntityHandlesToHost);
+            ConnectOptionalScriptCoreBridge<InputActionTriggerBridgeCallback>(libraryHandle, "LT_SetInputButtonDownBridge", &ForwardInputActionStartedToHost);
+            ConnectOptionalScriptCoreBridge<InputActionTriggerBridgeCallback>(libraryHandle, "LT_SetInputButtonBridge", &ForwardInputActionButtonToHost);
+        }
+
+        void UnbindLoadedScriptCoreHostBridges(void* libraryHandle)
+        {
+            ConnectOptionalScriptCoreBridge<SceneTransitionBridgeCallback>(libraryHandle, "LT_SetSceneTransitionBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputActionAxis1DBridgeCallback>(libraryHandle, "LT_SetInputActionAxis1DBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputActionAxis2DBridgeCallback>(libraryHandle, "LT_SetInputActionAxis2DBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputActionPressedBridgeCallback>(libraryHandle, "LT_SetInputActionPressedBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputActionExistsBridgeCallback>(libraryHandle, "LT_SetInputActionExistsBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputActionTriggerBridgeCallback>(libraryHandle, "LT_SetInputActionStartedBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputActionTriggerBridgeCallback>(libraryHandle, "LT_SetInputActionPerformedBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputActionTriggerBridgeCallback>(libraryHandle, "LT_SetInputActionCanceledBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputActionTriggerBridgeCallback>(libraryHandle, "LT_SetInputActionButtonBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<Physics2DRaycastBridgeCallback>(libraryHandle, "LT_SetPhysics2DRaycastBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<ScriptLogBridgeCallback>(libraryHandle, "LT_SetScriptLogBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<ScriptCreateEntityBridgeCallback>(libraryHandle, "LT_SetScriptCreateEntityBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<ScriptDestroyEntityBridgeCallback>(libraryHandle, "LT_SetScriptDestroyEntityBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<ScriptInstantiatePrefabBridgeCallback>(libraryHandle, "LT_SetScriptInstantiatePrefabBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<ScriptResolveEntityReferenceBridgeCallback>(libraryHandle, "LT_SetScriptResolveEntityReferenceBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<ScriptGetContactEntityHandlesBridgeCallback>(libraryHandle, "LT_SetScriptContactEntityHandlesBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputActionTriggerBridgeCallback>(libraryHandle, "LT_SetInputButtonDownBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputActionTriggerBridgeCallback>(libraryHandle, "LT_SetInputButtonBridge", nullptr);
+        }
+
+        void BindNativeScriptHostBridges()
+        {
+            ScriptableEntity::SetCreateEntityBridgeCallback(&ForwardScriptCreateEntityToHost);
+            ScriptableEntity::SetDestroyEntityBridgeCallback(&ForwardScriptDestroyEntityToHost);
+            ScriptableEntity::SetInstantiatePrefabBridgeCallback(&ForwardScriptInstantiatePrefabToHost);
+            ScriptableEntity::SetResolveEntityReferenceBridgeCallback(&ForwardScriptResolveEntityReferenceToHost);
+            ScriptableEntity::SetContactEntityHandlesBridgeCallback(&ForwardScriptContactEntityHandlesToHost);
+            ScriptableEntity::SetParallelScriptExecutionBridgeCallback(&ForwardScriptParallelExecutionStateToHost);
+            Entity::SetDestroyBridgeCallback(&ForwardScriptDestroyEntityToHost);
+            Entity::SetParallelExecutionBridgeCallback(&ForwardScriptParallelExecutionStateToHost);
+        }
+
+        void UnbindNativeScriptHostBridges()
+        {
+            ScriptableEntity::SetCreateEntityBridgeCallback(nullptr);
+            ScriptableEntity::SetDestroyEntityBridgeCallback(nullptr);
+            ScriptableEntity::SetInstantiatePrefabBridgeCallback(nullptr);
+            ScriptableEntity::SetResolveEntityReferenceBridgeCallback(nullptr);
+            ScriptableEntity::SetContactEntityHandlesBridgeCallback(nullptr);
+            ScriptableEntity::SetParallelScriptExecutionBridgeCallback(nullptr);
+            Entity::SetDestroyBridgeCallback(nullptr);
+            Entity::SetParallelExecutionBridgeCallback(nullptr);
+        }
+
         bool ReloadScriptCoreModule(const std::filesystem::path& libraryPath)
         {
             std::error_code errorCode;
@@ -871,122 +959,15 @@ namespace Limitless::ScriptCoreModuleRuntime
                 return false;
             }
 
-            const auto setSceneTransitionBridge = reinterpret_cast<SetSceneTransitionBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetSceneTransitionBridge"));
-            if (setSceneTransitionBridge)
+            BindLoadedScriptCoreHostBridges(loadedLibraryHandle);
+            if (ConnectOptionalScriptCoreBridge<ScriptLogBridgeCallback>(loadedLibraryHandle, "LT_SetScriptLogBridge", &ForwardScriptLogToHost))
             {
-                setSceneTransitionBridge(&ForwardSceneTransitionToHost);
-            }
-
-            const auto setInputActionAxis1DBridge = reinterpret_cast<SetInputActionAxis1DBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionAxis1DBridge"));
-            if (setInputActionAxis1DBridge)
-            {
-                setInputActionAxis1DBridge(&ForwardInputActionAxis1DToHost);
-            }
-
-            const auto setInputActionAxis2DBridge = reinterpret_cast<SetInputActionAxis2DBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionAxis2DBridge"));
-            if (setInputActionAxis2DBridge)
-            {
-                setInputActionAxis2DBridge(&ForwardInputActionAxis2DToHost);
-            }
-
-            const auto setInputActionPressedBridge = reinterpret_cast<SetInputActionPressedBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionPressedBridge"));
-            if (setInputActionPressedBridge)
-            {
-                setInputActionPressedBridge(&ForwardInputActionPressedToHost);
-            }
-
-            const auto setInputActionExistsBridge = reinterpret_cast<SetInputActionExistsBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionExistsBridge"));
-            if (setInputActionExistsBridge)
-            {
-                setInputActionExistsBridge(&ForwardInputActionExistsToHost);
-            }
-
-            auto setInputActionStartedBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionStartedBridge"));
-            if (!setInputActionStartedBridge)
-            {
-                setInputActionStartedBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
-                    PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputButtonDownBridge"));
-            }
-            if (setInputActionStartedBridge)
-            {
-                setInputActionStartedBridge(&ForwardInputActionStartedToHost);
-            }
-
-            const auto setInputActionPerformedBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionPerformedBridge"));
-            if (setInputActionPerformedBridge)
-            {
-                setInputActionPerformedBridge(&ForwardInputActionPerformedToHost);
-            }
-
-            const auto setInputActionCanceledBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionCanceledBridge"));
-            if (setInputActionCanceledBridge)
-            {
-                setInputActionCanceledBridge(&ForwardInputActionCanceledToHost);
-            }
-
-            auto setInputActionButtonBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputActionButtonBridge"));
-            if (!setInputActionButtonBridge)
-            {
-                setInputActionButtonBridge = reinterpret_cast<SetInputActionTriggerBridgeFunction>(
-                    PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetInputButtonBridge"));
-            }
-            if (setInputActionButtonBridge)
-            {
-                setInputActionButtonBridge(&ForwardInputActionButtonToHost);
-            }
-
-            const auto setPhysics2DRaycastBridge = reinterpret_cast<SetPhysics2DRaycastBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetPhysics2DRaycastBridge"));
-            if (setPhysics2DRaycastBridge)
-            {
-                setPhysics2DRaycastBridge(&ForwardPhysics2DRaycastToHost);
-            }
-
-            const auto setScriptLogBridge = reinterpret_cast<SetScriptLogBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptLogBridge"));
-            if (setScriptLogBridge)
-            {
-                setScriptLogBridge(&ForwardScriptLogToHost);
                 LT_INFO("ScriptCore runtime: script log bridge connected.");
             }
             else
             {
                 LT_WARN("ScriptCore runtime: LT_SetScriptLogBridge export missing; script logs will be suppressed.");
             }
-
-            const auto setScriptCreateEntityBridge = reinterpret_cast<SetScriptCreateEntityBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptCreateEntityBridge"));
-            if (setScriptCreateEntityBridge)
-                setScriptCreateEntityBridge(&ForwardScriptCreateEntityToHost);
-
-            const auto setScriptDestroyEntityBridge = reinterpret_cast<SetScriptDestroyEntityBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptDestroyEntityBridge"));
-            if (setScriptDestroyEntityBridge)
-                setScriptDestroyEntityBridge(&ForwardScriptDestroyEntityToHost);
-
-            const auto setScriptInstantiatePrefabBridge = reinterpret_cast<SetScriptInstantiatePrefabBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptInstantiatePrefabBridge"));
-            if (setScriptInstantiatePrefabBridge)
-                setScriptInstantiatePrefabBridge(&ForwardScriptInstantiatePrefabToHost);
-
-            const auto setScriptResolveEntityReferenceBridge = reinterpret_cast<SetScriptResolveEntityReferenceBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptResolveEntityReferenceBridge"));
-            if (setScriptResolveEntityReferenceBridge)
-                setScriptResolveEntityReferenceBridge(&ForwardScriptResolveEntityReferenceToHost);
-
-            const auto setScriptContactEntityHandlesBridge = reinterpret_cast<SetScriptContactEntityHandlesBridgeFunction>(
-                PlatformUtils::GetProcAddress(loadedLibraryHandle, "LT_SetScriptContactEntityHandlesBridge"));
-            if (setScriptContactEntityHandlesBridge)
-                setScriptContactEntityHandlesBridge(&ForwardScriptContactEntityHandlesToHost);
 
             ResetRuntimeScriptRegistry();
             registerFunction(&RegisterScriptFromModule);
@@ -1001,7 +982,10 @@ namespace Limitless::ScriptCoreModuleRuntime
             s_RuntimeState.LastWriteTime = sourceTimestamp;
 
             if (previousLibraryHandle != nullptr)
+            {
+                UnbindLoadedScriptCoreHostBridges(previousLibraryHandle);
                 PlatformUtils::FreeLibrary(previousLibraryHandle);
+            }
             if (!previousLoadedLibraryPath.empty())
             {
                 std::error_code removeError;
@@ -1049,6 +1033,7 @@ namespace Limitless::ScriptCoreModuleRuntime
             return;
 
         ResetRuntimeScriptRegistry();
+        BindNativeScriptHostBridges();
         s_RuntimeState.Initialized = true;
         s_RuntimeState.LastPollTime = std::chrono::steady_clock::now();
 
@@ -1072,6 +1057,7 @@ namespace Limitless::ScriptCoreModuleRuntime
 
         if (s_RuntimeState.LibraryHandle != nullptr)
         {
+            UnbindLoadedScriptCoreHostBridges(s_RuntimeState.LibraryHandle);
             PlatformUtils::FreeLibrary(s_RuntimeState.LibraryHandle);
             s_RuntimeState.LibraryHandle = nullptr;
         }
@@ -1088,6 +1074,7 @@ namespace Limitless::ScriptCoreModuleRuntime
         s_RuntimeState.LastWriteTime = {};
         s_RuntimeState.LastRejectedSourcePath.clear();
         s_RuntimeState.LastRejectedSourceWriteTime = {};
+        UnbindNativeScriptHostBridges();
         s_RuntimeState.Initialized = false;
     }
 

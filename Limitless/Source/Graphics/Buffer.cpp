@@ -13,13 +13,13 @@ namespace Limitless
     {
         LT_VERIFY(specification.Size > 0, "VertexBuffer::Create: specification size must be non-zero");
 
-        auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        auto& renderer = Renderer::GetInstance();
+        const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
             case GraphicsAPI::OpenGL:
             default:
             {
-                auto& renderer = Renderer::GetInstance();
                 return renderer.SubmitResourceAndWait("CreateVertexBuffer", [&](GraphicsContext*) -> std::shared_ptr<VertexBuffer> {
                     return std::make_shared<OpenGLVertexBuffer>(specification, initialData);
                 });
@@ -41,13 +41,13 @@ namespace Limitless
     {
         LT_VERIFY(specification.Count > 0, "IndexBuffer::Create: specification count must be non-zero");
 
-        auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        auto& renderer = Renderer::GetInstance();
+        const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
             case GraphicsAPI::OpenGL:
             default:
             {
-                auto& renderer = Renderer::GetInstance();
                 return renderer.SubmitResourceAndWait("CreateIndexBuffer", [&](GraphicsContext*) -> std::shared_ptr<IndexBuffer> {
                     return std::make_shared<OpenGLIndexBuffer>(specification, indices);
                 });

@@ -674,9 +674,9 @@ namespace Limitless::Assets
             return;
         }
 
-        renderer.SubmitCommand(std::make_unique<BindShaderCommand>(shader));
-        renderer.SubmitCommand(std::make_unique<SetShaderMat4Command>(shader, "u_ViewProjection", viewProjection));
-        renderer.SubmitCommand(std::make_unique<SetShaderMat4Command>(shader, "u_Model", model));
+        RenderBindingSet bindings{};
+        bindings.Parameters.push_back(RenderParameterBinding{ "u_ViewProjection", viewProjection });
+        bindings.Parameters.push_back(RenderParameterBinding{ "u_Model", model });
 
         if (auto tex = GetMainTexture())
         {
@@ -684,11 +684,14 @@ namespace Limitless::Assets
             {
                 renderer.SubmitCommand(std::make_unique<SetTextureSpecificationCommand>(tex, m_MainTextureSpecOverride));
             }
-            renderer.SubmitCommand(std::make_unique<BindTextureCommand>(tex, 0));
+            bindings.Textures.push_back(RenderTextureBinding{ "", tex, 0u });
         }
 
         if (auto normalTexture = GetNormalTexture())
-            renderer.SubmitCommand(std::make_unique<BindTextureCommand>(normalTexture, 1));
+            bindings.Textures.push_back(RenderTextureBinding{ "", normalTexture, 1u });
+
+        renderer.SubmitCommand(
+            std::make_unique<ApplyRenderBindingsCommand>(std::move(shader), std::shared_ptr<VertexArray>{}, std::move(bindings)));
     }
 }
 

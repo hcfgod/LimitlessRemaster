@@ -2,12 +2,13 @@
 
 #include "Graphics/GraphicsAPIDetector.h"
 #include "Graphics/OpenGL/OpenGLRenderPipeline.h"
+#include "Graphics/Renderer.h"
 
 namespace Limitless
 {
     std::shared_ptr<RenderPipeline> RenderPipeline::Create(const RenderPipelineDescriptor& descriptor)
     {
-        auto api = GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
+        const GraphicsAPI api = Renderer::GetInstance().GetActiveAPI();
         switch (api)
         {
             case GraphicsAPI::OpenGL:

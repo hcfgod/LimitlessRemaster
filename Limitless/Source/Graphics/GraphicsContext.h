@@ -29,6 +29,8 @@ public:
     // Swap the backbuffer to the screen
     virtual void SwapBuffers() = 0;
 
+    virtual void SetViewport(int x, int y, int width, int height) = 0;
+
     /// Returns the native graphics context (e.g. SDL_GLContext for OpenGL). May be null for APIs that do not expose it.
     virtual void* GetNativeContext() { return nullptr; }
 

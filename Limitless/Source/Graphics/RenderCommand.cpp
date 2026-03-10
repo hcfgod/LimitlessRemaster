@@ -18,18 +18,6 @@ namespace Limitless
         m_ClearColor[3] = a;
     }
 
-    // SetViewportCommand implementation
-    SetViewportCommand::SetViewportCommand(int x, int y, int width, int height)
-        : m_X(x), m_Y(y), m_Width(width), m_Height(height)
-    {
-    }
-
-    // SetScissorCommand implementation
-    SetScissorCommand::SetScissorCommand(int x, int y, int width, int height, bool enable)
-        : m_X(x), m_Y(y), m_Width(width), m_Height(height), m_Enable(enable)
-    {
-    }
-
     SetDrawColorAttachmentsCommand::SetDrawColorAttachmentsCommand(std::vector<uint32_t> attachments)
         : m_Attachments(std::move(attachments))
     {
@@ -41,40 +29,9 @@ namespace Limitless
     {
     }
 
-    // BindShaderCommand implementation
-    BindShaderCommand::BindShaderCommand(std::shared_ptr<Shader> shader)
-        : m_Shader(std::move(shader))
-    {
-    }
-
     // BindRenderPipelineCommand implementation
     BindRenderPipelineCommand::BindRenderPipelineCommand(std::shared_ptr<RenderPipeline> pipeline)
         : m_Pipeline(std::move(pipeline))
-    {
-    }
-
-    SetShaderMat4Command::SetShaderMat4Command(std::shared_ptr<Shader> shader, std::string uniformName, const glm::mat4& value)
-        : m_Shader(std::move(shader))
-        , m_UniformName(std::move(uniformName))
-        , m_Value(value)
-    {
-    }
-
-    // BindVertexArrayCommand implementation
-    BindVertexArrayCommand::BindVertexArrayCommand(std::shared_ptr<VertexArray> vertexArray)
-        : m_VertexArray(std::move(vertexArray))
-    {
-    }
-
-    // BindIndexBufferCommand implementation
-    BindIndexBufferCommand::BindIndexBufferCommand(std::shared_ptr<IndexBuffer> indexBuffer)
-        : m_IndexBuffer(std::move(indexBuffer))
-    {
-    }
-
-    // BindVertexBufferCommand implementation
-    BindVertexBufferCommand::BindVertexBufferCommand(std::shared_ptr<VertexBuffer> vertexBuffer)
-        : m_VertexBuffer(std::move(vertexBuffer))
     {
     }
 
@@ -134,12 +91,6 @@ namespace Limitless
         }
     }
 
-    // BindTextureCommand implementation
-    BindTextureCommand::BindTextureCommand(std::shared_ptr<Texture> texture, uint32_t slot)
-        : m_Texture(std::move(texture)), m_Slot(slot)
-    {
-    }
-
     SetTextureSpecificationCommand::SetTextureSpecificationCommand(std::shared_ptr<Texture> texture, const TextureSpecification& specification)
         : m_Texture(std::move(texture))
         , m_Specification(specification)
@@ -149,6 +100,25 @@ namespace Limitless
     // BindFramebufferCommand implementation
     BindFramebufferCommand::BindFramebufferCommand(std::shared_ptr<Framebuffer> framebuffer)
         : m_Framebuffer(std::move(framebuffer))
+    {
+    }
+
+    BeginRenderPassCommand::BeginRenderPassCommand(RenderPassDescriptor descriptor)
+        : m_Descriptor(std::move(descriptor))
+    {
+    }
+
+    EndRenderPassCommand::EndRenderPassCommand(RenderPassDescriptor descriptor)
+        : m_Descriptor(std::move(descriptor))
+    {
+    }
+
+    ApplyRenderBindingsCommand::ApplyRenderBindingsCommand(std::shared_ptr<Shader> shader,
+                                                           std::shared_ptr<VertexArray> vertexArray,
+                                                           RenderBindingSet bindings)
+        : m_Shader(std::move(shader))
+        , m_VertexArray(std::move(vertexArray))
+        , m_Bindings(std::move(bindings))
     {
     }
 

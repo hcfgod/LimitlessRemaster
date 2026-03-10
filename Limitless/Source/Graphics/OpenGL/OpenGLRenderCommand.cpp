@@ -17,6 +17,8 @@
 
 #include <SDL3/SDL.h>
 #include <cstring>
+#include <type_traits>
+#include <unordered_map>
 
 namespace {
     // Check for OpenGL errors
@@ -266,6 +268,7 @@ namespace Limitless
         {
             OpenGLStateCache GLState;
             Renderer2DUniformCache Renderer2DUniforms;
+            std::unordered_map<GLuint, std::unordered_map<std::string, GLint>> UniformLocations;
         };
 
         OpenGLRenderCommandRuntimeState& GetOpenGLRenderCommandRuntimeState()
@@ -273,6 +276,163 @@ namespace Limitless
             static OpenGLRenderCommandRuntimeState state{};
             return state;
         }
+
+        GLint GetCachedUniformLocationOpenGL(GLuint program, const std::string& name)
+        {
+            if (program == 0 || name.empty())
+                return -1;
+
+            auto& uniformLocations = GetOpenGLRenderCommandRuntimeState().UniformLocations;
+            auto& programLocations = uniformLocations[program];
+            const auto found = programLocations.find(name);
+            if (found != programLocations.end())
+                return found->second;
+
+            const GLint location = glGetUniformLocation(program, name.c_str());
+            programLocations.emplace(name, location);
+            return location;
+        }
+
+        GLuint BindShaderProgramOpenGL(const std::shared_ptr<Shader>& shader)
+        {
+            if (!shader)
+                return 0;
+
+            auto& runtimeState = GetOpenGLRenderCommandRuntimeState();
+            GLuint program = static_cast<GLuint>(GetShaderNativeHandle(shader));
+            if (program != 0)
+            {
+                runtimeState.GLState.UseProgram(program);
+                return program;
+            }
+
+            shader->Bind();
+
+            GLint boundProgram = 0;
+            glGetIntegerv(GL_CURRENT_PROGRAM, &boundProgram);
+            program = static_cast<GLuint>(boundProgram);
+            runtimeState.GLState.Program = program;
+            return program;
+        }
+
+        void BindVertexArrayOpenGL(const std::shared_ptr<VertexArray>& vertexArray)
+        {
+            if (!vertexArray)
+                return;
+
+            auto& runtimeState = GetOpenGLRenderCommandRuntimeState();
+            const GLuint vao = static_cast<GLuint>(GetVertexArrayNativeHandle(vertexArray));
+            if (vao != 0)
+            {
+                runtimeState.GLState.BindVertexArray(vao);
+            }
+            else
+            {
+                vertexArray->Bind();
+                runtimeState.GLState.VertexArray = 0;
+            }
+
+            const auto& indexBuffer = vertexArray->GetIndexBuffer();
+            if (indexBuffer)
+                indexBuffer->Bind();
+        }
+
+        ClearCommand::ClearFlags BuildRenderPassClearFlags(const RenderPassDescriptor& descriptor)
+        {
+            ClearCommand::ClearFlags flags{};
+            flags.color = false;
+            flags.depth = false;
+            flags.stencil = false;
+
+            for (const auto& colorAttachment : descriptor.ColorAttachments)
+            {
+                if (colorAttachment.LoadAction == RenderLoadAction::Clear)
+                {
+                    flags.color = true;
+                    break;
+                }
+            }
+
+            if (descriptor.DepthStencilAttachment.has_value())
+            {
+                flags.depth = descriptor.DepthStencilAttachment->DepthLoadAction == RenderLoadAction::Clear;
+                flags.stencil = descriptor.DepthStencilAttachment->StencilLoadAction == RenderLoadAction::Clear;
+            }
+
+            return flags;
+        }
+
+        glm::vec4 GetRenderPassClearColor(const RenderPassDescriptor& descriptor)
+        {
+            for (const auto& colorAttachment : descriptor.ColorAttachments)
+            {
+                if (colorAttachment.LoadAction == RenderLoadAction::Clear)
+                    return colorAttachment.ClearColor;
+            }
+
+            return glm::vec4(0.0f);
+        }
+    }
+
+    void ApplyNamedRenderParameterOpenGL(const std::shared_ptr<Shader>& shader, GLuint program, const RenderParameterBinding& parameter)
+    {
+        if (!shader || parameter.Name.empty())
+            return;
+
+        if (program == 0)
+            return;
+
+        const GLint location = GetCachedUniformLocationOpenGL(program, parameter.Name);
+        if (location == -1)
+            return;
+
+        std::visit([location](const auto& value)
+        {
+            using ValueT = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<ValueT, int32_t>)
+            {
+                glUniform1i(location, static_cast<GLint>(value));
+            }
+            else if constexpr (std::is_same_v<ValueT, float>)
+            {
+                glUniform1f(location, value);
+            }
+            else if constexpr (std::is_same_v<ValueT, glm::vec2>)
+            {
+                glUniform2fv(location, 1, &value[0]);
+            }
+            else if constexpr (std::is_same_v<ValueT, glm::vec3>)
+            {
+                glUniform3fv(location, 1, &value[0]);
+            }
+            else if constexpr (std::is_same_v<ValueT, glm::vec4>)
+            {
+                glUniform4fv(location, 1, &value[0]);
+            }
+            else if constexpr (std::is_same_v<ValueT, glm::mat4>)
+            {
+                glUniformMatrix4fv(location, 1, GL_FALSE, &value[0][0]);
+            }
+            else if constexpr (std::is_same_v<ValueT, std::vector<int32_t>>)
+            {
+                if (!value.empty())
+                {
+                    std::vector<GLint> converted(value.begin(), value.end());
+                    glUniform1iv(location, static_cast<GLsizei>(converted.size()), converted.data());
+                }
+            }
+            else if constexpr (std::is_same_v<ValueT, std::vector<glm::vec2>>)
+            {
+                if (!value.empty())
+                    glUniform2fv(location, static_cast<GLsizei>(value.size()), &value[0][0]);
+            }
+            else if constexpr (std::is_same_v<ValueT, std::vector<glm::vec4>>)
+            {
+                if (!value.empty())
+                    glUniform4fv(location, static_cast<GLsizei>(value.size()), &value[0][0]);
+            }
+        }, parameter.Value);
     }
 
     // ClearCommand Execute implementation
@@ -306,38 +466,6 @@ namespace Limitless
         {
             glClear(clearMask);
             CheckOpenGLError("glClear");
-        }
-    }
-
-    // SetViewportCommand Execute implementation
-    void SetViewportCommand::Execute(GraphicsContext* context)
-    {
-        if (!context)
-        {
-            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
-        }
-
-        glViewport(m_X, m_Y, m_Width, m_Height);
-        CheckOpenGLError("glViewport");
-    }
-
-    // SetScissorCommand Execute implementation
-    void SetScissorCommand::Execute(GraphicsContext* context)
-    {
-        if (!context)
-        {
-            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
-        }
-
-        if (m_Enable)
-        {
-            glEnable(GL_SCISSOR_TEST);
-            glScissor(m_X, m_Y, m_Width, m_Height);
-            CheckOpenGLError("glScissor");
-        }
-        else
-        {
-            glDisable(GL_SCISSOR_TEST);
         }
     }
 
@@ -414,33 +542,6 @@ namespace Limitless
         }
     }
 
-    // BindShaderCommand Execute implementation
-    void BindShaderCommand::Execute(GraphicsContext* context)
-    {
-        if (!context)
-        {
-            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
-        }
-
-        if (m_Shader)
-        {
-            const GLuint program = static_cast<GLuint>(GetShaderNativeHandle(m_Shader));
-            if (program != 0)
-            {
-                GetOpenGLRenderCommandRuntimeState().GLState.UseProgram(program);
-            }
-            else
-            {
-                m_Shader->Bind();
-                GetOpenGLRenderCommandRuntimeState().GLState.Program = 0;
-            }
-        }
-        else
-        {
-            LT_CORE_WARN("BindShaderCommand: shader was null (no-op)");
-        }
-    }
-
     void BindRenderPipelineCommand::Execute(GraphicsContext* context)
     {
         if (!context)
@@ -457,16 +558,7 @@ namespace Limitless
         const auto& descriptor = m_Pipeline->GetDescriptor();
         if (descriptor.ShaderProgram)
         {
-            const GLuint program = static_cast<GLuint>(GetShaderNativeHandle(descriptor.ShaderProgram));
-            if (program != 0)
-            {
-                GetOpenGLRenderCommandRuntimeState().GLState.UseProgram(program);
-            }
-            else
-            {
-                descriptor.ShaderProgram->Bind();
-                GetOpenGLRenderCommandRuntimeState().GLState.Program = 0;
-            }
+            BindShaderProgramOpenGL(descriptor.ShaderProgram);
         }
 
         if (descriptor.BlendState.Enabled)
@@ -506,108 +598,6 @@ namespace Limitless
 
         glPolygonMode(GL_FRONT_AND_BACK, ToOpenGLPolygonMode(descriptor.RasterState.FillMode));
         CheckOpenGLError("BindRenderPipelineCommand::PolygonMode");
-    }
-
-    void SetShaderMat4Command::Execute(GraphicsContext* context)
-    {
-        if (!context)
-        {
-            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
-        }
-
-        if (!m_Shader)
-        {
-            LT_CORE_WARN("SetShaderMat4Command: shader was null (no-op)");
-            return;
-        }
-
-        const GLuint program = static_cast<GLuint>(GetShaderNativeHandle(m_Shader));
-        if (program != 0)
-        {
-            GetOpenGLRenderCommandRuntimeState().GLState.UseProgram(program);
-
-            const GLint loc = glGetUniformLocation(program, m_UniformName.c_str());
-            if (loc != -1)
-            {
-                glUniformMatrix4fv(loc, 1, GL_FALSE, &m_Value[0][0]);
-            }
-            return;
-        }
-
-        m_Shader->SetMat4(m_UniformName, m_Value);
-    }
-
-    // BindVertexArrayCommand Execute implementation
-    void BindVertexArrayCommand::Execute(GraphicsContext* context)
-    {
-        if (!context)
-        {
-            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
-        }
-
-        if (m_VertexArray)
-        {
-            const GLuint vao = static_cast<GLuint>(GetVertexArrayNativeHandle(m_VertexArray));
-            if (vao != 0)
-            {
-                GetOpenGLRenderCommandRuntimeState().GLState.BindVertexArray(vao);
-            }
-            else
-            {
-                m_VertexArray->Bind();
-                GetOpenGLRenderCommandRuntimeState().GLState.VertexArray = 0;
-            }
-
-            // Defensive: ensure the VAO's index buffer is bound for indexed draws.
-            // In OpenGL core profile the element array buffer is part of VAO state, but making this
-            // explicit prevents subtle ordering/state issues and avoids driver crashes if the VAO
-            // was created without an element binding.
-            const auto& indexBuffer = m_VertexArray->GetIndexBuffer();
-            if (indexBuffer)
-            {
-                indexBuffer->Bind();
-            }
-        }
-        else
-        {
-            LT_CORE_WARN("BindVertexArrayCommand: vertex array was null (no-op)");
-        }
-    }
-
-    // BindIndexBufferCommand Execute implementation
-    void BindIndexBufferCommand::Execute(GraphicsContext* context)
-    {
-        if (!context)
-        {
-            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
-        }
-
-        if (m_IndexBuffer)
-        {
-            m_IndexBuffer->Bind();
-        }
-        else
-        {
-            LT_CORE_WARN("BindIndexBufferCommand: index buffer was null (no-op)");
-        }
-    }
-
-    // BindVertexBufferCommand Execute implementation
-    void BindVertexBufferCommand::Execute(GraphicsContext* context)
-    {
-        if (!context)
-        {
-            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
-        }
-
-        if (m_VertexBuffer)
-        {
-            m_VertexBuffer->Bind();
-        }
-        else
-        {
-            LT_CORE_WARN("BindVertexBufferCommand: vertex buffer was null (no-op)");
-        }
     }
 
     void SetVertexBufferDataCommand::Execute(GraphicsContext* context)
@@ -655,16 +645,15 @@ namespace Limitless
         m_KeepAlive.VertexBufferHandle->SetData(m_VertexBytes, m_VertexByteCount);
 
         // Bind shader + uniforms (OpenGL fast path when possible).
-        const GLuint program = static_cast<GLuint>(GetShaderNativeHandle(m_KeepAlive.ShaderProgramHandle));
+        GLuint program = BindShaderProgramOpenGL(m_KeepAlive.ShaderProgramHandle);
+        auto& renderer2DUniforms = GetOpenGLRenderCommandRuntimeState().Renderer2DUniforms;
+        renderer2DUniforms.OnProgramBound(program);
+
         if (program != 0)
         {
-            GetOpenGLRenderCommandRuntimeState().GLState.UseProgram(program);
-            auto& renderer2DUniforms = GetOpenGLRenderCommandRuntimeState().Renderer2DUniforms;
-            renderer2DUniforms.OnProgramBound(program);
-
             if (renderer2DUniforms.ViewProjectionLocation == -2)
             {
-                renderer2DUniforms.ViewProjectionLocation = glGetUniformLocation(program, "u_ViewProjection");
+                renderer2DUniforms.ViewProjectionLocation = GetCachedUniformLocationOpenGL(program, "u_ViewProjection");
             }
 
             if (renderer2DUniforms.ViewProjectionLocation != -1)
@@ -680,7 +669,7 @@ namespace Limitless
 
             if (renderer2DUniforms.ModelLocation == -2)
             {
-                renderer2DUniforms.ModelLocation = glGetUniformLocation(program, "u_Model");
+                renderer2DUniforms.ModelLocation = GetCachedUniformLocationOpenGL(program, "u_Model");
             }
 
             if (renderer2DUniforms.ModelLocation != -1)
@@ -688,14 +677,6 @@ namespace Limitless
                 static constexpr glm::mat4 kIdentity(1.0f);
                 glUniformMatrix4fv(renderer2DUniforms.ModelLocation, 1, GL_FALSE, &kIdentity[0][0]);
             }
-        }
-        else
-        {
-            m_KeepAlive.ShaderProgramHandle->Bind();
-            m_KeepAlive.ShaderProgramHandle->SetMat4("u_ViewProjection", m_ViewProjection);
-            m_KeepAlive.ShaderProgramHandle->SetMat4("u_Model", glm::mat4(1.0f));
-            GetOpenGLRenderCommandRuntimeState().GLState.Program = 0;
-            GetOpenGLRenderCommandRuntimeState().Renderer2DUniforms.OnProgramBound(0);
         }
 
         // Bind textures (multi-texture batching) using cached renderer IDs.
@@ -710,16 +691,7 @@ namespace Limitless
         }
 
         // Bind geometry and issue draw.
-        const GLuint vao = static_cast<GLuint>(GetVertexArrayNativeHandle(m_KeepAlive.VertexArrayHandle));
-        if (vao != 0)
-        {
-            GetOpenGLRenderCommandRuntimeState().GLState.BindVertexArray(vao);
-        }
-        else
-        {
-            m_KeepAlive.VertexArrayHandle->Bind();
-            GetOpenGLRenderCommandRuntimeState().GLState.VertexArray = 0;
-        }
+        BindVertexArrayOpenGL(m_KeepAlive.VertexArrayHandle);
 
         // Safety: in core profile, indexed drawing requires VAO + EBO.
         GLint boundVAO = 0;
@@ -736,18 +708,6 @@ namespace Limitless
         glDrawElements(ToOpenGLDrawMode(DrawMode::Triangles), static_cast<GLsizei>(m_IndexCount),
                        ToOpenGLIndexType(m_IndexType), nullptr);
         CheckOpenGLError("Renderer2DFlushCommand glDrawElements");
-    }
-
-    // BindTextureCommand Execute implementation
-    void BindTextureCommand::Execute(GraphicsContext* context)
-    {
-        if (!context)
-        {
-            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
-        }
-
-        const GLuint id = static_cast<GLuint>(GetTextureNativeHandle(m_Texture));
-        GetOpenGLRenderCommandRuntimeState().GLState.BindTexture2D(m_Slot, id);
     }
 
     void SetTextureSpecificationCommand::Execute(GraphicsContext* context)
@@ -767,7 +727,6 @@ namespace Limitless
         }
     }
 
-    // BindFramebufferCommand Execute implementation
     void BindFramebufferCommand::Execute(GraphicsContext* context)
     {
         if (!context)
@@ -775,7 +734,6 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // Clear any stale errors from previous commands so we only report errors from this bind.
         while (glGetError() != GL_NO_ERROR)
             ;
 
@@ -790,6 +748,134 @@ namespace Limitless
         CheckOpenGLError("BindFramebufferCommand::Execute");
     }
 
+    void BeginRenderPassCommand::Execute(GraphicsContext* context)
+    {
+        if (!context)
+        {
+            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
+        }
+
+        while (glGetError() != GL_NO_ERROR)
+            ;
+
+        if (m_Descriptor.TargetFramebuffer)
+        {
+            m_Descriptor.TargetFramebuffer->Bind();
+        }
+        else
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        }
+        CheckOpenGLError("BeginRenderPassCommand::BindFramebuffer");
+
+        glViewport(m_Descriptor.Viewport.X,
+                   m_Descriptor.Viewport.Y,
+                   m_Descriptor.Viewport.Width,
+                   m_Descriptor.Viewport.Height);
+        CheckOpenGLError("BeginRenderPassCommand::Viewport");
+
+        if (m_Descriptor.ScissorRect.has_value())
+        {
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(m_Descriptor.ScissorRect->X,
+                      m_Descriptor.ScissorRect->Y,
+                      m_Descriptor.ScissorRect->Width,
+                      m_Descriptor.ScissorRect->Height);
+            CheckOpenGLError("BeginRenderPassCommand::ScissorEnable");
+        }
+        else
+        {
+            glDisable(GL_SCISSOR_TEST);
+        }
+
+        const ClearCommand::ClearFlags clearFlags = BuildRenderPassClearFlags(m_Descriptor);
+        if (clearFlags.color || clearFlags.depth || clearFlags.stencil)
+        {
+            GLbitfield clearMask = 0;
+
+            if (clearFlags.color)
+            {
+                const glm::vec4 clearColor = GetRenderPassClearColor(m_Descriptor);
+                glClearColor(clearColor.r, clearColor.g, clearColor.b, clearColor.a);
+                clearMask |= GL_COLOR_BUFFER_BIT;
+                CheckOpenGLError("BeginRenderPassCommand::ClearColor");
+            }
+
+            if (m_Descriptor.DepthStencilAttachment.has_value())
+            {
+                if (clearFlags.depth)
+                {
+                    glClearDepth(m_Descriptor.DepthStencilAttachment->ClearDepth);
+                    clearMask |= GL_DEPTH_BUFFER_BIT;
+                    CheckOpenGLError("BeginRenderPassCommand::ClearDepthValue");
+                }
+
+                if (clearFlags.stencil)
+                {
+                    glClearStencil(static_cast<GLint>(m_Descriptor.DepthStencilAttachment->ClearStencil));
+                    clearMask |= GL_STENCIL_BUFFER_BIT;
+                    CheckOpenGLError("BeginRenderPassCommand::ClearStencilValue");
+                }
+            }
+
+            if (clearMask != 0)
+            {
+                glClear(clearMask);
+                CheckOpenGLError("BeginRenderPassCommand::Clear");
+            }
+        }
+    }
+
+    void EndRenderPassCommand::Execute(GraphicsContext* context)
+    {
+        if (!context)
+        {
+            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
+        }
+
+        if (m_Descriptor.ScissorRect.has_value())
+            glDisable(GL_SCISSOR_TEST);
+    }
+
+    void ApplyRenderBindingsCommand::Execute(GraphicsContext* context)
+    {
+        if (!context)
+        {
+            LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
+        }
+
+        if (!m_Shader)
+        {
+            LT_CORE_WARN("ApplyRenderBindingsCommand: missing shader (no-op)");
+            return;
+        }
+
+        GLuint program = BindShaderProgramOpenGL(m_Shader);
+        GetOpenGLRenderCommandRuntimeState().Renderer2DUniforms.OnProgramBound(program);
+
+        if (m_VertexArray)
+        {
+            BindVertexArrayOpenGL(m_VertexArray);
+        }
+
+        for (const auto& textureBinding : m_Bindings.Textures)
+        {
+            const GLuint textureId = static_cast<GLuint>(GetTextureNativeHandle(textureBinding.TextureHandle));
+            GetOpenGLRenderCommandRuntimeState().GLState.BindTexture2D(textureBinding.Slot, textureId);
+
+            if (!textureBinding.SamplerName.empty())
+            {
+                RenderParameterBinding samplerBinding{};
+                samplerBinding.Name = textureBinding.SamplerName;
+                samplerBinding.Value = static_cast<int32_t>(textureBinding.Slot);
+                ApplyNamedRenderParameterOpenGL(m_Shader, program, samplerBinding);
+            }
+        }
+
+        for (const auto& parameter : m_Bindings.Parameters)
+            ApplyNamedRenderParameterOpenGL(m_Shader, program, parameter);
+    }
+
     // DrawArraysCommand Execute implementation
     void DrawArraysCommand::Execute(GraphicsContext* context)
     {
@@ -798,7 +884,6 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // Safety: OpenGL core profile requires a VAO to be bound for vertex specification.
         GLint boundVAO = 0;
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &boundVAO);
         if (boundVAO == 0)
@@ -819,8 +904,6 @@ namespace Limitless
             LT_THROW_ERROR(ErrorCode::InvalidArgument, "Graphics context cannot be null");
         }
 
-        // Safety: In core profile, indexed drawing requires a VAO and an element array buffer
-        // unless the caller provides a valid client pointer (which we do not support here).
         GLint boundVAO = 0;
         glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &boundVAO);
 
@@ -833,7 +916,6 @@ namespace Limitless
             return;
         }
 
-        // If m_Indices is null, we expect an index buffer to be bound via the VAO state.
         if (m_Indices == nullptr && boundEBO == 0)
         {
             LT_CORE_ERROR("DrawIndexedCommand: no index buffer bound and indices pointer is null (skipping draw)");
@@ -853,7 +935,6 @@ namespace Limitless
             CheckOpenGLError("glDrawElements");
         }
     }
-
     // DrawInstancedCommand Execute implementation
     void DrawInstancedCommand::Execute(GraphicsContext* context)
     {
@@ -1080,6 +1161,7 @@ namespace Limitless
         // Custom code can mutate any OpenGL state. Invalidate cached state for correctness.
         GetOpenGLRenderCommandRuntimeState().GLState.InvalidateAll();
         GetOpenGLRenderCommandRuntimeState().Renderer2DUniforms.OnProgramBound(0);
+        GetOpenGLRenderCommandRuntimeState().UniformLocations.clear();
         
         LT_CORE_DEBUG("CustomCommand: {}", m_Name);
     }

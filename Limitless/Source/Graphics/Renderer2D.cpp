@@ -83,6 +83,27 @@ namespace Limitless
             pipelines[variantIndex] = RenderPipeline::Create(descriptor);
             pipelineShaders[variantIndex] = shader;
         }
+
+        void ConfigureRenderer2DTextureSamplers(const std::shared_ptr<Shader>& shader, uint32_t maxTextureSlots)
+        {
+            if (!shader || maxTextureSlots == 0)
+                return;
+
+            std::vector<int32_t> samplers(maxTextureSlots);
+            for (uint32_t i = 0; i < maxTextureSlots; ++i)
+            {
+                samplers[i] = static_cast<int32_t>(i);
+            }
+
+            RenderBindingSet bindings{};
+            RenderParameterBinding parameter{};
+            parameter.Name = "u_Textures";
+            parameter.Value = std::move(samplers);
+            bindings.Parameters.push_back(std::move(parameter));
+
+            Renderer::GetInstance().SubmitCommand(
+                std::make_unique<ApplyRenderBindingsCommand>(shader, std::shared_ptr<VertexArray>{}, std::move(bindings)));
+        }
     }
 
     struct Renderer2D::Impl
@@ -241,12 +262,7 @@ namespace Limitless
         }
 
         {
-            std::array<int, Impl::kCompileTimeMaxTextureSlots> samplers{};
-            for (uint32_t i = 0; i < d.MaxTextureSlots; ++i)
-            {
-                samplers[i] = static_cast<int>(i);
-            }
-            d.ShaderProgram->SetIntArray("u_Textures", samplers.data(), d.MaxTextureSlots);
+            ConfigureRenderer2DTextureSamplers(d.ShaderProgram, d.MaxTextureSlots);
         }
 
         d.TextMaterial = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(kDefaultTextMaterialKey);
@@ -264,12 +280,7 @@ namespace Limitless
 
         if (d.TextShaderProgram)
         {
-            std::array<int, Impl::kCompileTimeMaxTextureSlots> samplers{};
-            for (uint32_t i = 0; i < d.MaxTextureSlots; ++i)
-            {
-                samplers[i] = static_cast<int>(i);
-            }
-            d.TextShaderProgram->SetIntArray("u_Textures", samplers.data(), d.MaxTextureSlots);
+            ConfigureRenderer2DTextureSamplers(d.TextShaderProgram, d.MaxTextureSlots);
         }
         else
         {
@@ -634,12 +645,7 @@ namespace Limitless
             d.ShaderProgram = d.Material->GetShader();
             if (d.ShaderProgram)
             {
-                std::array<int, Impl::kCompileTimeMaxTextureSlots> samplers{};
-                for (uint32_t i = 0; i < d.MaxTextureSlots; ++i)
-                {
-                    samplers[i] = static_cast<int>(i);
-                }
-                d.ShaderProgram->SetIntArray("u_Textures", samplers.data(), d.MaxTextureSlots);
+                ConfigureRenderer2DTextureSamplers(d.ShaderProgram, d.MaxTextureSlots);
             }
         }
 
@@ -734,12 +740,7 @@ namespace Limitless
             d.TextShaderProgram = d.TextMaterial->GetShader();
             if (d.TextShaderProgram)
             {
-                std::array<int, Impl::kCompileTimeMaxTextureSlots> samplers{};
-                for (uint32_t i = 0; i < d.MaxTextureSlots; ++i)
-                {
-                    samplers[i] = static_cast<int>(i);
-                }
-                d.TextShaderProgram->SetIntArray("u_Textures", samplers.data(), d.MaxTextureSlots);
+                ConfigureRenderer2DTextureSamplers(d.TextShaderProgram, d.MaxTextureSlots);
             }
         }
 
@@ -841,12 +842,7 @@ namespace Limitless
             d.ShaderProgram = d.Material->GetShader();
             if (d.ShaderProgram)
             {
-                std::array<int, Impl::kCompileTimeMaxTextureSlots> samplers{};
-                for (uint32_t i = 0; i < d.MaxTextureSlots; ++i)
-                {
-                    samplers[i] = static_cast<int>(i);
-                }
-                d.ShaderProgram->SetIntArray("u_Textures", samplers.data(), d.MaxTextureSlots);
+                ConfigureRenderer2DTextureSamplers(d.ShaderProgram, d.MaxTextureSlots);
                 return true;
             }
         }

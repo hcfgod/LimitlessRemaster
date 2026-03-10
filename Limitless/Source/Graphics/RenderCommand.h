@@ -4,6 +4,7 @@
 #include "Core/Concurrency/LockFreeQueue.h"
 #include "Core/Debug/Log.h"
 #include "Graphics/GraphicsEnums.h"
+#include "Graphics/RenderPass.h"
 #include "Graphics/Texture.h"
 #include "Graphics/Framebuffer.h"
 #include <memory>
@@ -13,6 +14,7 @@
 #include <array>
 #include <string>
 #include <glm/glm.hpp>
+#include <cstdint>
 
 namespace Limitless
 {
@@ -29,21 +31,16 @@ namespace Limitless
     // Render command types
     enum class RenderCommandType
     {
+        BeginRenderPass,
+        EndRenderPass,
         Clear,
-        SetViewport,
-        SetScissor,
         SetDrawColorAttachments,
         ClearColorAttachment,
-        BindShader,
         BindRenderPipeline,
-        SetShaderMat4,
-        BindVertexArray,
-        BindIndexBuffer,
-        BindVertexBuffer,
         SetVertexBufferData,
-        BindTexture,
         SetTextureSpecification,
         BindFramebuffer,
+        ApplyRenderBindings,
         DrawArrays,
         DrawIndexed,
         DrawInstanced,
@@ -193,35 +190,6 @@ namespace Limitless
         float m_ClearColor[4];
     };
 
-    // Set viewport command
-    class SetViewportCommand : public RenderCommand
-    {
-    public:
-        SetViewportCommand(int x, int y, int width, int height);
-        
-        void Execute(GraphicsContext* context) override;
-        RenderCommandType GetType() const override { return RenderCommandType::SetViewport; }
-        std::string GetName() const override { return "SetViewport"; }
-
-    private:
-        int m_X, m_Y, m_Width, m_Height;
-    };
-
-    // Set scissor command
-    class SetScissorCommand : public RenderCommand
-    {
-    public:
-        SetScissorCommand(int x, int y, int width, int height, bool enable = true);
-        
-        void Execute(GraphicsContext* context) override;
-        RenderCommandType GetType() const override { return RenderCommandType::SetScissor; }
-        std::string GetName() const override { return "SetScissor"; }
-
-    private:
-        int m_X, m_Y, m_Width, m_Height;
-        bool m_Enable;
-    };
-
     class SetDrawColorAttachmentsCommand : public RenderCommand
     {
     public:
@@ -254,20 +222,6 @@ namespace Limitless
         glm::vec4 m_ClearValue{0.0f};
     };
 
-    // Bind shader command
-    class BindShaderCommand : public RenderCommand
-    {
-    public:
-        explicit BindShaderCommand(std::shared_ptr<Shader> shader);
-        
-        void Execute(GraphicsContext* context) override;
-        RenderCommandType GetType() const override { return RenderCommandType::BindShader; }
-        std::string GetName() const override { return "BindShader"; }
-
-    private:
-        std::shared_ptr<Shader> m_Shader;
-    };
-
     // Bind render pipeline command
     class BindRenderPipelineCommand : public RenderCommand
     {
@@ -280,64 +234,6 @@ namespace Limitless
 
     private:
         std::shared_ptr<RenderPipeline> m_Pipeline;
-    };
-
-    // Set shader mat4 uniform command (intended for per-frame camera/model matrices).
-    class SetShaderMat4Command : public RenderCommand
-    {
-    public:
-        SetShaderMat4Command(std::shared_ptr<Shader> shader, std::string uniformName, const glm::mat4& value);
-
-        void Execute(GraphicsContext* context) override;
-        RenderCommandType GetType() const override { return RenderCommandType::SetShaderMat4; }
-        std::string GetName() const override { return "SetShaderMat4"; }
-
-    private:
-        std::shared_ptr<Shader> m_Shader;
-        std::string m_UniformName;
-        glm::mat4 m_Value{1.0f};
-    };
-
-    // Bind vertex array command
-    class BindVertexArrayCommand : public RenderCommand
-    {
-    public:
-        explicit BindVertexArrayCommand(std::shared_ptr<VertexArray> vertexArray);
-        
-        void Execute(GraphicsContext* context) override;
-        RenderCommandType GetType() const override { return RenderCommandType::BindVertexArray; }
-        std::string GetName() const override { return "BindVertexArray"; }
-
-    private:
-        std::shared_ptr<VertexArray> m_VertexArray;
-    };
-
-    // Bind index buffer command
-    class BindIndexBufferCommand : public RenderCommand
-    {
-    public:
-        explicit BindIndexBufferCommand(std::shared_ptr<IndexBuffer> indexBuffer);
-        
-        void Execute(GraphicsContext* context) override;
-        RenderCommandType GetType() const override { return RenderCommandType::BindIndexBuffer; }
-        std::string GetName() const override { return "BindIndexBuffer"; }
-
-    private:
-        std::shared_ptr<IndexBuffer> m_IndexBuffer;
-    };
-
-    // Bind vertex buffer command
-    class BindVertexBufferCommand : public RenderCommand
-    {
-    public:
-        explicit BindVertexBufferCommand(std::shared_ptr<VertexBuffer> vertexBuffer);
-        
-        void Execute(GraphicsContext* context) override;
-        RenderCommandType GetType() const override { return RenderCommandType::BindVertexBuffer; }
-        std::string GetName() const override { return "BindVertexBuffer"; }
-
-    private:
-        std::shared_ptr<VertexBuffer> m_VertexBuffer;
     };
 
     // Upload new data into an existing vertex buffer (dynamic streaming).
@@ -368,21 +264,6 @@ namespace Limitless
         std::vector<uint8_t> m_OwnedData;
     };
 
-    // Bind texture command
-    class BindTextureCommand : public RenderCommand
-    {
-    public:
-        BindTextureCommand(std::shared_ptr<Texture> texture, uint32_t slot = 0);
-        
-        void Execute(GraphicsContext* context) override;
-        RenderCommandType GetType() const override { return RenderCommandType::BindTexture; }
-        std::string GetName() const override { return "BindTexture"; }
-
-    private:
-        std::shared_ptr<Texture> m_Texture;
-        uint32_t m_Slot;
-    };
-
     // Set texture sampler parameters (filtering/wrapping/mips).
     class SetTextureSpecificationCommand : public RenderCommand
     {
@@ -410,6 +291,82 @@ namespace Limitless
 
     private:
         std::shared_ptr<Framebuffer> m_Framebuffer;
+    };
+
+    class BeginRenderPassCommand : public RenderCommand
+    {
+    public:
+        explicit BeginRenderPassCommand(RenderPassDescriptor descriptor);
+
+        void Execute(GraphicsContext* context) override;
+        RenderCommandType GetType() const override { return RenderCommandType::BeginRenderPass; }
+        std::string GetName() const override { return "BeginRenderPass"; }
+        bool CanBatch() const override { return false; }
+
+    private:
+        RenderPassDescriptor m_Descriptor{};
+    };
+
+    class EndRenderPassCommand : public RenderCommand
+    {
+    public:
+        explicit EndRenderPassCommand(RenderPassDescriptor descriptor);
+
+        void Execute(GraphicsContext* context) override;
+        RenderCommandType GetType() const override { return RenderCommandType::EndRenderPass; }
+        std::string GetName() const override { return "EndRenderPass"; }
+        bool CanBatch() const override { return false; }
+
+    private:
+        RenderPassDescriptor m_Descriptor{};
+    };
+
+    using RenderParameterValue = std::variant<
+        int32_t,
+        float,
+        glm::vec2,
+        glm::vec3,
+        glm::vec4,
+        glm::mat4,
+        std::vector<int32_t>,
+        std::vector<glm::vec2>,
+        std::vector<glm::vec4>>;
+
+    struct RenderParameterBinding
+    {
+        std::string Name;
+        RenderParameterValue Value;
+    };
+
+    struct RenderTextureBinding
+    {
+        std::string SamplerName;
+        std::shared_ptr<Texture> TextureHandle;
+        uint32_t Slot = 0;
+    };
+
+    struct RenderBindingSet
+    {
+        std::vector<RenderTextureBinding> Textures;
+        std::vector<RenderParameterBinding> Parameters;
+    };
+
+    class ApplyRenderBindingsCommand : public RenderCommand
+    {
+    public:
+        ApplyRenderBindingsCommand(std::shared_ptr<Shader> shader,
+                                   std::shared_ptr<VertexArray> vertexArray,
+                                   RenderBindingSet bindings);
+
+        void Execute(GraphicsContext* context) override;
+        RenderCommandType GetType() const override { return RenderCommandType::ApplyRenderBindings; }
+        std::string GetName() const override { return "ApplyRenderBindings"; }
+        bool CanBatch() const override { return false; }
+
+    private:
+        std::shared_ptr<Shader> m_Shader;
+        std::shared_ptr<VertexArray> m_VertexArray;
+        RenderBindingSet m_Bindings{};
     };
 
     // Draw arrays command

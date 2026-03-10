@@ -1,6 +1,7 @@
 #include "Renderer.h"
 #include "Core/Debug/Log.h"
 #include "Core/ConfigManager.h"
+#include "Graphics/GraphicsAPIDetector.h"
 #include "Graphics/OpenGL/OpenGLContext.h"
 #include "Graphics/OpenGL/OpenGLGPUMetrics.h"
 #include "Graphics/OpenGL/OpenGLSharedContext.h"
@@ -54,6 +55,14 @@ namespace Limitless
     {
         static Renderer instance;
         return instance;
+    }
+
+    GraphicsAPI Renderer::GetActiveAPI() const
+    {
+        if (m_GraphicsContext)
+            return m_GraphicsContext->GetAPI();
+
+        return GraphicsAPIDetector::GetBestAPI().value_or(GraphicsAPI::OpenGL);
     }
 
     void Renderer::Initialize(GraphicsContext* context)
@@ -419,6 +428,34 @@ namespace Limitless
 
         graphicsContext->MakeCurrent();
         graphicsContext->SwapBuffers();
+    }
+
+    void Renderer::SetViewport(int x, int y, int width, int height)
+    {
+        GraphicsContext* graphicsContext = m_GraphicsContext;
+        if (!m_Initialized || !graphicsContext)
+        {
+            LT_CORE_WARN("Cannot set viewport - renderer not initialized");
+            return;
+        }
+
+        if (width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        if (m_RenderThreadEnabled.load(std::memory_order_relaxed) && m_RenderThreadRunning.load(std::memory_order_relaxed))
+        {
+            SubmitPrimaryResourceAndWait("Renderer/SetViewport", [x, y, width, height](GraphicsContext* context) {
+                if (context)
+                {
+                    context->SetViewport(x, y, width, height);
+                }
+            });
+            return;
+        }
+
+        graphicsContext->SetViewport(x, y, width, height);
     }
 
     void Renderer::EnableRenderThread(bool enable)

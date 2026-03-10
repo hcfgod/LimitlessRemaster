@@ -34,6 +34,7 @@ namespace Limitless
         
         // Get the graphics context
         GraphicsContext* GetGraphicsContext() const { return m_GraphicsContext; }
+        GraphicsAPI GetActiveAPI() const;
         
         // Get the render command queue
         RenderCommandQueue* GetRenderQueue() const { return m_RenderQueue.get(); }
@@ -61,6 +62,8 @@ namespace Limitless
         
         // Swap buffers
         void SwapBuffers();
+
+        void SetViewport(int x, int y, int width, int height);
 
         // Allocate CPU-side upload staging bytes for this frame.
         // Intended for render-command payloads that must outlive the submission thread until execution.
