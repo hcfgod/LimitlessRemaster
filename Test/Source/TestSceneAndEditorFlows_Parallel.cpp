@@ -89,6 +89,8 @@ TEST_SUITE("Scene And Editor Flows")
         REQUIRE(spawnThenDestroyScriptEntryAfterUpdate.RuntimeInstance != nullptr);
         auto* spawnThenDestroyScript = dynamic_cast<ParallelSpawnThenDestroyScript*>(spawnThenDestroyScriptEntryAfterUpdate.RuntimeInstance.get());
         REQUIRE(spawnThenDestroyScript != nullptr);
+        if (spawnThenDestroyScript == nullptr)
+            return;
         CHECK(spawnThenDestroyScript->ReceivedNonNullDeferredHandle);
         CHECK(spawnScriptEntryAfterUpdate.RuntimeUpdateCount >= 1);
         CHECK(destroyScriptEntryAfterUpdate.RuntimeUpdateCount >= 1);

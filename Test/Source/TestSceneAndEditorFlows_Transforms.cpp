@@ -41,6 +41,8 @@ TEST_SUITE("Scene And Editor Flows")
         REQUIRE(primaryScriptEntryAfterUpdate.RuntimeInstance != nullptr);
         auto* primary = dynamic_cast<PrimaryScript*>(primaryScriptEntryAfterUpdate.RuntimeInstance.get());
         REQUIRE(primary != nullptr);
+        if (primary == nullptr)
+            return;
         CHECK(primary->FoundSelfInOnCreate);
         CHECK(primary->FoundTargetInOnCreate);
         CHECK(primary->FoundByNameOnSelfInOnCreate);
@@ -48,7 +50,11 @@ TEST_SUITE("Scene And Editor Flows")
         auto* selfSecondary = dynamic_cast<SecondaryScript*>(GetScriptEntry(scene, controller, 1).RuntimeInstance.get());
         auto* targetSecondary = dynamic_cast<SecondaryScript*>(GetScriptEntry(scene, target, 0).RuntimeInstance.get());
         REQUIRE(selfSecondary != nullptr);
+        if (selfSecondary == nullptr)
+            return;
         REQUIRE(targetSecondary != nullptr);
+        if (targetSecondary == nullptr)
+            return;
         CHECK(selfSecondary->ReceivedPing);
         CHECK(targetSecondary->ReceivedPing);
     }

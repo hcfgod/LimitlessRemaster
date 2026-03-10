@@ -132,6 +132,8 @@ TEST_SUITE("Scene And Editor Flows")
 
         auto clone = scene.Clone();
         REQUIRE(clone != nullptr);
+        if (clone == nullptr)
+            return;
 
         const entt::entity clonedParent = FindEntityByTag(*clone, "Parent");
         const entt::entity clonedChild = FindEntityByTag(*clone, "Child");
@@ -230,9 +232,14 @@ TEST_SUITE("Scene And Editor Flows")
 
         const auto& clonedScript = GetScriptEntry(*clone, clonedChild, 0);
         CHECK(clonedScript.ScriptClassName == "ButtonScript");
-        REQUIRE(clonedScript.ExposedProperties.contains("FollowTarget"));
+        const bool hasClonedFollowTarget = clonedScript.ExposedProperties.contains("FollowTarget");
+        REQUIRE(hasClonedFollowTarget);
+        if (!hasClonedFollowTarget)
+            return;
         const auto* clonedFollowTarget = std::get_if<Limitless::ScriptEntityReference>(&clonedScript.ExposedProperties.at("FollowTarget"));
         REQUIRE(clonedFollowTarget != nullptr);
+        if (clonedFollowTarget == nullptr)
+            return;
         CHECK(clonedFollowTarget->Tag == "Parent");
         CHECK(clonedScript.RuntimeInitialized == false);
         CHECK(clonedScript.RuntimeUpdateCount == 0);
@@ -485,6 +492,8 @@ TEST_SUITE("Scene And Editor Flows")
         const auto loadResult = Limitless::Scene::LoadFromFile(scenePath);
         REQUIRE(loadResult.IsSuccess());
         REQUIRE(loadResult.GetValue() != nullptr);
+        if (loadResult.GetValue() == nullptr)
+            return;
         const auto& loadedScene = *loadResult.GetValue();
         const auto& loadedRegistry = loadedScene.GetRegistry();
 
@@ -586,18 +595,31 @@ TEST_SUITE("Scene And Editor Flows")
 
         REQUIRE(loadedScene.GetScriptComponentEntities(loadedHud).size() == 1);
         const auto& loadedScript = GetScriptEntry(loadedScene, loadedHud, 0);
-        REQUIRE(loadedScript.ExposedProperties.contains("FollowTarget"));
+        const bool hasLoadedFollowTarget = loadedScript.ExposedProperties.contains("FollowTarget");
+        REQUIRE(hasLoadedFollowTarget);
+        if (!hasLoadedFollowTarget)
+            return;
         const auto* loadedFollowTarget = std::get_if<Limitless::ScriptEntityReference>(&loadedScript.ExposedProperties.at("FollowTarget"));
         REQUIRE(loadedFollowTarget != nullptr);
+        if (loadedFollowTarget == nullptr)
+            return;
         CHECK(loadedFollowTarget->Tag == "Root");
-        REQUIRE(loadedScript.ExposedProperties.contains("EnemyPrefab"));
+        const bool hasLoadedEnemyPrefab = loadedScript.ExposedProperties.contains("EnemyPrefab");
+        REQUIRE(hasLoadedEnemyPrefab);
+        if (!hasLoadedEnemyPrefab)
+            return;
         const auto* loadedEnemyPrefab = std::get_if<Limitless::Prefab>(&loadedScript.ExposedProperties.at("EnemyPrefab"));
         REQUIRE(loadedEnemyPrefab != nullptr);
+        if (loadedEnemyPrefab == nullptr)
+            return;
         CHECK(loadedEnemyPrefab->AssetKey == "Assets/Prefabs/Enemies/BasicEnemy.prefab.json");
 
-        REQUIRE(loadedScene.GetEditorCameraBookmark().has_value());
-        CHECK(loadedScene.GetEditorCameraBookmark()->YawDegrees == doctest::Approx(-45.0f));
-        CHECK(loadedScene.GetEditorCameraBookmark()->PitchDegrees == doctest::Approx(15.0f));
+        const auto& loadedBookmark = loadedScene.GetEditorCameraBookmark();
+        REQUIRE(loadedBookmark.has_value());
+        if (!loadedBookmark.has_value())
+            return;
+        CHECK(loadedBookmark->YawDegrees == doctest::Approx(-45.0f));
+        CHECK(loadedBookmark->PitchDegrees == doctest::Approx(15.0f));
 
         std::error_code errorCode;
         std::filesystem::remove(scenePath, errorCode);
@@ -631,6 +653,8 @@ TEST_SUITE("Scene And Editor Flows")
         const auto loadResult = Limitless::Scene::LoadFromFile(scenePath);
         REQUIRE(loadResult.IsSuccess());
         REQUIRE(loadResult.GetValue() != nullptr);
+        if (loadResult.GetValue() == nullptr)
+            return;
 
         const auto& loadedScene = *loadResult.GetValue();
         const auto& loadedRegistry = loadedScene.GetRegistry();
@@ -693,6 +717,8 @@ TEST_SUITE("Scene And Editor Flows")
 
         auto clone = scene.Clone();
         REQUIRE(clone != nullptr);
+        if (clone == nullptr)
+            return;
         const entt::entity clonedEntity = FindEntityByTag(*clone, "Animated");
         REQUIRE_FALSE(IsNullEntity(clonedEntity));
 
@@ -732,6 +758,8 @@ TEST_SUITE("Scene And Editor Flows")
         const auto loadResult = Limitless::Scene::LoadFromFile(tempScenePath);
         REQUIRE(loadResult.IsSuccess());
         REQUIRE(loadResult.GetValue() != nullptr);
+        if (loadResult.GetValue() == nullptr)
+            return;
 
         const entt::entity loadedEntity = FindEntityByTag(*loadResult.GetValue(), "Animated");
         REQUIRE_FALSE(IsNullEntity(loadedEntity));

@@ -189,7 +189,11 @@ TEST_SUITE("Scene And Editor Flows")
         auto sequentialScene = baseScene.Clone();
         auto parallelScene = baseScene.Clone();
         REQUIRE(sequentialScene != nullptr);
+        if (sequentialScene == nullptr)
+            return;
         REQUIRE(parallelScene != nullptr);
+        if (parallelScene == nullptr)
+            return;
 
         constexpr float kFixedStep = 1.0f / 60.0f;
         constexpr int kStepCount = 24;
@@ -290,6 +294,8 @@ TEST_SUITE("Scene And Editor Flows")
 
         scene.Update(1.0f / 60.0f);
         REQUIRE(scriptEntry.RuntimeInstance != nullptr);
+        if (scriptEntry.RuntimeInstance == nullptr)
+            return;
         REQUIRE(scriptEntry.RuntimeInitialized == true);
 
         CHECK_NOTHROW(scene.DestroyEntity(entity));
@@ -321,6 +327,8 @@ TEST_SUITE("Scene And Editor Flows")
 
         scene->Update(1.0f / 60.0f);
         REQUIRE(scriptEntry.RuntimeInstance != nullptr);
+        if (scriptEntry.RuntimeInstance == nullptr)
+            return;
         REQUIRE(scriptEntry.RuntimeInitialized == true);
 
         CHECK_NOTHROW(scene.reset());
@@ -350,6 +358,8 @@ TEST_SUITE("Scene And Editor Flows")
 
         scene->Update(1.0f / 60.0f);
         REQUIRE(scriptEntry.RuntimeInstance != nullptr);
+        if (scriptEntry.RuntimeInstance == nullptr)
+            return;
         REQUIRE(scriptEntry.RuntimeInitialized == true);
 
         CHECK_NOTHROW(scene.reset());

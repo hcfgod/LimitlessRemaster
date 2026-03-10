@@ -481,6 +481,8 @@ TEST_SUITE("Scene And Editor Flows")
         REQUIRE(primaryScriptEntryAfterUpdate.RuntimeInstance != nullptr);
         auto* primary = dynamic_cast<PrimaryScript*>(primaryScriptEntryAfterUpdate.RuntimeInstance.get());
         REQUIRE(primary != nullptr);
+        if (primary == nullptr)
+            return;
         CHECK(primary->FoundSelfInOnCreate);
         CHECK(primary->FoundTargetInOnCreate);
         CHECK(primary->FoundByNameOnSelfInOnCreate);
@@ -488,7 +490,11 @@ TEST_SUITE("Scene And Editor Flows")
         auto* selfSecondary = dynamic_cast<SecondaryScript*>(GetScriptEntry(scene, controller, 1).RuntimeInstance.get());
         auto* targetSecondary = dynamic_cast<SecondaryScript*>(GetScriptEntry(scene, target, 0).RuntimeInstance.get());
         REQUIRE(selfSecondary != nullptr);
+        if (selfSecondary == nullptr)
+            return;
         REQUIRE(targetSecondary != nullptr);
+        if (targetSecondary == nullptr)
+            return;
         CHECK(selfSecondary->ReceivedPing);
         CHECK(targetSecondary->ReceivedPing);
     }
@@ -692,6 +698,8 @@ TEST_SUITE("Scene And Editor Flows")
         REQUIRE(spawnThenDestroyScriptEntryAfterUpdate.RuntimeInstance != nullptr);
         auto* spawnThenDestroyScript = dynamic_cast<ParallelSpawnThenDestroyScript*>(spawnThenDestroyScriptEntryAfterUpdate.RuntimeInstance.get());
         REQUIRE(spawnThenDestroyScript != nullptr);
+        if (spawnThenDestroyScript == nullptr)
+            return;
         CHECK(spawnThenDestroyScript->ReceivedNonNullDeferredHandle);
         CHECK(spawnScriptEntryAfterUpdate.RuntimeUpdateCount >= 1);
         CHECK(destroyScriptEntryAfterUpdate.RuntimeUpdateCount >= 1);
@@ -2138,7 +2146,11 @@ TEST_SUITE("Scene And Editor Flows")
         auto sequentialScene = baseScene.Clone();
         auto parallelScene = baseScene.Clone();
         REQUIRE(sequentialScene != nullptr);
+        if (sequentialScene == nullptr)
+            return;
         REQUIRE(parallelScene != nullptr);
+        if (parallelScene == nullptr)
+            return;
 
         constexpr float kFixedStep = 1.0f / 60.0f;
         constexpr int kStepCount = 24;
@@ -2343,6 +2355,8 @@ TEST_SUITE("Scene And Editor Flows")
 
         auto clone = scene.Clone();
         REQUIRE(clone != nullptr);
+        if (clone == nullptr)
+            return;
 
         const entt::entity clonedParent = FindEntityByTag(*clone, "Parent");
         const entt::entity clonedChild = FindEntityByTag(*clone, "Child");
@@ -2441,9 +2455,14 @@ TEST_SUITE("Scene And Editor Flows")
 
         const auto& clonedScript = GetScriptEntry(*clone, clonedChild, 0);
         CHECK(clonedScript.ScriptClassName == "ButtonScript");
-        REQUIRE(clonedScript.ExposedProperties.contains("FollowTarget"));
+        const bool hasClonedFollowTarget = clonedScript.ExposedProperties.contains("FollowTarget");
+        REQUIRE(hasClonedFollowTarget);
+        if (!hasClonedFollowTarget)
+            return;
         const auto* clonedFollowTarget = std::get_if<Limitless::ScriptEntityReference>(&clonedScript.ExposedProperties.at("FollowTarget"));
         REQUIRE(clonedFollowTarget != nullptr);
+        if (clonedFollowTarget == nullptr)
+            return;
         CHECK(clonedFollowTarget->Tag == "Parent");
         CHECK(clonedScript.RuntimeInitialized == false);
         CHECK(clonedScript.RuntimeUpdateCount == 0);
@@ -2696,6 +2715,8 @@ TEST_SUITE("Scene And Editor Flows")
         const auto loadResult = Limitless::Scene::LoadFromFile(scenePath);
         REQUIRE(loadResult.IsSuccess());
         REQUIRE(loadResult.GetValue() != nullptr);
+        if (loadResult.GetValue() == nullptr)
+            return;
         const auto& loadedScene = *loadResult.GetValue();
         const auto& loadedRegistry = loadedScene.GetRegistry();
 
@@ -2797,18 +2818,31 @@ TEST_SUITE("Scene And Editor Flows")
 
         REQUIRE(loadedScene.GetScriptComponentEntities(loadedHud).size() == 1);
         const auto& loadedScript = GetScriptEntry(loadedScene, loadedHud, 0);
-        REQUIRE(loadedScript.ExposedProperties.contains("FollowTarget"));
+        const bool hasLoadedFollowTarget = loadedScript.ExposedProperties.contains("FollowTarget");
+        REQUIRE(hasLoadedFollowTarget);
+        if (!hasLoadedFollowTarget)
+            return;
         const auto* loadedFollowTarget = std::get_if<Limitless::ScriptEntityReference>(&loadedScript.ExposedProperties.at("FollowTarget"));
         REQUIRE(loadedFollowTarget != nullptr);
+        if (loadedFollowTarget == nullptr)
+            return;
         CHECK(loadedFollowTarget->Tag == "Root");
-        REQUIRE(loadedScript.ExposedProperties.contains("EnemyPrefab"));
+        const bool hasLoadedEnemyPrefab = loadedScript.ExposedProperties.contains("EnemyPrefab");
+        REQUIRE(hasLoadedEnemyPrefab);
+        if (!hasLoadedEnemyPrefab)
+            return;
         const auto* loadedEnemyPrefab = std::get_if<Limitless::Prefab>(&loadedScript.ExposedProperties.at("EnemyPrefab"));
         REQUIRE(loadedEnemyPrefab != nullptr);
+        if (loadedEnemyPrefab == nullptr)
+            return;
         CHECK(loadedEnemyPrefab->AssetKey == "Assets/Prefabs/Enemies/BasicEnemy.prefab.json");
 
-        REQUIRE(loadedScene.GetEditorCameraBookmark().has_value());
-        CHECK(loadedScene.GetEditorCameraBookmark()->YawDegrees == doctest::Approx(-45.0f));
-        CHECK(loadedScene.GetEditorCameraBookmark()->PitchDegrees == doctest::Approx(15.0f));
+        const auto& loadedBookmark = loadedScene.GetEditorCameraBookmark();
+        REQUIRE(loadedBookmark.has_value());
+        if (!loadedBookmark.has_value())
+            return;
+        CHECK(loadedBookmark->YawDegrees == doctest::Approx(-45.0f));
+        CHECK(loadedBookmark->PitchDegrees == doctest::Approx(15.0f));
 
         std::error_code errorCode;
         std::filesystem::remove(scenePath, errorCode);
@@ -2844,6 +2878,8 @@ TEST_SUITE("Scene And Editor Flows")
         const auto loadResult = Limitless::Scene::LoadFromFile(scenePath);
         REQUIRE(loadResult.IsSuccess());
         REQUIRE(loadResult.GetValue() != nullptr);
+        if (loadResult.GetValue() == nullptr)
+            return;
 
         const auto& loadedScene = *loadResult.GetValue();
         const auto& loadedRegistry = loadedScene.GetRegistry();
@@ -2890,6 +2926,8 @@ TEST_SUITE("Scene And Editor Flows")
 
         scene.Update(1.0f / 60.0f);
         REQUIRE(scriptEntry.RuntimeInstance != nullptr);
+        if (scriptEntry.RuntimeInstance == nullptr)
+            return;
         REQUIRE(scriptEntry.RuntimeInitialized == true);
 
         CHECK_NOTHROW(scene.DestroyEntity(entity));
@@ -2921,6 +2959,8 @@ TEST_SUITE("Scene And Editor Flows")
 
         scene->Update(1.0f / 60.0f);
         REQUIRE(scriptEntry.RuntimeInstance != nullptr);
+        if (scriptEntry.RuntimeInstance == nullptr)
+            return;
         REQUIRE(scriptEntry.RuntimeInitialized == true);
 
         CHECK_NOTHROW(scene.reset());
@@ -2950,6 +2990,8 @@ TEST_SUITE("Scene And Editor Flows")
 
         scene->Update(1.0f / 60.0f);
         REQUIRE(scriptEntry.RuntimeInstance != nullptr);
+        if (scriptEntry.RuntimeInstance == nullptr)
+            return;
         REQUIRE(scriptEntry.RuntimeInitialized == true);
 
         CHECK_NOTHROW(scene.reset());
@@ -3103,6 +3145,8 @@ TEST_SUITE("Scene And Editor Flows")
 
         auto clone = scene.Clone();
         REQUIRE(clone != nullptr);
+        if (clone == nullptr)
+            return;
         const entt::entity clonedEntity = FindEntityByTag(*clone, "Animated");
         REQUIRE_FALSE(IsNullEntity(clonedEntity));
 
@@ -3142,6 +3186,8 @@ TEST_SUITE("Scene And Editor Flows")
         const auto loadResult = Limitless::Scene::LoadFromFile(tempScenePath);
         REQUIRE(loadResult.IsSuccess());
         REQUIRE(loadResult.GetValue() != nullptr);
+        if (loadResult.GetValue() == nullptr)
+            return;
 
         const entt::entity loadedEntity = FindEntityByTag(*loadResult.GetValue(), "Animated");
         REQUIRE_FALSE(IsNullEntity(loadedEntity));
@@ -3287,6 +3333,8 @@ TEST_SUITE("Scene And Editor Flows")
         }
 
         REQUIRE(legacyEntityJson != nullptr);
+        if (legacyEntityJson == nullptr)
+            return;
         REQUIRE(legacyEntityJson->contains("NativeScripts"));
         REQUIRE((*legacyEntityJson)["NativeScripts"].is_array());
         REQUIRE((*legacyEntityJson)["NativeScripts"].size() == 1);
@@ -3307,6 +3355,8 @@ TEST_SUITE("Scene And Editor Flows")
         const auto loadResult = Limitless::Scene::LoadFromFile(scenePath);
         REQUIRE(loadResult.IsSuccess());
         REQUIRE(loadResult.GetValue() != nullptr);
+        if (loadResult.GetValue() == nullptr)
+            return;
 
         const auto& loadedScene = *loadResult.GetValue();
         const auto& loadedRegistry = loadedScene.GetRegistry();
@@ -3328,27 +3378,41 @@ TEST_SUITE("Scene And Editor Flows")
         }
 
         REQUIRE(loadedNativeScript != nullptr);
+        if (loadedNativeScript == nullptr)
+            return;
         CHECK(loadedNativeScript->ScriptClassName == "LegacyNativeScript");
         CHECK(loadedNativeScript->ScriptAssetRelativePath == "Gameplay/Legacy/LegacyNativeScript");
         CHECK(loadedNativeScript->Enabled == false);
         CHECK(loadedNativeScript->ExecutionPolicy == Limitless::ScriptExecutionPolicy::ParallelSafe);
         CHECK(loadedNativeScript->DeclaredReadAccessMask == 3);
         CHECK(loadedNativeScript->DeclaredWriteAccessMask == 5);
-        REQUIRE(loadedNativeScript->ExposedProperties.contains("Counter"));
+        const bool hasCounter = loadedNativeScript->ExposedProperties.contains("Counter");
+        REQUIRE(hasCounter);
+        if (!hasCounter)
+            return;
         const auto* loadedCounter = std::get_if<int32_t>(&loadedNativeScript->ExposedProperties.at("Counter"));
         REQUIRE(loadedCounter != nullptr);
+        if (loadedCounter == nullptr)
+            return;
         CHECK(*loadedCounter == 12);
         CHECK(loadedNativeScript->RuntimeInitialized == false);
         CHECK(loadedNativeScript->RuntimeUpdateCount == 0);
         CHECK(loadedNativeScript->RuntimeWarnedMissingCompiledScript == false);
 
         REQUIRE(loadedManagedScript != nullptr);
+        if (loadedManagedScript == nullptr)
+            return;
         CHECK(loadedManagedScript->ScriptClassName == "Game.ManagedBootstrap");
         CHECK(loadedManagedScript->ScriptAssetRelativePath == "Gameplay/Legacy/ManagedBootstrap");
         CHECK(loadedManagedScript->Enabled == false);
-        REQUIRE(loadedManagedScript->ExposedProperties.contains("DisplayName"));
+        const bool hasDisplayName = loadedManagedScript->ExposedProperties.contains("DisplayName");
+        REQUIRE(hasDisplayName);
+        if (!hasDisplayName)
+            return;
         const auto* loadedDisplayName = std::get_if<std::string>(&loadedManagedScript->ExposedProperties.at("DisplayName"));
         REQUIRE(loadedDisplayName != nullptr);
+        if (loadedDisplayName == nullptr)
+            return;
         CHECK(*loadedDisplayName == "LegacyRoot");
         CHECK(loadedManagedScript->RuntimeInstanceId == 0);
         CHECK(loadedManagedScript->RuntimeInitialized == false);
@@ -3466,6 +3530,8 @@ TEST_SUITE("Scene And Editor Flows")
 
         auto clone = scene.Clone();
         REQUIRE(clone != nullptr);
+        if (clone == nullptr)
+            return;
         const entt::entity clonedRoot = FindEntityByTag(*clone, "MixedScriptRoot");
         REQUIRE_FALSE(IsNullEntity(clonedRoot));
         verifyMixedScripts(*clone, clonedRoot);
