@@ -282,6 +282,8 @@ namespace Limitless
 			return false;
 		}
 
+        GetInputSystem().SyncConnectedGamepads();
+
         // Initialize global audio engine (Unity-style).
         // This requires SDL_INIT_AUDIO (enabled in SDLManager::Initialize).
         if (!Audio::AudioEngine::GetInstance().Initialize())

@@ -7,6 +7,8 @@
 
 #include "Core/Input/InputRebinding.h"
 
+#include <SDL3/SDL.h>
+
 #include <algorithm>
 #include <optional>
 
@@ -79,10 +81,12 @@ namespace Limitless
                 break;
 
             case SDL_EVENT_GAMEPAD_ADDED:
+                LT_CORE_INFO("InputSystem: received SDL gamepad added event (id={})", static_cast<int>(event.gdevice.which));
                 OnGamepadAdded(event.gdevice.which);
                 break;
 
             case SDL_EVENT_GAMEPAD_REMOVED:
+                LT_CORE_INFO("InputSystem: received SDL gamepad removed event (id={})", static_cast<int>(event.gdevice.which));
                 OnGamepadRemoved(event.gdevice.which);
                 break;
 
@@ -103,6 +107,47 @@ namespace Limitless
         {
             asset->Update(*this);
         }
+    }
+
+    void InputSystem::SyncConnectedGamepads()
+    {
+        const bool gamepadSubsystemInitialized = (SDL_WasInit(SDL_INIT_GAMEPAD) & SDL_INIT_GAMEPAD) != 0;
+        LT_CORE_INFO(
+            "InputSystem: syncing connected gamepads (sdlGamepadSubsystem={}, trackedGamepads={})",
+            gamepadSubsystemInitialized,
+            GetGamepadCount());
+
+        if (!gamepadSubsystemInitialized)
+        {
+            LT_CORE_WARN("InputSystem: SDL gamepad subsystem is not initialized; gamepad events will not be delivered.");
+            return;
+        }
+
+        SDL_ClearError();
+
+        int discoveredGamepadCount = 0;
+        SDL_JoystickID* discoveredGamepads = SDL_GetGamepads(&discoveredGamepadCount);
+        const char* sdlError = SDL_GetError();
+        if (!discoveredGamepads || discoveredGamepadCount <= 0)
+        {
+            if (sdlError && sdlError[0] != '\0')
+                LT_CORE_WARN("InputSystem: SDL_GetGamepads reported no gamepads: {}", sdlError);
+            else
+                LT_CORE_INFO("InputSystem: SDL reports no connected gamepads during startup sync");
+
+            if (discoveredGamepads)
+                SDL_free(discoveredGamepads);
+            return;
+        }
+
+        LT_CORE_INFO("InputSystem: SDL reports {} connected gamepad(s) during startup sync", discoveredGamepadCount);
+        for (int i = 0; i < discoveredGamepadCount; ++i)
+        {
+            LT_CORE_INFO("InputSystem: discovered startup gamepad candidate (id={})", static_cast<int>(discoveredGamepads[i]));
+            OnGamepadAdded(discoveredGamepads[i]);
+        }
+
+        SDL_free(discoveredGamepads);
     }
 
     void InputSystem::PushOverrideActionAsset(std::shared_ptr<InputActionAsset> asset)
@@ -343,10 +388,16 @@ namespace Limitless
     void InputSystem::OnGamepadAdded(SDL_JoystickID which)
     {
         if (FindSlotByGamepadId(m_Gamepads, which) != static_cast<size_t>(-1))
+        {
+            LT_CORE_INFO("InputSystem: gamepad id={} is already tracked", static_cast<int>(which));
             return; // already tracked
+        }
 
         if (!SDL_IsGamepad(which))
+        {
+            LT_CORE_WARN("InputSystem: SDL reported gamepad id={} but SDL_IsGamepad returned false", static_cast<int>(which));
             return;
+        }
 
         const size_t slot = FindFreeGamepadSlot(m_Gamepads);
         if (slot == static_cast<size_t>(-1))
@@ -369,16 +420,20 @@ namespace Limitless
         pad.ButtonDown.fill(0);
         pad.ButtonPressedThisFrame.fill(0);
         pad.ButtonReleasedThisFrame.fill(0);
+        pad.LoggedInputActivity = false;
 
         const char* name = SDL_GetGamepadName(pad.Gamepad);
-        LT_INFO("InputSystem: gamepad connected (playerIndex={}, id={}, name='{}')", static_cast<int>(slot), static_cast<int>(which), (name ? name : "Unknown"));
+        LT_CORE_INFO("InputSystem: gamepad connected (playerIndex={}, id={}, name='{}')", static_cast<int>(slot), static_cast<int>(which), (name ? name : "Unknown"));
     }
 
     void InputSystem::OnGamepadRemoved(SDL_JoystickID which)
     {
         const size_t slot = FindSlotByGamepadId(m_Gamepads, which);
         if (slot == static_cast<size_t>(-1))
+        {
+            LT_CORE_WARN("InputSystem: received gamepad disconnect for unknown id={}", static_cast<int>(which));
             return;
+        }
 
         PerGamepadState& pad = m_Gamepads[slot];
         SDL_CloseGamepad(pad.Gamepad);
@@ -388,8 +443,9 @@ namespace Limitless
         pad.ButtonDown.fill(0);
         pad.ButtonPressedThisFrame.fill(0);
         pad.ButtonReleasedThisFrame.fill(0);
+        pad.LoggedInputActivity = false;
 
-        LT_INFO("InputSystem: gamepad disconnected (playerIndex={}, id={})", static_cast<int>(slot), static_cast<int>(which));
+        LT_CORE_INFO("InputSystem: gamepad disconnected (playerIndex={}, id={})", static_cast<int>(slot), static_cast<int>(which));
     }
 
     void InputSystem::OnGamepadAxis(SDL_JoystickID which, SDL_GamepadAxis axis, int16_t value)
@@ -397,7 +453,19 @@ namespace Limitless
         const size_t slot = FindSlotByGamepadId(m_Gamepads, which);
         if (slot == static_cast<size_t>(-1) || axis < 0 || axis >= SDL_GAMEPAD_AXIS_COUNT)
             return;
-        m_Gamepads[slot].Axis[static_cast<size_t>(axis)] = value;
+
+        PerGamepadState& pad = m_Gamepads[slot];
+        pad.Axis[static_cast<size_t>(axis)] = value;
+        if (!pad.LoggedInputActivity && (value <= -8000 || value >= 8000))
+        {
+            pad.LoggedInputActivity = true;
+            LT_CORE_INFO(
+                "InputSystem: observed first gamepad axis input (playerIndex={}, id={}, axis={}, value={})",
+                static_cast<int>(slot),
+                static_cast<int>(which),
+                static_cast<int>(axis),
+                static_cast<int>(value));
+        }
     }
 
     void InputSystem::OnGamepadButton(SDL_JoystickID which, SDL_GamepadButton button, bool down)
@@ -414,6 +482,16 @@ namespace Limitless
             pad.ButtonPressedThisFrame[idx] = 1;
         else if (wasDown && !down)
             pad.ButtonReleasedThisFrame[idx] = 1;
+
+        if (!pad.LoggedInputActivity && down)
+        {
+            pad.LoggedInputActivity = true;
+            LT_CORE_INFO(
+                "InputSystem: observed first gamepad button input (playerIndex={}, id={}, button={})",
+                static_cast<int>(slot),
+                static_cast<int>(which),
+                static_cast<int>(button));
+        }
     }
 
     void InputSystem::OnKey(SDL_Scancode scancode, bool down, bool repeat)

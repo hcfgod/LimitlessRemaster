@@ -43,6 +43,7 @@ namespace Limitless
 
         // Evaluate enabled action maps (should be called once per frame after events are pumped).
         void UpdateActions();
+        void SyncConnectedGamepads();
 
         // Unity-style ownership model:
         // - Project-wide default action asset (used when there are no overrides).
@@ -137,6 +138,7 @@ namespace Limitless
             std::array<uint8_t, SDL_GAMEPAD_BUTTON_COUNT> ButtonDown{};
             std::array<uint8_t, SDL_GAMEPAD_BUTTON_COUNT> ButtonPressedThisFrame{};
             std::array<uint8_t, SDL_GAMEPAD_BUTTON_COUNT> ButtonReleasedThisFrame{};
+            bool LoggedInputActivity = false;
         };
         static size_t FindSlotByGamepadId(std::array<PerGamepadState, kMaxGamepads>& gamepads, SDL_JoystickID id);
         static size_t FindFreeGamepadSlot(std::array<PerGamepadState, kMaxGamepads>& gamepads);

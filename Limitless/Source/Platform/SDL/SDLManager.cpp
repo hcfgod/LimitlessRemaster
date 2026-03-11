@@ -22,7 +22,7 @@ namespace Limitless
         }
 
         // Initialize SDL
-        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS))
+        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD))
         {
             std::string errorMsg = fmt::format("SDL could not initialize! SDL_Error: {}", SDL_GetError());
             PlatformError error(errorMsg, std::source_location::current());
@@ -30,7 +30,7 @@ namespace Limitless
             error.SetFunctionName("SDLManager::Initialize");
             error.SetClassName("SDLManager");
             error.SetModuleName("Platform/SDL");
-            error.AddContext("init_flags", "SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS");
+            error.AddContext("init_flags", "SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD");
             
             LT_CORE_ERROR("{}", errorMsg);
             Error::LogError(error);
