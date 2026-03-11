@@ -14,7 +14,7 @@ It is fully integrated with ECS, scene save/load, scene clone, editor undo/redo,
 
 - World sprites (`SpriteComponent`) using lit materials
 - World-space text is not currently supported in the UI-only text pipeline
-- Canvas UI text (`UITextComponent`) renders in the UI pass after world lighting
+- Canvas UI text (`UITextComponent`) renders through the canvas UI path rather than the deferred lighting path
 
 ## Rendering Path
 
@@ -46,6 +46,7 @@ Open **Project Settings -> Lighting 2D** and configure:
 - `MaxDirectionalLights`, `MaxPointLights`
 - `MaxShadowSegments`
 - `ShadowSoftnessScale`
+- `DirectionalShadowBiasScale`
 - `ShadowAlphaCutoff`
 - `ShadowSegmentSnapPixels`
 - `EnableHighAngularVelocityShadowFreeze`

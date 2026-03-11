@@ -67,6 +67,13 @@ Limitless::Events::WindowResizeEvent resize(1920, 1080);
 events.DispatchImmediate(resize);
 ```
 
+Current dispatch order for a given event is:
+
+- matching typed/raw callbacks first
+- listeners second
+
+Both phases stop once the event is marked handled.
+
 Deferred dispatch (recommended when emitting from systems that should not re-enter other systems mid-frame):
 
 ```cpp
@@ -185,6 +192,56 @@ Then dispatch it:
 PlayerDiedEvent e(7);
 events.Dispatch(e);
 ```
+
+## Native `ScriptEvent` Delegates
+
+The engine also uses a separate lightweight runtime delegate type for native scripting:
+
+- `Limitless::ScriptEvent<Args...>`
+
+This is distinct from the global `EventSystem` bus:
+
+- it is a local multicast delegate stored on runtime objects/components
+- it is not queued through `DispatchDeferred`
+- it is not serialized as persistent authored state
+
+Current examples include runtime UI delegates such as:
+
+- `UIButtonComponent::OnClicked`
+- `UIButtonComponent::OnHoverEnter`
+- `UIButtonComponent::OnHoverExit`
+- `UIButtonComponent::OnPressed`
+- `UISliderComponent::OnValueChanged`
+
+Basic usage:
+
+```cpp
+Limitless::ScriptEvent<> onClick;
+auto token = onClick += []() { LT_INFO("Clicked"); };
+onClick.Invoke();
+onClick -= token;
+```
+
+### Native script subscription helper
+
+`ScriptableEntity` provides a convenience helper:
+
+```cpp
+Subscribe(button.OnClicked, [this]() {
+    HandleClick();
+});
+```
+
+Important behavior:
+
+- `Subscribe(...)` stores an unsubscribe action on the script instance
+- the runtime calls `UnsubscribeAllScriptEvents()` automatically before `OnDestroy()`
+- this keeps UI/runtime delegate subscriptions from leaking across script teardown
+
+Lifetime note:
+
+- copying or assigning a `ScriptEvent` clears its subscriber list
+- subscribers are runtime-only state and are intentionally not preserved through serialization/copy-based scene duplication
 
 ## Best Practices
 

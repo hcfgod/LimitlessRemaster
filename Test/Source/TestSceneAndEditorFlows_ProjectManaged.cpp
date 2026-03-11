@@ -346,7 +346,10 @@ TEST_SUITE("Scene And Editor Flows")
         managedScript.ScriptClassName = "Game.ManagedBootstrap";
         managedScript.ScriptAssetRelativePath = "Gameplay/Mixed/MixedManagedScript";
         managedScript.Enabled = true;
-        managedScript.ExposedProperties["Target"] = Limitless::ScriptEntityReference{ "MixedScriptTarget" };
+        Limitless::ScriptEntityReference targetReference{};
+        targetReference.Tag = "MixedScriptTarget";
+        targetReference.SceneEntityId = scene.GetEntityPersistentId(target);
+        managedScript.ExposedProperties["Target"] = targetReference;
         managedScript.ExposedProperties["Count"] = int32_t(2);
         managedScript.RuntimeInstanceId = 99;
         managedScript.RuntimeInitialized = true;
@@ -358,7 +361,7 @@ TEST_SUITE("Scene And Editor Flows")
         REQUIRE_FALSE(IsNullEntity(managedScriptEntity));
         REQUIRE(registry.all_of<Limitless::ScriptComponent>(managedScriptEntity));
 
-        const auto verifyMixedScripts = [](const Limitless::Scene& inspectedScene, entt::entity ownerEntity) {
+        const auto verifyMixedScripts = [](const Limitless::Scene& inspectedScene, entt::entity ownerEntity, bool expectCopiedTarget) {
             const auto& inspectedRegistry = inspectedScene.GetRegistry();
             const auto scriptEntities = inspectedScene.GetScriptComponentEntities(ownerEntity);
             const auto scriptEntityCount = scriptEntities.size();
@@ -420,6 +423,17 @@ TEST_SUITE("Scene And Editor Flows")
             if (foundTarget == nullptr)
                 return;
             CHECK(foundTarget->Tag == "MixedScriptTarget");
+            const entt::entity inspectedTarget = FindEntityByTag(inspectedScene, "MixedScriptTarget");
+            if (expectCopiedTarget)
+            {
+                REQUIRE_FALSE(IsNullEntity(inspectedTarget));
+                CHECK(foundTarget->SceneEntityId == inspectedScene.GetEntityPersistentId(inspectedTarget));
+            }
+            else
+            {
+                CHECK(IsNullEntity(inspectedTarget));
+                CHECK(foundTarget->SceneEntityId.empty());
+            }
             CHECK(foundManagedScript->RuntimeInstanceId == 0);
             CHECK(foundManagedScript->RuntimeInitialized == false);
             CHECK(foundManagedScript->RuntimeUpdateCount == 0);
@@ -431,7 +445,7 @@ TEST_SUITE("Scene And Editor Flows")
         REQUIRE(clone != nullptr);
         const entt::entity clonedRoot = FindEntityByTag(*clone, "MixedScriptRoot");
         REQUIRE_FALSE(IsNullEntity(clonedRoot));
-        verifyMixedScripts(*clone, clonedRoot);
+        verifyMixedScripts(*clone, clonedRoot, true);
 
         const std::filesystem::path scenePath = MakeTempScenePath("MixedBackendScripts.scene.json");
         std::error_code errorCode;
@@ -448,12 +462,12 @@ TEST_SUITE("Scene And Editor Flows")
             return;
         const entt::entity loadedRoot = FindEntityByTag(*loadResult.GetValue(), "MixedScriptRoot");
         REQUIRE_FALSE(IsNullEntity(loadedRoot));
-        verifyMixedScripts(*loadResult.GetValue(), loadedRoot);
+        verifyMixedScripts(*loadResult.GetValue(), loadedRoot, true);
 
         Limitless::Scene destinationScene;
         const entt::entity instantiatedRoot = destinationScene.InstantiatePrefab(scenePath.string());
         REQUIRE_FALSE(IsNullEntity(instantiatedRoot));
-        verifyMixedScripts(destinationScene, instantiatedRoot);
+        verifyMixedScripts(destinationScene, instantiatedRoot, false);
 
         std::filesystem::remove(scenePath, errorCode);
     }

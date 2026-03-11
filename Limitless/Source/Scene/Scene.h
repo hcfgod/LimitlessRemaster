@@ -17,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -24,7 +25,7 @@
 namespace Limitless
 {
     class Physics2DWorld;
-    inline constexpr int kSceneSerializationVersion = 21;
+    inline constexpr int kSceneSerializationVersion = 22;
 
     struct DeferredStructuralMutation
     {
@@ -196,6 +197,9 @@ namespace Limitless
                                                               float maxDistance,
                                                               uint64_t collisionMask) const;
         entt::entity ResolveEntityReference(entt::entity entity) const;
+        std::string GetEntityPersistentId(entt::entity entity) const;
+        void SetEntityPersistentId(entt::entity entity, std::string persistentId);
+        entt::entity FindEntityByPersistentId(std::string_view persistentId) const;
 
         /// Get the EnTT registry for custom queries (views, groups, etc.).
         /// Mutable access is an escape hatch and can bypass scene structural/deferred safeguards.

@@ -15,6 +15,11 @@ namespace Limitless
         bool Enabled = true; ///< Unity-style active state. Disabled entities do not update or render.
     };
 
+    struct SceneEntityIdComponent
+    {
+        std::string Id;
+    };
+
     /// Position, rotation (euler degrees), and scale. Used for rendering and hierarchy.
     struct TransformComponent
     {

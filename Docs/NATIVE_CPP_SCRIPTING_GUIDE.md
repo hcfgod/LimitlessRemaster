@@ -2,21 +2,33 @@
 
 This guide explains how to write and run native C++ scripts on scene entities.
 
+For managed C# scripting, see `Docs/MANAGED_CSHARP_SCRIPTING_GUIDE.md`.
+
 ## Overview
 
-Native scripting is component-driven:
+Native scripting is asset- and component-driven:
 
-- Add `NativeScriptComponent` to an entity in the Inspector.
-- Register script classes with `NativeScriptRegistry`.
-- Select the registered class name from the `Native Script` inspector section.
-- Enter Play Mode to run script lifecycle methods.
+- author project native scripts under the opened project's `Assets/`
+- create paired `.h` / `.cpp` script assets from the Project browser
+- compile project-authored scripts into the `ScriptCore` module so they can be registered at load time
+- register built-in/engine-side script classes with `NativeScriptRegistry` when needed
+- attach scripts from the inspector `Add Component` script menus
+- enter `Play` or `Simulate` to run lifecycle methods
 
 ## Script Lifecycle
 
 Derive from `ScriptableEntity` and override any of:
 
 - `OnCreate()` called once when the script instance starts.
+- `OnFixedUpdate(float fixedDeltaTime)` called during fixed-step simulation updates.
 - `OnUpdate(float deltaTime)` called each runtime frame in Play Mode.
+- `OnCollisionEnter(const Entity& other)`
+- `OnCollisionStay(const Entity& other)`
+- `OnCollisionExit(const Entity& other)`
+- `OnTriggerEnter(const Entity& other)`
+- `OnTriggerStay(const Entity& other)`
+- `OnTriggerExit(const Entity& other)`
+- `OnUIButtonClicked(const Entity& buttonEntity)`
 - `OnDestroy()` called when the entity is destroyed, script is disabled/removed, or scene shuts down.
 
 ## Script Execution Policy and Parallelism
@@ -228,8 +240,7 @@ Important behavior:
 
 - Scene transitions are deferred until a safe point after script updates in the current frame.
 - In Editor Play Mode, scene transitions stay in Play Mode (they do not force-exit to Edit Mode).
-- Scene keys must be valid asset keys under `Assets/...`.
-- `.scene.json` is optional when calling `LoadScene`; it is appended automatically if omitted.
+- Requested identifiers are normalized against build scene keys using slash normalization, case-insensitive comparison, and optional `.scene` / `.scene.json` suffix handling.
 - Scene name-only loading (for example `"Level02"`) resolves through project scene records tracked by `AssetDatabase`.
 - If multiple scene assets share the same scene name, loading by name is considered ambiguous and will fail with a warning.
 
@@ -507,7 +518,7 @@ protected:
 
 ## Registering Scripts
 
-Register scripts during application startup (before Play Mode):
+Register built-in or engine-side scripts during application startup (before Play Mode):
 
 ```cpp
 Limitless::NativeScriptRegistry::RegisterScript<DoorRotateScript>("DoorRotateScript");
@@ -516,27 +527,27 @@ Limitless::NativeScriptRegistry::RegisterScript<DoorRotateScript>("DoorRotateScr
 Notes:
 
 - `NativeScriptComponent.ScriptClassName` (and each script entry’s class name) must match the registered class name exactly.
-- Scripts are native C++ only (no C# bridge in this system).
-- **Editor Play Mode**: The Editor builds and loads the **ScriptCore** DLL (`ScriptCore` project). Scripts authored under the project’s `Assets/` are compiled into ScriptCore; when you enter Play Mode, the Editor loads that DLL and registers its scripts so they run on entities with `NativeScriptComponent`.
+- Managed scripting now exists alongside native scripting; this document covers the native C++ path only.
+- **Project-authored native scripts** are compiled into the `ScriptCore` module and registered through its exported registration hook when the module is loaded.
+- **Editor Play Mode**: The Editor builds and loads the `ScriptCore` library. Scripts authored under the project's `Assets/` are compiled into ScriptCore; when you enter Play Mode, the Editor loads that module and registers its scripts so they run on authored native script components.
 
 ## Editor Usage
 
 1. Select an entity.
-2. Click `Add Component` and add `Native Script`.
-3. In the `Native Script` section:
-   - Toggle `Enabled`.
-   - Pick a script from the `Class` dropdown.
-4. Enter Play Mode and observe behavior.
+2. Click `Add Component`.
+3. Open the `Scripts` section and attach a native script.
+4. Enter `Play` or `Simulate` and observe behavior.
 
-If the class list is empty, no scripts were registered in the running executable.
+If the class list is empty, either no native scripts were registered in the currently loaded module or your project-authored scripts have not been built into `ScriptCore` yet.
 
 ## In-Editor Script Authoring
 
-The inspector now supports native script authoring:
+The editor supports native script authoring:
 
-- `Create New Native Script` generates template files in:
+- Project browser create menus generate template files in:
   - `<OpenedProjectRoot>/Assets/<AnyFolderYouChoose>`
-- `Edit Current Native Script` opens a built-in text editor window for `.h` and `.cpp`.
+- Opening a native script asset can use the built-in editor or an external Visual Studio workflow on Windows, depending on project build/editor settings.
+- `Edit Current Native Script` in built-in mode opens an editor window for `.h` and `.cpp`.
 - `Save Files` writes edited buffers back to disk.
 - Saved scripts are mirrored into `<EngineWorkspace>/Build/Generated/ScriptCore` for compilation by the `ScriptCore` build.
 - Mirror preserves your relative folder structure under `Assets` (for example `Assets/Gameplay/Player` mirrors to `.../Build/Generated/ScriptCore/Gameplay/Player`).
@@ -550,10 +561,11 @@ The inspector now supports native script authoring:
 Important:
 
 - New scripts are compiled through the `ScriptCore` DLL project.
-- The editor can trigger script-only builds with:
-  - Windows: `Scripts/build-scriptcore-windows.bat`
-  - Linux/macOS: `Scripts/build-scriptcore-unix.sh`
+- The editor can trigger script builds with:
+  - internal-toolchain/project-aware path: `Scripts/build-project-scriptcore-windows.bat` or `Scripts/build-project-scriptcore-unix.sh`
+  - workspace-level fallback path: `Scripts/build-scriptcore-windows.bat` or `Scripts/build-scriptcore-unix.sh`
 - Build configuration/platform are read from project build target settings when available.
+- On Windows, the external Visual Studio launch/build path forwards the opened project root into the build script and falls back to the built-in editor if external launch/preparation fails.
 - Script classes are loaded from the platform-native ScriptCore module and hot-reloaded in Edit mode when its timestamp changes (`ScriptCore.dll` on Windows, `libScriptCore.so` on Linux, `libScriptCore.dylib` on macOS).
 - ScriptCore hot-reload validates `LT_GetScriptCoreAbiVersion` before registration; incompatible or stale modules are rejected and the previously loaded module is kept.
 - Build failure behavior when entering Play Mode is configurable in Build Settings:
@@ -584,9 +596,9 @@ Key exposed fields:
 Suggested workflow:
 
 1. Create `PhysicsStressSpawnerScript.h/.cpp` in your project `Assets/Scripts` folder.
-2. Build `ScriptCore` from the editor or with `Scripts/build-scriptcore-windows.bat`.
+2. Build project scripts from the editor or with the appropriate ScriptCore build helper for your backend (`build-project-scriptcore-*` for the internal toolchain, `build-scriptcore-*` for the workspace-level path).
 3. Add a single empty entity in your scene.
-4. Add `Native Script` component.
+4. Use `Add Component` -> `Scripts` to attach the script.
 5. Select class `PhysicsStressSpawnerScript`.
 6. Tune `Rows`/`Columns` for your target stress level.
 7. Enter Play Mode and monitor the FPS/performance overlay.
@@ -594,7 +606,7 @@ Suggested workflow:
 ## Current Scope
 
 - Runtime execution is active in Play Mode.
-- Scene save/load and clone preserve `NativeScriptComponent` authored metadata (class name, asset path, enabled state, execution policy, declared access masks, exposed properties).
+- Scene save/load and clone preserve authored native script metadata (class name, asset path, enabled state, execution policy, declared access masks, exposed properties).
 - Script runtime instances are transient and are not serialized.
 - Script authoring source-of-truth is the opened project's `Assets` folder.
 - Script build inputs are generated mirrors under `Build/Generated/ScriptCore`.

@@ -2351,7 +2351,10 @@ TEST_SUITE("Scene And Editor Flows")
         scriptEntry.Enabled = true;
         scriptEntry.RuntimeInitialized = true;
         scriptEntry.RuntimeUpdateCount = 123;
-        scriptEntry.ExposedProperties["FollowTarget"] = Limitless::ScriptEntityReference{ "Parent" };
+        Limitless::ScriptEntityReference followTargetReference{};
+        followTargetReference.Tag = "Parent";
+        followTargetReference.SceneEntityId = scene.GetEntityPersistentId(parent);
+        scriptEntry.ExposedProperties["FollowTarget"] = followTargetReference;
 
         auto clone = scene.Clone();
         REQUIRE(clone != nullptr);
@@ -2464,6 +2467,7 @@ TEST_SUITE("Scene And Editor Flows")
         if (clonedFollowTarget == nullptr)
             return;
         CHECK(clonedFollowTarget->Tag == "Parent");
+        CHECK(clonedFollowTarget->SceneEntityId == clone->GetEntityPersistentId(clonedParent));
         CHECK(clonedScript.RuntimeInitialized == false);
         CHECK(clonedScript.RuntimeUpdateCount == 0);
 
@@ -2697,7 +2701,10 @@ TEST_SUITE("Scene And Editor Flows")
         auto& scriptEntry = AttachScriptEntry(scene, hud);
         scriptEntry.ScriptClassName = "HudScript";
         scriptEntry.ScriptAssetRelativePath = "Gameplay/Ui/HudScript";
-        scriptEntry.ExposedProperties["FollowTarget"] = Limitless::ScriptEntityReference{ "Root" };
+        Limitless::ScriptEntityReference followTargetReference{};
+        followTargetReference.Tag = "Root";
+        followTargetReference.SceneEntityId = scene.GetEntityPersistentId(root);
+        scriptEntry.ExposedProperties["FollowTarget"] = followTargetReference;
         scriptEntry.ExposedProperties["DisplayName"] = std::string("HudLabel");
         scriptEntry.ExposedProperties["EnemyPrefab"] = Limitless::Prefab{ "Assets/Prefabs/Enemies/BasicEnemy.prefab.json" };
 
@@ -2827,6 +2834,7 @@ TEST_SUITE("Scene And Editor Flows")
         if (loadedFollowTarget == nullptr)
             return;
         CHECK(loadedFollowTarget->Tag == "Root");
+        CHECK(loadedFollowTarget->SceneEntityId == loadedScene.GetEntityPersistentId(loadedRoot));
         const bool hasLoadedEnemyPrefab = loadedScript.ExposedProperties.contains("EnemyPrefab");
         REQUIRE(hasLoadedEnemyPrefab);
         if (!hasLoadedEnemyPrefab)
@@ -3447,7 +3455,10 @@ TEST_SUITE("Scene And Editor Flows")
         managedScript.ScriptClassName = "Game.ManagedBootstrap";
         managedScript.ScriptAssetRelativePath = "Gameplay/Mixed/MixedManagedScript";
         managedScript.Enabled = true;
-        managedScript.ExposedProperties["Target"] = Limitless::ScriptEntityReference{ "MixedScriptTarget" };
+        Limitless::ScriptEntityReference targetReference{};
+        targetReference.Tag = "MixedScriptTarget";
+        targetReference.SceneEntityId = scene.GetEntityPersistentId(target);
+        managedScript.ExposedProperties["Target"] = targetReference;
         managedScript.ExposedProperties["Count"] = int32_t(2);
         managedScript.RuntimeInstanceId = 99;
         managedScript.RuntimeInitialized = true;
@@ -3520,7 +3531,10 @@ TEST_SUITE("Scene And Editor Flows")
             REQUIRE(foundTarget != nullptr);
             if (foundTarget == nullptr)
                 return;
+            const entt::entity inspectedTarget = FindEntityByTag(inspectedScene, "MixedScriptTarget");
+            REQUIRE_FALSE(IsNullEntity(inspectedTarget));
             CHECK(foundTarget->Tag == "MixedScriptTarget");
+            CHECK(foundTarget->SceneEntityId == inspectedScene.GetEntityPersistentId(inspectedTarget));
             CHECK(foundManagedScript->RuntimeInstanceId == 0);
             CHECK(foundManagedScript->RuntimeInitialized == false);
             CHECK(foundManagedScript->RuntimeUpdateCount == 0);

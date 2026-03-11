@@ -37,7 +37,7 @@ The engine supports two common patterns:
 - **Override**: `InputSystem::PushOverrideActionAsset(asset)` / `PopOverrideActionAsset(...)`
 - **Evaluation**: `InputSystem::UpdateActions()` uses the **top override** if present, otherwise the project default.
 
-`Runtime/Source/TestLayer.cpp` sets the **project** input actions via `SetProjectActionAssetFromKey("Assets/InputActions/Runtime.inputactions.json")`.
+At startup, the application/runtime bootstrap applies the project input settings and uses `SetProjectActionAssetFromKey(...)` for the configured default input actions asset.
 The engine-owned `EditorCameraController` pushes its own override so editor controls do not affect gameplay actions.
 
 ## Project Settings InputActions (Default + Aliases)
@@ -121,7 +121,7 @@ Actions expose simplified Unity-like phases:
 
 ## Example: Editor Camera (WASD + Mouse Look)
 
-This is exactly what `Runtime/Source/TestLayer.cpp` does now:
+This is the action layout currently used by the engine-owned `EditorCameraController`:
 
 - Editor input is defined in `Assets/InputActions/EditorCamera.inputactions.json`
 - Map: `"Editor"`
@@ -131,7 +131,7 @@ This is exactly what `Runtime/Source/TestLayer.cpp` does now:
   - `"Boost"`: `Button` with `KeyboardButtonBinding` (Shift) and `GamepadButtonBinding` (shoulder)
   - `"LookEnable"`: `Button` with `MouseButtonBinding` (RMB) and `GamepadButtonBinding` (shoulder)
 
-At runtime:
+In the editor runtime path:
 
 - `Move.ReadAxis2D()` drives camera translation
 - `Look.ReadAxis2D()` drives yaw/pitch

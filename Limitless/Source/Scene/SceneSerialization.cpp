@@ -129,7 +129,8 @@ namespace Limitless::SceneSerialization
             root["Type"] = "Entity";
             root["Value"] = {
                 { "Tag", entityValue->Tag },
-                { "PrefabAssetKey", entityValue->PrefabAssetKey }
+                { "PrefabAssetKey", entityValue->PrefabAssetKey },
+                { "SceneEntityId", entityValue->SceneEntityId }
             };
         }
         else if (const auto* prefabValue = std::get_if<ScriptPrefabReference>(&value))
@@ -187,6 +188,7 @@ namespace Limitless::SceneSerialization
                 {
                     entityReference.Tag = value.value("Tag", std::string{});
                     entityReference.PrefabAssetKey = value.value("PrefabAssetKey", std::string{});
+                    entityReference.SceneEntityId = value.value("SceneEntityId", std::string{});
                 }
                 else if (value.is_string())
                     entityReference.Tag = value.get<std::string>();

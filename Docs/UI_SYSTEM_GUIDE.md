@@ -6,7 +6,7 @@ The runtime now supports a Canvas-driven UI workflow:
 
 - `CanvasComponent` defines UI space (`ScreenSpace` or `WorldSpace`), sort order, and reference resolution.
 - `RectTransformComponent` defines layout (`AnchorMin`, `AnchorMax`, `Pivot`, `SizeDelta`, `AnchoredPosition`).
-- UI elements render in a dedicated UI pass after world rendering.
+- UI rendering is split into dedicated canvas-aware phases for world-space and screen-space UI.
 
 ## Core Components
 
@@ -31,13 +31,15 @@ These components are intended to be composed with:
 
 - Uses centered canvas coordinates (`0,0` at center).
 - Uses `CanvasComponent::ReferenceResolution` as the root layout area.
-- Renders after world content in a dedicated pass.
+- Renders in a dedicated overlay UI pass after world content.
 
 ### World Space Canvas
 
 - Uses the scene camera projection.
 - Applies canvas world transform before UI element local layout transform.
-- Renders after world content in the same UI stage.
+- Renders in canvas-aware UI phases around the world pass based on canvas `SortOrder`:
+  - world-space canvases with negative sort order render before world content
+  - world-space canvases with positive sort order render after world content
 
 ## Important Behavior Change
 
@@ -77,7 +79,7 @@ the editor automatically ensures a `RectTransformComponent` exists on the target
 ## Current Scope
 
 This phase establishes the core data model, serialization, inspector integration, rendering pass separation,
-and runtime pointer interaction for screen-space UI (`UIButtonComponent` hover/press/click and `UISliderComponent` drag/value updates).
+and runtime pointer interaction for screen-space canvases (`UIButtonComponent` hover/press/click and `UISliderComponent` drag/value updates).
 
 Interaction state is exposed on the components through runtime flags:
 

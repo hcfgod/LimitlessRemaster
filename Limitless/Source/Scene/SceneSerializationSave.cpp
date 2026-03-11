@@ -86,6 +86,7 @@ namespace Limitless
             const auto& tag = registry.get<TagComponent>(entity);
             const auto& transform = registry.get<TransformComponent>(entity);
             entry["Tag"] = tag.Tag;
+            entry["EntityId"] = scene.GetEntityPersistentId(entity);
             entry["EntityEnabled"] = tag.Enabled;
             entry["Transform"] = {
                 { "Position", { transform.Position.x, transform.Position.y, transform.Position.z } },

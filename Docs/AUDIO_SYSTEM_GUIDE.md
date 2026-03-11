@@ -29,28 +29,55 @@ Decoders are expected to **resample/remix** into this format at import/load time
 - The callback mixes active voices into a preallocated scratch buffer and queues it to SDL.
 - Public API calls enqueue lock-free audio commands; the callback thread drains and applies commands before each mix pass.
 
-### Spatial 2D Audio (Implemented)
+### Spatial Audio (Implemented)
 
-Scene-authored 2D spatial audio is now supported through ECS components:
+Scene-authored spatial audio is supported through ECS components:
 
-- **`AudioListener2DComponent`**:
+- **`AudioListener2DComponent`**
   - `Enabled`
-  - `UsePrimaryCameraPosition` (listener can follow the scene primary camera)
-- **`AudioSourceComponent`** (extended):
-  - `Pitch` (playback rate multiplier; `1.0` = authored speed)
-  - `PlaybackSpace`: `Global` or `Spatial2D`
+  - `UsePrimaryCameraPosition`
+- **`AudioListener3DComponent`**
+  - `Enabled`
+  - `UsePrimaryCameraTransform`
+- **`AudioSourceComponent`** (extended)
+  - `Pitch`
+  - `Space`: `Global`, `Spatial2D`, or `Spatial3D`
   - `SpatialMinDistance`, `SpatialMaxDistance`
   - `SpatialRolloffExponent`
+  - `SpatialRolloffMode`: `SmoothStep`, `Linear`, `Inverse`
   - `StereoPanStrength`
+  - `DopplerFactor`
+  - `EnableDirectionalAttenuation`
+  - `DirectionalInnerAngleDegrees`
+  - `DirectionalOuterAngleDegrees`
+  - `DirectionalOuterVolume`
   - `AttenuationCurveKey` (reserved string key for future authored attenuation curve assets)
 
-At runtime, play mode computes listener/source world positions, applies attenuation based on distance, then applies stereo pan from listener-relative X position.
+#### Spatial 2D
 
-Listener resolution uses **multi-listener nearest selection**:
+For `Space = Spatial2D`:
 
-- All enabled `AudioListener2DComponent` instances are considered.
-- The nearest listener to each source is selected per-source for attenuation/pan.
-- If no listener is authored, a primary-camera fallback listener keeps scenes audible.
+- runtime computes source/listener world positions in 2D
+- applies distance attenuation
+- applies stereo pan from listener-relative X position
+
+2D listener resolution uses **multi-listener nearest selection**:
+
+- all enabled `AudioListener2DComponent` instances are considered
+- the nearest listener to each source is selected per-source
+- if no listener is authored, a primary-camera fallback listener keeps scenes audible
+
+#### Spatial 3D
+
+For `Space = Spatial3D`:
+
+- runtime computes 3D source/listener world positions
+- applies distance attenuation
+- applies stereo pan from source direction relative to listener forward/right vectors
+- applies optional directional attenuation from the source forward vector
+- applies Doppler-style pitch adjustment from listener/source relative velocity
+
+3D listener resolution also uses nearest-listener selection with primary-camera fallback when no authored listener is present.
 
 ### Mixer Groups (Implemented)
 
@@ -69,6 +96,8 @@ Default groups initialized by the engine:
 - `UI`
 
 Each `AudioSourceComponent` stores a `MixerGroup` name for scene-authored routing.
+
+Project audio settings can also point to an audio mixer asset key, and runtime bootstrap applies that mixer definition to initialize mixer-group volume and reverb-send values.
 
 ### Built-in Reverb Send/Return (Implemented)
 
@@ -123,21 +152,51 @@ Then load like any other Unity-style asset:
 
 Create an `AudioSource`, assign the clip (via `AssetHandle`), then call `Play()`.
 
-## Runtime Demo
+## Managed Scripting Surface
 
-Runtime includes a minimal audio validation demo:
+Managed gameplay code currently exposes:
 
-- Default clip key: `Assets/Audio/Example.wav`
-- Controls:
-  - **P**: play
-  - **O**: stop
+- `AudioSource`
+- `AudioListener2D`
+- `AudioListener3D`
+- `AudioPlaybackSpace`
+- `AudioRolloffMode`
 
-Drop an audio file at that path and run Runtime. If AssetBundle is enabled, rebuild the bundle so the file is packaged.
+`AudioSource` includes wrappers for authored/runtime properties such as:
+
+- clip key
+- volume
+- pitch
+- loop / mute
+- playback space
+- mixer group
+- spatial distance settings
+- rolloff mode / exponent
+- stereo pan strength
+- Doppler factor
+- directional attenuation settings
+- attenuation curve key
+- `IsPlaying`
+- `Play()`
+- `Stop()`
+
+`AudioListener2D` and `AudioListener3D` expose the authored listener toggles (`Enabled`, primary-camera binding options), so managed code can participate in the current scene-authored audio workflow without going through native-only gameplay code.
+
+## Quick Validation Workflow
+
+To validate the current audio path:
+
+- assign an `AudioClipKey` to an `AudioSourceComponent`
+- choose a `MixerGroup`
+- set `PlayOnStart = true` or request playback from code
+- author an `AudioListener2DComponent` / `AudioListener3DComponent`, or rely on the primary-camera fallback
+- enter Play Mode and confirm the source starts, spatializes, and routes through the expected mixer group
+
+If AssetBundle is enabled, rebuild the bundle so the clip asset is packaged.
 
 ## Next Steps (Planned)
 
 - **Streaming clips**: large music tracks via streaming ring buffers instead of “decode whole file”.
 - **Authored attenuation curves**: resolve `AttenuationCurveKey` to real curve assets.
 - **Advanced effect chains**: multiple effects per-group/per-voice (filters, dynamics, richer reverb).
-- **3D spatial audio**: listener/source orientation and 3D spatialization model.
 

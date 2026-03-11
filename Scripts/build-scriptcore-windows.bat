@@ -9,7 +9,7 @@ if "%1"=="Release" set CONFIGURATION=Release
 if "%1"=="Dist" set CONFIGURATION=Dist
 if "%2"=="ARM64" set PLATFORM=ARM64
 
-if not "%PROJECT_ROOT%"=="" for %%I in ("%PROJECT_ROOT%") do set "PROJECT_ROOT=%%~fI"
+if defined PROJECT_ROOT for %%I in ("%PROJECT_ROOT%") do set "PROJECT_ROOT=%%~fI"
 
 echo Building ScriptCore in %CONFIGURATION% configuration for %PLATFORM%...
 
@@ -67,7 +67,7 @@ set "OUTPUT_DIR=%CD%\Build\%BUILD_FOLDER%\Editor"
 set "RUNTIME_TEMPLATE_DIR=%CD%\RuntimeTemplates\%BUILD_FOLDER%"
 set "MANAGED_BUILD_SCRIPT=%CD%\Scripts\build-managed-runtime-windows.bat"
 set "PROJECT_LOCAL_OUTPUT_DIR="
-if not "%PROJECT_ROOT%"=="" set "PROJECT_LOCAL_OUTPUT_DIR=%PROJECT_ROOT%\Build\ScriptCore\%BUILD_FOLDER%"
+if defined PROJECT_ROOT set "PROJECT_LOCAL_OUTPUT_DIR=%PROJECT_ROOT%\Build\ScriptCore\%BUILD_FOLDER%"
 
 echo Building ScriptCore project only...
 set "SCRIPTCORE_PDB_FILE=%TEMP%\ScriptCore-%RANDOM%-%RANDOM%.pdb"
@@ -99,7 +99,7 @@ if not "%PROJECT_LOCAL_OUTPUT_DIR%"=="" (
 
 if not exist "%RUNTIME_TEMPLATE_DIR%\Managed" mkdir "%RUNTIME_TEMPLATE_DIR%\Managed"
 robocopy "%OUTPUT_DIR%\Managed" "%RUNTIME_TEMPLATE_DIR%\Managed" /MIR /NJH /NJS /NFL /NDL /NC /NS /NP >nul
-if %ERRORLEVEL% GEQ 8 (
+if errorlevel 8 (
     echo Error: Failed to refresh managed runtime payload in "%RUNTIME_TEMPLATE_DIR%".
     exit /b 1
 )

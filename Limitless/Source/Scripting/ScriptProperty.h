@@ -12,6 +12,7 @@ namespace Limitless
     {
         std::string Tag;
         std::string PrefabAssetKey;
+        std::string SceneEntityId;
     };
 
     struct Prefab

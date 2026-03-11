@@ -183,9 +183,14 @@ for (entt::entity entity : view)
 
 ## Scene model and loading
 
-- **One active scene per context.** The editor has a single open scene (optionally with an edit-time copy for Play Mode). The runtime (e.g. `GameLayer`) has a single active scene. There is no first-class **scene streaming** or **additive loading**: you cannot load a second scene “on top of” the current one or stream in chunks while keeping multiple scenes live.
-- **Transitions** are **replace**: `SceneManager::LoadScene(sceneIdentifier)` queues a request to replace the current scene with the requested one; the host consumes the request and loads the new scene (see `SceneManager.h` and `Docs/NATIVE_CPP_SCRIPTING_GUIDE.md`). `ReloadCurrentScene()` replaces the current scene with a fresh load of the same asset.
-- **Future: additive loading and streaming.** A possible extension would be to support multiple loaded scenes (e.g. a “main” scene plus additively loaded sub-scenes) or streaming (load/unload scene chunks or sectors while one logical level is active). That would require defining how entities from multiple scenes are merged or kept separate, how physics worlds and cameras are assigned, and how scripts refer to “the other” scene. Not implemented today.
+- **Editor authoring still centers on one open scene at a time.** The editor stores a single current authoring scene plus separate runtime clones when entering `Play` or `Simulate`.
+- **Runtime ownership is broader while playing.** The runtime/editor play-mode host can now keep more than one runtime scene alive through additive loading, active-scene switching, and scene unloading on top of the `SceneCollection` foundation.
+- **Transitions are no longer replace-only.** Runtime scene APIs can request:
+  - single-scene load
+  - additive load
+  - active-scene switch
+  - unload scene
+- **Streaming/multi-scene authoring UX is still evolving.** Editor-side authoring, tooling, and workflows are not yet a full Unity-style multi-scene editing experience even though the runtime model has moved beyond strict single-scene replacement.
 
 ## Extending
 

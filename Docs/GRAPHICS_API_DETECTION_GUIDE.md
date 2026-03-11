@@ -1,294 +1,258 @@
 # Graphics API Detection and Selection Guide
 
-## Overview
+This guide documents the current graphics API detection and selection code as it exists today.
 
-This document describes the engine's **graphics API selection framework**, and it clearly separates what is **implemented today** from what is **planned for the future**.
+## Current Reality
 
-### Status Legend (read this first)
+The engine currently ships with:
 
-- **Implemented**: The engine has working code paths used by the runtime today.
-- **Partially Implemented**: The framework exists, but behavior is conservative / placeholder in places.
-- **Future**: The API is present as a planned surface area, but the implementation is not complete yet.
+- OpenGL rendering and context creation
+- a graphics API detector/selector framework
+- stubbed future-facing entries for Vulkan, DirectX, and Metal
 
-### Current Reality (today)
+What that means in practice:
 
-- **Implemented:** Rendering and context creation are OpenGL-only (via SDL + `OpenGLContext`).
-- **Future:** Vulkan / DirectX / Metal contexts are not implemented yet. Selection can name them, but context creation will fall back to OpenGL.
-- **Partially Implemented:** Non-OpenGL detection is not implemented yet (the detector currently reports them as unsupported with an explicit message).
+- the actual runtime/backend path is **OpenGL-only**
+- non-OpenGL APIs can appear in priority lists and selection helpers
+- but non-OpenGL detection is not implemented today
+- and non-OpenGL context creation falls back to `OpenGLContext`
 
-**Key Design Principles:**
-- **Lightweight Detection**: The detector doesn't require SDL video subsystem or window creation
-- **Separation of Concerns**: Detection is separate from context creation
-- **Progressive Enhancement**: Basic detection first, detailed info after context creation
-- **Thread Safety**: All operations are thread-safe and idempotent
+## What Is Implemented Today
 
-## Features
+### OpenGL
 
-### Implemented Today
+Implemented today:
 
-- **OpenGL context creation**: Robust OpenGL context creation with fallback versions.
-- **Progressive enhancement for OpenGL details**: Vendor/renderer/version are updated after a real OpenGL context is created.
-- **Platform-specific priority lists**: Priority ordering exists per platform.
-- **Fallback behavior**: If a requested/selected API is not available, the engine falls back to OpenGL.
-- **Thread-safe initialization and preference**: `Initialize()` and preferred API control are thread-safe and idempotent.
-- **Debugging support**: You can generate a detailed detection report for troubleshooting.
+- `OpenGLContext`
+- SDL-based OpenGL context creation
+- fallback OpenGL version attempts during context creation
+- updating detector state with the actual OpenGL vendor/renderer/version after context creation
 
-### Partially Implemented Today
+`GraphicsAPIDetector::DetectOpenGL()` currently:
 
-- **“Lightweight detection” for OpenGL**: The detector currently assumes OpenGL is supported and uses conservative defaults until a real context is created (context creation is the real verification step).
-- **“Smart selection” criteria**: The selection API exists, but criteria-based selection and comparison output are placeholders.
+- assumes OpenGL support
+- seeds conservative default version data
+- marks OpenGL as supported/available
+- computes default capability flags from that assumed version
 
-### Future (Not Implemented Yet)
+That means OpenGL detection is not a real probe before context creation. The real verification step is whether the OpenGL context can actually be created.
 
-- **Vulkan detection** (real loader/device probing)
-- **DirectX detection** (DXGI / feature level probing)
-- **Metal detection** (MTLDevice probing)
-- **Vulkan / DirectX / Metal contexts** (actual runtime backends)
-- **Performance and feature comparisons** (runtime benchmarking / capability scoring)
+### Detector / Selector Framework
+
+Implemented today:
+
+- `GraphicsAPIDetector::Initialize()`
+- preferred API storage via `SetPreferredAPI()` / `GetPreferredAPI()` / `ClearPreferredAPI()`
+- platform priority lists
+- best-API lookup based on supported entries in the current detection results
+- detection reporting helpers
+
+Startup/config reality:
+
+- `Application` initializes `GraphicsAPIDetector` before window creation
+- `Window::CreateFromConfig()` reads `graphics.api` from config into `WindowProps::Api`
+- current startup does **not** automatically forward that config value into `GraphicsAPIDetector::SetPreferredAPI()`
+- `CreateGraphicsContext()` still chooses from detector state, not directly from `WindowProps::Api`
+
+### Context Factory Behavior
+
+`CreateGraphicsContext()` currently:
+
+- checks whether the detector has been initialized
+- asks `GraphicsAPIDetector::GetBestAPI()`
+- logs the selected API
+- always returns an `OpenGLContext` today
+
+Current outcomes:
+
+- if the detector is not initialized, the factory logs and returns `OpenGLContext`
+- if no supported API is found, the factory logs and returns `OpenGLContext`
+- if `OpenGL` is selected, it returns `OpenGLContext`
+- if `Vulkan`, `DirectX`, or `Metal` are selected, it still logs a warning and returns `OpenGLContext`
+
+## What Is Only Partial Today
+
+### API Selection
+
+The framework for selection exists, but it is still conservative/placeholder:
+
+- Windows priority list: `DirectX`, `Vulkan`, `OpenGL`
+- macOS priority list: `Metal`, `OpenGL`
+- Linux priority list: `Vulkan`, `OpenGL`
+
+Because only OpenGL is currently marked supported, `GetBestAPI()` effectively resolves to `OpenGL` today.
+
+### `GraphicsAPISelector`
+
+`GraphicsAPISelector` exists, but it is not a full decision engine yet.
+
+Current behavior:
+
+- `SelectAPI(criteria)` returns the first supported API
+- `GetRecommendation(criteria)` produces placeholder reasoning text
+- `GetPerformanceComparison()` returns `"Performance comparison not yet implemented"`
+- `GetFeatureComparison()` returns `"Feature comparison not yet implemented"`
+
+## What Is Not Implemented Today
+
+The following are present as framework surface area, but not implemented end-to-end:
+
+- real Vulkan detection
+- real DirectX detection
+- real Metal detection
+- Vulkan context creation
+- DirectX context creation
+- Metal context creation
+- criteria-based scoring for performance / compatibility / features / stability
+- runtime benchmarking/comparison output
+- runtime backend switching
 
 ## Supported Graphics APIs
 
-| API | Platform Support | Minimum Version | Status |
-|-----|-----------------|-----------------|---------|
-| OpenGL | All Platforms | 3.3+ | Implemented (context creation) / Partial (detection is conservative until a real context exists) |
-| Vulkan | Windows, Linux | 1.0+ | Future (detection + context not implemented yet) |
-| DirectX | Windows | 12+ | Future (detection + context not implemented yet) |
-| Metal | macOS | 2.0+ | Future (detection + context not implemented yet) |
+| API | Current Detection Status | Current Context Status | Current Runtime Status |
+|-----|--------------------------|------------------------|------------------------|
+| OpenGL | Assumed supported with conservative defaults until a real context exists | Implemented | Implemented |
+| Vulkan | Stubbed as unsupported with explicit error text | Not implemented | Not implemented |
+| DirectX | Stubbed as unsupported with explicit error text | Not implemented | Not implemented |
+| Metal | Stubbed as unsupported with explicit error text | Not implemented | Not implemented |
 
-## Quick Start
+## Initialization Flow
 
-### Basic Usage
+The current startup flow is:
 
-```cpp
-#include "Graphics/GraphicsAPIDetector.h"
+1. initialize `GraphicsAPIDetector`
+2. load config and parse `graphics.api` into `WindowProps::Api`
+3. create the SDL window / graphics context objects
+4. let `CreateGraphicsContext()` choose an API from detector state
+5. create the actual OpenGL context
+6. update the detector with real OpenGL version/vendor/renderer strings
 
-// Initialize the detection system (call once at application startup)
-GraphicsAPIDetector::Initialize();
+`GraphicsAPIDetector::Initialize()` is:
 
-// Get the best available graphics API
-auto bestAPI = GraphicsAPIDetector::GetBestAPI();
-if (bestAPI) {
-    GraphicsAPI selectedAPI = bestAPI.value();
-    std::cout << "Selected API: " << GraphicsAPIToString(selectedAPI) << std::endl;
-}
-```
+- thread-safe
+- idempotent
 
-### Advanced Usage
+Important implication:
 
-```cpp
-// Set a preferred graphics API (overrides automatic selection)
-GraphicsAPIDetector::SetPreferredAPI(GraphicsAPI::OpenGL);
+- the config key `graphics.api` is parsed and stored on the window side
+- but it does not currently become a true detector preference or enable a non-OpenGL backend
+- in practice, the runtime still resolves to OpenGL today
 
-// Get detailed information about all detected APIs
-auto detectionResults = GraphicsAPIDetector::GetDetectionResults();
-for (const auto& caps : detectionResults) {
-    std::cout << "API: " << GraphicsAPIToString(caps.api) << std::endl;
-    std::cout << "Version: " << caps.version.ToString() << std::endl;
-    std::cout << "Supported: " << (caps.isSupported ? "Yes" : "No") << std::endl;
-}
+## OpenGL Context Version Behavior
 
-// Get comprehensive detection report for debugging
-std::string report = GraphicsAPIDetector::GetDetectionReport();
-std::cout << report << std::endl;
-```
+`OpenGLContext::SetupAttributes()` currently:
 
-## Initialization
+- asks `GraphicsAPIDetector::GetBestSupportedOpenGLVersion()`
+- stores that requested version
+- sets SDL GL attributes
 
-The detection system must be initialized once at application startup:
+`GetBestSupportedOpenGLVersion()` currently returns a conservative result:
 
-```cpp
-// In Application::InternalInitialize() or similar startup code
-GraphicsAPIDetector::Initialize();
-```
+- `3.3`
 
-**Important**: The system is thread-safe and idempotent, so calling `Initialize()` multiple times is safe but unnecessary.
+During `OpenGLContext::Init()`:
 
-## Configuration
+- the engine first tries the requested version
+- if that fails, it retries lower fallback versions
+- current fallback list is:
+  - `3.3`
+  - `3.2`
+  - `3.1`
+  - `3.0`
+  - `2.1`
+  - `2.0`
 
-### Setting Preferred API
+After successful context creation, the engine reads:
 
-You can override the automatic API selection:
+- `GL_VENDOR`
+- `GL_RENDERER`
+- `GL_VERSION`
 
-```cpp
-// Force the use of OpenGL
-GraphicsAPIDetector::SetPreferredAPI(GraphicsAPI::OpenGL);
+and pushes that information back into `GraphicsAPIDetector::UpdateOpenGLInfo()`.
 
-// Check if a preferred API is set
-auto preferred = GraphicsAPIDetector::GetPreferredAPI();
-if (preferred) {
-    std::cout << "Preferred API: " << GraphicsAPIToString(preferred.value()) << std::endl;
-}
+## Usage Notes
 
-// Clear preferred API setting
-GraphicsAPIDetector::ClearPreferredAPI();
-```
+### Preferred API
 
-### Error Recovery
+You can set a preferred API with:
 
-The system includes robust error recovery:
+- `GraphicsAPIDetector::SetPreferredAPI(...)`
 
-```cpp
-// Check if detection system is initialized
-if (!GraphicsAPIDetector::IsInitialized()) {
-    std::cerr << "Graphics API Detection not initialized!" << std::endl;
-    return;
-}
+But today:
 
-// Validate API selection
-std::string errorMessage;
-if (!GraphicsAPISelector::ValidateSelection(GraphicsAPI::OpenGL, errorMessage)) {
-    std::cerr << "OpenGL validation failed: " << errorMessage << std::endl;
-}
-```
+- if the preferred API is unsupported, `GetBestAPI()` clears that preference
+- and the system falls back to the normal supported-API search
+- which still resolves to OpenGL with the current implementation
+- the `graphics.api` config key is **not** currently wired to call `SetPreferredAPI(...)` automatically
 
-## Integration with Graphics Context
+### Validation Helpers
 
-The graphics context creation automatically uses the detection system:
+These helpers are real:
 
-```cpp
-// This will automatically select the best available graphics API
-std::unique_ptr<GraphicsContext> context = CreateGraphicsContext();
-```
+- `IsAPISupported()`
+- `ValidateAPISelection()`
+- `MeetsRequirements()`
+- `GetUnsupportedReason()`
 
-The system will:
-1. Check if detection system is initialized
-2. Find the best available graphics API (respecting preferred API setting)
-3. Create the appropriate graphics context
-4. Fall back to OpenGL if no other APIs are available
-5. Provide detailed logging about the selection process
+But their answers are only as good as the current detector data.
 
-Important reality check:
+For non-OpenGL APIs, the result is currently based on stubbed unsupported entries.
+For OpenGL, the pre-context answer is conservative until a real context has been created.
 
-- `GraphicsAPIDetector` does **not** create a graphics context during detection.
-- For OpenGL, the detector provides **conservative defaults**; **successful context creation** is the real verification step.
-- For Vulkan/DirectX/Metal, detection currently returns **unsupported** with an explicit reason (until real probing/backends are implemented).
+## Diagnostics
 
-## OpenGL Context Creation
+Useful current helpers:
 
-The OpenGL context creation now includes robust fallback logic:
+- `GetDetectionResults()`
+- `GetDetectionReport()`
+- `GetAPIInfo(api)`
+- `GetUnsupportedReason(api)`
 
-```cpp
-// The system will try multiple OpenGL versions in order:
-// 1. Requested version (from detection)
-// 2. OpenGL 4.5, 4.4, 4.3, 4.2, 4.1, 4.0
-// 3. OpenGL 3.3, 3.2, 3.1, 3.0
-// 4. Throw exception if no version works
-```
+`GetDetectionReport()` currently includes:
 
-## Debugging and Diagnostics
-
-### Detection Report
-
-Get comprehensive information about the detection system:
-
-```cpp
-std::string report = GraphicsAPIDetector::GetDetectionReport();
-std::cout << report << std::endl;
-```
-
-This will output:
-- Initialization status
-- Preferred API setting
-- Detected APIs with versions and capabilities
-- Best API selection
-- Platform-specific priority list
-
-### Error Information
-
-Get detailed error information:
-
-```cpp
-// Check if an API is supported
-if (!GraphicsAPIDetector::IsAPISupported(GraphicsAPI::Vulkan)) {
-    std::string reason = GraphicsAPIDetector::GetUnsupportedReason(GraphicsAPI::Vulkan);
-    std::cout << "Vulkan not supported: " << reason << std::endl;
-}
-```
-
-## Performance Considerations
-
-- The detection system is designed to be fast and lightweight.
-- Results are cached after initialization.
-- Detection only occurs once unless explicitly refreshed.
-- Detection does **not** require SDL video/window creation.
-- Thread-safe operations use minimal locking.
-
-## Production Readiness
-
-### Production Ready Features
-
-1. **Thread Safety**: All operations are thread-safe.
-2. **Error Recovery**: Robust fallback logic for context creation.
-3. **Configuration**: User can override automatic selection.
-4. **Debugging**: Diagnostic report + explicit unsupported reasons for future APIs.
-5. **OpenGL Support**: Production-ready OpenGL **context creation** (capability details are finalized after context creation).
-6. **Initialization**: Proper initialization at application startup.
-
-### Future Enhancements
-
-1. **Real Vulkan Detection**: Vulkan loader/device probing and capability enumeration
-2. **Real DirectX Detection**: Adapter enumeration and feature-level probing (DX12)
-3. **Real Metal Detection**: MTLDevice probing and capability mapping
-4. **Vulkan Context**: Full Vulkan context + swapchain implementation
-5. **DirectX Context**: Full DirectX 12 context + swapchain implementation
-6. **Metal Context**: Full Metal context + CAMetalLayer integration
-7. **Selection Scoring**: Real selection logic based on criteria (features/stability/perf)
-8. **Configuration Persistence**: Save and load API preferences
-9. **Dynamic Switching**: Runtime API switching (only if architecture supports it)
+- initialization status
+- preferred API
+- detected API entries
+- best API result
+- current platform priority list
 
 ## Troubleshooting
 
-### Common Issues
+### Preferred API is ignored
 
-1. **Detection Not Initialized**: Ensure `GraphicsAPIDetector::Initialize()` is called at application startup
-2. **OpenGL Detection Fails**: Check if OpenGL drivers are installed and up to date
-3. **Context Creation Fails**: The system will automatically try lower OpenGL versions
-4. **Preferred API Not Used**: Check if the preferred API is actually supported on the system
+Check whether the preferred API is actually reported as supported.
 
-### Debug Information
+Today, non-OpenGL APIs are reported unsupported, so they will not survive `GetBestAPI()`.
 
-Enable debug logging to get detailed information about the detection process:
+Also note:
 
-```cpp
-// The system will log detection results automatically
-// Check the console output for detailed information
-// Use GetDetectionReport() for comprehensive diagnostics
-```
+- changing `graphics.api` in config changes the parsed window property
+- but it does not currently create a real Vulkan/DirectX/Metal path or set detector preference automatically
+- so config changes alone still do not bypass the current OpenGL-only runtime/backend
 
-## API Reference
+### Detection says OpenGL is supported but context creation fails
 
-### GraphicsAPIDetector
+That can happen.
 
-- `Initialize()`: Initialize the detection system (thread-safe, idempotent)
-- `SetPreferredAPI(GraphicsAPI)`: Set preferred graphics API
-- `GetPreferredAPI()`: Get preferred graphics API setting
-- `ClearPreferredAPI()`: Clear preferred API setting
-- `DetectAvailableAPIs()`: Detect all available APIs
-- `GetBestAPI()`: Get the best available API (respects preferred setting)
-- `GetAPI(GraphicsAPI)`: Get specific API information
-- `IsAPISupported(GraphicsAPI)`: Check if API is supported
-- `GetRecommendedAPI()`: Get platform-recommended API
-- `GetFallbackAPI()`: Get fallback API
-- `GetAPIPriorityList()`: Get platform-specific priority list
-- `ValidateAPISelection(GraphicsAPI)`: Validate API selection
-- `GetAPIInfo(GraphicsAPI)`: Get detailed API information
-- `GetSystemRequirements(GraphicsAPI)`: Get system requirements
-- `MeetsRequirements(GraphicsAPI)`: Check if system meets requirements
-- `GetUnsupportedReason(GraphicsAPI)`: Get unsupported reason
-- `Refresh()`: Refresh detection results
-- `IsInitialized()`: Check if detection system is initialized
-- `GetDetectionResults()`: Get all detection results
-- `GetDetectionReport()`: Get comprehensive detection report
+The detector currently assumes OpenGL support before a real context exists. Actual support is confirmed only when SDL/OpenGL context creation succeeds.
 
-### GraphicsAPISelector
+### Detection report shows placeholder OpenGL vendor/renderer
 
-- `SelectAPI(SelectionCriteria)`: Select API based on criteria
-- `SelectAPI(priorityList)`: Select API from custom priority list
-- `GetRecommendation(SelectionCriteria)`: Get detailed recommendation
-- `ValidateSelection(GraphicsAPI, errorMessage)`: Validate selection
-- `GetPerformanceComparison()`: Get performance comparison
-- `GetFeatureComparison()`: Get feature comparison
+That is expected before a real OpenGL context is created.
 
-## Conclusion
+The detector starts with placeholder values and only receives real vendor/renderer/version strings after successful context initialization.
 
-The graphics API detection and selection system is now **production-ready** for OpenGL with improved error handling, thread safety, and configuration options. It provides a robust foundation for cross-platform graphics development while maintaining the flexibility to add support for other graphics APIs in the future. 
+## Current Scope Summary
+
+- graphics API framework exists
+- OpenGL runtime/backend path exists
+- non-OpenGL APIs are framework placeholders today
+- selector criteria/comparison output is still placeholder logic
+- context factory always returns `OpenGLContext` today
+
+## Related Files
+
+- `Limitless/Source/Graphics/GraphicsAPIDetector.{h,cpp}`
+- `Limitless/Source/Graphics/GraphicsContext.{h,cpp}`
+- `Limitless/Source/Graphics/OpenGL/OpenGLContext.cpp`
+- `Limitless/Source/Graphics/Renderer.cpp`

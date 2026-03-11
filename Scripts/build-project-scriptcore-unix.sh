@@ -111,7 +111,8 @@ fi
 
 # --- Generate host glue source ---
 GLUE_CPP="$INTERMEDIATE_DIR/ScriptCoreHostGlue.cpp"
-cat > "$GLUE_CPP" <<'EOF'
+GLUE_CPP_TMP="${GLUE_CPP}.tmp"
+cat > "$GLUE_CPP_TMP" <<'EOF'
 #include "ScriptCoreRegistration.h"
 #include "Scene/SceneManager.h"
 #include "Scripting/Debug.h"
@@ -224,9 +225,18 @@ extern "C" LT_SCRIPTCORE_API void LT_SetScriptInstantiatePrefabBridge(Limitless:
     Limitless::ScriptableEntity::SetInstantiatePrefabBridgeCallback(callback);
 }
 EOF
+if [[ ! -f "$GLUE_CPP" ]] || ! cmp -s "$GLUE_CPP_TMP" "$GLUE_CPP"; then
+    mv "$GLUE_CPP_TMP" "$GLUE_CPP"
+else
+    rm -f "$GLUE_CPP_TMP"
+fi
 
 # --- Discover source files ---
-mapfile -t SOURCE_FILES < <(find "$GENERATED_DIR" -type f -name '*.cpp' ! -name 'ScriptCoreHostGlue.cpp')
+SOURCE_FILES=()
+while IFS= read -r src; do
+    [[ -z "$src" ]] && continue
+    SOURCE_FILES+=("$src")
+done < <(find "$GENERATED_DIR" -type f -name '*.cpp' ! -name 'ScriptCoreHostGlue.cpp' -print | LC_ALL=C sort)
 if [[ "$SYSTEM_NAME" == "macosx" ]]; then
     OUTPUT_EXTENSION="dylib"
     CXX_BIN="${CXX:-clang++}"
@@ -240,7 +250,12 @@ OUTPUT_LIB="$OUTPUT_DIR/libScriptCore.${OUTPUT_EXTENSION}"
 # --- Helper: convert a source path to a stable .o / .d filename ---
 safe_obj_name() {
     local src_path="$1"
-    local rel_path="${src_path#"$GENERATED_DIR"/}"
+    local rel_path
+    if [[ "$src_path" == "$GENERATED_DIR/"* ]]; then
+        rel_path="${src_path#"$GENERATED_DIR"/}"
+    else
+        rel_path="$(basename "$src_path")"
+    fi
     # Replace path separators and spaces with underscores
     local safe_name="${rel_path//\//_}"
     safe_name="${safe_name// /_}"
@@ -260,15 +275,25 @@ COMMON_CXX_FLAGS=(-fPIC -std=c++20 -O2 -MMD -I"$SDK_INCLUDE_DIR" -I"$SDK_VENDOR_
 
 echo "Building project ScriptCore module (incremental)..."
 
+if [[ "${#SOURCE_FILES[@]}" -eq 0 ]]; then
+    DUMMY_CPP="$INTERMEDIATE_DIR/DummyScriptCoreTranslationUnit.cpp"
+    DUMMY_CPP_TMP="${DUMMY_CPP}.tmp"
+    printf '%s\n' '// Auto-generated fallback translation unit.' > "$DUMMY_CPP_TMP"
+    if [[ ! -f "$DUMMY_CPP" ]] || ! cmp -s "$DUMMY_CPP_TMP" "$DUMMY_CPP"; then
+        mv "$DUMMY_CPP_TMP" "$DUMMY_CPP"
+    else
+        rm -f "$DUMMY_CPP_TMP"
+    fi
+    SOURCE_FILES+=("$DUMMY_CPP")
+fi
+
 compiled_count=0
 skipped_count=0
 failed_count=0
 obj_files=()
 
-# Compile the host glue (always — it's generated fresh each run)
 GLUE_OBJ="$OBJ_DIR/ScriptCoreHostGlue.o"
 GLUE_DEP="$DEP_DIR/ScriptCoreHostGlue.d"
-"$CXX_BIN" "${COMMON_CXX_FLAGS[@]}" -MF "$GLUE_DEP" -c "$GLUE_CPP" -o "$GLUE_OBJ"
 obj_files+=("$GLUE_OBJ")
 
 # needs_compile <source_path> <obj_path> <dep_path>
@@ -302,6 +327,18 @@ needs_compile() {
     return 1
 }
 
+if needs_compile "$GLUE_CPP" "$GLUE_OBJ" "$GLUE_DEP"; then
+    if "$CXX_BIN" "${COMMON_CXX_FLAGS[@]}" -MF "$GLUE_DEP" -c "$GLUE_CPP" -o "$GLUE_OBJ"; then
+        compiled_count=$((compiled_count + 1))
+    else
+        echo "Error: compilation failed for $(basename "$GLUE_CPP")"
+        failed_count=$((failed_count + 1))
+        rm -f "$GLUE_OBJ" "$GLUE_DEP"
+    fi
+else
+    skipped_count=$((skipped_count + 1))
+fi
+
 # Compile each user script source
 for src in "${SOURCE_FILES[@]}"; do
     obj_name="$(safe_obj_name "$src")"
@@ -329,15 +366,6 @@ if [[ "$failed_count" -gt 0 ]]; then
     exit 1
 fi
 
-# Handle empty source list — create dummy translation unit
-if [[ "${#SOURCE_FILES[@]}" -eq 0 ]]; then
-    DUMMY_CPP="$INTERMEDIATE_DIR/DummyScriptCoreTranslationUnit.cpp"
-    echo "// Auto-generated fallback translation unit." > "$DUMMY_CPP"
-    DUMMY_OBJ="$OBJ_DIR/DummyScriptCoreTranslationUnit.o"
-    "$CXX_BIN" "${COMMON_CXX_FLAGS[@]}" -c "$DUMMY_CPP" -o "$DUMMY_OBJ"
-    obj_files+=("$DUMMY_OBJ")
-fi
-
 # --- Prune stale .o files whose source no longer exists ---
 pruned=0
 for existing_obj in "$OBJ_DIR"/*.o; do
@@ -360,12 +388,29 @@ if [[ "$pruned" -gt 0 ]]; then
     echo "Pruned $pruned stale object file(s)."
 fi
 
-# --- Link all object files into shared library ---
-echo "Linking libScriptCore.${OUTPUT_EXTENSION}..."
-"$CXX_BIN" -shared -fPIC \
-    "${obj_files[@]}" \
-    -L"$SDK_LIB_DIR" -lLimitless \
-    -o "$OUTPUT_LIB"
+link_required=0
+if [[ "$compiled_count" -ne 0 || "$pruned" -ne 0 ]]; then
+    link_required=1
+elif [[ ! -f "$OUTPUT_LIB" ]]; then
+    link_required=1
+else
+    for obj_path in "${obj_files[@]}"; do
+        if [[ ! -f "$obj_path" || "$obj_path" -nt "$OUTPUT_LIB" ]]; then
+            link_required=1
+            break
+        fi
+    done
+fi
+
+if [[ "$link_required" -eq 0 ]]; then
+    echo "libScriptCore.${OUTPUT_EXTENSION} is up-to-date; skipping relink."
+else
+    echo "Linking libScriptCore.${OUTPUT_EXTENSION}..."
+    "$CXX_BIN" -shared -fPIC \
+        "${obj_files[@]}" \
+        -L"$SDK_LIB_DIR" -lLimitless \
+        -o "$OUTPUT_LIB"
+fi
 
 if [[ ! -f "$MANAGED_BUILD_SCRIPT" ]]; then
     echo "Error: Managed runtime build script not found: $MANAGED_BUILD_SCRIPT"

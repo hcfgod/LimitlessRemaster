@@ -1,16 +1,27 @@
 # LimitlessRemaster
 
-LimitlessRemaster is a C++20 game engine and editor focused on 2D workflows.  
-It includes a Unity-style editor, Scene/ECS runtime (EnTT), Renderer2D on OpenGL, asset import/versioning, native C++ scripting (ScriptCore), audio, input actions, and cross-platform build/test pipelines.
+LimitlessRemaster is a C++20 game engine and editor focused on 2D-first workflows with an expanding Unity-style authoring model.
+
+Current major areas include:
+
+- Unity-style editor workflow
+- scene/ECS runtime on EnTT
+- OpenGL-based 2D renderer
+- asset import/versioning with `.meta` GUIDs
+- native C++ scripting through `ScriptCore`
+- managed C# scripting through Coral/CoreCLR payload staging
+- animation, UI, audio, tilemaps, input actions, and 2D physics
+- cross-platform build/test/export tooling
 
 ## Current Status
 
-- Editor-first workflow with Play/Simulate, scene editing, inspector, hierarchy, project panel, and diagnostics.
-- Rendering backend in production is OpenGL.
-- 2D gameplay stack is implemented: scene/ECS, sprites, tilemaps, animation, UI, audio, input actions, and physics.
-- Physics2D supports multiple worlds per scene (`WorldCount` + per-body `PhysicsWorldSlot`).
-- Asset pipeline supports `.meta` GUIDs, import/reimport, hot reload, and serialization version migration.
-- Native script runtime is C++ via ScriptCore DLL loading and host bridge callbacks.
+- Editor-first workflow with scene hierarchy, inspector, project browser, diagnostics, layouts, and session persistence.
+- Play, Simulate, Pause, prefab editing, and runtime scene transitions are implemented.
+- The Project browser supports grid browsing plus compact list mode at scale `0.0`.
+- Physics2D supports multiple worlds per scene via `WorldCount` and per-body `PhysicsWorldSlot`.
+- Audio supports global, 2D spatial, and 3D spatial playback.
+- Native and managed scripting coexist; managed scripting does not replace native scripting.
+- Rendering backend in production remains OpenGL.
 
 ## Build
 
@@ -29,13 +40,7 @@ Scripts\build-windows.bat Debug x64
 Scripts\build-windows.bat Dist x64
 ```
 
-Typical output directory format:
-
-```text
-Build/<cfg.shortname>-windows-<platform>/
-```
-
-Examples:
+Typical output examples:
 
 - `Build/debug_x64-windows-x64/`
 - `Build/dist_x64-windows-x64/`
@@ -47,36 +52,27 @@ Scripts/build-unix.sh --config Debug --compiler gcc
 Scripts/build-unix.sh --config Release --compiler clang
 ```
 
-Typical output directory format:
-
-```text
-Build/<cfg.shortname>-<system>-<platform>/
-```
-
-Examples:
+Typical output examples:
 
 - `Build/debug_x64-linux-x64/`
 - `Build/debug_arm64-macosx-ARM64/`
 
-The Unix build script checks dependencies and can install/build missing packages (SDL3, Box2D, and related system libs) based on platform/package manager availability.
+The Unix build script can validate/install required dependencies depending on host platform and package-manager availability.
 
-### Premake Direct (Advanced)
+### Premake Direct
 
 ```bash
-# From repo root
-Vendor/Premake/premake5 vs2022   # Windows solution
-Vendor/Premake/premake5 gmake2   # Linux/macOS makefiles
+Vendor/Premake/premake5 vs2022
+Vendor/Premake/premake5 gmake2
 ```
 
 ## Run
 
 ### Editor
 
-Start project in Premake/workspace is `Editor`.
-
 - Windows: `Build/debug_x64-windows-x64/Editor/Editor.exe`
 - Linux: `./Build/debug_x64-linux-x64/Editor/Editor`
-- macOS: `./Build/debug_x64-macosx-x64/Editor/Editor` (or ARM64 folder on Apple Silicon)
+- macOS: `./Build/debug_x64-macosx-x64/Editor/Editor`
 
 ### Runtime Sample
 
@@ -88,11 +84,19 @@ Start project in Premake/workspace is `Editor`.
 - Windows: `Build\debug_x64-windows-x64\Test\Test.exe --success`
 - Linux/macOS: `./Build/debug_x64-<system>-x64/Test/Test --success`
 
-## ScriptCore Workflow
+## Scripting Overview
 
-- `ScriptCore` builds as a shared library and is output beside the Editor binary.
-- The editor also supports project-side ScriptCore loading for gameplay scripts compiled in the target project.
-- If component layouts or script bridge APIs change, rebuild ScriptCore to avoid ABI/layout mismatch issues.
+### Native C++
+
+- Built through `ScriptCore`
+- Project-authored native sources live under project `Assets/`
+- Editor supports creation/edit/build/hot-reload flows
+
+### Managed C#
+
+- Contract/API assembly lives under `Managed/Limitless.Managed`
+- Runtime payload is staged into `Managed/`
+- Project-authored `.cs` files under `Assets/` can be generated/built/discovered through the editor workflow
 
 ## Documentation Map
 
@@ -121,6 +125,7 @@ Start project in Premake/workspace is `Editor`.
 - `Docs/PHYSICS2D_BUILD_GUIDE.md`
 - `Docs/PHYSICS2D_DESIGN.md`
 - `Docs/NATIVE_CPP_SCRIPTING_GUIDE.md`
+- `Docs/MANAGED_CSHARP_SCRIPTING_GUIDE.md`
 - `Docs/INPUT_GUIDE.md`
 - `Docs/AUDIO_SYSTEM_GUIDE.md`
 - `Docs/ANIMATION_2D_SYSTEM_GUIDE.md`
@@ -143,12 +148,13 @@ Start project in Premake/workspace is `Editor`.
 
 ## Known Limitations
 
-- Rendering backend is OpenGL in production; Vulkan/DirectX/Metal are not implemented end-to-end yet.
-- Scene loading model is currently single active scene per context (no first-class additive/streaming runtime model yet).
-- GPU telemetry in performance monitor remains limited without vendor-specific integration.
-- Some optional subsystems (for example FFmpeg integration on Windows) depend on local vendor/binary availability.
+- OpenGL is still the only production-ready rendering backend.
+- Editor authoring is still centered on one open scene at a time, even though runtime scene ownership is broader while playing.
+- GPU telemetry remains limited without deeper vendor-specific integration.
+- Some optional dependencies, such as FFmpeg on Windows, still depend on local binary/vendor availability.
 
 ## License
 
 This project is proprietary and closed-source. Public/open contributions are not accepted at this time.
+
 See `LICENSE` for terms.

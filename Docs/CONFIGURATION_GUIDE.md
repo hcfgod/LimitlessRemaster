@@ -9,7 +9,16 @@
 - Optional hot reload via `FileWatcher`
 - Key-level schema validation and change callbacks
 
-When using the engine’s entry point (`Limitless/Source/Core/EntryPoint.h`), the engine resolves and loads `config.json` (current working directory first, then executable directory) and initializes `ConfigManager` before calling your `CreateApplication()`. In that case you only need `GetInstance()` and Get/Set; you do not call `Initialize()` yourself. For custom or tooling use without the engine main, call `Initialize(path)` as below.
+When using the engine’s entry point (`Limitless/Source/Core/EntryPoint.h`), the engine resolves and loads `config.json` before calling your `CreateApplication()`.
+
+Current resolution order is:
+
+- **Distribution builds**: executable directory first, then current working directory
+- **Non-distribution builds**: current working directory first, then executable directory
+
+The resolved path is then passed to `ConfigManager::Initialize(...)` as an absolute path so file I/O and hot reload watch the intended file deterministically.
+
+In that entry-point path, you usually only need `GetInstance()` and Get/Set; you do not call `Initialize()` yourself. For custom or tooling use without the engine main, call `Initialize(path)` as below.
 
 ## Guarantees (Current Behavior)
 
@@ -54,12 +63,12 @@ config.Initialize("config.json");
 // Write
 config.SetValue(Limitless::Config::Window::WIDTH, 1920u);
 config.SetValue(Limitless::Config::Window::HEIGHT, 1080u);
-config.SetValue("graphics.vsync", true);
+config.SetValue(Limitless::Config::Window::VSYNC, true);
 
 // Read with defaults
 uint32_t width  = config.GetValue<uint32_t>(Limitless::Config::Window::WIDTH, 1280u);
 uint32_t height = config.GetValue<uint32_t>(Limitless::Config::Window::HEIGHT, 720u);
-bool vsync      = config.GetValue<bool>("graphics.vsync", true);
+bool vsync      = config.GetValue<bool>(Limitless::Config::Window::VSYNC, true);
 ```
 
 ## Configuration File Layout
@@ -142,6 +151,12 @@ config.EnableAsyncHotReload(true);
 
 When hot reload triggers, the manager updates stored values and can dispatch change callbacks. (See the hot reload guide for end-to-end integration details.)
 
+Important threading note:
+
+- the file watcher triggers reload work from a background thread
+- legacy `RegisterChangeCallback(...)` handlers run inline on that calling thread
+- main-thread-sensitive work (for example window mutation) must be deferred or queued back to the main thread
+
 ## Validation (Schema)
 
 You can register key-level validation:
@@ -171,6 +186,11 @@ config.RegisterAsyncChangeCallback("window.width",
     });
 ```
 
+Current behavior:
+
+- the async callback thread is started lazily when async callbacks are first registered
+- async callbacks are queued through the config manager's internal lock-free callback queue
+
 ### Legacy (sync) callbacks
 
 Synchronous callbacks are supported for backwards compatibility:
@@ -182,6 +202,28 @@ config.RegisterChangeCallback("logging.level",
         LT_INFO("Legacy callback: {}", key);
     });
 ```
+
+Current behavior:
+
+- legacy callbacks execute immediately on the thread performing the write/reload
+- during file-watch hot reload, that may be the file watcher thread rather than the main thread
+
+## Batch Updates
+
+`ConfigManager` supports callback deferral across grouped writes:
+
+```cpp
+config.BeginBatchUpdate();
+config.SetValue(Limitless::Config::Window::WIDTH, 1600u);
+config.SetValue(Limitless::Config::Window::HEIGHT, 900u);
+config.EndBatchUpdate();
+```
+
+Current behavior:
+
+- writes still update the stored values immediately
+- callback notifications are queued while the batch is active
+- `EndBatchUpdate()` flushes the pending notifications
 
 ## Recommended Keys
 

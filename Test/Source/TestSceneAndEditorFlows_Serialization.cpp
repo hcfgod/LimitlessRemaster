@@ -128,7 +128,10 @@ TEST_SUITE("Scene And Editor Flows")
         scriptEntry.Enabled = true;
         scriptEntry.RuntimeInitialized = true;
         scriptEntry.RuntimeUpdateCount = 123;
-        scriptEntry.ExposedProperties["FollowTarget"] = Limitless::ScriptEntityReference{ "Parent" };
+        Limitless::ScriptEntityReference followTargetReference{};
+        followTargetReference.Tag = "Parent";
+        followTargetReference.SceneEntityId = scene.GetEntityPersistentId(parent);
+        scriptEntry.ExposedProperties["FollowTarget"] = followTargetReference;
 
         auto clone = scene.Clone();
         REQUIRE(clone != nullptr);
@@ -241,6 +244,7 @@ TEST_SUITE("Scene And Editor Flows")
         if (clonedFollowTarget == nullptr)
             return;
         CHECK(clonedFollowTarget->Tag == "Parent");
+        CHECK(clonedFollowTarget->SceneEntityId == clone->GetEntityPersistentId(clonedParent));
         CHECK(clonedScript.RuntimeInitialized == false);
         CHECK(clonedScript.RuntimeUpdateCount == 0);
 
@@ -474,7 +478,10 @@ TEST_SUITE("Scene And Editor Flows")
         auto& scriptEntry = AttachScriptEntry(scene, hud);
         scriptEntry.ScriptClassName = "HudScript";
         scriptEntry.ScriptAssetRelativePath = "Gameplay/Ui/HudScript";
-        scriptEntry.ExposedProperties["FollowTarget"] = Limitless::ScriptEntityReference{ "Root" };
+        Limitless::ScriptEntityReference followTargetReference{};
+        followTargetReference.Tag = "Root";
+        followTargetReference.SceneEntityId = scene.GetEntityPersistentId(root);
+        scriptEntry.ExposedProperties["FollowTarget"] = followTargetReference;
         scriptEntry.ExposedProperties["DisplayName"] = std::string("HudLabel");
         scriptEntry.ExposedProperties["EnemyPrefab"] = Limitless::Prefab{ "Assets/Prefabs/Enemies/BasicEnemy.prefab.json" };
 
@@ -604,6 +611,7 @@ TEST_SUITE("Scene And Editor Flows")
         if (loadedFollowTarget == nullptr)
             return;
         CHECK(loadedFollowTarget->Tag == "Root");
+        CHECK(loadedFollowTarget->SceneEntityId == loadedScene.GetEntityPersistentId(loadedRoot));
         const bool hasLoadedEnemyPrefab = loadedScript.ExposedProperties.contains("EnemyPrefab");
         REQUIRE(hasLoadedEnemyPrefab);
         if (!hasLoadedEnemyPrefab)

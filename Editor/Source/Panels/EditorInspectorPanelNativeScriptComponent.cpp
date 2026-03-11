@@ -180,6 +180,21 @@ namespace Limitless::EditorInspectorPanel
             return entt::null;
         }
 
+        entt::entity ResolveSceneEntityReference(const Scene* scene, const ScriptEntityReference& value)
+        {
+            if (!scene)
+                return entt::null;
+
+            if (!value.SceneEntityId.empty())
+            {
+                const entt::entity resolvedEntity = scene->FindEntityByPersistentId(value.SceneEntityId);
+                if (resolvedEntity != entt::null && scene->IsValid(resolvedEntity))
+                    return resolvedEntity;
+            }
+
+            return FindFirstEntityByTag(scene, value.Tag);
+        }
+
         int CountEntitiesByTag(const Scene* scene, const std::string& tag)
         {
             if (!scene || tag.empty())
@@ -207,14 +222,20 @@ namespace Limitless::EditorInspectorPanel
                 return EditorAssetNaming::GetAssetDisplayNameFromAssetKey(value.PrefabAssetKey) + " (Prefab)";
             }
 
-            if (value.Tag.empty())
+            if (value.Tag.empty() && value.SceneEntityId.empty())
                 return "None (Entity)";
 
-            const entt::entity resolvedEntity = FindFirstEntityByTag(scene, value.Tag);
+            const entt::entity resolvedEntity = ResolveSceneEntityReference(scene, value);
             if (!scene || resolvedEntity == entt::null)
-                return value.Tag + " (Missing)";
+            {
+                if (!value.Tag.empty())
+                    return value.Tag + " (Missing)";
+                return "Missing Entity";
+            }
 
-            return value.Tag + "##" + std::to_string(static_cast<uint32_t>(resolvedEntity));
+            const auto* tagComponent = scene->GetRegistry().try_get<TagComponent>(resolvedEntity);
+            const std::string displayName = (tagComponent && !tagComponent->Tag.empty()) ? tagComponent->Tag : "Entity";
+            return displayName + "##" + std::to_string(static_cast<uint32_t>(resolvedEntity));
         }
 
         std::vector<std::string> BuildPrefabReferencePickerKeys()
@@ -511,7 +532,9 @@ namespace Limitless::EditorInspectorPanel
             if (const auto* entityValue = std::get_if<ScriptEntityReference>(&left))
             {
                 const auto& rightValue = std::get<ScriptEntityReference>(right);
-                return entityValue->Tag == rightValue.Tag && entityValue->PrefabAssetKey == rightValue.PrefabAssetKey;
+                return entityValue->Tag == rightValue.Tag &&
+                       entityValue->PrefabAssetKey == rightValue.PrefabAssetKey &&
+                       entityValue->SceneEntityId == rightValue.SceneEntityId;
             }
             if (const auto* prefabValue = std::get_if<Prefab>(&left))
                 return prefabValue->AssetKey == std::get<Prefab>(right).AssetKey;
@@ -647,10 +670,13 @@ namespace Limitless::EditorInspectorPanel
                 }
                 else if (auto* entityValue = std::get_if<ScriptEntityReference>(&propertyValue))
                 {
-                    auto assignEntityReference = [&](const std::string& tagValue, const std::string& prefabAssetKeyValue) {
+                    auto assignEntityReference = [&](const std::string& tagValue,
+                                                     const std::string& prefabAssetKeyValue,
+                                                     const std::string& sceneEntityIdValue = std::string{}) {
                         ScriptEntityReference referenceValue{};
                         referenceValue.Tag = tagValue;
                         referenceValue.PrefabAssetKey = prefabAssetKeyValue;
+                        referenceValue.SceneEntityId = sceneEntityIdValue;
                         return MutateScriptComponent(scene,
                                                      scriptComponentEntity,
                                                      selectedEntity,
@@ -664,7 +690,9 @@ namespace Limitless::EditorInspectorPanel
                     const std::string previewLabel = BuildEntityReferencePreviewLabel(scene, *entityValue);
                     if (ImGui::BeginCombo("##ScriptPropertyValue", previewLabel.c_str()))
                     {
-                        const bool noneSelected = entityValue->Tag.empty() && entityValue->PrefabAssetKey.empty();
+                        const bool noneSelected = entityValue->Tag.empty() &&
+                                                  entityValue->PrefabAssetKey.empty() &&
+                                                  entityValue->SceneEntityId.empty();
                         if (ImGui::Selectable("None (Entity/Prefab)", noneSelected))
                             (void)assignEntityReference({}, {});
                         if (noneSelected)
@@ -679,11 +707,14 @@ namespace Limitless::EditorInspectorPanel
                             for (entt::entity candidateEntity : entityView)
                             {
                                 const auto& candidateTag = entityView.get<TagComponent>(candidateEntity).Tag;
-                                const bool isSelected = entityValue->PrefabAssetKey.empty() && candidateTag == entityValue->Tag;
+                                const std::string candidateId = scene->GetEntityPersistentId(candidateEntity);
+                                const bool isSelected = entityValue->PrefabAssetKey.empty() &&
+                                    ((!entityValue->SceneEntityId.empty() && entityValue->SceneEntityId == candidateId) ||
+                                     (entityValue->SceneEntityId.empty() && candidateTag == entityValue->Tag));
                                 std::string optionLabel = candidateTag.empty() ? "Entity" : candidateTag;
                                 optionLabel += "##EntityReferenceOption_" + std::to_string(static_cast<uint32_t>(candidateEntity));
                                 if (ImGui::Selectable(optionLabel.c_str(), isSelected))
-                                    (void)assignEntityReference(candidateTag, {});
+                                    (void)assignEntityReference(candidateTag, {}, candidateId);
                                 if (isSelected)
                                     ImGui::SetItemDefaultFocus();
                             }
@@ -716,7 +747,7 @@ namespace Limitless::EditorInspectorPanel
                                 if (scene->IsValid(droppedEntity))
                                 {
                                     if (const auto* tagComponent = scene->GetRegistry().try_get<TagComponent>(droppedEntity))
-                                        (void)assignEntityReference(tagComponent->Tag, {});
+                                        (void)assignEntityReference(tagComponent->Tag, {}, scene->GetEntityPersistentId(droppedEntity));
                                 }
                             }
                         }
@@ -732,7 +763,7 @@ namespace Limitless::EditorInspectorPanel
                         ImGui::EndDragDropTarget();
                     }
 
-                    if (!entityValue->Tag.empty() || !entityValue->PrefabAssetKey.empty())
+                    if (!entityValue->Tag.empty() || !entityValue->PrefabAssetKey.empty() || !entityValue->SceneEntityId.empty())
                     {
                         ImGui::SameLine();
                         if (ImGui::Button("X##ClearEntityReference"))
@@ -740,10 +771,13 @@ namespace Limitless::EditorInspectorPanel
                     }
 
                     const int matchingTagCount = CountEntitiesByTag(scene, entityValue->Tag);
-                    if (entityValue->PrefabAssetKey.empty() && !entityValue->Tag.empty() && matchingTagCount > 1)
+                    if (entityValue->PrefabAssetKey.empty() &&
+                        entityValue->SceneEntityId.empty() &&
+                        !entityValue->Tag.empty() &&
+                        matchingTagCount > 1)
                     {
                         ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
-                                           "Tag '%s' matches %d entities. Entity references by tag require unique tags.",
+                                           "Legacy tag-only ref '%s' matches %d entities. Reassign it to store a stable scene entity id.",
                                            entityValue->Tag.c_str(),
                                            matchingTagCount);
                     }

@@ -1229,6 +1229,7 @@ namespace Limitless
             DeserializedEntityInfo info;
             const std::string tag = entry.value("Tag", "Entity");
             info.Entity = scene->CreateEntity(tag);
+            scene->SetEntityPersistentId(info.Entity, entry.value("EntityId", std::string{}));
             if (auto* tagComponent = scene->GetRegistry().try_get<TagComponent>(info.Entity))
                 tagComponent->Enabled = entry.value("EntityEnabled", true);
             auto& transform = scene->GetRegistry().get<TransformComponent>(info.Entity);

@@ -38,6 +38,58 @@ function Copy-IfExists {
     Copy-Item -LiteralPath $Source -Destination $Destination -Force
 }
 
+function Get-LatestWriteTimeUtc {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Paths
+    )
+
+    $latestTime = [datetime]::MinValue
+    $latestPath = ""
+    foreach ($path in $Paths) {
+        if (!(Test-Path -LiteralPath $path)) {
+            continue
+        }
+
+        $item = Get-Item -LiteralPath $path
+        if ($item -is [System.IO.DirectoryInfo]) {
+            $files = Get-ChildItem -LiteralPath $path -Recurse -File -ErrorAction SilentlyContinue
+            foreach ($file in $files) {
+                if ($file.LastWriteTimeUtc -gt $latestTime) {
+                    $latestTime = $file.LastWriteTimeUtc
+                    $latestPath = $file.FullName
+                }
+            }
+        }
+        elseif ($item.LastWriteTimeUtc -gt $latestTime) {
+            $latestTime = $item.LastWriteTimeUtc
+            $latestPath = $item.FullName
+        }
+    }
+
+    return @{
+        Time = $latestTime
+        Path = $latestPath
+    }
+}
+
+function Assert-BuildArtifactUpToDate {
+    param(
+        [Parameter(Mandatory = $true)][string]$ArtifactPath,
+        [Parameter(Mandatory = $true)][string]$ArtifactLabel,
+        [Parameter(Mandatory = $true)][string[]]$SourcePaths
+    )
+
+    if (!(Test-Path -LiteralPath $ArtifactPath)) {
+        throw "$ArtifactLabel not found: $ArtifactPath"
+    }
+
+    $artifact = Get-Item -LiteralPath $ArtifactPath
+    $latestSource = Get-LatestWriteTimeUtc -Paths $SourcePaths
+    if ($latestSource.Path -and $latestSource.Time -gt $artifact.LastWriteTimeUtc) {
+        throw "$ArtifactLabel is stale: '$ArtifactPath' is older than '$($latestSource.Path)'. Rebuild the Dist editor binaries before packaging."
+    }
+}
+
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptRoot
 $cfgShortName = "$($Configuration.ToLowerInvariant())_x64"
@@ -47,6 +99,9 @@ $editorBuildDirectory = Join-Path $repoRoot "Build\$platformFolder\Editor"
 $runtimeBuildDirectory = Join-Path $repoRoot "Build\$platformFolder\Runtime"
 $limitlessLibraryPath = Join-Path $repoRoot "Build\$platformFolder\Limitless\Limitless.lib"
 $projectAssetsDirectory = Join-Path $repoRoot "Assets"
+$editorExecutablePath = Join-Path $editorBuildDirectory "Editor.exe"
+$runtimeExecutablePath = Join-Path $runtimeBuildDirectory "Runtime.exe"
+$runtimeManagedManifestPath = Join-Path $runtimeBuildDirectory "Managed\Limitless.Managed.payload.json"
 
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repoRoot "Build\ShippedEditor\$platformFolder"
@@ -76,6 +131,24 @@ if (!(Test-Path -LiteralPath $limitlessLibraryPath)) {
 if (!(Test-Path -LiteralPath $projectAssetsDirectory)) {
     throw "Project Assets folder not found: $projectAssetsDirectory"
 }
+
+Assert-BuildArtifactUpToDate -ArtifactPath $editorExecutablePath -ArtifactLabel "Editor build output" -SourcePaths @(
+    (Join-Path $repoRoot "Editor\Source"),
+    (Join-Path $repoRoot "Editor\premake5.lua")
+)
+
+Assert-BuildArtifactUpToDate -ArtifactPath $runtimeExecutablePath -ArtifactLabel "Runtime build output" -SourcePaths @(
+    (Join-Path $repoRoot "Runtime\Source"),
+    (Join-Path $repoRoot "Runtime\premake5.lua")
+)
+
+Assert-BuildArtifactUpToDate -ArtifactPath $runtimeManagedManifestPath -ArtifactLabel "Managed runtime payload" -SourcePaths @(
+    (Join-Path $repoRoot "Scripts\build-managed-runtime-windows.bat"),
+    (Join-Path $repoRoot "Scripts\generate-managed-project-csproj-windows.ps1"),
+    (Join-Path $repoRoot "Managed\Limitless.Managed"),
+    (Join-Path $repoRoot "Managed\Limitless.Managed.TestScripts"),
+    (Join-Path $repoRoot "Limitless\Vendor\Coral\Coral.Managed")
+)
 
 Write-Host "Preparing package root: $packageRoot"
 if (Test-Path -LiteralPath $packageRoot) {
@@ -107,6 +180,8 @@ Copy-IfExists -Source $defaultLayoutSource -Destination (Join-Path $packageRoot 
 Write-Host "Copying internal toolchain assets..."
 New-Item -ItemType Directory -Path (Join-Path $toolchainRoot "Scripts") -Force | Out-Null
 Copy-IfExists -Source (Join-Path $repoRoot "Scripts\build-project-scriptcore-windows.bat") -Destination (Join-Path $toolchainRoot "Scripts\build-project-scriptcore-windows.bat")
+Copy-IfExists -Source (Join-Path $repoRoot "Scripts\scriptcore-prune-stale-objects.ps1") -Destination (Join-Path $toolchainRoot "Scripts\scriptcore-prune-stale-objects.ps1")
+Copy-IfExists -Source (Join-Path $repoRoot "Scripts\scriptcore-determine-link-state.ps1") -Destination (Join-Path $toolchainRoot "Scripts\scriptcore-determine-link-state.ps1")
 Copy-IfExists -Source (Join-Path $repoRoot "Scripts\build-project-scriptcore-unix.sh") -Destination (Join-Path $toolchainRoot "Scripts\build-project-scriptcore-unix.sh")
 Copy-IfExists -Source (Join-Path $repoRoot "Scripts\build-managed-runtime-windows.bat") -Destination (Join-Path $toolchainRoot "Scripts\build-managed-runtime-windows.bat")
 Copy-IfExists -Source (Join-Path $repoRoot "Scripts\build-managed-runtime-unix.sh") -Destination (Join-Path $toolchainRoot "Scripts\build-managed-runtime-unix.sh")
@@ -237,6 +312,7 @@ Required paths:
 Versioning:
 - Keep Toolchain content in sync with the same engine/editor commit.
 - Regenerate this package after changing ScriptCore/Runtime build scripts or template layout.
+- Rebuild the Dist editor before packaging after changing editor source files.
 "@
 
 $toolchainReadmePath = Join-Path $toolchainRoot "README_INTERNAL_TOOLCHAIN.txt"

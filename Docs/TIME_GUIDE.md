@@ -7,7 +7,7 @@ The engine provides a Unity-style `Limitless::Time` API that acts as the **singl
 - **Delta time** (`GetDeltaTimeSeconds()`): per-frame time step for gameplay updates (**scaled** by `TimeScale`)
 - **Unscaled delta** (`GetUnscaledDeltaTimeSeconds()`): per-frame time step for UI/tools and real-time systems (**not scaled**)
 - **Time since startup**: scaled and unscaled variants
-- **Fixed-step accumulator**: simple `FixedUpdate`-style loop using `TryConsumeFixedStep()`
+- **Fixed-step accumulator**: simple `FixedUpdate`-style loop using `TryConsumeFixedStep()` (currently accumulated from **unscaled** time)
 
 ## What `Time` is not for
 
@@ -59,6 +59,8 @@ Limitless::Time::SetTimeScale(0.25f); // quarter-speed
 Limitless::Time::SetTimeScale(1.0f);  // normal speed
 ```
 
+Important: `SetTimeScale()` affects scaled delta/time values, but the built-in fixed-step accumulator currently advances from `GetUnscaledDeltaTimeSeconds()`. If you want fixed-step simulation to pause with gameplay time, gate your fixed-step loop explicitly.
+
 ### Fixed-step loop (deterministic simulation)
 
 ```cpp
@@ -73,5 +75,6 @@ while (Limitless::Time::TryConsumeFixedStep())
 
 - Use **scaled delta** for gameplay, animation, and simulation that should pause/slow down.
 - Use **unscaled delta** for debugging UI, editors, telemetry, and file watchers.
+- Remember that the default fixed-step accumulator currently consumes **unscaled** time, not scaled time.
 - Keep long stalls safe by clamping `MaximumDeltaTimeSeconds` (default is 0.25s).
 

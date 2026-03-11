@@ -13,7 +13,7 @@ Framebuffers allow you to render to a texture instead of the default backbuffer.
 
 ## Creating a Framebuffer
 
-Framebuffers must be created on the render thread. Use the factory methods:
+Framebuffer GPU objects are created on the **primary render context**, but callers can use the factory methods from normal engine code:
 
 ```cpp
 #include "Graphics/Framebuffer.h"
@@ -34,6 +34,12 @@ auto future = Framebuffer::CreateAsync(spec);
 auto framebuffer = future.get();
 ```
 
+Current behavior:
+
+- `Framebuffer::Create(...)` blocks until creation completes on the primary render context
+- `Framebuffer::CreateAsync(...)` schedules creation on the primary render context and returns a `std::future`
+- both APIs validate that width/height are non-zero and that at least one color attachment is requested
+
 ## FramebufferSpecification
 
 | Field | Default | Description |
@@ -41,6 +47,7 @@ auto framebuffer = future.get();
 | `Width` | 0 | Framebuffer width (required) |
 | `Height` | 0 | Framebuffer height (required) |
 | `Samples` | 1 | MSAA sample count. 0 or 1 = no MSAA |
+| `ColorAttachmentCount` | 1 | Number of color attachments to create |
 | `DepthAttachment` | true | Create 24-bit depth renderbuffer |
 | `StencilAttachment` | false | Create stencil (combined with depth when true) |
 | `SwapChainTarget` | false | Reserved for future swap-chain binding |
@@ -69,7 +76,7 @@ renderer.SubmitCommand(std::make_unique<BindFramebufferCommand>(nullptr));
 
 ## Getting the Color Texture
 
-Use `GetColorAttachment()` to obtain the texture for display (e.g. in ImGui):
+Use `GetColorAttachment()` to obtain color attachment slot `0` for display (e.g. in ImGui):
 
 ```cpp
 auto colorTexture = framebuffer->GetColorAttachment();
@@ -82,6 +89,8 @@ ImGui::Image(
            static_cast<float>(framebuffer->GetHeight())));
 ```
 
+If you create multiple color attachments, use `GetColorAttachment(index)` and `GetColorAttachmentCount()`.
+
 ## Resizing
 
 Framebuffers can be resized; attachments are recreated:
@@ -90,14 +99,29 @@ Framebuffers can be resized; attachments are recreated:
 framebuffer->Resize(2560, 1440);
 ```
 
-Resize must be called from the render thread. For window resize, use `Renderer::SubmitResourceAndWait` or schedule on the render thread.
+Current behavior:
+
+- `Resize()` recreates the attachments and invalidates the underlying framebuffer
+- when the renderer is initialized, `Resize()` marshals work to the **primary render context** internally and blocks until completion
+- before full renderer initialization, it falls back to a direct single-thread path
+- sizes are clamped against `GL_MAX_RENDERBUFFER_SIZE` in the current OpenGL backend
+
+In normal engine/editor code, you usually call `framebuffer->Resize(...)` directly rather than manually submitting a separate render-thread task around it.
 
 ## Thread Safety
 
-- **Create** / **CreateAsync**: Safe to call from any thread; creation runs on the render thread
-- **Bind** / **Unbind**: Must be called from the render thread (via render commands)
-- **GetColorAttachment** / **GetWidth** / **GetHeight**: Safe from any thread
-- **Resize**: Must be called from the render thread
+- **Create** / **CreateAsync**:
+  - safe to call from normal engine threads
+  - creation runs on the primary render context
+- **Bind** / **Unbind**:
+  - raw calls are render-context operations and should only execute on the render thread / primary context
+  - in higher-level code, prefer issuing bind/unbind through render commands or render-pass flow
+- **GetColorAttachment** / `GetColorAttachment(index)` / **GetWidth** / **GetHeight**:
+  - read-only accessors
+  - do not race these calls against concurrent `Resize()` or destruction
+- **Resize**:
+  - callable from normal engine code
+  - internally marshals to the primary render context in the common renderer-initialized path
 
 ## Example: Editor Viewport
 

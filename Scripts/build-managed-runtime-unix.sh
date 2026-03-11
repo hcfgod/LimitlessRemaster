@@ -10,6 +10,7 @@ DOTNET_CONFIGURATION=""
 SCRIPT_DIR=""
 REPO_ROOT=""
 MANAGED_PROJECT_GENERATOR_SCRIPT=""
+MANAGED_BUILD_SCRIPT=""
 MANAGED_PROJECT_CSPROJ=""
 MANAGED_PROJECT_ASSEMBLY_FILE=""
 SCRIPT_ASSEMBLIES_JSON='["Limitless.Managed.TestScripts.dll"]'
@@ -110,6 +111,7 @@ evaluate_managed_cache_requirement() {
     scan_input_root "$REPO_ROOT/Managed/Limitless.Managed"
     scan_input_root "$REPO_ROOT/Managed/Limitless.Managed.TestScripts"
     scan_input_root "$MANAGED_PROJECT_GENERATOR_SCRIPT"
+    scan_input_root "$MANAGED_BUILD_SCRIPT"
 
     if [[ -n "$MANAGED_PROJECT_CSPROJ" ]]; then
         scan_input_root "$MANAGED_PROJECT_CSPROJ"
@@ -276,6 +278,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+MANAGED_BUILD_SCRIPT="$REPO_ROOT/Scripts/build-managed-runtime-unix.sh"
 MANAGED_PROJECT_GENERATOR_SCRIPT="$REPO_ROOT/Scripts/generate-managed-project-csproj-unix.sh"
 if [[ -n "$PROJECT_ROOT" ]]; then
     MANAGED_PROJECT_CACHE_KEY="project-$(basename "$PROJECT_ROOT")"

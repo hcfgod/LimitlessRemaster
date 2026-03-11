@@ -1,12 +1,13 @@
-# Renderer2D Guide (MVP)
+# Renderer2D Guide
 
-`Renderer2D` is the first "game-code friendly" renderer API in Limitless. It is intentionally small and pragmatic:
+`Renderer2D` is the main game-code-friendly 2D submission API in Limitless. It stays intentionally small:
 
-- A stable scene API: `BeginScene(camera)`, `DrawQuad(...)`, `EndScene()`
-- A real batching path (minimizing draw calls under common 2D workloads)
-- Basic renderer statistics surfaced for profiling
+- `BeginScene(...)`
+- `DrawQuad(...)`
+- `DrawText(...)`
+- `EndScene()`
 
-This is **OpenGL-first** today because the engine's render-command execution is OpenGL-backed.
+It is still **OpenGL-first** today because the render-command execution path is currently OpenGL-backed.
 
 ## Public API
 
@@ -15,53 +16,89 @@ Header: `Limitless/Source/Graphics/Renderer2D.h`
 Core calls:
 
 - `Renderer2D::Initialize()` / `Renderer2D::Shutdown()`
-- `Renderer2D::BeginScene(const Camera& camera)` (also `BeginScene(viewProjection)`)
-- `Renderer2D::DrawQuad(...)` (position+size, or transform; color or texture+tint)
-- `Renderer2D::DrawText(transform, text, font, fontSize, color)` (MSDF text)
+- `Renderer2D::BeginScene(const Camera& camera)`
+- `Renderer2D::BeginScene(const glm::mat4& viewProjection)`
+- `Renderer2D::BeginScene(const glm::mat4& viewProjection, bool enableDepthTest)`
+- `Renderer2D::DrawQuad(...)`
+- `Renderer2D::DrawText(transform, text, font, fontSize, color)`
 - `Renderer2D::EndScene()`
+
+Notes:
+
+- `Renderer2D` is instantiable; `Renderer2D::Default()` returns the shared default instance used by the scene renderer.
+- Quad overloads support position/size or full-transform submission, with color-only, textured, or textured+UV variants.
 
 Readiness and assets:
 
-- `Renderer2D::IsShaderReady()` — true when the default material is loaded; otherwise `DrawQuad` is dropped.
-- `Renderer2D::GetDefaultShaderKey()` — asset key for the default shader (for `AssetLoadProgress` and `LoadingScreen::BuildContext`).
+- `Renderer2D::IsShaderReady()` returns true once the default quad shader/material path has resolved successfully.
+- `Renderer2D::GetDefaultShaderKey()` returns the default textured-quad shader key used by loading/progress systems.
 
 Statistics:
 
 - `Renderer2D::GetStatistics()` returns `{ DrawCalls, Batches, QuadCount }`
 - `Renderer2D::ResetStatistics()`
 
-## Batching model (current MVP)
+`QuadCount` includes both regular quad submissions and text glyph quads.
 
-The MVP batches quads by **texture**:
+## Batching model
 
-- Quads using the same `Texture2D` are appended into a single CPU vertex staging buffer
-- At flush time, `Renderer2D` uploads the vertex data once and issues **one** `DrawIndexedCommand`
-- If the texture changes (or the batch reaches capacity), the current batch is flushed and a new one begins
+`Renderer2D` keeps separate batch state for:
 
-This yields "one draw call per texture per scene" for typical 2D usage, without requiring instancing or per-draw uniforms.
+- textured/color quads
+- MSDF text quads
+
+Within each batch, submissions are grouped by texture slots:
+
+- vertices are staged on the CPU
+- textures are assigned to the current texture-slot table
+- a batch flush happens when index capacity is reached or the texture-slot table is full
+- flush uploads one packed vertex buffer region and submits one indexed draw for that batch
+
+This still gives the common “few draw calls for many sprites/text glyphs” behavior, but it is not literally “one draw call per texture per scene” once capacity or texture-slot limits are hit.
+
+The runtime texture-slot limit is clamped by the graphics context and capped in code at 32 slots.
 
 ## Renderer state defaults
 
-`BeginScene()` submits common 2D defaults:
+`BeginScene()` configures the current scene view-projection and prepares the quad/text pipelines.
 
-- Blending enabled: \( SrcAlpha \times OneMinusSrcAlpha \)
-- Depth test disabled
-- Face culling disabled
+Current pipeline defaults:
+
+- alpha blending enabled (`SrcAlpha`, `OneMinusSrcAlpha`)
+- face culling disabled
+- depth test/write follow the `enableDepthTest` argument
+
+Important default behavior:
+
+- `BeginScene(const Camera&)` enables depth testing
+- `BeginScene(const glm::mat4& viewProjection)` also enables depth testing
+- screen-space UI paths explicitly call `BeginScene(..., false)` when they want depth disabled
 
 ## Asset usage
 
-The default `Renderer2D` material is an asset:
+The default quad and text paths are both asset-driven:
 
-- `Assets/Materials/Renderer2D_TexturedQuad.material.json`
-- `Assets/Shaders/Renderer2D_TexturedQuad.glsl`
+- textured quads:
+  - `Assets/Materials/Renderer2D_TexturedQuad.material.json`
+  - `Assets/Shaders/Renderer2D_TexturedQuad.glsl`
+- MSDF text:
+  - `Assets/Materials/Renderer2D_MSDFText.material.json`
+  - `Assets/Shaders/Renderer2D_MSDFText.glsl`
 
-This keeps the shader pipeline editor-friendly and consistent with the engine's existing asset workflow.
+If the material asset is missing, `Renderer2D` falls back to loading the shader asset directly. If the text shader path is unavailable, text rendering is disabled while quad rendering can still continue.
 
-## Example usage (Runtime)
+## Current scene integration
 
-The runtime layer uses `Renderer2D` here:
+The main runtime/editor scene submission path uses `Renderer2D::Default()` from:
 
-- `Runtime/Source/Renderer2DDemo.cpp`
+- `Limitless/Source/Scene/SceneRendererRuntime.cpp`
 
-It draws a grid of textured quads and logs `Renderer2D` statistics once per second.
+Current uses include:
+
+- sprite submission
+- MSDF text submission
+- screen-space and world-space UI submission
+- particle-emitter billboard submission
+
+The scene renderer chooses the view-projection and whether depth testing is enabled before beginning each 2D pass.
 

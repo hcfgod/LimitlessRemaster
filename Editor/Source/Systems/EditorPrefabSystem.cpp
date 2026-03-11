@@ -21,6 +21,23 @@ namespace Limitless::EditorPrefabSystem
     {
         constexpr float kParentInverseDeterminantEpsilon = 1e-6f;
 
+        entt::entity FindFirstEntityByTag(const Scene& scene, const std::string& tag)
+        {
+            if (tag.empty())
+                return entt::null;
+
+            const auto& registry = scene.GetRegistry();
+            auto view = registry.view<TagComponent>();
+            for (entt::entity entity : view)
+            {
+                const auto& tagComponent = view.get<TagComponent>(entity);
+                if (tagComponent.Tag == tag)
+                    return entity;
+            }
+
+            return entt::null;
+        }
+
         bool IsFiniteMatrix(const glm::mat4& matrix)
         {
             for (int column = 0; column < 4; ++column)
@@ -93,6 +110,44 @@ namespace Limitless::EditorPrefabSystem
             return entity == entt::null;
         }
 
+        entt::entity ResolveCopiedReferenceSourceEntity(const Scene& sourceScene, const ScriptEntityReference& reference)
+        {
+            if (!reference.SceneEntityId.empty())
+            {
+                const entt::entity resolvedEntity = sourceScene.FindEntityByPersistentId(reference.SceneEntityId);
+                if (resolvedEntity != entt::null && sourceScene.IsValid(resolvedEntity))
+                    return resolvedEntity;
+            }
+
+            return FindFirstEntityByTag(sourceScene, reference.Tag);
+        }
+
+        void RemapCopiedScriptEntityReferences(const Scene& sourceScene,
+                                              Scene& destinationScene,
+                                              const std::unordered_map<entt::entity, entt::entity>& entityMap,
+                                              std::unordered_map<std::string, ScriptPropertyValue>& exposedProperties)
+        {
+            for (auto& [propertyName, propertyValue] : exposedProperties)
+            {
+                auto* entityReference = std::get_if<ScriptEntityReference>(&propertyValue);
+                if (!entityReference || !entityReference->PrefabAssetKey.empty())
+                    continue;
+
+                const entt::entity sourceReferencedEntity = ResolveCopiedReferenceSourceEntity(sourceScene, *entityReference);
+                const auto mappedReferencedEntity = entityMap.find(sourceReferencedEntity);
+                if (mappedReferencedEntity == entityMap.end())
+                {
+                    if (sourceReferencedEntity != entt::null)
+                        entityReference->SceneEntityId.clear();
+                    continue;
+                }
+
+                entityReference->SceneEntityId = destinationScene.GetEntityPersistentId(mappedReferencedEntity->second);
+                if (const auto* destinationTag = destinationScene.GetRegistry().try_get<TagComponent>(mappedReferencedEntity->second))
+                    entityReference->Tag = destinationTag->Tag;
+            }
+        }
+
         bool CopyEntitySubtreeToScene(const Scene& sourceScene,
                                       Scene& destinationScene,
                                       entt::entity sourceRootEntity,
@@ -120,6 +175,7 @@ namespace Limitless::EditorPrefabSystem
 
             std::unordered_map<entt::entity, entt::entity> entityMap;
             entityMap.reserve(sourceEntities.size());
+            std::unordered_map<entt::entity, entt::entity> scriptComponentMap;
 
             for (entt::entity sourceEntity : sourceEntities)
             {
@@ -310,9 +366,23 @@ namespace Limitless::EditorPrefabSystem
                         destinationScriptEntity = destinationScene.AttachManagedScriptComponent(destinationEntity, std::move(destinationScriptEntry));
                     }
 
+                    if (destinationScriptEntity != entt::null)
+                        scriptComponentMap.emplace(sourceScriptEntity, destinationScriptEntity);
                     if (auto* attachedScriptComponent = destinationScene.GetScriptComponent(destinationScriptEntity))
                         attachedScriptComponent->ComponentOrder = sourceScriptComponent->ComponentOrder;
                 }
+            }
+
+            for (const auto& [sourceScriptEntity, destinationScriptEntity] : scriptComponentMap)
+            {
+                auto* destinationScriptComponent = destinationScene.GetScriptComponent(destinationScriptEntity);
+                if (!destinationScriptComponent)
+                    continue;
+
+                if (NativeScriptEntry* destinationScriptEntry = destinationScriptComponent->TryGetNativeEntry())
+                    RemapCopiedScriptEntityReferences(sourceScene, destinationScene, entityMap, destinationScriptEntry->ExposedProperties);
+                else if (ManagedScriptEntry* destinationScriptEntry = destinationScriptComponent->TryGetManagedEntry())
+                    RemapCopiedScriptEntityReferences(sourceScene, destinationScene, entityMap, destinationScriptEntry->ExposedProperties);
             }
 
             for (entt::entity sourceEntity : sourceEntities)

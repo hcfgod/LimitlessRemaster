@@ -18,8 +18,8 @@ Important: `.meta` files are part of the source-of-truth for stable GUID identit
 
 ### Asset Key vs GUID
 
-- **Key**: typically the asset’s project-relative path (example: `Assets/Textures/Checker.ppm`)
-- **GUID**: stable identifier stored in `Assets/Textures/Checker.ppm.meta`
+- **Key**: typically the asset’s project-relative path (example: `Assets/InputActions/Runtime.inputactions.json`)
+- **GUID**: stable identifier stored in `Assets/InputActions/Runtime.inputactions.json.meta`
 
 The `.meta` file is created automatically when you first load an asset through the asset system.
 
@@ -29,7 +29,9 @@ Unity-style keys like `Assets/...` are resolved using `AssetPaths`:
 
 - Preferred: set an explicit asset root directory at startup via `Assets::SetAssetRootDirectory(...)`.
 - Optional: set the environment variable `LIMITLESS_ASSET_ROOT` to a directory that contains `Assets/`.
-- Fallback (development convenience): walk up from the current working directory until a directory containing an `Assets/` folder is found.
+- Preferred automatic discovery: walk up from the current working directory until a directory containing `Project/Project.json` is found.
+- Fallback (development convenience): if no project marker is found, walk up until a directory containing an `Assets/` folder is found.
+- For Unity-style keys, project assets win first; shared editor assets and built-in default assets are fallback resolution paths when the project copy is missing.
 
 Implementation:
 
@@ -56,6 +58,10 @@ File: `Limitless/Source/Assets/AssetHandle.h`
 `AssetHandle<T>` serializes to JSON as:
 
 - `{ "guid": "..." }`
+
+It also accepts a raw GUID string when loading:
+
+- `"..."` (string GUID)
 
 For scene files, we use a slightly richer reference object to keep workflows convenient while still being GUID-stable:
 
@@ -106,10 +112,16 @@ Assets support hot reload for **source file changes** under `Assets/`.
 
 High-level behavior:
 
-- The engine watches the **entire** `Assets/` tree (single watcher) instead of one watcher per file.
+- The engine watches the **entire** `Assets/` tree with a single `AssetTreeWatcher`.
 - Change events are **debounced/coalesced** to avoid re-import storms during rapid saves.
 - Reload cascades through dependencies tracked in `AssetDatabase` and `.meta` files (dependency graph).
 - Async loads can be cancelled via `AssetLoadCoordinator` (generation-based cancellation).
+
+Implementation notes:
+
+- `AssetTreeWatcher` prefers platform-native directory notifications where available.
+- It falls back to polling when a native backend is unavailable.
+- `AssetHotReloadManager` is a development/editor-oriented feature and is disabled automatically when a packaged `AssetBundle` is auto-loaded at startup.
 
 Key files:
 
@@ -125,7 +137,7 @@ Minimal Unity-style material stored as JSON:
 
 - File: `Limitless/Source/Assets/MaterialAsset.{h,cpp}`
 - Importer: `Limitless/Source/Assets/MaterialAssetImporter.h`
-- Example: `Assets/Materials/TexturedTriangle.material.json`
+- Example: `Assets/Materials/Renderer2D_TexturedQuad.material.json`
 
 The material references other assets via `{ "guid": "..." }` (preferred) or `{ "key": "Assets/..." }` (convenience). When loaded, it writes dependency GUIDs into the database and `.meta`, enabling cascading hot reload.
 
@@ -194,40 +206,39 @@ File: `Limitless/Source/Assets/TextureAsset.{h,cpp}`
 - Decode image to RGBA8 on an AsyncIO worker thread (stb_image)
 - Upload RGBA8 to GPU on render thread via `Texture2D::CreateFromRGBA8Async`
 
-## Runtime Proof
+## Current Integration Examples
 
-The Runtime demo now loads a **material asset** (and the material pulls in its shader + texture deps):
+The asset system is used by current runtime/editor flows such as:
 
-- `Assets/Materials/TexturedTriangle.material.json`
+- bundled startup loading through `AssetBundle`
+- project input action loading through `InputActionsAssetResource`
+- editor/runtime texture, shader, material, animation, audio, and scene asset importers
 
-The material references:
+At startup:
 
-- `Assets/Shaders/TexturedTriangle.glsl`
-- `Assets/Textures/Checker.ppm`
-
-and the asset system will create/update `.meta` files and dependency entries so shader/texture edits can cascade and hot reload correctly.
-
-Related files:
-
-- `Assets/Textures/Checker.ppm`
-- `Assets/Materials/TexturedTriangle.material.json`
-- `Runtime/Source/TexturedTriangleDemo.{h,cpp}`
+- `Application::InternalInitialize()` probes for a packaged `AssetBundle`
+- if found, bundle-first loading is enabled
+- `GameLayerBootstrap` can then resolve bundled project settings and asset-backed input configuration without requiring the source project layout beside the executable
 
 ## Current limitations / next steps
 
 ### Current limitations
 
-- **No compression (yet)**: AssetBundles currently store raw bytes; shipped bundles are not compressed.
-- **No per-type cooked formats (yet)**:
-  - Textures are still decoded at runtime into RGBA8 (then uploaded).
-  - Shaders are still compiled at runtime.
-- **Asset discovery targets a known set of types**: Today, the engine only treats a small, explicit set of assets as first-class types (via importer specializations).
+- **Asset discovery targets a known set of types**: today, the engine only treats a specific set of assets as first-class importer/bundle types.
+- **Cooked bundle coverage is partial**:
+  - AssetBundles now support cooked texture and shader payloads.
+  - Other asset types still primarily ship as raw payloads.
+- **Runtime fallback paths still exist**:
+  - Texture/shader bundle cooking can fall back to raw payloads if cooking fails.
+  - Platform-specific offline cooking coverage is still limited.
 
 ### Next steps
 
-- **Incremental builds**: Hash-based change detection so bundling/cooking can avoid rebuilding unchanged assets.
-- **Compression**: Bundle compression and optional per-asset compression strategies.
+- **Broader cooked formats**: add cooked payload coverage for more asset classes.
 - **Cooked formats**:
   - Platform-specific texture cooking (mips + block compression where appropriate).
   - Platform-specific shader cooking (precompiled binaries, reflection caches).
+- **Bundle/runtime evolution**:
+  - Further refine bundle manifest/data layout as the offline pipeline grows.
+  - Expand compression/cooking strategy choices where needed.
 

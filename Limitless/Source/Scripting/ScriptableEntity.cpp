@@ -524,6 +524,17 @@ namespace Limitless
         {
             if (!value->PrefabAssetKey.empty())
                 return Entity::FromPrefabAssetKey(value->PrefabAssetKey);
+            if (!value->SceneEntityId.empty())
+            {
+#ifndef SCRIPTCORE_EXPORTS
+                if (m_Scene)
+                {
+                    const entt::entity resolvedEntity = m_Scene->FindEntityByPersistentId(value->SceneEntityId);
+                    if (resolvedEntity != entt::null && m_Registry && m_Registry->valid(resolvedEntity))
+                        return Entity(m_Registry, resolvedEntity);
+                }
+#endif
+            }
             if (!value->Tag.empty())
             {
                 const Entity resolved = FindEntityByTag(value->Tag);
@@ -712,10 +723,22 @@ namespace Limitless
         {
             entityReference.PrefabAssetKey = value.GetPrefabAssetKey();
         }
-        else if (value && m_Registry && m_Registry->valid(value.GetHandle()))
+        else if (m_Registry)
         {
-            if (const auto* tagComponent = m_Registry->try_get<TagComponent>(value.GetHandle()))
-                entityReference.Tag = tagComponent->Tag;
+            entt::entity entityHandle = value.GetHandle();
+#ifndef SCRIPTCORE_EXPORTS
+            if (m_Scene)
+                entityHandle = m_Scene->ResolveEntityReference(entityHandle);
+#endif
+            if (entityHandle != entt::null && m_Registry->valid(entityHandle))
+            {
+                if (const auto* tagComponent = m_Registry->try_get<TagComponent>(entityHandle))
+                    entityReference.Tag = tagComponent->Tag;
+#ifndef SCRIPTCORE_EXPORTS
+                if (m_Scene)
+                    entityReference.SceneEntityId = m_Scene->GetEntityPersistentId(entityHandle);
+#endif
+            }
         }
 
         bool changed = false;
@@ -727,7 +750,9 @@ namespace Limitless
         }
         else if (auto* existing = std::get_if<ScriptEntityReference>(&found->second))
         {
-            if (existing->Tag != entityReference.Tag || existing->PrefabAssetKey != entityReference.PrefabAssetKey)
+            if (existing->Tag != entityReference.Tag ||
+                existing->PrefabAssetKey != entityReference.PrefabAssetKey ||
+                existing->SceneEntityId != entityReference.SceneEntityId)
             {
                 *existing = std::move(entityReference);
                 changed = true;

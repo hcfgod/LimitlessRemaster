@@ -244,6 +244,7 @@ namespace Limitless
             // CreateEntity ensures default baseline components are initialized first.
             entt::entity destinationEntity = clone->CreateEntity(tag.Tag);
             entityMap.emplace(sourceEntity, destinationEntity);
+            clone->SetEntityPersistentId(destinationEntity, GetEntityPersistentId(sourceEntity));
             if (auto* destinationTag = destinationRegistry.try_get<TagComponent>(destinationEntity))
                 destinationTag->Enabled = tag.Enabled;
             destinationRegistry.replace<TransformComponent>(destinationEntity, transform);

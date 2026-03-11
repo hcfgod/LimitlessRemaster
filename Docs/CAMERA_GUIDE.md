@@ -84,20 +84,23 @@ const Limitless::Camera* active = cameras.GetActiveCamera();
 
 ## Scene Camera Component (Unity-style)
 
-You can now add a `CameraComponent` directly to scene entities from the Inspector.
+You can author a `CameraComponent` directly on scene entities.
 
-- Add component: `Inspector -> Add Component -> Camera Component`
 - Set **Projection** (`Orthographic 2D` or `Perspective 3D`)
-- Set **Primary** on the camera you want to use in Play Mode
+- Set **Primary** on the camera you want runtime selection to prefer when multiple camera entities exist
 - Use the entity `TransformComponent` to position/orient the camera
+- Orthographic camera entities use `Zoom`, `NearPlane`, and `FarPlane`
+- Perspective camera entities use `FieldOfViewYDegrees`, `NearPlane`, and `FarPlane`
 
-### Play Mode Behavior
+### Runtime / Play Mode Behavior
 
-- On **Enter Play**, the editor clones the scene and searches for a scene camera entity:
-  - Prefers the first camera marked `Primary`
-  - Falls back to the first entity that has a `CameraComponent`
-- A gameplay camera is created from that component and becomes the active camera.
-- On **Exit Play**, that temporary gameplay camera is destroyed and the editor camera is restored.
+- Runtime scans the active scene for entities with `CameraComponent`.
+- Selection behavior is:
+  - start with the first entity that has a `CameraComponent`
+  - if any camera entity is marked `Primary`, that one wins
+- Runtime creates or reuses a `CameraManager` gameplay camera matching the selected component projection type.
+- The gameplay camera becomes the active camera in `CameraManager`.
+- The gameplay camera is updated from the selected entity’s world transform and authored camera settings each frame.
 
-If no scene camera component exists, the editor still falls back to any pre-existing gameplay camera in `CameraManager`.
+If no scene camera component exists, runtime does not resolve a gameplay camera from scene data.
 

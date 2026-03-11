@@ -27,9 +27,10 @@ xml_escape() {
 }
 
 PROJECT_MANAGED_SCRIPTS=()
-while IFS= read -r -d '' script_path; do
+while IFS= read -r script_path; do
+    [[ -z "$script_path" ]] && continue
     PROJECT_MANAGED_SCRIPTS+=("$script_path")
-done < <(find "$ASSETS_DIR" -type f -name '*.cs' -print0)
+done < <(find "$ASSETS_DIR" -type f -name '*.cs' -print | LC_ALL=C sort)
 
 if [[ ${#PROJECT_MANAGED_SCRIPTS[@]} -eq 0 ]]; then
     exit 0
@@ -51,6 +52,7 @@ mkdir -p "$GENERATED_MANAGED_DIR"
 MANAGED_PROJECT_CSPROJ="$GENERATED_MANAGED_DIR/${MANAGED_PROJECT_ASSEMBLY_NAME}.csproj"
 CONTRACT_CSPROJ="$REPO_ROOT/Managed/Limitless.Managed/Limitless.Managed.csproj"
 
+temp_csproj="$(mktemp)"
 {
     echo '<Project Sdk="Microsoft.NET.Sdk">'
     echo '  <PropertyGroup>'
@@ -82,6 +84,12 @@ CONTRACT_CSPROJ="$REPO_ROOT/Managed/Limitless.Managed/Limitless.Managed.csproj"
     done
     echo '  </ItemGroup>'
     echo '</Project>'
-} > "$MANAGED_PROJECT_CSPROJ"
+} > "$temp_csproj"
+
+if [[ -f "$MANAGED_PROJECT_CSPROJ" ]] && cmp -s "$temp_csproj" "$MANAGED_PROJECT_CSPROJ"; then
+    rm -f "$temp_csproj"
+else
+    mv "$temp_csproj" "$MANAGED_PROJECT_CSPROJ"
+fi
 
 printf '%s|%s\n' "$MANAGED_PROJECT_CSPROJ" "$MANAGED_PROJECT_ASSEMBLY_FILE"

@@ -619,7 +619,8 @@ namespace Limitless::EditorInspectorPanel
             const std::string scriptName = useInternalBackend
                 ? "build-project-scriptcore-windows.bat"
                 : "build-scriptcore-windows.bat";
-            std::string scriptCommand = "cmd.exe /c \"Scripts\\" + scriptName + " " + configuration + " " + platform;
+            const std::filesystem::path scriptPath = buildRoot / "Scripts" / scriptName;
+            std::string scriptCommand = "cmd.exe /d /s /c \"\"" + scriptPath.string() + "\" " + configuration + " " + platform;
             if (hasOpenedProject)
                 scriptCommand += " \"" + openedProjectRoot.string() + "\"";
             scriptCommand += " > \"" + buildLogPath.string() + "\" 2>&1\"";

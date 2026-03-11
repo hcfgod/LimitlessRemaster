@@ -234,6 +234,7 @@ for (auto& task : tasks)
 
 - AsyncIO executes work on a **dedicated thread pool** and returns future-backed `Task<T>` results.
 - AsyncIO’s internal work queue is a **bounded, blocking MPMC queue** (mutex + condition variable). This is an intentional correctness choice.
+- If AsyncIO is unavailable, shutting down, or its queue is saturated, submitted work can execute **inline** so futures still complete deterministically.
 - The engine also provides lock-free queues in `Core/Concurrency/LockFreeQueue.h` (SPSC + bounded MPMC ring buffer). These are used in some subsystems for fast producer/consumer handoff.
 
 ## Correctness Contracts (Threading + Ownership Invariants)
@@ -433,12 +434,13 @@ std::string content = task.Get(); // Only block when you need the result
 
 ### Queue Size
 
-The default queue size (8192) is suitable for most applications. Increase if you have many concurrent file operations:
+The default AsyncIO queue size (`8192`) is suitable for most applications. This limit is currently **fixed in code**, not exposed as a runtime setting.
 
-```cpp
-// For high-throughput applications
-constexpr size_t QUEUE_SIZE = 16384;
-```
+If you hit saturation in practice:
+
+- reduce operation bursts
+- batch related work where possible
+- adjust the internal queue limit in code if you truly need a higher ceiling
 
 ### Memory Usage
 
@@ -583,10 +585,11 @@ TEST_CASE("AsyncIO Performance")
 - [ ] ConfigManager using AsyncIO for file operations
 - [ ] ECS runtime using JobSystem for simulation work (not AsyncIO)
 - [ ] FileWatcher using AsyncIO for file system operations
-- [ ] Logging system configured for AsyncIO
+- [ ] Logging configured independently of AsyncIO (for example `spdlog` async logging)
 - [ ] Error handling implemented for async operations
 - [ ] Thread count configured appropriately
 - [ ] Performance testing completed
+
 - [ ] Documentation updated
 
 ## Troubleshooting
@@ -595,7 +598,7 @@ TEST_CASE("AsyncIO Performance")
 
 1. **AsyncIO not initialized**: Ensure AsyncIO is initialized before use
 2. **Thread pool exhausted**: Increase thread count or reduce concurrent operations
-3. **Queue full**: Increase queue size or reduce operation frequency
+3. **Queue full**: Reduce operation frequency/burstiness, batch work, or raise the internal queue limit in code
 4. **File permission errors**: Check file permissions and paths
 5. **Memory leaks**: Ensure proper cleanup of Task objects
 

@@ -22,6 +22,8 @@ The logging system supports the following configuration options in the `config.j
 {
   "logging": {
     "level": "info",
+    "core_level": "info",
+    "app_level": "info",
     "file_enabled": true,
     "console_enabled": true,
     "pattern": "[%T] [%l] %n: %v",
@@ -35,12 +37,20 @@ The logging system supports the following configuration options in the `config.j
 ### Configuration Parameters
 
 - **`level`**: Log level (`trace`, `debug`, `info`, `warn`, `error`, `critical`, `off`)
+- **`core_level`**: Optional engine/core logger override; falls back to `level` when omitted
+- **`app_level`**: Optional client/application logger override; falls back to `level` when omitted
 - **`file_enabled`**: Enable/disable file logging
 - **`console_enabled`**: Enable/disable console logging
-- **`pattern`**: Log message format pattern
+- **`pattern`**: Rotating file sink format pattern
 - **`directory`**: Directory where log files are stored
 - **`max_file_size`**: Maximum size of each log file in bytes (default: 50MB)
 - **`max_files`**: Maximum number of backup log files to keep
+
+Current sink behavior:
+
+- the rotating file sink uses the configured `pattern`
+- the console sink uses a fixed colored pattern
+- both core and client loggers also write into the editor-console in-memory sink
 
 ## Usage
 
@@ -54,7 +64,7 @@ auto& configManager = Limitless::ConfigManager::GetInstance();
 configManager.Initialize("config.json");
 
 // Logging is initialized with config settings
-Limitless::Log::Init(logLevel, fileEnabled, consoleEnabled, pattern, directory, maxFileSize, maxFiles);
+Limitless::Log::InitFromConfig();
 ```
 
 ### Logging Macros
@@ -121,6 +131,21 @@ You can override configuration values via command line. Current parser rules:
 ./YourApp --logging.directory=custom_logs
 ```
 
+## Hot Reload Coverage
+
+Current logging hot reload is wired through `HotReloadManager` and directly watches:
+
+- `logging.level`
+- `logging.file_enabled`
+- `logging.console_enabled`
+- `logging.pattern`
+
+Current note:
+
+- hot reload reinitializes logging on the main thread
+- `core_level`, `app_level`, `directory`, `max_file_size`, and `max_files` are read by `Log::InitFromConfig()`
+- but those keys are not currently registered as direct hot-reload triggers on their own
+
 ## Log Patterns
 
 The log pattern uses spdlog format specifiers:
@@ -164,8 +189,8 @@ public:
         // Log configuration values
         auto& config = Limitless::ConfigManager::GetInstance();
         LT_INFO("Window size: {}x{}", 
-                config.GetValue<int>(Limitless::Config::Window::WIDTH, 1280),
-                config.GetValue<int>(Limitless::Config::Window::HEIGHT, 720));
+                config.GetValue<uint32_t>(Limitless::Config::Window::WIDTH, 1280u),
+                config.GetValue<uint32_t>(Limitless::Config::Window::HEIGHT, 720u));
         
         return true;
     }
@@ -191,6 +216,8 @@ std::unique_ptr<Limitless::Application> CreateApplication() {
 4. **Use structured logging**: Include relevant context in your log messages for better debugging.
 
 5. **Test configuration**: Verify your logging configuration works as expected in different environments.
+
+6. **Respect shutdown ordering**: Keep logging alive until other subsystems are fully torn down, and do not emit log macros after `Log::Shutdown()`.
 
 ## Troubleshooting
 

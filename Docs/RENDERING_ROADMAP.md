@@ -28,7 +28,11 @@ Source of truth: `Limitless/Source/Graphics/OpenGL/OpenGLRenderCommand.cpp`
 | `SetVertexBufferDataCommand` | Implemented | Dynamic streaming uploads via `VertexBuffer::SetData()` |
 | `BindTextureCommand` | Implemented | `Texture::Bind(slot)` (`glActiveTexture` + `glBindTexture`) |
 | `SetTextureSpecificationCommand` | Implemented | Sampler-like state via `Texture::ApplySpecification()` |
+| `BindRenderPipelineCommand` | Implemented | Binds the current render pipeline / fixed-function fallback state |
 | `BindFramebufferCommand` | Implemented | `glBindFramebuffer`, `Framebuffer::Bind()` |
+| `BeginRenderPassCommand` | Implemented | Binds target framebuffer, viewport/scissor, and clear/load behavior |
+| `EndRenderPassCommand` | Implemented | Ends the pass and restores pass-local state as needed |
+| `ApplyRenderBindingsCommand` | Implemented | Applies bound textures/samplers/uniform-style parameter sets |
 | `DrawArraysCommand` | Implemented | `glDrawArrays` |
 | `DrawIndexedCommand` | Implemented | `glDrawElements` / `glDrawElementsBaseVertex` |
 | `DrawInstancedCommand` | Implemented | `glDrawArraysInstanced` |
@@ -65,7 +69,7 @@ Acceptance criteria:
 - A triangle renders on Windows with OpenGL backend.
 - Command submission uses the queue (not only immediate execution).
 
-### Milestone 2 — “Textured quad”
+### Milestone 2 — “Textured quad” (DONE)
 
 Goal: draw a quad with a texture and basic blending.
 
@@ -77,14 +81,19 @@ Deliverables:
 Acceptance criteria:
 - Textured quad renders with deterministic output (basic pixel test optional).
 
-### Milestone 3 — “Batching that matters”
+### Milestone 3 — “Batching that matters” (PARTIALLY DONE)
 
 Goal: reduce per-frame overhead with a real batching strategy.
 
 Deliverables:
-- Define a “batch key” (pipeline/shader/material/VAO) and sort commands by it
-- Add a small command buffer allocator/pool to reduce per-frame heap churn
-- Add renderer stats that show batch count and draw-call count
+- Define a safe batching strategy that preserves command correctness
+- ~~Add a small command buffer allocator/pool to reduce per-frame heap churn~~ **Done**: the renderer now uses frame-local upload allocation plus `FrameCommandArena` for per-frame command storage
+- ~~Add renderer stats that show batch count and draw-call count~~ **Partially done**: `Renderer2D` exposes batch/draw-call stats and `RenderCommandQueue` tracks queue statistics
+
+Current status notes:
+
+- Generic command-level reordering by “batch key” is **not** enabled today because render commands are stateful and order-dependent.
+- The queue only does stable priority sorting, and its batching stage intentionally preserves original submission order.
 
 Acceptance criteria:
 - Demonstrable reduction in command count / state changes under a simple scene.
@@ -96,15 +105,22 @@ Goal: move from raw command lists to a stable renderer-facing API.
 Deliverables:
 - ~~`Renderer2D` or `Renderer` helpers that build command sequences safely~~ **Done**: `Renderer2D` exists and is used by `SceneRenderer` and Runtime (BeginScene/DrawQuad/DrawText/EndScene, batching, stats). See `Docs/RENDERER2D_GUIDE.md`.
 - Clear ownership rules for GPU resources referenced by queued commands
-- Decide how multi-threaded *GPU execution* will be handled (OpenGL context ownership vs future Vulkan/Metal)
+- ~~Decide how multi-threaded *GPU execution* will be handled~~ **Partially done**: current OpenGL execution uses an optional dedicated render thread plus an optional shared-context resource thread, with primary-context-only work kept on the render thread
 
 ## What’s next
 
-- **Milestone 3 — Batching that matters**: Reduce per-frame overhead (batch key, command pool, renderer stats). Renderer2D already batches by texture; this milestone is about command-level batching and stats.
-- **Milestone 4 — Remaining**: Ownership rules for queued commands; multi-thread GPU execution policy.
+- **Milestone 3 — Remaining**: Reduce per-frame overhead further without violating command ordering. Renderer2D already batches by texture; the remaining work is around higher-level submission patterns rather than unsafe global command reordering.
+- **Milestone 4 — Remaining**: Ownership rules for queued commands and continued cleanup of the renderer-facing API surface.
 - **Not yet on roadmap**: 2D lighting, 3D mesh pipeline.
 
 ## Notes on multi-threading
 
-Multi-thread **submission** is supported. Multi-thread **OpenGL execution** is not a goal until explicit context ownership / sharing rules are designed and enforced.
+Multi-thread **submission** is supported.
+
+Current OpenGL execution model:
+
+- A dedicated render thread can own frame execution and presentation when `graphics.render_thread_enabled` is enabled.
+- An optional shared-context resource thread can process shareable GPU resource work in parallel when shared-context support is available.
+- Primary-context-only work (for example VAO/FBO-related work) is kept on the render thread via the primary resource queue.
+- Submission helpers also have an inline fast path when the calling thread already owns the current graphics context, which avoids unnecessary cross-thread round-trips.
 

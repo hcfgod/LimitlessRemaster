@@ -564,7 +564,9 @@ namespace Limitless::ManagedScriptHost
             if (const auto* entityValue = std::get_if<ScriptEntityReference>(&left))
             {
                 const auto& rightValue = std::get<ScriptEntityReference>(right);
-                return entityValue->Tag == rightValue.Tag && entityValue->PrefabAssetKey == rightValue.PrefabAssetKey;
+                return entityValue->Tag == rightValue.Tag &&
+                       entityValue->PrefabAssetKey == rightValue.PrefabAssetKey &&
+                       entityValue->SceneEntityId == rightValue.SceneEntityId;
             }
             if (const auto* prefabValue = std::get_if<Prefab>(&left))
                 return prefabValue->AssetKey == std::get<Prefab>(right).AssetKey;
@@ -604,7 +606,7 @@ namespace Limitless::ManagedScriptHost
                     {
                         ScriptEntityReference entityReference{};
                         Coral::ManagedObject entityObject = runtimeInstance.Object.GetFieldValue<Coral::ManagedObject>(fieldDefinition.Name);
-                        if (entityObject.IsValid() && scene != nullptr)
+                        if (entityObject.m_Handle != nullptr && scene != nullptr)
                         {
                             const uint32_t entityHandle = entityObject.GetPropertyValue<uint32_t>("Handle");
                             if (entityHandle != static_cast<uint32_t>(entt::null))
@@ -614,6 +616,7 @@ namespace Limitless::ManagedScriptHost
                                 {
                                     if (const auto* tagComponent = scene->GetRegistry().try_get<TagComponent>(resolvedEntity))
                                         entityReference.Tag = tagComponent->Tag;
+                                    entityReference.SceneEntityId = scene->GetEntityPersistentId(resolvedEntity);
                                 }
                             }
                         }
@@ -739,19 +742,29 @@ namespace Limitless::ManagedScriptHost
                 return {};
 
             uint32_t handle = static_cast<uint32_t>(entt::null);
-            if (scene != nullptr && !entityReference.Tag.empty())
+            if (scene != nullptr)
             {
-                auto& registry = scene->GetRegistry();
-                auto view = registry.view<TagComponent>();
-                for (entt::entity entity : view)
-                {
-                    const auto& tagComponent = view.get<TagComponent>(entity);
-                    if (tagComponent.Tag != entityReference.Tag)
-                        continue;
+                entt::entity resolvedEntity = entt::null;
+                if (!entityReference.SceneEntityId.empty())
+                    resolvedEntity = scene->FindEntityByPersistentId(entityReference.SceneEntityId);
 
-                    handle = static_cast<uint32_t>(scene->ResolveEntityReference(entity));
-                    break;
+                if (resolvedEntity == entt::null && !entityReference.Tag.empty())
+                {
+                    auto& registry = scene->GetRegistry();
+                    auto view = registry.view<TagComponent>();
+                    for (entt::entity entity : view)
+                    {
+                        const auto& tagComponent = view.get<TagComponent>(entity);
+                        if (tagComponent.Tag != entityReference.Tag)
+                            continue;
+
+                        resolvedEntity = entity;
+                        break;
+                    }
                 }
+
+                if (resolvedEntity != entt::null && scene->IsValid(resolvedEntity))
+                    handle = static_cast<uint32_t>(scene->ResolveEntityReference(resolvedEntity));
             }
 
             return entityType.CreateInstance(handle);

@@ -1,267 +1,184 @@
 # Hot Reload Configuration Guide
 
+This guide documents the current configuration hot-reload path.
+
 ## Overview
 
-The Limitless Engine now supports hot reloading of configuration files! This means you can change settings in `config.json` while the application is running and see the changes take effect immediately without restarting.
+Limitless supports hot reloading for the active `config.json` file through:
 
-## How It Works
+- `ConfigManager`
+- `FileWatcher`
+- `HotReloadManager`
 
-The hot reload system consists of several components:
+The current implementation is configuration-driven and focused on:
 
-1. **FileWatcher**: Monitors the `config.json` file for changes using file system polling
-2. **ConfigManager**: Handles configuration loading and change detection
-3. **HotReloadManager**: Manages system-specific hot reloading (logging, window, etc.)
+- logging settings
+- window settings
 
-## Supported Hot Reload Features
+## Current Runtime Flow
 
-### Logging System (Implemented)
-- **Log Level**: Change between `trace`, `debug`, `info`, `warn`, `error`, `critical`, `off`
-- **File Logging**: Enable/disable file output
-- **Console Logging**: Enable/disable console output
-- **Log Pattern**: Change the log message format
-- **Log Directory**: Change where log files are stored
-- **File Size/Count**: Adjust rotation settings
+The hot-reload pipeline works like this:
 
-### Window System (Implemented)
-- **Window Title**: Change window title in real-time
-- **Window Size**: Change width and height in real-time
-- **Window Position**: Change x and y position in real-time
-- **Fullscreen**: Toggle fullscreen mode in real-time
-- **Resizable**: Enable/disable window resizing in real-time
-- **VSync**: Enable/disable vertical synchronization in real-time
-- **Borderless**: Toggle borderless mode in real-time
-- **Always on Top**: Toggle always-on-top behavior in real-time
-- **High DPI**: Enable/disable high DPI support in real-time
-- **Window Icon**: Change window icon in real-time
-- **Size Constraints**: Change minimum and maximum window sizes in real-time
+1. `Application` initializes `HotReloadManager` and enables config hot reload.
+2. `ConfigManager` starts a `FileWatcher` for the active config file.
+3. `FileWatcher` polls the file modification time.
+4. When the file changes, `ConfigManager` reloads the file and compares old vs new values.
+5. Changed keys trigger registered callbacks.
+6. `HotReloadManager` queues logging/window work.
+7. `HotReloadManager::Update()` applies the queued work on the main thread during the application loop.
 
-## Usage
+This main-thread application step is important for window safety and deterministic logging reinitialization.
 
-### 1. Start the Application
-```bash
-./Runtime.exe
-```
+## Supported Hot-Reloaded Keys
 
-You should see output like:
-```
-FileWatcher: Started watching config.json
-ConfigManager: Hot reload enabled for config.json
-HotReloadManager: Hot reload enabled
-```
+### Logging
 
-### 2. Modify Configuration
-While the application is running, edit `config.json`:
+The currently registered logging keys are:
 
-```json
-{
-  "logging": {
-    "level": "trace",  // Changed from "debug" to "trace"
-    "file_enabled": false,  // Disabled file logging
-    "console_enabled": true,
-    "pattern": "[%T] [%l] %n: %v"
-  },
-  "window": {
-    "width": 1920,  // Changed from 1024
-    "height": 1080, // Changed from 768
-    "title": "Hot Reload Test"
-  }
-}
-```
+- `logging.level`
+- `logging.file_enabled`
+- `logging.console_enabled`
+- `logging.pattern`
 
-### 3. Watch the Changes
-You should see output like:
-```
-FileWatcher: Detected change in config.json
-ConfigManager: Hot reload triggered for config.json
-ConfigManager: Reloading configuration from config.json
-ConfigManager: Value changed for key 'logging.level'
-ConfigManager: Value changed for key 'logging.file_enabled'
-ConfigManager: Value changed for key 'window.width'
-ConfigManager: Value changed for key 'window.title'
-HotReloadManager: Logging configuration changed - logging.level
-HotReloadManager: Reinitializing logging system...
-Logging configuration:
-  Level: trace
-  File enabled: false
-  Console enabled: true
-  Pattern: [%T] [%l] %n: %v
-  Directory: logs
-  Max file size: 50MB
-  Max files: 10
-Limitless Engine Logger Initialized!
-Application Logger Initialized!
-HotReloadManager: Logging system reinitialized
-HotReloadManager: Window configuration changed - window.width
-HotReloadManager: Window configuration changed - window.title
-HotReloadManager: Applying window config diff: window.width = 1920
-HotReloadManager: Window config applied successfully: window.width
-HotReloadManager: Applying window config diff: window.title = Hot Reload Test
-HotReloadManager: Window config applied successfully: window.title
-```
+Behavior:
 
-**Note**: Window changes are applied on the application's **main thread** (next frame) for maximum platform safety.
+- logging changes do not reconfigure immediately on the file-watcher thread
+- instead, the manager queues a logging reinitialization
+- the logging system is reinitialized on the next main-thread update
 
-## Configuration Examples
+### Window
 
-### Change Log Level in Real-Time
-```json
-{
-  "logging": {
-    "level": "trace"  // Shows all log messages
-  }
-}
-```
-**Effect**: Immediately shows trace and debug messages that were previously hidden.
+The currently registered window keys are:
 
-### Disable File Logging
-```json
-{
-  "logging": {
-    "file_enabled": false
-  }
-}
-```
-**Effect**: Stops writing to log files, only console output remains.
+- `window.width`
+- `window.height`
+- `window.title`
+- `window.fullscreen`
+- `window.resizable`
+- `window.vsync`
+- `window.position.x`
+- `window.position.y`
+- `window.borderless`
+- `window.always_on_top`
+- `window.min_width`
+- `window.min_height`
+- `window.max_width`
+- `window.max_height`
+- `window.high_dpi`
+- `window.icon`
 
-### Change Log Pattern
-```json
-{
-  "logging": {
-    "pattern": "[%Y-%m-%d %H:%M:%S] [%l] %v"
-  }
-}
-```
-**Effect**: Changes the format of log messages to include date.
+Behavior:
 
-### Change Window Title
-```json
-{
-  "window": {
-    "title": "My New Window Title"
-  }
-}
-```
-**Effect**: Immediately changes the window title bar text.
+- window changes are queued when config values change
+- they are applied on the main thread in `HotReloadManager::Update()`
 
-### Resize Window
-```json
-{
-  "window": {
-    "width": 1920,
-    "height": 1080
-  }
-}
-```
-**Effect**: Immediately resizes the window to the new dimensions.
+## What Is Not Hot Reloaded Today
 
-### Toggle Fullscreen
-```json
-{
-  "window": {
-    "fullscreen": true
-  }
-}
-```
-**Effect**: Immediately switches the window to fullscreen mode.
+These are **not** currently registered in `HotReloadManager`:
 
-### Change Window Position
-```json
-{
-  "window": {
-    "position": {
-      "x": 100,
-      "y": 200
-    }
-  }
-}
-```
-**Effect**: Immediately moves the window to the new position.
+- audio settings hot reload
+- graphics quality/settings hot reload
+- input settings hot reload
+- arbitrary project/editor settings hot reload
 
-### Enable Full Debug Output
+Those may still be valid configuration values, but they are not part of the current hot-reload callback set.
+
+## File Watching Details
+
+`FileWatcher` currently:
+
+- watches one file path at a time
+- uses polling-based file timestamp checks
+- defaults to a `500ms` polling interval
+- uses `AsyncIO` helpers for file existence and modified-time queries
+
+If the watched file disappears, the watch loop logs the condition and stops.
+
+## Config Reload Behavior
+
+`ConfigManager::ReloadFromFile()` currently:
+
+- reloads the active config file
+- stores the old flat key/value map
+- compares old and new values
+- invokes change callbacks only for keys whose values actually changed
+- logs removed keys, but does not currently dispatch a dedicated removal callback
+
+## Typical Usage
+
+1. Run the editor or runtime normally.
+2. Edit the active `config.json`.
+3. Save the file.
+4. Wait for the watcher to detect the change.
+5. Observe the effect next frame for window/logging changes.
+
+Example:
+
 ```json
 {
   "logging": {
     "level": "trace",
-    "file_enabled": true,
+    "file_enabled": false,
     "console_enabled": true,
     "pattern": "[%T] [%l] %n: %v"
+  },
+  "window": {
+    "width": 1920,
+    "height": 1080,
+    "title": "Hot Reload Test",
+    "fullscreen": false,
+    "borderless": false
   }
 }
 ```
-**Effect**: Maximum debugging information with both file and console output.
 
-## Technical Details
+## Where the Active Config Comes From
 
-### File Watching
-- **Polling Interval**: 500ms (configurable)
-- **File Detection**: Uses file system last write time
-- **Error Handling**: Graceful handling of file access errors
+The engine logs the active config path at startup.
 
-### Change Detection
-- **Value Comparison**: Detects actual value changes, not just file modifications
-- **Callback System**: Notifies specific systems when their configuration changes
-- **Thread Safety**: All operations are thread-safe
+In practice:
 
-### Performance
-- **Low Overhead**: File watching uses minimal system resources
-- **Efficient Polling**: Only checks file modification time
-- **Smart Reloading**: Only reinitializes systems that actually changed
+- Visual Studio/debug runs often use `Runtime/config.json`
+- built executables usually use the `config.json` beside the executable in the output directory
+
+The runtime build flow copies `Runtime/config.json` into the build output so the output-local config stays available.
 
 ## Troubleshooting
 
-### Hot Reload Not Working
-1. **Check File Path**: Ensure `config.json` is in the correct location
-2. **File Permissions**: Verify the application can read the config file
-3. **JSON Syntax**: Ensure the JSON is valid (use a JSON validator)
+### Changes do not apply
 
-#### Where is my `config.json` actually coming from?
+Check:
 
-The engine prints the active config path at startup:
+- the edited file is the actual active `config.json`
+- the JSON syntax is valid
+- hot reload was enabled during startup
+- the changed key is part of the supported key set above
 
-- `[Limitless] Working directory: ...`
-- `[Limitless] Using config file: ...\config.json`
+### Logging changes seem delayed
 
-When running from Visual Studio, the working directory is often `Runtime/`, so `Runtime/config.json` is used.
-When running the built executable directly, the working directory is usually the output folder, so the config next to the `.exe` is used.
+That is expected.
 
-To reduce confusion, the `Runtime` project copies `Runtime/config.json` into the build output folder on every build so both locations stay in sync.
+Logging changes are queued and then applied on the next main-thread `HotReloadManager::Update()` call.
 
-### Logging Changes Not Visible
-1. **Log Level**: Make sure the new log level is lower than the current messages
-2. **Console Output**: Check if console logging is enabled
-3. **File Output**: Check if file logging is enabled and directory exists
+### Window changes do not apply
 
-### Performance Issues
-1. **Polling Interval**: Can be adjusted in `FileWatcher.cpp`
-2. **File Size**: Large config files may cause slight delays
-3. **System Load**: High system load may affect file watching responsiveness
+Check:
 
-## Future Enhancements
+- the value type matches the expected key type
+- a window has been registered with `HotReloadManager`
+- the application is still pumping frames so `Update()` continues to run
 
-### Planned Features
-- **Audio System Hot Reloading**: Real-time audio configuration changes
-- **Graphics System Hot Reloading**: Real-time graphics quality settings
-- **Input System Hot Reloading**: Real-time input sensitivity and mapping changes
+## Current Scope Summary
 
-### Advanced Features
-- **Multiple Config Files**: Watch multiple configuration files
-- **Conditional Hot Reloading**: Enable/disable hot reloading for specific systems
-- **Hot Reload Profiles**: Different hot reload settings for debug/release builds
+- config hot reload is implemented
+- file watching is polling-based
+- change detection is value-aware
+- logging and window hot reload are implemented
+- audio / graphics / input hot reload are still future work
 
-## Best Practices
+## Related Files
 
-1. **Test Changes**: Always test configuration changes in a safe environment
-2. **Backup Config**: Keep a backup of your working configuration
-3. **Incremental Changes**: Make small changes to test hot reloading
-4. **Monitor Output**: Watch the console for hot reload messages
-5. **Validate JSON**: Use a JSON validator to ensure syntax is correct
-
-## Example Workflow
-
-1. **Start Application**: Run your application normally
-2. **Make Small Change**: Change one setting in `config.json`
-3. **Save File**: Save the file (this triggers hot reload)
-4. **Verify Change**: Check console output and application behavior
-5. **Repeat**: Make additional changes as needed
-
-The hot reload system improves iteration speed by eliminating the need to restart the application for routine configuration changes.
+- `Limitless/Source/Core/ConfigManager.{h,cpp}`
+- `Limitless/Source/Core/FileWatcher.{h,cpp}`
+- `Limitless/Source/Core/HotReloadManager.{h,cpp}`
+- `Limitless/Source/Core/Application.cpp`

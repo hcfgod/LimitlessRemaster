@@ -375,6 +375,8 @@ namespace Limitless::ManagedScriptHost
             return false;
         }
 
+        InvocationScope invocationScope(scene, instanceId);
+
         if (runtimeInstance->LastSynchronizedExposedPropertiesRevision == revision)
         {
             if (errorMessage != nullptr)
@@ -422,6 +424,8 @@ namespace Limitless::ManagedScriptHost
                 *errorMessage = "managed runtime instance was not found";
             return false;
         }
+
+        InvocationScope invocationScope(scene, instanceId);
 
         const DiscoveredScriptClass* discoveredClass = FindDiscoveredClassMetadata(runtimeInstance->ClassName);
         if (discoveredClass == nullptr)

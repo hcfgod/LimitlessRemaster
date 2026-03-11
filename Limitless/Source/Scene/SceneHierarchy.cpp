@@ -1,6 +1,7 @@
 #include "Scene/Scene.h"
 #include "Scene/Components/ScriptingComponents.h"
 
+#include "Assets/AssetUtils.h"
 #include "Core/ConfigManager.h"
 #include "Core/Debug/Log.h"
 #include "Scripting/Coroutine.h"
@@ -115,6 +116,39 @@ namespace Limitless
                     operationName ? operationName : "Unknown",
                     static_cast<uint32_t>(phase));
         }
+
+        bool SceneEntityIdExists(const entt::registry& registry, std::string_view persistentId, entt::entity excludedEntity)
+        {
+            if (persistentId.empty())
+                return false;
+
+            auto view = registry.view<SceneEntityIdComponent>();
+            for (entt::entity entity : view)
+            {
+                if (entity == excludedEntity)
+                    continue;
+
+                const auto& entityId = view.get<SceneEntityIdComponent>(entity);
+                if (entityId.Id == persistentId)
+                    return true;
+            }
+
+            return false;
+        }
+
+        std::string MakeUniqueSceneEntityId(const entt::registry& registry, entt::entity excludedEntity, const std::string& preferredId = {})
+        {
+            if (!preferredId.empty() && !SceneEntityIdExists(registry, preferredId, excludedEntity))
+                return preferredId;
+
+            std::string generatedId;
+            do
+            {
+                generatedId = Assets::GenerateGuid();
+            } while (generatedId.empty() || SceneEntityIdExists(registry, generatedId, excludedEntity));
+
+            return generatedId;
+        }
     }
 
     entt::entity Scene::CreateEntity(const std::string& name)
@@ -144,6 +178,9 @@ namespace Limitless
         tag.Tag = name;
         tag.Enabled = true;
         m_Registry.emplace<TagComponent>(entity, std::move(tag));
+        SceneEntityIdComponent entityId{};
+        entityId.Id = MakeUniqueSceneEntityId(m_Registry, entity);
+        m_Registry.emplace<SceneEntityIdComponent>(entity, std::move(entityId));
         m_Registry.emplace<TransformComponent>(entity);
         auto& hierarchy = m_Registry.emplace<HierarchyComponent>(entity);
         m_TransformsDirty = true;
@@ -498,6 +535,46 @@ namespace Limitless
         if (found == m_DeferredEntityReferences.end() || found->second == entt::null)
             return entity;
         return found->second;
+    }
+
+    std::string Scene::GetEntityPersistentId(entt::entity entity) const
+    {
+        entity = ResolveEntityReference(entity);
+        if (!IsValid(entity))
+            return {};
+
+        const auto* entityId = m_Registry.try_get<SceneEntityIdComponent>(entity);
+        if (!entityId)
+            return {};
+
+        return entityId->Id;
+    }
+
+    void Scene::SetEntityPersistentId(entt::entity entity, std::string persistentId)
+    {
+        entity = ResolveEntityReference(entity);
+        if (!IsValid(entity))
+            return;
+
+        SceneEntityIdComponent entityId{};
+        entityId.Id = MakeUniqueSceneEntityId(m_Registry, entity, persistentId);
+        m_Registry.emplace_or_replace<SceneEntityIdComponent>(entity, std::move(entityId));
+    }
+
+    entt::entity Scene::FindEntityByPersistentId(std::string_view persistentId) const
+    {
+        if (persistentId.empty())
+            return entt::null;
+
+        auto view = m_Registry.view<SceneEntityIdComponent>();
+        for (entt::entity entity : view)
+        {
+            const auto& entityId = view.get<SceneEntityIdComponent>(entity);
+            if (entityId.Id == persistentId)
+                return entity;
+        }
+
+        return entt::null;
     }
 
     entt::entity Scene::AllocateDeferredEntityReference()

@@ -23,7 +23,7 @@ An animation clip stores:
 - Transform tracks:
   - `PositionTrack`
   - `ScaleTrack`
-  - `RotationZTrack`
+  - `RotationTrack`
 - `EventTrack` for timed animation events
 
 Interpolation values are `Step` or `Linear` on supported tracks.
@@ -56,7 +56,7 @@ Runtime fields cache controller/clip assets and sampled outputs for sprite UV/te
 
 ### AnimationEventReceiverComponent
 
-- Receives animation events generated during `Scene::Update`.
+- Receives animation events generated during the animation runtime update.
 - Runtime list `RuntimeDispatchedEvents` is refreshed each frame.
 
 ## Editor Workflow
@@ -91,9 +91,11 @@ Animation asset edits are command-based through `EditorTextAssetCommand`:
 - Redo rewrites edited JSON text
 - Asset database/import pipeline are refreshed after each apply/undo/redo
 
-## Native Script API
+## Scripting API
 
-`ScriptableEntity` now exposes animator runtime controls:
+### Native C++ scripting
+
+`ScriptableEntity` exposes animator runtime controls:
 
 - `HasAnimator()`
 - `PlayAnimatorState(stateName, restartIfSameState)`
@@ -106,6 +108,44 @@ Animation asset edits are command-based through `EditorTextAssetCommand`:
 - Runtime queries:
   - `GetAnimatorCurrentStateName()`
   - `GetAnimatorStateTimeSeconds()`
+
+### Managed C# scripting
+
+The managed contract assembly also exposes animation wrappers such as:
+
+- `Animator`
+- `AnimationEventReceiver`
+- `AnimationEvent`
+
+Current managed `Animator` members include:
+
+- authoring/runtime properties:
+  - `ControllerKey`
+  - `DefaultClipKey`
+  - `PlaybackSpeed`
+  - `Enabled`
+  - `ApplyToSprite`
+  - `ApplyToTransform`
+  - `AutoPlay`
+  - `CurrentStateName`
+  - `CurrentClipKey`
+  - `StateTimeSeconds`
+  - `CurrentStateDurationSeconds`
+- playback control:
+  - `PlayState(...)`
+  - `PlayClip(...)`
+- parameter access:
+  - `SetBool`, `GetBool`
+  - `SetFloat`, `GetFloat`
+  - `SetInteger`, `GetInteger`
+  - `SetTrigger`, `ResetTrigger`
+
+Current managed `AnimationEventReceiver` members include:
+
+- `Enabled`
+- `EventCount`
+- `GetEvent(index)`
+- `GetEvents()`
 
 ## Test Coverage
 

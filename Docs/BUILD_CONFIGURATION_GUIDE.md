@@ -1,407 +1,239 @@
 # Build Configuration Guide
 
-This guide covers the build system configuration, platform-specific settings, and C++20 coroutine support in the Limitless Engine.
-
-## Table of Contents
-
-1. [Build System Overview](#build-system-overview)
-2. [Platform-Specific Build Options](#platform-specific-build-options)
-3. [C++20 Coroutine Support](#c20-coroutine-support)
-4. [Build Configurations](#build-configurations)
-5. [Cross-Platform Building](#cross-platform-building)
-6. [Application Icon Setup](#application-icon-setup)
-7. [Remote Desktop Build Pipeline](#remote-desktop-build-pipeline)
-8. [Best Practices](#best-practices)
+This guide covers the current build/export model for the Limitless workspace and editor.
 
 ## Build System Overview
 
-The Limitless Engine uses **Premake5** as its build system generator, providing:
-- **Cross-platform support** for Windows, macOS, and Linux
-- **Multiple compiler support** (MSVC, GCC, Clang)
-- **Multiple architecture support** (x64, ARM64)
-- **C++20 coroutine support** with platform-specific flags
-- **Automated project generation** with proper dependencies
+Limitless uses **Premake5** to generate platform build files and provides helper scripts for the common workflows.
 
-Output directory: `Build/<Config>-<system>-<platform>/` (e.g. `Build/Debug-windows-x64/`).
+Current goals:
 
-## Platform-Specific Build Options
+- Windows, macOS, and Linux desktop support
+- multiple compilers/toolchains where applicable
+- x64 and ARM64 targets
+- source-workspace and install-relative/internal-toolchain build flows
+- managed payload staging for C# scripting
 
-### Windows (MSVC)
+## Standard Build Scripts
 
-**Build Options:**
-```lua
-filter "system:windows"
-    cppdialect "C++20"
-    staticruntime "Off"
-    systemversion "latest"
-    
-    buildoptions
-    {
-        "/utf-8",
-        "/std:c++20",
-    }
+### Windows
+
+```bat
+Scripts\build-windows.bat [Debug|Release|Dist] [x64|ARM64]
 ```
 
-**Key Features:**
-- **C++20 Standard**: Full C++20 language support
-- **UTF-8 Support**: Proper Unicode handling
-- **Coroutine Support**: C++20 coroutines are available when compiling in C++20 mode (no special MSVC flag required for standard C++20 coroutines).
-- **Runtime Library**: `staticruntime "Off"` (dynamic runtime). Binaries are smaller and link consistently across projects; you may need the MSVC runtime redistributable on target machines.
-- **Latest SDK**: Uses the latest Windows SDK
+Typical output examples:
 
-### macOS (GCC/Clang)
+- `Build/debug_x64-windows-x64/`
+- `Build/dist_x64-windows-x64/`
 
-**Build Options:**
-```lua
-filter "system:macosx"
-    cppdialect "C++20"
-    staticruntime "Off"
-    
-    buildoptions
-    {
-        "-std=c++20",
-    }
+### Linux / macOS
+
+```bash
+Scripts/build-unix.sh --config Debug --compiler gcc
+Scripts/build-unix.sh --config Release --compiler clang
 ```
 
-**Key Features:**
-- **C++20 Standard**: Full C++20 language support
-- **Coroutine Support**: Standard C++20 coroutines are available in C++20 mode on modern Clang.
-- **Framework Integration**: Native macOS framework support
-- **ARM64 Support**: Native Apple Silicon support
+Typical output examples:
 
-### Linux (GCC/Clang)
+- `Build/debug_x64-linux-x64/`
+- `Build/debug_arm64-macosx-ARM64/`
 
-**Build Options:**
-```lua
-filter "system:linux"
-    cppdialect "C++20"
-    staticruntime "Off"
-    
-    buildoptions
-    {
-        "-std=c++20",
-    }
+## Premake Direct
+
+Advanced users can still generate directly:
+
+```bash
+Vendor/Premake/premake5 vs2022
+Vendor/Premake/premake5 gmake2
 ```
-
-**Key Features:**
-- **C++20 Standard**: Full C++20 language support
-- **Coroutine Support**: Standard C++20 coroutines are available in C++20 mode on modern GCC/Clang.
-- **System Libraries**: Native Linux library integration
-- **Multi-architecture**: x64 and ARM64 support
-
-## C++20 Coroutine Status (Engine Reality)
-
-The project is compiled in **C++20 mode**, so client code may use standard C++20 coroutines where supported by the chosen compiler.
-
-However:
-
-- The engine’s current async primitives (`Limitless::Async::Task<T>`) are **future-backed** and are **not** coroutine-awaitable by default.
-- If you want coroutine-friendly tasks, you’ll need either:
-  - an awaiter wrapper around `std::shared_future`, or
-  - a dedicated coroutine `Task` type (future work).
-
-## Render Thread (OpenGL)
-
-The engine supports a dedicated render thread for OpenGL execution/present.
-
-- **Config key**: `graphics.render_thread_enabled` (boolean)
-- **Default**: `true`
-- **Behavior**:
-  - Main thread builds/submits render commands (MPMC submission).
-  - `Renderer::EndFrame()` signals the render thread that a frame is ready.
-  - `Renderer::SwapBuffers()` waits until the render thread completes the frame (process commands + present).
-
-This improves correctness and simplifies thread-affinity rules for OpenGL contexts. It does not make OpenGL GPU execution parallel; it ensures context ownership is explicit and safe.
-
-### GPU Resource Operations (OpenGL)
-
-When the render thread is enabled, GPU resource operations are executed on the render thread via an internal resource queue.
-
-- **Examples**:
-  - Shader compile/link
-  - Buffer/texture creation
-  - VAO attribute setup
-  - OpenGL deletes during teardown
-- **Behavior**: these operations may block the calling thread briefly (they are submitted and waited on).
-
-### GPU Resource Lifetime Rule (Must-have)
-
-**Rule**: GPU resources must be destroyed **before** `Renderer::Shutdown()` tears down the graphics context.
-
-- The engine attempts to delete OpenGL objects on the render thread via the resource queue.
-- If a GPU resource is destroyed *after* the renderer/context are already gone, the engine will **not** call `glDelete*` (unsafe) and will instead **warn and leak** the GL handle.
-
-This is a deliberate correctness choice: leaking during shutdown is preferable to undefined behavior or driver crashes.
 
 ## Build Configurations
 
-### Debug Configuration
-```lua
-filter "configurations:Debug"
-    defines 
-    { 
-        "LT_CONFIG_DEBUG",
-        "LT_LOG_LEVEL_TRACE_ENABLED",
-        "LT_LOG_LEVEL_DEBUG_ENABLED",
-        "LT_LOG_LEVEL_INFO_ENABLED",
-        "LT_LOG_LEVEL_WARN_ENABLED",
-        "LT_LOG_LEVEL_ERROR_ENABLED",
-        "LT_LOG_LEVEL_CRITICAL_ENABLED",
-        "LT_LOG_CONSOLE_ENABLED",
-        "LT_LOG_FILE_ENABLED",
-        "LT_LOG_CORE_ENABLED"
-    }
-    runtime "Debug"
-    symbols "on"
-    optimize "off"
-```
+### `Debug`
 
-**Features:**
-- **Full Debugging**: Complete debug information
-- **All Log Levels**: Maximum logging output
-- **No Optimization**: Easier debugging
-- **Symbols**: Full symbol information
+- full symbols
+- minimal optimization
+- highest logging/detail level
 
-### Release Configuration
-```lua
-filter "configurations:Release"
-    defines 
-    { 
-        "LT_CONFIG_RELEASE",
-        "LT_LOG_LEVEL_INFO_ENABLED",
-        "LT_LOG_LEVEL_WARN_ENABLED",
-        "LT_LOG_LEVEL_ERROR_ENABLED",
-        "LT_LOG_LEVEL_CRITICAL_ENABLED",
-        "LT_LOG_CONSOLE_ENABLED",
-        "LT_LOG_FILE_ENABLED",
-        "LT_LOG_CORE_DISABLED"
-    }
-    runtime "Release"
-    optimize "speed"
-    symbols "off"
-```
+### `Release`
 
-**Features:**
-- **Speed Optimization**: Maximum performance
-- **Reduced Logging**: Only essential log levels
-- **No Debug Symbols**: Smaller executable size
-- **Release Runtime**: Optimized runtime libraries
+- optimized build
+- reduced logging
 
-### Distribution Configuration
-```lua
-filter "configurations:Dist"
-    defines 
-    { 
-        "LT_CONFIG_DIST",
-        "LT_LOG_LEVEL_WARN_ENABLED",
-        "LT_LOG_LEVEL_ERROR_ENABLED",
-        "LT_LOG_LEVEL_CRITICAL_ENABLED",
-        "LT_LOG_CONSOLE_DISABLED",
-        "LT_LOG_FILE_ENABLED",
-        "LT_LOG_CORE_DISABLED"
-    }
-    runtime "Release"
-    optimize "speed"
-    symbols "off"
-    systemversion "latest"
-```
+### `Dist`
 
-**Features:**
-- **Maximum Performance**: Full optimization
-- **Minimal Logging**: Only critical errors
-- **No Console Output**: Clean user experience
-- **Distribution Ready**: Production-ready build
+- shipping-oriented build
+- release runtime
+- minimized logging
+- used by the editor/game export pipeline as the shipped build configuration
 
-## Application Icon Setup
+Current editor/export reality:
 
-The workspace uses a shared logo file at `Resources/LimitlessLogo.ico`.
+- the Build Settings panel currently forces `BuildConfiguration` to `Dist`
+- load/save sanitization in `BuildSettings` also normalizes the stored build configuration to `Dist`
+- `Debug` and `Release` still exist for direct workspace/toolchain builds, but the editor's shipped game build flow currently exports `Dist`
 
-- **Windows executable icon metadata**: Embedded through `Resources/LimitlessExecutableIcon.rc` so the generated `.exe` files show the project icon in Explorer.
-- **Runtime window icon (Windows/macOS/Linux)**: `window.icon` in `Editor/config.json` and `Runtime/config.json` is set to `LimitlessLogo.ico`.
-- **Output layout**: Premake post-build copy rules place `LimitlessLogo.ico` next to each built executable so config-based icon loading works consistently.
-- **Packaged game builds**: `GameBuilder` now copies `LimitlessLogo.ico` into the output directory alongside `config.json` and the game executable.
+## Render Thread / OpenGL Resource Model
 
-## Cross-Platform Building
+The production renderer is OpenGL-based and supports a dedicated render thread.
 
-### Editor Build Modes
+Important runtime rules:
 
-The editor now supports two execution modes for desktop builds:
+- render commands are submitted from the main thread
+- GPU resource work may execute on the render/resource thread
+- GPU resources must be destroyed before renderer shutdown tears down the context
 
-- `Auto`: chooses the best route for the selected target
-- `Local`: builds on the current host machine
-- `Remote`: dispatches to a native worker on the selected target OS
+Leaking a resource during shutdown is preferred over calling unsafe `glDelete*` after the context is gone.
+
+## Editor Build Settings Model
+
+Per-project export settings live in:
+
+- `Project/Settings/BuildSettings.json`
+
+The build settings file currently includes:
+
+- ordered build-scene list
+- persisted settings version
+- build configuration
+- build backend
+- target OS / architecture
+- execution mode
+- remote build settings
+- compression settings
+- last output directory
+- game icon override
+- engine root override field
+- script editor mode
+- native script compile failure policy
+
+The first enabled build scene is treated as the startup scene.
+
+Current editor behavior:
+
+- the editor auto-detects the engine workspace root or internal toolchain root at build time
+- `EngineRootOverride` exists in the schema, but the current Build Settings panel clears persisted manual overrides and relies on auto-detection
+- the panel may auto-resolve the backend to `InternalToolchain` when an internal toolchain layout is detected without a matching legacy workspace root
+
+## Build Backends
+
+Current backend options:
+
+- `LegacySdk`
+  - source-workspace oriented
+  - uses the existing engine workspace/build scripts directly
+
+- `InternalToolchain`
+  - install-relative/toolchain-root oriented
+  - intended for packaged/internal distribution workflows
+
+The editor may normalize a legacy selection into `InternalToolchain` when running from an internal-toolchain install layout.
+
+## Execution Modes
+
+Current editor build execution modes:
+
+- `Auto`
+- `Local`
+- `Remote`
 
 Current `Auto` behavior:
 
-- Host target match -> local build
-- Windows host + Linux target + WSL installed -> local Linux cross-build through WSL
-- Otherwise -> remote build (using target-routed endpoint if configured)
+- host/target match -> local build
+- Windows host + Linux target + WSL ready -> local Linux build through WSL
+- otherwise -> remote build when configured
 
-Target settings are persisted in `Project/Settings/BuildSettings.json`:
+On Windows, the Build Settings panel also exposes a WSL setup/status helper for the local Windows->Linux path.
 
-- `targetOS`: `Windows` | `macOS` | `Linux`
-- `targetArchitecture`: `x64` | `ARM64`
-- `executionMode`: `Auto` | `Local` | `Remote`
-- `remoteBuildEndpoint`, `remoteBuildEndpointWindows`, `remoteBuildEndpointMacOS`, `remoteBuildEndpointLinux`
-- `useTargetEndpointRouting`, `remoteBuildPool`, `remoteBuildAuthToken`
-- `remoteBuildTimeoutSeconds`, `remoteBuildPollIntervalSeconds`, `remoteBuildMaxRetries`
-- `allowLocalBuildFallback`
+## Remote Build Flow
 
-### Windows Building
+Remote builds use:
 
-**Using Build Script:**
-```batch
-# Build Debug x64
-Scripts\build-windows.bat Debug x64
+- `Scripts/remote_build_worker.py`
+- `Scripts/remote_build_client.py`
 
-# Build Release ARM64
-Scripts\build-windows.bat Release ARM64
+The editor can route requests through:
 
-# Build Distribution x64
-Scripts\build-windows.bat Dist x64
-```
+- fallback endpoint
+- target-specific endpoints
+- optional auth token / pool labels / retry settings
 
-**Using Premake Directly:**
-```batch
-# Generate Visual Studio solution
-Vendor/Premake/premake5 vs2022
+For API details see:
 
-# Build with MSBuild
-msbuild LimitlessRemaster.sln /p:Configuration=Debug /p:Platform=x64
-```
+- `Docs/REMOTE_BUILD_API_GUIDE.md`
 
-### macOS Building
+## Managed C# Payload Staging
 
-**Using Build Script:**
-```bash
-# Build Debug with GCC
-Scripts/build-unix.sh --config Debug --compiler gcc
+Managed scripting is now part of the build/staging model.
 
-# Build Release with Clang
-Scripts/build-unix.sh --config Release --compiler clang
+Primary helper scripts:
 
-# Build Distribution
-Scripts/build-unix.sh --config Dist --compiler clang
-```
+- Windows: `Scripts/build-managed-runtime-windows.bat`
+- Unix: `Scripts/build-managed-runtime-unix.sh`
 
-**Using Premake Directly:**
-```bash
-# Generate Makefiles
-Vendor/Premake/premake5 gmake2
+These scripts currently:
 
-# Build with make
-make -j$(sysctl -n hw.ncpu) config=Debug_x64
-```
+- validate `dotnet` availability
+- build/publish Coral-managed runtime pieces
+- build `Managed/Limitless.Managed`
+- build `Managed/Limitless.Managed.TestScripts`
+- optionally generate and build a project-authored managed scripts `.csproj`
+- stage everything into a `Managed/` payload directory
+- emit `Limitless.Managed.payload.json`
+- reuse a managed runtime cache
+- coordinate concurrent builds with scoped lock directories
 
-### Linux Building
+The resulting payload is copied beside editor/runtime/shipping outputs as:
 
-**Using Build Script:**
-```bash
-# Build Debug with GCC
-Scripts/build-unix.sh --config Debug --compiler gcc
+- `<Output>/Managed/`
 
-# Build Release with Clang
-Scripts/build-unix.sh --config Release --compiler clang
+## Managed Payload Manifest
 
-# Build Distribution
-Scripts/build-unix.sh --config Dist --compiler gcc
-```
+The managed payload manifest is:
 
-**Using Premake Directly:**
-```bash
-# Generate Makefiles
-Vendor/Premake/premake5 gmake2
+- `Managed/Limitless.Managed.payload.json`
 
-# Build with make
-make -j$(nproc) config=Debug_x64
-```
+It records:
 
-## Remote Desktop Build Pipeline
+- payload format version
+- host API version
+- Coral managed assembly/runtimeconfig names
+- `Limitless.Managed` contract assembly/runtimeconfig names
+- discovered script assembly list
+- target OS / architecture / build configuration
 
-Use this when building desktop targets from a different host OS.
+## Application Icon Packaging
 
-### 1) Run a native worker per target OS
+Shared icon assets:
 
-```bash
-python Scripts/remote_build_worker.py --host 0.0.0.0 --port 8080 --engine-root /path/to/LimitlessRemaster
-```
+- `Resources/LimitlessExecutableIcon.rc`
+- `Resources/LimitlessLogo.ico`
 
-### 2) Configure editor Build Settings
+Current behavior:
 
-- Set `Execution Mode` to `Auto` (recommended) or `Remote`
-- Set `Target OS` and `Target Architecture`
-- Set `Remote Endpoint` fallback and optionally per-target endpoints:
-  - `Remote Endpoint (Windows)`
-  - `Remote Endpoint (macOS)`
-  - `Remote Endpoint (Linux)`
-- Optionally set auth token and retry/timeout values
-
-### 3) Build from editor
-
-The editor will:
-
-- Build asset bundles locally
-- Build ScriptCore + Runtime either locally (host or WSL Linux cross) or via remote worker
-- Download/verify artifact bundle (SHA-256)
-- Reuse existing packaging flow (`config.json`, `GameBootstrap.json`, platform finalization)
-
-For full API payloads and contract details see `Docs/REMOTE_BUILD_API_GUIDE.md`.
-
-## Best Practices
-
-### Compiler Selection
-
-1. **Windows**: Use MSVC for best Windows integration
-2. **macOS**: Use Clang for best Apple ecosystem integration
-3. **Linux**: Use GCC for best Linux compatibility
-
-### Configuration Selection
-
-1. **Development**: Use Debug configuration for development
-2. **Testing**: Use Release configuration for performance testing
-3. **Distribution**: Use Dist configuration for final builds
-
-### Coroutine Usage
-
-1. **Platform Awareness**: Always check coroutine support
-2. **Error Handling**: Use proper exception handling in coroutines
-3. **Memory Management**: Be aware of coroutine memory allocation
-4. **Performance**: Profile coroutine performance in your use case
-
-### Build Optimization
-
-1. **Parallel Building**: Use `-j` flag for parallel compilation
-2. **Incremental Builds**: Use proper dependency management
-3. **Clean Builds**: Clean build directory for major changes
-4. **Cache Management**: Use build caching when available
-
-### Platform-Specific Considerations
-
-1. **Windows**: Ensure UTF-8 encoding for source files
-2. **macOS**: Consider framework vs static library usage
-3. **Linux**: Ensure proper library linking and dependencies
+- the build request resolves `GameWindowIconPath` from either an absolute path or a project-relative path
+- the shipped runtime config writes `window.icon` to the copied icon filename in the output directory
+- packaged game builds copy either the configured icon or the default runtime `LimitlessLogo.ico` into the output directory
+- on Windows, configured executable icon embedding requires `.ico` data; if the configured runtime icon is not `.ico`, a same-stem companion `.ico` file is required for executable metadata embedding
 
 ## Troubleshooting
 
-### Common Build Issues
+Common build issues:
 
-1. **Coroutine Support (C++20)**: Ensure you are compiling in **C++20 mode** and your compiler version supports standard coroutines.
-   - MSVC: no special `/await` flag is required for standard C++20 coroutines.
-   - GCC/Clang: standard C++20 coroutines work in C++20 mode on modern toolchains. (Older toolchains may require extra flags; upgrade if possible.)
-2. **C++20 Support**: Verify your compiler supports the C++20 standard library features you use (not just the language mode).
-3. **Library Dependencies**: Check all required libraries are available
-4. **Platform SDK**: Ensure latest platform SDK is installed
+- missing platform SDK/toolchain
+- missing `dotnet` SDK for managed payload builds
+- missing WSL for local Windows->Linux builds
+- configured game icon path missing or invalid
+- Windows executable icon embedding requested with a non-`.ico` icon and no companion `.ico`
+- missing FFmpeg binaries when audio decoding support is enabled
+- stale ScriptCore or managed payload after bridge/API changes
 
-### Performance Issues
+## Related Files
 
-1. **Build Time**: Use parallel compilation and build caching
-2. **Binary Size**: Use appropriate optimization levels
-3. **Runtime Performance**: Profile with Release configuration
-
-### Platform-Specific Issues
-
-1. **Windows**: Check Windows SDK version compatibility
-2. **macOS**: Verify Xcode command line tools installation
-3. **Linux**: Ensure development libraries are installed
-
-This build configuration targets the engine's **implemented platforms today** (Windows/macOS/Linux) while keeping future platform expansion in mind, and provides C++20 build settings across those targets.
+- `Limitless/Source/Project/BuildSettings.{h,cpp}`
+- `Limitless/Source/Project/GameBuilder.{h,cpp}`
+- `Scripts/build-windows.bat`
+- `Scripts/build-unix.sh`
+- `Scripts/build-managed-runtime-windows.bat`
+- `Scripts/build-managed-runtime-unix.sh`

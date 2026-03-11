@@ -30,7 +30,7 @@ jobs:
           if [ ! -f "Limitless/Vendor/Coral/Coral.Native/Include/Coral/Assembly.hpp" ]; then
             rm -rf Limitless/Vendor/Coral
             git clone https://github.com/hcfgod/Coral.git Limitless/Vendor/Coral
-            git -C Limitless/Vendor/Coral checkout 087b32322c4834bf6054d232914869f2b5637bfc
+            git -C Limitless/Vendor/Coral checkout 6d93ae654b0bc558dfd0cb5b45e7d817397141b3
             rm -rf Limitless/Vendor/Coral/.git
           fi
           test -f "Limitless/Vendor/Coral/Coral.Native/Include/Coral/Assembly.hpp"
@@ -103,7 +103,7 @@ jobs:
           if [ ! -f "Limitless/Vendor/Coral/Coral.Native/Include/Coral/Assembly.hpp" ]; then
             rm -rf Limitless/Vendor/Coral
             git clone https://github.com/hcfgod/Coral.git Limitless/Vendor/Coral
-            git -C Limitless/Vendor/Coral checkout 087b32322c4834bf6054d232914869f2b5637bfc
+            git -C Limitless/Vendor/Coral checkout 6d93ae654b0bc558dfd0cb5b45e7d817397141b3
             rm -rf Limitless/Vendor/Coral/.git
           fi
           test -f "Limitless/Vendor/Coral/Coral.Native/Include/Coral/Assembly.hpp"
