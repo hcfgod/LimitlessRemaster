@@ -123,7 +123,12 @@ namespace Limitless
             std::chrono::high_resolution_clock::time_point submissionTime{};
             uint64_t frameId = 0;
             
-            QueuedCommand() = default;
+            QueuedCommand() noexcept
+                : command(nullptr, RenderCommandDeleter{})
+                , priority(RenderCommandPriority::Normal)
+                , submissionTime{}
+                , frameId(0)
+            {}
             
             QueuedCommand(UniqueRenderCommand cmd, RenderCommandPriority prio, uint64_t frame)
                 : command(std::move(cmd))
