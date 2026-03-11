@@ -127,11 +127,13 @@ namespace Limitless::Audio
         m_MasterVolume.store(std::max(0.0f, volume), std::memory_order_release);
     }
 
-    bool AudioEngine::EnqueueCriticalCommand(AudioCommand&& command, const char* commandName)
+    bool AudioEngine::EnqueueCriticalCommand(AudioCommand command, const char* commandName)
     {
+        const AudioCommand templateCommand = command;
         for (int attempt = 0; attempt < kCriticalCommandEnqueueRetries; ++attempt)
         {
-            if (m_CommandQueue.TryPush(std::move(command)))
+            AudioCommand queuedCommand = templateCommand;
+            if (m_CommandQueue.TryPush(std::move(queuedCommand)))
                 return true;
             std::this_thread::yield();
         }
@@ -140,7 +142,7 @@ namespace Limitless::Audio
         return false;
     }
 
-    bool AudioEngine::EnqueueBestEffortCommand(AudioCommand&& command, const char* commandName)
+    bool AudioEngine::EnqueueBestEffortCommand(AudioCommand command, const char* commandName)
     {
         if (m_CommandQueue.TryPush(std::move(command)))
             return true;

@@ -26,7 +26,8 @@ struct GraphicsAPIVersion {
 
 // Graphics API capability information
 struct GraphicsAPICapabilities {
-    GraphicsAPI api;
+    GraphicsAPI api = GraphicsAPI::OpenGL;
+
     GraphicsAPIVersion version;
     bool isSupported = false;
     bool isAvailable = false;
@@ -199,7 +200,8 @@ public:
     
     // Get selection recommendation with reasoning
     struct SelectionRecommendation {
-        GraphicsAPI recommendedAPI;
+        GraphicsAPI recommendedAPI = GraphicsAPI::OpenGL;
+
         std::string reasoning;
         std::vector<GraphicsAPI> alternatives;
         std::string warnings;

@@ -124,8 +124,8 @@ namespace Limitless::Audio
         static void SDLCALL StreamCallback(void* userdata, SDL_AudioStream* stream, int additionalAmount, int totalAmount);
         void ProduceAudio(SDL_AudioStream* stream, int additionalAmount, int totalAmount);
 
-        bool EnqueueCriticalCommand(AudioCommand&& command, const char* commandName);
-        bool EnqueueBestEffortCommand(AudioCommand&& command, const char* commandName);
+        bool EnqueueCriticalCommand(AudioCommand command, const char* commandName);
+        bool EnqueueBestEffortCommand(AudioCommand command, const char* commandName);
         void DrainPendingCommands();
         void ApplyPlayVoiceCommand(AudioCommand&& command);
         void ApplyStopVoiceCommand(uint32_t voiceId);

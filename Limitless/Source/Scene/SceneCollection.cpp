@@ -267,10 +267,13 @@ namespace Limitless
             return;
         }
 
-        if (!m_Collection->SetScene(*m_Handle, std::move(scene), std::move(assetKey), lifecycle, roles))
+        if (m_Collection->GetRecord(*m_Handle) != nullptr)
         {
-            *m_Handle = m_Collection->AddScene(std::move(scene), std::move(assetKey), lifecycle, roles);
+            m_Collection->SetScene(*m_Handle, std::move(scene), std::move(assetKey), lifecycle, roles);
+            return;
         }
+
+        *m_Handle = m_Collection->AddScene(std::move(scene), std::move(assetKey), lifecycle, roles);
     }
 
     SceneCollectionSlot& SceneCollectionSlot::operator=(std::unique_ptr<Scene> scene)

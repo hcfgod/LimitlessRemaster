@@ -190,11 +190,11 @@ namespace Limitless
         // Statistics
         struct DispatchStats
         {
-            size_t totalEventsDispatched;
-            size_t eventsHandled;
-            size_t eventsFiltered;
-            std::chrono::microseconds totalDispatchTime;
-            double averageDispatchTime;
+            size_t totalEventsDispatched = 0;
+            size_t eventsHandled = 0;
+            size_t eventsFiltered = 0;
+            std::chrono::microseconds totalDispatchTime{};
+            double averageDispatchTime = 0.0;
         };
         
         DispatchStats GetStats() const;
@@ -208,7 +208,7 @@ namespace Limitless
         struct ListenerEntry
         {
             std::shared_ptr<EventListener> listener;
-            EventPriority priority;
+            EventPriority priority = EventPriority::Normal;
             
             bool operator<(const ListenerEntry& other) const
             {

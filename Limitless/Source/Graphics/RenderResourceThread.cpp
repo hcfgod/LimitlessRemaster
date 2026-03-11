@@ -71,15 +71,17 @@ namespace Limitless
     {
         for (;;)
         {
+            bool shouldShutdown = false;
             // Wait for work or shutdown request.
             {
                 std::unique_lock<std::mutex> lock(m_Mutex);
                 m_CV.wait(lock, [this]() {
                     return m_Shutdown.load(std::memory_order_relaxed) || !m_Queue.IsEmpty();
                 });
+                shouldShutdown = m_Shutdown.load(std::memory_order_relaxed);
             }
 
-            if (m_Shutdown.load(std::memory_order_relaxed))
+            if (shouldShutdown)
             {
                 break;
             }

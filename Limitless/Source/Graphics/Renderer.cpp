@@ -569,10 +569,12 @@ namespace Limitless
         {
             uint64_t frameIdToComplete = 0;
             bool executingAFrame = false;
+            bool shouldShutdown = false;
 
             // Wait for frame request.
             {
                 std::unique_lock<std::mutex> lock(m_RenderThreadMutex);
+
                 m_RenderThreadCV.wait(lock, [this]() {
                     // IMPORTANT:
                     // We must always wake for resource work, even if the optional OpenGL resource thread is enabled.
@@ -585,10 +587,8 @@ namespace Limitless
                     // The render thread can always act as a safe fallback consumer for the resource queue.
                     return m_FrameRequested || m_RenderThreadShutdown.load() || !m_PrimaryResourceQueue.IsEmpty() || !m_ResourceQueue.IsEmpty();
                 });
-                if (m_RenderThreadShutdown.load(std::memory_order_relaxed))
-                {
-                    break;
-                }
+                shouldShutdown = m_RenderThreadShutdown.load(std::memory_order_relaxed);
+
 
                 // Always process any pending resource work before frame execution.
                 // (We keep the lock only for the wait/flags; resource processing happens outside.)
@@ -606,7 +606,13 @@ namespace Limitless
                 }
             }
 
+            if (shouldShutdown)
+            {
+                break;
+            }
+
             // Execute resource commands + frame commands under a context-current scope.
+
             try
             {
                 OpenGLContext::ScopedCurrentContext scope(*glContext);

@@ -119,9 +119,9 @@ namespace Limitless
         struct QueuedCommand
         {
             UniqueRenderCommand command;
-            RenderCommandPriority priority;
-            std::chrono::high_resolution_clock::time_point submissionTime;
-            uint64_t frameId;
+            RenderCommandPriority priority = RenderCommandPriority::Normal;
+            std::chrono::high_resolution_clock::time_point submissionTime{};
+            uint64_t frameId = 0;
             
             QueuedCommand() = default;
             

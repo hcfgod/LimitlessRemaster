@@ -205,6 +205,7 @@ namespace Limitless::Concurrency
 
     bool JobSystem::TryEnqueue(Job& job)
     {
+        Job injectorJob = job;
         if (t_CurrentJobSystem == this &&
             t_CurrentWorkerIndex != kInvalidWorkerIndex &&
             t_CurrentWorkerIndex < m_Workers.size())
@@ -213,7 +214,7 @@ namespace Limitless::Concurrency
                 return true;
         }
 
-        if (m_InjectorQueue.TryPush(std::move(job)))
+        if (m_InjectorQueue.TryPush(std::move(injectorJob)))
             return true;
 
         return false;

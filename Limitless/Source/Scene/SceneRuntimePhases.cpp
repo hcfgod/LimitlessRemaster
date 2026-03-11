@@ -83,11 +83,19 @@ namespace Limitless
         else
             deferred.DebugName = "DeferredStructuralMutation";
 
-        if (m_DeferredStructuralMutationQueue && m_DeferredStructuralMutationQueue->TryPush(std::move(deferred)))
-            return true;
+        if (m_DeferredStructuralMutationQueue)
+        {
+            DeferredStructuralMutation queuedMutation = deferred;
+            if (m_DeferredStructuralMutationQueue->TryPush(std::move(queuedMutation)))
+                return true;
+        }
 
-        if (m_DeferredStructuralMutationOverflowQueue && m_DeferredStructuralMutationOverflowQueue->TryPush(std::move(deferred)))
-            return true;
+        if (m_DeferredStructuralMutationOverflowQueue)
+        {
+            DeferredStructuralMutation queuedMutation = deferred;
+            if (m_DeferredStructuralMutationOverflowQueue->TryPush(std::move(queuedMutation)))
+                return true;
+        }
 
         {
             std::lock_guard<std::mutex> lock(m_DeferredStructuralMutationsOverflowMutex);

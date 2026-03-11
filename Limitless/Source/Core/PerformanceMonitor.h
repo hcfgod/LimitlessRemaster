@@ -24,35 +24,35 @@ namespace Limitless {
     /// Performance data structure containing various metrics.
     struct PerformanceMetrics {
         // Frame timing
-        double frameTime;           // Current frame time in milliseconds
-        double frameTimeAvg;        // Average frame time over the last N frames
-        double fps;                 // Current FPS
-        double fpsAvg;              // Average FPS over the last N frames
+        double frameTime = 0.0;           // Current frame time in milliseconds
+        double frameTimeAvg = 0.0;        // Average frame time over the last N frames
+        double fps = 0.0;                 // Current FPS
+        double fpsAvg = 0.0;              // Average FPS over the last N frames
         
         // Memory usage
-        uint64_t totalMemory;       // Total allocated memory in bytes
-        uint64_t peakMemory;        // Peak memory usage in bytes
-        uint64_t currentMemory;     // Current memory usage in bytes
-        uint32_t allocationCount;   // Number of active allocations
+        uint64_t totalMemory = 0;       // Total allocated memory in bytes
+        uint64_t peakMemory = 0;        // Peak memory usage in bytes
+        uint64_t currentMemory = 0;     // Current memory usage in bytes
+        uint32_t allocationCount = 0;   // Number of active allocations
         
         // CPU usage
-        double cpuUsage;            // CPU usage percentage
-        double cpuUsageAvg;         // Average CPU usage over time
-        uint32_t cpuCoreCount;      // Number of CPU cores
+        double cpuUsage = 0.0;            // CPU usage percentage
+        double cpuUsageAvg = 0.0;         // Average CPU usage over time
+        uint32_t cpuCoreCount = 0;      // Number of CPU cores
         
         // GPU metrics (if available)
-        double gpuUsage;            // GPU usage percentage
-        double gpuMemoryUsage;      // GPU memory usage percentage
-        double gpuTemperature;      // GPU temperature in Celsius
-        uint64_t gpuMemoryUsedBytes;  // VRAM used (bytes)
-        uint64_t gpuMemoryTotalBytes; // VRAM total (bytes)
+        double gpuUsage = 0.0;            // GPU usage percentage
+        double gpuMemoryUsage = 0.0;      // GPU memory usage percentage
+        double gpuTemperature = 0.0;      // GPU temperature in Celsius
+        uint64_t gpuMemoryUsedBytes = 0;  // VRAM used (bytes)
+        uint64_t gpuMemoryTotalBytes = 0; // VRAM total (bytes)
         
         // Performance counters
         std::unordered_map<std::string, double> counters;
         
         // System information
-        uint64_t timestamp;         // Timestamp when metrics were collected
-        uint32_t frameCount;        // Total frame count since start
+        uint64_t timestamp = 0;         // Timestamp when metrics were collected
+        uint32_t frameCount = 0;        // Total frame count since start
     };
 
     /// Performance counter for tracking specific metrics.
@@ -251,16 +251,16 @@ namespace Limitless {
         double GetFPSInternal() const;
         double GetAverageFPSInternal() const;
 
-        bool m_Initialized;
-        bool m_Enabled;
-        bool m_LoggingEnabled;
+        bool m_Initialized = false;
+        bool m_Enabled = false;
+        bool m_LoggingEnabled = false;
         
         // Frame timing
         PerformanceTimer m_FrameTimer;
         std::vector<double> m_FrameTimes;
-        size_t m_FrameTimeIndex;
-        uint32_t m_FrameCount;
-        std::chrono::high_resolution_clock::time_point m_LastFrameTime;
+        size_t m_FrameTimeIndex = 0;
+        uint32_t m_FrameCount = 0;
+        std::chrono::high_resolution_clock::time_point m_LastFrameTime{};
         
         // Performance counters
         std::unordered_map<std::string, std::unique_ptr<PerformanceCounter>> m_Counters;
@@ -275,10 +275,10 @@ namespace Limitless {
         std::unique_ptr<ISystemPlatform> m_SystemPlatform;
         
         // Metrics collection
-        PerformanceMetrics m_CurrentMetrics;
-        double m_MetricsCollectionInterval;
-        std::chrono::high_resolution_clock::time_point m_LastMetricsUpdate;
-        MetricsCallback m_MetricsCallback;
+        PerformanceMetrics m_CurrentMetrics{};
+        double m_MetricsCollectionInterval = 1.0;
+        std::chrono::high_resolution_clock::time_point m_LastMetricsUpdate{};
+        MetricsCallback m_MetricsCallback{};
         
         // Thread safety
         mutable std::mutex m_Mutex;

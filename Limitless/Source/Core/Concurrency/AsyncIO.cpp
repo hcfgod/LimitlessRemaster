@@ -70,18 +70,23 @@ namespace Limitless
             for (;;)
             {
                 std::function<void()> task;
+                bool shouldExit = false;
                 {
                     std::unique_lock<std::mutex> lock(m_TaskMutex);
                     m_TaskCv.wait(lock, [this]() {
                         return m_Shutdown.load() || !m_TaskQueue.empty();
                     });
 
-                    if (m_Shutdown.load() && m_TaskQueue.empty())
-                        break;
-
-                    task = std::move(m_TaskQueue.front());
-                    m_TaskQueue.pop_front();
+                    shouldExit = m_Shutdown.load() && m_TaskQueue.empty();
+                    if (!shouldExit)
+                    {
+                        task = std::move(m_TaskQueue.front());
+                        m_TaskQueue.pop_front();
+                    }
                 }
+
+                if (shouldExit)
+                    break;
 
                 try
                 {

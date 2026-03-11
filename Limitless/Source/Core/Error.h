@@ -206,7 +206,8 @@ namespace Limitless
         std::string className;
         std::string moduleName;
         std::string threadId;
-        uint64_t timestamp;
+        uint64_t timestamp = 0;
+
         std::string platformInfo;
         std::string systemInfo;
         std::unordered_map<std::string, std::string> additionalData;

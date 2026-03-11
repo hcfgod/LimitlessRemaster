@@ -13,7 +13,9 @@
 // Platform-specific includes
 #ifdef LT_PLATFORM_WINDOWS
     #include <windows.h>
+    #include <winternl.h>
     #include <psapi.h>
+
     #include <intrin.h>
     #include <direct.h>
     #include <shlobj.h>
@@ -181,19 +183,23 @@ namespace Limitless
     void PlatformDetection::DetectOS()
     {
         #ifdef LT_PLATFORM_WINDOWS
-            OSVERSIONINFOEX osvi;
-            ZeroMemory(&osvi, sizeof(OSVERSIONINFOEX));
-            osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
-            
-            #pragma warning(push)
-            #pragma warning(disable:4996)
-            GetVersionEx((OSVERSIONINFO*)&osvi);
-            #pragma warning(pop)
-            
             s_PlatformInfo.osName = "Windows";
-            s_PlatformInfo.osVersion = std::to_string(osvi.dwMajorVersion) + "." + std::to_string(osvi.dwMinorVersion);
-            s_PlatformInfo.osBuild = std::to_string(osvi.dwBuildNumber);
-            
+            s_PlatformInfo.osVersion = "Unknown";
+            s_PlatformInfo.osBuild = "Unknown";
+
+            RTL_OSVERSIONINFOW osvi{};
+            osvi.dwOSVersionInfoSize = sizeof(osvi);
+            using RtlGetVersionFn = LONG(WINAPI*)(PRTL_OSVERSIONINFOW);
+            const HMODULE ntdllModule = GetModuleHandleW(L"ntdll.dll");
+            if (ntdllModule != nullptr)
+            {
+                const auto rtlGetVersion = reinterpret_cast<RtlGetVersionFn>(GetProcAddress(ntdllModule, "RtlGetVersion"));
+                if (rtlGetVersion != nullptr && rtlGetVersion(&osvi) >= 0)
+                {
+                    s_PlatformInfo.osVersion = std::to_string(osvi.dwMajorVersion) + "." + std::to_string(osvi.dwMinorVersion);
+                    s_PlatformInfo.osBuild = std::to_string(osvi.dwBuildNumber);
+                }
+            }
         #elif defined(LT_PLATFORM_MACOS)
             s_PlatformInfo.osName = "macOS";
             

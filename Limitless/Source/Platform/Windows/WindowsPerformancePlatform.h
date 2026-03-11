@@ -30,14 +30,15 @@ namespace Limitless {
         void SetUpdateInterval(double intervalSeconds) override;
 
     private:
-        PDH_HQUERY m_Query;
-        PDH_HCOUNTER m_Counter;
-        bool m_Initialized;
-        double m_CurrentUsage;
-        double m_AverageUsage;
-        uint32_t m_CoreCount;
-        double m_UpdateInterval;
-        std::chrono::high_resolution_clock::time_point m_LastUpdate;
+        PDH_HQUERY m_Query = nullptr;
+        PDH_HCOUNTER m_Counter = nullptr;
+        bool m_Initialized = false;
+        double m_CurrentUsage = 0.0;
+        double m_AverageUsage = 0.0;
+        uint32_t m_CoreCount = 0;
+        double m_UpdateInterval = 1.0;
+        std::chrono::high_resolution_clock::time_point m_LastUpdate{};
+
     };
 
     /// Windows-specific GPU monitoring implementation.

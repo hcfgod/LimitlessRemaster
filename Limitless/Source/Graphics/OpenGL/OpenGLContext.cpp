@@ -11,8 +11,8 @@
 namespace Limitless {
     OpenGLContext::ScopedCurrentContext::ScopedCurrentContext(OpenGLContext& context)
         : m_Context(context)
-        , m_Lock(context.m_ContextMutex)
     {
+        m_Lock = std::unique_lock<std::recursive_mutex>(context.m_ContextMutex);
         const std::thread::id thisThread = std::this_thread::get_id();
 
         // Re-entrant behavior:
@@ -28,6 +28,7 @@ namespace Limitless {
         if (!SDL_GL_MakeCurrent(m_Context.m_Window, m_Context.m_Context))
         {
             LT_CORE_CRITICAL("Could not make GL context current: {}", SDL_GetError());
+            m_Lock.unlock();
             throw std::runtime_error("Failed to make OpenGL context current");
         }
 
