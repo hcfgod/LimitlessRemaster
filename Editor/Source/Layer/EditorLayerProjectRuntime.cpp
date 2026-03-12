@@ -14,6 +14,7 @@
 #include "Graphics/Renderer2D.h"
 #include "Project/ProjectManager.h"
 #include "Project/ProjectSettings.h"
+#include "Scripting/ScriptCoreModuleRuntime.h"
 #include "Scene/Components/RenderingComponents.h"
 #include "Scene/Components/TilemapComponents.h"
 #include "Scene/Scene.h"
@@ -177,6 +178,18 @@ namespace Limitless
             LT_WARN("Failed to load project physics settings: {}", physicsSettingsResult.GetError().GetErrorMessage());
             m_ProjectPhysics2DSettingsLoaded = false;
         }
+
+        const auto layersSettingsResult = Project::LoadLayersSettings(pm.GetProjectRoot());
+        if (layersSettingsResult.IsSuccess())
+        {
+            m_ProjectLayersSettings = layersSettingsResult.GetValue();
+            m_ProjectLayersSettingsLoaded = true;
+            m_ProjectSettingsPanelState.Layers = m_ProjectLayersSettings;
+        }
+        else
+        {
+            m_ProjectLayersSettingsLoaded = false;
+        }
     }
 
     void EditorLayer::RefreshProjectLighting2DSettings()
@@ -197,6 +210,27 @@ namespace Limitless
         {
             LT_WARN("Failed to load project lighting settings: {}", lightingSettingsResult.GetError().GetErrorMessage());
             m_ProjectLighting2DSettingsLoaded = false;
+        }
+    }
+
+    void EditorLayer::RefreshProjectScriptingSettings()
+    {
+        const auto& projectManager = Project::ProjectManager::GetInstance();
+        if (!projectManager.HasOpenProject())
+            return;
+
+        const auto scriptingSettingsResult = Project::LoadScriptingSettings(projectManager.GetProjectRoot());
+        if (scriptingSettingsResult.IsSuccess())
+        {
+            m_ProjectScriptingSettings = scriptingSettingsResult.GetValue();
+            m_ProjectScriptingSettingsLoaded = true;
+            m_ProjectSettingsPanelState.Scripting = m_ProjectScriptingSettings;
+            ApplyProjectScriptingSettings();
+        }
+        else
+        {
+            LT_WARN("Failed to load project scripting settings: {}", scriptingSettingsResult.GetError().GetErrorMessage());
+            m_ProjectScriptingSettingsLoaded = false;
         }
     }
 
@@ -221,6 +255,9 @@ namespace Limitless
             runtimeSettings.ContactDampingRatio = m_ProjectPhysics2DSettings.ContactDampingRatio;
             runtimeSettings.ContactPushSpeed = m_ProjectPhysics2DSettings.ContactPushSpeed;
             targetScene->SetPhysics2DSettings(runtimeSettings);
+
+            if (m_ProjectLayersSettingsLoaded)
+                targetScene->SetPhysics2DCollisionMatrix(m_ProjectLayersSettings.CollisionMatrix);
         };
 
         for (const SceneCollection::Handle handle : m_SceneCollection.CollectHandlesWithRoles(0u))
@@ -254,6 +291,14 @@ namespace Limitless
         runtimeSettings.ShadowFreezeFrameCount = std::max(1, m_ProjectLighting2DSettings.ShadowFreezeFrameCount);
         runtimeSettings.MaxShadowSamplesPerLight = std::max(1, m_ProjectLighting2DSettings.MaxShadowSamplesPerLight);
         Lighting2DRenderer::Default().SetSettings(runtimeSettings);
+    }
+
+    void EditorLayer::ApplyProjectScriptingSettings()
+    {
+        if (!m_ProjectScriptingSettingsLoaded)
+            return;
+
+        ScriptCoreModuleRuntime::SetAutoRecompileOnSave(m_ProjectScriptingSettings.AutoReloadScripts);
     }
 
     void EditorLayer::LaunchStartupAssetImport()

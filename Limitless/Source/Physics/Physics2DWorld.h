@@ -3,6 +3,8 @@
 #include "Physics/Physics2DContactListener.h"
 #include "Scene/Components/PhysicsComponents.h"
 
+#include <array>
+#include <cstdint>
 #include <glm/glm.hpp>
 #include <unordered_map>
 
@@ -71,6 +73,9 @@ namespace Limitless
         void SetSettings(const Physics2DWorldSettings& settings);
         const Physics2DWorldSettings& GetSettings() const { return m_Settings; }
 
+        void SetCollisionMatrix(const std::array<uint32_t, 32>& matrix) { m_CollisionMatrix = matrix; }
+        const std::array<uint32_t, 32>& GetCollisionMatrix() const { return m_CollisionMatrix; }
+
         Physics2DRaycastHit RaycastClosest(const glm::vec2& origin, const glm::vec2& direction, float maxDistance, uint64_t collisionMask) const;
 
         const Physics2DContactListener& GetContactListener() const { return m_ContactListener; }
@@ -107,6 +112,7 @@ namespace Limitless
         Physics2DWorldSettings m_Settings{};
         Physics2DContactListener m_ContactListener;
         Physics2DDiagnostics m_Diagnostics{};
+        std::array<uint32_t, 32> m_CollisionMatrix = []{ std::array<uint32_t, 32> m; m.fill(~0u); return m; }();
         std::unordered_map<entt::entity, Physics2DBodyDiagnostics> m_BodyDiagnostics;
         bool m_RuntimeBuilt = false;
         bool m_DiagnosticsEnabled = true;

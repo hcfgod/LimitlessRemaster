@@ -4,6 +4,9 @@
 #include "Assets/InputActionsAssetImporter.h"
 #include "imgui/imgui.h"
 
+#include <algorithm>
+#include <glm/geometric.hpp>
+
 namespace Limitless
 {
     void EditorCameraController::Initialize(CameraManager& cameraManager, CameraId cameraId, Settings settings)
@@ -45,6 +48,9 @@ namespace Limitless
         m_InputAssetResource.reset();
         m_InputAssetRevision = 0;
         m_WasLookActive = false;
+        m_WasBlenderNavigationActive = false;
+        m_OrbitTarget = glm::vec3(0.0f);
+        m_OrbitDistance = 5.0f;
         m_Settings = Settings{};
     }
 
@@ -68,6 +74,7 @@ namespace Limitless
                 window.SetCursorVisible(true);
             }
             m_WasLookActive = false;
+            m_WasBlenderNavigationActive = false;
         }
         else
         {
@@ -93,18 +100,109 @@ namespace Limitless
             return;
         }
 
-        // Docked split views can cause action-based RMB state to flicker while cursor
-        // lock engages. Prefer raw RMB state, with action as fallback for non-mouse bindings.
-        const bool mouseLookEnable = ImGui::GetIO().MouseDown[ImGuiMouseButton_Right];
-        const bool actionLookEnable = (m_ActionLookEnable != nullptr) ? m_ActionLookEnable->ReadButton() : true;
-        const bool wantLook = mouseLookEnable || actionLookEnable;
+        const ImGuiIO& io = ImGui::GetIO();
+        const bool shiftDown = io.KeyShift;
+        const bool ctrlDown = io.KeyCtrl;
+        const bool middleMouseDown = io.MouseDown[ImGuiMouseButton_Middle];
+        const bool rightMouseDown = io.MouseDown[ImGuiMouseButton_Right];
+
+        // -- Blender-style navigation detection --
+        // MMB = orbit, Shift+MMB = pan, Ctrl+MMB = dolly drag, Wheel = dolly step
+        const bool blenderOrbitActive = !rightMouseDown && middleMouseDown && !shiftDown && !ctrlDown;
+        const bool blenderPanActive = !rightMouseDown && middleMouseDown && shiftDown && !ctrlDown;
+        const bool blenderDollyDragActive = !rightMouseDown && middleMouseDown && ctrlDown;
+        const bool blenderWheelActive = !rightMouseDown && !middleMouseDown && io.MouseWheel != 0.0f;
+        const bool blenderNavigationActive = blenderOrbitActive || blenderPanActive || blenderDollyDragActive;
+        const bool startedBlenderNavigationThisFrame = blenderNavigationActive && !m_WasBlenderNavigationActive;
+        m_WasBlenderNavigationActive = blenderNavigationActive;
+
+        // Keep orbit target in sync when not actively navigating Blender-style.
+        if (!blenderNavigationActive && !blenderWheelActive)
+        {
+            const glm::vec3 fwd = camera->GetForwardDirection();
+            const float currentDistance = glm::length(m_OrbitTarget - camera->GetPosition());
+            if (currentDistance > 0.001f)
+                m_OrbitDistance = currentDistance;
+            else
+                m_OrbitDistance = std::max(0.25f, m_OrbitDistance);
+            m_OrbitTarget = camera->GetPosition() + fwd * m_OrbitDistance;
+        }
+
+        const bool wantLook = rightMouseDown;
         const bool startedLookThisFrame = wantLook && !m_WasLookActive;
         m_WasLookActive = wantLook;
 
-        const glm::vec2 move = m_ActionMove->ReadAxis2D();
-        const glm::vec2 look = (wantLook && !startedLookThisFrame) ? m_ActionLook->ReadAxis2D() : glm::vec2(0.0f);
+        const glm::vec2 move = wantLook ? m_ActionMove->ReadAxis2D() : glm::vec2(0.0f);
+        const glm::vec2 look =
+            ((wantLook && !startedLookThisFrame) || (blenderNavigationActive && !startedBlenderNavigationThisFrame))
+            ? m_ActionLook->ReadAxis2D()
+            : glm::vec2(0.0f);
 
-        // Mouse delta -> yaw/pitch (scaled; camera stores degrees).
+        // =====================================================================
+        // Blender-style navigation — immediate, no smoothing, no deltaTime.
+        //
+        // Matches Blender's turntable orbit model:
+        //   - Orbit:  direct degrees-per-pixel rotation around pivot (turntable)
+        //   - Pan:    view-plane translation proportional to pivot distance
+        //   - Zoom:   multiplicative distance scaling (not additive)
+        // =====================================================================
+        if (blenderNavigationActive)
+        {
+            // Blender turntable: ~0.3 degrees per pixel at default sensitivity.
+            // LookSensitivity is in radians-per-pixel; convert to degrees and
+            // scale up slightly so orbit feels like Blender's turntable default.
+            const float orbitDegreesPerUnit = LookSensitivity * (180.0f / 3.14159265f) * 2.0f;
+            const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+
+            if (blenderOrbitActive)
+            {
+                // Turntable: yaw around world-up, pitch around camera-right.
+                // Immediate — no interpolation.
+                const float yaw = camera->GetYawDegrees() + (look.x * orbitDegreesPerUnit);
+                const float pitch = camera->GetPitchDegrees() + (-look.y * orbitDegreesPerUnit);
+                camera->SetYawPitchDegrees(yaw, pitch);
+                // Reposition camera on the orbit sphere — pivot stays fixed.
+                camera->SetPosition(m_OrbitTarget - camera->GetForwardDirection() * std::max(0.1f, m_OrbitDistance));
+            }
+            else if (blenderPanActive)
+            {
+                // Pan: translate pivot + camera along the view plane.
+                // Speed is proportional to distance so it feels consistent
+                // at any zoom level — just like Blender.
+                glm::vec3 right = glm::cross(camera->GetForwardDirection(), worldUp);
+                if (glm::length(right) < 0.0001f)
+                    right = glm::vec3(1.0f, 0.0f, 0.0f);
+                right = glm::normalize(right);
+                const glm::vec3 up = glm::normalize(glm::cross(right, camera->GetForwardDirection()));
+
+                const float panSpeed = std::max(0.01f, m_OrbitDistance) * 0.002f;
+                const glm::vec3 panOffset = ((-right * look.x) - (up * look.y)) * panSpeed;
+                m_OrbitTarget += panOffset;
+                camera->SetPosition(camera->GetPosition() + panOffset);
+            }
+            else if (blenderDollyDragActive)
+            {
+                // Drag-dolly: multiplicative zoom from vertical mouse movement.
+                // Each pixel multiplies distance by a small factor — feels
+                // logarithmic like Blender's dolly zoom style.
+                const float zoomFactor = std::pow(1.005f, look.y);
+                m_OrbitDistance = std::max(0.1f, m_OrbitDistance * zoomFactor);
+                camera->SetPosition(m_OrbitTarget - camera->GetForwardDirection() * m_OrbitDistance);
+            }
+
+            return;
+        }
+
+        // Scroll-wheel zoom: multiplicative, each notch ±10%.
+        // Immediate — no smoothing. Matches Blender's wheel zoom.
+        if (blenderWheelActive)
+        {
+            const float zoomFactor = std::pow(1.1f, -io.MouseWheel);
+            m_OrbitDistance = std::max(0.1f, m_OrbitDistance * zoomFactor);
+            camera->SetPosition(m_OrbitTarget - camera->GetForwardDirection() * m_OrbitDistance);
+            return;
+        }
+
         const float yaw = camera->GetYawDegrees() + (look.x * (LookSensitivity * 180.0f / 3.14159265f));
         const float pitch = camera->GetPitchDegrees() + (-look.y * (LookSensitivity * 180.0f / 3.14159265f));
         camera->SetYawPitchDegrees(yaw, pitch);
@@ -113,12 +211,16 @@ namespace Limitless
         const float speed = MoveSpeed * boost;
 
         const glm::vec3 forward = camera->GetForwardDirection();
-        const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
+        glm::vec3 right = glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f));
+        if (glm::length(right) < 0.0001f)
+            right = glm::vec3(1.0f, 0.0f, 0.0f);
+        right = glm::normalize(right);
 
         glm::vec3 position = camera->GetPosition();
         position += forward * (move.y * speed * deltaTime);
         position += right * (move.x * speed * deltaTime);
         camera->SetPosition(position);
+        m_OrbitTarget = position + camera->GetForwardDirection() * std::max(0.25f, m_OrbitDistance);
     }
 
     void EditorCameraController::OnWindowResize(uint32_t widthPixels, uint32_t heightPixels)
@@ -130,6 +232,24 @@ namespace Limitless
                 camera->SetViewportSize(widthPixels, heightPixels);
             }
         }
+    }
+
+    void EditorCameraController::FocusOnPoint(const glm::vec3& point, float distance)
+    {
+        if (!m_CameraManager || !m_CameraId)
+            return;
+
+        auto* camera = m_CameraManager->GetPerspective3D(m_CameraId);
+        if (!camera)
+            return;
+
+        float focusDistance = distance;
+        if (focusDistance <= 0.0f)
+            focusDistance = glm::length(point - camera->GetPosition());
+
+        m_OrbitTarget = point;
+        m_OrbitDistance = std::max(0.1f, focusDistance);
+        camera->SetPosition(m_OrbitTarget - camera->GetForwardDirection() * m_OrbitDistance);
     }
 
     void EditorCameraController::EnsureInputAsset()

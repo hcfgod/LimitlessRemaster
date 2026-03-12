@@ -14,6 +14,7 @@ namespace Limitless::Editor
         bool ShowProjectPanel = true;
         bool ShowSceneView = true;
         bool ShowGameView = true;
+        bool ShowEditorPreferencesWindow = false;
         bool ShowProjectSettingsWindow = false;
         bool ShowBuildSettingsWindow = false;
         bool ShowAssetDiagnosticsWindow = false;

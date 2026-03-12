@@ -38,6 +38,11 @@ public abstract class ScriptableEntity
     public Camera? Camera => Entity.GetComponent<Camera>();
     protected static DebugApi Debug => DebugApi.Shared;
     protected static RandomApi Random => RandomApi.Shared;
+    protected byte Layer
+    {
+        get => Entity.Layer;
+        set => Entity.Layer = value;
+    }
 
     public bool IsEntityAlive
     {
@@ -103,6 +108,26 @@ public abstract class ScriptableEntity
     protected Entity[] GetChildren(Entity entity)
     {
         return entity?.GetChildren() ?? System.Array.Empty<Entity>();
+    }
+
+    protected static uint LayerToMask(byte layer)
+    {
+        return layer < 32 ? (1u << layer) : 0u;
+    }
+
+    protected static uint LayersToMask(params byte[] layers)
+    {
+        uint mask = 0u;
+        if (layers == null)
+            return mask;
+
+        foreach (byte layer in layers)
+        {
+            if (layer < 32)
+                mask |= (1u << layer);
+        }
+
+        return mask;
     }
 
     public Coroutine StartCoroutine(IEnumerator routine)

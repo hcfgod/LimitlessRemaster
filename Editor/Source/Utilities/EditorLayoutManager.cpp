@@ -77,6 +77,7 @@ namespace Limitless::Editor
             outState.ShowProjectPanel = root.value("showProjectPanel", outState.ShowProjectPanel);
             outState.ShowSceneView = root.value("showSceneView", outState.ShowSceneView);
             outState.ShowGameView = root.value("showGameView", outState.ShowGameView);
+            outState.ShowEditorPreferencesWindow = root.value("showEditorPreferencesWindow", outState.ShowEditorPreferencesWindow);
             outState.ShowProjectSettingsWindow = root.value("showProjectSettingsWindow", outState.ShowProjectSettingsWindow);
             outState.ShowBuildSettingsWindow = root.value("showBuildSettingsWindow", outState.ShowBuildSettingsWindow);
             outState.ShowAssetDiagnosticsWindow = root.value("showAssetDiagnosticsWindow", outState.ShowAssetDiagnosticsWindow);
@@ -101,6 +102,7 @@ namespace Limitless::Editor
             root["showProjectPanel"] = state.ShowProjectPanel;
             root["showSceneView"] = state.ShowSceneView;
             root["showGameView"] = state.ShowGameView;
+            root["showEditorPreferencesWindow"] = state.ShowEditorPreferencesWindow;
             root["showProjectSettingsWindow"] = state.ShowProjectSettingsWindow;
             root["showBuildSettingsWindow"] = state.ShowBuildSettingsWindow;
             root["showAssetDiagnosticsWindow"] = state.ShowAssetDiagnosticsWindow;

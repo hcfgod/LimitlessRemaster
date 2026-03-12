@@ -26,6 +26,7 @@
 #include "EditorScenePanel.h"
 #include "EditorViewportPanel.h"
 #include "Scene/ParticleEmitterSystem.h"
+#include "Scene/SceneRenderer.h"
 #include "Scripting/ScriptCoreModuleRuntime.h"
 #include "Core/Input/InputSystem.h"
 #include "Core/PerformanceMonitor.h"
@@ -74,7 +75,8 @@ namespace Limitless
         constexpr const char* kDefaultSceneFileName = "SampleScene.scene.json";
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 9;
+        constexpr uint32_t kEditorSessionStateVersion = 10;
+        constexpr double kEntityFocusShortcutDoublePressWindowSeconds = 0.35;
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
         struct EditorSessionStateData final
@@ -118,6 +120,15 @@ namespace Limitless
                 return static_cast<char>(std::tolower(c));
             });
             return text;
+        }
+
+        float EstimateEditorCameraFocusDistance(const glm::mat4& worldTransform, float distanceMultiplier)
+        {
+            const float worldScaleX = glm::length(glm::vec3(worldTransform[0]));
+            const float worldScaleY = glm::length(glm::vec3(worldTransform[1]));
+            const float worldScaleZ = glm::length(glm::vec3(worldTransform[2]));
+            const float estimatedRadius = std::max({ 0.5f, worldScaleX, worldScaleY, worldScaleZ });
+            return std::clamp(estimatedRadius * distanceMultiplier, 0.75f, 150.0f);
         }
 
         std::string ExtractSceneNameFromAssetKey(const std::string& assetKey)
@@ -274,7 +285,8 @@ namespace Limitless
                     return state;
                 }
 
-                if (version != 3 && version != 4 && version != 5 && version != 6 && version != 8 && version != kEditorSessionStateVersion)
+                if (version != 3 && version != 4 && version != 5 && version != 6 && version != 8 && version != 9 &&
+                    version != kEditorSessionStateVersion)
                 {
                     return {};
                 }
@@ -289,6 +301,8 @@ namespace Limitless
                     state.LayoutWindowState.ShowProjectPanel = root.value("showProjectPanel", state.LayoutWindowState.ShowProjectPanel);
                     state.LayoutWindowState.ShowSceneView = root.value("showSceneView", state.LayoutWindowState.ShowSceneView);
                     state.LayoutWindowState.ShowGameView = root.value("showGameView", state.LayoutWindowState.ShowGameView);
+                    state.LayoutWindowState.ShowEditorPreferencesWindow =
+                        root.value("showEditorPreferencesWindow", state.LayoutWindowState.ShowEditorPreferencesWindow);
                     state.LayoutWindowState.ShowProjectSettingsWindow = root.value("showProjectSettingsWindow", state.LayoutWindowState.ShowProjectSettingsWindow);
                     state.LayoutWindowState.ShowBuildSettingsWindow = root.value("showBuildSettingsWindow", state.LayoutWindowState.ShowBuildSettingsWindow);
                     state.LayoutWindowState.ShowAssetDiagnosticsWindow = root.value("showAssetDiagnosticsWindow", state.LayoutWindowState.ShowAssetDiagnosticsWindow);
@@ -395,6 +409,7 @@ namespace Limitless
                 root["showProjectPanel"] = state.LayoutWindowState.ShowProjectPanel;
                 root["showSceneView"] = state.LayoutWindowState.ShowSceneView;
                 root["showGameView"] = state.LayoutWindowState.ShowGameView;
+                root["showEditorPreferencesWindow"] = state.LayoutWindowState.ShowEditorPreferencesWindow;
                 root["showProjectSettingsWindow"] = state.ShowProjectSettingsWindow;
                 root["showBuildSettingsWindow"] = state.LayoutWindowState.ShowBuildSettingsWindow;
                 root["showAssetDiagnosticsWindow"] = state.ShowAssetDiagnosticsWindow;
@@ -502,6 +517,7 @@ namespace Limitless
 
     void EditorLayer::OnAttach()
     {
+        Editor::EditorPreferences::GetInstance().EnsureLoaded();
         SceneManager::ClearPendingSceneTransition();
         Physics2DQueries::SetActiveSceneCollectionForScriptQueries(&m_SceneCollection, ToSceneRoleMask(SceneRole::ScriptQueryTarget));
         m_EditorUndoService.Initialize(
@@ -587,6 +603,7 @@ namespace Limitless
                 const auto sl = Project::SaveLayersSettings(projectRoot, m_ProjectSettingsPanelState.Layers);
                 const auto sp = Project::SavePhysics2DSettings(projectRoot, m_ProjectSettingsPanelState.Physics2D);
                 const auto lighting = Project::SaveLighting2DSettings(projectRoot, m_ProjectSettingsPanelState.Lighting2D);
+                const auto scripting = Project::SaveScriptingSettings(projectRoot, m_ProjectSettingsPanelState.Scripting);
 
                 if (sr.IsFailure()) LT_WARN("Editor exit: failed to save render settings: {}", sr.GetError().GetErrorMessage());
                 if (sa.IsFailure()) LT_WARN("Editor exit: failed to save audio settings: {}", sa.GetError().GetErrorMessage());
@@ -594,6 +611,7 @@ namespace Limitless
                 if (sl.IsFailure()) LT_WARN("Editor exit: failed to save layers settings: {}", sl.GetError().GetErrorMessage());
                 if (sp.IsFailure()) LT_WARN("Editor exit: failed to save physics settings: {}", sp.GetError().GetErrorMessage());
                 if (lighting.IsFailure()) LT_WARN("Editor exit: failed to save lighting settings: {}", lighting.GetError().GetErrorMessage());
+                if (scripting.IsFailure()) LT_WARN("Editor exit: failed to save scripting settings: {}", scripting.GetError().GetErrorMessage());
             }
         }
 
@@ -655,11 +673,17 @@ namespace Limitless
 
             m_ProjectPhysics2DSettings = m_ProjectSettingsPanelState.Physics2D;
             m_ProjectPhysics2DSettingsLoaded = true;
+            m_ProjectLayersSettings = m_ProjectSettingsPanelState.Layers;
+            m_ProjectLayersSettingsLoaded = true;
             ApplyProjectPhysics2DSettingsToScenes();
 
             m_ProjectLighting2DSettings = m_ProjectSettingsPanelState.Lighting2D;
             m_ProjectLighting2DSettingsLoaded = true;
             ApplyProjectLighting2DSettings();
+
+            m_ProjectScriptingSettings = m_ProjectSettingsPanelState.Scripting;
+            m_ProjectScriptingSettingsLoaded = true;
+            ApplyProjectScriptingSettings();
         }
 
         if (m_PlayModeState == EditorPlayModeState::Play)
@@ -733,6 +757,33 @@ namespace Limitless
             m_EditorCameraController.get());
 
         const bool saveModifierDown = io.KeyCtrl || io.KeySuper;
+        if (m_ShowSceneView &&
+            !io.WantTextInput &&
+            !io.KeyShift &&
+            !io.KeyAlt &&
+            !saveModifierDown &&
+            ImGui::IsKeyPressed(ImGuiKey_F, false))
+        {
+            const double nowSeconds = ImGui::GetTime();
+            const bool sameEntity = m_SelectedEntity != entt::null && m_SelectedEntity == m_LastEntityFocusShortcutEntity;
+            const bool zoomedIn = sameEntity &&
+                m_LastEntityFocusShortcutTimeSeconds >= 0.0 &&
+                (nowSeconds - m_LastEntityFocusShortcutTimeSeconds) <= kEntityFocusShortcutDoublePressWindowSeconds;
+
+            FocusEditorCameraOnSelectedEntity(zoomedIn);
+
+            if (m_Scene && m_Scene->IsValid(m_SelectedEntity))
+            {
+                m_LastEntityFocusShortcutTimeSeconds = nowSeconds;
+                m_LastEntityFocusShortcutEntity = m_SelectedEntity;
+            }
+            else
+            {
+                m_LastEntityFocusShortcutTimeSeconds = -1.0;
+                m_LastEntityFocusShortcutEntity = entt::null;
+            }
+        }
+
         if (saveModifierDown && !io.WantTextInput)
         {
             const bool undoPressed = ImGui::IsKeyPressed(ImGuiKey_Z, false);
@@ -754,6 +805,21 @@ namespace Limitless
             if (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_R, false))
                 BuildProjectScripts();
         }
+    }
+
+    void EditorLayer::FocusEditorCameraOnSelectedEntity(bool zoomedIn)
+    {
+        if (!m_Scene || !m_EditorCameraController || !m_Scene->IsValid(m_SelectedEntity))
+            return;
+
+        const glm::mat4 worldTransform = m_Scene->GetWorldTransformMatrix(m_SelectedEntity);
+        const glm::vec3 focusPoint = glm::vec3(worldTransform[3]);
+        const Editor::EditorPreferencesData preferences = Editor::EditorPreferences::GetInstance().GetData();
+        const float distanceMultiplier = zoomedIn
+            ? preferences.EntityFocusDoublePressDistanceMultiplier
+            : preferences.EntityFocusSinglePressDistanceMultiplier;
+        const float desiredDistance = EstimateEditorCameraFocusDistance(worldTransform, distanceMultiplier);
+        m_EditorCameraController->FocusOnPoint(focusPoint, desiredDistance);
     }
 
     void EditorLayer::OnFixedUpdate(float fixedDeltaTime)
@@ -822,6 +888,7 @@ namespace Limitless
             m_ProjectSettingsPanelState.Loaded = false;
             m_ProjectSettingsPanelState.StatusMessage.clear();
             m_ProjectSettingsPanelState.StatusIsError = false;
+            m_ProjectScriptingSettingsLoaded = false;
             EditorProjectPanel::InvalidateProjectDirectoryCache(m_ProjectPanelState);
             m_MaterialPreviewCache.Entries.clear();
 
@@ -853,6 +920,7 @@ namespace Limitless
             RefreshProjectRenderSettings();
             RefreshProjectAudioSettings();
             RefreshProjectLighting2DSettings();
+            RefreshProjectScriptingSettings();
 
             const auto isMissingSceneAssetKey = [](const std::string& sceneAssetKey) -> bool {
                 if (sceneAssetKey.empty())
@@ -1009,6 +1077,7 @@ namespace Limitless
             ImGui::End();
         }
 
+        EditorPreferencesPanel::Draw(m_ShowEditorPreferencesWindow, m_EditorPreferencesPanelState);
         EditorProjectSettingsPanel::Draw(m_ShowProjectSettingsWindow, m_ProjectSettingsPanelState);
         EditorBuildSettingsPanel::Draw(m_ShowBuildSettingsWindow, m_BuildSettingsPanelState,
                                        m_CurrentSceneAssetKey, m_Scene.get(),
@@ -1935,6 +2004,8 @@ namespace Limitless
             }
             perspectiveCamera->SetPerspective(fieldOfViewY, nearPlane, farPlane);
         }
+
+        SceneRenderer::SetActiveCullingMask(selection->Component.CullingMask);
 
         const glm::mat4 worldTransform = m_Scene->GetWorldTransformMatrix(selection->Entity);
         const glm::vec3 position = glm::vec3(worldTransform[3]);

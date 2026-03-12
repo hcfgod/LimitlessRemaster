@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EnTT/entt.hpp"
+#include "Scene/Components/CoreComponents.h"
 
 #include <string>
 #include <stdexcept>
@@ -188,6 +189,24 @@ namespace Limitless
             else if (m_Registry != nullptr && m_Registry->valid(m_EntityHandle))
                 m_Registry->destroy(m_EntityHandle);
             m_EntityHandle = entt::null;
+        }
+
+        uint8_t GetLayer() const
+        {
+            if (!IsValid())
+                return 0;
+            const TagComponent* tag = m_Registry->try_get<TagComponent>(m_EntityHandle);
+            return tag ? tag->Layer : static_cast<uint8_t>(0);
+        }
+
+        void SetLayer(uint8_t layer) const
+        {
+            if (!IsValid())
+                return;
+            TagComponent* tag = m_Registry->try_get<TagComponent>(m_EntityHandle);
+            if (!tag)
+                return;
+            tag->Layer = (layer < 32) ? layer : static_cast<uint8_t>(31);
         }
 
     private:

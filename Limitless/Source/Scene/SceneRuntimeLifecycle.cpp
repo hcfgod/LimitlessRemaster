@@ -215,6 +215,7 @@ namespace Limitless
             if (!physicsWorld->IsInitialized())
                 physicsWorld->Initialize(m_Physics2DSettings);
             physicsWorld->SetSettings(m_Physics2DSettings);
+            physicsWorld->SetCollisionMatrix(m_Physics2DCollisionMatrix);
             physicsWorld->RebuildScene(*this);
         }
         m_PhysicsWorldInitializedForLoading = true;
@@ -245,6 +246,7 @@ namespace Limitless
             if (!physicsWorld->IsInitialized())
                 physicsWorld->Initialize(m_Physics2DSettings);
             physicsWorld->SetSettings(m_Physics2DSettings);
+            physicsWorld->SetCollisionMatrix(m_Physics2DCollisionMatrix);
             physicsWorld->PrepareForStep(*this, fixedDeltaTime);
             activeWorlds.push_back(physicsWorld.get());
         }
@@ -367,6 +369,16 @@ namespace Limitless
         {
             if (physicsWorld)
                 physicsWorld->SetSettings(m_Physics2DSettings);
+        }
+    }
+
+    void Scene::SetPhysics2DCollisionMatrix(const std::array<uint32_t, 32>& matrix)
+    {
+        m_Physics2DCollisionMatrix = matrix;
+        for (auto& physicsWorld : m_Physics2DWorlds)
+        {
+            if (physicsWorld)
+                physicsWorld->SetCollisionMatrix(matrix);
         }
     }
 
@@ -571,6 +583,11 @@ namespace Limitless
         {
             if (!m_Physics2DWorlds[worldIndex])
                 m_Physics2DWorlds[worldIndex] = std::make_unique<Physics2DWorld>(worldIndex);
+            if (m_Physics2DWorlds[worldIndex])
+            {
+                m_Physics2DWorlds[worldIndex]->SetSettings(m_Physics2DSettings);
+                m_Physics2DWorlds[worldIndex]->SetCollisionMatrix(m_Physics2DCollisionMatrix);
+            }
         }
 
         auto bodyView = m_Registry.view<Rigidbody2DComponent>();

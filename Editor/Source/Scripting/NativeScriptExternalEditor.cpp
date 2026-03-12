@@ -278,6 +278,15 @@ namespace Limitless::NativeScriptExternalEditor
                 + ";LT_PLATFORM_WINDOWS;SCRIPTCORE_EXPORTS;_UNICODE;UNICODE;%(PreprocessorDefinitions)";
         }
 
+        std::string ReadTextFileOrEmpty(const std::filesystem::path& path)
+        {
+            std::ifstream input(path, std::ios::in | std::ios::binary);
+            if (!input.is_open())
+                return {};
+
+            return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+        }
+
         bool WriteTextFile(const std::filesystem::path& path, const std::string& contents, std::string& outError)
         {
             outError.clear();
@@ -287,6 +296,13 @@ namespace Limitless::NativeScriptExternalEditor
             {
                 outError = "Failed to create directory '" + path.parent_path().string() + "': " + errorCode.message();
                 return false;
+            }
+
+            errorCode.clear();
+            if (std::filesystem::exists(path, errorCode))
+            {
+                if (ReadTextFileOrEmpty(path) == contents)
+                    return true;
             }
 
             std::ofstream output(path, std::ios::out | std::ios::binary | std::ios::trunc);

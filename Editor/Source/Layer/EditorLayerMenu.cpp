@@ -48,6 +48,7 @@ namespace Limitless
             m_ShowGameView,
             m_ShowProjectPanel,
             m_ShowDemoWindow,
+            m_ShowEditorPreferencesWindow,
             m_ShowAssetDiagnosticsWindow,
             m_ShowPhysicsDiagnosticsWindow,
             m_ShowConsoleWindow,

@@ -2,6 +2,7 @@
 
 #include "Graphics/Camera/Camera.h"
 #include "Graphics/Camera/CameraManager.h"
+#include "Scene/Components/CoreComponents.h"
 #include "Scene/Components/RenderingComponents.h"
 #include "Scene/Scene.h"
 #include "Scene/SceneRenderer.h"
@@ -67,6 +68,8 @@ namespace Limitless
 
         if (!hasSelection)
             return nullptr;
+
+        SceneRenderer::SetActiveCullingMask(selectedCameraComponent.CullingMask);
 
         const CameraType expectedType = (selectedCameraComponent.Projection == CameraComponent::ProjectionType::Perspective3D)
             ? CameraType::Perspective3D

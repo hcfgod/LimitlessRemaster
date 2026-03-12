@@ -2,8 +2,14 @@
 
 #include "Limitless.h"
 
+namespace Limitless
+{
+    class Scene;
+}
+
 namespace Limitless::GameLayerInternal
 {
+
     inline constexpr SceneRoleMask RuntimeSceneBaseRoles =
         SceneRole::RuntimeUpdate |
         SceneRole::FixedUpdate |
@@ -16,4 +22,5 @@ namespace Limitless::GameLayerInternal
         SceneRole::ScriptQueryTarget;
 
     void ApplyRuntimeProjectSettingsFromBundle();
+    void ApplyRuntimeProjectSettingsToScene(::Limitless::Scene& scene);
 }

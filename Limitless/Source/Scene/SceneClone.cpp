@@ -246,7 +246,10 @@ namespace Limitless
             entityMap.emplace(sourceEntity, destinationEntity);
             clone->SetEntityPersistentId(destinationEntity, GetEntityPersistentId(sourceEntity));
             if (auto* destinationTag = destinationRegistry.try_get<TagComponent>(destinationEntity))
+            {
                 destinationTag->Enabled = tag.Enabled;
+                destinationTag->Layer = tag.Layer;
+            }
             destinationRegistry.replace<TransformComponent>(destinationEntity, transform);
 
             if (const auto* canvas = sourceRegistry.try_get<CanvasComponent>(sourceEntity))
@@ -579,6 +582,7 @@ namespace Limitless
 
         clone->m_EditorCameraBookmark = m_EditorCameraBookmark;
         clone->m_Physics2DSettings = m_Physics2DSettings;
+        clone->m_Physics2DCollisionMatrix = m_Physics2DCollisionMatrix;
         return clone;
     }
 }

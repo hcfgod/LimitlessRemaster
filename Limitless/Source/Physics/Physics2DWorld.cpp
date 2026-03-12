@@ -44,6 +44,16 @@ namespace Limitless
         // entities at once. Remaining entities are deferred to subsequent frames.
         constexpr int kMaxNewBodiesPerStep = 256;
 
+        bool IsDefaultColliderCollisionLayer(uint64_t collisionLayer)
+        {
+            return collisionLayer == 1ull;
+        }
+
+        bool IsDefaultColliderCollisionMask(uint64_t collisionMask)
+        {
+            return collisionMask == ~0ull || collisionMask == static_cast<uint64_t>(0xFFFFFFFFu);
+        }
+
         entt::entity ToEntityHandle(void* userData)
         {
             return static_cast<entt::entity>(reinterpret_cast<uintptr_t>(userData));
@@ -186,7 +196,9 @@ namespace Limitless
                                         uint64_t collisionLayer,
                                         uint64_t collisionMask,
                                         Rigidbody2DComponent::BodyType bodyType,
-                                        bool updateBodyMass)
+                                        bool updateBodyMass,
+                                        uint8_t entityLayer = 0,
+                                        const std::array<uint32_t, 32>* collisionMatrix = nullptr)
         {
             b2ShapeDef shapeDefinition = b2DefaultShapeDef();
             shapeDefinition.density = glm::clamp(
@@ -195,8 +207,20 @@ namespace Limitless
                 kMaximumShapeDensity);
             shapeDefinition.isSensor = isSensor;
             shapeDefinition.enableContactEvents = true;
-            shapeDefinition.filter.categoryBits = collisionLayer;
-            shapeDefinition.filter.maskBits = collisionMask;
+
+            const bool colliderHasDefaultLayer = IsDefaultColliderCollisionLayer(collisionLayer);
+            const bool colliderHasDefaultMask = IsDefaultColliderCollisionMask(collisionMask);
+            if (colliderHasDefaultLayer && colliderHasDefaultMask && collisionMatrix != nullptr && entityLayer < 32)
+            {
+                shapeDefinition.filter.categoryBits = (1ull << entityLayer);
+                shapeDefinition.filter.maskBits = static_cast<uint64_t>((*collisionMatrix)[entityLayer]);
+            }
+            else
+            {
+                shapeDefinition.filter.categoryBits = collisionLayer;
+                shapeDefinition.filter.maskBits = collisionMask;
+            }
+
             shapeDefinition.updateBodyMass = updateBodyMass && !shapeDefinition.isSensor;
             if (bodyType == Rigidbody2DComponent::BodyType::Dynamic && shapeDefinition.updateBodyMass)
             {
@@ -215,6 +239,8 @@ namespace Limitless
                                              const PolygonCollider2DComponent* polygonCollider,
                                              const EdgeCollider2DComponent* edgeCollider,
                                              const CapsuleCollider2DComponent* capsuleCollider,
+                                             uint8_t entityLayer,
+                                             const std::array<uint32_t, 32>* collisionMatrix,
                                              uint16_t worldSlot)
         {
             uint64_t signature = 0;
@@ -226,6 +252,14 @@ namespace Limitless
             signature = HashCombine64(signature, boxCollider ? 1ull : 0ull);
             if (boxCollider)
             {
+                const bool useEntityLayerFiltering =
+                    IsDefaultColliderCollisionLayer(boxCollider->CollisionLayer) &&
+                    IsDefaultColliderCollisionMask(boxCollider->CollisionMask) &&
+                    collisionMatrix != nullptr &&
+                    entityLayer < 32;
+                const uint64_t resolvedCollisionLayer = useEntityLayerFiltering ? (1ull << entityLayer) : boxCollider->CollisionLayer;
+                const uint64_t resolvedCollisionMask =
+                    useEntityLayerFiltering ? static_cast<uint64_t>((*collisionMatrix)[entityLayer]) : boxCollider->CollisionMask;
                 signature = HashCombine64(signature, HashFloat(boxCollider->Offset.x));
                 signature = HashCombine64(signature, HashFloat(boxCollider->Offset.y));
                 signature = HashCombine64(signature, HashFloat(boxCollider->Size.x));
@@ -234,13 +268,21 @@ namespace Limitless
                 signature = HashCombine64(signature, HashFloat(boxCollider->Friction));
                 signature = HashCombine64(signature, HashFloat(boxCollider->Restitution));
                 signature = HashCombine64(signature, boxCollider->IsSensor ? 1ull : 0ull);
-                signature = HashCombine64(signature, boxCollider->CollisionLayer);
-                signature = HashCombine64(signature, boxCollider->CollisionMask);
+                signature = HashCombine64(signature, resolvedCollisionLayer);
+                signature = HashCombine64(signature, resolvedCollisionMask);
             }
 
             signature = HashCombine64(signature, circleCollider ? 1ull : 0ull);
             if (circleCollider)
             {
+                const bool useEntityLayerFiltering =
+                    IsDefaultColliderCollisionLayer(circleCollider->CollisionLayer) &&
+                    IsDefaultColliderCollisionMask(circleCollider->CollisionMask) &&
+                    collisionMatrix != nullptr &&
+                    entityLayer < 32;
+                const uint64_t resolvedCollisionLayer = useEntityLayerFiltering ? (1ull << entityLayer) : circleCollider->CollisionLayer;
+                const uint64_t resolvedCollisionMask =
+                    useEntityLayerFiltering ? static_cast<uint64_t>((*collisionMatrix)[entityLayer]) : circleCollider->CollisionMask;
                 signature = HashCombine64(signature, HashFloat(circleCollider->Offset.x));
                 signature = HashCombine64(signature, HashFloat(circleCollider->Offset.y));
                 signature = HashCombine64(signature, HashFloat(circleCollider->Radius));
@@ -248,13 +290,21 @@ namespace Limitless
                 signature = HashCombine64(signature, HashFloat(circleCollider->Friction));
                 signature = HashCombine64(signature, HashFloat(circleCollider->Restitution));
                 signature = HashCombine64(signature, circleCollider->IsSensor ? 1ull : 0ull);
-                signature = HashCombine64(signature, circleCollider->CollisionLayer);
-                signature = HashCombine64(signature, circleCollider->CollisionMask);
+                signature = HashCombine64(signature, resolvedCollisionLayer);
+                signature = HashCombine64(signature, resolvedCollisionMask);
             }
 
             signature = HashCombine64(signature, polygonCollider ? 1ull : 0ull);
             if (polygonCollider)
             {
+                const bool useEntityLayerFiltering =
+                    IsDefaultColliderCollisionLayer(polygonCollider->CollisionLayer) &&
+                    IsDefaultColliderCollisionMask(polygonCollider->CollisionMask) &&
+                    collisionMatrix != nullptr &&
+                    entityLayer < 32;
+                const uint64_t resolvedCollisionLayer = useEntityLayerFiltering ? (1ull << entityLayer) : polygonCollider->CollisionLayer;
+                const uint64_t resolvedCollisionMask =
+                    useEntityLayerFiltering ? static_cast<uint64_t>((*collisionMatrix)[entityLayer]) : polygonCollider->CollisionMask;
                 signature = HashCombine64(signature, HashFloat(polygonCollider->Offset.x));
                 signature = HashCombine64(signature, HashFloat(polygonCollider->Offset.y));
                 signature = HashPoints(signature, polygonCollider->Points);
@@ -262,13 +312,21 @@ namespace Limitless
                 signature = HashCombine64(signature, HashFloat(polygonCollider->Friction));
                 signature = HashCombine64(signature, HashFloat(polygonCollider->Restitution));
                 signature = HashCombine64(signature, polygonCollider->IsSensor ? 1ull : 0ull);
-                signature = HashCombine64(signature, polygonCollider->CollisionLayer);
-                signature = HashCombine64(signature, polygonCollider->CollisionMask);
+                signature = HashCombine64(signature, resolvedCollisionLayer);
+                signature = HashCombine64(signature, resolvedCollisionMask);
             }
 
             signature = HashCombine64(signature, edgeCollider ? 1ull : 0ull);
             if (edgeCollider)
             {
+                const bool useEntityLayerFiltering =
+                    IsDefaultColliderCollisionLayer(edgeCollider->CollisionLayer) &&
+                    IsDefaultColliderCollisionMask(edgeCollider->CollisionMask) &&
+                    collisionMatrix != nullptr &&
+                    entityLayer < 32;
+                const uint64_t resolvedCollisionLayer = useEntityLayerFiltering ? (1ull << entityLayer) : edgeCollider->CollisionLayer;
+                const uint64_t resolvedCollisionMask =
+                    useEntityLayerFiltering ? static_cast<uint64_t>((*collisionMatrix)[entityLayer]) : edgeCollider->CollisionMask;
                 signature = HashCombine64(signature, HashFloat(edgeCollider->Offset.x));
                 signature = HashCombine64(signature, HashFloat(edgeCollider->Offset.y));
                 signature = HashCombine64(signature, HashFloat(edgeCollider->PointA.x));
@@ -278,13 +336,21 @@ namespace Limitless
                 signature = HashCombine64(signature, HashFloat(edgeCollider->Friction));
                 signature = HashCombine64(signature, HashFloat(edgeCollider->Restitution));
                 signature = HashCombine64(signature, edgeCollider->IsSensor ? 1ull : 0ull);
-                signature = HashCombine64(signature, edgeCollider->CollisionLayer);
-                signature = HashCombine64(signature, edgeCollider->CollisionMask);
+                signature = HashCombine64(signature, resolvedCollisionLayer);
+                signature = HashCombine64(signature, resolvedCollisionMask);
             }
 
             signature = HashCombine64(signature, capsuleCollider ? 1ull : 0ull);
             if (capsuleCollider)
             {
+                const bool useEntityLayerFiltering =
+                    IsDefaultColliderCollisionLayer(capsuleCollider->CollisionLayer) &&
+                    IsDefaultColliderCollisionMask(capsuleCollider->CollisionMask) &&
+                    collisionMatrix != nullptr &&
+                    entityLayer < 32;
+                const uint64_t resolvedCollisionLayer = useEntityLayerFiltering ? (1ull << entityLayer) : capsuleCollider->CollisionLayer;
+                const uint64_t resolvedCollisionMask =
+                    useEntityLayerFiltering ? static_cast<uint64_t>((*collisionMatrix)[entityLayer]) : capsuleCollider->CollisionMask;
                 signature = HashCombine64(signature, HashFloat(capsuleCollider->Offset.x));
                 signature = HashCombine64(signature, HashFloat(capsuleCollider->Offset.y));
                 signature = HashCombine64(signature, HashFloat(capsuleCollider->Size.x));
@@ -294,8 +360,8 @@ namespace Limitless
                 signature = HashCombine64(signature, HashFloat(capsuleCollider->Friction));
                 signature = HashCombine64(signature, HashFloat(capsuleCollider->Restitution));
                 signature = HashCombine64(signature, capsuleCollider->IsSensor ? 1ull : 0ull);
-                signature = HashCombine64(signature, capsuleCollider->CollisionLayer);
-                signature = HashCombine64(signature, capsuleCollider->CollisionMask);
+                signature = HashCombine64(signature, resolvedCollisionLayer);
+                signature = HashCombine64(signature, resolvedCollisionMask);
             }
 
             return signature;
@@ -783,6 +849,8 @@ namespace Limitless
             }
 
             auto& transform = bodyView.get<TransformComponent>(entity);
+            const auto* tagComponent = registry.try_get<TagComponent>(entity);
+            const uint8_t entityLayer = tagComponent ? tagComponent->Layer : static_cast<uint8_t>(0);
             const uint64_t desiredBodyAndShapeSignature =
                 BuildBodyAndShapeSignature(rigidbody,
                                             transform,
@@ -791,6 +859,8 @@ namespace Limitless
                                             polygonCollider,
                                             edgeCollider,
                                             capsuleCollider,
+                                            entityLayer,
+                                            &m_CollisionMatrix,
                                             m_SceneWorldSlot);
 
             const bool hasValidRuntimeBody = rigidbody.RuntimeBodyCreated && b2Body_IsValid(rigidbody.RuntimeBodyId);
@@ -998,7 +1068,9 @@ namespace Limitless
                                                                   boxCollider->CollisionLayer,
                                                                   boxCollider->CollisionMask,
                                                                   rigidbody.Type,
-                                                                  true);
+                                                                  true,
+                                                                  entityLayer,
+                                                                  &m_CollisionMatrix);
                 b2Polygon boxPolygon = b2MakeOffsetBox(
                     halfWidth,
                     halfHeight,
@@ -1053,7 +1125,9 @@ namespace Limitless
                                                                   circleCollider->CollisionLayer,
                                                                   circleCollider->CollisionMask,
                                                                   rigidbody.Type,
-                                                                  true);
+                                                                  true,
+                                                                  entityLayer,
+                                                                  &m_CollisionMatrix);
                 b2Circle circleShape{};
                 circleShape.center = {
                     glm::clamp(safeCircleOffsetX * safeScaleX, -kMaximumColliderOffset, kMaximumColliderOffset),
@@ -1124,7 +1198,9 @@ namespace Limitless
                                                                           polygonCollider->CollisionLayer,
                                                                           polygonCollider->CollisionMask,
                                                                           rigidbody.Type,
-                                                                          true);
+                                                                          true,
+                                                                          entityLayer,
+                                                                          &m_CollisionMatrix);
                         const b2Polygon polygonShape = b2MakePolygon(&hull, 0.0f);
                         polygonCollider->RuntimeShapeId = b2CreatePolygonShape(rigidbody.RuntimeBodyId, &shapeDefinition, &polygonShape);
                         polygonCollider->RuntimeShapeCreated = b2Shape_IsValid(polygonCollider->RuntimeShapeId);
@@ -1190,7 +1266,9 @@ namespace Limitless
                                                                       edgeCollider->CollisionLayer,
                                                                       edgeCollider->CollisionMask,
                                                                       rigidbody.Type,
-                                                                      false);
+                                                                      false,
+                                                                      entityLayer,
+                                                                      &m_CollisionMatrix);
                     b2Segment segmentShape{};
                     segmentShape.point1 = pointA;
                     segmentShape.point2 = pointB;
@@ -1268,7 +1346,9 @@ namespace Limitless
                                                                   capsuleCollider->CollisionLayer,
                                                                   capsuleCollider->CollisionMask,
                                                                   rigidbody.Type,
-                                                                  true);
+                                                                  true,
+                                                                  entityLayer,
+                                                                  &m_CollisionMatrix);
                 capsuleCollider->RuntimeShapeId = b2CreateCapsuleShape(rigidbody.RuntimeBodyId, &shapeDefinition, &capsuleShape);
                 capsuleCollider->RuntimeShapeCreated = b2Shape_IsValid(capsuleCollider->RuntimeShapeId);
                 if (capsuleCollider->RuntimeShapeCreated)

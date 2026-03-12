@@ -13,6 +13,7 @@ namespace Limitless::EditorInspectorPanel
         std::string ScriptAssetRelativePath;
         std::string FolderRelativePath;
         std::string DisplayName;
+        bool LikelyDerivesFromScriptableEntity = true;
     };
 
     void RestorePendingNativeScriptEditorSession();

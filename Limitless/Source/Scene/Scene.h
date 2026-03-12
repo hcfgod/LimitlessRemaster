@@ -8,6 +8,7 @@
 #include "Scene/Entity.h"
 
 #include <glm/glm.hpp>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <deque>
@@ -182,6 +183,7 @@ namespace Limitless
 
         void SetPhysics2DSettings(const Physics2DWorldSettings& settings);
         const Physics2DWorldSettings& GetPhysics2DSettings() const { return m_Physics2DSettings; }
+        void SetPhysics2DCollisionMatrix(const std::array<uint32_t, 32>& matrix);
         /// Returns the physics world by slot (0 by default).
         Physics2DWorld* GetPhysics2DWorld(uint16_t worldSlot = 0);
         const Physics2DWorld* GetPhysics2DWorld(uint16_t worldSlot = 0) const;
@@ -294,6 +296,7 @@ namespace Limitless
         entt::registry m_Registry;
         std::optional<EditorCameraBookmark> m_EditorCameraBookmark;
         Physics2DWorldSettings m_Physics2DSettings{};
+        std::array<uint32_t, 32> m_Physics2DCollisionMatrix = [] { std::array<uint32_t, 32> matrix{}; matrix.fill(~0u); return matrix; }();
         std::vector<std::unique_ptr<Physics2DWorld>> m_Physics2DWorlds;
         LoadState m_LoadState = LoadState::Ready;
         bool m_SceneObjectsInitialized = true;

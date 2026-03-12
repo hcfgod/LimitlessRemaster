@@ -30,6 +30,8 @@ internal static class ScriptBridge
     internal static unsafe delegate*<uint, bool> HasTagComponentIcall;
     internal static unsafe delegate*<uint, NativeString> GetTagIcall;
     internal static unsafe delegate*<uint, NativeString, bool> SetTagIcall;
+    internal static unsafe delegate*<uint, byte> GetEntityLayerIcall;
+    internal static unsafe delegate*<uint, byte, void> SetEntityLayerIcall;
     internal static unsafe delegate*<uint, bool> HasTransformComponentIcall;
     internal static unsafe delegate*<uint, Vector3> GetTransformPositionIcall;
     internal static unsafe delegate*<uint, Vector3, void> SetTransformPositionIcall;
@@ -50,6 +52,8 @@ internal static class ScriptBridge
     internal static unsafe delegate*<uint, float, void> SetCameraFarPlaneIcall;
     internal static unsafe delegate*<uint, float> GetCameraFieldOfViewYDegreesIcall;
     internal static unsafe delegate*<uint, float, void> SetCameraFieldOfViewYDegreesIcall;
+    internal static unsafe delegate*<uint, uint> GetCameraCullingMaskIcall;
+    internal static unsafe delegate*<uint, uint, void> SetCameraCullingMaskIcall;
     internal static unsafe delegate*<uint, bool> HasBoxCollider2DComponentIcall;
     internal static unsafe delegate*<uint, Vector2> GetBoxCollider2DOffsetIcall;
     internal static unsafe delegate*<uint, Vector2, void> SetBoxCollider2DOffsetIcall;

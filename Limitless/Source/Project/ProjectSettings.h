@@ -2,6 +2,8 @@
 
 #include "Core/Error.h"
 
+#include <array>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -55,8 +57,22 @@ namespace Limitless::Project
 
     struct LayersSettings final
     {
-        uint32_t Version = 1;
-        std::vector<std::string> Layers;
+        static constexpr uint32_t kMaxLayers = 32;
+
+        uint32_t Version = 2;
+        std::array<std::string, kMaxLayers> LayerNames;
+        std::array<uint32_t, kMaxLayers> CollisionMatrix;
+
+        LayersSettings()
+        {
+            LayerNames.fill({});
+            LayerNames[0] = "Default";
+            CollisionMatrix.fill(~0u);
+        }
+
+        int LayerNameToIndex(const std::string& name) const;
+        std::string LayerIndexToName(uint8_t index) const;
+        uint32_t LayerToCollisionMask(uint8_t layerIndex) const;
     };
 
     struct Physics2DSettings final
@@ -96,6 +112,12 @@ namespace Limitless::Project
         int MaxShadowSamplesPerLight = 12;
     };
 
+    struct ScriptingSettings final
+    {
+        uint32_t Version = 1;
+        bool AutoReloadScripts = true;
+    };
+
     [[nodiscard]] std::filesystem::path GetProjectSettingsDirectory(const std::filesystem::path& projectRoot);
 
     [[nodiscard]] std::filesystem::path GetRenderSettingsPath(const std::filesystem::path& projectRoot);
@@ -104,6 +126,7 @@ namespace Limitless::Project
     [[nodiscard]] std::filesystem::path GetLayersSettingsPath(const std::filesystem::path& projectRoot);
     [[nodiscard]] std::filesystem::path GetPhysics2DSettingsPath(const std::filesystem::path& projectRoot);
     [[nodiscard]] std::filesystem::path GetLighting2DSettingsPath(const std::filesystem::path& projectRoot);
+    [[nodiscard]] std::filesystem::path GetScriptingSettingsPath(const std::filesystem::path& projectRoot);
 
     [[nodiscard]] Result<RenderSettings> LoadRenderSettings(const std::filesystem::path& projectRoot);
     [[nodiscard]] Result<AudioSettings> LoadAudioSettings(const std::filesystem::path& projectRoot);
@@ -111,6 +134,7 @@ namespace Limitless::Project
     [[nodiscard]] Result<LayersSettings> LoadLayersSettings(const std::filesystem::path& projectRoot);
     [[nodiscard]] Result<Physics2DSettings> LoadPhysics2DSettings(const std::filesystem::path& projectRoot);
     [[nodiscard]] Result<Lighting2DSettings> LoadLighting2DSettings(const std::filesystem::path& projectRoot);
+    [[nodiscard]] Result<ScriptingSettings> LoadScriptingSettings(const std::filesystem::path& projectRoot);
 
     [[nodiscard]] Result<void> SaveRenderSettings(const std::filesystem::path& projectRoot, const RenderSettings& settings);
     [[nodiscard]] Result<void> SaveAudioSettings(const std::filesystem::path& projectRoot, const AudioSettings& settings);
@@ -118,6 +142,7 @@ namespace Limitless::Project
     [[nodiscard]] Result<void> SaveLayersSettings(const std::filesystem::path& projectRoot, const LayersSettings& settings);
     [[nodiscard]] Result<void> SavePhysics2DSettings(const std::filesystem::path& projectRoot, const Physics2DSettings& settings);
     [[nodiscard]] Result<void> SaveLighting2DSettings(const std::filesystem::path& projectRoot, const Lighting2DSettings& settings);
+    [[nodiscard]] Result<void> SaveScriptingSettings(const std::filesystem::path& projectRoot, const ScriptingSettings& settings);
 
     // Returns a de-duplicated list of additional InputActions keys, merged from canonical and legacy fields.
     [[nodiscard]] std::vector<std::string> CollectAdditionalInputActionsAssetKeys(const InputSettings& settings);

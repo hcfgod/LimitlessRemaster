@@ -9,6 +9,8 @@
 #include "Core/Input/InputSystem.h"
 #include "Graphics/Lighting2DRenderer.h"
 #include "Platform/Platform.h"
+#include "Project/ProjectSettings.h"
+#include "Scene/Scene.h"
 #include "Scene/SceneRenderer.h"
 
 #include <nlohmann/json.hpp>
@@ -23,6 +25,14 @@ namespace Limitless
 {
     namespace GameLayerInternal
     {
+        namespace
+        {
+            Project::Physics2DSettings s_RuntimePhysics2DSettings{};
+            bool s_RuntimePhysics2DSettingsLoaded = false;
+            Project::LayersSettings s_RuntimeLayersSettings{};
+            bool s_RuntimeLayersSettingsLoaded = false;
+        }
+
         void ApplyRuntimeProjectSettingsFromBundle()
         {
             auto& bundle = Assets::AssetBundle::GetInstance();
@@ -131,6 +141,73 @@ namespace Limitless
                 }
             }
 
+            if (const auto physicsSettingsText = bundle.ReadAllTextByKey("Project/Settings/Physics2DSettings.json");
+                physicsSettingsText.IsSuccess())
+            {
+                try
+                {
+                    const nlohmann::json physicsRoot = nlohmann::json::parse(physicsSettingsText.GetValue());
+                    s_RuntimePhysics2DSettings.Version = physicsRoot.value("version", 1u);
+                    s_RuntimePhysics2DSettings.GravityX = physicsRoot.value("gravityX", 0.0f);
+                    s_RuntimePhysics2DSettings.GravityY = physicsRoot.value("gravityY", -9.81f);
+                    s_RuntimePhysics2DSettings.VelocitySubSteps = std::max(1, physicsRoot.value("velocitySubSteps", 8));
+                    s_RuntimePhysics2DSettings.EnableSleep = physicsRoot.value("enableSleep", true);
+                    s_RuntimePhysics2DSettings.EnableContinuousCollision = physicsRoot.value("enableContinuousCollision", true);
+                    s_RuntimePhysics2DSettings.HighContactQualityMode = physicsRoot.value("highContactQualityMode", false);
+                    s_RuntimePhysics2DSettings.HighContactQualityExtraSubSteps = std::max(0, physicsRoot.value("highContactQualityExtraSubSteps", 4));
+                    s_RuntimePhysics2DSettings.ContactHertz = physicsRoot.value("contactHertz", 90.0f);
+                    s_RuntimePhysics2DSettings.ContactDampingRatio = physicsRoot.value("contactDampingRatio", 1.0f);
+                    s_RuntimePhysics2DSettings.ContactPushSpeed = physicsRoot.value("contactPushSpeed", 8.0f);
+                    s_RuntimePhysics2DSettingsLoaded = true;
+                }
+                catch (const std::exception& e)
+                {
+                    s_RuntimePhysics2DSettingsLoaded = false;
+                    LT_WARN("GameLayer: failed parsing Physics2DSettings.json: {}", e.what());
+                }
+            }
+
+            if (const auto layersSettingsText = bundle.ReadAllTextByKey("Project/Settings/LayersSettings.json");
+                layersSettingsText.IsSuccess())
+            {
+                try
+                {
+                    const nlohmann::json layersRoot = nlohmann::json::parse(layersSettingsText.GetValue());
+                    s_RuntimeLayersSettings = Project::LayersSettings{};
+                    s_RuntimeLayersSettings.Version = 2;
+
+                    if (layersRoot.contains("layerNames") && layersRoot["layerNames"].is_array())
+                    {
+                        const auto& layerNames = layersRoot["layerNames"];
+                        for (uint32_t i = 0; i < Project::LayersSettings::kMaxLayers && i < layerNames.size(); ++i)
+                        {
+                            if (layerNames[i].is_string())
+                                s_RuntimeLayersSettings.LayerNames[i] = layerNames[i].get<std::string>();
+                        }
+                    }
+
+                    if (layersRoot.contains("collisionMatrix") && layersRoot["collisionMatrix"].is_array())
+                    {
+                        const auto& collisionMatrix = layersRoot["collisionMatrix"];
+                        for (uint32_t i = 0; i < Project::LayersSettings::kMaxLayers && i < collisionMatrix.size(); ++i)
+                        {
+                            if (collisionMatrix[i].is_number_unsigned() || collisionMatrix[i].is_number_integer())
+                                s_RuntimeLayersSettings.CollisionMatrix[i] = collisionMatrix[i].get<uint32_t>();
+                        }
+                    }
+
+                    if (s_RuntimeLayersSettings.LayerNames[0].empty())
+                        s_RuntimeLayersSettings.LayerNames[0] = "Default";
+
+                    s_RuntimeLayersSettingsLoaded = true;
+                }
+                catch (const std::exception& e)
+                {
+                    s_RuntimeLayersSettingsLoaded = false;
+                    LT_WARN("GameLayer: failed parsing LayersSettings.json: {}", e.what());
+                }
+            }
+
             if (const auto inputSettingsText = bundle.ReadAllTextByKey("Project/Settings/InputSettings.json");
                 inputSettingsText.IsSuccess())
             {
@@ -187,6 +264,27 @@ namespace Limitless
                     LT_WARN("GameLayer: failed parsing InputSettings.json: {}", e.what());
                 }
             }
+        }
+
+        void ApplyRuntimeProjectSettingsToScene(Scene& scene)
+        {
+            if (s_RuntimePhysics2DSettingsLoaded)
+            {
+                Physics2DWorldSettings runtimeSettings = scene.GetPhysics2DSettings();
+                runtimeSettings.Gravity = glm::vec2(s_RuntimePhysics2DSettings.GravityX, s_RuntimePhysics2DSettings.GravityY);
+                runtimeSettings.VelocitySubSteps = std::max(1, s_RuntimePhysics2DSettings.VelocitySubSteps);
+                runtimeSettings.EnableSleep = s_RuntimePhysics2DSettings.EnableSleep;
+                runtimeSettings.EnableContinuousCollision = s_RuntimePhysics2DSettings.EnableContinuousCollision;
+                runtimeSettings.HighContactQualityMode = s_RuntimePhysics2DSettings.HighContactQualityMode;
+                runtimeSettings.HighContactQualityExtraSubSteps = std::max(0, s_RuntimePhysics2DSettings.HighContactQualityExtraSubSteps);
+                runtimeSettings.ContactHertz = s_RuntimePhysics2DSettings.ContactHertz;
+                runtimeSettings.ContactDampingRatio = s_RuntimePhysics2DSettings.ContactDampingRatio;
+                runtimeSettings.ContactPushSpeed = s_RuntimePhysics2DSettings.ContactPushSpeed;
+                scene.SetPhysics2DSettings(runtimeSettings);
+            }
+
+            if (s_RuntimeLayersSettingsLoaded)
+                scene.SetPhysics2DCollisionMatrix(s_RuntimeLayersSettings.CollisionMatrix);
         }
     }
 

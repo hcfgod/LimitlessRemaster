@@ -789,6 +789,7 @@ namespace Limitless
                 camera.NearPlane = cameraJson.value("NearPlane", -1.0f);
                 camera.FarPlane = cameraJson.value("FarPlane", 1.0f);
                 camera.FieldOfViewYDegrees = cameraJson.value("FieldOfViewYDegrees", 60.0f);
+                camera.CullingMask = cameraJson.value("CullingMask", ~0u);
             }
 
             if (entry.contains("AudioListener2D") && entry["AudioListener2D"].is_object())
@@ -1231,7 +1232,10 @@ namespace Limitless
             info.Entity = scene->CreateEntity(tag);
             scene->SetEntityPersistentId(info.Entity, entry.value("EntityId", std::string{}));
             if (auto* tagComponent = scene->GetRegistry().try_get<TagComponent>(info.Entity))
+            {
                 tagComponent->Enabled = entry.value("EntityEnabled", true);
+                tagComponent->Layer = static_cast<uint8_t>(std::clamp(entry.value("Layer", 0), 0, 31));
+            }
             auto& transform = scene->GetRegistry().get<TransformComponent>(info.Entity);
 
             if (entry.contains("Transform"))

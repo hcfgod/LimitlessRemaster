@@ -246,6 +246,27 @@ namespace Limitless::ManagedScriptHost
             return true;
         }
 
+        uint8_t ManagedGetEntityLayerIcall(uint32_t entityHandle)
+        {
+            entt::registry* registry = GetActiveRegistry();
+            const entt::entity entity = ResolveManagedEntityHandle(entityHandle);
+            if (registry == nullptr || entity == entt::null)
+                return 0;
+            const auto* tagComponent = registry->try_get<TagComponent>(entity);
+            return tagComponent ? tagComponent->Layer : static_cast<uint8_t>(0);
+        }
+
+        void ManagedSetEntityLayerIcall(uint32_t entityHandle, uint8_t layer)
+        {
+            entt::registry* registry = GetActiveRegistry();
+            const entt::entity entity = ResolveManagedEntityHandle(entityHandle);
+            if (registry == nullptr || entity == entt::null)
+                return;
+            auto* tagComponent = registry->try_get<TagComponent>(entity);
+            if (tagComponent)
+                tagComponent->Layer = (layer < 32) ? layer : static_cast<uint8_t>(31);
+        }
+
         bool ManagedHasTransformComponentIcall(uint32_t entityHandle)
         {
             entt::registry* registry = GetActiveRegistry();
@@ -488,6 +509,27 @@ namespace Limitless::ManagedScriptHost
             cameraComponent->FieldOfViewYDegrees = fieldOfViewYDegrees;
         }
 
+        uint32_t ManagedGetCameraCullingMaskIcall(uint32_t entityHandle)
+        {
+            entt::registry* registry = GetActiveRegistry();
+            const entt::entity entity = ResolveManagedEntityHandle(entityHandle);
+            if (registry == nullptr || entity == entt::null)
+                return ~0u;
+            const auto* cameraComponent = registry->try_get<CameraComponent>(entity);
+            return cameraComponent ? cameraComponent->CullingMask : ~0u;
+        }
+
+        void ManagedSetCameraCullingMaskIcall(uint32_t entityHandle, uint32_t cullingMask)
+        {
+            entt::registry* registry = GetActiveRegistry();
+            const entt::entity entity = ResolveManagedEntityHandle(entityHandle);
+            if (registry == nullptr || entity == entt::null)
+                return;
+            auto* cameraComponent = registry->try_get<CameraComponent>(entity);
+            if (cameraComponent)
+                cameraComponent->CullingMask = cullingMask;
+        }
+
         LT_MANAGED_COMPONENT_HAS(HasBoxCollider2DComponentIcall, TryGetManagedBoxCollider2DComponent);
         LT_MANAGED_COMPONENT_GET(GetBoxCollider2DOffsetIcall, ManagedVector2, TryGetManagedBoxCollider2DComponent, ToManagedVector2(component->Offset), ManagedVector2{});
         LT_MANAGED_COMPONENT_SET(SetBoxCollider2DOffsetIcall, ManagedVector2, TryGetManagedBoxCollider2DComponent, component->Offset = ToGlmVector2(value););
@@ -693,6 +735,8 @@ namespace Limitless::ManagedScriptHost
                 LT_MANAGED_INTERNAL_CALL(HasTagComponentIcall),
                 LT_MANAGED_INTERNAL_CALL(GetTagIcall),
                 LT_MANAGED_INTERNAL_CALL(SetTagIcall),
+                LT_MANAGED_INTERNAL_CALL(GetEntityLayerIcall),
+                LT_MANAGED_INTERNAL_CALL(SetEntityLayerIcall),
                 LT_MANAGED_INTERNAL_CALL(HasTransformComponentIcall),
                 LT_MANAGED_INTERNAL_CALL(GetTransformPositionIcall),
                 LT_MANAGED_INTERNAL_CALL(SetTransformPositionIcall),
@@ -713,6 +757,8 @@ namespace Limitless::ManagedScriptHost
                 LT_MANAGED_INTERNAL_CALL(SetCameraFarPlaneIcall),
                 LT_MANAGED_INTERNAL_CALL(GetCameraFieldOfViewYDegreesIcall),
                 LT_MANAGED_INTERNAL_CALL(SetCameraFieldOfViewYDegreesIcall),
+                LT_MANAGED_INTERNAL_CALL(GetCameraCullingMaskIcall),
+                LT_MANAGED_INTERNAL_CALL(SetCameraCullingMaskIcall),
                 LT_MANAGED_INTERNAL_CALL(HasBoxCollider2DComponentIcall),
                 LT_MANAGED_INTERNAL_CALL(GetBoxCollider2DOffsetIcall),
                 LT_MANAGED_INTERNAL_CALL(SetBoxCollider2DOffsetIcall),

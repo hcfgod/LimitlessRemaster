@@ -123,6 +123,11 @@ namespace Limitless::Project
         return GetProjectSettingsDirectory(projectRoot) / "Lighting2DSettings.json";
     }
 
+    std::filesystem::path GetScriptingSettingsPath(const std::filesystem::path& projectRoot)
+    {
+        return GetProjectSettingsDirectory(projectRoot) / "ScriptingSettings.json";
+    }
+
     static Result<json> TryReadJson(const std::filesystem::path& path)
     {
         if (!path.empty())
@@ -398,11 +403,14 @@ namespace Limitless::Project
     {
         json root;
         root["version"] = s.Version;
-        root["layers"] = json::array();
-        for (const auto& name : s.Layers)
-        {
-            root["layers"].push_back(name);
-        }
+        json layerNamesJson = json::array();
+        for (uint32_t i = 0; i < LayersSettings::kMaxLayers; ++i)
+            layerNamesJson.push_back(s.LayerNames[i]);
+        root["layerNames"] = std::move(layerNamesJson);
+        json collisionMatrixJson = json::array();
+        for (uint32_t i = 0; i < LayersSettings::kMaxLayers; ++i)
+            collisionMatrixJson.push_back(s.CollisionMatrix[i]);
+        root["collisionMatrix"] = std::move(collisionMatrixJson);
         return root;
     }
 
@@ -410,26 +418,47 @@ namespace Limitless::Project
     {
         LayersSettings s;
         if (!root.is_object())
-        {
             return s;
-        }
 
-        s.Version = root.value("version", 1u);
-        if (root.contains("layers") && root["layers"].is_array())
+        const uint32_t version = root.value("version", 1u);
+        s.Version = 2;
+
+        if (version >= 2)
         {
-            for (const auto& layer : root["layers"])
+            if (root.contains("layerNames") && root["layerNames"].is_array())
             {
-                if (layer.is_string())
+                const auto& arr = root["layerNames"];
+                for (uint32_t i = 0; i < LayersSettings::kMaxLayers && i < arr.size(); ++i)
                 {
-                    s.Layers.push_back(layer.get<std::string>());
+                    if (arr[i].is_string())
+                        s.LayerNames[i] = arr[i].get<std::string>();
+                }
+            }
+            if (root.contains("collisionMatrix") && root["collisionMatrix"].is_array())
+            {
+                const auto& arr = root["collisionMatrix"];
+                for (uint32_t i = 0; i < LayersSettings::kMaxLayers && i < arr.size(); ++i)
+                {
+                    if (arr[i].is_number_unsigned() || arr[i].is_number_integer())
+                        s.CollisionMatrix[i] = arr[i].get<uint32_t>();
+                }
+            }
+        }
+        else
+        {
+            if (root.contains("layers") && root["layers"].is_array())
+            {
+                const auto& arr = root["layers"];
+                for (uint32_t i = 0; i < LayersSettings::kMaxLayers && i < arr.size(); ++i)
+                {
+                    if (arr[i].is_string())
+                        s.LayerNames[i] = arr[i].get<std::string>();
                 }
             }
         }
 
-        if (s.Layers.empty())
-        {
-            s.Layers = {"Default"};
-        }
+        if (s.LayerNames[0].empty())
+            s.LayerNames[0] = "Default";
 
         return s;
     }
@@ -530,6 +559,25 @@ namespace Limitless::Project
         return s;
     }
 
+    static json ScriptingSettingsToJson(const ScriptingSettings& s)
+    {
+        json root;
+        root["version"] = s.Version;
+        root["autoReloadScripts"] = s.AutoReloadScripts;
+        return root;
+    }
+
+    static ScriptingSettings ScriptingSettingsFromJson(const json& root)
+    {
+        ScriptingSettings s;
+        if (!root.is_object())
+            return s;
+
+        s.Version = root.value("version", 1u);
+        s.AutoReloadScripts = root.value("autoReloadScripts", true);
+        return s;
+    }
+
     Result<RenderSettings> LoadRenderSettings(const std::filesystem::path& projectRoot)
     {
         const auto root = TryReadJson(GetRenderSettingsPath(projectRoot));
@@ -590,6 +638,16 @@ namespace Limitless::Project
         return Lighting2DSettingsFromJson(root.GetValue());
     }
 
+    Result<ScriptingSettings> LoadScriptingSettings(const std::filesystem::path& projectRoot)
+    {
+        const auto root = TryReadJson(GetScriptingSettingsPath(projectRoot));
+        if (root.IsFailure())
+        {
+            return Result<ScriptingSettings>(root.GetError());
+        }
+        return ScriptingSettingsFromJson(root.GetValue());
+    }
+
     Result<void> SaveRenderSettings(const std::filesystem::path& projectRoot, const RenderSettings& settings)
     {
         return AtomicWriteJson(GetRenderSettingsPath(projectRoot), RenderSettingsToJson(settings));
@@ -618,6 +676,37 @@ namespace Limitless::Project
     Result<void> SaveLighting2DSettings(const std::filesystem::path& projectRoot, const Lighting2DSettings& settings)
     {
         return AtomicWriteJson(GetLighting2DSettingsPath(projectRoot), Lighting2DSettingsToJson(settings));
+    }
+
+    Result<void> SaveScriptingSettings(const std::filesystem::path& projectRoot, const ScriptingSettings& settings)
+    {
+        return AtomicWriteJson(GetScriptingSettingsPath(projectRoot), ScriptingSettingsToJson(settings));
+    }
+
+    int LayersSettings::LayerNameToIndex(const std::string& name) const
+    {
+        if (name.empty())
+            return -1;
+        for (uint32_t i = 0; i < kMaxLayers; ++i)
+        {
+            if (LayerNames[i] == name)
+                return static_cast<int>(i);
+        }
+        return -1;
+    }
+
+    std::string LayersSettings::LayerIndexToName(uint8_t index) const
+    {
+        if (index >= kMaxLayers)
+            return {};
+        return LayerNames[index];
+    }
+
+    uint32_t LayersSettings::LayerToCollisionMask(uint8_t layerIndex) const
+    {
+        if (layerIndex >= kMaxLayers)
+            return ~0u;
+        return CollisionMatrix[layerIndex];
     }
 
     std::vector<std::string> CollectAdditionalInputActionsAssetKeys(const InputSettings& settings)

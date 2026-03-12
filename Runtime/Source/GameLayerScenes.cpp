@@ -139,6 +139,7 @@ namespace Limitless
 
         loadedScene->BeginLoadingState();
         loadedScene->MarkSceneObjectsInitialized();
+        GameLayerInternal::ApplyRuntimeProjectSettingsToScene(*loadedScene);
         loadedScene->InitializePhysicsWorldForLoading();
         loadedScene->SetLoadStateReady();
         m_SceneCollection.SetLifecycleState(handle, SceneCollectionLifecycleState::Active);

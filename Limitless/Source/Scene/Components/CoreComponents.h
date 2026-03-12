@@ -13,6 +13,7 @@ namespace Limitless
     {
         std::string Tag = "Entity";
         bool Enabled = true; ///< Unity-style active state. Disabled entities do not update or render.
+        uint8_t Layer = 0; ///< Unity-style layer index (0-31). Used for physics collision filtering, camera culling, and raycasting.
     };
 
     struct SceneEntityIdComponent
@@ -97,6 +98,10 @@ namespace Limitless
 
         // Perspective settings.
         float FieldOfViewYDegrees = 60.0f;
+
+        // Layer culling mask. Each bit corresponds to a layer index (0-31).
+        // Only entities whose layer bit is set in this mask will be rendered by this camera.
+        uint32_t CullingMask = ~0u; ///< Default: render all layers.
     };
 
     /// Marks an entity hierarchy root as an instance of a prefab asset.

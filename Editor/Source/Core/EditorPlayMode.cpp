@@ -4,6 +4,7 @@
 #include "Graphics/Camera/OrthographicCamera2D.h"
 #include "Graphics/Camera/PerspectiveCamera3D.h"
 #include "Scene/Scene.h"
+#include "Scene/SceneRenderer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -429,6 +430,7 @@ namespace Limitless
                 return;
 
             const CameraComponent& component = selection->Component;
+            SceneRenderer::SetActiveCullingMask(component.CullingMask);
             const Camera* existingCamera = cameraManager.GetCamera(cachedGameplayCameraId);
             if (!existingCamera)
                 return;

@@ -114,4 +114,22 @@ public sealed class Camera : EntityComponent
             }
         }
     }
+
+    public uint CullingMask
+    {
+        get
+        {
+            unsafe
+            {
+                return ScriptBridge.GetCameraCullingMaskIcall(EntityHandle);
+            }
+        }
+        set
+        {
+            unsafe
+            {
+                ScriptBridge.SetCameraCullingMaskIcall(EntityHandle, value);
+            }
+        }
+    }
 }

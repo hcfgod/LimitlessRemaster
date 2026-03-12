@@ -220,6 +220,20 @@ namespace Limitless
         Entity GetEntity(entt::entity entity) const;
         Entity ResolveEntity(const Entity& entity) const;
         Entity FindEntityByTag(const std::string& tag) const;
+
+        /// Returns the layer index (0-31) of this entity.
+        uint8_t GetLayer() const;
+        /// Sets the layer index (0-31) of this entity.
+        void SetLayer(uint8_t layer);
+        /// Returns the layer index (0-31) of the given entity.
+        uint8_t GetLayer(const Entity& entity) const;
+        /// Sets the layer index (0-31) of the given entity.
+        void SetLayer(const Entity& entity, uint8_t layer);
+        /// Returns the layer index (0-31) of the given entity.
+        uint8_t GetLayer(entt::entity entity) const;
+        /// Sets the layer index (0-31) of the given entity.
+        void SetLayer(entt::entity entity, uint8_t layer);
+
         Entity GetParent(const Entity& entity) const;
         Entity GetParent(entt::entity entity) const;
         std::vector<Entity> GetChildren(const Entity& parent) const;

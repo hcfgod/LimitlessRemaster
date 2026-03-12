@@ -117,6 +117,7 @@ namespace Limitless::EditorRuntimeOperations
         static bool s_RightMouseWasDown = false;
 
         (void)playModeState;
+        const ImGuiIO& io = ImGui::GetIO();
         const bool rightMouseDown = ImGui::IsMouseDown(ImGuiMouseButton_Right);
         const bool rightMousePressedThisFrame = rightMouseDown && !s_RightMouseWasDown;
         const ImVec2 mousePosition = ImGui::GetMousePos();
@@ -146,7 +147,8 @@ namespace Limitless::EditorRuntimeOperations
 
         const bool sceneLookCaptureActive = !textInputWanted && rightMouseDown && s_CaptureOwner == ViewportCaptureOwner::Scene;
         const bool gameLookCaptureActive = !textInputWanted && rightMouseDown && s_CaptureOwner == ViewportCaptureOwner::Game;
-        const bool allowCameraInput = sceneLookCaptureActive || (!textInputWanted && sceneViewHovered && !rightMouseDown);
+        const bool sceneCameraHoverActive = !textInputWanted && mouseInSceneView && s_CaptureOwner != ViewportCaptureOwner::Game;
+        const bool allowCameraInput = sceneLookCaptureActive || sceneCameraHoverActive;
 
         editorCameraController->SetInputEnabled(allowCameraInput);
         editorCameraController->Update(deltaTime);

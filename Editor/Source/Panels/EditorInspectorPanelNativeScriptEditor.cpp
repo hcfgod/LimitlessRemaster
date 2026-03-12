@@ -1044,6 +1044,24 @@ namespace Limitless::EditorInspectorPanel
             return normalized;
         }
 
+        bool HeaderFileContainsScriptableEntityDerivation(const std::filesystem::path& headerPath)
+        {
+            std::ifstream headerFile(headerPath, std::ios::in);
+            if (!headerFile.is_open())
+                return true;
+
+            std::string line;
+            while (std::getline(headerFile, line))
+            {
+                if (line.find("ScriptableEntity") != std::string::npos)
+                {
+                    if (line.find(":") != std::string::npos)
+                        return true;
+                }
+            }
+            return false;
+        }
+
         std::vector<ProjectNativeScriptInfo> DiscoverProjectNativeScriptsFromAssets()
         {
             std::vector<ProjectNativeScriptInfo> discoveredScripts;
@@ -1078,6 +1096,7 @@ namespace Limitless::EditorInspectorPanel
                 info.ScriptAssetRelativePath = scriptAssetRelativePath;
                 info.FolderRelativePath = NormalizeRelativeScriptPath(relativePathWithoutExtension.parent_path());
                 info.DisplayName = relativePathWithoutExtension.filename().string();
+                info.LikelyDerivesFromScriptableEntity = HeaderFileContainsScriptableEntityDerivation(headerPath);
                 discoveredScripts.push_back(std::move(info));
             }
 
@@ -1225,8 +1244,36 @@ namespace Limitless::EditorInspectorPanel
             return true;
         }
 
-        bool SaveBufferToTextFile(const std::filesystem::path& path, const std::array<char, kNativeScriptEditorBufferSize>& buffer, std::string& outError)
+        bool SaveBufferToTextFile(const std::filesystem::path& path,
+                                  const std::array<char, kNativeScriptEditorBufferSize>& buffer,
+                                  std::string& outError,
+                                  bool* outFileChanged = nullptr)
         {
+            if (outFileChanged)
+                *outFileChanged = false;
+
+            const std::string desiredContent(buffer.data());
+            std::error_code directoryError;
+            if (path.has_parent_path())
+                std::filesystem::create_directories(path.parent_path(), directoryError);
+            if (directoryError)
+            {
+                outError = "Failed to create parent directory for file: " + path.string();
+                return false;
+            }
+
+            std::error_code existsError;
+            if (std::filesystem::exists(path, existsError))
+            {
+                std::ifstream input(path, std::ios::in | std::ios::binary);
+                if (input.is_open())
+                {
+                    const std::string existingContent((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+                    if (existingContent == desiredContent)
+                        return true;
+                }
+            }
+
             std::ofstream output(path, std::ios::out | std::ios::binary | std::ios::trunc);
             if (!output.is_open())
             {
@@ -1234,13 +1281,15 @@ namespace Limitless::EditorInspectorPanel
                 return false;
             }
 
-            output << buffer.data();
+            output << desiredContent;
             if (!output.good())
             {
                 outError = "Failed to write file: " + path.string();
                 return false;
             }
 
+            if (outFileChanged)
+                *outFileChanged = true;
             return true;
         }
 
@@ -1799,8 +1848,11 @@ namespace Limitless::EditorInspectorPanel
             return true;
         }
 
-        bool MirrorScriptToGeneratedDirectory(const NativeScriptAuthoringState& state, std::string& outError)
+        bool MirrorScriptToGeneratedDirectory(const NativeScriptAuthoringState& state, std::string& outError, bool* outMirroredChange = nullptr)
         {
+            if (outMirroredChange)
+                *outMirroredChange = false;
+
             std::vector<std::filesystem::path> generatedDirectories = GetGeneratedScriptCoreMirrorDirectories();
             if (generatedDirectories.empty())
             {
@@ -1842,10 +1894,14 @@ namespace Limitless::EditorInspectorPanel
                     return false;
                 }
 
-                if (!SaveBufferToTextFile(generatedHeaderFile, state.HeaderBuffer, outError))
+                bool headerChanged = false;
+                if (!SaveBufferToTextFile(generatedHeaderFile, state.HeaderBuffer, outError, &headerChanged))
                     return false;
-                if (!SaveBufferToTextFile(generatedSourceFile, state.SourceBuffer, outError))
+                bool sourceChanged = false;
+                if (!SaveBufferToTextFile(generatedSourceFile, state.SourceBuffer, outError, &sourceChanged))
                     return false;
+                if (outMirroredChange)
+                    *outMirroredChange = *outMirroredChange || headerChanged || sourceChanged;
             }
             return true;
         }
@@ -1880,8 +1936,10 @@ namespace Limitless::EditorInspectorPanel
             const auto saveEditorFiles = [&](bool forceBuildAfterSave) -> bool
             {
                 std::string saveError;
-                const bool headerSaved = SaveBufferToTextFile(state.HeaderPath, state.HeaderBuffer, saveError);
-                const bool sourceSaved = SaveBufferToTextFile(state.SourcePath, state.SourceBuffer, saveError);
+                bool headerFileChanged = false;
+                bool sourceFileChanged = false;
+                const bool headerSaved = SaveBufferToTextFile(state.HeaderPath, state.HeaderBuffer, saveError, &headerFileChanged);
+                const bool sourceSaved = SaveBufferToTextFile(state.SourcePath, state.SourceBuffer, saveError, &sourceFileChanged);
                 if (!(headerSaved && sourceSaved))
                 {
                     state.StatusMessage = saveError;
@@ -1892,7 +1950,8 @@ namespace Limitless::EditorInspectorPanel
                 state.HeaderDirty = false;
                 state.SourceDirty = false;
 
-                const bool mirrorSucceeded = MirrorScriptToGeneratedDirectory(state, saveError);
+                bool mirroredAnyChange = false;
+                const bool mirrorSucceeded = MirrorScriptToGeneratedDirectory(state, saveError, &mirroredAnyChange);
                 if (!mirrorSucceeded)
                 {
                     state.StatusMessage = saveError;
@@ -1900,7 +1959,13 @@ namespace Limitless::EditorInspectorPanel
                 }
                 else
                 {
-                    if (!saveError.empty())
+                    const bool anySavedChange = headerFileChanged || sourceFileChanged || mirroredAnyChange;
+                    if (!anySavedChange)
+                    {
+                        state.StatusMessage = "No script file changes to save.";
+                        state.StatusIsError = false;
+                    }
+                    else if (!saveError.empty())
                     {
                         state.StatusMessage = "Script files saved. " + saveError + " Build will mirror all scripts.";
                         state.StatusIsError = false;
@@ -1912,7 +1977,8 @@ namespace Limitless::EditorInspectorPanel
                     }
                 }
 
-                const bool shouldBuildNow = (forceBuildAfterSave || state.AutoBuildAfterSave);
+                const bool shouldBuildNow =
+                    forceBuildAfterSave || (state.AutoBuildAfterSave && (headerFileChanged || sourceFileChanged || mirroredAnyChange));
                 if (shouldBuildNow)
                     (void)TriggerNativeScriptsBuild(state);
 

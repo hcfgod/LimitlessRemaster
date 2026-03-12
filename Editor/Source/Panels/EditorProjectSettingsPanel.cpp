@@ -348,6 +348,7 @@ namespace Limitless::EditorProjectSettingsPanel
             const auto l = Project::LoadLayersSettings(projectRoot);
             const auto p = Project::LoadPhysics2DSettings(projectRoot);
             const auto lighting = Project::LoadLighting2DSettings(projectRoot);
+            const auto scripting = Project::LoadScriptingSettings(projectRoot);
 
             if (r.IsFailure()) { SetStatus(state, true, r.GetError().GetErrorMessage()); return false; }
             if (a.IsFailure()) { SetStatus(state, true, a.GetError().GetErrorMessage()); return false; }
@@ -355,6 +356,7 @@ namespace Limitless::EditorProjectSettingsPanel
             if (l.IsFailure()) { SetStatus(state, true, l.GetError().GetErrorMessage()); return false; }
             if (p.IsFailure()) { SetStatus(state, true, p.GetError().GetErrorMessage()); return false; }
             if (lighting.IsFailure()) { SetStatus(state, true, lighting.GetError().GetErrorMessage()); return false; }
+            if (scripting.IsFailure()) { SetStatus(state, true, scripting.GetError().GetErrorMessage()); return false; }
 
             state.Render = r.GetValue();
             state.Audio = a.GetValue();
@@ -362,78 +364,138 @@ namespace Limitless::EditorProjectSettingsPanel
             state.Layers = l.GetValue();
             state.Physics2D = p.GetValue();
             state.Lighting2D = lighting.GetValue();
+            state.Scripting = scripting.GetValue();
             RefreshAudioMixerAssetKeys(state, projectRoot);
             RefreshInputActionsAssetKeys(state, projectRoot);
             state.Loaded = true;
             return true;
         }
 
+        static bool s_LayerBuffersNeedRefresh = true;
+
         void DrawLayersEditor(Project::LayersSettings& layers)
         {
-            if (layers.Layers.empty())
+            static std::array<std::array<char, 128>, Project::LayersSettings::kMaxLayers> layerNameBuffers{};
+            if (s_LayerBuffersNeedRefresh)
             {
-                layers.Layers.push_back("Default");
+                for (uint32_t i = 0; i < Project::LayersSettings::kMaxLayers; ++i)
+                    std::snprintf(layerNameBuffers[i].data(), layerNameBuffers[i].size(), "%s", layers.LayerNames[i].c_str());
+                s_LayerBuffersNeedRefresh = false;
             }
 
-            ImGui::TextDisabled("Layers");
+            ImGui::TextDisabled("Layer Names (0-31)");
             ImGui::Separator();
+            ImGui::TextDisabled("Layer 0 (Default) cannot be renamed. Empty name = unused slot.");
+            ImGui::Spacing();
 
-            // Keep a stable selection index across frames.
-            static int selectedIndex = 0;
-            selectedIndex = std::clamp(selectedIndex, 0, static_cast<int>(layers.Layers.size()) - 1);
-
-            ImGui::BeginChild("LayersList", ImVec2(280.0f, 220.0f), true);
-            for (int i = 0; i < static_cast<int>(layers.Layers.size()); ++i)
+            ImGui::BeginChild("LayerNamesList", ImVec2(0.0f, 400.0f), true);
+            for (uint32_t i = 0; i < Project::LayersSettings::kMaxLayers; ++i)
             {
-                const bool selected = (i == selectedIndex);
-                if (ImGui::Selectable(layers.Layers[i].c_str(), selected))
+                ImGui::PushID(static_cast<int>(i));
+                ImGui::AlignTextToFramePadding();
+                char indexLabel[8];
+                std::snprintf(indexLabel, sizeof(indexLabel), "%2u", i);
+                ImGui::TextDisabled("%s", indexLabel);
+                ImGui::SameLine();
+
+                if (i == 0)
                 {
-                    selectedIndex = i;
+                    ImGui::BeginDisabled(true);
+                    ImGui::SetNextItemWidth(-1.0f);
+                    ImGui::InputText("##LayerName", layerNameBuffers[i].data(), layerNameBuffers[i].size());
+                    ImGui::EndDisabled();
                 }
+                else
+                {
+                    ImGui::SetNextItemWidth(-1.0f);
+                    ImGui::InputText("##LayerName", layerNameBuffers[i].data(), layerNameBuffers[i].size());
+                    if (ImGui::IsItemDeactivatedAfterEdit())
+                    {
+                        layers.LayerNames[i] = layerNameBuffers[i].data();
+                    }
+                }
+                ImGui::PopID();
             }
             ImGui::EndChild();
 
-            ImGui::SameLine();
-
-            ImGui::BeginGroup();
-            ImGui::TextDisabled("Selected");
-
-            if (selectedIndex >= 0 && selectedIndex < static_cast<int>(layers.Layers.size()))
+            if (ImGui::Button("Reset Buffers From Settings", ImVec2(220, 0)))
             {
-                static std::array<char, 128> nameBuffer{};
-                std::snprintf(nameBuffer.data(), nameBuffer.size(), "%s", layers.Layers[selectedIndex].c_str());
+                for (uint32_t i = 0; i < Project::LayersSettings::kMaxLayers; ++i)
+                    std::snprintf(layerNameBuffers[i].data(), layerNameBuffers[i].size(), "%s", layers.LayerNames[i].c_str());
+            }
 
-                ImGui::TextUnformatted("Name");
-                ImGui::InputText("##LayerName", nameBuffer.data(), nameBuffer.size());
-                if (ImGui::Button("Apply Rename", ImVec2(120, 0)))
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            ImGui::TextDisabled("Collision Matrix");
+            ImGui::TextDisabled("Check = layers collide with each other. Symmetric.");
+            ImGui::Spacing();
+
+            std::vector<uint32_t> usedLayers;
+            for (uint32_t i = 0; i < Project::LayersSettings::kMaxLayers; ++i)
+            {
+                if (!layers.LayerNames[i].empty())
+                    usedLayers.push_back(i);
+            }
+
+            if (!usedLayers.empty())
+            {
+                const float checkboxSize = 22.0f;
+                const float labelWidth = 100.0f;
+
+                ImGui::BeginChild("CollisionMatrix", ImVec2(0.0f, 0.0f), true, ImGuiWindowFlags_HorizontalScrollbar);
+
+                ImGui::SetCursorPosX(labelWidth + 4.0f);
+                for (uint32_t col : usedLayers)
                 {
-                    std::string newName = nameBuffer.data();
-                    if (!newName.empty())
+                    const std::string& colName = layers.LayerNames[col];
+                    const float textWidth = ImGui::CalcTextSize(colName.c_str()).x;
+                    const float offset = std::max(0.0f, (checkboxSize - textWidth) * 0.5f);
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offset);
+                    ImGui::TextDisabled("%s", colName.c_str());
+                    ImGui::SameLine();
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, checkboxSize - textWidth - offset) + 2.0f);
+                }
+                ImGui::NewLine();
+
+                for (size_t rowIdx = 0; rowIdx < usedLayers.size(); ++rowIdx)
+                {
+                    const uint32_t row = usedLayers[rowIdx];
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextDisabled("%s", layers.LayerNames[row].c_str());
+                    ImGui::SameLine();
+                    ImGui::SetCursorPosX(labelWidth + 4.0f);
+
+                    for (size_t colIdx = 0; colIdx <= rowIdx; ++colIdx)
                     {
-                        layers.Layers[selectedIndex] = std::move(newName);
+                        const uint32_t col = usedLayers[colIdx];
+                        ImGui::PushID(static_cast<int>(row * Project::LayersSettings::kMaxLayers + col));
+                        bool collides = (layers.CollisionMatrix[row] & (1u << col)) != 0;
+                        if (ImGui::Checkbox("##cm", &collides))
+                        {
+                            if (collides)
+                            {
+                                layers.CollisionMatrix[row] |= (1u << col);
+                                layers.CollisionMatrix[col] |= (1u << row);
+                            }
+                            else
+                            {
+                                layers.CollisionMatrix[row] &= ~(1u << col);
+                                layers.CollisionMatrix[col] &= ~(1u << row);
+                            }
+                        }
+                        ImGui::PopID();
+                        ImGui::SameLine();
                     }
+                    ImGui::NewLine();
                 }
+                ImGui::EndChild();
             }
-
-            if (ImGui::Button("Add Layer", ImVec2(120, 0)))
+            else
             {
-                layers.Layers.push_back("New Layer");
-                selectedIndex = static_cast<int>(layers.Layers.size()) - 1;
+                ImGui::TextDisabled("No layers defined.");
             }
-
-            ImGui::SameLine();
-            ImGui::BeginDisabled(layers.Layers.size() <= 1);
-            if (ImGui::Button("Remove", ImVec2(120, 0)))
-            {
-                if (selectedIndex >= 0 && selectedIndex < static_cast<int>(layers.Layers.size()))
-                {
-                    layers.Layers.erase(layers.Layers.begin() + selectedIndex);
-                    selectedIndex = std::clamp(selectedIndex, 0, static_cast<int>(layers.Layers.size()) - 1);
-                }
-            }
-            ImGui::EndDisabled();
-
-            ImGui::EndGroup();
         }
     }
 
@@ -686,6 +748,15 @@ namespace Limitless::EditorProjectSettingsPanel
                 ImGui::EndTabItem();
             }
 
+            if (ImGui::BeginTabItem("Scripting"))
+            {
+                ImGui::TextUnformatted("Auto Reload Scripts");
+                ImGui::Checkbox("##ScriptingAutoReloadScripts", &state.Scripting.AutoReloadScripts);
+                ImGui::TextDisabled("When enabled, detected script source saves trigger automatic script rebuild/reload while editing.");
+                ImGui::TextDisabled("When disabled, use the existing manual Build Project Scripts actions.");
+                ImGui::EndTabItem();
+            }
+
             if (ImGui::BeginTabItem("Layers"))
             {
                 DrawLayersEditor(state.Layers);
@@ -791,6 +862,7 @@ namespace Limitless::EditorProjectSettingsPanel
             state.SelectedAdditionalInputAliasBufferSourceIndex = -1;
             state.StatusMessage.clear();
             state.StatusIsError = false;
+            s_LayerBuffersNeedRefresh = true;
             (void)EnsureLoaded(state, projectRoot);
         }
 
@@ -804,6 +876,7 @@ namespace Limitless::EditorProjectSettingsPanel
             const auto sl = Project::SaveLayersSettings(projectRoot, state.Layers);
             const auto sp = Project::SavePhysics2DSettings(projectRoot, state.Physics2D);
             const auto lighting = Project::SaveLighting2DSettings(projectRoot, state.Lighting2D);
+            const auto scripting = Project::SaveScriptingSettings(projectRoot, state.Scripting);
 
             if (sr.IsFailure()) { SetStatus(state, true, sr.GetError().GetErrorMessage()); }
             else if (sa.IsFailure()) { SetStatus(state, true, sa.GetError().GetErrorMessage()); }
@@ -811,6 +884,7 @@ namespace Limitless::EditorProjectSettingsPanel
             else if (sl.IsFailure()) { SetStatus(state, true, sl.GetError().GetErrorMessage()); }
             else if (sp.IsFailure()) { SetStatus(state, true, sp.GetError().GetErrorMessage()); }
             else if (lighting.IsFailure()) { SetStatus(state, true, lighting.GetError().GetErrorMessage()); }
+            else if (scripting.IsFailure()) { SetStatus(state, true, scripting.GetError().GetErrorMessage()); }
             else { SetStatus(state, false, "Project settings saved."); }
 
             // Best-effort apply so project defaults are live in the editor session.

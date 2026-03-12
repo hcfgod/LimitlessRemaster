@@ -7,11 +7,13 @@
 #include "Undo/EditorUndoService.h"
 #include "Scene/Scene.h"
 #include "Scripting/ManagedScriptHost.h"
+#include "Scripting/NativeScriptRegistry.h"
 #include "imgui/imgui.h"
 
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <unordered_set>
@@ -122,6 +124,24 @@ namespace Limitless::EditorInspectorPanel
             return scriptEntry;
         }
 
+        bool CsFileContainsScriptableEntityDerivation(const std::filesystem::path& csPath)
+        {
+            std::ifstream csFile(csPath, std::ios::in);
+            if (!csFile.is_open())
+                return true;
+
+            std::string line;
+            while (std::getline(csFile, line))
+            {
+                if (line.find("ScriptableEntity") != std::string::npos)
+                {
+                    if (line.find(":") != std::string::npos)
+                        return true;
+                }
+            }
+            return false;
+        }
+
         std::vector<ProjectNativeScriptInfo> DiscoverProjectManagedScriptsForComponentAdd()
         {
             std::vector<ProjectNativeScriptInfo> availableScripts;
@@ -167,11 +187,14 @@ namespace Limitless::EditorInspectorPanel
                     continue;
                 }
 
+                const bool likelyDerives = CsFileContainsScriptableEntityDerivation(entry.path());
+
                 ProjectNativeScriptInfo scriptInfo{};
                 scriptInfo.ScriptClassName = entry.path().stem().string();
                 scriptInfo.ScriptAssetRelativePath = relativePath.generic_string();
                 scriptInfo.FolderRelativePath = relativePath.parent_path().generic_string();
                 scriptInfo.DisplayName = scriptInfo.ScriptClassName;
+                scriptInfo.LikelyDerivesFromScriptableEntity = likelyDerives;
                 availableScripts.push_back(std::move(scriptInfo));
             }
 
@@ -198,11 +221,30 @@ namespace Limitless::EditorInspectorPanel
             ImGui::Separator();
         }
 
+        bool IsNativeScriptEligibleForComponentAdd(const ProjectNativeScriptInfo& scriptInfo)
+        {
+            if (NativeScriptRegistry::HasScript(scriptInfo.ScriptClassName))
+                return true;
+            const std::string resolvedName = ResolveRegisteredScriptClassNameForInspector(scriptInfo.ScriptClassName);
+            if (!resolvedName.empty() && NativeScriptRegistry::HasScript(resolvedName))
+                return true;
+            if (NativeScriptRegistry::GetRegisteredScriptNames().empty())
+                return scriptInfo.LikelyDerivesFromScriptableEntity;
+            return false;
+        }
+
         void DrawAddScriptComponentMenu(Scene* scene,
                                         entt::entity selectedEntity,
                                         EditorUndoService* undoService)
         {
-            const std::vector<ProjectNativeScriptInfo> availableScripts = GetAvailableProjectScriptsForInspector();
+            std::vector<ProjectNativeScriptInfo> allScripts = GetAvailableProjectScriptsForInspector();
+            std::vector<ProjectNativeScriptInfo> availableScripts;
+            availableScripts.reserve(allScripts.size());
+            for (auto& scriptInfo : allScripts)
+            {
+                if (IsNativeScriptEligibleForComponentAdd(scriptInfo))
+                    availableScripts.push_back(std::move(scriptInfo));
+            }
             const ProjectScriptFolderNode scriptFolderTree = BuildProjectScriptFolderTree(availableScripts);
             const std::vector<ProjectNativeScriptInfo> availableManagedScripts = DiscoverProjectManagedScriptsForComponentAdd();
             const auto& managedSnapshot = ManagedScriptHost::GetSnapshot();
@@ -342,6 +384,9 @@ namespace Limitless::EditorInspectorPanel
                     {
                         for (const ProjectNativeScriptInfo& scriptInfo : availableManagedScripts)
                         {
+                            const bool resolvedInHost = !ManagedScriptHost::ResolveDiscoveredClassName(scriptInfo.ScriptClassName).empty();
+                            if (!resolvedInHost && !scriptInfo.LikelyDerivesFromScriptableEntity)
+                                continue;
                             const std::string menuLabel = scriptInfo.DisplayName + "##ManagedProjectScript_" + scriptInfo.ScriptAssetRelativePath;
                             if (ImGui::MenuItem(menuLabel.c_str()))
                                 attachManagedScriptAsset(scriptInfo);

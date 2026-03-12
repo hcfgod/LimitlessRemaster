@@ -46,12 +46,36 @@ namespace Limitless
             std::unordered_map<std::string, Async::Task<Assets::MaterialAsset::Ptr>> PendingMaterialLoads;
             glm::vec4 ViewportClearColor = glm::vec4(0.08f, 0.08f, 0.10f, 1.0f);
             UiInputViewportRect UiInputViewportRectPixels{};
+            uint32_t ActiveCullingMask = ~0u;
         };
 
         SceneRendererRuntimeState& GetSceneRendererRuntimeState()
         {
             static SceneRendererRuntimeState state{};
             return state;
+        }
+
+        uint8_t GetEntityLayerForCameraCulling(const entt::registry& registry, entt::entity entity)
+        {
+            const auto* tag = registry.try_get<TagComponent>(entity);
+            if (!tag)
+                return 0;
+            return static_cast<uint8_t>(std::min<int>(tag->Layer, 31));
+        }
+
+        uint32_t GetEffectiveCameraCullingMask(const Camera& camera)
+        {
+            if (camera.GetUsage() == CameraUsage::Editor)
+                return ~0u;
+            return GetSceneRendererRuntimeState().ActiveCullingMask;
+        }
+
+        bool IsEntityVisibleToCameraCullingMask(const entt::registry& registry, entt::entity entity, uint32_t cullingMask)
+        {
+            if (cullingMask == ~0u)
+                return true;
+            const uint8_t layer = GetEntityLayerForCameraCulling(registry, entity);
+            return (cullingMask & (1u << layer)) != 0u;
         }
 
         bool TryGetOwningCanvasEntity(const entt::registry& registry, entt::entity entity, entt::entity& outCanvasEntity)
@@ -689,12 +713,10 @@ namespace Limitless
                                 const Camera& camera,
                                 uint32_t width,
                                 uint32_t height,
-                                CanvasUiRenderPhase phase = CanvasUiRenderPhase::All)
+                                CanvasUiRenderPhase phase)
         {
-            if (width == 0 || height == 0)
-                return;
-
             auto& registry = scene.GetRegistry();
+            const uint32_t activeCullingMask = GetEffectiveCameraCullingMask(camera);
 
             auto canvasView = registry.view<CanvasComponent>();
             std::vector<entt::entity> canvases;
@@ -777,6 +799,12 @@ namespace Limitless
 
                 for (entt::entity uiEntity : uiEntities)
                 {
+                    if (canvas.Mode == CanvasComponent::RenderMode::WorldSpace &&
+                        !IsEntityVisibleToCameraCullingMask(registry, uiEntity, activeCullingMask))
+                    {
+                        continue;
+                    }
+
                     const UiLayoutRect layoutRect = ResolveUiLayoutRect(registry, uiEntity, canvasEntity, canvasRect, layoutCache);
                     const glm::vec2 layoutSize = layoutRect.Max - layoutRect.Min;
                     if (layoutSize.x <= 0.0f || layoutSize.y <= 0.0f)
@@ -947,7 +975,6 @@ namespace Limitless
 
                 Renderer2D::Default().EndScene();
             }
-
         }
     }
 
@@ -967,6 +994,7 @@ namespace Limitless
             : 1.0f;
 
         auto& registry = scene.GetRegistry();
+        const uint32_t activeCullingMask = GetEffectiveCameraCullingMask(camera);
         // ---- Grid2D + TilemapLayer rendering path ----------------------------
         // Renders entities using the new Grid2DComponent + child TilemapLayerComponent
         // architecture. Each Grid2D entity defines the cell layout; its children
@@ -1006,6 +1034,9 @@ namespace Limitless
 
                 for (entt::entity layerEntity : layerEntities)
                 {
+                    if (!IsEntityVisibleToCameraCullingMask(registry, layerEntity, activeCullingMask))
+                        continue;
+
                     auto& layer = registry.get<TilemapLayerComponent>(layerEntity);
 
                     // Filter by exact render order so tile layers can interleave
@@ -1188,6 +1219,8 @@ namespace Limitless
         auto drawSpriteEntity = [&](entt::entity entity) {
             if (!scene.IsEntityEnabledInHierarchy(entity))
                 return;
+            if (!IsEntityVisibleToCameraCullingMask(registry, entity, activeCullingMask))
+                return;
             if (IsEntityInCanvasUiHierarchy(registry, entity))
                 return;
 
@@ -1368,6 +1401,8 @@ namespace Limitless
             {
                 if (!scene.IsEntityEnabledInHierarchy(entity))
                     continue;
+                if (!IsEntityVisibleToCameraCullingMask(registry, entity, activeCullingMask))
+                    continue;
 
                 auto& emitter = particleView.get<ParticleEmitterComponent>(entity);
                 if (!emitter.RuntimeState || emitter.RuntimeState->AliveCount == 0)
@@ -1430,6 +1465,8 @@ namespace Limitless
         std::set<int32_t> renderOrders;
         for (entt::entity entity : view)
         {
+            if (!IsEntityVisibleToCameraCullingMask(registry, entity, activeCullingMask))
+                continue;
             renderEntities.push_back(entity);
             const auto& sprite = view.get<SpriteComponent>(entity);
             renderOrders.insert(sprite.RenderOrder);
@@ -1444,6 +1481,8 @@ namespace Limitless
             for (entt::entity child : children)
             {
                 if (!registry.all_of<TilemapLayerComponent>(child) || !scene.IsEntityEnabledInHierarchy(child))
+                    continue;
+                if (!IsEntityVisibleToCameraCullingMask(registry, child, activeCullingMask))
                     continue;
                 renderOrders.insert(registry.get<TilemapLayerComponent>(child).RenderOrder);
             }
@@ -1517,6 +1556,16 @@ namespace Limitless
     glm::vec4 SceneRenderer::GetViewportClearColor()
     {
         return GetSceneRendererRuntimeState().ViewportClearColor;
+    }
+
+    void SceneRenderer::SetActiveCullingMask(uint32_t cullingMask)
+    {
+        GetSceneRendererRuntimeState().ActiveCullingMask = cullingMask;
+    }
+
+    uint32_t SceneRenderer::GetActiveCullingMask()
+    {
+        return GetSceneRendererRuntimeState().ActiveCullingMask;
     }
 
     void SceneRenderer::SetUiInputViewportRectPixels(float minX, float minY, float width, float height, bool enabled)

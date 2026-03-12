@@ -7,6 +7,7 @@
 #include "EditorPlayMode.h"
 #include "EditorAnimationTimelinePanel.h"
 #include "EditorAnimatorGraphPanel.h"
+#include "EditorPreferencesPanel.h"
 #include "EditorProjectPanel.h"
 #include "EditorProjectDialog.h"
 #include "EditorProjectSettingsPanel.h"
@@ -84,6 +85,7 @@ namespace Limitless
         void DrawSpriteEditorPanel();
         void ApplyAnimationTimelinePreviewToSelectedEntity();
         void RestoreAnimationPreviewTransforms();
+        void FocusEditorCameraOnSelectedEntity(bool zoomedIn);
 
         void EnsureSceneViewFramebuffer(uint32_t width, uint32_t height);
         void EnsureGameViewFramebuffer(uint32_t width, uint32_t height);
@@ -142,6 +144,8 @@ namespace Limitless
         void ApplyProjectAudioSettings();
         void RefreshProjectLighting2DSettings();
         void ApplyProjectLighting2DSettings();
+        void RefreshProjectScriptingSettings();
+        void ApplyProjectScriptingSettings();
         std::string CreateSceneAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         std::string CreateMaterialAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
         std::string CreateTilesetAssetInFolder(const std::filesystem::path& relativeFolderPath, const std::string& preferredFileName = {});
@@ -199,6 +203,8 @@ namespace Limitless
         std::string m_ScriptSafeModeMessage;
         entt::entity m_SelectedEntity = entt::null;
         entt::entity m_EditModeSelectedEntityBeforePlay = entt::null;
+        double m_LastEntityFocusShortcutTimeSeconds = -1.0;
+        entt::entity m_LastEntityFocusShortcutEntity = entt::null;
 
         /// Selected texture asset key when user double-clicks a texture in the Project panel (e.g. "Assets/Textures/X.png").
         /// When non-empty, the Inspector shows the texture and its spec; entity selection is ignored.
@@ -255,6 +261,7 @@ namespace Limitless
         bool m_ShowSceneView = true;
         bool m_ShowGameView = true;
         bool m_ShowDemoWindow = false;
+        bool m_ShowEditorPreferencesWindow = false;
         bool m_ShowProjectSettingsWindow = false;
         bool m_ShowAssetDiagnosticsWindow = false;
         bool m_ShowPhysicsDiagnosticsWindow = true;
@@ -289,6 +296,7 @@ namespace Limitless
         EditorProjectPanelState m_ProjectPanelState;
         EditorAssetPreview::MaterialPreviewCache m_MaterialPreviewCache;
         EditorProjectDialog::EditorProjectDialogState m_ProjectDialogState;
+        EditorPreferencesPanel::EditorPreferencesPanelState m_EditorPreferencesPanelState;
         EditorProjectSettingsPanel::EditorProjectSettingsPanelState m_ProjectSettingsPanelState;
         Project::RenderSettings m_ProjectRenderSettings{};
         bool m_ProjectRenderSettingsLoaded = false;
@@ -301,8 +309,12 @@ namespace Limitless
         int64_t m_ProjectAppliedAudioMixerLastWriteTimeTicks = 0;
         Project::Physics2DSettings m_ProjectPhysics2DSettings{};
         bool m_ProjectPhysics2DSettingsLoaded = false;
+        Project::LayersSettings m_ProjectLayersSettings{};
+        bool m_ProjectLayersSettingsLoaded = false;
         Project::Lighting2DSettings m_ProjectLighting2DSettings{};
         bool m_ProjectLighting2DSettingsLoaded = false;
+        Project::ScriptingSettings m_ProjectScriptingSettings{};
+        bool m_ProjectScriptingSettingsLoaded = false;
 
         std::unordered_map<std::string, Async::Task<Assets::TextureAsset::Ptr>> m_PendingTexturePrewarmTasks;
         std::unordered_map<std::string, Async::Task<Assets::MaterialAsset::Ptr>> m_PendingMaterialPrewarmTasks;

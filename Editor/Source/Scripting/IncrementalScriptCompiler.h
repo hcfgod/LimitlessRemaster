@@ -10,6 +10,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace Limitless
@@ -62,6 +63,7 @@ namespace Limitless
         IncrementalScriptCompiler& operator=(const IncrementalScriptCompiler&) = delete;
 
         void OnFileChanged(const std::filesystem::path& changedPath);
+        void SnapshotExistingScriptFiles(const std::filesystem::path& assetsDir);
 
         std::filesystem::path m_EngineRoot;
         std::filesystem::path m_ProjectRoot;
@@ -74,6 +76,8 @@ namespace Limitless
         // Written on the watcher thread, read on the main thread.
         std::atomic<bool> m_ScriptChangeDetected{false};
         std::atomic<int64_t> m_LastChangeTimestampMs{0};
+        std::mutex m_ScriptContentHashesMutex;
+        std::unordered_map<std::string, size_t> m_ScriptContentHashes;
         int m_DebounceMs = 500;
     };
 }

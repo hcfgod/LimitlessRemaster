@@ -2972,8 +2972,11 @@ namespace Limitless::EditorViewportPanel
                     sceneViewCamera->SetViewportSize(sceneWidth, sceneHeight);
 
                 const bool isSceneLoading = scene && scene->GetLoadState() == Scene::LoadState::Loading;
+                const uint32_t previousActiveCullingMask = SceneRenderer::GetActiveCullingMask();
+                SceneRenderer::SetActiveCullingMask(~0u); // Editor scene view renders all layers.
                 if (sceneViewCamera && scene && sceneViewFramebuffer && !isSceneLoading)
                     SceneRenderer::RenderToViewport(*scene, *sceneViewCamera, sceneViewFramebuffer, sceneWidth, sceneHeight);
+                SceneRenderer::SetActiveCullingMask(previousActiveCullingMask);
 
                 if (sceneViewFramebuffer && sceneViewFramebuffer->GetColorAttachment())
                 {

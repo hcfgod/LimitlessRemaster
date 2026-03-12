@@ -124,6 +124,24 @@ public sealed class Entity
         return string.Equals(Tag, tag ?? string.Empty, System.StringComparison.Ordinal);
     }
 
+    public byte Layer
+    {
+        get
+        {
+            unsafe
+            {
+                return ScriptBridge.GetEntityLayerIcall(m_Handle);
+            }
+        }
+        set
+        {
+            unsafe
+            {
+                ScriptBridge.SetEntityLayerIcall(m_Handle, value);
+            }
+        }
+    }
+
     public void SetParent(Entity? parent)
     {
         unsafe

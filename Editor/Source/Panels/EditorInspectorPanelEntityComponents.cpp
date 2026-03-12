@@ -11,6 +11,7 @@
 #include "Assets/AudioClipAsset.h"
 #include "Audio/SceneAudioSystem.h"
 #include "Project/ProjectManager.h"
+#include "Project/ProjectSettings.h"
 #include "Scene/ParticleEmitterSystem.h"
 #include "Undo/EditorUndoService.h"
 #include "imgui/imgui.h"
@@ -532,13 +533,22 @@ namespace Limitless::EditorInspectorPanel
                 std::snprintf(renameBuffer.data(), renameBuffer.size(), "%s", tag->Tag.c_str());
             }
 
+            Project::LayersSettings layersSettings;
+            const auto& projectManager = Project::ProjectManager::GetInstance();
+            if (projectManager.HasOpenProject())
+            {
+                const auto loadResult = Project::LoadLayersSettings(projectManager.GetProjectRoot());
+                if (loadResult.IsSuccess())
+                    layersSettings = loadResult.GetValue();
+            }
+
             ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.06f, 0.09f, 0.15f, 0.92f));
             ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.20f, 0.32f, 0.48f, 0.45f));
             ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 12.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 10.0f));
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 6.0f));
-            const float entityCardHeight = ImGui::GetFrameHeight() * 2.0f + 10.0f + ImGui::GetStyle().WindowPadding.y * 2.0f;
+            const float entityCardHeight = ImGui::GetFrameHeight() * 3.0f + 20.0f + ImGui::GetStyle().WindowPadding.y * 2.0f;
             ImGui::BeginChild("InspectorEntityHeader", ImVec2(0.0f, entityCardHeight), true, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
             ImGui::AlignTextToFramePadding();
@@ -573,6 +583,49 @@ namespace Limitless::EditorInspectorPanel
                     tag->Tag = updatedName;
                 }
             }
+
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("Layer");
+            ImGui::SameLine();
+            {
+                const uint8_t currentLayer = tag->Layer < Project::LayersSettings::kMaxLayers ? tag->Layer : 0;
+                std::string layerPreview = layersSettings.LayerNames[currentLayer];
+                if (layerPreview.empty())
+                    layerPreview = "Layer " + std::to_string(currentLayer);
+                ImGui::SetNextItemWidth(-1.0f);
+                if (ImGui::BeginCombo("##EntityLayer", layerPreview.c_str()))
+                {
+                    for (uint32_t i = 0; i < Project::LayersSettings::kMaxLayers; ++i)
+                    {
+                        if (layersSettings.LayerNames[i].empty())
+                            continue;
+                        const bool selected = (currentLayer == static_cast<uint8_t>(i));
+                        const std::string label = layersSettings.LayerNames[i] + "##Layer" + std::to_string(i);
+                        if (ImGui::Selectable(label.c_str(), selected))
+                        {
+                            const uint8_t newLayer = static_cast<uint8_t>(i);
+                            if (undoService)
+                            {
+                                (void)undoService->ExecuteSceneMutation("Change Entity Layer", [&](Scene& mutableScene) {
+                                    auto* mutableTag = mutableScene.GetRegistry().try_get<TagComponent>(selectedEntity);
+                                    if (!mutableTag)
+                                        return false;
+                                    mutableTag->Layer = newLayer;
+                                    return true;
+                                });
+                            }
+                            else
+                            {
+                                tag->Layer = newLayer;
+                            }
+                        }
+                        if (selected)
+                            ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+            }
+
             ImGui::EndChild();
             ImGui::PopStyleVar(4);
             ImGui::PopStyleColor(2);
@@ -1607,6 +1660,50 @@ namespace Limitless::EditorInspectorPanel
                         ClearPrimaryFlagFromOtherCameras(activeRegistry, selectedEntity);
                     return true;
                 });
+
+                // Culling Mask — layer bitmask dropdown
+                {
+                    ImGui::TextUnformatted("Culling Mask");
+                    const char* maskLabel = (camera->CullingMask == ~0u) ? "Everything"
+                                          : (camera->CullingMask == 0u) ? "Nothing"
+                                          : "Mixed...";
+                    if (ImGui::BeginCombo("##CameraCullingMask", maskLabel))
+                    {
+                        if (ImGui::Selectable("Everything", camera->CullingMask == ~0u))
+                            camera->CullingMask = ~0u;
+                        if (ImGui::Selectable("Nothing", camera->CullingMask == 0u))
+                            camera->CullingMask = 0u;
+                        ImGui::Separator();
+
+                        Project::LayersSettings layersSettings{};
+                        const auto& pm = Project::ProjectManager::GetInstance();
+                        if (pm.HasOpenProject())
+                        {
+                            const auto result = Project::LoadLayersSettings(pm.GetProjectRoot());
+                            if (result.IsSuccess())
+                                layersSettings = result.GetValue();
+                        }
+                        for (int i = 0; i < 32; ++i)
+                        {
+                            const std::string& layerName = layersSettings.LayerNames[i];
+                            if (layerName.empty() && i > 0)
+                                continue;
+                            char cullingLabel[128];
+                            snprintf(cullingLabel, sizeof(cullingLabel), "%d: %s", i, layerName.empty() ? "(unnamed)" : layerName.c_str());
+                            bool isSet = (camera->CullingMask & (1u << i)) != 0;
+                            if (ImGui::Checkbox(cullingLabel, &isSet))
+                            {
+                                if (isSet)
+                                    camera->CullingMask |= (1u << i);
+                                else
+                                    camera->CullingMask &= ~(1u << i);
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+                    TrackInteractiveMemberMutation<CameraComponent>(
+                        undoService, "Edit Camera Culling Mask", selectedEntity, &CameraComponent::CullingMask, camera->CullingMask);
+                }
 
                 ImGui::TreePop();
             }

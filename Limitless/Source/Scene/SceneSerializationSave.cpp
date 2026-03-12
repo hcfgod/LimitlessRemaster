@@ -88,6 +88,7 @@ namespace Limitless
             entry["Tag"] = tag.Tag;
             entry["EntityId"] = scene.GetEntityPersistentId(entity);
             entry["EntityEnabled"] = tag.Enabled;
+            entry["Layer"] = tag.Layer;
             entry["Transform"] = {
                 { "Position", { transform.Position.x, transform.Position.y, transform.Position.z } },
                 { "Rotation", { transform.Rotation.x, transform.Rotation.y, transform.Rotation.z } },
@@ -367,7 +368,8 @@ namespace Limitless
                     { "Zoom", camera->Zoom },
                     { "NearPlane", camera->NearPlane },
                     { "FarPlane", camera->FarPlane },
-                    { "FieldOfViewYDegrees", camera->FieldOfViewYDegrees }
+                    { "FieldOfViewYDegrees", camera->FieldOfViewYDegrees },
+                    { "CullingMask", camera->CullingMask }
                 };
             }
 

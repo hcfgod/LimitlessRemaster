@@ -14,6 +14,7 @@ namespace Limitless::EditorMenuBar
               bool& showGameView,
               bool& showProjectPanel,
               bool& showDemoWindow,
+              bool& showEditorPreferencesWindow,
               bool& showAssetDiagnosticsWindow,
               bool& showPhysicsDiagnosticsWindow,
               bool& showConsoleWindow,

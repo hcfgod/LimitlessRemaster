@@ -227,6 +227,47 @@ namespace Limitless
         return Entity{};
     }
 
+    uint8_t ScriptableEntity::GetLayer() const
+    {
+        return GetLayer(m_EntityHandle);
+    }
+
+    void ScriptableEntity::SetLayer(uint8_t layer)
+    {
+        SetLayer(m_EntityHandle, layer);
+    }
+
+    uint8_t ScriptableEntity::GetLayer(const Entity& entity) const
+    {
+        return GetLayer(entity.GetHandle());
+    }
+
+    void ScriptableEntity::SetLayer(const Entity& entity, uint8_t layer)
+    {
+        SetLayer(entity.GetHandle(), layer);
+    }
+
+    uint8_t ScriptableEntity::GetLayer(entt::entity entity) const
+    {
+        if (m_Registry == nullptr)
+            return 0;
+        if (!m_Registry->valid(entity))
+            return 0;
+        const auto* tag = m_Registry->try_get<TagComponent>(entity);
+        return tag ? tag->Layer : static_cast<uint8_t>(0);
+    }
+
+    void ScriptableEntity::SetLayer(entt::entity entity, uint8_t layer)
+    {
+        if (m_Registry == nullptr || !m_Registry->valid(entity))
+            return;
+        if (layer > 31)
+            layer = 31;
+        auto* tag = m_Registry->try_get<TagComponent>(entity);
+        if (tag)
+            tag->Layer = layer;
+    }
+
     Entity ScriptableEntity::GetParent(const Entity& entity) const
     {
         return GetParent(entity.GetHandle());

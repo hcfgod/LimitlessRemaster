@@ -25,6 +25,11 @@ namespace Limitless
         static void SetViewportClearColor(const glm::vec4& clearColor);
         /// Gets the currently configured viewport background clear color.
         static glm::vec4 GetViewportClearColor();
+        /// Sets the active camera culling mask for the current render pass.
+        /// Only entities whose layer bit is set in this mask will be rendered.
+        static void SetActiveCullingMask(uint32_t cullingMask);
+        static uint32_t GetActiveCullingMask();
+
         /// Sets the UI input viewport rectangle in window-space pixels.
         /// When enabled, Canvas UI pointer hit-testing uses this rectangle instead of the full window.
         static void SetUiInputViewportRectPixels(float minX, float minY, float width, float height, bool enabled = true);

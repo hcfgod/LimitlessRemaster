@@ -321,6 +321,29 @@ namespace Limitless
             return false;
         }
 
+        uint8_t GetEntityLayerForCameraCulling(const entt::registry& registry, entt::entity entity)
+        {
+            const auto* tag = registry.try_get<TagComponent>(entity);
+            if (!tag)
+                return 0;
+            return static_cast<uint8_t>(std::min<int>(tag->Layer, 31));
+        }
+
+        uint32_t GetEffectiveCameraCullingMask(const Camera& camera)
+        {
+            if (camera.GetUsage() == CameraUsage::Editor)
+                return ~0u;
+            return SceneRenderer::GetActiveCullingMask();
+        }
+
+        bool IsEntityVisibleToCameraCullingMask(const entt::registry& registry, entt::entity entity, uint32_t cullingMask)
+        {
+            if (cullingMask == ~0u)
+                return true;
+            const uint8_t layer = GetEntityLayerForCameraCulling(registry, entity);
+            return (cullingMask & (1u << layer)) != 0u;
+        }
+
         bool ProjectWorldToScreen(const glm::mat4& viewProjection,
                                   const glm::vec3& worldPosition,
                                   uint32_t width,
@@ -586,7 +609,7 @@ namespace Limitless
             return true;
         }
 
-        std::vector<entt::entity> BuildSortedSpriteRenderList(Scene& scene, float interpolationAlpha)
+        std::vector<entt::entity> BuildSortedSpriteRenderList(Scene& scene, float interpolationAlpha, uint32_t cullingMask)
         {
             auto& registry = scene.GetRegistry();
             auto view = registry.view<TransformComponent, SpriteComponent>();
@@ -596,6 +619,8 @@ namespace Limitless
             for (entt::entity entity : view)
             {
                 if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
+                if (!IsEntityVisibleToCameraCullingMask(registry, entity, cullingMask))
                     continue;
                 entities.push_back(entity);
             }
@@ -742,10 +767,10 @@ namespace Limitless
             }
         }
 
-        std::vector<NormalPassSpriteDraw> BuildNormalPassDrawList(Scene& scene, float interpolationAlpha)
+        std::vector<NormalPassSpriteDraw> BuildNormalPassDrawList(Scene& scene, float interpolationAlpha, uint32_t cullingMask)
         {
             std::vector<NormalPassSpriteDraw> drawList;
-            auto sortedEntities = BuildSortedSpriteRenderList(scene, interpolationAlpha);
+            auto sortedEntities = BuildSortedSpriteRenderList(scene, interpolationAlpha, cullingMask);
             drawList.reserve(sortedEntities.size());
 
             auto& registry = scene.GetRegistry();
@@ -1057,6 +1082,7 @@ namespace Limitless
                                                        uint32_t width,
                                                        uint32_t height,
                                                        uint32_t maxSegments,
+                                                       uint32_t cullingMask,
                                                        uint32_t& outOccluderCount,
                                                        float shadowSegmentSnapPixels)
         {
@@ -1237,6 +1263,8 @@ namespace Limitless
                     break;
                 if (!scene.IsEntityEnabledInHierarchy(entity))
                     continue;
+                if (!IsEntityVisibleToCameraCullingMask(registry, entity, cullingMask))
+                    continue;
 
                 auto& occluder = occluderView.get<ShadowOccluder2DComponent>(entity);
                 explicitOccluderEntities.insert(entity);
@@ -1268,6 +1296,8 @@ namespace Limitless
                     continue;
                 if (!scene.IsEntityEnabledInHierarchy(entity))
                     continue;
+                if (!IsEntityVisibleToCameraCullingMask(registry, entity, cullingMask))
+                    continue;
                 const auto* sprite = registry.try_get<SpriteComponent>(entity);
                 if (!sprite)
                     continue;
@@ -1289,6 +1319,8 @@ namespace Limitless
                 if (IsEntityInLightHierarchy(registry, entity))
                     continue;
                 if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
+                if (!IsEntityVisibleToCameraCullingMask(registry, entity, cullingMask))
                     continue;
                 const auto* sprite = registry.try_get<SpriteComponent>(entity);
                 if (!sprite)
@@ -1319,6 +1351,8 @@ namespace Limitless
                 if (registry.any_of<BoxCollider2DComponent, CircleCollider2DComponent>(entity))
                     continue;
                 if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
+                if (!IsEntityVisibleToCameraCullingMask(registry, entity, cullingMask))
                     continue;
                 if (IsEntityInCanvasUiHierarchy(registry, entity))
                     continue;
@@ -1378,6 +1412,8 @@ namespace Limitless
                     {
                         continue;
                     }
+                    if (!IsEntityVisibleToCameraCullingMask(registry, layerEntity, cullingMask))
+                        continue;
 
                     const auto& layer = registry.get<TilemapLayerComponent>(layerEntity);
                     // Tilemap layers must opt in to shadow casting. Keeping
@@ -1476,7 +1512,8 @@ namespace Limitless
                                                                    const glm::mat4& viewProjection,
                                                                    uint32_t width,
                                                                    uint32_t height,
-                                                                   float pixelsPerUnit)
+                                                                   float pixelsPerUnit,
+                                                                   uint32_t cullingMask)
         {
             std::vector<ScreenDirectionalLight> lights;
             lights.reserve(std::max(0, g_State->Settings.MaxDirectionalLights));
@@ -1492,6 +1529,8 @@ namespace Limitless
                 if (lights.size() >= maxDirectionalLights)
                     break;
                 if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
+                if (!IsEntityVisibleToCameraCullingMask(registry, entity, cullingMask))
                     continue;
 
                 auto& directional = directionalView.get<DirectionalLight2DComponent>(entity);
@@ -1546,7 +1585,8 @@ namespace Limitless
                                                        const glm::mat4& viewProjection,
                                                        uint32_t width,
                                                        uint32_t height,
-                                                       float pixelsPerUnit)
+                                                       float pixelsPerUnit,
+                                                       uint32_t cullingMask)
         {
             std::vector<ScreenPointLight> lights;
             lights.reserve(std::max(0, g_State->Settings.MaxPointLights));
@@ -1562,6 +1602,8 @@ namespace Limitless
                 if (lights.size() >= maxPointLights)
                     break;
                 if (!scene.IsEntityEnabledInHierarchy(entity))
+                    continue;
+                if (!IsEntityVisibleToCameraCullingMask(registry, entity, cullingMask))
                     continue;
 
                 auto& pointLight = pointView.get<PointLight2DComponent>(entity);
@@ -1865,9 +1907,10 @@ namespace Limitless
         const float interpolationAlpha = ComputeInterpolationAlpha();
         const glm::mat4 viewProjection = camera.GetViewProjectionMatrix();
         const float pixelsPerUnit = EstimatePixelsPerWorldUnit(camera.GetViewMatrix(), viewProjection, width, height);
+        const uint32_t cullingMask = GetEffectiveCameraCullingMask(camera);
 
         const glm::mat4 cameraViewMatrix = camera.GetViewMatrix();
-        std::vector<NormalPassSpriteDraw> normalPassDraws = BuildNormalPassDrawList(scene, interpolationAlpha);
+        std::vector<NormalPassSpriteDraw> normalPassDraws = BuildNormalPassDrawList(scene, interpolationAlpha, cullingMask);
         uint32_t occluderCount = 0;
         const uint32_t maxShadowSegments = ClampSegmentsByQuality(g_State->Settings);
         float effectiveShadowSegmentSnapPixels = std::max(0.0f, g_State->Settings.ShadowSegmentSnapPixels);
@@ -1919,14 +1962,14 @@ namespace Limitless
         }
         else
         {
-            shadowSegments = BuildShadowSegments(scene, interpolationAlpha, viewProjection, width, height, maxShadowSegments, occluderCount, effectiveShadowSegmentSnapPixels);
+            shadowSegments = BuildShadowSegments(scene, interpolationAlpha, viewProjection, width, height, maxShadowSegments, cullingMask, occluderCount, effectiveShadowSegmentSnapPixels);
             g_State->CachedShadowSegments = shadowSegments;
             g_State->CachedShadowOccluderCount = occluderCount;
         }
         if (allowAngularVelocityShadowFreeze && g_State->ShadowFreezeFramesRemaining > 0)
             --g_State->ShadowFreezeFramesRemaining;
-        std::vector<ScreenDirectionalLight> directionalLights = BuildDirectionalLights(scene, interpolationAlpha, camera, viewProjection, width, height, pixelsPerUnit);
-        std::vector<ScreenPointLight> pointLights = BuildPointLights(scene, interpolationAlpha, viewProjection, width, height, pixelsPerUnit);
+        std::vector<ScreenDirectionalLight> directionalLights = BuildDirectionalLights(scene, interpolationAlpha, camera, viewProjection, width, height, pixelsPerUnit, cullingMask);
+        std::vector<ScreenPointLight> pointLights = BuildPointLights(scene, interpolationAlpha, viewProjection, width, height, pixelsPerUnit, cullingMask);
 
         const auto buildEnd = std::chrono::high_resolution_clock::now();
         g_State->Diagnostics.CpuBuildTimeMs = std::chrono::duration<float, std::milli>(buildEnd - buildStart).count();

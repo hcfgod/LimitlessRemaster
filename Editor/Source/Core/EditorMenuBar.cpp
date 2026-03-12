@@ -13,6 +13,7 @@ namespace Limitless::EditorMenuBar
               bool& showGameView,
               bool& showProjectPanel,
               bool& showDemoWindow,
+              bool& showEditorPreferencesWindow,
               bool& showAssetDiagnosticsWindow,
               bool& showPhysicsDiagnosticsWindow,
               bool& showConsoleWindow,
@@ -99,7 +100,8 @@ namespace Limitless::EditorMenuBar
             if (ImGui::MenuItem(redoMenuText.c_str(), "Ctrl+Y", false, canRedo))
                 onRedo();
             ImGui::Separator();
-            if (ImGui::MenuItem("Preferences")) {}
+            if (ImGui::MenuItem("Preferences..."))
+                showEditorPreferencesWindow = true;
             ImGui::EndMenu();
         }
 
@@ -134,6 +136,7 @@ namespace Limitless::EditorMenuBar
 
         if (ImGui::BeginMenu("Window"))
         {
+            ImGui::MenuItem("Preferences", nullptr, &showEditorPreferencesWindow);
             ImGui::MenuItem("Demo Window", nullptr, &showDemoWindow);
             ImGui::MenuItem("Asset Diagnostics", nullptr, &showAssetDiagnosticsWindow);
             ImGui::MenuItem("Physics 2D Diagnostics", nullptr, &showPhysicsDiagnosticsWindow);

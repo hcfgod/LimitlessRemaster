@@ -26,7 +26,7 @@ namespace Limitless
     {
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 9;
+        constexpr uint32_t kEditorSessionStateVersion = 10;
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
         struct EditorSessionStateData final
@@ -236,6 +236,7 @@ namespace Limitless
                 root["showProjectPanel"] = state.LayoutWindowState.ShowProjectPanel;
                 root["showSceneView"] = state.LayoutWindowState.ShowSceneView;
                 root["showGameView"] = state.LayoutWindowState.ShowGameView;
+                root["showEditorPreferencesWindow"] = state.LayoutWindowState.ShowEditorPreferencesWindow;
                 root["showProjectSettingsWindow"] = state.ShowProjectSettingsWindow;
                 root["showBuildSettingsWindow"] = state.LayoutWindowState.ShowBuildSettingsWindow;
                 root["showAssetDiagnosticsWindow"] = state.ShowAssetDiagnosticsWindow;
@@ -298,6 +299,7 @@ namespace Limitless
         state.ShowProjectPanel = m_ShowProjectPanel;
         state.ShowSceneView = m_ShowSceneView;
         state.ShowGameView = m_ShowGameView;
+        state.ShowEditorPreferencesWindow = m_ShowEditorPreferencesWindow;
         state.ShowProjectSettingsWindow = m_ShowProjectSettingsWindow;
         state.ShowBuildSettingsWindow = m_ShowBuildSettingsWindow;
         state.ShowAssetDiagnosticsWindow = m_ShowAssetDiagnosticsWindow;
@@ -321,6 +323,7 @@ namespace Limitless
         m_ShowProjectPanel = state.ShowProjectPanel;
         m_ShowSceneView = state.ShowSceneView;
         m_ShowGameView = state.ShowGameView;
+        m_ShowEditorPreferencesWindow = state.ShowEditorPreferencesWindow;
         m_ShowProjectSettingsWindow = state.ShowProjectSettingsWindow;
         m_ShowBuildSettingsWindow = state.ShowBuildSettingsWindow;
         m_ShowAssetDiagnosticsWindow = state.ShowAssetDiagnosticsWindow;

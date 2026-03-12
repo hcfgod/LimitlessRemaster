@@ -2,6 +2,8 @@
 
 #include "Limitless.h"
 
+#include <glm/glm.hpp>
+
 #include <memory>
 #include <string>
 
@@ -53,6 +55,7 @@ namespace Limitless
 
         void Update(float deltaTime);
         void OnWindowResize(uint32_t widthPixels, uint32_t heightPixels);
+        void FocusOnPoint(const glm::vec3& point, float distance = -1.0f);
 
         /// When false, input is ignored and cursor is restored. Use when viewport is not focused.
         void SetInputEnabled(bool enabled);
@@ -87,6 +90,9 @@ namespace Limitless
         CameraId m_CameraId{};
         bool m_InputEnabled = true;  ///< When false, Update ignores input and cursor is restored.
         bool m_WasLookActive = false;
+        bool m_WasBlenderNavigationActive = false;
+        glm::vec3 m_OrbitTarget{0.0f, 0.0f, 0.0f};
+        float m_OrbitDistance = 5.0f;
     };
 }
 
