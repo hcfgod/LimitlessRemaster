@@ -75,7 +75,7 @@ namespace Limitless
         constexpr const char* kDefaultSceneFileName = "SampleScene.scene.json";
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 10;
+        constexpr uint32_t kEditorSessionStateVersion = 11;
         constexpr double kEntityFocusShortcutDoublePressWindowSeconds = 0.35;
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
@@ -95,6 +95,9 @@ namespace Limitless
             float ProjectGridScale = 1.0f;
             std::unordered_map<std::string, bool> ProjectFolderExpansionState;
             std::unordered_map<std::string, bool> InspectorFoldoutState;
+            std::unordered_map<std::string, std::vector<std::string>> InspectorSectionOrderState;
+            int AdditionalInspectorCount = 0;
+            int AdditionalProjectPanelCount = 0;
         };
 
         std::string NormalizeSlashes(std::string pathText)
@@ -285,8 +288,8 @@ namespace Limitless
                     return state;
                 }
 
-                if (version != 3 && version != 4 && version != 5 && version != 6 && version != 8 && version != 9 &&
-                    version != kEditorSessionStateVersion)
+                if (version != 3 && version != 4 && version != 5 && version != 6 && version != 7 && version != 8 && version != 9 &&
+                    version != 10 && version != kEditorSessionStateVersion)
                 {
                     return {};
                 }
@@ -358,6 +361,34 @@ namespace Limitless
                             state.InspectorFoldoutState[stateIt.key()] = stateIt.value().get<bool>();
                         }
                     }
+                }
+                if (version >= 10)
+                {
+                    if (const auto inspectorSectionOrderIt = root.find("inspectorSectionOrderState");
+                        inspectorSectionOrderIt != root.end() && inspectorSectionOrderIt->is_object())
+                    {
+                        for (auto stateIt = inspectorSectionOrderIt->begin(); stateIt != inspectorSectionOrderIt->end(); ++stateIt)
+                        {
+                            if (!stateIt.value().is_array())
+                                continue;
+
+                            std::vector<std::string> orderedSections;
+                            for (const auto& sectionValue : stateIt.value())
+                            {
+                                if (!sectionValue.is_string())
+                                    continue;
+                                orderedSections.push_back(sectionValue.get<std::string>());
+                            }
+
+                            if (!orderedSections.empty())
+                                state.InspectorSectionOrderState[stateIt.key()] = std::move(orderedSections);
+                        }
+                    }
+                }
+                if (version >= 11)
+                {
+                    state.AdditionalInspectorCount = root.value("additionalInspectorCount", 0);
+                    state.AdditionalProjectPanelCount = root.value("additionalProjectPanelCount", 0);
                 }
                 if (version < 8)
                 {
@@ -436,6 +467,14 @@ namespace Limitless
                 for (const auto& [foldoutKey, expanded] : state.InspectorFoldoutState)
                     inspectorFoldoutRoot[foldoutKey] = expanded;
                 root["inspectorFoldoutState"] = std::move(inspectorFoldoutRoot);
+
+                nlohmann::json inspectorSectionOrderRoot = nlohmann::json::object();
+                for (const auto& [contextKey, orderedSections] : state.InspectorSectionOrderState)
+                    inspectorSectionOrderRoot[contextKey] = orderedSections;
+                root["inspectorSectionOrderState"] = std::move(inspectorSectionOrderRoot);
+
+                root["additionalInspectorCount"] = state.AdditionalInspectorCount;
+                root["additionalProjectPanelCount"] = state.AdditionalProjectPanelCount;
 
                 const std::filesystem::path tmpPath = statePath.string() + ".tmp";
                 {
@@ -951,6 +990,7 @@ namespace Limitless
             ApplyLayoutWindowState(sessionState.LayoutWindowState);
             EditorInspectorPanel::ApplyNativeScriptEditorSessionState(sessionState.NativeScriptEditorState);
             EditorInspectorPanel::ApplyPersistentFoldoutState(sessionState.InspectorFoldoutState);
+            EditorInspectorPanel::ApplyPersistentSectionOrderState(sessionState.InspectorSectionOrderState);
             m_ShowProjectSettingsWindow = sessionState.ShowProjectSettingsWindow;
             m_ShowAssetDiagnosticsWindow = sessionState.ShowAssetDiagnosticsWindow;
             m_ShowPerformancePanel = sessionState.ShowPerformancePanel;
@@ -959,6 +999,12 @@ namespace Limitless
             m_ProjectPanelState.ActiveFolderRelativePath = std::filesystem::path(sessionState.ProjectActiveFolderRelativePath);
             m_ProjectPanelState.GridScale = std::clamp(sessionState.ProjectGridScale, 0.0f, 1.80f);
             m_ProjectPanelState.ExpandedFolderState = sessionState.ProjectFolderExpansionState;
+
+            for (int i = 0; i < sessionState.AdditionalInspectorCount; ++i)
+                SpawnAdditionalInspectorPanel();
+            for (int i = 0; i < sessionState.AdditionalProjectPanelCount; ++i)
+                SpawnAdditionalProjectPanel();
+
             if (ImGuiLayer* imguiLayer = GetImGuiLayer())
             {
                 const std::filesystem::path workingLayoutPath = Editor::EditorLayoutManager::GetProjectWorkingLayoutPath(projectRoot);
@@ -1094,6 +1140,7 @@ namespace Limitless
         DrawTilePalettePanelFrame();
         DrawSpriteEditorPanel();
         DrawProjectPanel();
+        DrawAdditionalProjectPanels();
         DrawAnimationTimelinePanel();
         DrawAnimatorGraphPanel();
         DrawPhysicsDiagnosticsPanel();
@@ -1659,10 +1706,12 @@ namespace Limitless
         if (!m_ShowInspectorPanel)
             return;
 
-        EditorInspectorPanel::Draw(
+        m_InspectorInstanceState.IsOpen = m_ShowInspectorPanel;
+        EditorInspectorPanel::DrawInstance(
+            "Inspector",
+            m_InspectorInstanceState,
             m_Scene.get(),
             m_CurrentSceneAssetKey,
-            m_ShowInspectorPanel,
             m_SelectedEntity,
             kAssetTexturePayload,
             m_SelectedTextureAssetKey,
@@ -1682,6 +1731,65 @@ namespace Limitless
             m_SelectedAnimationClipAssetKey,
             m_SelectedAnimatorControllerAssetKey,
             &m_EditorUndoService);
+        m_ShowInspectorPanel = m_InspectorInstanceState.IsOpen;
+
+        DrawAdditionalInspectorPanels();
+    }
+
+    void EditorLayer::DrawAdditionalInspectorPanels()
+    {
+        for (auto& additional : m_AdditionalInspectors)
+        {
+            if (!additional.State.IsOpen)
+                continue;
+
+            EditorInspectorPanel::DrawInstance(
+                additional.WindowName.c_str(),
+                additional.State,
+                m_Scene.get(),
+                m_CurrentSceneAssetKey,
+                m_SelectedEntity,
+                kAssetTexturePayload,
+                m_SelectedTextureAssetKey,
+                m_CachedTextureAsset,
+                kAssetAudioPayload,
+                kAssetMaterialPayload,
+                kAssetShaderPayload,
+                kAssetFontPayload,
+                m_MaterialPreviewCache,
+                m_SelectedMaterialAssetKey,
+                m_CachedMaterialAsset,
+                m_SelectedNativeScriptAssetKey,
+                m_SelectedPrefabAssetKey,
+                m_SelectedTilesetAssetKey,
+                m_SelectedAudioMixerAssetKey,
+                m_SelectedInputActionsAssetKey,
+                m_SelectedAnimationClipAssetKey,
+                m_SelectedAnimatorControllerAssetKey,
+                &m_EditorUndoService);
+        }
+
+        // Remove closed instances.
+        m_AdditionalInspectors.erase(
+            std::remove_if(m_AdditionalInspectors.begin(), m_AdditionalInspectors.end(),
+                [](const AdditionalInspectorInstance& instance) { return !instance.State.IsOpen; }),
+            m_AdditionalInspectors.end());
+    }
+
+    void EditorLayer::SpawnAdditionalInspectorPanel()
+    {
+        AdditionalInspectorInstance instance;
+        instance.WindowName = "Inspector##" + std::to_string(m_NextInspectorInstanceId++);
+        instance.State.IsOpen = true;
+        m_AdditionalInspectors.push_back(std::move(instance));
+    }
+
+    void EditorLayer::SpawnAdditionalProjectPanel()
+    {
+        AdditionalProjectPanelInstance instance;
+        instance.WindowName = "Project##" + std::to_string(m_NextProjectPanelInstanceId++);
+        instance.IsOpen = true;
+        m_AdditionalProjectPanels.push_back(std::move(instance));
     }
 
     void EditorLayer::DrawAnimationTimelinePanel()

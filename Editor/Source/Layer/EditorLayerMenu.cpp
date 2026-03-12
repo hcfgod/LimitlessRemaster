@@ -160,6 +160,8 @@ namespace Limitless
                 if (ImGui::MenuItem("Revert to Default"))
                     ResetLayoutToDefault();
             },
-            [this]() { ResetLayoutToDefault(); });
+            [this]() { ResetLayoutToDefault(); },
+            [this]() { SpawnAdditionalInspectorPanel(); },
+            [this]() { SpawnAdditionalProjectPanel(); });
     }
 }

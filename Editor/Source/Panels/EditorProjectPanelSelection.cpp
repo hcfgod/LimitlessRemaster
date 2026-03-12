@@ -207,10 +207,20 @@ namespace Limitless::EditorProjectPanel::Internal
         int32_t selectedTextureSubIndex = -1;
         const bool selectedTextureIsSubSprite =
             Assets::TryParseSubSpriteAssetKey(selection.SelectedTextureAssetKey, selectedTextureParentKey, selectedTextureSubIndex);
+        std::string entryTextureParentKey;
+        int32_t entrySubSpriteIndex = -1;
+        const bool entryIsSubSprite =
+            Assets::TryParseSubSpriteAssetKey(entry.PrimaryAssetKey, entryTextureParentKey, entrySubSpriteIndex);
         (void)selectedTextureSubIndex;
+        (void)entryTextureParentKey;
+        (void)entrySubSpriteIndex;
 
         if (entry.IsTexture)
-            return selection.SelectedTextureAssetKey == entry.PrimaryAssetKey || (selectedTextureIsSubSprite && selectedTextureParentKey == entry.PrimaryAssetKey);
+        {
+            if (entryIsSubSprite)
+                return selection.SelectedTextureAssetKey == entry.PrimaryAssetKey;
+            return !selectedTextureIsSubSprite && selection.SelectedTextureAssetKey == entry.PrimaryAssetKey;
+        }
         if (entry.IsMaterial)
             return selection.SelectedMaterialAssetKey == entry.PrimaryAssetKey;
         if (entry.IsTileset)
@@ -393,6 +403,23 @@ namespace Limitless::EditorProjectPanel::Internal
         if (!ImGui::BeginPopupContextItem())
             return;
 
+        std::string subSpriteTextureKey;
+        int32_t subSpriteIndex = -1;
+        if (Assets::TryParseSubSpriteAssetKey(entry.PrimaryAssetKey, subSpriteTextureKey, subSpriteIndex))
+        {
+            if (ImGui::MenuItem("Open Parent Texture"))
+            {
+                state.MultiSelectedAssetKeys = { subSpriteTextureKey };
+                state.SelectionAnchorAssetKey = subSpriteTextureKey;
+                state.MultiSelectedSubSpriteKeys.clear();
+                state.SubSpriteSelectionAnchorKey.clear();
+                ClearPrimaryAssetSelection(selection);
+                selection.SelectedTextureAssetKey = subSpriteTextureKey;
+            }
+            ImGui::EndPopup();
+            return;
+        }
+
         if (entry.IsNativeScriptFile || entry.IsManagedScriptFile)
         {
             if (ImGui::MenuItem("Open Script") && callbacks.OnNativeScriptAssetActivated)
@@ -461,6 +488,13 @@ namespace Limitless::EditorProjectPanel::Internal
         if (!ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
             return;
 
+        std::string subSpriteTextureKey;
+        int32_t subSpriteIndex = -1;
+        const bool entryIsSubSprite =
+            Assets::TryParseSubSpriteAssetKey(entry.PrimaryAssetKey, subSpriteTextureKey, subSpriteIndex);
+        (void)subSpriteTextureKey;
+        (void)subSpriteIndex;
+
         const bool draggingMultiSelection =
             state.MultiSelectedAssetKeys.size() > 1 &&
             std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey) != state.MultiSelectedAssetKeys.end();
@@ -479,7 +513,9 @@ namespace Limitless::EditorProjectPanel::Internal
         }
         else
         {
-            if (entry.IsTexture)
+            if (entryIsSubSprite)
+                ImGui::SetDragDropPayload(kSubSpritePayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+            else if (entry.IsTexture)
                 ImGui::SetDragDropPayload(callbacks.TexturePayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
             else if (entry.IsScene)
                 ImGui::SetDragDropPayload(callbacks.ScenePayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);

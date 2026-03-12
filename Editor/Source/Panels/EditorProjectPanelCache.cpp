@@ -988,7 +988,8 @@ namespace Limitless::EditorProjectPanel::Internal
         bool drewPreviewImage = false;
         if (entry.IsTexture)
         {
-            if (Assets::TextureAsset::Ptr textureAsset = GetCachedThumbnailTextureAsset(state, entry.PrimaryAssetKey))
+            const std::string& textureAssetKey = entry.Entry.AssetKey.empty() ? entry.PrimaryAssetKey : entry.Entry.AssetKey;
+            if (Assets::TextureAsset::Ptr textureAsset = GetCachedThumbnailTextureAsset(state, textureAssetKey))
             {
                 if (const auto& textureHandle = textureAsset->GetTexture(); textureHandle)
                 {

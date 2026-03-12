@@ -4,6 +4,7 @@
 
 #include "Assets/AssetPaths.h"
 #include "Core/Debug/Log.h"
+#include "EditorPanelLock.h"
 #include "EditorPanelStyle.h"
 #include "ProjectAssetOperations.h"
 #include "imgui/imgui.h"
@@ -12,7 +13,8 @@
 
 namespace Limitless::EditorProjectPanel
 {
-    void Draw(bool& isOpen,
+    void Draw(const char* windowName,
+              bool& isOpen,
               EditorProjectPanelState& state,
               EditorAssetPreview::MaterialPreviewCache& materialPreviewCache,
               entt::entity& selectedEntity,
@@ -92,13 +94,18 @@ namespace Limitless::EditorProjectPanel
         };
 
         EditorPanelStyle::PushPanelVisualStyle();
-        if (!ImGui::Begin("Project", &isOpen))
+        if (!ImGui::Begin(windowName, &isOpen))
         {
             Internal::ClearProjectSearchMatchCache(state);
             ImGui::End();
             EditorPanelStyle::PopPanelVisualStyle();
             return;
         }
+
+        state.IsLocked = EditorPanelLock::DrawLockToggle(state.IsLocked);
+
+        if (state.IsLocked)
+            ImGui::BeginDisabled(true);
 
         state.TreeExpansionStateChanged = false;
         state.BrowseLocationChanged = false;
@@ -265,6 +272,10 @@ namespace Limitless::EditorProjectPanel
         ImGui::PopStyleColor(7);
         ImGui::PopStyleVar(5);
         Internal::ClearProjectSearchMatchCache(state);
+
+        if (state.IsLocked)
+            ImGui::EndDisabled();
+
         ImGui::End();
         EditorPanelStyle::PopPanelVisualStyle();
     }

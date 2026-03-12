@@ -4,6 +4,9 @@
 #include "Limitless.h"
 #include "Scene/Scene.h"
 
+#include <string_view>
+#include <vector>
+
 namespace Limitless
 {
     class EditorUndoService;
@@ -43,6 +46,14 @@ namespace Limitless::EditorInspectorPanel
         bool RemoveTilemapLayerComponent = false;
     };
 
+    void DrawEntityHeaderSection(Scene* scene,
+                                 entt::registry& registry,
+                                 entt::entity selectedEntity,
+                                 EditorUndoService* undoService);
+
+    std::vector<std::string> CollectStandardEntityComponentSectionKeys(entt::registry& registry,
+                                                                       entt::entity selectedEntity);
+
     void DrawStandardEntityComponentSections(Scene* scene,
                                              entt::registry& registry,
                                              entt::entity selectedEntity,
@@ -53,5 +64,7 @@ namespace Limitless::EditorInspectorPanel
                                              std::string& selectedAnimationClipAssetKey,
                                              std::string& selectedAnimatorControllerAssetKey,
                                              PendingEntityComponentRemovals& pendingRemovals,
-                                             Limitless::EditorUndoService* undoService);
+                                             Limitless::EditorUndoService* undoService,
+                                             std::string_view onlySectionKey = {},
+                                             const std::vector<std::string>* orderedSectionKeys = nullptr);
 }

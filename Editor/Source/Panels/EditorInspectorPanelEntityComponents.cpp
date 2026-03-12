@@ -32,10 +32,16 @@ namespace Limitless::EditorInspectorPanel
 {
     namespace
     {
+        bool ShouldDrawInspectorSection(std::string_view onlySectionKey, std::string_view sectionKey)
+        {
+            return onlySectionKey.empty() || onlySectionKey == sectionKey;
+        }
+
         bool BeginInspectorSectionHeader(const char* label,
                                          const char* popupId,
                                          const char* optionsButtonId)
         {
+            (void)optionsButtonId;
             ImGui::Spacing();
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f, 10.0f));
             ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
@@ -53,21 +59,6 @@ namespace Limitless::EditorInspectorPanel
 
             if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
                 ImGui::OpenPopup(popupId);
-
-            const ImVec2 headerMin = ImGui::GetItemRectMin();
-            const ImVec2 headerMax = ImGui::GetItemRectMax();
-            const float optionsButtonWidth = ImGui::CalcTextSize("...").x + 16.0f;
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 4.0f));
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.31f, 0.46f, 0.95f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.39f, 0.56f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.33f, 0.45f, 0.63f, 1.0f));
-            const float optionsButtonHeight = ImGui::GetFrameHeight();
-            ImGui::SetCursorScreenPos(ImVec2(headerMax.x - optionsButtonWidth - 8.0f,
-                                             headerMin.y + std::max(0.0f, (headerMax.y - headerMin.y - optionsButtonHeight) * 0.5f) + 1.0f));
-            if (ImGui::Button(optionsButtonId))
-                ImGui::OpenPopup(popupId);
-            ImGui::PopStyleColor(3);
-            ImGui::PopStyleVar();
 
             return isOpen;
         }
@@ -511,18 +502,13 @@ namespace Limitless::EditorInspectorPanel
 
     }
 
-    void DrawStandardEntityComponentSections(Scene* scene,
-                                             entt::registry& registry,
-                                             entt::entity selectedEntity,
-                                             const char* texturePayloadId,
-                                             const char* audioPayloadId,
-                                             const char* materialPayloadId,
-                                             const char* fontPayloadId,
-                                             std::string& selectedAnimationClipAssetKey,
-                                             std::string& selectedAnimatorControllerAssetKey,
-                                             PendingEntityComponentRemovals& pendingRemovals,
-                                             Limitless::EditorUndoService* undoService)
+    void DrawEntityHeaderSection(Scene* scene,
+                                 entt::registry& registry,
+                                 entt::entity selectedEntity,
+                                 EditorUndoService* undoService)
     {
+        (void)scene;
+
         if (auto* tag = registry.try_get<TagComponent>(selectedEntity))
         {
             static entt::entity renameEntity = entt::null;
@@ -633,10 +619,90 @@ namespace Limitless::EditorInspectorPanel
 
         ImGui::Spacing();
         ImGui::Separator();
+    }
 
-        if (auto* transform = registry.try_get<TransformComponent>(selectedEntity))
+    std::vector<std::string> CollectStandardEntityComponentSectionKeys(entt::registry& registry, entt::entity selectedEntity)
+    {
+        std::vector<std::string> sectionKeys;
+        if (registry.try_get<TransformComponent>(selectedEntity))
+            sectionKeys.emplace_back("Transform");
+        if (registry.try_get<CanvasComponent>(selectedEntity))
+            sectionKeys.emplace_back("Canvas");
+        if (registry.try_get<RectTransformComponent>(selectedEntity))
+            sectionKeys.emplace_back("RectTransform");
+        if (registry.try_get<SpriteComponent>(selectedEntity))
+            sectionKeys.emplace_back("Sprite");
+        if (registry.try_get<AnimatorComponent>(selectedEntity))
+            sectionKeys.emplace_back("Animator");
+        if (registry.try_get<AnimationEventReceiverComponent>(selectedEntity))
+            sectionKeys.emplace_back("AnimationEventReceiver");
+        if (registry.try_get<CameraComponent>(selectedEntity))
+            sectionKeys.emplace_back("Camera");
+        if (registry.try_get<AudioListener2DComponent>(selectedEntity))
+            sectionKeys.emplace_back("AudioListener2D");
+        if (registry.try_get<AudioListener3DComponent>(selectedEntity))
+            sectionKeys.emplace_back("AudioListener3D");
+        if (registry.try_get<Grid2DComponent>(selectedEntity))
+            sectionKeys.emplace_back("Grid2D");
+        if (registry.try_get<TilemapLayerComponent>(selectedEntity))
+            sectionKeys.emplace_back("TilemapLayer");
+        if (registry.try_get<AudioSourceComponent>(selectedEntity))
+            sectionKeys.emplace_back("AudioSource");
+        if (registry.try_get<Rigidbody2DComponent>(selectedEntity))
+            sectionKeys.emplace_back("Rigidbody2D");
+        if (registry.try_get<BoxCollider2DComponent>(selectedEntity))
+            sectionKeys.emplace_back("BoxCollider2D");
+        if (registry.try_get<CircleCollider2DComponent>(selectedEntity))
+            sectionKeys.emplace_back("CircleCollider2D");
+        if (registry.try_get<PolygonCollider2DComponent>(selectedEntity))
+            sectionKeys.emplace_back("PolygonCollider2D");
+        if (registry.try_get<EdgeCollider2DComponent>(selectedEntity))
+            sectionKeys.emplace_back("EdgeCollider2D");
+        if (registry.try_get<CapsuleCollider2DComponent>(selectedEntity))
+            sectionKeys.emplace_back("CapsuleCollider2D");
+        if (registry.try_get<DirectionalLight2DComponent>(selectedEntity))
+            sectionKeys.emplace_back("DirectionalLight2D");
+        if (registry.try_get<PointLight2DComponent>(selectedEntity))
+            sectionKeys.emplace_back("PointLight2D");
+        if (registry.try_get<ShadowOccluder2DComponent>(selectedEntity))
+            sectionKeys.emplace_back("ShadowOccluder2D");
+        if (registry.try_get<Joint2DComponent>(selectedEntity))
+            sectionKeys.emplace_back("Joint2D");
+        if (registry.try_get<UIImageComponent>(selectedEntity))
+            sectionKeys.emplace_back("UIImage");
+        if (registry.try_get<UIPanelComponent>(selectedEntity))
+            sectionKeys.emplace_back("UIPanel");
+        if (registry.try_get<UITextComponent>(selectedEntity))
+            sectionKeys.emplace_back("UIText");
+        if (registry.try_get<UIButtonComponent>(selectedEntity))
+            sectionKeys.emplace_back("UIButton");
+        if (registry.try_get<UISliderComponent>(selectedEntity))
+            sectionKeys.emplace_back("UISlider");
+        if (registry.try_get<ParticleEmitterComponent>(selectedEntity))
+            sectionKeys.emplace_back("ParticleEmitter");
+        return sectionKeys;
+    }
+
+    void DrawStandardEntityComponentSections(Scene* scene,
+                                             entt::registry& registry,
+                                             entt::entity selectedEntity,
+                                             const char* texturePayloadId,
+                                             const char* audioPayloadId,
+                                             const char* materialPayloadId,
+                                             const char* fontPayloadId,
+                                             std::string& selectedAnimationClipAssetKey,
+                                             std::string& selectedAnimatorControllerAssetKey,
+                                             PendingEntityComponentRemovals& pendingRemovals,
+                                             Limitless::EditorUndoService* undoService,
+                                             std::string_view onlySectionKey,
+                                             const std::vector<std::string>* orderedSectionKeys)
+    {
+        if (ShouldDrawInspectorSection(onlySectionKey, "Transform") && (registry.try_get<TransformComponent>(selectedEntity) != nullptr))
         {
+            auto* transform = registry.try_get<TransformComponent>(selectedEntity);
             const bool transformOpen = BeginInspectorSectionHeader("Transform", "TransformComponentOptions", "...##TransformComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("Transform", *orderedSectionKeys, "Transform");
 
             if (ImGui::BeginPopup("TransformComponentOptions"))
             {
@@ -699,9 +765,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* canvas = registry.try_get<CanvasComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "Canvas") && (registry.try_get<CanvasComponent>(selectedEntity) != nullptr))
         {
+            auto* canvas = registry.try_get<CanvasComponent>(selectedEntity);
             const bool canvasOpen = BeginInspectorSectionHeader("Canvas", "CanvasComponentOptions", "...##CanvasComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("Canvas", *orderedSectionKeys, "Canvas");
 
             if (ImGui::BeginPopup("CanvasComponentOptions"))
             {
@@ -741,9 +810,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* rectTransform = registry.try_get<RectTransformComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "RectTransform") && (registry.try_get<RectTransformComponent>(selectedEntity) != nullptr))
         {
+            auto* rectTransform = registry.try_get<RectTransformComponent>(selectedEntity);
             const bool rectTransformOpen = BeginInspectorSectionHeader("RectTransform", "RectTransformComponentOptions", "...##RectTransformComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("RectTransform", *orderedSectionKeys, "RectTransform");
 
             if (ImGui::BeginPopup("RectTransformComponentOptions"))
             {
@@ -883,9 +955,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* sprite = registry.try_get<SpriteComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "Sprite") && (registry.try_get<SpriteComponent>(selectedEntity) != nullptr))
         {
+            auto* sprite = registry.try_get<SpriteComponent>(selectedEntity);
             const bool spriteOpen = BeginInspectorSectionHeader("Sprite", "SpriteComponentOptions", "...##SpriteComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("Sprite", *orderedSectionKeys, "Sprite");
 
             if (ImGui::BeginPopup("SpriteComponentOptions"))
             {
@@ -1072,9 +1147,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* animator = registry.try_get<AnimatorComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "Animator") && (registry.try_get<AnimatorComponent>(selectedEntity) != nullptr))
         {
+            auto* animator = registry.try_get<AnimatorComponent>(selectedEntity);
             const bool animatorOpen = BeginInspectorSectionHeader("Animator", "AnimatorComponentOptions", "...##AnimatorComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("Animator", *orderedSectionKeys, "Animator");
 
             if (ImGui::BeginPopup("AnimatorComponentOptions"))
             {
@@ -1504,9 +1582,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* animationEventReceiver = registry.try_get<AnimationEventReceiverComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "AnimationEventReceiver") && (registry.try_get<AnimationEventReceiverComponent>(selectedEntity) != nullptr))
         {
+            auto* animationEventReceiver = registry.try_get<AnimationEventReceiverComponent>(selectedEntity);
             const bool receiverOpen = BeginInspectorSectionHeader("Animation Event Receiver", "AnimationEventReceiverComponentOptions", "...##AnimationEventReceiverComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("AnimationEventReceiver", *orderedSectionKeys, "Animation Event Receiver");
 
             if (ImGui::BeginPopup("AnimationEventReceiverComponentOptions"))
             {
@@ -1537,9 +1618,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* camera = registry.try_get<CameraComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "Camera") && (registry.try_get<CameraComponent>(selectedEntity) != nullptr))
         {
+            auto* camera = registry.try_get<CameraComponent>(selectedEntity);
             const bool cameraOpen = BeginInspectorSectionHeader("Camera", "CameraComponentOptions", "...##CameraComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("Camera", *orderedSectionKeys, "Camera");
 
             if (ImGui::BeginPopup("CameraComponentOptions"))
             {
@@ -1709,9 +1793,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* audioListener = registry.try_get<AudioListener2DComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "AudioListener2D") && (registry.try_get<AudioListener2DComponent>(selectedEntity) != nullptr))
         {
+            auto* audioListener = registry.try_get<AudioListener2DComponent>(selectedEntity);
             const bool listenerOpen = BeginInspectorSectionHeader("Audio Listener 2D", "AudioListener2DComponentOptions", "...##AudioListener2DComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("AudioListener2D", *orderedSectionKeys, "Audio Listener 2D");
 
             if (ImGui::BeginPopup("AudioListener2DComponentOptions"))
             {
@@ -1739,9 +1826,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* audioListener3D = registry.try_get<AudioListener3DComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "AudioListener3D") && (registry.try_get<AudioListener3DComponent>(selectedEntity) != nullptr))
         {
+            auto* audioListener3D = registry.try_get<AudioListener3DComponent>(selectedEntity);
             const bool listener3DOpen = BeginInspectorSectionHeader("Audio Listener 3D", "AudioListener3DComponentOptions", "...##AudioListener3DComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("AudioListener3D", *orderedSectionKeys, "Audio Listener 3D");
 
             if (ImGui::BeginPopup("AudioListener3DComponentOptions"))
             {
@@ -1769,9 +1859,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* grid2D = registry.try_get<Grid2DComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "Grid2D") && (registry.try_get<Grid2DComponent>(selectedEntity) != nullptr))
         {
+            auto* grid2D = registry.try_get<Grid2DComponent>(selectedEntity);
             const bool grid2DOpen = BeginInspectorSectionHeader("Grid 2D", "Grid2DComponentOptions", "...##Grid2DComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("Grid2D", *orderedSectionKeys, "Grid 2D");
 
             if (ImGui::BeginPopup("Grid2DComponentOptions"))
             {
@@ -1851,10 +1944,13 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* tilemapLayer = registry.try_get<TilemapLayerComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "TilemapLayer") && (registry.try_get<TilemapLayerComponent>(selectedEntity) != nullptr))
         {
+            auto* tilemapLayer = registry.try_get<TilemapLayerComponent>(selectedEntity);
             tilemapLayer->EnsureStorage();
             const bool layerOpen = BeginInspectorSectionHeader("Tilemap Layer", "TilemapLayerComponentOptions", "...##TilemapLayerComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("TilemapLayer", *orderedSectionKeys, "Tilemap Layer");
 
             if (ImGui::BeginPopup("TilemapLayerComponentOptions"))
             {
@@ -1922,9 +2018,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* audioSource = registry.try_get<AudioSourceComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "AudioSource") && (registry.try_get<AudioSourceComponent>(selectedEntity) != nullptr))
         {
+            auto* audioSource = registry.try_get<AudioSourceComponent>(selectedEntity);
             const bool audioOpen = BeginInspectorSectionHeader("Audio Source", "AudioSourceComponentOptions", "...##AudioSourceComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("AudioSource", *orderedSectionKeys, "Audio Source");
 
             if (ImGui::BeginPopup("AudioSourceComponentOptions"))
             {
@@ -2278,9 +2377,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* rigidbody2D = registry.try_get<Rigidbody2DComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "Rigidbody2D") && (registry.try_get<Rigidbody2DComponent>(selectedEntity) != nullptr))
         {
+            auto* rigidbody2D = registry.try_get<Rigidbody2DComponent>(selectedEntity);
             const bool rigidbodyOpen = BeginInspectorSectionHeader("Rigidbody 2D", "Rigidbody2DComponentOptions", "...##Rigidbody2DComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("Rigidbody2D", *orderedSectionKeys, "Rigidbody 2D");
 
             if (ImGui::BeginPopup("Rigidbody2DComponentOptions"))
             {
@@ -2430,9 +2532,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* boxCollider2D = registry.try_get<BoxCollider2DComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "BoxCollider2D") && (registry.try_get<BoxCollider2DComponent>(selectedEntity) != nullptr))
         {
+            auto* boxCollider2D = registry.try_get<BoxCollider2DComponent>(selectedEntity);
             const bool boxColliderOpen = BeginInspectorSectionHeader("Box Collider 2D", "BoxCollider2DComponentOptions", "...##BoxCollider2DComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("BoxCollider2D", *orderedSectionKeys, "Box Collider 2D");
 
             if (ImGui::BeginPopup("BoxCollider2DComponentOptions"))
             {
@@ -2482,9 +2587,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* circleCollider2D = registry.try_get<CircleCollider2DComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "CircleCollider2D") && (registry.try_get<CircleCollider2DComponent>(selectedEntity) != nullptr))
         {
+            auto* circleCollider2D = registry.try_get<CircleCollider2DComponent>(selectedEntity);
             const bool circleColliderOpen = BeginInspectorSectionHeader("Circle Collider 2D", "CircleCollider2DComponentOptions", "...##CircleCollider2DComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("CircleCollider2D", *orderedSectionKeys, "Circle Collider 2D");
 
             if (ImGui::BeginPopup("CircleCollider2DComponentOptions"))
             {
@@ -2533,9 +2641,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* polygonCollider2D = registry.try_get<PolygonCollider2DComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "PolygonCollider2D") && (registry.try_get<PolygonCollider2DComponent>(selectedEntity) != nullptr))
         {
+            auto* polygonCollider2D = registry.try_get<PolygonCollider2DComponent>(selectedEntity);
             const bool polygonColliderOpen = BeginInspectorSectionHeader("Polygon Collider 2D", "PolygonCollider2DComponentOptions", "...##PolygonCollider2DComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("PolygonCollider2D", *orderedSectionKeys, "Polygon Collider 2D");
 
             if (ImGui::BeginPopup("PolygonCollider2DComponentOptions"))
             {
@@ -2647,9 +2758,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* edgeCollider2D = registry.try_get<EdgeCollider2DComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "EdgeCollider2D") && (registry.try_get<EdgeCollider2DComponent>(selectedEntity) != nullptr))
         {
+            auto* edgeCollider2D = registry.try_get<EdgeCollider2DComponent>(selectedEntity);
             const bool edgeColliderOpen = BeginInspectorSectionHeader("Edge Collider 2D", "EdgeCollider2DComponentOptions", "...##EdgeCollider2DComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("EdgeCollider2D", *orderedSectionKeys, "Edge Collider 2D");
 
             if (ImGui::BeginPopup("EdgeCollider2DComponentOptions"))
             {
@@ -2700,9 +2814,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* capsuleCollider2D = registry.try_get<CapsuleCollider2DComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "CapsuleCollider2D") && (registry.try_get<CapsuleCollider2DComponent>(selectedEntity) != nullptr))
         {
+            auto* capsuleCollider2D = registry.try_get<CapsuleCollider2DComponent>(selectedEntity);
             const bool capsuleColliderOpen = BeginInspectorSectionHeader("Capsule Collider 2D", "CapsuleCollider2DComponentOptions", "...##CapsuleCollider2DComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("CapsuleCollider2D", *orderedSectionKeys, "Capsule Collider 2D");
 
             if (ImGui::BeginPopup("CapsuleCollider2DComponentOptions"))
             {
@@ -2764,9 +2881,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* directionalLight = registry.try_get<DirectionalLight2DComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "DirectionalLight2D") && (registry.try_get<DirectionalLight2DComponent>(selectedEntity) != nullptr))
         {
+            auto* directionalLight = registry.try_get<DirectionalLight2DComponent>(selectedEntity);
             const bool directionalLightOpen = BeginInspectorSectionHeader("Directional Light 2D", "DirectionalLight2DComponentOptions", "...##DirectionalLight2DComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("DirectionalLight2D", *orderedSectionKeys, "Directional Light 2D");
 
             if (ImGui::BeginPopup("DirectionalLight2DComponentOptions"))
             {
@@ -2851,9 +2971,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* pointLight = registry.try_get<PointLight2DComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "PointLight2D") && (registry.try_get<PointLight2DComponent>(selectedEntity) != nullptr))
         {
+            auto* pointLight = registry.try_get<PointLight2DComponent>(selectedEntity);
             const bool pointLightOpen = BeginInspectorSectionHeader("Point Light 2D", "PointLight2DComponentOptions", "...##PointLight2DComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("PointLight2D", *orderedSectionKeys, "Point Light 2D");
 
             if (ImGui::BeginPopup("PointLight2DComponentOptions"))
             {
@@ -2915,9 +3038,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* shadowOccluder = registry.try_get<ShadowOccluder2DComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "ShadowOccluder2D") && (registry.try_get<ShadowOccluder2DComponent>(selectedEntity) != nullptr))
         {
+            auto* shadowOccluder = registry.try_get<ShadowOccluder2DComponent>(selectedEntity);
             const bool occluderOpen = BeginInspectorSectionHeader("Shadow Occluder 2D", "ShadowOccluder2DComponentOptions", "...##ShadowOccluder2DComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("ShadowOccluder2D", *orderedSectionKeys, "Shadow Occluder 2D");
 
             if (ImGui::BeginPopup("ShadowOccluder2DComponentOptions"))
             {
@@ -3061,9 +3187,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* joint2D = registry.try_get<Joint2DComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "Joint2D") && (registry.try_get<Joint2DComponent>(selectedEntity) != nullptr))
         {
+            auto* joint2D = registry.try_get<Joint2DComponent>(selectedEntity);
             const bool jointOpen = BeginInspectorSectionHeader("Joint 2D", "Joint2DComponentOptions", "...##Joint2DComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("Joint2D", *orderedSectionKeys, "Joint 2D");
 
             if (ImGui::BeginPopup("Joint2DComponentOptions"))
             {
@@ -3146,9 +3275,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* uiImage = registry.try_get<UIImageComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "UIImage") && (registry.try_get<UIImageComponent>(selectedEntity) != nullptr))
         {
+            auto* uiImage = registry.try_get<UIImageComponent>(selectedEntity);
             const bool uiImageOpen = BeginInspectorSectionHeader("UI Image", "UIImageComponentOptions", "...##UIImageComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("UIImage", *orderedSectionKeys, "UI Image");
 
             if (ImGui::BeginPopup("UIImageComponentOptions"))
             {
@@ -3236,9 +3368,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* uiPanel = registry.try_get<UIPanelComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "UIPanel") && (registry.try_get<UIPanelComponent>(selectedEntity) != nullptr))
         {
+            auto* uiPanel = registry.try_get<UIPanelComponent>(selectedEntity);
             const bool uiPanelOpen = BeginInspectorSectionHeader("UI Panel", "UIPanelComponentOptions", "...##UIPanelComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("UIPanel", *orderedSectionKeys, "UI Panel");
 
             if (ImGui::BeginPopup("UIPanelComponentOptions"))
             {
@@ -3336,9 +3471,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* uiText = registry.try_get<UITextComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "UIText") && (registry.try_get<UITextComponent>(selectedEntity) != nullptr))
         {
+            auto* uiText = registry.try_get<UITextComponent>(selectedEntity);
             const bool uiTextOpen = BeginInspectorSectionHeader("UI Text", "UITextComponentOptions", "...##UITextComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("UIText", *orderedSectionKeys, "UI Text");
 
             if (ImGui::BeginPopup("UITextComponentOptions"))
             {
@@ -3457,9 +3595,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* uiButton = registry.try_get<UIButtonComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "UIButton") && (registry.try_get<UIButtonComponent>(selectedEntity) != nullptr))
         {
+            auto* uiButton = registry.try_get<UIButtonComponent>(selectedEntity);
             const bool uiButtonOpen = BeginInspectorSectionHeader("UI Button", "UIButtonComponentOptions", "...##UIButtonComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("UIButton", *orderedSectionKeys, "UI Button");
 
             if (ImGui::BeginPopup("UIButtonComponentOptions"))
             {
@@ -3529,9 +3670,12 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        if (auto* uiSlider = registry.try_get<UISliderComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "UISlider") && (registry.try_get<UISliderComponent>(selectedEntity) != nullptr))
         {
+            auto* uiSlider = registry.try_get<UISliderComponent>(selectedEntity);
             const bool uiSliderOpen = BeginInspectorSectionHeader("UI Slider", "UISliderComponentOptions", "...##UISliderComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("UISlider", *orderedSectionKeys, "UI Slider");
 
             if (ImGui::BeginPopup("UISliderComponentOptions"))
             {
@@ -3636,9 +3780,12 @@ namespace Limitless::EditorInspectorPanel
         // -----------------------------------------------------------------
         // Particle Emitter
         // -----------------------------------------------------------------
-        if (auto* particleEmitter = registry.try_get<ParticleEmitterComponent>(selectedEntity))
+        if (ShouldDrawInspectorSection(onlySectionKey, "ParticleEmitter") && (registry.try_get<ParticleEmitterComponent>(selectedEntity) != nullptr))
         {
+            auto* particleEmitter = registry.try_get<ParticleEmitterComponent>(selectedEntity);
             const bool particleOpen = BeginInspectorSectionHeader("Particle Emitter", "ParticleEmitterComponentOptions", "...##ParticleEmitterComponentOptionsButton");
+            if (orderedSectionKeys)
+                (void)HandleSectionDragDrop("ParticleEmitter", *orderedSectionKeys, "Particle Emitter");
 
             if (ImGui::BeginPopup("ParticleEmitterComponentOptions"))
             {

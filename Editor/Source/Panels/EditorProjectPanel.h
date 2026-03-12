@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Limitless::EditorAssetPreview
@@ -63,6 +64,7 @@ namespace Limitless
 
         // Persisted expansion state for the Project tree.
         std::unordered_map<std::string, bool> ExpandedFolderState;
+        std::unordered_set<std::string> ExpandedSubSpriteTextureKeys;
         std::unordered_map<std::string, bool> SearchMatchCache;
         std::shared_ptr<EditorProjectPanel::Internal::ProjectPanelCacheState> CacheState;
         EditorProjectFolderPopup FolderPopupPending = EditorProjectFolderPopup::None;
@@ -90,6 +92,7 @@ namespace Limitless
         bool CreateAnimatorControllerPopupOpen = false;
         bool CreateTilePalettePopupPending = false;
         bool CreateTilePalettePopupOpen = false;
+        bool IsLocked = false;
         bool AssetsRootExpanded = true;
         float GridScale = 1.0f;
         bool BrowseLocationChanged = false;
@@ -116,7 +119,8 @@ namespace Limitless
         void InvalidateProjectDirectoryCache(EditorProjectPanelState& state);
 
         /// Draws the full Project panel tree and folder popup workflow.
-        void Draw(bool& isOpen,
+        void Draw(const char* windowName,
+                  bool& isOpen,
                   EditorProjectPanelState& state,
                   EditorAssetPreview::MaterialPreviewCache& materialPreviewCache,
                   entt::entity& selectedEntity,

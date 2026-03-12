@@ -26,7 +26,7 @@ namespace Limitless
     {
         constexpr const char* kSceneFileSuffix = ".scene.json";
         constexpr const char* kEditorSessionStateRelativePath = "Project/Settings/EditorSessionState.json";
-        constexpr uint32_t kEditorSessionStateVersion = 10;
+        constexpr uint32_t kEditorSessionStateVersion = 11;
         constexpr std::string_view kSceneAssetSuffix = ".scene.json";
 
         struct EditorSessionStateData final
@@ -45,6 +45,9 @@ namespace Limitless
             float ProjectGridScale = 1.0f;
             std::unordered_map<std::string, bool> ProjectFolderExpansionState;
             std::unordered_map<std::string, bool> InspectorFoldoutState;
+            std::unordered_map<std::string, std::vector<std::string>> InspectorSectionOrderState;
+            int AdditionalInspectorCount = 0;
+            int AdditionalProjectPanelCount = 0;
         };
 
         std::string NormalizeSlashes(std::string pathText)
@@ -195,33 +198,187 @@ namespace Limitless
         std::filesystem::path GetEditorSessionStatePathForProjectRoot(const std::filesystem::path& projectRoot)
         {
             if (projectRoot.empty())
+                return {};
+            return projectRoot / kEditorSessionStateRelativePath;
+        }
+
+        EditorSessionStateData ReadProjectSessionState(const std::filesystem::path& projectRoot)
+        {
+            const std::filesystem::path statePath = GetEditorSessionStatePathForProjectRoot(projectRoot);
+            if (statePath.empty())
+                return {};
+
+            try
+            {
+                std::ifstream in(statePath, std::ios::in | std::ios::binary);
+                if (!in.is_open())
+                    return {};
+
+                nlohmann::json root;
+                in >> root;
+                if (!root.is_object())
+                    return {};
+
+                EditorSessionStateData state{};
+                state.HasPersistedState = true;
+                const uint32_t version = root.value("version", 0u);
+                if (version == 1)
+                {
+                    state.LastOpenedSceneAssetKey = root.value("lastOpenedSceneAssetKey", std::string{});
+                    state.LayoutWindowState.ShowProjectSettingsWindow = state.ShowProjectSettingsWindow;
+                    state.LayoutWindowState.ShowAssetDiagnosticsWindow = state.ShowAssetDiagnosticsWindow;
+                    state.LayoutWindowState.ShowPerformancePanel = state.ShowPerformancePanel;
+                    state.LayoutWindowState.ShowConsoleWindow = state.ShowConsoleWindow;
+                    return state;
+                }
+
+                if (version != 3 && version != 4 && version != 5 && version != 6 && version != 7 && version != 8 &&
+                    version != 9 && version != 10 && version != kEditorSessionStateVersion)
+                {
+                    return {};
+                }
+
+                state.LastOpenedSceneAssetKey = root.value("lastOpenedSceneAssetKey", std::string{});
+                if (version >= 8)
+                {
+                    state.ActiveLayoutName = Editor::EditorLayoutManager::NormalizeLayoutName(
+                        root.value("activeLayoutName", Editor::EditorLayoutManager::GetDefaultLayoutName()));
+                    state.LayoutWindowState.ShowScenePanel = root.value("showScenePanel", state.LayoutWindowState.ShowScenePanel);
+                    state.LayoutWindowState.ShowInspectorPanel = root.value("showInspectorPanel", state.LayoutWindowState.ShowInspectorPanel);
+                    state.LayoutWindowState.ShowProjectPanel = root.value("showProjectPanel", state.LayoutWindowState.ShowProjectPanel);
+                    state.LayoutWindowState.ShowSceneView = root.value("showSceneView", state.LayoutWindowState.ShowSceneView);
+                    state.LayoutWindowState.ShowGameView = root.value("showGameView", state.LayoutWindowState.ShowGameView);
+                    state.LayoutWindowState.ShowEditorPreferencesWindow =
+                        root.value("showEditorPreferencesWindow", state.LayoutWindowState.ShowEditorPreferencesWindow);
+                    state.LayoutWindowState.ShowProjectSettingsWindow =
+                        root.value("showProjectSettingsWindow", state.LayoutWindowState.ShowProjectSettingsWindow);
+                    state.LayoutWindowState.ShowBuildSettingsWindow =
+                        root.value("showBuildSettingsWindow", state.LayoutWindowState.ShowBuildSettingsWindow);
+                    state.LayoutWindowState.ShowAssetDiagnosticsWindow =
+                        root.value("showAssetDiagnosticsWindow", state.LayoutWindowState.ShowAssetDiagnosticsWindow);
+                    state.LayoutWindowState.ShowPhysicsDiagnosticsWindow =
+                        root.value("showPhysicsDiagnosticsWindow", state.LayoutWindowState.ShowPhysicsDiagnosticsWindow);
+                    state.LayoutWindowState.ShowConsoleWindow =
+                        root.value("showConsoleWindow", state.LayoutWindowState.ShowConsoleWindow);
+                    state.LayoutWindowState.ShowEditorFpsOverlay =
+                        root.value("showEditorFpsOverlay", state.LayoutWindowState.ShowEditorFpsOverlay);
+                    state.LayoutWindowState.ShowGizmoToolbar =
+                        root.value("showGizmoToolbar", state.LayoutWindowState.ShowGizmoToolbar);
+                    state.LayoutWindowState.ShowPerformancePanel =
+                        root.value("showPerformancePanel", state.LayoutWindowState.ShowPerformancePanel);
+                    state.LayoutWindowState.ShowAnimationTimelinePanel =
+                        root.value("showAnimationTimelinePanel", state.LayoutWindowState.ShowAnimationTimelinePanel);
+                    state.LayoutWindowState.ShowAnimatorGraphPanel =
+                        root.value("showAnimatorGraphPanel", state.LayoutWindowState.ShowAnimatorGraphPanel);
+                    state.LayoutWindowState.ShowTilePalettePanel =
+                        root.value("showTilePalettePanel", state.LayoutWindowState.ShowTilePalettePanel);
+                    state.LayoutWindowState.ShowSpriteEditorWindow =
+                        root.value("showSpriteEditorWindow", state.LayoutWindowState.ShowSpriteEditorWindow);
+                    state.LayoutWindowState.ShowDemoWindow = root.value("showDemoWindow", state.LayoutWindowState.ShowDemoWindow);
+                }
+
+                state.NativeScriptEditorState.IsOpen = root.value("nativeScriptEditorIsOpen", false);
+                state.NativeScriptEditorState.LastEditedScriptClassName =
+                    root.value("nativeScriptEditorLastClassName", std::string{});
+                state.NativeScriptEditorState.LastEditedScriptAssetRelativePath =
+                    root.value("nativeScriptEditorLastAssetRelativePath", std::string{});
+                state.NativeScriptEditorState.ShowDebugInfo = root.value("nativeScriptEditorShowDebugInfo", false);
+                state.ShowProjectSettingsWindow = root.value("showProjectSettingsWindow", false);
+                state.ShowAssetDiagnosticsWindow = root.value("showAssetDiagnosticsWindow", false);
+                if (version >= 5)
+                {
+                    state.ShowPerformancePanel = root.value("showPerformancePanel", false);
+                    state.ShowConsoleWindow = root.value("showConsoleWindow", true);
+                }
+                if (version >= 4)
+                {
+                    state.ProjectAssetsRootExpanded = root.value("projectAssetsRootExpanded", true);
+                    if (const auto expansionStateIt = root.find("projectFolderExpansionState");
+                        expansionStateIt != root.end() && expansionStateIt->is_object())
+                    {
+                        for (auto stateIt = expansionStateIt->begin(); stateIt != expansionStateIt->end(); ++stateIt)
+                        {
+                            if (!stateIt.value().is_boolean())
+                                continue;
+                            state.ProjectFolderExpansionState[stateIt.key()] = stateIt.value().get<bool>();
+                        }
+                    }
+                }
+                if (version >= 6)
+                    state.ProjectActiveFolderRelativePath = root.value("projectActiveFolderRelativePath", std::string{});
+                if (version >= 7)
+                    state.ProjectGridScale = root.value("projectGridScale", 1.0f);
+                if (version >= 9)
+                {
+                    if (const auto inspectorFoldoutStateIt = root.find("inspectorFoldoutState");
+                        inspectorFoldoutStateIt != root.end() && inspectorFoldoutStateIt->is_object())
+                    {
+                        for (auto stateIt = inspectorFoldoutStateIt->begin(); stateIt != inspectorFoldoutStateIt->end(); ++stateIt)
+                        {
+                            if (!stateIt.value().is_boolean())
+                                continue;
+                            state.InspectorFoldoutState[stateIt.key()] = stateIt.value().get<bool>();
+                        }
+                    }
+                }
+                if (version >= 10)
+                {
+                    if (const auto inspectorSectionOrderIt = root.find("inspectorSectionOrderState");
+                        inspectorSectionOrderIt != root.end() && inspectorSectionOrderIt->is_object())
+                    {
+                        for (auto stateIt = inspectorSectionOrderIt->begin(); stateIt != inspectorSectionOrderIt->end(); ++stateIt)
+                        {
+                            if (!stateIt.value().is_array())
+                                continue;
+
+                            std::vector<std::string> orderedSections;
+                            for (const auto& sectionValue : stateIt.value())
+                            {
+                                if (!sectionValue.is_string())
+                                    continue;
+                                orderedSections.push_back(sectionValue.get<std::string>());
+                            }
+
+                            if (!orderedSections.empty())
+                                state.InspectorSectionOrderState[stateIt.key()] = std::move(orderedSections);
+                        }
+                    }
+                }
+                if (version >= 11)
+                {
+                    state.AdditionalInspectorCount = root.value("additionalInspectorCount", 0);
+                    state.AdditionalProjectPanelCount = root.value("additionalProjectPanelCount", 0);
+                }
+                if (version < 8)
+                {
+                    state.LayoutWindowState.ShowProjectSettingsWindow = state.ShowProjectSettingsWindow;
+                    state.LayoutWindowState.ShowAssetDiagnosticsWindow = state.ShowAssetDiagnosticsWindow;
+                    state.LayoutWindowState.ShowPerformancePanel = state.ShowPerformancePanel;
+                    state.LayoutWindowState.ShowConsoleWindow = state.ShowConsoleWindow;
+                }
+                return state;
+            }
+            catch (...)
             {
                 return {};
             }
-            return projectRoot / kEditorSessionStateRelativePath;
         }
 
         void WriteProjectSessionState(const std::filesystem::path& projectRoot, const EditorSessionStateData& state)
         {
             if (projectRoot.empty())
-            {
                 return;
-            }
 
             const std::filesystem::path statePath = GetEditorSessionStatePathForProjectRoot(projectRoot);
             if (statePath.empty())
-            {
                 return;
-            }
 
             try
             {
                 std::error_code ec;
                 std::filesystem::create_directories(statePath.parent_path(), ec);
                 if (ec)
-                {
                     return;
-                }
 
                 nlohmann::json root;
                 root["version"] = kEditorSessionStateVersion;
@@ -264,13 +421,19 @@ namespace Limitless
                     inspectorFoldoutRoot[foldoutKey] = expanded;
                 root["inspectorFoldoutState"] = std::move(inspectorFoldoutRoot);
 
+                nlohmann::json inspectorSectionOrderRoot = nlohmann::json::object();
+                for (const auto& [contextKey, orderedSections] : state.InspectorSectionOrderState)
+                    inspectorSectionOrderRoot[contextKey] = orderedSections;
+                root["inspectorSectionOrderState"] = std::move(inspectorSectionOrderRoot);
+
+                root["additionalInspectorCount"] = state.AdditionalInspectorCount;
+                root["additionalProjectPanelCount"] = state.AdditionalProjectPanelCount;
+
                 const std::filesystem::path tmpPath = statePath.string() + ".tmp";
                 {
                     std::ofstream out(tmpPath, std::ios::out | std::ios::binary | std::ios::trunc);
                     if (!out.is_open())
-                    {
                         return;
-                    }
                     out << root.dump(2);
                     out.flush();
                 }
@@ -731,6 +894,7 @@ namespace Limitless
             state.LastOpenedSceneAssetKey = m_CurrentSceneAssetKey;
         EditorInspectorPanel::GetNativeScriptEditorSessionState(state.NativeScriptEditorState);
         EditorInspectorPanel::GetPersistentFoldoutState(state.InspectorFoldoutState);
+        EditorInspectorPanel::GetPersistentSectionOrderState(state.InspectorSectionOrderState);
         state.ActiveLayoutName = m_ActiveLayoutName;
         state.LayoutWindowState = CaptureLayoutWindowState();
         state.ShowProjectSettingsWindow = m_ShowProjectSettingsWindow;
@@ -741,6 +905,8 @@ namespace Limitless
         state.ProjectActiveFolderRelativePath = m_ProjectPanelState.ActiveFolderRelativePath.generic_string();
         state.ProjectGridScale = m_ProjectPanelState.GridScale;
         state.ProjectFolderExpansionState = m_ProjectPanelState.ExpandedFolderState;
+        state.AdditionalInspectorCount = static_cast<int>(m_AdditionalInspectors.size());
+        state.AdditionalProjectPanelCount = static_cast<int>(m_AdditionalProjectPanels.size());
         WriteProjectSessionState(projectManager.GetProjectRoot(), state);
         (void)SaveWorkingLayoutToDisk();
     }

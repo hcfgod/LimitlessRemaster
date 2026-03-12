@@ -343,7 +343,8 @@ namespace Limitless::EditorProjectPanel::Internal
                     const std::string displayName = isScriptAssetFile
                         ? BuildProjectScriptAssetDisplayName(entry.AbsolutePath)
                         : GetAssetDisplayName(entry.AbsolutePath);
-                    if (searchActive && !EntryMatchesProjectSearchFilter(state, entry, displayName))
+                    const bool matchesSearch = !searchActive || EntryMatchesProjectSearchFilter(state, entry, displayName);
+                    if (!isTexture && !matchesSearch)
                         continue;
 
                     ProjectGridEntry fileEntry;
@@ -366,16 +367,6 @@ namespace Limitless::EditorProjectPanel::Internal
                     fileEntry.IsNativeScriptFile = isNativeScriptFile;
                     fileEntry.IsManagedScriptFile = isManagedScriptFile;
                     fileEntry.HasPairedScriptFile = hasPairedScriptFile;
-                    if (isTexture)
-                    {
-                        const Assets::SpriteImportSettings& spriteSettings = GetCachedSpriteImportSettings(state, entry.AssetKey);
-                        if (spriteSettings.Mode == Assets::SpriteImportSettings::SpriteMode::Multiple && !spriteSettings.SubSprites.empty())
-                        {
-                            const auto& firstSubSprite = spriteSettings.SubSprites.front();
-                            fileEntry.HasThumbnailSubRect = true;
-                            fileEntry.ThumbnailRectPixels = firstSubSprite.RectPixels;
-                        }
-                    }
                     fileEntry.Badge = &ResolveAssetBadge(isTexture,
                                                          isScene,
                                                          isMaterial,
@@ -389,6 +380,51 @@ namespace Limitless::EditorProjectPanel::Internal
                                                          isFont,
                                                          isNativeScriptFile,
                                                          isManagedScriptFile);
+                    if (isTexture)
+                    {
+                        const Assets::SpriteImportSettings& spriteSettings = GetCachedSpriteImportSettings(state, entry.AssetKey);
+                        const bool hasSubSprites = spriteSettings.Mode == Assets::SpriteImportSettings::SpriteMode::Multiple && !spriteSettings.SubSprites.empty();
+                        fileEntry.HasExpandableSubSprites = hasSubSprites;
+
+                        if (!matchesSearch)
+                            continue;
+
+                        output.push_back(std::move(fileEntry));
+
+                        const bool isExpanded = hasSubSprites &&
+                            (searchActive || state.ExpandedSubSpriteTextureKeys.count(entry.AssetKey) > 0);
+                        if (isExpanded)
+                        {
+                            const std::string textureBaseName = entry.AbsolutePath.stem().string();
+                            for (size_t subSpriteIndex = 0; subSpriteIndex < spriteSettings.SubSprites.size(); ++subSpriteIndex)
+                            {
+                                const Assets::SpriteSubRect& subSprite = spriteSettings.SubSprites[subSpriteIndex];
+                                const std::string subSpriteAssetKey = entry.AssetKey + "#" + std::to_string(subSpriteIndex);
+                                const std::string subSpriteDisplayName = subSprite.Name.empty()
+                                    ? (textureBaseName + "_" + std::to_string(subSpriteIndex))
+                                    : subSprite.Name;
+                                if (searchActive && !matchesSearch &&
+                                    !MatchesProjectSearchFilter(state, subSpriteDisplayName) &&
+                                    !MatchesProjectSearchFilter(state, subSpriteAssetKey))
+                                {
+                                    continue;
+                                }
+
+                                ProjectGridEntry subSpriteEntry;
+                                subSpriteEntry.Entry = entry;
+                                subSpriteEntry.DisplayName = subSpriteDisplayName;
+                                subSpriteEntry.PrimaryAssetKey = subSpriteAssetKey;
+                                subSpriteEntry.Badge = &kBadgeSubSprite;
+                                subSpriteEntry.IsTexture = true;
+                                subSpriteEntry.IsSubSprite = true;
+                                subSpriteEntry.HasThumbnailSubRect = true;
+                                subSpriteEntry.ThumbnailRectPixels = subSprite.RectPixels;
+                                output.push_back(std::move(subSpriteEntry));
+                            }
+                        }
+                        continue;
+                    }
+
                     output.push_back(std::move(fileEntry));
                 }
             };
@@ -494,9 +530,14 @@ namespace Limitless::EditorProjectPanel::Internal
                 const float rightPadding = 10.0f;
                 const float minNameWidth = 120.0f;
 
+                const float expandArrowSize = 10.0f;
+                const float expandArrowPad = 4.0f;
+
                 for (size_t index = 0; index < gridEntries.size(); ++index)
                 {
                     ProjectGridEntry& entry = gridEntries[index];
+                    if (entry.IsSubSprite)
+                        ImGui::Indent(18.0f);
                     ImGui::PushID(static_cast<int>(index));
                     const float rowWidth = std::max(1.0f, ImGui::GetContentRegionAvail().x);
                     const ImVec2 rowMin = ImGui::GetCursorScreenPos();
@@ -514,10 +555,50 @@ namespace Limitless::EditorProjectPanel::Internal
                     drawList->AddRectFilled(rowMin, rowMax, fillColor, 6.0f);
                     drawList->AddRect(rowMin, rowMax, borderColor, 6.0f, 0, isSelected ? 2.0f : 1.0f);
 
+                    float contentStartX = rowMin.x + rowPaddingX;
+
+                    if (entry.HasExpandableSubSprites)
+                    {
+                        const std::string& parentKey = entry.Entry.AssetKey.empty() ? entry.PrimaryAssetKey : entry.Entry.AssetKey;
+                        const bool isExpanded = state.ExpandedSubSpriteTextureKeys.count(parentKey) > 0;
+                        const float arrowCenterX = contentStartX + expandArrowSize * 0.5f;
+                        const float arrowCenterY = rowMin.y + rowHeight * 0.5f;
+                        const float halfSize = expandArrowSize * 0.4f;
+                        if (isExpanded)
+                        {
+                            const ImVec2 p1(arrowCenterX - halfSize, arrowCenterY - halfSize * 0.5f);
+                            const ImVec2 p2(arrowCenterX + halfSize, arrowCenterY - halfSize * 0.5f);
+                            const ImVec2 p3(arrowCenterX, arrowCenterY + halfSize * 0.5f);
+                            drawList->AddTriangleFilled(p1, p2, p3, IM_COL32(200, 210, 225, 255));
+                        }
+                        else
+                        {
+                            const ImVec2 p1(arrowCenterX - halfSize * 0.5f, arrowCenterY - halfSize);
+                            const ImVec2 p2(arrowCenterX + halfSize * 0.5f, arrowCenterY);
+                            const ImVec2 p3(arrowCenterX - halfSize * 0.5f, arrowCenterY + halfSize);
+                            drawList->AddTriangleFilled(p1, p2, p3, IM_COL32(200, 210, 225, 255));
+                        }
+                        const ImVec2 arrowHitMin(rowMin.x, rowMin.y);
+                        const ImVec2 arrowHitMax(contentStartX + expandArrowSize + expandArrowPad, rowMax.y);
+                        if (hovered && ImGui::IsMouseClicked(0))
+                        {
+                            const ImVec2 mousePos = ImGui::GetMousePos();
+                            if (mousePos.x >= arrowHitMin.x && mousePos.x <= arrowHitMax.x &&
+                                mousePos.y >= arrowHitMin.y && mousePos.y <= arrowHitMax.y)
+                            {
+                                if (isExpanded)
+                                    state.ExpandedSubSpriteTextureKeys.erase(parentKey);
+                                else
+                                    state.ExpandedSubSpriteTextureKeys.insert(parentKey);
+                            }
+                        }
+                        contentStartX += expandArrowSize + expandArrowPad;
+                    }
+
                     const AssetTypeBadgeInfo& badge = *entry.Badge;
                     const ImVec2 badgeTextSize = ImGui::CalcTextSize(badge.Label);
                     const float badgeHeight = badgeTextSize.y + badgePadY * 2.0f;
-                    const ImVec2 badgeMin(rowMin.x + rowPaddingX, rowMin.y + (rowHeight - badgeHeight) * 0.5f);
+                    const ImVec2 badgeMin(contentStartX, rowMin.y + (rowHeight - badgeHeight) * 0.5f);
                     const ImVec2 badgeMax(badgeMin.x + badgeTextSize.x + badgePadX * 2.0f, badgeMin.y + badgeHeight);
                     drawList->AddRectFilled(badgeMin, badgeMax, badge.FillColor, 4.0f);
                     drawList->AddRect(badgeMin, badgeMax, badge.BorderColor, 4.0f, 0, 1.0f);
@@ -576,6 +657,8 @@ namespace Limitless::EditorProjectPanel::Internal
                     }
 
                     ImGui::PopID();
+                    if (entry.IsSubSprite)
+                        ImGui::Unindent(18.0f);
                     if (index + 1 < gridEntries.size())
                         ImGui::Dummy(ImVec2(0.0f, rowSpacing));
                 }
@@ -617,6 +700,9 @@ namespace Limitless::EditorProjectPanel::Internal
                     return std::string(ellipsis);
                 };
 
+                const float expandArrowSize = std::max(10.0f, 12.0f * gridScale);
+                const float expandArrowPad = 4.0f * gridScale;
+
                 for (size_t index = 0; index < gridEntries.size(); ++index)
                 {
                     ProjectGridEntry& entry = gridEntries[index];
@@ -648,6 +734,46 @@ namespace Limitless::EditorProjectPanel::Internal
                     drawList->AddRect(previewMin, previewMax, IM_COL32(48, 61, 90, 220), 6.0f, 0, 1.0f);
 
                     DrawProjectGridEntryPreview(state, materialPreviewCache, entry, previewMin, previewMax);
+
+                    if (entry.HasExpandableSubSprites)
+                    {
+                        const std::string& parentKey = entry.Entry.AssetKey.empty() ? entry.PrimaryAssetKey : entry.Entry.AssetKey;
+                        const bool isExpanded = state.ExpandedSubSpriteTextureKeys.count(parentKey) > 0;
+                        const float arrowCenterX = tileMax.x - previewInset - expandArrowSize * 0.5f;
+                        const float arrowCenterY = tileMin.y + previewInset * 0.5f + previewTopOffset * 0.5f;
+                        const float halfSize = expandArrowSize * 0.4f;
+
+                        drawList->AddCircleFilled(ImVec2(arrowCenterX, arrowCenterY), expandArrowSize * 0.7f, IM_COL32(20, 28, 45, 200));
+                        if (isExpanded)
+                        {
+                            const ImVec2 p1(arrowCenterX - halfSize, arrowCenterY - halfSize * 0.4f);
+                            const ImVec2 p2(arrowCenterX + halfSize, arrowCenterY - halfSize * 0.4f);
+                            const ImVec2 p3(arrowCenterX, arrowCenterY + halfSize * 0.6f);
+                            drawList->AddTriangleFilled(p1, p2, p3, IM_COL32(220, 230, 245, 255));
+                        }
+                        else
+                        {
+                            const ImVec2 p1(arrowCenterX - halfSize * 0.4f, arrowCenterY - halfSize);
+                            const ImVec2 p2(arrowCenterX + halfSize * 0.6f, arrowCenterY);
+                            const ImVec2 p3(arrowCenterX - halfSize * 0.4f, arrowCenterY + halfSize);
+                            drawList->AddTriangleFilled(p1, p2, p3, IM_COL32(220, 230, 245, 255));
+                        }
+
+                        const ImVec2 arrowHitMin(arrowCenterX - expandArrowSize, tileMin.y);
+                        const ImVec2 arrowHitMax(tileMax.x, tileMin.y + previewInset + previewTopOffset);
+                        if (hovered && ImGui::IsMouseClicked(0))
+                        {
+                            const ImVec2 mousePos = ImGui::GetMousePos();
+                            if (mousePos.x >= arrowHitMin.x && mousePos.x <= arrowHitMax.x &&
+                                mousePos.y >= arrowHitMin.y && mousePos.y <= arrowHitMax.y)
+                            {
+                                if (isExpanded)
+                                    state.ExpandedSubSpriteTextureKeys.erase(parentKey);
+                                else
+                                    state.ExpandedSubSpriteTextureKeys.insert(parentKey);
+                            }
+                        }
+                    }
 
                     const std::string secondaryText = entry.IsDirectory
                         ? (entry.Entry.RelativePath.empty() ? std::string("Assets") : std::string("Assets/") + entry.Entry.RelativePath.generic_string())

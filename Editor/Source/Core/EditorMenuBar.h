@@ -52,5 +52,7 @@ namespace Limitless::EditorMenuBar
               bool canApplyPrefabToInstances,
               const std::function<void()>& onApplyPrefabToInstances,
               const std::function<void()>& onDrawLayoutsMenu,
-              const std::function<void()>& onResetLayoutToDefault);
+              const std::function<void()>& onResetLayoutToDefault,
+              const std::function<void()>& onAddInspectorPanel,
+              const std::function<void()>& onAddProjectPanel);
 }

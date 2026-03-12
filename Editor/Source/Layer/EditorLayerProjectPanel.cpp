@@ -47,6 +47,7 @@ namespace Limitless
         const std::string prevControllerKey = m_SelectedAnimatorControllerAssetKey;
 
         EditorProjectPanel::Draw(
+            "Project",
             m_ShowProjectPanel,
             m_ProjectPanelState,
             m_MaterialPreviewCache,
@@ -673,5 +674,90 @@ namespace Limitless
             m_ShowAnimationTimelinePanel = true;
         if (m_ProjectPanelState.RequestFocusAnimatorControllerEditor && !m_SelectedAnimatorControllerAssetKey.empty())
             m_ShowAnimatorGraphPanel = true;
+    }
+
+    void EditorLayer::DrawAdditionalProjectPanels()
+    {
+        for (auto& additional : m_AdditionalProjectPanels)
+        {
+            if (!additional.IsOpen)
+                continue;
+
+            EditorProjectPanel::Draw(
+                additional.WindowName.c_str(),
+                additional.IsOpen,
+                additional.State,
+                m_MaterialPreviewCache,
+                m_SelectedEntity,
+                m_SelectedTextureAssetKey,
+                m_CachedTextureAsset,
+                m_SelectedMaterialAssetKey,
+                m_CachedMaterialAsset,
+                m_SelectedNativeScriptAssetKey,
+                m_SelectedPrefabAssetKey,
+                m_SelectedTilesetAssetKey,
+                m_SelectedAudioMixerAssetKey,
+                m_SelectedInputActionsAssetKey,
+                m_SelectedAnimationClipAssetKey,
+                m_SelectedAnimatorControllerAssetKey,
+                kAssetTexturePayload,
+                kAssetAudioPayload,
+                kAssetMovePayload,
+                kAssetScenePayload,
+                kAssetMaterialPayload,
+                kAssetPrefabPayload,
+                kAssetShaderPayload,
+                kAssetFontPayload,
+                [this](const std::string& assetKey) { LoadSceneFromAssetKey(assetKey); },
+                [this](const std::filesystem::path& relativeFolderPath) {
+                    const std::string createdSceneAssetKey = CreateSceneAssetInFolder(relativeFolderPath);
+                    if (!createdSceneAssetKey.empty())
+                        LoadSceneFromAssetKey(createdSceneAssetKey);
+                },
+                [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
+                    (void)CreateMaterialAssetInFolder(relativeFolderPath, preferredName);
+                },
+                [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
+                    (void)CreateTilesetAssetInFolder(relativeFolderPath, preferredName);
+                },
+                [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
+                    (void)CreateAudioMixerAssetInFolder(relativeFolderPath, preferredName);
+                },
+                [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
+                    (void)CreateInputActionsAssetInFolder(relativeFolderPath, preferredName);
+                },
+                [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
+                    (void)CreateAnimationClipAssetInFolder(relativeFolderPath, preferredName);
+                },
+                [this](const std::filesystem::path& relativeFolderPath, const std::string& preferredName) {
+                    (void)CreateAnimatorControllerAssetInFolder(relativeFolderPath, preferredName);
+                },
+                [this](entt::entity entity, const std::filesystem::path& relativeFolderPath) {
+                    (void)CreatePrefabFromEntityInFolder(entity, relativeFolderPath);
+                },
+                [this](const std::string& prefabAssetKey) {
+                    (void)OpenPrefabAssetForEditing(prefabAssetKey);
+                },
+                [this](const std::string& prefabAssetKey) {
+                    (void)InstantiatePrefabAtParent(prefabAssetKey, entt::null);
+                },
+                [this](const std::string& sceneAssetKey) { SetProjectDefaultSceneAssetKey(sceneAssetKey); },
+                [this](const std::string& oldAssetKey, const std::string& newAssetKey) {
+                    // Additional project panels share rename handling with the main panel;
+                    // asset rename side effects are already handled by the primary panel.
+                    (void)oldAssetKey;
+                    (void)newAssetKey;
+                },
+                [this](const std::vector<std::string>&) -> bool { return false; },
+                [this](const std::string& scriptAssetKey) {
+                    (void)EditorInspectorPanel::OpenNativeScriptEditorForAssetKey(scriptAssetKey);
+                });
+        }
+
+        // Remove closed instances.
+        m_AdditionalProjectPanels.erase(
+            std::remove_if(m_AdditionalProjectPanels.begin(), m_AdditionalProjectPanels.end(),
+                [](const AdditionalProjectPanelInstance& instance) { return !instance.IsOpen; }),
+            m_AdditionalProjectPanels.end());
     }
 }

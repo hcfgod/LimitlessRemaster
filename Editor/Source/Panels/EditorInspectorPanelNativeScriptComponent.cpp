@@ -30,6 +30,11 @@ namespace Limitless::EditorInspectorPanel
         constexpr const char* kSceneEntityPayload = "SCENE_ENTITY";
         constexpr const char* kAssetMovePayload = "ASSET_MOVE";
 
+        bool ShouldDrawScriptInspectorSection(std::string_view onlySectionKey, std::string_view sectionKey)
+        {
+            return onlySectionKey.empty() || onlySectionKey == sectionKey;
+        }
+
         struct ProjectScriptFolderNode final
         {
             std::map<std::string, ProjectScriptFolderNode> Children;
@@ -41,6 +46,7 @@ namespace Limitless::EditorInspectorPanel
                                                const char* optionsButtonId,
                                                const char* stateKeySuffix)
         {
+            (void)optionsButtonId;
             ImGui::Spacing();
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f, 10.0f));
             ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
@@ -58,21 +64,6 @@ namespace Limitless::EditorInspectorPanel
 
             if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
                 ImGui::OpenPopup(popupId);
-
-            const ImVec2 headerMin = ImGui::GetItemRectMin();
-            const ImVec2 headerMax = ImGui::GetItemRectMax();
-            const float optionsButtonWidth = ImGui::CalcTextSize("...").x + 16.0f;
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 4.0f));
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.23f, 0.34f, 0.50f, 0.95f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.43f, 0.60f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.35f, 0.49f, 0.67f, 1.0f));
-            const float optionsButtonHeight = ImGui::GetFrameHeight();
-            ImGui::SetCursorScreenPos(ImVec2(headerMax.x - optionsButtonWidth - 8.0f,
-                                             headerMin.y + std::max(0.0f, (headerMax.y - headerMin.y - optionsButtonHeight) * 0.5f) + 1.0f));
-            if (ImGui::Button(optionsButtonId))
-                ImGui::OpenPopup(popupId);
-            ImGui::PopStyleColor(3);
-            ImGui::PopStyleVar();
 
             return isOpen;
         }
@@ -848,12 +839,33 @@ namespace Limitless::EditorInspectorPanel
         }
     }
 
+    std::vector<std::string> CollectScriptComponentSectionKeys(Scene* scene, entt::entity selectedEntity)
+    {
+        std::vector<std::string> sectionKeys;
+        if (!scene || selectedEntity == entt::null || !scene->IsValid(selectedEntity))
+            return sectionKeys;
+
+        for (entt::entity scriptComponentEntity : scene->GetScriptComponentEntities(selectedEntity))
+        {
+            const ScriptComponent* scriptComponent = scene->GetScriptComponent(scriptComponentEntity);
+            if (!scriptComponent || scriptComponent->OwnerEntity != selectedEntity)
+                continue;
+
+            sectionKeys.push_back("Script:" + std::to_string(scriptComponent->ComponentOrder));
+        }
+
+        return sectionKeys;
+    }
+
     void DrawScriptComponentSections(Scene* scene,
                                      entt::registry& registry,
                                      entt::entity selectedEntity,
-                                     EditorUndoService* undoService)
+                                     EditorUndoService* undoService,
+                                     std::string_view onlySectionKey,
+                                     const std::vector<std::string>* orderedSectionKeys)
     {
         (void)registry;
+        (void)orderedSectionKeys;
 
         if (!scene || selectedEntity == entt::null || !scene->IsValid(selectedEntity))
             return;
@@ -925,6 +937,10 @@ namespace Limitless::EditorInspectorPanel
                 if (!scriptComponent || scriptComponent->OwnerEntity != selectedEntity)
                     continue;
 
+                const std::string sectionKey = "Script:" + std::to_string(scriptComponent->ComponentOrder);
+                if (!ShouldDrawScriptInspectorSection(onlySectionKey, sectionKey))
+                    continue;
+
                 if (ManagedScriptEntry* managedScriptEntry = scriptComponent->TryGetManagedEntry())
                 {
                     ImGui::PushID(static_cast<int>(static_cast<uint32_t>(scriptComponentEntity)));
@@ -938,6 +954,8 @@ namespace Limitless::EditorInspectorPanel
                         "ScriptComponentOptions",
                         "...##ScriptComponentOptionsButton",
                         scriptStateKey.c_str());
+                    if (orderedSectionKeys)
+                        (void)HandleSectionDragDrop(sectionKey, *orderedSectionKeys, scriptLabel.c_str());
                     if (ImGui::BeginPopup("ScriptComponentOptions"))
                     {
                         if (ImGui::MenuItem("Remove Component"))
@@ -1134,6 +1152,8 @@ namespace Limitless::EditorInspectorPanel
                     "ScriptComponentOptions",
                     "...##ScriptComponentOptionsButton",
                     scriptStateKey.c_str());
+                if (orderedSectionKeys)
+                    (void)HandleSectionDragDrop(sectionKey, *orderedSectionKeys, scriptLabel.c_str());
                 if (ImGui::BeginPopup("ScriptComponentOptions"))
                 {
                     bool showDebugInfo = GetNativeScriptDebugInfoEnabled();

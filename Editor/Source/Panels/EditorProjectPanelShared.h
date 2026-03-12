@@ -139,6 +139,8 @@ namespace Limitless::EditorProjectPanel::Internal
         bool IsManagedScriptFile = false;
         bool IsScriptPair = false;
         bool HasPairedScriptFile = false;
+        bool IsSubSprite = false;
+        bool HasExpandableSubSprites = false;
         bool HasThumbnailSubRect = false;
         glm::ivec4 ThumbnailRectPixels = glm::ivec4(0);
         ImVec2 ThumbnailUvMin = ImVec2(0.0f, 1.0f);

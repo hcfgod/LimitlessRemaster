@@ -51,7 +51,9 @@ namespace Limitless::EditorMenuBar
               bool canApplyPrefabToInstances,
               const std::function<void()>& onApplyPrefabToInstances,
               const std::function<void()>& onDrawLayoutsMenu,
-              const std::function<void()>& onResetLayoutToDefault)
+              const std::function<void()>& onResetLayoutToDefault,
+              const std::function<void()>& onAddInspectorPanel,
+              const std::function<void()>& onAddProjectPanel)
     {
         EditorPanelStyle::PushPanelVisualStyle();
         if (!ImGui::BeginMainMenuBar())
@@ -147,6 +149,11 @@ namespace Limitless::EditorMenuBar
             ImGui::MenuItem("Animation Timeline", nullptr, &showAnimationTimelinePanel);
             ImGui::MenuItem("Animator Graph", nullptr, &showAnimatorGraphPanel);
             ImGui::MenuItem("Tile Palette", nullptr, &showTilePalettePanel);
+            ImGui::Separator();
+            if (ImGui::MenuItem("Add Inspector Panel") && onAddInspectorPanel)
+                onAddInspectorPanel();
+            if (ImGui::MenuItem("Add Project Panel") && onAddProjectPanel)
+                onAddProjectPanel();
             ImGui::Separator();
             if (ImGui::MenuItem("Reset Layout to Default") && onResetLayoutToDefault)
                 onResetLayoutToDefault();

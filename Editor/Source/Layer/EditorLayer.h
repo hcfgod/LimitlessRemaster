@@ -4,6 +4,7 @@
 #include "Assets/MaterialAsset.h"
 #include "Assets/TextureAsset.h"
 #include "EditorAssetPreview.h"
+#include "EditorInspectorPanel.h"
 #include "EditorPlayMode.h"
 #include "EditorAnimationTimelinePanel.h"
 #include "EditorAnimatorGraphPanel.h"
@@ -75,7 +76,11 @@ namespace Limitless
         void DrawViewportPanel();
         void DrawScenePanel();
         void DrawInspectorPanel();
+        void DrawAdditionalInspectorPanels();
         void DrawProjectPanel();
+        void DrawAdditionalProjectPanels();
+        void SpawnAdditionalInspectorPanel();
+        void SpawnAdditionalProjectPanel();
         void DrawAnimationTimelinePanel();
         void DrawAnimatorGraphPanel();
         void DrawPhysicsDiagnosticsPanel();
@@ -258,6 +263,24 @@ namespace Limitless
         bool m_ShowScenePanel = true;
         bool m_ShowInspectorPanel = true;
         bool m_ShowProjectPanel = true;
+
+        EditorInspectorInstanceState m_InspectorInstanceState;
+        struct AdditionalInspectorInstance
+        {
+            EditorInspectorInstanceState State;
+            std::string WindowName;
+        };
+        std::vector<AdditionalInspectorInstance> m_AdditionalInspectors;
+        int m_NextInspectorInstanceId = 2;
+
+        struct AdditionalProjectPanelInstance
+        {
+            bool IsOpen = true;
+            EditorProjectPanelState State;
+            std::string WindowName;
+        };
+        std::vector<AdditionalProjectPanelInstance> m_AdditionalProjectPanels;
+        int m_NextProjectPanelInstanceId = 2;
         bool m_ShowSceneView = true;
         bool m_ShowGameView = true;
         bool m_ShowDemoWindow = false;
