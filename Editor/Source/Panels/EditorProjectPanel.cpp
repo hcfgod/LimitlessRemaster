@@ -104,9 +104,6 @@ namespace Limitless::EditorProjectPanel
 
         state.IsLocked = EditorPanelLock::DrawLockToggle(state.IsLocked);
 
-        if (state.IsLocked)
-            ImGui::BeginDisabled(true);
-
         state.TreeExpansionStateChanged = false;
         state.BrowseLocationChanged = false;
         state.GridScaleChanged = false;
@@ -272,9 +269,6 @@ namespace Limitless::EditorProjectPanel
         ImGui::PopStyleColor(7);
         ImGui::PopStyleVar(5);
         Internal::ClearProjectSearchMatchCache(state);
-
-        if (state.IsLocked)
-            ImGui::EndDisabled();
 
         ImGui::End();
         EditorPanelStyle::PopPanelVisualStyle();

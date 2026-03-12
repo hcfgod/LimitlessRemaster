@@ -81,6 +81,9 @@ namespace Limitless::EditorProjectPanel::Internal
 
     void SetActiveFolder(EditorProjectPanelState& state, std::filesystem::path relativePath)
     {
+        if (state.IsLocked)
+            return;
+
         relativePath = relativePath.lexically_normal();
         if (relativePath == ".")
             relativePath.clear();
@@ -701,7 +704,6 @@ namespace Limitless::EditorProjectPanel::Internal
                 };
 
                 const float expandArrowSize = std::max(10.0f, 12.0f * gridScale);
-                const float expandArrowPad = 4.0f * gridScale;
 
                 for (size_t index = 0; index < gridEntries.size(); ++index)
                 {
