@@ -42,9 +42,9 @@ TEST_SUITE("Scene And Editor Flows")
 
         auto& grid2D = registry.emplace<Limitless::Grid2DComponent>(child);
         grid2D.CellSize = { 1.0f, 1.0f };
+        grid2D.GridSize = { 4, 3 };
         auto& tilemapLayer = registry.emplace<Limitless::TilemapLayerComponent>(child);
-        tilemapLayer.GridSize = { 4, 3 };
-        tilemapLayer.ResizeGrid(tilemapLayer.GridSize);
+        Limitless::EnsureTilemapLayerStorage(grid2D, tilemapLayer);
         const uint32_t grassTileId = tilemapLayer.GetOrAddTileTableEntry("Assets/Tiles/Grass.tile.json");
         const uint32_t stoneTileId = tilemapLayer.GetOrAddTileTableEntry("Assets/Tiles/Stone.tile.json");
         tilemapLayer.Tiles[0] = grassTileId;
@@ -185,9 +185,9 @@ TEST_SUITE("Scene And Editor Flows")
         const auto& clonedGrid2D = cloneRegistry.get<Limitless::Grid2DComponent>(clonedChild);
         CHECK(clonedGrid2D.CellSize.x == doctest::Approx(1.0f));
         CHECK(clonedGrid2D.CellSize.y == doctest::Approx(1.0f));
+        CHECK(clonedGrid2D.GridSize.x == 4);
+        CHECK(clonedGrid2D.GridSize.y == 3);
         const auto& clonedTilemapLayer = cloneRegistry.get<Limitless::TilemapLayerComponent>(clonedChild);
-        CHECK(clonedTilemapLayer.GridSize.x == 4);
-        CHECK(clonedTilemapLayer.GridSize.y == 3);
         REQUIRE(clonedTilemapLayer.TileTable.size() >= 3);
         const uint32_t clonedGrassTileId = FindTileIdByAssetKey(clonedTilemapLayer, "Assets/Tiles/Grass.tile.json");
         const uint32_t clonedStoneTileId = FindTileIdByAssetKey(clonedTilemapLayer, "Assets/Tiles/Stone.tile.json");
@@ -393,9 +393,9 @@ TEST_SUITE("Scene And Editor Flows")
 
         auto& grid2D = registry.emplace<Limitless::Grid2DComponent>(root);
         grid2D.CellSize = { 0.5f, 0.5f };
+        grid2D.GridSize = { 3, 2 };
         auto& tilemapLayer = registry.emplace<Limitless::TilemapLayerComponent>(root);
-        tilemapLayer.GridSize = { 3, 2 };
-        tilemapLayer.ResizeGrid(tilemapLayer.GridSize);
+        Limitless::EnsureTilemapLayerStorage(grid2D, tilemapLayer);
         tilemapLayer.CollisionEnabled = true;
         const uint32_t cityTileA = tilemapLayer.GetOrAddTileTableEntry("Assets/Tiles/CityTiles_0.tile.json");
         const uint32_t cityTileB = tilemapLayer.GetOrAddTileTableEntry("Assets/Tiles/CityTiles_1.tile.json");
@@ -524,9 +524,9 @@ TEST_SUITE("Scene And Editor Flows")
         const auto& loadedGrid2D = loadedRegistry.get<Limitless::Grid2DComponent>(loadedRoot);
         CHECK(loadedGrid2D.CellSize.x == doctest::Approx(0.5f));
         CHECK(loadedGrid2D.CellSize.y == doctest::Approx(0.5f));
+        CHECK(loadedGrid2D.GridSize.x == 3);
+        CHECK(loadedGrid2D.GridSize.y == 2);
         const auto& loadedTilemapLayer = loadedRegistry.get<Limitless::TilemapLayerComponent>(loadedRoot);
-        CHECK(loadedTilemapLayer.GridSize.x == 3);
-        CHECK(loadedTilemapLayer.GridSize.y == 2);
         CHECK(loadedTilemapLayer.CollisionEnabled == true);
         REQUIRE(loadedTilemapLayer.TileTable.size() >= 3);
         const uint32_t loadedCityTileAId = FindTileIdByAssetKey(loadedTilemapLayer, "Assets/Tiles/CityTiles_0.tile.json");

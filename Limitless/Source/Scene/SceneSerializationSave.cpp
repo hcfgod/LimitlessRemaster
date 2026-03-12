@@ -324,7 +324,9 @@ namespace Limitless
             {
                 entry["Grid2D"] = {
                     { "CellSize", { grid2D->CellSize.x, grid2D->CellSize.y } },
-                    { "CellGap",  { grid2D->CellGap.x,  grid2D->CellGap.y  } }
+                    { "CellGap",  { grid2D->CellGap.x,  grid2D->CellGap.y  } },
+                    { "GridSize", { grid2D->GridSize.x, grid2D->GridSize.y } },
+                    { "OriginCell", { grid2D->OriginCell.x, grid2D->OriginCell.y } }
                 };
             }
 
@@ -341,7 +343,6 @@ namespace Limitless
                 }
 
                 nlohmann::json tilemapLayerJson = {
-                    { "GridSize",         { tilemapLayer->GridSize.x, tilemapLayer->GridSize.y } },
                     { "RenderOrder",      tilemapLayer->RenderOrder },
                     { "CollisionEnabled", tilemapLayer->CollisionEnabled },
                     { "CastShadows",      tilemapLayer->CastShadows },

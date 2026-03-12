@@ -1896,13 +1896,16 @@ namespace Limitless::EditorInspectorPanel
                             const int32_t layerNumber = static_cast<int32_t>(children.size()) + 1;
                             const std::string layerName = "Layer " + std::to_string(layerNumber);
                             const int32_t renderOrder = static_cast<int32_t>(children.size()) * 10;
+                            auto* mutableGrid2D = mutableScene.GetRegistry().try_get<Grid2DComponent>(selectedEntity);
+                            if (!mutableGrid2D)
+                                return false;
 
                             entt::entity layerEntity = mutableScene.CreateEntity(layerName);
                             mutableScene.SetParent(layerEntity, selectedEntity);
 
                             auto& layer = mutableScene.GetRegistry().emplace<TilemapLayerComponent>(layerEntity);
                             layer.RenderOrder = renderOrder;
-                            layer.EnsureStorage();
+                            EnsureTilemapLayerStorage(*mutableGrid2D, layer);
                             return true;
                         });
                     }
@@ -1918,7 +1921,7 @@ namespace Limitless::EditorInspectorPanel
 
                         auto& layer = registry.emplace<TilemapLayerComponent>(layerEntity);
                         layer.RenderOrder = renderOrder;
-                        layer.EnsureStorage();
+                        EnsureTilemapLayerStorage(*grid2D, layer);
                     }
                 }
 
@@ -1947,7 +1950,12 @@ namespace Limitless::EditorInspectorPanel
         if (ShouldDrawInspectorSection(onlySectionKey, "TilemapLayer") && (registry.try_get<TilemapLayerComponent>(selectedEntity) != nullptr))
         {
             auto* tilemapLayer = registry.try_get<TilemapLayerComponent>(selectedEntity);
-            tilemapLayer->EnsureStorage();
+            const entt::entity tilemapGridEntity = scene ? scene->GetParent(selectedEntity) : entt::null;
+            auto* tilemapGrid = (scene && tilemapGridEntity != entt::null)
+                ? registry.try_get<Grid2DComponent>(tilemapGridEntity)
+                : nullptr;
+            if (tilemapGrid)
+                EnsureTilemapLayerStorage(*tilemapGrid, *tilemapLayer);
             const bool layerOpen = BeginInspectorSectionHeader("Tilemap Layer", "TilemapLayerComponentOptions", "...##TilemapLayerComponentOptionsButton");
             if (orderedSectionKeys)
                 (void)HandleSectionDragDrop("TilemapLayer", *orderedSectionKeys, "Tilemap Layer");
@@ -1961,29 +1969,6 @@ namespace Limitless::EditorInspectorPanel
 
             if (layerOpen)
             {
-                glm::ivec2 gridSize = tilemapLayer->GridSize;
-                ImGui::TextUnformatted("Grid Size");
-                if (ImGui::DragInt2("##TilemapGridSize", &gridSize.x, 1.0f, 1, 4096))
-                {
-                    gridSize = glm::ivec2(std::max(1, gridSize.x), std::max(1, gridSize.y));
-                    if (gridSize != tilemapLayer->GridSize)
-                        tilemapLayer->ResizeGrid(gridSize);
-                }
-                TrackInteractiveValueMutation(undoService, "Edit TilemapLayer Grid Size", tilemapLayer->GridSize, [undoService, selectedEntity](const glm::ivec2& value) {
-                    if (!undoService)
-                        return false;
-                    Scene* activeScene = undoService->GetActiveScene();
-                    if (!activeScene || !activeScene->IsValid(selectedEntity))
-                        return false;
-                    auto* activeLayer = activeScene->GetRegistry().try_get<TilemapLayerComponent>(selectedEntity);
-                    if (!activeLayer)
-                        return false;
-                    const glm::ivec2 clampedSize(std::max(1, value.x), std::max(1, value.y));
-                    if (clampedSize != activeLayer->GridSize)
-                        activeLayer->ResizeGrid(clampedSize);
-                    return true;
-                });
-
                 ImGui::TextUnformatted("Render Order");
                 ImGui::DragInt("##TilemapRenderOrder", &tilemapLayer->RenderOrder);
                 TrackInteractiveMemberMutation<TilemapLayerComponent>(
@@ -2003,7 +1988,7 @@ namespace Limitless::EditorInspectorPanel
                 TrackInteractiveMemberMutation<TilemapLayerComponent>(
                     undoService, "Edit TilemapLayer Cast Shadows", selectedEntity, &TilemapLayerComponent::CastShadows, tilemapLayer->CastShadows);
 
-                const int32_t tileCount = tilemapLayer->GetCellCount();
+                const int32_t tileCount = tilemapGrid ? GetTilemapCellCount(*tilemapGrid) : static_cast<int32_t>(tilemapLayer->Tiles.size());
                 int32_t nonEmptyCount = 0;
                 for (uint32_t t : tilemapLayer->Tiles)
                 {

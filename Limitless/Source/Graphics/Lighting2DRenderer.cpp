@@ -1415,16 +1415,16 @@ namespace Limitless
                     if (!IsEntityVisibleToCameraCullingMask(registry, layerEntity, cullingMask))
                         continue;
 
-                    const auto& layer = registry.get<TilemapLayerComponent>(layerEntity);
+                    auto& layer = registry.get<TilemapLayerComponent>(layerEntity);
                     // Tilemap layers must opt in to shadow casting. Keeping
                     // this separate from collision avoids giant map-perimeter
                     // shadows when a gameplay collision layer is broadly filled.
                     if (!layer.CollisionEnabled || !layer.CastShadows)
                         continue;
-                    const int32_t widthCells = std::max(1, layer.GridSize.x);
-                    const int32_t heightCells = std::max(1, layer.GridSize.y);
-                    const glm::vec2 mapCenterOffset =
-                        -0.5f * glm::vec2(widthCells - 1, heightCells - 1) * cellSize;
+                    EnsureTilemapLayerStorage(grid, layer);
+                    const int32_t widthCells = std::max(1, grid.GridSize.x);
+                    const int32_t heightCells = std::max(1, grid.GridSize.y);
+                    const glm::vec2 firstCellCenter = GetTilemapLayerFirstCellCenter(grid, layer);
 
                     const auto hasTileAt = [&](int32_t cellX, int32_t cellY) -> bool {
                         if (cellX < 0 || cellY < 0 || cellX >= widthCells || cellY >= heightCells)
@@ -1452,7 +1452,7 @@ namespace Limitless
                             if (!hasTileAt(cellX, cellY))
                                 continue;
 
-                            const glm::vec2 localCenter = mapCenterOffset + glm::vec2(
+                            const glm::vec2 localCenter = firstCellCenter + glm::vec2(
                                 static_cast<float>(cellX) * cellSize.x,
                                 static_cast<float>(cellY) * cellSize.y);
                             const glm::vec2 localMin = localCenter - cellSize * 0.5f;

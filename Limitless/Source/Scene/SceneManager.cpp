@@ -18,6 +18,26 @@ namespace Limitless
             SceneTransitionBridgeCallback TransitionBridgeCallback = nullptr;
         };
 
+        thread_local bool s_IsDispatchingSceneTransitionBridge = false;
+
+        class ScopedSceneTransitionBridgeDispatch final
+        {
+        public:
+            ScopedSceneTransitionBridgeDispatch()
+                : m_PreviousValue(s_IsDispatchingSceneTransitionBridge)
+            {
+                s_IsDispatchingSceneTransitionBridge = true;
+            }
+
+            ~ScopedSceneTransitionBridgeDispatch()
+            {
+                s_IsDispatchingSceneTransitionBridge = m_PreviousValue;
+            }
+
+        private:
+            bool m_PreviousValue = false;
+        };
+
         SceneManagerRuntimeState& GetSceneManagerRuntimeState()
         {
             static SceneManagerRuntimeState state{};
@@ -58,6 +78,45 @@ namespace Limitless
             state.PendingSceneTransitions.push_back(SceneTransitionRequest{ transitionType, sceneIdentifier, loadMode });
             return true;
         }
+
+        bool DispatchSceneTransition(SceneManagerRuntimeState& state,
+                                     SceneTransitionType transitionType,
+                                     const std::string& sceneIdentifier,
+                                     LoadSceneMode loadMode)
+        {
+            SceneTransitionBridgeCallback callback = nullptr;
+            {
+                std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
+                callback = state.TransitionBridgeCallback;
+                if (callback == nullptr || s_IsDispatchingSceneTransitionBridge)
+                {
+                    const auto normalizedSceneIdentifier = NormalizeSceneAssetKey(sceneIdentifier);
+                    if (!normalizedSceneIdentifier.has_value())
+                        return false;
+
+                    return EnqueueSceneTransition(state, transitionType, *normalizedSceneIdentifier, loadMode);
+                }
+            }
+
+            ScopedSceneTransitionBridgeDispatch dispatchScope;
+            return callback(transitionType, sceneIdentifier.c_str(), loadMode);
+        }
+
+        bool DispatchSceneTransition(SceneManagerRuntimeState& state,
+                                     SceneTransitionType transitionType,
+                                     LoadSceneMode loadMode)
+        {
+            SceneTransitionBridgeCallback callback = nullptr;
+            {
+                std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
+                callback = state.TransitionBridgeCallback;
+                if (callback == nullptr || s_IsDispatchingSceneTransitionBridge)
+                    return EnqueueSceneTransition(state, transitionType, {}, loadMode);
+            }
+
+            ScopedSceneTransitionBridgeDispatch dispatchScope;
+            return callback(transitionType, "", loadMode);
+        }
     }
 
     bool SceneManager::LoadScene(const std::string& sceneIdentifier, LoadSceneMode loadMode)
@@ -66,25 +125,13 @@ namespace Limitless
             return false;
 
         auto& state = GetSceneManagerRuntimeState();
-        std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
-        if (state.TransitionBridgeCallback != nullptr)
-            return state.TransitionBridgeCallback(SceneTransitionType::LoadByAssetKey, sceneIdentifier.c_str(), loadMode);
-
-        const auto normalizedSceneIdentifier = NormalizeSceneAssetKey(sceneIdentifier);
-        if (!normalizedSceneIdentifier.has_value())
-            return false;
-
-        return EnqueueSceneTransition(state, SceneTransitionType::LoadByAssetKey, *normalizedSceneIdentifier, loadMode);
+        return DispatchSceneTransition(state, SceneTransitionType::LoadByAssetKey, sceneIdentifier, loadMode);
     }
 
     bool SceneManager::ReloadCurrentScene()
     {
         auto& state = GetSceneManagerRuntimeState();
-        std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
-        if (state.TransitionBridgeCallback != nullptr)
-            return state.TransitionBridgeCallback(SceneTransitionType::ReloadCurrentScene, "", LoadSceneMode::Single);
-
-        return EnqueueSceneTransition(state, SceneTransitionType::ReloadCurrentScene, {}, LoadSceneMode::Single);
+        return DispatchSceneTransition(state, SceneTransitionType::ReloadCurrentScene, LoadSceneMode::Single);
     }
 
     bool SceneManager::SetActiveScene(const std::string& sceneIdentifier)
@@ -93,15 +140,7 @@ namespace Limitless
             return false;
 
         auto& state = GetSceneManagerRuntimeState();
-        std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
-        if (state.TransitionBridgeCallback != nullptr)
-            return state.TransitionBridgeCallback(SceneTransitionType::SetActiveSceneByAssetKey, sceneIdentifier.c_str(), LoadSceneMode::Single);
-
-        const auto normalizedSceneIdentifier = NormalizeSceneAssetKey(sceneIdentifier);
-        if (!normalizedSceneIdentifier.has_value())
-            return false;
-
-        return EnqueueSceneTransition(state, SceneTransitionType::SetActiveSceneByAssetKey, *normalizedSceneIdentifier, LoadSceneMode::Single);
+        return DispatchSceneTransition(state, SceneTransitionType::SetActiveSceneByAssetKey, sceneIdentifier, LoadSceneMode::Single);
     }
 
     bool SceneManager::UnloadScene(const std::string& sceneIdentifier)
@@ -110,15 +149,7 @@ namespace Limitless
             return false;
 
         auto& state = GetSceneManagerRuntimeState();
-        std::scoped_lock<std::mutex> lock(state.SceneTransitionMutex);
-        if (state.TransitionBridgeCallback != nullptr)
-            return state.TransitionBridgeCallback(SceneTransitionType::UnloadByAssetKey, sceneIdentifier.c_str(), LoadSceneMode::Single);
-
-        const auto normalizedSceneIdentifier = NormalizeSceneAssetKey(sceneIdentifier);
-        if (!normalizedSceneIdentifier.has_value())
-            return false;
-
-        return EnqueueSceneTransition(state, SceneTransitionType::UnloadByAssetKey, *normalizedSceneIdentifier, LoadSceneMode::Single);
+        return DispatchSceneTransition(state, SceneTransitionType::UnloadByAssetKey, sceneIdentifier, LoadSceneMode::Single);
     }
 
     void SceneManager::SetTransitionBridgeCallback(SceneTransitionBridgeCallback callback)

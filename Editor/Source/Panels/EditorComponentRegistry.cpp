@@ -70,7 +70,17 @@ namespace Limitless::EditorInspectorPanel
         void AddTilemapLayerComponent(entt::registry& registry, entt::entity entity)
         {
             auto& layer = registry.emplace<TilemapLayerComponent>(entity);
-            layer.EnsureStorage();
+            if (const auto* hierarchy = registry.try_get<HierarchyComponent>(entity))
+            {
+                if (hierarchy->Parent != entt::null)
+                {
+                    if (const auto* grid = registry.try_get<Grid2DComponent>(hierarchy->Parent))
+                    {
+                        EnsureTilemapLayerStorage(*grid, layer);
+                        return;
+                    }
+                }
+            }
         }
 
         void AddCanvasComponent(entt::registry& registry, entt::entity entity)

@@ -1044,7 +1044,7 @@ namespace Limitless
                     if (layer.RenderOrder != targetRenderOrder)
                         continue;
 
-                    layer.EnsureStorage();
+                    EnsureTilemapLayerStorage(grid2D, layer);
                     // Track which TileTable entries are actually referenced by
                     // cells in this layer. Large palettes may populate a huge
                     // TileTable, but only a subset is typically painted.
@@ -1176,10 +1176,9 @@ namespace Limitless
                     }
 
                     // Render tiles.
-                    const int32_t gridWidth  = std::max(1, layer.GridSize.x);
-                    const int32_t gridHeight = std::max(1, layer.GridSize.y);
-                    const glm::vec2 mapCenterOffset =
-                        -0.5f * glm::vec2(gridWidth - 1, gridHeight - 1) * cellSize;
+                    const int32_t gridWidth  = std::max(1, grid2D.GridSize.x);
+                    const int32_t gridHeight = std::max(1, grid2D.GridSize.y);
+                    const glm::vec2 firstCellCenter = GetTilemapLayerFirstCellCenter(grid2D, layer);
 
                     for (int32_t cellY = 0; cellY < gridHeight; ++cellY)
                     {
@@ -1202,8 +1201,8 @@ namespace Limitless
                                 continue;
 
                             const glm::vec3 localPosition = glm::vec3(
-                                mapCenterOffset.x + static_cast<float>(cellX) * cellSize.x,
-                                mapCenterOffset.y + static_cast<float>(cellY) * cellSize.y,
+                                firstCellCenter.x + static_cast<float>(cellX) * cellSize.x,
+                                firstCellCenter.y + static_cast<float>(cellY) * cellSize.y,
                                 0.0f);
                             glm::mat4 tileTransform = gridWorldTransform;
                             tileTransform = glm::translate(tileTransform, localPosition);

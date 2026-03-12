@@ -17,12 +17,19 @@
 #include <fstream>
 #include <limits>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace Limitless
 {
     namespace
     {
+        struct LegacyTilemapLayerLayout
+        {
+            glm::ivec2 GridSize = glm::ivec2(kDefaultTilemapLayerGridDimension, kDefaultTilemapLayerGridDimension);
+            glm::vec2 OriginCell = glm::vec2(0.0f);
+        };
+
         void ResetAnimatorRuntimeOutput(AnimatorComponent& animator, bool clearSpriteTextureOverrideCache)
         {
             animator.RuntimeHasSpriteSubRect = false;
@@ -729,7 +736,10 @@ namespace Limitless
             }
         }
 
-        void DeserializeGridCameraAndAudioComponents(const nlohmann::json& entry, Scene* scene, entt::entity entity)
+        void DeserializeGridCameraAndAudioComponents(const nlohmann::json& entry,
+                                                     Scene* scene,
+                                                     entt::entity entity,
+                                                     std::unordered_map<uint32_t, LegacyTilemapLayerLayout>* legacyTilemapLayouts)
         {
             if (entry.contains("Grid2D") && entry["Grid2D"].is_object())
             {
@@ -745,6 +755,17 @@ namespace Limitless
                 auto cellGap = grid2DJson.value("CellGap", std::vector<float>{ grid2D.CellGap.x, grid2D.CellGap.y });
                 if (cellGap.size() >= 2)
                     grid2D.CellGap = glm::vec2(cellGap[0], cellGap[1]);
+
+                auto gridSize = grid2DJson.value("GridSize", std::vector<int>{ grid2D.GridSize.x, grid2D.GridSize.y });
+                if (gridSize.size() >= 2)
+                    grid2D.GridSize = GetClampedGrid2DLayoutSize(glm::ivec2(gridSize[0], gridSize[1]));
+
+                if (grid2DJson.contains("OriginCell") && grid2DJson["OriginCell"].is_array())
+                {
+                    const auto originCell = grid2DJson["OriginCell"].get<std::vector<float>>();
+                    if (originCell.size() >= 2)
+                        grid2D.OriginCell = glm::vec2(originCell[0], originCell[1]);
+                }
             }
 
             if (entry.contains("TilemapLayer") && entry["TilemapLayer"].is_object())
@@ -752,9 +773,34 @@ namespace Limitless
                 const auto& layerJson = entry["TilemapLayer"];
                 auto& layer = scene->GetRegistry().emplace<TilemapLayerComponent>(entity);
 
-                auto gridSize = layerJson.value("GridSize", std::vector<int>{ layer.GridSize.x, layer.GridSize.y });
+                LegacyTilemapLayerLayout legacyLayout;
+                bool hasLegacyLayout = false;
+
+                auto gridSize = layerJson.value("GridSize", std::vector<int>{ legacyLayout.GridSize.x, legacyLayout.GridSize.y });
                 if (gridSize.size() >= 2)
-                    layer.GridSize = glm::ivec2(std::max(1, gridSize[0]), std::max(1, gridSize[1]));
+                {
+                    legacyLayout.GridSize = GetClampedGrid2DLayoutSize(glm::ivec2(gridSize[0], gridSize[1]));
+                    hasLegacyLayout = true;
+                }
+
+                if (layerJson.contains("OriginCell") && layerJson["OriginCell"].is_array())
+                {
+                    const auto originCell = layerJson["OriginCell"].get<std::vector<float>>();
+                    if (originCell.size() >= 2)
+                    {
+                        legacyLayout.OriginCell = glm::vec2(originCell[0], originCell[1]);
+                        hasLegacyLayout = true;
+                    }
+                }
+                else if (hasLegacyLayout)
+                {
+                    legacyLayout.OriginCell = -0.5f * glm::vec2(
+                        static_cast<float>(std::max(1, legacyLayout.GridSize.x) - 1),
+                        static_cast<float>(std::max(1, legacyLayout.GridSize.y) - 1));
+                }
+
+                if (hasLegacyLayout && legacyTilemapLayouts)
+                    (*legacyTilemapLayouts)[static_cast<uint32_t>(entity)] = legacyLayout;
 
                 layer.RenderOrder = layerJson.value("RenderOrder", 0);
                 layer.CollisionEnabled = layerJson.value("CollisionEnabled", false);
@@ -770,7 +816,6 @@ namespace Limitless
                 if (layerJson.contains("Tiles") && layerJson["Tiles"].is_array())
                     layer.Tiles = layerJson["Tiles"].get<std::vector<uint32_t>>();
 
-                layer.EnsureStorage();
                 layer.RenderCacheDirty = true;
             }
 
@@ -1214,18 +1259,23 @@ namespace Limitless
             }
         }
 
-        void DeserializeComponentsFromJson(const nlohmann::json& entry, Scene* scene, entt::entity entity,
-            int32_t& outJointConnectedEntityIndex)
+        void DeserializeComponentsFromJson(const nlohmann::json& entry,
+                                           Scene* scene,
+                                           entt::entity entity,
+                                           int32_t& outJointConnectedEntityIndex,
+                                           std::unordered_map<uint32_t, LegacyTilemapLayerLayout>* legacyTilemapLayouts)
         {
             DeserializeLayoutComponents(entry, scene, entity);
             DeserializeRenderAndAnimationComponents(entry, scene, entity);
             DeserializeUiComponents(entry, scene, entity);
-            DeserializeGridCameraAndAudioComponents(entry, scene, entity);
+            DeserializeGridCameraAndAudioComponents(entry, scene, entity, legacyTilemapLayouts);
             DeserializePhysicsComponents(entry, scene, entity, outJointConnectedEntityIndex);
             DeserializeScriptAndPrefabComponents(entry, scene, entity);
         }
 
-        DeserializedEntityInfo DeserializeEntityFromJson(const nlohmann::json& entry, Scene* scene)
+        DeserializedEntityInfo DeserializeEntityFromJson(const nlohmann::json& entry,
+                                                         Scene* scene,
+                                                         std::unordered_map<uint32_t, LegacyTilemapLayerLayout>* legacyTilemapLayouts)
         {
             DeserializedEntityInfo info;
             const std::string tag = entry.value("Tag", "Entity");
@@ -1252,8 +1302,7 @@ namespace Limitless
                     transform.Scale = glm::vec3(scale[0], scale[1], scale[2]);
             }
 
-            DeserializeComponentsFromJson(entry, scene, info.Entity, info.JointConnectedEntityIndex);
-
+            DeserializeComponentsFromJson(entry, scene, info.Entity, info.JointConnectedEntityIndex, legacyTilemapLayouts);
             if (entry.contains("Hierarchy"))
             {
                 const auto& hierarchyJson = entry["Hierarchy"];
@@ -1366,6 +1415,45 @@ namespace Limitless
                 });
             }
         }
+
+        void SyncGrid2DLayoutsAfterLoad(Scene* scene,
+                                        const std::unordered_map<uint32_t, LegacyTilemapLayerLayout>& legacyTilemapLayouts,
+                                        bool promoteLegacyLayerLayout)
+        {
+            if (!scene)
+                return;
+
+            auto& registry = scene->GetRegistry();
+            auto gridView = registry.view<Grid2DComponent>();
+            for (entt::entity gridEntity : gridView)
+            {
+                auto& grid = gridView.get<Grid2DComponent>(gridEntity);
+                const auto children = scene->GetChildren(gridEntity);
+
+                if (promoteLegacyLayerLayout)
+                {
+                    for (entt::entity child : children)
+                    {
+                        const auto legacyIt = legacyTilemapLayouts.find(static_cast<uint32_t>(child));
+                        if (legacyIt != legacyTilemapLayouts.end())
+                        {
+                            grid.GridSize = GetClampedGrid2DLayoutSize(legacyIt->second.GridSize);
+                            grid.OriginCell = legacyIt->second.OriginCell;
+                            break;
+                        }
+                    }
+                }
+
+                for (entt::entity child : children)
+                {
+                    auto* layer = registry.try_get<TilemapLayerComponent>(child);
+                    if (!layer)
+                        continue;
+                    EnsureTilemapLayerStorage(grid, *layer);
+                    layer->RenderCacheDirty = true;
+                }
+            }
+        }
     }
 
     Result<std::unique_ptr<Scene>> Scene::LoadFromFile(const std::filesystem::path& path)
@@ -1384,14 +1472,16 @@ namespace Limitless
         std::vector<int32_t> parentIndices;
         std::vector<int32_t> siblingOrders;
         std::vector<int32_t> jointConnectedEntityIndices;
+        std::unordered_map<uint32_t, LegacyTilemapLayerLayout> legacyTilemapLayouts;
         createdEntities.reserve(root["Entities"].size());
         parentIndices.reserve(root["Entities"].size());
         siblingOrders.reserve(root["Entities"].size());
         jointConnectedEntityIndices.reserve(root["Entities"].size());
+        legacyTilemapLayouts.reserve(root["Entities"].size());
 
         for (const auto& entry : root["Entities"])
         {
-            DeserializedEntityInfo info = DeserializeEntityFromJson(entry, scene.get());
+            DeserializedEntityInfo info = DeserializeEntityFromJson(entry, scene.get(), &legacyTilemapLayouts);
             createdEntities.push_back(info.Entity);
             parentIndices.push_back(info.ParentIndex);
             siblingOrders.push_back(info.SiblingOrder);
@@ -1399,6 +1489,7 @@ namespace Limitless
         }
 
         RestoreHierarchyAndJointReferences(scene->GetRegistry(), createdEntities, parentIndices, siblingOrders, jointConnectedEntityIndices);
+        SyncGrid2DLayoutsAfterLoad(scene.get(), legacyTilemapLayouts, loadedVersion < 23);
         for (size_t index = 0; index < createdEntities.size(); ++index)
         {
             if (parentIndices[index] >= 0)

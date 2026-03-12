@@ -26,7 +26,7 @@
 namespace Limitless
 {
     class Physics2DWorld;
-    inline constexpr int kSceneSerializationVersion = 22;
+    inline constexpr int kSceneSerializationVersion = 23;
 
     struct DeferredStructuralMutation
     {
@@ -322,7 +322,7 @@ namespace Limitless
         std::atomic<uint64_t> m_NextDeferredStructuralMutationSequence{ 1 };
         std::atomic<bool> m_WarnedDeferredStructuralMutationQueueOverflow{ false };
         std::atomic<bool> m_WarnedDeferredStructuralMutationFlushBudgetExceeded{ false };
-        mutable std::mutex m_DeferredEntityReferencesMutex;
+        mutable std::recursive_mutex m_DeferredEntityReferencesMutex;
         std::unordered_map<entt::entity, entt::entity> m_DeferredEntityReferences;
         std::atomic<uint64_t> m_NextDeferredEntityReferenceSequence{ 1 };
 

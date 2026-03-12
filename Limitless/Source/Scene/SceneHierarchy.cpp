@@ -306,8 +306,19 @@ namespace Limitless
 
     bool Scene::IsValid(entt::entity entity) const
     {
+        if (entity == entt::null)
+            return false;
+
+        // Fast path: check registry directly without locking the deferred-reference mutex.
+        // All internal callers resolve deferred references before calling IsValid, so the
+        // entity should already be a real registry handle.  This avoids a recursive lock on
+        // m_DeferredEntityReferencesMutex when callers hold that lock via ResolveEntityReference.
+        if (m_Registry.valid(entity))
+            return true;
+
+        // Fallback: the entity may still be a deferred reference placeholder.
         const entt::entity resolvedEntity = ResolveEntityReference(entity);
-        return m_Registry.valid(resolvedEntity);
+        return resolvedEntity != entity && m_Registry.valid(resolvedEntity);
     }
 
     bool Scene::IsEntityEnabledInHierarchy(entt::entity entity) const
@@ -530,7 +541,7 @@ namespace Limitless
         if (entity == entt::null)
             return entt::null;
 
-        std::lock_guard<std::mutex> lock(m_DeferredEntityReferencesMutex);
+        std::lock_guard<std::recursive_mutex> lock(m_DeferredEntityReferencesMutex);
         const auto found = m_DeferredEntityReferences.find(entity);
         if (found == m_DeferredEntityReferences.end() || found->second == entt::null)
             return entity;
@@ -595,7 +606,7 @@ namespace Limitless
 
             const entt::entity deferredEntity = static_cast<entt::entity>(rawValue);
 
-            std::lock_guard<std::mutex> lock(m_DeferredEntityReferencesMutex);
+            std::lock_guard<std::recursive_mutex> lock(m_DeferredEntityReferencesMutex);
             if (m_DeferredEntityReferences.contains(deferredEntity))
                 continue;
 
@@ -609,7 +620,7 @@ namespace Limitless
         if (deferredEntity == entt::null)
             return;
 
-        std::lock_guard<std::mutex> lock(m_DeferredEntityReferencesMutex);
+        std::lock_guard<std::recursive_mutex> lock(m_DeferredEntityReferencesMutex);
         const auto found = m_DeferredEntityReferences.find(deferredEntity);
         if (found == m_DeferredEntityReferences.end())
         {
@@ -631,7 +642,7 @@ namespace Limitless
         if (deferredEntity == entt::null)
             return;
 
-        std::lock_guard<std::mutex> lock(m_DeferredEntityReferencesMutex);
+        std::lock_guard<std::recursive_mutex> lock(m_DeferredEntityReferencesMutex);
         m_DeferredEntityReferences.erase(deferredEntity);
     }
 
@@ -640,7 +651,7 @@ namespace Limitless
         if (resolvedEntity == entt::null)
             return;
 
-        std::lock_guard<std::mutex> lock(m_DeferredEntityReferencesMutex);
+        std::lock_guard<std::recursive_mutex> lock(m_DeferredEntityReferencesMutex);
         for (auto iterator = m_DeferredEntityReferences.begin(); iterator != m_DeferredEntityReferences.end();)
         {
             if (iterator->first == resolvedEntity || iterator->second == resolvedEntity)

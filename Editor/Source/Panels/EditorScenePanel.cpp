@@ -824,7 +824,7 @@ namespace Limitless::EditorScenePanel
                     (void)undoService->ExecuteSceneMutation("Create Grid (Tilemap)", [&](Scene& mutableScene) {
                         gridEntity = mutableScene.CreateEntity("Grid");
                         auto& reg = mutableScene.GetRegistry();
-                        reg.emplace<Grid2DComponent>(gridEntity);
+                        auto& grid = reg.emplace<Grid2DComponent>(gridEntity);
 
                         auto createLayer = [&](const char* name, int32_t order, bool collision) {
                             entt::entity layerEntity = mutableScene.CreateEntity(name);
@@ -832,7 +832,7 @@ namespace Limitless::EditorScenePanel
                             auto& layer = reg.emplace<TilemapLayerComponent>(layerEntity);
                             layer.RenderOrder = order;
                             layer.CollisionEnabled = collision;
-                            layer.EnsureStorage();
+                            EnsureTilemapLayerStorage(grid, layer);
                         };
                         createLayer("Background", -20, false);
                         createLayer("Collision",    0, true);
@@ -844,7 +844,7 @@ namespace Limitless::EditorScenePanel
                 {
                     gridEntity = scene->CreateEntity("Grid");
                     auto& reg = scene->GetRegistry();
-                    reg.emplace<Grid2DComponent>(gridEntity);
+                    auto& grid = reg.emplace<Grid2DComponent>(gridEntity);
 
                     auto createLayer = [&](const char* name, int32_t order, bool collision) {
                         entt::entity layerEntity = scene->CreateEntity(name);
@@ -852,7 +852,7 @@ namespace Limitless::EditorScenePanel
                         auto& layer = reg.emplace<TilemapLayerComponent>(layerEntity);
                         layer.RenderOrder = order;
                         layer.CollisionEnabled = collision;
-                        layer.EnsureStorage();
+                        EnsureTilemapLayerStorage(grid, layer);
                     };
                     createLayer("Background", -20, false);
                     createLayer("Collision",    0, true);

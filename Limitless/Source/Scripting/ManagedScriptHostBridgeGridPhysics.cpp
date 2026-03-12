@@ -25,22 +25,72 @@ namespace Limitless::ManagedScriptHost
 
         LT_MANAGED_COMPONENT_HAS(HasTilemapLayerComponentIcall, TryGetManagedTilemapLayerComponent);
 
+        Grid2DComponent* TryGetManagedTilemapLayerGridComponent(uint32_t entityHandle)
+        {
+            entt::registry* registry = GetActiveRegistry();
+            if (registry == nullptr || s_HostState.ActiveScene == nullptr)
+                return nullptr;
+
+            const entt::entity layerEntity = ResolveManagedEntityHandle(entityHandle);
+            if (layerEntity == entt::null)
+                return nullptr;
+
+            const auto* hierarchy = registry->try_get<HierarchyComponent>(layerEntity);
+            if (!hierarchy || hierarchy->Parent == entt::null || !registry->valid(hierarchy->Parent))
+                return nullptr;
+
+            return registry->try_get<Grid2DComponent>(hierarchy->Parent);
+        }
+
         int ManagedGetTilemapLayerGridWidthIcall(uint32_t entityHandle)
         {
-            const auto* layer = TryGetManagedTilemapLayerComponent(entityHandle);
-            return layer ? std::max(1, layer->GridSize.x) : 64;
+            if (!TryGetManagedTilemapLayerComponent(entityHandle))
+                return 0;
+
+            const auto* grid = TryGetManagedTilemapLayerGridComponent(entityHandle);
+            return grid ? std::max(1, grid->GridSize.x) : 0;
         }
 
         int ManagedGetTilemapLayerGridHeightIcall(uint32_t entityHandle)
         {
-            const auto* layer = TryGetManagedTilemapLayerComponent(entityHandle);
-            return layer ? std::max(1, layer->GridSize.y) : 64;
+            if (!TryGetManagedTilemapLayerComponent(entityHandle))
+                return 0;
+
+            const auto* grid = TryGetManagedTilemapLayerGridComponent(entityHandle);
+            return grid ? std::max(1, grid->GridSize.y) : 0;
         }
 
         void ManagedResizeTilemapLayerGridIcall(uint32_t entityHandle, int width, int height)
         {
-            if (auto* layer = TryGetManagedTilemapLayerComponent(entityHandle))
-                layer->ResizeGrid(glm::ivec2(std::max(1, width), std::max(1, height)));
+            entt::registry* registry = GetActiveRegistry();
+            auto* layer = TryGetManagedTilemapLayerComponent(entityHandle);
+            auto* grid = TryGetManagedTilemapLayerGridComponent(entityHandle);
+            if (layer == nullptr || registry == nullptr || s_HostState.ActiveScene == nullptr || grid == nullptr)
+                return;
+
+            const entt::entity layerEntity = ResolveManagedEntityHandle(entityHandle);
+            const auto* hierarchy = registry->try_get<HierarchyComponent>(layerEntity);
+            if (!hierarchy || hierarchy->Parent == entt::null)
+                return;
+
+            const glm::ivec2 previousGridSize = grid->GridSize;
+            const glm::ivec2 requestedGridSize = GetClampedGrid2DLayoutSize(glm::ivec2(std::max(1, width), std::max(1, height)));
+            const auto children = s_HostState.ActiveScene->GetChildren(hierarchy->Parent);
+            for (entt::entity child : children)
+            {
+                auto* childLayer = registry->try_get<TilemapLayerComponent>(child);
+                if (!childLayer)
+                    continue;
+                ResizeTilemapLayerStorage(*childLayer, previousGridSize, requestedGridSize, glm::ivec2(0));
+            }
+            grid->GridSize = requestedGridSize;
+            for (entt::entity child : children)
+            {
+                auto* childLayer = registry->try_get<TilemapLayerComponent>(child);
+                if (!childLayer)
+                    continue;
+                EnsureTilemapLayerStorage(*grid, *childLayer);
+            }
         }
 
         LT_MANAGED_COMPONENT_GET(GetTilemapLayerRenderOrderIcall, int, TryGetManagedTilemapLayerComponent, component->RenderOrder, 0);
@@ -49,36 +99,49 @@ namespace Limitless::ManagedScriptHost
         LT_MANAGED_COMPONENT_SET(SetTilemapLayerCollisionEnabledIcall, bool, TryGetManagedTilemapLayerComponent, component->CollisionEnabled = value;);
         LT_MANAGED_COMPONENT_GET(GetTilemapLayerCastShadowsIcall, bool, TryGetManagedTilemapLayerComponent, component->CastShadows, false);
         LT_MANAGED_COMPONENT_SET(SetTilemapLayerCastShadowsIcall, bool, TryGetManagedTilemapLayerComponent, component->CastShadows = value;);
-        LT_MANAGED_COMPONENT_GET(GetTilemapLayerCellCountIcall, int, TryGetManagedTilemapLayerComponent, component->GetCellCount(), 0);
+
+        int ManagedGetTilemapLayerCellCountIcall(uint32_t entityHandle)
+        {
+            if (!TryGetManagedTilemapLayerComponent(entityHandle))
+                return 0;
+
+            const auto* grid = TryGetManagedTilemapLayerGridComponent(entityHandle);
+            return grid ? GetTilemapCellCount(*grid) : 0;
+        }
 
         bool ManagedIsTilemapLayerCellInBoundsIcall(uint32_t entityHandle, int cellX, int cellY)
         {
-            const auto* layer = TryGetManagedTilemapLayerComponent(entityHandle);
-            return layer ? IsLayerCellInBounds(*layer, cellX, cellY) : false;
+            if (!TryGetManagedTilemapLayerComponent(entityHandle))
+                return false;
+
+            const auto* grid = TryGetManagedTilemapLayerGridComponent(entityHandle);
+            return grid ? IsGrid2DCellInBounds(*grid, cellX, cellY) : false;
         }
 
         int ManagedGetTilemapLayerTileIdIcall(uint32_t entityHandle, int cellX, int cellY)
         {
             auto* layer = TryGetManagedTilemapLayerComponent(entityHandle);
-            if (layer == nullptr || !IsLayerCellInBounds(*layer, cellX, cellY))
+            auto* grid = TryGetManagedTilemapLayerGridComponent(entityHandle);
+            if (layer == nullptr || grid == nullptr || !IsGrid2DCellInBounds(*grid, cellX, cellY))
                 return 0;
 
-            layer->EnsureStorage();
-            const size_t index = LayerCellToIndex(*layer, cellX, cellY);
+            EnsureTilemapLayerStorage(*grid, *layer);
+            const size_t index = Grid2DCellToIndex(*grid, cellX, cellY);
             return index < layer->Tiles.size() ? static_cast<int>(layer->Tiles[index]) : 0;
         }
 
         void ManagedSetTilemapLayerTileIdIcall(uint32_t entityHandle, int cellX, int cellY, int tileId)
         {
             auto* layer = TryGetManagedTilemapLayerComponent(entityHandle);
-            if (layer == nullptr || !IsLayerCellInBounds(*layer, cellX, cellY))
+            auto* grid = TryGetManagedTilemapLayerGridComponent(entityHandle);
+            if (layer == nullptr || grid == nullptr || !IsGrid2DCellInBounds(*grid, cellX, cellY))
                 return;
 
-            layer->EnsureStorage();
+            EnsureTilemapLayerStorage(*grid, *layer);
+            const size_t index = Grid2DCellToIndex(*grid, cellX, cellY);
             const uint32_t resolvedTileId = (tileId > 0 && static_cast<size_t>(tileId) < layer->TileTable.size())
                 ? static_cast<uint32_t>(tileId)
                 : 0u;
-            const size_t index = LayerCellToIndex(*layer, cellX, cellY);
             if (index < layer->Tiles.size())
                 layer->Tiles[index] = resolvedTileId;
         }
@@ -86,11 +149,12 @@ namespace Limitless::ManagedScriptHost
         Coral::String ManagedGetTilemapLayerTileAssetKeyIcall(uint32_t entityHandle, int cellX, int cellY)
         {
             auto* layer = TryGetManagedTilemapLayerComponent(entityHandle);
-            if (layer == nullptr || !IsLayerCellInBounds(*layer, cellX, cellY))
+            auto* grid = TryGetManagedTilemapLayerGridComponent(entityHandle);
+            if (layer == nullptr || grid == nullptr || !IsGrid2DCellInBounds(*grid, cellX, cellY))
                 return Coral::String::New("");
 
-            layer->EnsureStorage();
-            const size_t index = LayerCellToIndex(*layer, cellX, cellY);
+            EnsureTilemapLayerStorage(*grid, *layer);
+            const size_t index = Grid2DCellToIndex(*grid, cellX, cellY);
             if (index >= layer->Tiles.size())
                 return Coral::String::New("");
 
@@ -104,13 +168,14 @@ namespace Limitless::ManagedScriptHost
         void ManagedSetTilemapLayerTileAssetKeyIcall(uint32_t entityHandle, int cellX, int cellY, Coral::String value)
         {
             auto* layer = TryGetManagedTilemapLayerComponent(entityHandle);
-            if (layer == nullptr || !IsLayerCellInBounds(*layer, cellX, cellY))
+            auto* grid = TryGetManagedTilemapLayerGridComponent(entityHandle);
+            if (layer == nullptr || grid == nullptr || !IsGrid2DCellInBounds(*grid, cellX, cellY))
                 return;
 
-            layer->EnsureStorage();
+            EnsureTilemapLayerStorage(*grid, *layer);
+            const size_t index = Grid2DCellToIndex(*grid, cellX, cellY);
             const std::string tileAssetKey = ToUtf8Borrowed(value);
             const uint32_t tileId = layer->GetOrAddTileTableEntry(tileAssetKey);
-            const size_t index = LayerCellToIndex(*layer, cellX, cellY);
             if (index < layer->Tiles.size())
                 layer->Tiles[index] = tileId;
         }
@@ -136,11 +201,13 @@ namespace Limitless::ManagedScriptHost
             if (layer == nullptr || index <= 0 || static_cast<size_t>(index) >= layer->TileTable.size())
                 return;
 
+            if (auto* grid = TryGetManagedTilemapLayerGridComponent(entityHandle))
+                EnsureTilemapLayerStorage(*grid, *layer);
+
             const std::string tileAssetKey = ToUtf8Borrowed(value);
             if (tileAssetKey.empty())
             {
                 layer->TileTable[static_cast<size_t>(index)].clear();
-                layer->EnsureStorage();
                 for (uint32_t& tileId : layer->Tiles)
                 {
                     if (tileId == static_cast<uint32_t>(index))

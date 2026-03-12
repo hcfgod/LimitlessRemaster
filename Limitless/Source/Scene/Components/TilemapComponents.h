@@ -10,6 +10,9 @@
 
 namespace Limitless
 {
+    inline constexpr int32_t kDefaultTilemapLayerGridDimension = 2048;
+    inline constexpr int32_t kMaxTilemapLayerGridDimension = 8192;
+
     // -------------------------------------------------------------------------
     // Grid2D + TilemapLayer system (Unity-style Tile Palette architecture)
     //
@@ -25,6 +28,8 @@ namespace Limitless
     {
         glm::vec2 CellSize = glm::vec2(1.0f, 1.0f);
         glm::vec2 CellGap = glm::vec2(0.0f, 0.0f);
+        glm::ivec2 GridSize = glm::ivec2(kDefaultTilemapLayerGridDimension, kDefaultTilemapLayerGridDimension);
+        glm::vec2 OriginCell = glm::vec2(0.0f);
     };
 
     /// A single tilemap layer within a Grid2D hierarchy. Each cell stores an
@@ -32,7 +37,6 @@ namespace Limitless
     /// compact IDs to TileAsset keys for rendering and collision.
     struct TilemapLayerComponent
     {
-        glm::ivec2 GridSize = glm::ivec2(64, 64);
         int32_t RenderOrder = 0;
         bool CollisionEnabled = false;
         bool CastShadows = false;
@@ -54,18 +58,6 @@ namespace Limitless
         std::vector<CachedTileRenderData> CachedTileRender;
         bool RenderCacheDirty = true;
 
-        int32_t GetCellCount() const
-        {
-            return std::max(1, GridSize.x) * std::max(1, GridSize.y);
-        }
-
-        void EnsureStorage()
-        {
-            const size_t cellCount = static_cast<size_t>(GetCellCount());
-            if (Tiles.size() != cellCount)
-                Tiles.resize(cellCount, 0u);
-        }
-
         /// Returns the existing tile table index for the given key, or appends
         /// a new entry and returns the new index. Index 0 is reserved for "no tile".
         uint32_t GetOrAddTileTableEntry(const std::string& tileAssetKey)
@@ -86,44 +78,78 @@ namespace Limitless
             RenderCacheDirty = true;
             return static_cast<uint32_t>(TileTable.size() - 1);
         }
-
-        void ResizeGrid(const glm::ivec2& requestedGridSize)
-        {
-            const glm::ivec2 previousGridSize = GridSize;
-            GridSize = glm::ivec2(std::max(1, requestedGridSize.x), std::max(1, requestedGridSize.y));
-
-            const int32_t oldWidth = std::max(1, previousGridSize.x);
-            const int32_t newWidth = std::max(1, GridSize.x);
-            const int32_t newHeight = std::max(1, GridSize.y);
-            const int32_t copyWidth = std::min(oldWidth, newWidth);
-            const int32_t copyHeight = std::min(std::max(1, previousGridSize.y), newHeight);
-
-            const std::vector<uint32_t> oldTiles = Tiles;
-            Tiles.assign(static_cast<size_t>(newWidth * newHeight), 0u);
-
-            for (int32_t y = 0; y < copyHeight; ++y)
-            {
-                for (int32_t x = 0; x < copyWidth; ++x)
-                {
-                    const size_t oldIndex = static_cast<size_t>(y * oldWidth + x);
-                    const size_t newIndex = static_cast<size_t>(y * newWidth + x);
-                    if (oldIndex < oldTiles.size())
-                        Tiles[newIndex] = oldTiles[oldIndex];
-                }
-            }
-        }
     };
 
-    inline bool IsLayerCellInBounds(const TilemapLayerComponent& layer, int32_t cellX, int32_t cellY)
+    inline glm::vec2 GetTilemapLayerFirstCellCenter(const Grid2DComponent& grid, const TilemapLayerComponent& layer)
     {
-        return cellX >= 0 && cellY >= 0 &&
-            cellX < std::max(1, layer.GridSize.x) &&
-            cellY < std::max(1, layer.GridSize.y);
+        const glm::vec2 cellSize(std::max(0.001f, grid.CellSize.x), std::max(0.001f, grid.CellSize.y));
+        return glm::vec2(grid.OriginCell.x * cellSize.x, grid.OriginCell.y * cellSize.y);
     }
 
-    inline size_t LayerCellToIndex(const TilemapLayerComponent& layer, int32_t cellX, int32_t cellY)
+    inline glm::ivec2 GetClampedGrid2DLayoutSize(const glm::ivec2& requestedGridSize)
     {
-        const int32_t width = std::max(1, layer.GridSize.x);
+        return glm::ivec2(
+            std::clamp(requestedGridSize.x, 1, kMaxTilemapLayerGridDimension),
+            std::clamp(requestedGridSize.y, 1, kMaxTilemapLayerGridDimension));
+    }
+
+    inline int32_t GetTilemapCellCount(const Grid2DComponent& grid)
+    {
+        return std::max(1, grid.GridSize.x) * std::max(1, grid.GridSize.y);
+    }
+
+    inline void EnsureTilemapLayerStorage(const Grid2DComponent& grid, TilemapLayerComponent& layer)
+    {
+        const size_t cellCount = static_cast<size_t>(GetTilemapCellCount(grid));
+        if (layer.Tiles.size() != cellCount)
+            layer.Tiles.resize(cellCount, 0u);
+    }
+
+    inline void ResizeTilemapLayerStorage(TilemapLayerComponent& layer,
+                                          const glm::ivec2& previousGridSize,
+                                          const glm::ivec2& requestedGridSize,
+                                          const glm::ivec2& destinationOffset)
+    {
+        const glm::ivec2 clampedGridSize = GetClampedGrid2DLayoutSize(requestedGridSize);
+        const int32_t oldWidth = std::max(1, previousGridSize.x);
+        const int32_t oldHeight = std::max(1, previousGridSize.y);
+        const int32_t newWidth = std::max(1, clampedGridSize.x);
+        const int32_t newHeight = std::max(1, clampedGridSize.y);
+
+        const std::vector<uint32_t> oldTiles = layer.Tiles;
+        layer.Tiles.assign(static_cast<size_t>(newWidth * newHeight), 0u);
+
+        for (int32_t y = 0; y < oldHeight; ++y)
+        {
+            for (int32_t x = 0; x < oldWidth; ++x)
+            {
+                const size_t oldIndex = static_cast<size_t>(y * oldWidth + x);
+                if (oldIndex >= oldTiles.size())
+                    continue;
+
+                const int32_t newX = x + destinationOffset.x;
+                const int32_t newY = y + destinationOffset.y;
+                if (newX < 0 || newY < 0 || newX >= newWidth || newY >= newHeight)
+                    continue;
+
+                const size_t newIndex = static_cast<size_t>(newY * newWidth + newX);
+                layer.Tiles[newIndex] = oldTiles[oldIndex];
+            }
+        }
+
+        layer.RenderCacheDirty = true;
+    }
+
+    inline bool IsGrid2DCellInBounds(const Grid2DComponent& grid, int32_t cellX, int32_t cellY)
+    {
+        return cellX >= 0 && cellY >= 0 &&
+            cellX < std::max(1, grid.GridSize.x) &&
+            cellY < std::max(1, grid.GridSize.y);
+    }
+
+    inline size_t Grid2DCellToIndex(const Grid2DComponent& grid, int32_t cellX, int32_t cellY)
+    {
+        const int32_t width = std::max(1, grid.GridSize.x);
         return static_cast<size_t>(cellY * width + cellX);
     }
 }

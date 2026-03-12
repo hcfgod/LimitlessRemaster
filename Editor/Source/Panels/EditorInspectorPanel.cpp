@@ -410,18 +410,19 @@ namespace Limitless::EditorInspectorPanel
             return;
         }
 
-        static entt::entity animationPanelSelectionOwner = entt::null;
+        const bool hasValidSelectedEntity = scene && selectedEntity != entt::null && scene->IsValid(selectedEntity);
+
+        // Animation clip/controller selections live in their own dedicated panels,
+        // so they must NOT prevent the entity inspector from appearing and must NOT
+        // be cleared when an entity is selected.
         const bool hasSelectedAsset =
             !selectedInputActionsAssetKey.empty() ||
-            !selectedAnimationClipAssetKey.empty() ||
-            !selectedAnimatorControllerAssetKey.empty() ||
             !selectedAudioMixerAssetKey.empty() ||
             !selectedMaterialAssetKey.empty() ||
             !selectedTextureAssetKey.empty() ||
             !selectedNativeScriptAssetKey.empty() ||
             !selectedPrefabAssetKey.empty() ||
             !selectedTilesetAssetKey.empty();
-        const bool hasValidSelectedEntity = scene && selectedEntity != entt::null && scene->IsValid(selectedEntity);
         const bool showEntityInspector = hasValidSelectedEntity && !hasSelectedAsset;
         auto& persistentState = GetInspectorPersistentUiState();
         if (showEntityInspector)
@@ -436,18 +437,9 @@ namespace Limitless::EditorInspectorPanel
             selectedNativeScriptAssetKey.clear();
             selectedPrefabAssetKey.clear();
             selectedTilesetAssetKey.clear();
-
-            // Keep timeline/graph selection while editing the same entity's Animator.
-            if (animationPanelSelectionOwner != selectedEntity)
-            {
-                selectedAnimationClipAssetKey.clear();
-                selectedAnimatorControllerAssetKey.clear();
-                animationPanelSelectionOwner = selectedEntity;
-            }
         }
-        else
+        else if (!hasValidSelectedEntity)
         {
-            animationPanelSelectionOwner = entt::null;
             persistentState.ActiveEntityContextKey.clear();
         }
 
@@ -642,10 +634,10 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
+        // Animation clip/controller selections live in their own dedicated panels,
+        // so they must NOT prevent the entity inspector from appearing.
         const bool hasSelectedAsset =
             !effectiveInputActionsKey.empty() ||
-            !effectiveAnimationClipKey.empty() ||
-            !effectiveAnimatorControllerKey.empty() ||
             !effectiveAudioMixerKey.empty() ||
             !effectiveMaterialKey.empty() ||
             !effectiveTextureKey.empty() ||

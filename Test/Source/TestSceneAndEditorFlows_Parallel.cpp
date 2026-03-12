@@ -988,10 +988,10 @@ TEST_SUITE("Scene And Editor Flows")
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
         scriptEntry.DeclaredWriteAccessMask = 0;
-        registry.emplace<Limitless::Grid2DComponent>(scriptHost);
+        auto& grid2D = registry.emplace<Limitless::Grid2DComponent>(scriptHost);
+        grid2D.GridSize = { 4, 2 };
         auto& tilemapLayer = registry.emplace<Limitless::TilemapLayerComponent>(scriptHost);
-        tilemapLayer.GridSize = { 4, 2 };
-        tilemapLayer.ResizeGrid(tilemapLayer.GridSize);
+        Limitless::EnsureTilemapLayerStorage(grid2D, tilemapLayer);
         const uint32_t tileBeforeUpdate = tilemapLayer.Tiles[1];
 
         scene.Update(1.0f / 60.0f);
@@ -1062,10 +1062,10 @@ TEST_SUITE("Scene And Editor Flows")
         scriptEntry.ExecutionPolicy = Limitless::ScriptExecutionPolicy::ParallelSafe;
         scriptEntry.DeclaredReadAccessMask = Limitless::ToAccessMask(Limitless::SceneSystemAccessComponent::Transform);
         scriptEntry.DeclaredWriteAccessMask = 0;
-        registry.emplace<Limitless::Grid2DComponent>(scriptHost);
+        auto& grid2D = registry.emplace<Limitless::Grid2DComponent>(scriptHost);
+        grid2D.GridSize = { 4, 2 };
         auto& tilemapLayer = registry.emplace<Limitless::TilemapLayerComponent>(scriptHost);
-        tilemapLayer.GridSize = { 4, 2 };
-        tilemapLayer.ResizeGrid(tilemapLayer.GridSize);
+        Limitless::EnsureTilemapLayerStorage(grid2D, tilemapLayer);
         const uint32_t tileBeforeFixedUpdate = tilemapLayer.Tiles[1];
 
         scene.FixedUpdate(1.0f / 60.0f);

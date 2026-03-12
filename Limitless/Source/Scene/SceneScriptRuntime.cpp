@@ -433,14 +433,14 @@ namespace Limitless
         bool HasGrid2DChangedForAccessValidation(const Grid2DComponent& before, const Grid2DComponent& after)
         {
             return glm::length(after.CellSize - before.CellSize) > kScriptTransformDirtyEpsilon ||
-                   glm::length(after.CellGap - before.CellGap) > kScriptTransformDirtyEpsilon;
+                   glm::length(after.CellGap - before.CellGap) > kScriptTransformDirtyEpsilon ||
+                   before.GridSize != after.GridSize ||
+                   glm::length(after.OriginCell - before.OriginCell) > kScriptTransformDirtyEpsilon;
         }
 
         bool HasTilemapLayerChangedForAccessValidation(const TilemapLayerComponent& before, const TilemapLayerComponent& after)
         {
-            if (before.GridSize.x != after.GridSize.x ||
-                before.GridSize.y != after.GridSize.y ||
-                before.RenderOrder != after.RenderOrder ||
+            if (before.RenderOrder != after.RenderOrder ||
                 before.CollisionEnabled != after.CollisionEnabled ||
                 before.CastShadows != after.CastShadows ||
                 before.TileTable != after.TileTable ||
