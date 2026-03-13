@@ -226,18 +226,21 @@ namespace Limitless::Assets
 
     glm::vec4 ComputeSubSpriteUvs(const glm::ivec4& rectPixels,
                                    uint32_t textureWidth,
-                                   uint32_t textureHeight)
+                                   uint32_t textureHeight,
+                                   float insetTexels)
     {
         if (textureWidth == 0 || textureHeight == 0)
             return glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
 
         const float invW = 1.0f / static_cast<float>(textureWidth);
         const float invH = 1.0f / static_cast<float>(textureHeight);
+        const float safeInsetX = std::clamp(insetTexels, 0.0f, std::max(0.0f, (static_cast<float>(rectPixels.z) - 1.0f) * 0.5f));
+        const float safeInsetY = std::clamp(insetTexels, 0.0f, std::max(0.0f, (static_cast<float>(rectPixels.w) - 1.0f) * 0.5f));
 
-        const float uvMinX = static_cast<float>(rectPixels.x) * invW;
-        const float uvMinY = static_cast<float>(rectPixels.y) * invH;
-        const float uvMaxX = static_cast<float>(rectPixels.x + rectPixels.z) * invW;
-        const float uvMaxY = static_cast<float>(rectPixels.y + rectPixels.w) * invH;
+        const float uvMinX = (static_cast<float>(rectPixels.x) + safeInsetX) * invW;
+        const float uvMinY = (static_cast<float>(rectPixels.y) + safeInsetY) * invH;
+        const float uvMaxX = (static_cast<float>(rectPixels.x + rectPixels.z) - safeInsetX) * invW;
+        const float uvMaxY = (static_cast<float>(rectPixels.y + rectPixels.w) - safeInsetY) * invH;
 
         return glm::vec4(uvMinX, uvMinY, uvMaxX, uvMaxY);
     }

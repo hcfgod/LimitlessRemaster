@@ -135,7 +135,7 @@ namespace Limitless::EditorTilePalettePanel
                 if (subIdx < static_cast<int32_t>(spriteSettings.SubSprites.size()))
                 {
                     const auto& rect = spriteSettings.SubSprites[static_cast<size_t>(subIdx)].RectPixels;
-                    const glm::vec4 uvs = Assets::ComputeSubSpriteUvs(rect, texW, texH);
+                    const glm::vec4 uvs = Assets::ComputeSubSpriteUvs(rect, texW, texH, 0.5f);
                     info.UvMin = glm::vec2(uvs.x, uvs.y);
                     info.UvMax = glm::vec2(uvs.z, uvs.w);
                 }
@@ -191,7 +191,8 @@ namespace Limitless::EditorTilePalettePanel
                         const glm::vec4 uvs = Assets::ComputeSubSpriteUvs(
                             rect,
                             cachedTex->GetTexture()->GetWidth(),
-                            cachedTex->GetTexture()->GetHeight());
+                            cachedTex->GetTexture()->GetHeight(),
+                            0.5f);
                         info.UvMin = glm::vec2(uvs.x, uvs.y);
                         info.UvMax = glm::vec2(uvs.z, uvs.w);
                     }

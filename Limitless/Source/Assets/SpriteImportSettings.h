@@ -52,7 +52,8 @@ namespace Limitless::Assets
     /// Returns { uvMinX, uvMinY, uvMaxX, uvMaxY }.
     [[nodiscard]] glm::vec4 ComputeSubSpriteUvs(const glm::ivec4& rectPixels,
                                                  uint32_t textureWidth,
-                                                 uint32_t textureHeight);
+                                                 uint32_t textureHeight,
+                                                 float insetTexels = 0.0f);
 
     /// Parse a virtual sub-sprite key in the form "<textureAssetKey>#<index>".
     /// Returns true when parsing succeeds and fills outTextureAssetKey + outSubSpriteIndex.

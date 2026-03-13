@@ -1136,7 +1136,8 @@ namespace Limitless
                                     const glm::vec4 uvs = Assets::ComputeSubSpriteUvs(
                                         rect,
                                         cached.Texture->GetTexture()->GetWidth(),
-                                        cached.Texture->GetTexture()->GetHeight());
+                                        cached.Texture->GetTexture()->GetHeight(),
+                                        0.5f);
                                     // ComputeSubSpriteUvs returns UVs in image space
                                     // (Y=0 at top). Textures are loaded with FlipVerticallyOnLoad,
                                     // so OpenGL UV Y=0 maps to the image bottom. Swap Y to match.
