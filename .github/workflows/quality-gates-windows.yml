@@ -27,7 +27,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               exit $LASTEXITCODE
             }
-            git -C "Limitless\Vendor\Coral" checkout 6d93ae654b0bc558dfd0cb5b45e7d817397141b3
+            git -C "Limitless\Vendor\Coral" checkout 5ca1cca
             if ($LASTEXITCODE -ne 0) {
               exit $LASTEXITCODE
             }
@@ -217,7 +217,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               exit $LASTEXITCODE
             }
-            git -C "Limitless\Vendor\Coral" checkout 6d93ae654b0bc558dfd0cb5b45e7d817397141b3
+            git -C "Limitless\Vendor\Coral" checkout 5ca1cca
             if ($LASTEXITCODE -ne 0) {
               exit $LASTEXITCODE
             }
