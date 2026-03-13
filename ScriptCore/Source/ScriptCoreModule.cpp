@@ -80,6 +80,36 @@ extern "C" LT_SCRIPTCORE_API void LT_SetInputButtonBridge(Limitless::InputAction
     Limitless::Input::SetButtonBridgeCallback(callback);
 }
 
+extern "C" LT_SCRIPTCORE_API void LT_SetInputMousePositionBridge(Limitless::InputMouseVector2BridgeCallback callback)
+{
+    Limitless::Input::SetMousePositionBridgeCallback(callback);
+}
+
+extern "C" LT_SCRIPTCORE_API void LT_SetInputMouseDeltaBridge(Limitless::InputMouseVector2BridgeCallback callback)
+{
+    Limitless::Input::SetMouseDeltaBridgeCallback(callback);
+}
+
+extern "C" LT_SCRIPTCORE_API void LT_SetInputMouseWheelDeltaBridge(Limitless::InputMouseVector2BridgeCallback callback)
+{
+    Limitless::Input::SetMouseWheelDeltaBridgeCallback(callback);
+}
+
+extern "C" LT_SCRIPTCORE_API void LT_SetInputMouseButtonBridge(Limitless::InputMouseButtonBridgeCallback callback)
+{
+    Limitless::Input::SetMouseButtonBridgeCallback(callback);
+}
+
+extern "C" LT_SCRIPTCORE_API void LT_SetInputMouseButtonDownBridge(Limitless::InputMouseButtonBridgeCallback callback)
+{
+    Limitless::Input::SetMouseButtonDownBridgeCallback(callback);
+}
+
+extern "C" LT_SCRIPTCORE_API void LT_SetInputMouseButtonUpBridge(Limitless::InputMouseButtonBridgeCallback callback)
+{
+    Limitless::Input::SetMouseButtonUpBridgeCallback(callback);
+}
+
 extern "C" LT_SCRIPTCORE_API void LT_SetPhysics2DRaycastBridge(Limitless::Physics2DRaycastBridgeCallback callback)
 {
     Limitless::Physics2D::SetRaycastBridgeCallback(callback);

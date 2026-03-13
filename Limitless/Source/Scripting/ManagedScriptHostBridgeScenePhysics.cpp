@@ -2,6 +2,7 @@
 
 #include "Audio/AudioEngine.h"
 #include "Core/Debug/Log.h"
+#include "Core/Input/InputSystem.h"
 #include "Scene/SceneManager.h"
 #include "Scripting/Random.h"
 
@@ -44,6 +45,76 @@ namespace Limitless::ManagedScriptHost
         float ManagedRandomValueIcall()
         {
             return Random::Value();
+        }
+
+        ManagedVector2 ManagedGetMousePositionIcall()
+        {
+            return ToManagedVector2(InputSystem::GetInstance().GetMousePosition());
+        }
+
+        ManagedVector2 ManagedGetMouseDeltaIcall()
+        {
+            return ToManagedVector2(InputSystem::GetInstance().GetMouseDelta());
+        }
+
+        ManagedVector2 ManagedGetMouseWheelDeltaIcall()
+        {
+            return ToManagedVector2(InputSystem::GetInstance().GetMouseWheelDelta());
+        }
+
+        bool ManagedGetMouseButtonIcall(int button)
+        {
+            return InputSystem::GetInstance().IsMouseButtonDown(static_cast<uint8_t>(button));
+        }
+
+        bool ManagedGetMouseButtonDownIcall(int button)
+        {
+            return InputSystem::GetInstance().WasMouseButtonPressedThisFrame(static_cast<uint8_t>(button));
+        }
+
+        bool ManagedGetMouseButtonUpIcall(int button)
+        {
+            return InputSystem::GetInstance().WasMouseButtonReleasedThisFrame(static_cast<uint8_t>(button));
+        }
+
+        bool ManagedInputActionExistsIcall(Coral::String mapName, Coral::String actionName)
+        {
+            return InputSystem::GetInstance().HasAction(ToUtf8Borrowed(mapName), ToUtf8Borrowed(actionName));
+        }
+
+        bool ManagedInputActionPressedIcall(Coral::String mapName, Coral::String actionName, float deadzone)
+        {
+            return InputSystem::GetInstance().IsActionPressed(ToUtf8Borrowed(mapName), ToUtf8Borrowed(actionName), deadzone);
+        }
+
+        bool ManagedInputActionStartedIcall(Coral::String mapName, Coral::String actionName)
+        {
+            return InputSystem::GetInstance().WasActionStartedThisFrame(ToUtf8Borrowed(mapName), ToUtf8Borrowed(actionName));
+        }
+
+        bool ManagedInputActionPerformedIcall(Coral::String mapName, Coral::String actionName)
+        {
+            return InputSystem::GetInstance().WasActionPerformedThisFrame(ToUtf8Borrowed(mapName), ToUtf8Borrowed(actionName));
+        }
+
+        bool ManagedInputActionCanceledIcall(Coral::String mapName, Coral::String actionName)
+        {
+            return InputSystem::GetInstance().WasActionCanceledThisFrame(ToUtf8Borrowed(mapName), ToUtf8Borrowed(actionName));
+        }
+
+        bool ManagedInputActionButtonIcall(Coral::String mapName, Coral::String actionName)
+        {
+            return InputSystem::GetInstance().ReadActionButton(ToUtf8Borrowed(mapName), ToUtf8Borrowed(actionName));
+        }
+
+        float ManagedInputActionAxis1DIcall(Coral::String mapName, Coral::String actionName)
+        {
+            return InputSystem::GetInstance().ReadActionAxis1D(ToUtf8Borrowed(mapName), ToUtf8Borrowed(actionName));
+        }
+
+        ManagedVector2 ManagedInputActionAxis2DIcall(Coral::String mapName, Coral::String actionName)
+        {
+            return ToManagedVector2(InputSystem::GetInstance().ReadActionAxis2D(ToUtf8Borrowed(mapName), ToUtf8Borrowed(actionName)));
         }
 
         bool ManagedLoadSceneIcall(Coral::String sceneIdentifier, int loadMode)
@@ -717,6 +788,20 @@ namespace Limitless::ManagedScriptHost
                 LT_MANAGED_INTERNAL_CALL(RandomRangeIntIcall),
                 LT_MANAGED_INTERNAL_CALL(RandomRangeFloatIcall),
                 LT_MANAGED_INTERNAL_CALL(RandomValueIcall),
+                LT_MANAGED_INTERNAL_CALL(GetMousePositionIcall),
+                LT_MANAGED_INTERNAL_CALL(GetMouseDeltaIcall),
+                LT_MANAGED_INTERNAL_CALL(GetMouseWheelDeltaIcall),
+                LT_MANAGED_INTERNAL_CALL(GetMouseButtonIcall),
+                LT_MANAGED_INTERNAL_CALL(GetMouseButtonDownIcall),
+                LT_MANAGED_INTERNAL_CALL(GetMouseButtonUpIcall),
+                LT_MANAGED_INTERNAL_CALL(InputActionExistsIcall),
+                LT_MANAGED_INTERNAL_CALL(InputActionPressedIcall),
+                LT_MANAGED_INTERNAL_CALL(InputActionStartedIcall),
+                LT_MANAGED_INTERNAL_CALL(InputActionPerformedIcall),
+                LT_MANAGED_INTERNAL_CALL(InputActionCanceledIcall),
+                LT_MANAGED_INTERNAL_CALL(InputActionButtonIcall),
+                LT_MANAGED_INTERNAL_CALL(InputActionAxis1DIcall),
+                LT_MANAGED_INTERNAL_CALL(InputActionAxis2DIcall),
                 LT_MANAGED_INTERNAL_CALL(LoadSceneIcall),
                 LT_MANAGED_INTERNAL_CALL(ReloadCurrentSceneIcall),
                 LT_MANAGED_INTERNAL_CALL(SetActiveSceneIcall),

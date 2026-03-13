@@ -618,6 +618,48 @@ namespace Limitless::ScriptCoreModuleRuntime
             return InputSystem::GetInstance().ReadActionAxis2D(safeMapName, safeActionName);
         }
 
+        glm::vec2 ForwardInputMousePositionToHost()
+        {
+            if (ShouldSuppressGameplayInput())
+                return glm::vec2(0.0f);
+            return InputSystem::GetInstance().GetMousePosition();
+        }
+
+        glm::vec2 ForwardInputMouseDeltaToHost()
+        {
+            if (ShouldSuppressGameplayInput())
+                return glm::vec2(0.0f);
+            return InputSystem::GetInstance().GetMouseDelta();
+        }
+
+        glm::vec2 ForwardInputMouseWheelDeltaToHost()
+        {
+            if (ShouldSuppressGameplayInput())
+                return glm::vec2(0.0f);
+            return InputSystem::GetInstance().GetMouseWheelDelta();
+        }
+
+        bool ForwardInputMouseButtonToHost(uint8_t button)
+        {
+            if (ShouldSuppressGameplayInput())
+                return false;
+            return InputSystem::GetInstance().IsMouseButtonDown(button);
+        }
+
+        bool ForwardInputMouseButtonDownToHost(uint8_t button)
+        {
+            if (ShouldSuppressGameplayInput())
+                return false;
+            return InputSystem::GetInstance().WasMouseButtonPressedThisFrame(button);
+        }
+
+        bool ForwardInputMouseButtonUpToHost(uint8_t button)
+        {
+            if (ShouldSuppressGameplayInput())
+                return false;
+            return InputSystem::GetInstance().WasMouseButtonReleasedThisFrame(button);
+        }
+
         bool ForwardInputActionPressedToHost(const char* mapName, const char* actionName, float deadzone)
         {
             if (ShouldSuppressGameplayInput())
@@ -826,6 +868,12 @@ namespace Limitless::ScriptCoreModuleRuntime
             ConnectOptionalScriptCoreBridge<SceneTransitionBridgeCallback>(libraryHandle, "LT_SetSceneTransitionBridge", &ForwardSceneTransitionToHost);
             ConnectOptionalScriptCoreBridge<InputActionAxis1DBridgeCallback>(libraryHandle, "LT_SetInputActionAxis1DBridge", &ForwardInputActionAxis1DToHost);
             ConnectOptionalScriptCoreBridge<InputActionAxis2DBridgeCallback>(libraryHandle, "LT_SetInputActionAxis2DBridge", &ForwardInputActionAxis2DToHost);
+            ConnectOptionalScriptCoreBridge<InputMouseVector2BridgeCallback>(libraryHandle, "LT_SetInputMousePositionBridge", &ForwardInputMousePositionToHost);
+            ConnectOptionalScriptCoreBridge<InputMouseVector2BridgeCallback>(libraryHandle, "LT_SetInputMouseDeltaBridge", &ForwardInputMouseDeltaToHost);
+            ConnectOptionalScriptCoreBridge<InputMouseVector2BridgeCallback>(libraryHandle, "LT_SetInputMouseWheelDeltaBridge", &ForwardInputMouseWheelDeltaToHost);
+            ConnectOptionalScriptCoreBridge<InputMouseButtonBridgeCallback>(libraryHandle, "LT_SetInputMouseButtonBridge", &ForwardInputMouseButtonToHost);
+            ConnectOptionalScriptCoreBridge<InputMouseButtonBridgeCallback>(libraryHandle, "LT_SetInputMouseButtonDownBridge", &ForwardInputMouseButtonDownToHost);
+            ConnectOptionalScriptCoreBridge<InputMouseButtonBridgeCallback>(libraryHandle, "LT_SetInputMouseButtonUpBridge", &ForwardInputMouseButtonUpToHost);
             ConnectOptionalScriptCoreBridge<InputActionPressedBridgeCallback>(libraryHandle, "LT_SetInputActionPressedBridge", &ForwardInputActionPressedToHost);
             ConnectOptionalScriptCoreBridge<InputActionExistsBridgeCallback>(libraryHandle, "LT_SetInputActionExistsBridge", &ForwardInputActionExistsToHost);
             ConnectOptionalScriptCoreBridge<InputActionTriggerBridgeCallback>(libraryHandle, "LT_SetInputActionStartedBridge", &ForwardInputActionStartedToHost);
@@ -848,6 +896,12 @@ namespace Limitless::ScriptCoreModuleRuntime
             ConnectOptionalScriptCoreBridge<SceneTransitionBridgeCallback>(libraryHandle, "LT_SetSceneTransitionBridge", nullptr);
             ConnectOptionalScriptCoreBridge<InputActionAxis1DBridgeCallback>(libraryHandle, "LT_SetInputActionAxis1DBridge", nullptr);
             ConnectOptionalScriptCoreBridge<InputActionAxis2DBridgeCallback>(libraryHandle, "LT_SetInputActionAxis2DBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputMouseVector2BridgeCallback>(libraryHandle, "LT_SetInputMousePositionBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputMouseVector2BridgeCallback>(libraryHandle, "LT_SetInputMouseDeltaBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputMouseVector2BridgeCallback>(libraryHandle, "LT_SetInputMouseWheelDeltaBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputMouseButtonBridgeCallback>(libraryHandle, "LT_SetInputMouseButtonBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputMouseButtonBridgeCallback>(libraryHandle, "LT_SetInputMouseButtonDownBridge", nullptr);
+            ConnectOptionalScriptCoreBridge<InputMouseButtonBridgeCallback>(libraryHandle, "LT_SetInputMouseButtonUpBridge", nullptr);
             ConnectOptionalScriptCoreBridge<InputActionPressedBridgeCallback>(libraryHandle, "LT_SetInputActionPressedBridge", nullptr);
             ConnectOptionalScriptCoreBridge<InputActionExistsBridgeCallback>(libraryHandle, "LT_SetInputActionExistsBridge", nullptr);
             ConnectOptionalScriptCoreBridge<InputActionTriggerBridgeCallback>(libraryHandle, "LT_SetInputActionStartedBridge", nullptr);
