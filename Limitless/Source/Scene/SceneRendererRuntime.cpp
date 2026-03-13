@@ -1,4 +1,5 @@
 #include "Scene/Scene.h"
+#include "Scene/SceneRenderCulling.h"
 #include "Scene/SceneRenderer.h"
 #include "Scene/Components/RenderingComponents.h"
 #include "Scene/Components/TilemapComponents.h"
@@ -10,6 +11,7 @@
 #include "Assets/TextureAsset.h"
 #include "Assets/TileAsset.h"
 #include "Core/Concurrency/AsyncIO.h"
+#include "Core/Debug/Log.h"
 #include "Core/Input/InputSystem.h"
 #include "Core/Time.h"
 #include "Graphics/Camera/Camera.h"
@@ -717,6 +719,7 @@ namespace Limitless
         {
             auto& registry = scene.GetRegistry();
             const uint32_t activeCullingMask = GetEffectiveCameraCullingMask(camera);
+            const SceneRenderCullingFrustum cameraFrustum = BuildSceneRenderCullingFrustum(camera);
 
             auto canvasView = registry.view<CanvasComponent>();
             std::vector<entt::entity> canvases;
@@ -838,6 +841,12 @@ namespace Limitless
 
                     if (slider && sliderHasVisualChildren)
                         SyncSliderVisualChildren(registry, uiEntity, *slider);
+
+                    if (canvas.Mode == CanvasComponent::RenderMode::WorldSpace &&
+                        !IsSceneRenderQuadVisible(cameraFrustum, model))
+                    {
+                        continue;
+                    }
 
                     if (slider && !sliderHasVisualChildren)
                     {
@@ -995,6 +1004,7 @@ namespace Limitless
 
         auto& registry = scene.GetRegistry();
         const uint32_t activeCullingMask = GetEffectiveCameraCullingMask(camera);
+        const SceneRenderCullingFrustum cameraFrustum = BuildSceneRenderCullingFrustum(camera);
         // ---- Grid2D + TilemapLayer rendering path ----------------------------
         // Renders entities using the new Grid2DComponent + child TilemapLayerComponent
         // architecture. Each Grid2D entity defines the cell layout; its children
@@ -1045,21 +1055,29 @@ namespace Limitless
                         continue;
 
                     EnsureTilemapLayerStorage(grid2D, layer);
-                    // Track which TileTable entries are actually referenced by
-                    // cells in this layer. Large palettes may populate a huge
-                    // TileTable, but only a subset is typically painted.
-                    std::vector<bool> usedTileTableEntries(layer.TileTable.size(), false);
-                    for (uint32_t tileId : layer.Tiles)
+
+                    // Rebuild the sparse painted-cell index only when the
+                    // grid was resized / loaded / cloned (structural change).
+                    // Single-cell paints use incremental AppendPaintedCellToCache
+                    // so we avoid an O(totalCells) scan every frame.
+                    if (layer.PaintedCellCacheDirty)
                     {
-                        if (tileId == 0u)
-                            continue;
-                        if (static_cast<size_t>(tileId) < usedTileTableEntries.size())
-                            usedTileTableEntries[tileId] = true;
+                        RebuildPaintedCellCache(layer);
                     }
 
                     // Rebuild render cache if dirty.
                     if (layer.RenderCacheDirty)
                     {
+                        std::vector<bool> usedTileTableEntries(layer.TileTable.size(), false);
+                        for (const auto& pc : layer.CachedPaintedCells)
+                        {
+                            if (pc.CellIndex >= layer.Tiles.size())
+                                continue;
+                            const uint32_t liveTileId = layer.Tiles[pc.CellIndex];
+                            if (liveTileId != 0u && static_cast<size_t>(liveTileId) < usedTileTableEntries.size())
+                                usedTileTableEntries[liveTileId] = true;
+                        }
+
                         layer.CachedTileRender.clear();
                         layer.CachedTileRender.resize(layer.TileTable.size());
                         bool allResolved = true;
@@ -1135,6 +1153,7 @@ namespace Limitless
 
                         if (allResolved)
                             layer.RenderCacheDirty = false;
+                        MarkAllChunksDirty(layer);
                     }
                     else
                     {
@@ -1146,8 +1165,6 @@ namespace Limitless
                             auto& cached = layer.CachedTileRender[ti];
                             if (!cached.Texture &&
                                 ti < layer.TileTable.size() &&
-                                ti < usedTileTableEntries.size() &&
-                                usedTileTableEntries[ti] &&
                                 !layer.TileTable[ti].empty())
                             {
                                 // Re-check pending texture loads without re-reading tile JSON.
@@ -1169,48 +1186,149 @@ namespace Limitless
                                     }
                                 }
                                 if (anyNewlyAvailable)
+                                {
                                     layer.RenderCacheDirty = true;
+                                    MarkAllChunksDirty(layer);
+                                }
                                 break;
                             }
                         }
                     }
 
-                    // Render tiles.
+                    if (layer.PaintedCellRowOffsetsDirty)
+                        RebuildPaintedCellRowOffsets(grid2D, layer);
+                    if (layer.PaintedCellChunkCacheDirty)
+                        RebuildPaintedCellChunkCache(grid2D, layer);
+
+                    // Ensure persistent chunk topology and caches exist.
+                    if (layer.ChunkTopologyDirty)
+                        RebuildChunkTopology(grid2D, layer);
+
                     const int32_t gridWidth  = std::max(1, grid2D.GridSize.x);
-                    const int32_t gridHeight = std::max(1, grid2D.GridSize.y);
                     const glm::vec2 firstCellCenter = GetTilemapLayerFirstCellCenter(grid2D, layer);
+                    const int32_t chunkDimension = std::max(1, kTilemapPaintedCellChunkDimension);
+                    const int32_t chunkCountX = std::max(1, layer.ChunkGridSize.x);
+                    const int32_t chunkCountY = std::max(1, layer.ChunkGridSize.y);
 
-                    for (int32_t cellY = 0; cellY < gridHeight; ++cellY)
+                    // Rebuild dirty chunk render caches.
+                    // Vertices are baked in grid-local space so they survive
+                    // camera and grid-transform changes without rebuild.
+                    for (int32_t cy = 0; cy < chunkCountY; ++cy)
                     {
-                        for (int32_t cellX = 0; cellX < gridWidth; ++cellX)
+                        for (int32_t cx = 0; cx < chunkCountX; ++cx)
                         {
-                            const size_t tileIdx =
-                                static_cast<size_t>(cellY * gridWidth + cellX);
-                            if (tileIdx >= layer.Tiles.size())
+                            const size_t ci = static_cast<size_t>(cy) * static_cast<size_t>(chunkCountX) + static_cast<size_t>(cx);
+                            if (ci >= layer.ChunkRenderCaches.size())
+                                continue;
+                            auto& rc = layer.ChunkRenderCaches[ci];
+                            if (!rc.Dirty)
                                 continue;
 
-                            const uint32_t tileId = layer.Tiles[tileIdx];
-                            if (tileId == 0u)
-                                continue;
+                            rc.CpuVertices.clear();
+                            rc.Textures.clear();
+                            rc.QuadCount = 0;
+                            rc.Empty = true;
 
-                            if (tileId >= layer.CachedTileRender.size())
-                                continue;
+                            // Use the painted-cell chunk offsets to find cells in this chunk.
+                            if (ci < layer.CachedPaintedCellChunkOffsets.size() &&
+                                ci + 1u < layer.CachedPaintedCellChunkOffsets.size())
+                            {
+                                const uint32_t chunkStart = layer.CachedPaintedCellChunkOffsets[ci];
+                                const uint32_t chunkEnd = layer.CachedPaintedCellChunkOffsets[ci + 1u];
+                                for (uint32_t pcIdx = chunkStart; pcIdx < chunkEnd; ++pcIdx)
+                                {
+                                    if (pcIdx >= layer.CachedPaintedCellChunkIndices.size())
+                                        continue;
+                                    const uint32_t paintedIdx = layer.CachedPaintedCellChunkIndices[pcIdx];
+                                    if (paintedIdx >= layer.CachedPaintedCells.size())
+                                        continue;
+                                    const auto& pc = layer.CachedPaintedCells[paintedIdx];
+                                    if (pc.CellIndex >= layer.Tiles.size())
+                                        continue;
+                                    const uint32_t tileId = layer.Tiles[pc.CellIndex];
+                                    if (tileId == 0u || tileId >= layer.CachedTileRender.size())
+                                        continue;
+                                    const auto& cached = layer.CachedTileRender[tileId];
+                                    if (!cached.Texture || !cached.Texture->GetTexture())
+                                        continue;
 
-                            const auto& cached = layer.CachedTileRender[tileId];
-                            if (!cached.Texture || !cached.Texture->GetTexture())
-                                continue;
+                                    // Assign a texture slot for this tile's texture.
+                                    int32_t texSlot = -1;
+                                    for (size_t t = 0; t < rc.Textures.size(); ++t)
+                                    {
+                                        if (rc.Textures[t] == cached.Texture) { texSlot = static_cast<int32_t>(t) + 1; break; }
+                                    }
+                                    if (texSlot < 0)
+                                    {
+                                        if (rc.Textures.size() >= 15)
+                                            continue;
+                                        texSlot = static_cast<int32_t>(rc.Textures.size()) + 1;
+                                        rc.Textures.push_back(cached.Texture);
+                                    }
 
-                            const glm::vec3 localPosition = glm::vec3(
-                                firstCellCenter.x + static_cast<float>(cellX) * cellSize.x,
-                                firstCellCenter.y + static_cast<float>(cellY) * cellSize.y,
-                                0.0f);
-                            glm::mat4 tileTransform = gridWorldTransform;
-                            tileTransform = glm::translate(tileTransform, localPosition);
-                            tileTransform = glm::scale(tileTransform, glm::vec3(cellSize, 1.0f));
-                            Renderer2D::Default().DrawQuad(tileTransform, cached.Texture,
-                                                 cached.Color, cached.UvMin, cached.UvMax);
+                                    const int32_t cellX = static_cast<int32_t>(pc.CellIndex % static_cast<uint32_t>(gridWidth));
+                                    const int32_t cellY = static_cast<int32_t>(pc.CellIndex / static_cast<uint32_t>(gridWidth));
+                                    const float cx0 = firstCellCenter.x + static_cast<float>(cellX) * cellSize.x;
+                                    const float cy0 = firstCellCenter.y + static_cast<float>(cellY) * cellSize.y;
+                                    const float halfW = cellSize.x * 0.5f;
+                                    const float halfH = cellSize.y * 0.5f;
+
+                                    const TilemapLayerComponent::ChunkVertex verts[4] = {
+                                        { glm::vec3(cx0 - halfW, cy0 - halfH, 0.0f), glm::vec2(cached.UvMin.x, cached.UvMin.y), cached.Color, texSlot },
+                                        { glm::vec3(cx0 + halfW, cy0 - halfH, 0.0f), glm::vec2(cached.UvMax.x, cached.UvMin.y), cached.Color, texSlot },
+                                        { glm::vec3(cx0 + halfW, cy0 + halfH, 0.0f), glm::vec2(cached.UvMax.x, cached.UvMax.y), cached.Color, texSlot },
+                                        { glm::vec3(cx0 - halfW, cy0 + halfH, 0.0f), glm::vec2(cached.UvMin.x, cached.UvMax.y), cached.Color, texSlot },
+                                    };
+                                    rc.CpuVertices.insert(rc.CpuVertices.end(), std::begin(verts), std::end(verts));
+                                    ++rc.QuadCount;
+                                }
+                            }
+
+                            rc.Empty = (rc.QuadCount == 0);
+                            rc.Dirty = false;
+                            rc.GpuDirty = true;
                         }
                     }
+
+                    // Frustum-cull and submit visible chunks.
+                    for (int32_t cy = 0; cy < chunkCountY; ++cy)
+                    {
+                        for (int32_t cx = 0; cx < chunkCountX; ++cx)
+                        {
+                            const size_t ci = static_cast<size_t>(cy) * static_cast<size_t>(chunkCountX) + static_cast<size_t>(cx);
+                            if (ci >= layer.ChunkRenderCaches.size())
+                                continue;
+                            const auto& rc = layer.ChunkRenderCaches[ci];
+                            if (rc.Empty || rc.QuadCount == 0)
+                                continue;
+
+                            // Frustum-cull using persistent chunk bounds.
+                            const glm::vec3 worldCorners[4] = {
+                                glm::vec3(gridWorldTransform * glm::vec4(rc.LocalMin.x, rc.LocalMin.y, 0.0f, 1.0f)),
+                                glm::vec3(gridWorldTransform * glm::vec4(rc.LocalMax.x, rc.LocalMin.y, 0.0f, 1.0f)),
+                                glm::vec3(gridWorldTransform * glm::vec4(rc.LocalMax.x, rc.LocalMax.y, 0.0f, 1.0f)),
+                                glm::vec3(gridWorldTransform * glm::vec4(rc.LocalMin.x, rc.LocalMax.y, 0.0f, 1.0f))
+                            };
+                            glm::vec3 aabbMin(0.0f), aabbMax(0.0f);
+                            if (ComputeSceneRenderAabbFromPoints(worldCorners, 4, aabbMin, aabbMax) &&
+                                !IsSceneRenderAabbVisible(cameraFrustum, aabbMin, aabbMax))
+                                continue;
+
+                            // Collect GPU texture handles for the chunk's texture slots.
+                            std::vector<std::shared_ptr<Texture2D>> gpuTextures;
+                            gpuTextures.reserve(rc.Textures.size());
+                            for (const auto& texAsset : rc.Textures)
+                                gpuTextures.push_back(texAsset ? texAsset->GetTexture() : nullptr);
+
+                            Renderer2D::Default().SubmitPrebakedQuads(
+                                rc.CpuVertices.data(),
+                                rc.QuadCount,
+                                gpuTextures.data(),
+                                static_cast<uint32_t>(gpuTextures.size()),
+                                gridWorldTransform);
+                        }
+                    }
+
                 }
             }
         };
@@ -1227,6 +1345,8 @@ namespace Limitless
             auto* animator = registry.try_get<AnimatorComponent>(entity);
 
             glm::mat4 model = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
+            if (!IsSceneRenderQuadVisible(cameraFrustum, model))
+                return;
             bool useMissingAssetFallback = false;
 
             const glm::vec2 safeTilingFactor(
@@ -1394,6 +1514,38 @@ namespace Limitless
             }
         };
 
+        auto isParticleEmitterVisible = [&](const ParticleEmitterRuntime& runtime, float emitterZ) {
+            bool hasBounds = false;
+            glm::vec3 boundsMinimum(0.0f);
+            glm::vec3 boundsMaximum(0.0f);
+            for (uint32_t i = 0; i < runtime.AliveCount; ++i)
+            {
+                const float t = 1.0f - (runtime.Lifetimes[i] / runtime.MaxLifetimes[i]);
+                const float size = std::max(0.001f, glm::mix(runtime.StartSizes[i], runtime.EndSizes[i], t));
+                const glm::vec3 particleMinimum(
+                    runtime.Positions[i].x - size * 0.5f,
+                    runtime.Positions[i].y - size * 0.5f,
+                    emitterZ);
+                const glm::vec3 particleMaximum(
+                    runtime.Positions[i].x + size * 0.5f,
+                    runtime.Positions[i].y + size * 0.5f,
+                    emitterZ);
+
+                if (!hasBounds)
+                {
+                    boundsMinimum = particleMinimum;
+                    boundsMaximum = particleMaximum;
+                    hasBounds = true;
+                    continue;
+                }
+
+                ExpandSceneRenderAabb(boundsMinimum, boundsMaximum, particleMinimum);
+                ExpandSceneRenderAabb(boundsMinimum, boundsMaximum, particleMaximum);
+            }
+
+            return !hasBounds || IsSceneRenderAabbVisible(cameraFrustum, boundsMinimum, boundsMaximum);
+        };
+
         auto drawParticleEmitters = [&]() {
             auto particleView = registry.view<ParticleEmitterComponent, TransformComponent>();
             for (entt::entity entity : particleView)
@@ -1405,6 +1557,11 @@ namespace Limitless
 
                 auto& emitter = particleView.get<ParticleEmitterComponent>(entity);
                 if (!emitter.RuntimeState || emitter.RuntimeState->AliveCount == 0)
+                    continue;
+                const auto& runtime = *emitter.RuntimeState;
+                const auto& emitterTransform = particleView.get<TransformComponent>(entity);
+                const float emitterZ = emitterTransform.Position.z;
+                if (!isParticleEmitterVisible(runtime, emitterZ))
                     continue;
 
                 // Resolve texture once per emitter (same lazy-load pattern as SpriteComponent)
@@ -1433,10 +1590,6 @@ namespace Limitless
                         }
                     }
                 }
-
-                const auto& runtime = *emitter.RuntimeState;
-                const auto& emitterTransform = particleView.get<TransformComponent>(entity);
-                const float emitterZ = emitterTransform.Position.z;
 
                 for (uint32_t i = 0; i < runtime.AliveCount; ++i)
                 {

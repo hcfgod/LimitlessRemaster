@@ -271,7 +271,7 @@ namespace Limitless
             bool hadPrefabInstanceBeforeFixedUpdate = false;
             Grid2DComponent grid2DBeforeFixedUpdate{};
             bool hadGrid2DBeforeFixedUpdate = false;
-            TilemapLayerComponent tilemapLayerBeforeFixedUpdate{};
+            TilemapLayerValidationSnapshot tilemapLayerSnapshotBeforeFixedUpdate{};
             bool hadTilemapLayerBeforeFixedUpdate = false;
             AnimatorComponent animatorBeforeFixedUpdate{};
             bool hadAnimatorBeforeFixedUpdate = false;
@@ -426,7 +426,7 @@ namespace Limitless
                 }
                 if (auto* tilemapLayer = m_Registry.try_get<TilemapLayerComponent>(entity))
                 {
-                    tilemapLayerBeforeFixedUpdate = *tilemapLayer;
+                    tilemapLayerSnapshotBeforeFixedUpdate = SnapshotTilemapLayerForValidation(*tilemapLayer);
                     hadTilemapLayerBeforeFixedUpdate = true;
                 }
                 if (auto* animator = m_Registry.try_get<AnimatorComponent>(entity))
@@ -733,7 +733,7 @@ namespace Limitless
                 const bool hasTilemapLayerAfterFixedUpdate = tilemapLayerAfterFixedUpdate != nullptr;
                 if (hadTilemapLayerBeforeFixedUpdate != hasTilemapLayerAfterFixedUpdate ||
                     (hadTilemapLayerBeforeFixedUpdate && tilemapLayerAfterFixedUpdate &&
-                     HasTilemapLayerChangedForAccessValidation(tilemapLayerBeforeFixedUpdate, *tilemapLayerAfterFixedUpdate)))
+                     HasTilemapLayerChangedFromSnapshot(tilemapLayerSnapshotBeforeFixedUpdate, *tilemapLayerAfterFixedUpdate)))
                 {
                     observedWriteMask |= ToAccessMask(SceneSystemAccessComponent::Tilemap);
                 }

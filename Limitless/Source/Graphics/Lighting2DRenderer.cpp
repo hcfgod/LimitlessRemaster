@@ -21,6 +21,7 @@
 #include "Scene/Components/CoreComponents.h"
 #include "Scene/Components/RenderingComponents.h"
 #include "Scene/Components/TilemapComponents.h"
+#include "Scene/SceneRenderCulling.h"
 #include "Scene/Scene.h"
 #include "Scene/SceneRenderer.h"
 
@@ -1078,6 +1079,7 @@ namespace Limitless
 
         std::vector<ShadowSegment> BuildShadowSegments(Scene& scene,
                                                        float interpolationAlpha,
+                                                       const Camera& camera,
                                                        const glm::mat4& viewProjection,
                                                        uint32_t width,
                                                        uint32_t height,
@@ -1422,9 +1424,22 @@ namespace Limitless
                     if (!layer.CollisionEnabled || !layer.CastShadows)
                         continue;
                     EnsureTilemapLayerStorage(grid, layer);
+                    if (layer.PaintedCellCacheDirty)
+                        RebuildPaintedCellCache(layer);
+
                     const int32_t widthCells = std::max(1, grid.GridSize.x);
                     const int32_t heightCells = std::max(1, grid.GridSize.y);
                     const glm::vec2 firstCellCenter = GetTilemapLayerFirstCellCenter(grid, layer);
+                    if (layer.PaintedCellRowOffsetsDirty)
+                        RebuildPaintedCellRowOffsets(grid, layer);
+                    if (layer.PaintedCellChunkCacheDirty)
+                        RebuildPaintedCellChunkCache(grid, layer);
+                    if (layer.ChunkTopologyDirty)
+                        RebuildChunkTopology(grid, layer);
+
+                    const SceneRenderCullingFrustum shadowFrustum = BuildSceneRenderCullingFrustum(camera);
+                    const int32_t chunkCountX = std::max(1, layer.ChunkGridSize.x);
+                    const int32_t chunkCountY = std::max(1, layer.ChunkGridSize.y);
 
                     const auto hasTileAt = [&](int32_t cellX, int32_t cellY) -> bool {
                         if (cellX < 0 || cellY < 0 || cellX >= widthCells || cellY >= heightCells)
@@ -1435,39 +1450,100 @@ namespace Limitless
                         return layer.Tiles[index] != 0u;
                     };
 
-                    bool emittedAnySegment = false;
-                    auto emitLocalEdge = [&](const glm::vec2& localA, const glm::vec2& localB) {
-                        const glm::vec4 worldAH = gridWorldTransform * glm::vec4(localA, 0.0f, 1.0f);
-                        const glm::vec4 worldBH = gridWorldTransform * glm::vec4(localB, 0.0f, 1.0f);
-                        const size_t beforeCount = segments.size();
-                        appendWorldEdge(glm::vec3(worldAH), glm::vec3(worldBH), EncodeEntityIdToUnitVec2(layerEntity));
-                        if (segments.size() > beforeCount)
-                            emittedAnySegment = true;
-                    };
-
-                    for (int32_t cellY = 0; cellY < heightCells && segments.size() < maxSegments; ++cellY)
+                    // Rebuild dirty chunk lighting caches.
+                    for (int32_t cy = 0; cy < chunkCountY; ++cy)
                     {
-                        for (int32_t cellX = 0; cellX < widthCells && segments.size() < maxSegments; ++cellX)
+                        for (int32_t cx = 0; cx < chunkCountX; ++cx)
                         {
-                            if (!hasTileAt(cellX, cellY))
+                            const size_t ci = static_cast<size_t>(cy) * static_cast<size_t>(chunkCountX) + static_cast<size_t>(cx);
+                            if (ci >= layer.ChunkLightingCaches.size())
+                                continue;
+                            auto& lc = layer.ChunkLightingCaches[ci];
+                            if (!lc.Dirty)
                                 continue;
 
-                            const glm::vec2 localCenter = firstCellCenter + glm::vec2(
-                                static_cast<float>(cellX) * cellSize.x,
-                                static_cast<float>(cellY) * cellSize.y);
-                            const glm::vec2 localMin = localCenter - cellSize * 0.5f;
-                            const glm::vec2 localMax = localCenter + cellSize * 0.5f;
+                            lc.OccluderEdges.clear();
+                            lc.Empty = true;
 
-                            // Maintain consistent counter-clockwise edge winding for
-                            // stable outward normals in shader-side facing tests.
-                            if (!hasTileAt(cellX, cellY - 1))
-                                emitLocalEdge(glm::vec2(localMin.x, localMin.y), glm::vec2(localMax.x, localMin.y));
-                            if (!hasTileAt(cellX + 1, cellY))
-                                emitLocalEdge(glm::vec2(localMax.x, localMin.y), glm::vec2(localMax.x, localMax.y));
-                            if (!hasTileAt(cellX, cellY + 1))
-                                emitLocalEdge(glm::vec2(localMax.x, localMax.y), glm::vec2(localMin.x, localMax.y));
-                            if (!hasTileAt(cellX - 1, cellY))
-                                emitLocalEdge(glm::vec2(localMin.x, localMax.y), glm::vec2(localMin.x, localMin.y));
+                            if (ci < layer.CachedPaintedCellChunkOffsets.size() &&
+                                ci + 1u < layer.CachedPaintedCellChunkOffsets.size())
+                            {
+                                const uint32_t chunkStart = layer.CachedPaintedCellChunkOffsets[ci];
+                                const uint32_t chunkEnd = layer.CachedPaintedCellChunkOffsets[ci + 1u];
+                                for (uint32_t pcIdx = chunkStart; pcIdx < chunkEnd; ++pcIdx)
+                                {
+                                    if (pcIdx >= layer.CachedPaintedCellChunkIndices.size())
+                                        continue;
+                                    const uint32_t paintedIdx = layer.CachedPaintedCellChunkIndices[pcIdx];
+                                    if (paintedIdx >= layer.CachedPaintedCells.size())
+                                        continue;
+                                    const auto& pc = layer.CachedPaintedCells[paintedIdx];
+                                    if (pc.CellIndex >= layer.Tiles.size())
+                                        continue;
+                                    if (layer.Tiles[pc.CellIndex] == 0u)
+                                        continue;
+
+                                    const int32_t cellX = static_cast<int32_t>(pc.CellIndex % static_cast<uint32_t>(widthCells));
+                                    const int32_t cellY = static_cast<int32_t>(pc.CellIndex / static_cast<uint32_t>(widthCells));
+                                    const glm::vec2 localCenter = firstCellCenter + glm::vec2(
+                                        static_cast<float>(cellX) * cellSize.x,
+                                        static_cast<float>(cellY) * cellSize.y);
+                                    const glm::vec2 localMin = localCenter - cellSize * 0.5f;
+                                    const glm::vec2 localMax = localCenter + cellSize * 0.5f;
+
+                                    if (!hasTileAt(cellX, cellY - 1))
+                                        lc.OccluderEdges.push_back(glm::vec4(localMin.x, localMin.y, localMax.x, localMin.y));
+                                    if (!hasTileAt(cellX + 1, cellY))
+                                        lc.OccluderEdges.push_back(glm::vec4(localMax.x, localMin.y, localMax.x, localMax.y));
+                                    if (!hasTileAt(cellX, cellY + 1))
+                                        lc.OccluderEdges.push_back(glm::vec4(localMax.x, localMax.y, localMin.x, localMax.y));
+                                    if (!hasTileAt(cellX - 1, cellY))
+                                        lc.OccluderEdges.push_back(glm::vec4(localMin.x, localMax.y, localMin.x, localMin.y));
+                                }
+                            }
+
+                            lc.Empty = lc.OccluderEdges.empty();
+                            lc.Dirty = false;
+                        }
+                    }
+
+                    // Frustum-cull chunks and append cached edges for visible chunks.
+                    bool emittedAnySegment = false;
+                    const glm::vec2 casterEntityId = EncodeEntityIdToUnitVec2(layerEntity);
+                    for (int32_t cy = 0; cy < chunkCountY && segments.size() < maxSegments; ++cy)
+                    {
+                        for (int32_t cx = 0; cx < chunkCountX && segments.size() < maxSegments; ++cx)
+                        {
+                            const size_t ci = static_cast<size_t>(cy) * static_cast<size_t>(chunkCountX) + static_cast<size_t>(cx);
+                            if (ci >= layer.ChunkLightingCaches.size())
+                                continue;
+                            const auto& lc = layer.ChunkLightingCaches[ci];
+                            if (lc.Empty)
+                                continue;
+
+                            // Frustum-cull using persistent chunk bounds.
+                            const glm::vec3 worldCorners[4] = {
+                                glm::vec3(gridWorldTransform * glm::vec4(lc.LocalMin.x, lc.LocalMin.y, 0.0f, 1.0f)),
+                                glm::vec3(gridWorldTransform * glm::vec4(lc.LocalMax.x, lc.LocalMin.y, 0.0f, 1.0f)),
+                                glm::vec3(gridWorldTransform * glm::vec4(lc.LocalMax.x, lc.LocalMax.y, 0.0f, 1.0f)),
+                                glm::vec3(gridWorldTransform * glm::vec4(lc.LocalMin.x, lc.LocalMax.y, 0.0f, 1.0f))
+                            };
+                            glm::vec3 aabbMin(0.0f), aabbMax(0.0f);
+                            if (ComputeSceneRenderAabbFromPoints(worldCorners, 4, aabbMin, aabbMax) &&
+                                !IsSceneRenderAabbVisible(shadowFrustum, aabbMin, aabbMax))
+                                continue;
+
+                            for (const glm::vec4& edge : lc.OccluderEdges)
+                            {
+                                if (segments.size() >= maxSegments)
+                                    break;
+                                const glm::vec3 worldA = glm::vec3(gridWorldTransform * glm::vec4(edge.x, edge.y, 0.0f, 1.0f));
+                                const glm::vec3 worldB = glm::vec3(gridWorldTransform * glm::vec4(edge.z, edge.w, 0.0f, 1.0f));
+                                const size_t beforeCount = segments.size();
+                                appendWorldEdge(worldA, worldB, casterEntityId);
+                                if (segments.size() > beforeCount)
+                                    emittedAnySegment = true;
+                            }
                         }
                     }
 
@@ -1962,7 +2038,7 @@ namespace Limitless
         }
         else
         {
-            shadowSegments = BuildShadowSegments(scene, interpolationAlpha, viewProjection, width, height, maxShadowSegments, cullingMask, occluderCount, effectiveShadowSegmentSnapPixels);
+            shadowSegments = BuildShadowSegments(scene, interpolationAlpha, camera, viewProjection, width, height, maxShadowSegments, cullingMask, occluderCount, effectiveShadowSegmentSnapPixels);
             g_State->CachedShadowSegments = shadowSegments;
             g_State->CachedShadowOccluderCount = occluderCount;
         }

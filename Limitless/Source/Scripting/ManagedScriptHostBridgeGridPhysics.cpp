@@ -143,7 +143,16 @@ namespace Limitless::ManagedScriptHost
                 ? static_cast<uint32_t>(tileId)
                 : 0u;
             if (index < layer->Tiles.size())
+            {
+                const uint32_t oldValue = layer->Tiles[index];
                 layer->Tiles[index] = resolvedTileId;
+                layer->RenderCacheDirty = true;
+                ++layer->MutationRevision;
+                if (oldValue == 0u && resolvedTileId != 0u && !layer->PaintedCellCacheDirty)
+                    AppendPaintedCellToCache(*layer, static_cast<uint32_t>(index), resolvedTileId);
+                MarkChunkDirtyForCell(*grid, *layer, static_cast<uint32_t>(index));
+                MarkChunkNeighborsDirtyForCell(*grid, *layer, static_cast<uint32_t>(index));
+            }
         }
 
         Coral::String ManagedGetTilemapLayerTileAssetKeyIcall(uint32_t entityHandle, int cellX, int cellY)
@@ -177,7 +186,16 @@ namespace Limitless::ManagedScriptHost
             const std::string tileAssetKey = ToUtf8Borrowed(value);
             const uint32_t tileId = layer->GetOrAddTileTableEntry(tileAssetKey);
             if (index < layer->Tiles.size())
+            {
+                const uint32_t oldValue = layer->Tiles[index];
                 layer->Tiles[index] = tileId;
+                layer->RenderCacheDirty = true;
+                ++layer->MutationRevision;
+                if (oldValue == 0u && tileId != 0u && !layer->PaintedCellCacheDirty)
+                    AppendPaintedCellToCache(*layer, static_cast<uint32_t>(index), tileId);
+                MarkChunkDirtyForCell(*grid, *layer, static_cast<uint32_t>(index));
+                MarkChunkNeighborsDirtyForCell(*grid, *layer, static_cast<uint32_t>(index));
+            }
         }
 
         int ManagedGetTilemapLayerTileTableEntryCountIcall(uint32_t entityHandle)
@@ -220,6 +238,9 @@ namespace Limitless::ManagedScriptHost
             }
 
             layer->RenderCacheDirty = true;
+            layer->PaintedCellCacheDirty = true;
+            MarkAllChunksDirty(*layer);
+            ++layer->MutationRevision;
         }
 
         int ManagedGetOrAddTilemapLayerTileTableEntryIcall(uint32_t entityHandle, Coral::String value)

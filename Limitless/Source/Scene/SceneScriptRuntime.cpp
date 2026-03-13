@@ -452,6 +452,63 @@ namespace Limitless
             return before.Tiles != after.Tiles;
         }
 
+        uint64_t HashTilemapLayerContentForValidation(const TilemapLayerComponent& layer)
+        {
+            uint64_t h = 0x517cc1b727220a95ULL;
+            // Hash TileTable (usually small — a handful of asset key strings).
+            for (const auto& key : layer.TileTable)
+            {
+                for (char c : key) { h ^= static_cast<uint64_t>(static_cast<unsigned char>(c)); h *= 0x100000001b3ULL; }
+                h ^= 0xffULL; h *= 0x100000001b3ULL;
+            }
+            // Bounded hash of Tiles: sample up to 512 evenly-spaced values.
+            // O(1) bounded — avoids scanning millions of cells while still
+            // catching the vast majority of direct writes.
+            const size_t n = layer.Tiles.size();
+            constexpr size_t kMaxSamples = 512;
+            if (n <= kMaxSamples)
+            {
+                for (size_t i = 0; i < n; ++i) { h ^= layer.Tiles[i]; h *= 0x100000001b3ULL; }
+            }
+            else
+            {
+                const size_t step = n / kMaxSamples;
+                for (size_t i = 0; i < n; i += step) { h ^= layer.Tiles[i]; h *= 0x100000001b3ULL; }
+            }
+            return h;
+        }
+
+        TilemapLayerValidationSnapshot SnapshotTilemapLayerForValidation(const TilemapLayerComponent& layer)
+        {
+            TilemapLayerValidationSnapshot snap;
+            snap.MutationRevision = layer.MutationRevision;
+            snap.RenderOrder = layer.RenderOrder;
+            snap.CollisionEnabled = layer.CollisionEnabled;
+            snap.CastShadows = layer.CastShadows;
+            snap.TilesCount = layer.Tiles.size();
+            snap.TileTableCount = layer.TileTable.size();
+            snap.ContentHash = HashTilemapLayerContentForValidation(layer);
+            return snap;
+        }
+
+        bool HasTilemapLayerChangedFromSnapshot(const TilemapLayerValidationSnapshot& before, const TilemapLayerComponent& after)
+        {
+            // Fast path: revision counter catches all instrumented mutations.
+            if (before.MutationRevision != after.MutationRevision)
+                return true;
+            if (before.RenderOrder != after.RenderOrder ||
+                before.CollisionEnabled != after.CollisionEnabled ||
+                before.CastShadows != after.CastShadows ||
+                before.TilesCount != after.Tiles.size() ||
+                before.TileTableCount != after.TileTable.size())
+            {
+                return true;
+            }
+            // Fallback: bounded content hash catches direct Tiles[] writes
+            // from native scripts that bypass MutationRevision.
+            return before.ContentHash != HashTilemapLayerContentForValidation(after);
+        }
+
         bool HasAnimatorChangedForAccessValidation(const AnimatorComponent& before, const AnimatorComponent& after)
         {
             return before.ControllerKey != after.ControllerKey ||

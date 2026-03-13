@@ -74,6 +74,18 @@ namespace Limitless
                      const glm::vec2& uvMax);
         void DrawText(const glm::mat4& transform, const std::string& text, const Font::Ptr& font, float fontSize, const glm::vec4& color = glm::vec4(1.0f));
 
+        /// Submit pre-baked quad vertices directly, bypassing per-quad transform
+        /// computation. Used by tilemap chunk rendering to batch an entire chunk
+        /// as a single draw call. Vertices must use the same layout as Renderer2D
+        /// internal QuadVertex (Position vec3, UV vec2, Color vec4, TexIndex int).
+        /// Texture slots are bound in order; vertex TexIndex values must index
+        /// into the provided texture array.
+        void SubmitPrebakedQuads(const void* vertexData,
+                                 uint32_t quadCount,
+                                 const std::shared_ptr<Texture2D>* textures,
+                                 uint32_t textureCount,
+                                 const glm::mat4& modelTransform = glm::mat4(1.0f));
+
         const Statistics& GetStatistics() const;
         void ResetStatistics();
 

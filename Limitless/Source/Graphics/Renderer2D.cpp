@@ -108,7 +108,7 @@ namespace Limitless
 
     struct Renderer2D::Impl
     {
-        static constexpr uint32_t kMaxQuads = 10000;
+        static constexpr uint32_t kMaxQuads = 50000;
         static constexpr uint32_t kMaxVertices = kMaxQuads * 4;
         static constexpr uint32_t kMaxIndices = kMaxQuads * 6;
         static constexpr uint32_t kCompileTimeMaxTextureSlots = 32;
@@ -207,20 +207,20 @@ namespace Limitless
         });
         d.QuadVertexArray->AddVertexBuffer(d.QuadVertexBuffer);
 
-        std::vector<uint16_t> indices;
+        std::vector<uint32_t> indices;
         indices.resize(Impl::kMaxIndices);
-        uint16_t offset = 0;
+        uint32_t offset = 0;
         for (uint32_t i = 0; i < Impl::kMaxIndices; i += 6)
         {
-            indices[i + 0] = static_cast<uint16_t>(offset + 0);
-            indices[i + 1] = static_cast<uint16_t>(offset + 1);
-            indices[i + 2] = static_cast<uint16_t>(offset + 2);
+            indices[i + 0] = offset + 0;
+            indices[i + 1] = offset + 1;
+            indices[i + 2] = offset + 2;
 
-            indices[i + 3] = static_cast<uint16_t>(offset + 2);
-            indices[i + 4] = static_cast<uint16_t>(offset + 3);
-            indices[i + 5] = static_cast<uint16_t>(offset + 0);
+            indices[i + 3] = offset + 2;
+            indices[i + 4] = offset + 3;
+            indices[i + 5] = offset + 0;
 
-            offset = static_cast<uint16_t>(offset + 4);
+            offset += 4;
         }
 
         d.QuadIndexBuffer = IndexBuffer::Create(indices.data(), static_cast<uint32_t>(indices.size()));
@@ -586,6 +586,9 @@ namespace Limitless
                 if (d.TextIndexCount + 6 > Impl::kMaxIndices)
                 {
                     FlushTextBatch();
+                    texIndex = static_cast<int32_t>(d.TextTextureSlotCount);
+                    d.TextTextureSlots[d.TextTextureSlotCount] = atlasTexture;
+                    ++d.TextTextureSlotCount;
                 }
 
                 const float left = penX + glyph->PlaneMin.x * atlasScale;
@@ -709,7 +712,7 @@ namespace Limitless
             dataSizeBytes,
             d.ViewProjection,
             d.IndexCount,
-            IndexType::UnsignedShort,
+            IndexType::UnsignedInt,
             d.TextureSlotCount);
 
         d.Stats.DrawCalls += 1;
@@ -804,7 +807,7 @@ namespace Limitless
             dataSizeBytes,
             d.ViewProjection,
             d.TextIndexCount,
-            IndexType::UnsignedShort,
+            IndexType::UnsignedInt,
             d.TextTextureSlotCount);
 
         d.Stats.DrawCalls += 1;
@@ -814,6 +817,82 @@ namespace Limitless
         d.TextVertexBufferPtr = d.TextVertexBufferBase.get();
         d.TextTextureSlotCount = 1;
         d.TextTextureSlots[0] = d.WhiteTexture;
+    }
+
+    void Renderer2D::SubmitPrebakedQuads(const void* vertexData,
+                                         uint32_t quadCount,
+                                         const std::shared_ptr<Texture2D>* textures,
+                                         uint32_t textureCount,
+                                         const glm::mat4& modelTransform)
+    {
+        EnsureInitialized();
+        auto& d = *m_Impl;
+        if (!d.Initialized || !vertexData || quadCount == 0)
+            return;
+
+        // Flush any pending dynamic quads so draw order is preserved.
+        FlushQuadBatch();
+
+        if (!d.ShaderProgram)
+            return;
+
+        auto& renderer = Renderer::GetInstance();
+        EnsureRenderer2DPipeline(d.QuadPipelines,
+                                 d.QuadPipelineShaders,
+                                 d.ShaderProgram,
+                                 d.QuadVertexBuffer->GetLayout(),
+                                 "Renderer2D/Quad",
+                                 d.SceneDepthTestEnabled);
+
+        const auto& quadPipeline = d.QuadPipelines[GetPipelineVariantIndex(d.SceneDepthTestEnabled)];
+        if (quadPipeline)
+            renderer.SubmitCommandArena<BindRenderPipelineCommand>(quadPipeline);
+        else
+        {
+            renderer.SubmitCommandArena<SetBlendModeCommand>(BlendFactor::SrcAlpha, BlendFactor::OneMinusSrcAlpha, true);
+            renderer.SubmitCommandArena<SetDepthTestCommand>(d.SceneDepthTestEnabled);
+            renderer.SubmitCommandArena<SetCullFaceCommand>(false);
+        }
+
+        const uint32_t vertexCount = quadCount * 4;
+        const uint32_t indexCount = quadCount * 6;
+        const uint32_t dataSizeBytes = vertexCount * static_cast<uint32_t>(sizeof(QuadVertex));
+
+        void* uploadBytes = renderer.AllocateFrameUpload(dataSizeBytes, alignof(QuadVertex));
+        if (!uploadBytes)
+        {
+            LT_CORE_WARN("Renderer2D::SubmitPrebakedQuads: frame upload OOM (dropping {} quads)", quadCount);
+            return;
+        }
+
+        std::memcpy(uploadBytes, vertexData, dataSizeBytes);
+
+        const uint32_t slotCount = std::min(textureCount + 1u, d.MaxTextureSlots);
+        std::array<std::shared_ptr<Texture>, Impl::kCompileTimeMaxTextureSlots> texHandles{};
+        texHandles[0] = d.WhiteTexture;
+        for (uint32_t i = 1; i < slotCount; ++i)
+            texHandles[i] = textures[i - 1];
+
+        Renderer2DFlushCommand::KeepAlive keepAlive{};
+        keepAlive.VertexBufferHandle = d.QuadVertexBuffer;
+        keepAlive.VertexArrayHandle = d.QuadVertexArray;
+        keepAlive.ShaderProgramHandle = d.ShaderProgram;
+        keepAlive.TextureHandles = std::move(texHandles);
+
+        const glm::mat4 mvp = d.ViewProjection * modelTransform;
+
+        renderer.SubmitCommandArena<Renderer2DFlushCommand>(
+            std::move(keepAlive),
+            uploadBytes,
+            dataSizeBytes,
+            mvp,
+            indexCount,
+            IndexType::UnsignedInt,
+            slotCount);
+
+        d.Stats.DrawCalls += 1;
+        d.Stats.Batches += 1;
+        d.Stats.QuadCount += quadCount;
     }
 
     const Renderer2D::Statistics& Renderer2D::GetStatistics() const

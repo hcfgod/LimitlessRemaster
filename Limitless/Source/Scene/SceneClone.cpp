@@ -373,7 +373,13 @@ namespace Limitless
             {
                 auto& destinationLayer = destinationRegistry.emplace<TilemapLayerComponent>(destinationEntity, *tilemapLayer);
                 destinationLayer.CachedTileRender.clear();
+                destinationLayer.ChunkRenderCaches.clear();
+                destinationLayer.ChunkLightingCaches.clear();
+                destinationLayer.ChunkGridSize = glm::ivec2(0);
                 destinationLayer.RenderCacheDirty = true;
+                destinationLayer.PaintedCellCacheDirty = true;
+                destinationLayer.ChunkTopologyDirty = true;
+                destinationLayer.MutationRevision = 1;
             }
 
             if (const auto* camera = sourceRegistry.try_get<CameraComponent>(sourceEntity))

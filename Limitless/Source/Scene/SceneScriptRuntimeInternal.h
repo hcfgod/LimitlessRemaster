@@ -68,6 +68,25 @@ namespace Limitless
         bool HasPrefabInstanceChangedForAccessValidation(const PrefabInstanceComponent& before, const PrefabInstanceComponent& after);
         bool HasGrid2DChangedForAccessValidation(const Grid2DComponent& before, const Grid2DComponent& after);
         bool HasTilemapLayerChangedForAccessValidation(const TilemapLayerComponent& before, const TilemapLayerComponent& after);
+
+        /// Lightweight snapshot for tilemap change detection that avoids
+        /// deep-copying Tiles/CachedTileRender/CachedPaintedCells vectors.
+        /// Uses MutationRevision as fast path + bounded content hash as
+        /// fallback for detecting direct Tiles[] writes from native scripts.
+        struct TilemapLayerValidationSnapshot
+        {
+            uint64_t MutationRevision = 0;
+            int32_t RenderOrder = 0;
+            bool CollisionEnabled = false;
+            bool CastShadows = false;
+            size_t TilesCount = 0;
+            size_t TileTableCount = 0;
+            uint64_t ContentHash = 0;
+        };
+
+        uint64_t HashTilemapLayerContentForValidation(const TilemapLayerComponent& layer);
+        TilemapLayerValidationSnapshot SnapshotTilemapLayerForValidation(const TilemapLayerComponent& layer);
+        bool HasTilemapLayerChangedFromSnapshot(const TilemapLayerValidationSnapshot& before, const TilemapLayerComponent& after);
         bool HasAnimatorChangedForAccessValidation(const AnimatorComponent& before, const AnimatorComponent& after);
         bool HasAnimationEventReceiverChangedForAccessValidation(const AnimationEventReceiverComponent& before, const AnimationEventReceiverComponent& after);
         bool HasParticleEmitterChangedForAccessValidation(const ParticleEmitterComponent& before, const ParticleEmitterComponent& after);

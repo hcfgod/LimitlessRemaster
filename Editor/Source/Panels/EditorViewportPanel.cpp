@@ -2,6 +2,7 @@
 
 #include "Assets/AssetLoadProgress.h"
 #include "Assets/LoadingScreen.h"
+#include "Core/Debug/Log.h"
 #include "Editor/EditorCameraController.h"
 #include "EditorInspectorPanelNativeScriptEditor.h"
 #include "EditorScenePanel.h"
@@ -297,6 +298,10 @@ namespace Limitless::EditorViewportPanel
                     layer->Tiles[idx] = applyNewValues ? edit.NewTile : edit.PreviousTile;
                 }
                 layer->RenderCacheDirty = true;
+                layer->PaintedCellCacheDirty = true;
+                layer->ChunkTopologyDirty = true;
+                MarkAllChunksDirty(*layer);
+                ++layer->MutationRevision;
                 return true;
             }
 
@@ -370,9 +375,23 @@ namespace Limitless::EditorViewportPanel
             const glm::ivec2 requestedGridSize(
                 gridWidth + addLeft + addRight,
                 gridHeight + addBottom + addTop);
+            const int64_t requestedCellCount =
+                static_cast<int64_t>(requestedGridSize.x) * static_cast<int64_t>(requestedGridSize.y);
+            const double requestedTilesMiB =
+                static_cast<double>(requestedCellCount * static_cast<int64_t>(sizeof(uint32_t))) / (1024.0 * 1024.0);
             if (requestedGridSize.x > kMaxTilemapLayerGridDimension ||
                 requestedGridSize.y > kMaxTilemapLayerGridDimension)
             {
+                LT_CORE_WARN("Tilemap paint expansion blocked for grid entity {} (current={}x{}, requested={}x{}, addL={}, addB={}, addR={}, addT={})",
+                    static_cast<uint32_t>(gridEntity),
+                    gridWidth,
+                    gridHeight,
+                    requestedGridSize.x,
+                    requestedGridSize.y,
+                    addLeft,
+                    addBottom,
+                    addRight,
+                    addTop);
                 return false;
             }
 
@@ -382,7 +401,17 @@ namespace Limitless::EditorViewportPanel
             targetLayout.OriginCell -= glm::vec2(destinationOffset);
 
             if (!ApplyGrid2DLayout(scene, gridEntity, targetLayout))
+            {
+                LT_CORE_WARN("Tilemap paint expansion failed for grid entity {} (current={}x{}, requested={}x{}, cells={}, tileDataMiB={:.2f})",
+                    static_cast<uint32_t>(gridEntity),
+                    gridWidth,
+                    gridHeight,
+                    requestedGridSize.x,
+                    requestedGridSize.y,
+                    requestedCellCount,
+                    requestedTilesMiB);
                 return false;
+            }
 
             OffsetPendingGrid2DCellEdits(dragState, destinationOffset);
             outCellOffset = destinationOffset;
@@ -426,7 +455,27 @@ namespace Limitless::EditorViewportPanel
             }
 
             layer.Tiles[idx] = newTileValue;
-            layer.RenderCacheDirty = true;
+            // Only mark render cache dirty if this tile type isn't cached yet.
+            // The render cache maps tile-table indices to textures/colors and
+            // doesn't need rebuilding when we merely change which cell holds
+            // an already-cached tile ID. This avoids a full rebuild every frame
+            // during continuous painting.
+            if (newTileValue != 0u &&
+                (newTileValue >= layer.CachedTileRender.size() ||
+                 !layer.CachedTileRender[newTileValue].Texture))
+            {
+                layer.RenderCacheDirty = true;
+            }
+            ++layer.MutationRevision;
+
+            // Incremental sparse-cache update: only append when a previously
+            // empty cell is painted for the first time.  Overwrites and erases
+            // are handled by the live Tiles[] lookup in the renderer.
+            if (oldValue == 0u && newTileValue != 0u && !layer.PaintedCellCacheDirty)
+                AppendPaintedCellToCache(layer, static_cast<uint32_t>(idx), newTileValue);
+
+            MarkChunkDirtyForCell(grid, layer, static_cast<uint32_t>(idx));
+            MarkChunkNeighborsDirtyForCell(grid, layer, static_cast<uint32_t>(idx));
         }
 
         // Renderer2D quad vertices in local space (must match Renderer2D::DrawQuad).
@@ -1811,6 +1860,7 @@ namespace Limitless::EditorViewportPanel
                         std::move(edits));
                     (void)undoService->ExecuteCommand(std::move(command));
                 }
+
                 paintDragState = {};
             };
 
@@ -1916,7 +1966,12 @@ namespace Limitless::EditorViewportPanel
 
             // Grid overlay -- uses near-plane clipping so lines that are
             // partially behind the camera still render their visible portion.
-            if (tilemapEditorState.ShowGridOverlay)
+            // For large grids, skip the overlay entirely to avoid thousands
+            // of ImGui line draws that would freeze the editor.
+            constexpr int32_t kMaxGridOverlayLinesPerAxis = 256;
+            if (tilemapEditorState.ShowGridOverlay &&
+                grid->GridSize.x <= kMaxGridOverlayLinesPerAxis &&
+                grid->GridSize.y <= kMaxGridOverlayLinesPerAxis)
             {
                 const glm::vec2 firstCellCenter = GetGrid2DFirstCellCenter(*grid, *layer);
                 const glm::vec2 gridBoundaryMin = firstCellCenter - cellSize * 0.5f;

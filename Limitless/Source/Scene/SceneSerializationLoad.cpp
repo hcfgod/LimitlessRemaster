@@ -817,6 +817,9 @@ namespace Limitless
                     layer.Tiles = layerJson["Tiles"].get<std::vector<uint32_t>>();
 
                 layer.RenderCacheDirty = true;
+                layer.PaintedCellCacheDirty = true;
+                layer.ChunkTopologyDirty = true;
+                layer.MutationRevision = 1;
             }
 
             if (entry.contains("Camera") && entry["Camera"].is_object())
@@ -1451,6 +1454,8 @@ namespace Limitless
                         continue;
                     EnsureTilemapLayerStorage(grid, *layer);
                     layer->RenderCacheDirty = true;
+                    layer->PaintedCellCacheDirty = true;
+                    layer->ChunkTopologyDirty = true;
                 }
             }
         }

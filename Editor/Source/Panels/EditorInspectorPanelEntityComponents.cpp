@@ -1989,12 +1989,9 @@ namespace Limitless::EditorInspectorPanel
                     undoService, "Edit TilemapLayer Cast Shadows", selectedEntity, &TilemapLayerComponent::CastShadows, tilemapLayer->CastShadows);
 
                 const int32_t tileCount = tilemapGrid ? GetTilemapCellCount(*tilemapGrid) : static_cast<int32_t>(tilemapLayer->Tiles.size());
-                int32_t nonEmptyCount = 0;
-                for (uint32_t t : tilemapLayer->Tiles)
-                {
-                    if (t != 0)
-                        ++nonEmptyCount;
-                }
+                if (tilemapLayer->PaintedCellCacheDirty)
+                    RebuildPaintedCellCache(*tilemapLayer);
+                const int32_t nonEmptyCount = static_cast<int32_t>(tilemapLayer->CachedPaintedCells.size());
                 ImGui::TextDisabled("Cells: %d  |  Painted: %d  |  Tile types: %d",
                                     tileCount, nonEmptyCount,
                                     static_cast<int>(tilemapLayer->TileTable.size()));

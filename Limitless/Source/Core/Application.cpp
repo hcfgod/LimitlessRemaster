@@ -23,6 +23,46 @@
 #include "Core/PerformanceMonitor.h"
 #include <chrono>
 
+#if defined(LT_PLATFORM_WINDOWS)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+
+static LONG WINAPI LimitlessCrashHandler(EXCEPTION_POINTERS* exInfo)
+{
+    if (exInfo && exInfo->ExceptionRecord)
+    {
+        const DWORD code = exInfo->ExceptionRecord->ExceptionCode;
+        const void* addr = exInfo->ExceptionRecord->ExceptionAddress;
+        const char* desc = "Unknown";
+        switch (code)
+        {
+            case EXCEPTION_ACCESS_VIOLATION:     desc = "ACCESS_VIOLATION"; break;
+            case EXCEPTION_STACK_OVERFLOW:       desc = "STACK_OVERFLOW"; break;
+            case EXCEPTION_INT_DIVIDE_BY_ZERO:   desc = "INT_DIVIDE_BY_ZERO"; break;
+            case EXCEPTION_FLT_DIVIDE_BY_ZERO:   desc = "FLT_DIVIDE_BY_ZERO"; break;
+            case EXCEPTION_ILLEGAL_INSTRUCTION:  desc = "ILLEGAL_INSTRUCTION"; break;
+            case EXCEPTION_IN_PAGE_ERROR:        desc = "IN_PAGE_ERROR"; break;
+            case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:desc = "ARRAY_BOUNDS_EXCEEDED"; break;
+            default: break;
+        }
+        LT_CORE_ERROR("[CRASH HANDLER] Exception 0x{:08X} ({}) at address {}",
+            code, desc, addr);
+        if (code == EXCEPTION_ACCESS_VIOLATION && exInfo->ExceptionRecord->NumberParameters >= 2)
+        {
+            const char* op = exInfo->ExceptionRecord->ExceptionInformation[0] == 0 ? "READ" : "WRITE";
+            LT_CORE_ERROR("[CRASH HANDLER] {} of address 0x{:016X}",
+                op, exInfo->ExceptionRecord->ExceptionInformation[1]);
+        }
+        // Force flush the logger so the crash info is written to disk
+        if (Limitless::Log::GetCoreLogger())
+            Limitless::Log::GetCoreLogger()->flush();
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+
 namespace Limitless
 {
     static Application* s_ApplicationInstance = nullptr;
@@ -38,59 +78,59 @@ namespace Limitless
         return s_ApplicationInstance != nullptr;
     }
 
-	Application::Application()
-	{
+    Application::Application()
+    {
         LT_VERIFY(s_ApplicationInstance == nullptr, "Only one Application instance is supported");
         s_ApplicationInstance = this;
 
-		LT_CORE_INFO("Application constructor starting...");
+        LT_CORE_INFO("Application constructor starting...");
 
-		SetGlobalServiceRegistry(&m_Services);
-		
-		// Initialize AsyncIO system with thread count from config
-		auto& asyncIO = Limitless::Async::GetAsyncIO();
-		auto& configManager = Limitless::ConfigManager::GetInstance();
-		size_t threadCount = configManager.GetValue<size_t>("system.max_threads", 0);
-		asyncIO.Initialize(threadCount);
+        SetGlobalServiceRegistry(&m_Services);
+        
+        // Initialize AsyncIO system with thread count from config
+        auto& asyncIO = Limitless::Async::GetAsyncIO();
+        auto& configManager = Limitless::ConfigManager::GetInstance();
+        size_t threadCount = configManager.GetValue<size_t>("system.max_threads", 0);
+        asyncIO.Initialize(threadCount);
 
         // Dedicated simulation worker pool (separate from AsyncIO workers).
         auto& jobSystem = Limitless::Concurrency::GetJobSystem();
         const size_t simulationThreadCount = configManager.GetValue<size_t>("system.simulation_threads", 0);
         jobSystem.Initialize(simulationThreadCount);
 
-		// Initialize hot reload manager
-		auto& hotReloadManager = Limitless::HotReloadManager::GetInstance();
-		hotReloadManager.Initialize();
-		hotReloadManager.EnableHotReload(true);
+        // Initialize hot reload manager
+        auto& hotReloadManager = Limitless::HotReloadManager::GetInstance();
+        hotReloadManager.Initialize();
+        hotReloadManager.EnableHotReload(true);
 
-		m_Services.Register<ConfigManager>(configManager);
-		m_Services.Register<Async::AsyncIO>(asyncIO);
-		m_Services.Register<Concurrency::JobSystem>(jobSystem);
-		m_Services.Register<HotReloadManager>(hotReloadManager);
+        m_Services.Register<ConfigManager>(configManager);
+        m_Services.Register<Async::AsyncIO>(asyncIO);
+        m_Services.Register<Concurrency::JobSystem>(jobSystem);
+        m_Services.Register<HotReloadManager>(hotReloadManager);
 
-		LT_CORE_INFO("Application constructor completed successfully");
-	}
+        LT_CORE_INFO("Application constructor completed successfully");
+    }
 
-	EventSystem& Application::GetEventSystem()
-	{
-		return ::Limitless::GetEventSystem();
-	}
+    EventSystem& Application::GetEventSystem()
+    {
+        return ::Limitless::GetEventSystem();
+    }
 
-	InputSystem& Application::GetInputSystem()
-	{
-		return ::Limitless::GetInputSystem();
-	}
+    InputSystem& Application::GetInputSystem()
+    {
+        return ::Limitless::GetInputSystem();
+    }
 
-	void Application::SetImGuiCallbacks(std::function<void()> beginFrame, std::function<void()> endFrame)
-	{
-		m_ImGuiBeginFrame = std::move(beginFrame);
-		m_ImGuiEndFrame = std::move(endFrame);
-	}
+    void Application::SetImGuiCallbacks(std::function<void()> beginFrame, std::function<void()> endFrame)
+    {
+        m_ImGuiBeginFrame = std::move(beginFrame);
+        m_ImGuiEndFrame = std::move(endFrame);
+    }
 
-	Application::~Application()
-	{
-		LT_CORE_INFO("Application destructor starting...");
-		
+    Application::~Application()
+    {
+        LT_CORE_INFO("Application destructor starting...");
+        
         // Shutdown hot reload manager
         auto& hotReloadManager = Limitless::HotReloadManager::GetInstance();
         hotReloadManager.Shutdown();
@@ -103,7 +143,7 @@ namespace Limitless
         auto& jobSystem = Limitless::Concurrency::GetJobSystem();
         jobSystem.Shutdown();
         
-		LT_CORE_INFO("Application destructor completed");
+        LT_CORE_INFO("Application destructor completed");
 
         m_ImGuiBeginFrame = nullptr;
         m_ImGuiEndFrame = nullptr;
@@ -114,26 +154,31 @@ namespace Limitless
         {
             s_ApplicationInstance = nullptr;
         }
-	}
+    }
 
-	void Application::Run()
-	{
-		LT_CORE_INFO("Application::Run() starting...");
-		
-		if (!InternalInitialize())
-		{
-			LT_CORE_ERROR("Application internal initialization failed!");
-			return;
-		}
+    void Application::Run()
+    {
+        LT_CORE_INFO("Application::Run() starting...");
 
-		LT_CORE_INFO("Application internal initialization completed, entering main loop...");
+#if defined(LT_PLATFORM_WINDOWS)
+        SetUnhandledExceptionFilter(LimitlessCrashHandler);
+        LT_CORE_INFO("Windows crash handler installed");
+#endif
+        
+        if (!InternalInitialize())
+        {
+            LT_CORE_ERROR("Application internal initialization failed!");
+            return;
+        }
 
-		while(m_IsRunning)
-		{
-			// Update engine time once per frame (Unity-style)
-			Time::Update();
-			const float deltaTime = Time::GetDeltaTimeSeconds();
-			const float fixedDeltaTime = Time::GetFixedDeltaTimeSeconds();
+        LT_CORE_INFO("Application internal initialization completed, entering main loop...");
+
+        while(m_IsRunning)
+        {
+            // Update engine time once per frame (Unity-style)
+            Time::Update();
+            const float deltaTime = Time::GetDeltaTimeSeconds();
+            const float fixedDeltaTime = Time::GetFixedDeltaTimeSeconds();
 
             PerformanceMonitor::GetInstance().BeginFrame();
 
@@ -188,7 +233,7 @@ namespace Limitless
 		LT_CORE_INFO("Main loop ended, beginning shutdown...");
 		InternalShutdown();
 		LT_CORE_INFO("Application::Run() completed");
-	}
+    }
 
 	bool Application::InternalInitialize()
 	{

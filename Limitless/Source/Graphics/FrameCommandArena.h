@@ -7,14 +7,17 @@
 #include <memory>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace Limitless
 {
     // -----------------------------------------------------------------------------
     // FrameCommandArena
-    // Frame-local arena allocator for RenderCommand objects.
+    // Frame-local page-based arena allocator for RenderCommand objects.
     //
-    // - Allocates command objects out of a preallocated byte buffer (per buffered frame).
+    // - Allocates command objects out of fixed-size pages (per buffered frame slot).
+    // - When a page is full, a new page is added. Old pages are **never freed**
+    //   mid-frame, so pointers returned by Allocate remain valid until BeginFrame.
     // - Returns `UniqueRenderCommand` with a deleter that only runs the destructor (no free).
     //
     // This removes per-command heap allocations in hot render submission paths.
@@ -28,7 +31,7 @@ namespace Limitless
         FrameCommandArena(const FrameCommandArena&) = delete;
         FrameCommandArena& operator=(const FrameCommandArena&) = delete;
 
-        void Initialize(size_t bytesPerFrame = 2u * 1024u * 1024u, uint32_t bufferedFrames = 3);
+        void Initialize(size_t bytesPerPage = 2u * 1024u * 1024u, uint32_t bufferedFrames = 3);
         void Shutdown();
 
         void BeginFrame(uint64_t frameId);
@@ -53,16 +56,22 @@ namespace Limitless
         }
 
     private:
-        struct FrameBuffer
+        struct Page
         {
             std::unique_ptr<uint8_t[]> Data{};
             size_t CapacityBytes = 0;
             size_t HeadBytes = 0;
+        };
+
+        struct FrameSlot
+        {
+            std::vector<Page> Pages;
+            uint32_t ActivePageIndex = 0;
             uint64_t FrameId = 0;
         };
 
         static size_t AlignUp(size_t value, size_t alignment);
-        void EnsureFrameCapacity(FrameBuffer& buffer, size_t requiredBytes);
+        Page& GetOrAddPage(FrameSlot& slot, size_t minCapacity);
 
         template<typename TCommand>
         static void DestroyInArena(RenderCommand* base)
@@ -76,10 +85,10 @@ namespace Limitless
             delete static_cast<TCommand*>(base);
         }
 
-        std::unique_ptr<FrameBuffer[]> m_Buffers{};
-        uint32_t m_BufferCount = 0;
-        uint32_t m_CurrentIndex = 0;
-        size_t m_DefaultBytesPerFrame = 0;
+        std::unique_ptr<FrameSlot[]> m_Slots{};
+        uint32_t m_SlotCount = 0;
+        uint32_t m_CurrentSlotIndex = 0;
+        size_t m_DefaultPageSize = 0;
         bool m_Initialized = false;
     };
 }
