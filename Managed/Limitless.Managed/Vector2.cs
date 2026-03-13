@@ -1,5 +1,8 @@
+using System.Runtime.InteropServices;
+
 namespace Limitless.Managed;
 
+[StructLayout(LayoutKind.Sequential)]
 public struct Vector2
 {
     public float X;

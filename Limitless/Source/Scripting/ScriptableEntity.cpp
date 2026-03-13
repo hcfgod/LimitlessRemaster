@@ -839,6 +839,90 @@ namespace Limitless
             ++(*m_ExposedPropertiesRevision);
     }
 
+    glm::vec2 ScriptableEntity::GetExposedVector2(const std::string& name, const glm::vec2& fallbackValue) const
+    {
+        if (!m_ExposedProperties)
+            return fallbackValue;
+        const auto found = m_ExposedProperties->find(name);
+        if (found == m_ExposedProperties->end())
+            return fallbackValue;
+        if (const auto* value = std::get_if<glm::vec2>(&found->second))
+            return *value;
+        return fallbackValue;
+    }
+
+    glm::vec4 ScriptableEntity::GetExposedVector4(const std::string& name, const glm::vec4& fallbackValue) const
+    {
+        if (!m_ExposedProperties)
+            return fallbackValue;
+        const auto found = m_ExposedProperties->find(name);
+        if (found == m_ExposedProperties->end())
+            return fallbackValue;
+        if (const auto* value = std::get_if<glm::vec4>(&found->second))
+            return *value;
+        return fallbackValue;
+    }
+
+    void ScriptableEntity::SetExposedVector2(const std::string& name, const glm::vec2& value)
+    {
+        if (!m_ExposedProperties)
+            return;
+
+        bool changed = false;
+        const auto found = m_ExposedProperties->find(name);
+        if (found == m_ExposedProperties->end())
+        {
+            (*m_ExposedProperties)[name] = value;
+            changed = true;
+        }
+        else if (auto* existing = std::get_if<glm::vec2>(&found->second))
+        {
+            if (existing->x != value.x || existing->y != value.y)
+            {
+                *existing = value;
+                changed = true;
+            }
+        }
+        else
+        {
+            found->second = value;
+            changed = true;
+        }
+
+        if (changed && m_ExposedPropertiesRevision)
+            ++(*m_ExposedPropertiesRevision);
+    }
+
+    void ScriptableEntity::SetExposedVector4(const std::string& name, const glm::vec4& value)
+    {
+        if (!m_ExposedProperties)
+            return;
+
+        bool changed = false;
+        const auto found = m_ExposedProperties->find(name);
+        if (found == m_ExposedProperties->end())
+        {
+            (*m_ExposedProperties)[name] = value;
+            changed = true;
+        }
+        else if (auto* existing = std::get_if<glm::vec4>(&found->second))
+        {
+            if (existing->x != value.x || existing->y != value.y || existing->z != value.z || existing->w != value.w)
+            {
+                *existing = value;
+                changed = true;
+            }
+        }
+        else
+        {
+            found->second = value;
+            changed = true;
+        }
+
+        if (changed && m_ExposedPropertiesRevision)
+            ++(*m_ExposedPropertiesRevision);
+    }
+
     bool ScriptableEntity::Raycast2D(const glm::vec2& origin,
                                      const glm::vec2& direction,
                                      float maxDistance,

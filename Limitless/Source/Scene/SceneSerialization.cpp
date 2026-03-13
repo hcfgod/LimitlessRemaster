@@ -140,6 +140,25 @@ namespace Limitless::SceneSerialization
                 { "AssetKey", prefabValue->AssetKey }
             };
         }
+        else if (const auto* vec2Value = std::get_if<glm::vec2>(&value))
+        {
+            root["Type"] = "Vector2";
+            root["Value"] = { vec2Value->x, vec2Value->y };
+        }
+        else if (const auto* vec4Value = std::get_if<glm::vec4>(&value))
+        {
+            root["Type"] = "Vector4";
+            root["Value"] = { vec4Value->x, vec4Value->y, vec4Value->z, vec4Value->w };
+        }
+        else if (const auto* enumValue = std::get_if<ScriptEnumValue>(&value))
+        {
+            root["Type"] = "Enum";
+            root["Value"] = {
+                { "EnumType", enumValue->EnumTypeName },
+                { "Value", enumValue->Value },
+                { "Names", enumValue->EnumNames }
+            };
+        }
         return root;
     }
 
@@ -212,6 +231,47 @@ namespace Limitless::SceneSerialization
                     prefabReference.AssetKey = value.get<std::string>();
             }
             outValue = std::move(prefabReference);
+            return true;
+        }
+        if (typeName == "Vector2")
+        {
+            const auto vector = root.value("Value", std::vector<float>{ 0.0f, 0.0f });
+            if (vector.size() >= 2)
+                outValue = glm::vec2(vector[0], vector[1]);
+            else
+                outValue = glm::vec2(0.0f);
+            return true;
+        }
+        if (typeName == "Vector4")
+        {
+            const auto vector = root.value("Value", std::vector<float>{ 0.0f, 0.0f, 0.0f, 0.0f });
+            if (vector.size() >= 4)
+                outValue = glm::vec4(vector[0], vector[1], vector[2], vector[3]);
+            else
+                outValue = glm::vec4(0.0f);
+            return true;
+        }
+        if (typeName == "Enum")
+        {
+            ScriptEnumValue enumValue{};
+            if (root.contains("Value"))
+            {
+                const auto& value = root["Value"];
+                if (value.is_object())
+                {
+                    enumValue.EnumTypeName = value.value("EnumType", std::string{});
+                    enumValue.Value = value.value("Value", 0);
+                    if (value.contains("Names") && value["Names"].is_array())
+                    {
+                        for (const auto& name : value["Names"])
+                        {
+                            if (name.is_string())
+                                enumValue.EnumNames.push_back(name.get<std::string>());
+                        }
+                    }
+                }
+            }
+            outValue = std::move(enumValue);
             return true;
         }
 

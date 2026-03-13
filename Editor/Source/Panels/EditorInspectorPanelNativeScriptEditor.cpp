@@ -28,6 +28,7 @@
 #include <thread>
 #include <mutex>
 #include <regex>
+#include <sstream>
 #include <string_view>
 #include <unordered_set>
 #include <vector>
@@ -1363,6 +1364,48 @@ namespace Limitless::EditorInspectorPanel
             return true;
         }
 
+        bool TryParseVector2Literal(const std::string& rawValue, glm::vec2& outValue)
+        {
+            const std::regex numberPattern(R"([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)");
+            std::vector<float> values;
+            for (std::sregex_iterator iterator(rawValue.begin(), rawValue.end(), numberPattern), end; iterator != end; ++iterator)
+            {
+                float parsedValue = 0.0f;
+                if (!TryParseFloatLiteral(iterator->str(), parsedValue))
+                    continue;
+                values.push_back(parsedValue);
+                if (values.size() == 2)
+                    break;
+            }
+
+            if (values.size() != 2)
+                return false;
+
+            outValue = glm::vec2(values[0], values[1]);
+            return true;
+        }
+
+        bool TryParseVector4Literal(const std::string& rawValue, glm::vec4& outValue)
+        {
+            const std::regex numberPattern(R"([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)");
+            std::vector<float> values;
+            for (std::sregex_iterator iterator(rawValue.begin(), rawValue.end(), numberPattern), end; iterator != end; ++iterator)
+            {
+                float parsedValue = 0.0f;
+                if (!TryParseFloatLiteral(iterator->str(), parsedValue))
+                    continue;
+                values.push_back(parsedValue);
+                if (values.size() == 4)
+                    break;
+            }
+
+            if (values.size() != 4)
+                return false;
+
+            outValue = glm::vec4(values[0], values[1], values[2], values[3]);
+            return true;
+        }
+
         bool TryBuildDefaultFieldValue(const std::string& typeName,
                                        const std::optional<std::string>& rawInitializer,
                                        ScriptPropertyValue& outValue)
@@ -1400,10 +1443,26 @@ namespace Limitless::EditorInspectorPanel
                 outValue = value;
                 return true;
             }
+            if (typeName == "glm::vec2")
+            {
+                glm::vec2 value(0.0f);
+                if (!initializer.empty() && !TryParseVector2Literal(initializer, value))
+                    return false;
+                outValue = value;
+                return true;
+            }
             if (typeName == "glm::vec3")
             {
                 glm::vec3 value(0.0f);
                 if (!initializer.empty() && !TryParseVector3Literal(initializer, value))
+                    return false;
+                outValue = value;
+                return true;
+            }
+            if (typeName == "glm::vec4")
+            {
+                glm::vec4 value(0.0f);
+                if (!initializer.empty() && !TryParseVector4Literal(initializer, value))
                     return false;
                 outValue = value;
                 return true;
@@ -1485,6 +1544,42 @@ namespace Limitless::EditorInspectorPanel
             return false;
         }
 
+        struct ParsedEnumDefinition final
+        {
+            std::string Name;
+            std::vector<std::string> Values;
+        };
+
+        void ParseEnumDefinitionsFromSource(const std::string& source, std::vector<ParsedEnumDefinition>& outEnums)
+        {
+            const std::regex enumDeclPattern(R"(enum\s+(?:class\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*[A-Za-z_][A-Za-z0-9_:]*)?\s*\{([^}]*)\})");
+            const std::regex enumValuePattern(R"(([A-Za-z_][A-Za-z0-9_]*))");
+
+            for (std::sregex_iterator it(source.begin(), source.end(), enumDeclPattern), end; it != end; ++it)
+            {
+                ParsedEnumDefinition enumDef;
+                enumDef.Name = (*it)[1].str();
+
+                const std::string body = (*it)[2].str();
+                for (std::sregex_iterator vit(body.begin(), body.end(), enumValuePattern), vend; vit != vend; ++vit)
+                {
+                    enumDef.Values.push_back((*vit)[1].str());
+                }
+                if (!enumDef.Values.empty())
+                    outEnums.push_back(std::move(enumDef));
+            }
+        }
+
+        const ParsedEnumDefinition* FindEnumDefinition(const std::vector<ParsedEnumDefinition>& enums, const std::string& typeName)
+        {
+            for (const auto& enumDef : enums)
+            {
+                if (enumDef.Name == typeName)
+                    return &enumDef;
+            }
+            return nullptr;
+        }
+
         bool ParsePublicScriptFieldsFromHeader(const std::filesystem::path& headerPath,
                                                std::vector<ScriptPublicFieldDefinition>& outFields,
                                                std::string& outError)
@@ -1496,12 +1591,31 @@ namespace Limitless::EditorInspectorPanel
                 return false;
             }
 
-            const std::regex fieldPattern(
-                R"(^\s*(?:const\s+)?(?:static\s+)?(float|int32_t|int|bool|glm::vec3|std::string|Limitless::Entity|Entity|Limitless::Prefab|Prefab|Limitless::ScriptPrefabReference|ScriptPrefabReference)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*([^;]+))?\s*;\s*$)");
+            const std::string fileContent((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+            input.close();
+
+            std::vector<ParsedEnumDefinition> discoveredEnums;
+            ParseEnumDefinitionsFromSource(fileContent, discoveredEnums);
+
+            std::string enumTypeAlternation;
+            for (const auto& enumDef : discoveredEnums)
+            {
+                if (!enumTypeAlternation.empty())
+                    enumTypeAlternation += "|";
+                enumTypeAlternation += enumDef.Name;
+            }
+
+            const std::string baseTypes = "float|int32_t|int|bool|glm::vec2|glm::vec3|glm::vec4|std::string|Limitless::Entity|Entity|Limitless::Prefab|Prefab|Limitless::ScriptPrefabReference|ScriptPrefabReference";
+            const std::string fullPattern = enumTypeAlternation.empty()
+                ? std::string(R"(^\s*(?:const\s+)?(?:static\s+)?()" + baseTypes + R"()\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*([^;]+))?\s*;\s*$)")
+                : std::string(R"(^\s*(?:const\s+)?(?:static\s+)?()" + baseTypes + "|" + enumTypeAlternation + R"()\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=\s*([^;]+))?\s*;\s*$)");
+
+            const std::regex fieldPattern(fullPattern);
 
             bool insidePublicSection = false;
+            std::istringstream stream(fileContent);
             std::string line;
-            while (std::getline(input, line))
+            while (std::getline(stream, line))
             {
                 const size_t commentIndex = line.find("//");
                 const std::string content = TrimString(commentIndex == std::string::npos ? line : line.substr(0, commentIndex));
@@ -1528,6 +1642,7 @@ namespace Limitless::EditorInspectorPanel
                 if (!std::regex_match(content, fieldMatch, fieldPattern))
                     continue;
 
+                const std::string typeName = fieldMatch[1].str();
                 ScriptPublicFieldDefinition fieldDefinition;
                 fieldDefinition.Name = fieldMatch[2].str();
 
@@ -1535,8 +1650,32 @@ namespace Limitless::EditorInspectorPanel
                 if (fieldMatch[3].matched)
                     initializer = fieldMatch[3].str();
 
-                if (!TryBuildDefaultFieldValue(fieldMatch[1].str(), initializer, fieldDefinition.DefaultValue))
+                const ParsedEnumDefinition* enumDef = FindEnumDefinition(discoveredEnums, typeName);
+                if (enumDef != nullptr)
+                {
+                    ScriptEnumValue enumValue{};
+                    enumValue.EnumTypeName = enumDef->Name;
+                    enumValue.EnumNames = enumDef->Values;
+                    enumValue.Value = 0;
+                    if (initializer.has_value())
+                    {
+                        const std::string initTrimmed = TrimString(initializer.value());
+                        for (size_t i = 0; i < enumDef->Values.size(); ++i)
+                        {
+                            if (initTrimmed == enumDef->Values[i] ||
+                                initTrimmed == enumDef->Name + "::" + enumDef->Values[i])
+                            {
+                                enumValue.Value = static_cast<int32_t>(i);
+                                break;
+                            }
+                        }
+                    }
+                    fieldDefinition.DefaultValue = std::move(enumValue);
+                }
+                else if (!TryBuildDefaultFieldValue(typeName, initializer, fieldDefinition.DefaultValue))
+                {
                     continue;
+                }
 
                 outFields.push_back(std::move(fieldDefinition));
             }

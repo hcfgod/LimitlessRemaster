@@ -144,6 +144,12 @@ namespace Limitless::EditorInspectorPanel
                     return "Entity";
                 case ScriptPropertyType::Prefab:
                     return "Prefab";
+                case ScriptPropertyType::Vector2:
+                    return "Vector2";
+                case ScriptPropertyType::Vector4:
+                    return "Vector4";
+                case ScriptPropertyType::Enum:
+                    return "Enum";
             }
 
             return "Unknown";

@@ -282,6 +282,8 @@ namespace Limitless
         std::string GetExposedString(const std::string& name, const std::string& fallbackValue = {}) const;
         Entity GetExposedEntity(const std::string& name, const Entity& fallbackValue = Entity{}) const;
         Prefab GetExposedPrefab(const std::string& name, const Prefab& fallbackValue = {}) const;
+        glm::vec2 GetExposedVector2(const std::string& name, const glm::vec2& fallbackValue = glm::vec2(0.0f)) const;
+        glm::vec4 GetExposedVector4(const std::string& name, const glm::vec4& fallbackValue = glm::vec4(0.0f)) const;
 
         void SetExposedFloat(const std::string& name, float value);
         void SetExposedInteger(const std::string& name, int32_t value);
@@ -290,6 +292,8 @@ namespace Limitless
         void SetExposedString(const std::string& name, const std::string& value);
         void SetExposedEntity(const std::string& name, const Entity& value);
         void SetExposedPrefab(const std::string& name, const Prefab& value);
+        void SetExposedVector2(const std::string& name, const glm::vec2& value);
+        void SetExposedVector4(const std::string& name, const glm::vec4& value);
 
         void SyncExposedField(const std::string& name, float& value) { if (HasPendingExposedPropertySync()) value = GetExposedFloat(name, value); }
         void SyncExposedField(const std::string& name, int32_t& value) { if (HasPendingExposedPropertySync()) value = GetExposedInteger(name, value); }
@@ -298,6 +302,8 @@ namespace Limitless
         void SyncExposedField(const std::string& name, std::string& value) { if (HasPendingExposedPropertySync()) value = GetExposedString(name, value); }
         void SyncExposedField(const std::string& name, Entity& value) { if (HasPendingExposedPropertySync()) value = GetExposedEntity(name, value); }
         void SyncExposedField(const std::string& name, Prefab& value) { if (HasPendingExposedPropertySync()) value = GetExposedPrefab(name, value); }
+        void SyncExposedField(const std::string& name, glm::vec2& value) { if (HasPendingExposedPropertySync()) value = GetExposedVector2(name, value); }
+        void SyncExposedField(const std::string& name, glm::vec4& value) { if (HasPendingExposedPropertySync()) value = GetExposedVector4(name, value); }
 
         void WriteBackExposedField(const std::string& name, float value) { SetExposedFloat(name, value); }
         void WriteBackExposedField(const std::string& name, int32_t value) { SetExposedInteger(name, value); }
@@ -306,6 +312,8 @@ namespace Limitless
         void WriteBackExposedField(const std::string& name, const std::string& value) { SetExposedString(name, value); }
         void WriteBackExposedField(const std::string& name, const Entity& value) { SetExposedEntity(name, value); }
         void WriteBackExposedField(const std::string& name, const Prefab& value) { SetExposedPrefab(name, value); }
+        void WriteBackExposedField(const std::string& name, const glm::vec2& value) { SetExposedVector2(name, value); }
+        void WriteBackExposedField(const std::string& name, const glm::vec4& value) { SetExposedVector4(name, value); }
 
         bool Raycast2D(const glm::vec2& origin,
                        const glm::vec2& direction,

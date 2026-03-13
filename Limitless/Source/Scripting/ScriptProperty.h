@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <variant>
+#include <vector>
 
 namespace Limitless
 {
@@ -24,6 +25,13 @@ namespace Limitless
     // Prefer Limitless::Entity fields in new scripts for Unity-style object references.
     using ScriptPrefabReference = Prefab;
 
+    struct ScriptEnumValue
+    {
+        int32_t Value = 0;
+        std::string EnumTypeName;
+        std::vector<std::string> EnumNames;
+    };
+
     enum class ScriptPropertyType : uint32_t
     {
         Float = 0,
@@ -32,8 +40,11 @@ namespace Limitless
         Vector3 = 3,
         String = 4,
         Entity = 5,
-        Prefab = 6
+        Prefab = 6,
+        Vector2 = 7,
+        Vector4 = 8,
+        Enum = 9
     };
 
-    using ScriptPropertyValue = std::variant<float, int32_t, bool, glm::vec3, std::string, ScriptEntityReference, Prefab>;
+    using ScriptPropertyValue = std::variant<float, int32_t, bool, glm::vec3, std::string, ScriptEntityReference, Prefab, glm::vec2, glm::vec4, ScriptEnumValue>;
 }

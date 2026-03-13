@@ -834,6 +834,42 @@ namespace Limitless::EditorInspectorPanel
                             (void)assignPrefabKey({});
                     }
                 }
+                else if (auto* vec2Value = std::get_if<glm::vec2>(&propertyValue))
+                {
+                    EditorPanelStyle::AxisVectorDragState vectorInteractionState{};
+                    if (EditorPanelStyle::DragFloatNWithAxisLabels("##ScriptPropertyValue", &vec2Value->x, 2, 0.1f, 0.0f, 0.0f, "%.3f", 0, &vectorInteractionState))
+                        IncrementScriptPropertyRevision(scriptComponent);
+                    HandleInteractiveScriptPropertyUndo(undoService, propertyEditLabel, &vectorInteractionState);
+                }
+                else if (auto* vec4Value = std::get_if<glm::vec4>(&propertyValue))
+                {
+                    EditorPanelStyle::AxisVectorDragState vectorInteractionState{};
+                    if (EditorPanelStyle::DragFloatNWithAxisLabels("##ScriptPropertyValue", &vec4Value->x, 4, 0.1f, 0.0f, 0.0f, "%.3f", 0, &vectorInteractionState))
+                        IncrementScriptPropertyRevision(scriptComponent);
+                    HandleInteractiveScriptPropertyUndo(undoService, propertyEditLabel, &vectorInteractionState);
+                }
+                else if (auto* enumValue = std::get_if<ScriptEnumValue>(&propertyValue))
+                {
+                    const char* previewName = (enumValue->Value >= 0 && enumValue->Value < static_cast<int32_t>(enumValue->EnumNames.size()))
+                        ? enumValue->EnumNames[enumValue->Value].c_str()
+                        : "Unknown";
+                    if (ImGui::BeginCombo("##ScriptPropertyValue", previewName))
+                    {
+                        for (int32_t i = 0; i < static_cast<int32_t>(enumValue->EnumNames.size()); ++i)
+                        {
+                            const bool isSelected = enumValue->Value == i;
+                            if (ImGui::Selectable(enumValue->EnumNames[i].c_str(), isSelected))
+                            {
+                                enumValue->Value = i;
+                                IncrementScriptPropertyRevision(scriptComponent);
+                            }
+                            if (isSelected)
+                                ImGui::SetItemDefaultFocus();
+                        }
+                        ImGui::EndCombo();
+                    }
+                    HandleInteractiveScriptPropertyUndo(undoService, propertyEditLabel);
+                }
                 ImGui::PopID();
             }
         }

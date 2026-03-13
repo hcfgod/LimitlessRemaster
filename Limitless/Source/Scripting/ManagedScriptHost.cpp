@@ -14,6 +14,7 @@
 #include "Scene/Scene.h"
 
 #include <Coral/Assembly.hpp>
+#include <Coral/Attribute.hpp>
 #include <Coral/HostInstance.hpp>
 #include <Coral/MessageLevel.hpp>
 #include <Coral/String.hpp>
@@ -463,6 +464,12 @@ namespace Limitless::ManagedScriptHost
                     return ScriptEntityReference{};
                 case ScriptPropertyType::Prefab:
                     return Prefab{};
+                case ScriptPropertyType::Vector2:
+                    return glm::vec2(0.0f);
+                case ScriptPropertyType::Vector4:
+                    return glm::vec4(0.0f);
+                case ScriptPropertyType::Enum:
+                    return ScriptEnumValue{};
             }
 
             return 0.0f;
@@ -491,9 +498,19 @@ namespace Limitless::ManagedScriptHost
                 outType = ScriptPropertyType::String;
                 return true;
             }
+            if (fullName == kManagedVector2TypeName)
+            {
+                outType = ScriptPropertyType::Vector2;
+                return true;
+            }
             if (fullName == kManagedVector3TypeName)
             {
                 outType = ScriptPropertyType::Vector3;
+                return true;
+            }
+            if (fullName == kManagedVector4TypeName)
+            {
+                outType = ScriptPropertyType::Vector4;
                 return true;
             }
             if (fullName == kManagedEntityTypeName)
@@ -502,7 +519,44 @@ namespace Limitless::ManagedScriptHost
                 return true;
             }
 
+            try
+            {
+                Coral::Type& baseType = fieldType.GetBaseType();
+                if (baseType)
+                {
+                    const std::string baseName = ToUtf8(baseType.GetFullName());
+                    if (baseName == kSystemEnumBaseTypeName)
+                    {
+                        outType = ScriptPropertyType::Enum;
+                        return true;
+                    }
+                }
+            }
+            catch (...) {}
+
             return false;
+        }
+
+        ScriptEnumValue BuildManagedEnumDefault(Coral::Type& fieldType)
+        {
+            ScriptEnumValue result{};
+            result.EnumTypeName = ToUtf8(fieldType.GetFullName());
+            try
+            {
+                const auto fields = fieldType.GetFields();
+                for (const auto& f : fields)
+                {
+                    if (f.GetAccessibility() == Coral::TypeAccessibility::Public)
+                    {
+                        const std::string name = ToUtf8(f.GetName());
+                        if (name != "value__")
+                            result.EnumNames.push_back(name);
+                    }
+                }
+            }
+            catch (...) {}
+            result.Value = 0;
+            return result;
         }
 
         bool TryReadDefaultFieldValue(const Coral::ManagedObject& instance,
@@ -538,6 +592,35 @@ namespace Limitless::ManagedScriptHost
                 case ScriptPropertyType::Prefab:
                     outValue = Prefab{};
                     return true;
+                case ScriptPropertyType::Vector2:
+                {
+                    const ManagedVector2 value = instance.GetFieldValue<ManagedVector2>(fieldDefinition.Name);
+                    outValue = ToGlmVector2(value);
+                    return true;
+                }
+                case ScriptPropertyType::Vector4:
+                {
+                    const ManagedVector4 value = instance.GetFieldValue<ManagedVector4>(fieldDefinition.Name);
+                    outValue = ToGlmVector4(value);
+                    return true;
+                }
+                case ScriptPropertyType::Enum:
+                {
+                    const int32_t value = instance.GetFieldValue<int32_t>(fieldDefinition.Name);
+                    if (const auto* existingEnum = std::get_if<ScriptEnumValue>(&fieldDefinition.DefaultValue))
+                    {
+                        ScriptEnumValue enumVal = *existingEnum;
+                        enumVal.Value = value;
+                        outValue = std::move(enumVal);
+                    }
+                    else
+                    {
+                        ScriptEnumValue enumVal{};
+                        enumVal.Value = value;
+                        outValue = std::move(enumVal);
+                    }
+                    return true;
+                }
             }
 
             return false;
@@ -570,6 +653,21 @@ namespace Limitless::ManagedScriptHost
             }
             if (const auto* prefabValue = std::get_if<Prefab>(&left))
                 return prefabValue->AssetKey == std::get<Prefab>(right).AssetKey;
+            if (const auto* vec2Value = std::get_if<glm::vec2>(&left))
+            {
+                const glm::vec2& rightValue = std::get<glm::vec2>(right);
+                return vec2Value->x == rightValue.x && vec2Value->y == rightValue.y;
+            }
+            if (const auto* vec4Value = std::get_if<glm::vec4>(&left))
+            {
+                const glm::vec4& rightValue = std::get<glm::vec4>(right);
+                return vec4Value->x == rightValue.x && vec4Value->y == rightValue.y && vec4Value->z == rightValue.z && vec4Value->w == rightValue.w;
+            }
+            if (const auto* enumValue = std::get_if<ScriptEnumValue>(&left))
+            {
+                const auto& rightValue = std::get<ScriptEnumValue>(right);
+                return enumValue->Value == rightValue.Value && enumValue->EnumTypeName == rightValue.EnumTypeName;
+            }
 
             return false;
         }
@@ -627,6 +725,35 @@ namespace Limitless::ManagedScriptHost
                     case ScriptPropertyType::Prefab:
                         outValue = Prefab{};
                         return true;
+                    case ScriptPropertyType::Vector2:
+                    {
+                        const ManagedVector2 value = runtimeInstance.Object.GetFieldValue<ManagedVector2>(fieldDefinition.Name);
+                        outValue = ToGlmVector2(value);
+                        return true;
+                    }
+                    case ScriptPropertyType::Vector4:
+                    {
+                        const ManagedVector4 value = runtimeInstance.Object.GetFieldValue<ManagedVector4>(fieldDefinition.Name);
+                        outValue = ToGlmVector4(value);
+                        return true;
+                    }
+                    case ScriptPropertyType::Enum:
+                    {
+                        const int32_t value = runtimeInstance.Object.GetFieldValue<int32_t>(fieldDefinition.Name);
+                        if (const auto* existingEnum = std::get_if<ScriptEnumValue>(&fieldDefinition.DefaultValue))
+                        {
+                            ScriptEnumValue enumVal = *existingEnum;
+                            enumVal.Value = value;
+                            outValue = std::move(enumVal);
+                        }
+                        else
+                        {
+                            ScriptEnumValue enumVal{};
+                            enumVal.Value = value;
+                            outValue = std::move(enumVal);
+                        }
+                        return true;
+                    }
                 }
             }
             catch (const std::exception& exception)
@@ -645,6 +772,26 @@ namespace Limitless::ManagedScriptHost
             return false;
         }
 
+        bool HasManagedAttribute(Coral::FieldInfo& fieldInfo, const char* attributeTypeName)
+        {
+            try
+            {
+                auto attributes = fieldInfo.GetAttributes();
+                for (auto& attr : attributes)
+                {
+                    Coral::Type& attrType = attr.GetType();
+                    if (attrType)
+                    {
+                        const std::string attrFullName = ToUtf8(attrType.GetFullName());
+                        if (attrFullName == attributeTypeName)
+                            return true;
+                    }
+                }
+            }
+            catch (...) {}
+            return false;
+        }
+
         std::vector<ReflectedFieldDefinition> ReflectManagedFields(Coral::Type& type)
         {
             std::vector<ReflectedFieldDefinition> reflectedFields;
@@ -654,7 +801,15 @@ namespace Limitless::ManagedScriptHost
 
             for (auto fieldInfo : type.GetFields())
             {
-                if (fieldInfo.GetAccessibility() != Coral::TypeAccessibility::Public)
+                const bool isPublic = fieldInfo.GetAccessibility() == Coral::TypeAccessibility::Public;
+
+                if (!isPublic)
+                {
+                    if (!HasManagedAttribute(fieldInfo, kSerializeFieldAttributeTypeName))
+                        continue;
+                }
+
+                if (isPublic && HasManagedAttribute(fieldInfo, kHideInInspectorAttributeTypeName))
                     continue;
 
                 const std::string fieldName = ToUtf8(fieldInfo.GetName());
@@ -669,7 +824,11 @@ namespace Limitless::ManagedScriptHost
                 ReflectedFieldDefinition fieldDefinition{};
                 fieldDefinition.Name = fieldName;
                 fieldDefinition.Type = propertyType;
-                fieldDefinition.DefaultValue = BuildDefaultScriptPropertyValue(propertyType);
+
+                if (propertyType == ScriptPropertyType::Enum)
+                    fieldDefinition.DefaultValue = BuildManagedEnumDefault(fieldType);
+                else
+                    fieldDefinition.DefaultValue = BuildDefaultScriptPropertyValue(propertyType);
 
                 ScriptPropertyValue reflectedDefaultValue = fieldDefinition.DefaultValue;
                 if (hasDefaultInstance && TryReadDefaultFieldValue(defaultInstance, fieldDefinition, reflectedDefaultValue))
@@ -839,6 +998,32 @@ namespace Limitless::ManagedScriptHost
                     }
                     case ScriptPropertyType::Prefab:
                         break;
+                    case ScriptPropertyType::Vector2:
+                    {
+                        const glm::vec2 value = std::holds_alternative<glm::vec2>(propertyValue)
+                            ? std::get<glm::vec2>(propertyValue)
+                            : std::get<glm::vec2>(fieldDefinition.DefaultValue);
+                        runtimeInstance.Object.SetFieldValue(fieldDefinition.Name, ToManagedVector2(value));
+                        break;
+                    }
+                    case ScriptPropertyType::Vector4:
+                    {
+                        const glm::vec4 value = std::holds_alternative<glm::vec4>(propertyValue)
+                            ? std::get<glm::vec4>(propertyValue)
+                            : std::get<glm::vec4>(fieldDefinition.DefaultValue);
+                        runtimeInstance.Object.SetFieldValue(fieldDefinition.Name, ToManagedVector4(value));
+                        break;
+                    }
+                    case ScriptPropertyType::Enum:
+                    {
+                        int32_t value = 0;
+                        if (const auto* enumVal = std::get_if<ScriptEnumValue>(&propertyValue))
+                            value = enumVal->Value;
+                        else if (const auto* defaultEnum = std::get_if<ScriptEnumValue>(&fieldDefinition.DefaultValue))
+                            value = defaultEnum->Value;
+                        runtimeInstance.Object.SetFieldValue(fieldDefinition.Name, value);
+                        break;
+                    }
                 }
             }
             catch (const std::exception& exception)

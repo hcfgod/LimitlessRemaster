@@ -28,12 +28,17 @@ namespace Limitless::ManagedScriptHost::Internal
     inline constexpr const char* kContractAssemblyFileName = "Limitless.Managed.dll";
     inline constexpr const char* kScriptBaseTypeName = "Limitless.Managed.ScriptableEntity";
     inline constexpr const char* kScriptBridgeTypeName = "Limitless.Managed.ScriptBridge";
+    inline constexpr const char* kManagedVector2TypeName = "Limitless.Managed.Vector2";
     inline constexpr const char* kManagedVector3TypeName = "Limitless.Managed.Vector3";
+    inline constexpr const char* kManagedVector4TypeName = "Limitless.Managed.Vector4";
     inline constexpr const char* kManagedEntityTypeName = "Limitless.Managed.Entity";
     inline constexpr const char* kSystemSingleTypeName = "System.Single";
     inline constexpr const char* kSystemInt32TypeName = "System.Int32";
     inline constexpr const char* kSystemBooleanTypeName = "System.Boolean";
     inline constexpr const char* kSystemStringTypeName = "System.String";
+    inline constexpr const char* kSystemEnumBaseTypeName = "System.Enum";
+    inline constexpr const char* kSerializeFieldAttributeTypeName = "Limitless.Managed.SerializeFieldAttribute";
+    inline constexpr const char* kHideInInspectorAttributeTypeName = "Limitless.Managed.HideInInspectorAttribute";
 
     struct RuntimeInstance final
     {
