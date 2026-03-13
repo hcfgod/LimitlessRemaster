@@ -45,21 +45,17 @@ namespace Limitless
     /// compact IDs to TileAsset keys for rendering and collision.
     struct TilemapLayerComponent
     {
-        int32_t RenderOrder = 0;
-        bool CollisionEnabled = false;
-        bool CastShadows = false;
+        /// Monotonically increasing revision counter. Bumped on every
+        /// mutation (tile paint, TileTable change, resize, undo, etc.).
+        /// Used for cheap change detection in the script-runtime access
+        /// validator so it never needs to deep-copy or compare Tiles[].
+        uint64_t MutationRevision = 0;
 
         /// Maps compact tile IDs to TileAsset keys. Index 0 is reserved (empty).
         std::vector<std::string> TileTable;
 
         /// Per-cell tile ID (index into TileTable). 0 = empty.
         std::vector<uint32_t> Tiles;
-
-        /// Monotonically increasing revision counter. Bumped on every
-        /// mutation (tile paint, TileTable change, resize, undo, etc.).
-        /// Used for cheap change detection in the script-runtime access
-        /// validator so it never needs to deep-copy or compare Tiles[].
-        uint64_t MutationRevision = 0;
 
         /// Transient render cache - not serialized. Rebuilt lazily when dirty.
         struct CachedTileRenderData
@@ -70,20 +66,15 @@ namespace Limitless
             glm::vec4 Color = glm::vec4(1.0f);
         };
         std::vector<CachedTileRenderData> CachedTileRender;
-        bool RenderCacheDirty = true;
 
         /// Cached indices of non-empty cells for efficient rendering.
         /// Rebuilt when RenderCacheDirty is consumed. Avoids iterating
         /// millions of empty cells every frame.
         struct PaintedCell { uint32_t CellIndex; uint32_t TileId; };
         std::vector<PaintedCell> CachedPaintedCells;
-        bool PaintedCellCacheDirty = true;
         std::vector<uint32_t> CachedPaintedCellRowOffsets;
-        bool PaintedCellRowOffsetsDirty = true;
         std::vector<uint32_t> CachedPaintedCellChunkOffsets;
         std::vector<uint32_t> CachedPaintedCellChunkIndices;
-        glm::ivec2 CachedPaintedCellChunkGridSize = glm::ivec2(0);
-        bool PaintedCellChunkCacheDirty = true;
 
         // -----------------------------------------------------------------
         // Persistent chunk render/lighting caches (not serialized).
@@ -124,7 +115,15 @@ namespace Limitless
 
         std::vector<ChunkRenderCache> ChunkRenderCaches;
         std::vector<ChunkLightingCache> ChunkLightingCaches;
+        int32_t RenderOrder = 0;
+        glm::ivec2 CachedPaintedCellChunkGridSize = glm::ivec2(0);
         glm::ivec2 ChunkGridSize = glm::ivec2(0);
+        bool CollisionEnabled = false;
+        bool CastShadows = false;
+        bool RenderCacheDirty = true;
+        bool PaintedCellCacheDirty = true;
+        bool PaintedCellRowOffsetsDirty = true;
+        bool PaintedCellChunkCacheDirty = true;
         bool ChunkTopologyDirty = true;
 
         /// Returns the existing tile table index for the given key, or appends
