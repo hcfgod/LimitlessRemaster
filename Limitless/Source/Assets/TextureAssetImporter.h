@@ -18,6 +18,7 @@ namespace Limitless::Assets
         using Settings = TextureSpecification;
 
         static constexpr AssetType Type = AssetType::Texture2D;
+        static constexpr uint32_t Version = 1u;
 
         static nlohmann::json SettingsToJson(const Settings& s)
         {
@@ -43,7 +44,8 @@ namespace Limitless::Assets
             const auto recordResult = AssetDatabase::GetInstance().ImportOrUpdate(
                 key,
                 Type,
-                isDefaultSettings ? nlohmann::json::object() : SettingsToJson(settings));
+                isDefaultSettings ? nlohmann::json::object() : SettingsToJson(settings),
+                Version);
             Settings resolvedSettings = settings;
             if (recordResult.IsSuccess())
             {

@@ -2,6 +2,7 @@
 
 #include "Assets/AssetBundle.h"
 #include "Assets/AssetDatabase.h"
+#include "Assets/AssetImporterVersion.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetTypes.h"
 #include "Assets/AssetUtils.h"
@@ -389,7 +390,7 @@ namespace Limitless::Assets
             {
                 settings = existingRecord.GetValue().ImporterSettings;
             }
-            (void)AssetDatabase::GetInstance().ImportOrUpdate(key, *typeOpt, settings);
+            (void)AssetDatabase::GetInstance().ImportOrUpdate(key, *typeOpt, settings, GetCurrentAssetImporterVersion(*typeOpt));
             discovered++;
         }
 
@@ -416,7 +417,11 @@ namespace Limitless::Assets
             if (alreadyPresent)
                 return;
 
-            const auto imported = AssetDatabase::GetInstance().ImportOrUpdate(key, type, nlohmann::json::object());
+            const auto imported = AssetDatabase::GetInstance().ImportOrUpdate(
+                key,
+                type,
+                nlohmann::json::object(),
+                GetCurrentAssetImporterVersion(type));
             if (imported.IsSuccess())
             {
                 records.push_back(imported.GetValue());

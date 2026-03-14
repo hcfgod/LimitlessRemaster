@@ -27,7 +27,10 @@ namespace Limitless::Assets
         {
             MissingFileForRecord,
             StaleKeyMapping,
-            DuplicateGuidForDifferentKeys
+            DuplicateGuidForDifferentKeys,
+            SelfDependency,
+            MissingDependencyRecord,
+            DependencyCycle
         };
 
         Type IssueType = Type::MissingFileForRecord;

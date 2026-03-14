@@ -127,7 +127,7 @@ namespace Limitless
     class Window
     {
     public:
-        using FileDropCallback = std::function<void(const std::vector<std::filesystem::path>&)>;
+        using FileDropCallback = std::function<void(const std::vector<std::filesystem::path>&, float, float)>;
 
         virtual ~Window() = default;
 

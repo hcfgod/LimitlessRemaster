@@ -96,10 +96,25 @@ namespace Limitless::EditorProjectPanel
         EditorPanelStyle::PushPanelVisualStyle();
         if (!ImGui::Begin(windowName, &isOpen))
         {
+            const ImVec2 windowPos = ImGui::GetWindowPos();
+            const ImVec2 windowSize = ImGui::GetWindowSize();
+            state.ExternalDropPanelMinX = windowPos.x;
+            state.ExternalDropPanelMinY = windowPos.y;
+            state.ExternalDropPanelMaxX = windowPos.x + windowSize.x;
+            state.ExternalDropPanelMaxY = windowPos.y + windowSize.y;
             Internal::ClearProjectSearchMatchCache(state);
             ImGui::End();
             EditorPanelStyle::PopPanelVisualStyle();
             return;
+        }
+
+        {
+            const ImVec2 windowPos = ImGui::GetWindowPos();
+            const ImVec2 windowSize = ImGui::GetWindowSize();
+            state.ExternalDropPanelMinX = windowPos.x;
+            state.ExternalDropPanelMinY = windowPos.y;
+            state.ExternalDropPanelMaxX = windowPos.x + windowSize.x;
+            state.ExternalDropPanelMaxY = windowPos.y + windowSize.y;
         }
 
         state.IsLocked = EditorPanelLock::DrawLockToggle(state.IsLocked);
@@ -109,6 +124,7 @@ namespace Limitless::EditorProjectPanel
         state.GridScaleChanged = false;
         state.RequestFocusAnimationClipEditor = false;
         state.RequestFocusAnimatorControllerEditor = false;
+        state.IsProjectPanelHoveredForExternalDrop = false;
         state.HoveredFolderRelativePathForExternalDrop.clear();
         Internal::SetProjectSearchFilter(state, std::string(state.SearchBuffer.data()));
         Internal::ClearProjectSearchMatchCache(state);
@@ -222,6 +238,7 @@ namespace Limitless::EditorProjectPanel
 
         ImGui::Spacing();
         Internal::DrawProjectBrowserRegion(assetsDirectory, state, materialPreviewCache, selection, callbacks);
+        state.IsProjectPanelHoveredForExternalDrop = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup);
 
         if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
         {
@@ -239,10 +256,9 @@ namespace Limitless::EditorProjectPanel
             }
         }
 
-        if (!state.PendingExternalDropPaths.empty() &&
-            ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup))
+        if (!state.PendingExternalDropPaths.empty())
         {
-            const std::filesystem::path targetFolder = state.HoveredFolderRelativePathForExternalDrop;
+            const std::filesystem::path targetFolder = state.PendingExternalDropTargetFolderRelativePath;
             const bool importedAny = ProjectAssetOperations::ImportExternalPathsToFolder(
                 state.PendingExternalDropPaths, targetFolder);
             if (importedAny)
@@ -253,6 +269,7 @@ namespace Limitless::EditorProjectPanel
                         targetFolder.generic_string());
             }
             state.PendingExternalDropPaths.clear();
+            state.PendingExternalDropTargetFolderRelativePath.clear();
         }
 
         DrawProjectFolderPopups(

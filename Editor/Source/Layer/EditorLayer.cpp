@@ -584,12 +584,38 @@ namespace Limitless
             m_EditorCameraController,
             m_SceneViewFramebuffer);
 
-        Application::GetInstance().GetWindow().SetFileDropCallback([this](const std::vector<std::filesystem::path>& droppedPaths) {
+        Application::GetInstance().GetWindow().SetFileDropCallback([this](const std::vector<std::filesystem::path>& droppedPaths, float dropX, float dropY) {
             if (droppedPaths.empty())
             {
                 return;
             }
 
+            float hitX = dropX;
+            float hitY = dropY;
+            if (hitX < 0.0f || hitY < 0.0f)
+            {
+                int cursorX = 0;
+                int cursorY = 0;
+                Application::GetInstance().GetWindow().GetCursorPosition(cursorX, cursorY);
+                hitX = static_cast<float>(cursorX);
+                hitY = static_cast<float>(cursorY);
+            }
+
+            const bool withinProjectPanelBounds =
+                hitX >= m_ProjectPanelState.ExternalDropPanelMinX &&
+                hitY >= m_ProjectPanelState.ExternalDropPanelMinY &&
+                hitX <= m_ProjectPanelState.ExternalDropPanelMaxX &&
+                hitY <= m_ProjectPanelState.ExternalDropPanelMaxY;
+
+            if (!withinProjectPanelBounds)
+            {
+                return;
+            }
+
+            m_ProjectPanelState.PendingExternalDropTargetFolderRelativePath =
+                m_ProjectPanelState.HoveredFolderRelativePathForExternalDrop.empty()
+                    ? m_ProjectPanelState.ActiveFolderRelativePath
+                    : m_ProjectPanelState.HoveredFolderRelativePathForExternalDrop;
             m_ProjectPanelState.PendingExternalDropPaths.insert(
                 m_ProjectPanelState.PendingExternalDropPaths.end(),
                 droppedPaths.begin(),

@@ -63,7 +63,10 @@ namespace Limitless::Assets
         // - resolves key to a filesystem path
         // - ensures `.meta` GUID exists next to the real file
         // - upserts record and persists the database file
-        Result<Record> ImportOrUpdate(const std::string& key, AssetType type, const nlohmann::json& importerSettings = nlohmann::json::object());
+        Result<Record> ImportOrUpdate(const std::string& key,
+                                      AssetType type,
+                                      const nlohmann::json& importerSettings = nlohmann::json::object(),
+                                      uint32_t importerVersion = 1u);
 
         // Update dependency list for a GUID:
         // - stored in database

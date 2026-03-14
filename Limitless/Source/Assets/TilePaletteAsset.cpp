@@ -1,6 +1,7 @@
 #include "Assets/TilePaletteAsset.h"
 #include "Assets/TileAsset.h"
 #include "Assets/AssetDatabase.h"
+#include "Assets/AssetImporterVersion.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/SpriteImportSettings.h"
 #include "Core/Debug/Log.h"
@@ -223,7 +224,11 @@ namespace Limitless::Assets
             const std::string tileAssetKey = relPath.generic_string();
 
             // Register the tile with the asset database.
-            AssetDatabase::GetInstance().ImportOrUpdate(tileAssetKey, AssetType::Tile);
+            AssetDatabase::GetInstance().ImportOrUpdate(
+                tileAssetKey,
+                AssetType::Tile,
+                nlohmann::json::object(),
+                GetCurrentAssetImporterVersion(AssetType::Tile));
 
             tileKeys.push_back(tileAssetKey);
         }

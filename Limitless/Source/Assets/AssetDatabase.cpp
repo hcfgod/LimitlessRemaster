@@ -2,6 +2,7 @@
 
 #include "Assets/AssetBundle.h"
 #include "Assets/AssetPaths.h"
+#include "Assets/AssetRegistryCache.h"
 #include "Assets/AssetUtils.h"
 #include "Project/ProjectManager.h"
 
@@ -13,6 +14,11 @@
 
 namespace Limitless::Assets
 {
+    namespace
+    {
+        constexpr uint32_t kAssetDatabaseJsonVersion = 2;
+    }
+
     static uint64_t ComputeImporterSettingsHash64(const nlohmann::json& importerSettings)
     {
         // Stable across restarts; used only for incremental tooling decisions.
@@ -34,6 +40,57 @@ namespace Limitless::Assets
         // file_time_type::duration::rep is implementation-defined; we store the raw tick count and only
         // compare values from the same platform/toolchain family (incremental reimport correctness is best-effort).
         return static_cast<int64_t>(t.time_since_epoch().count());
+    }
+
+    static uint64_t GetFileSizeOrZero(const std::filesystem::path& path)
+    {
+        std::error_code ec;
+        const uint64_t size = std::filesystem::file_size(path, ec);
+        return ec ? 0ull : size;
+    }
+
+    static AssetRegistryCacheSnapshot BuildRegistryCacheSnapshot(
+        const std::unordered_map<std::string, AssetDatabase::Record>& records,
+        uint64_t sourceSizeBytes,
+        int64_t sourceLastWriteTimeTicks)
+    {
+        AssetRegistryCacheSnapshot snapshot{};
+        snapshot.DatabaseJsonVersion = kAssetDatabaseJsonVersion;
+        snapshot.SourceSizeBytes = sourceSizeBytes;
+        snapshot.SourceLastWriteTimeTicks = sourceLastWriteTimeTicks;
+        snapshot.Entries.reserve(records.size());
+
+        std::vector<const AssetDatabase::Record*> sortedRecords;
+        sortedRecords.reserve(records.size());
+        for (const auto& [guid, record] : records)
+        {
+            (void)guid;
+            sortedRecords.push_back(&record);
+        }
+
+        std::sort(sortedRecords.begin(), sortedRecords.end(), [](const AssetDatabase::Record* lhs, const AssetDatabase::Record* rhs) {
+            if (lhs->Key != rhs->Key)
+                return lhs->Key < rhs->Key;
+            return lhs->Guid < rhs->Guid;
+        });
+
+        for (const AssetDatabase::Record* record : sortedRecords)
+        {
+            AssetRegistryCacheEntry entry{};
+            entry.Guid = record->Guid;
+            entry.Key = record->Key;
+            entry.ResolvedPath = record->ResolvedPath;
+            entry.Type = record->Type;
+            entry.ImporterSettingsJson = record->ImporterSettings.dump();
+            entry.Dependencies = record->Dependencies;
+            entry.SourceSizeBytes = record->SourceSizeBytes;
+            entry.SourceLastWriteTimeTicks = record->SourceLastWriteTimeTicks;
+            entry.ImporterSettingsHash64 = record->ImporterSettingsHash64;
+            entry.ImporterVersion = record->ImporterVersion;
+            snapshot.Entries.push_back(std::move(entry));
+        }
+
+        return snapshot;
     }
 
     static bool IsPathUnderRoot(const std::filesystem::path& candidatePath,
@@ -148,7 +205,10 @@ namespace Limitless::Assets
         return git->second;
     }
 
-    Result<AssetDatabase::Record> AssetDatabase::ImportOrUpdate(const std::string& key, AssetType type, const nlohmann::json& importerSettings)
+    Result<AssetDatabase::Record> AssetDatabase::ImportOrUpdate(const std::string& key,
+                                                                AssetType type,
+                                                                const nlohmann::json& importerSettings,
+                                                                uint32_t importerVersion)
     {
         if (key.empty())
         {
@@ -215,7 +275,7 @@ namespace Limitless::Assets
         record.SourceSizeBytes = sizeEc ? 0ull : sizeBytes;
         record.SourceLastWriteTimeTicks = lastWriteTicks;
         record.ImporterSettingsHash64 = ComputeImporterSettingsHash64(record.ImporterSettings);
-        record.ImporterVersion = 1;
+        record.ImporterVersion = importerVersion != 0u ? importerVersion : 1u;
 
         {
             std::lock_guard<std::mutex> lock(m_Mutex);
@@ -525,6 +585,92 @@ namespace Limitless::Assets
 
         try
         {
+            const uint64_t sourceSizeBytes = GetFileSizeOrZero(dbPath);
+            const int64_t sourceLastWriteTimeTicks = GetLastWriteTimeTicksOrZero(dbPath);
+            const std::filesystem::path cachePath = AssetRegistryCache::GetCacheFilePath(dbPath);
+
+            auto loadFromCache = [&]() -> Result<void>
+            {
+                const auto cacheLoadResult = AssetRegistryCache::LoadFromFile(
+                    cachePath,
+                    kAssetDatabaseJsonVersion,
+                    sourceSizeBytes,
+                    sourceLastWriteTimeTicks);
+                if (cacheLoadResult.IsFailure())
+                {
+                    return Result<void>(cacheLoadResult.GetError());
+                }
+
+                m_ByGuid.clear();
+                m_GuidByKey.clear();
+                m_DependentsByGuid.clear();
+
+                for (const auto& entry : cacheLoadResult.GetValue().Entries)
+                {
+                    Record record{};
+                    record.Guid = entry.Guid;
+                    record.Key = entry.Key;
+                    record.ResolvedPath = entry.ResolvedPath;
+                    record.Type = entry.Type;
+                    if (!entry.ImporterSettingsJson.empty())
+                    {
+                        try
+                        {
+                            record.ImporterSettings = nlohmann::json::parse(entry.ImporterSettingsJson);
+                        }
+                        catch (const std::exception& exception)
+                        {
+                            return Result<void>(ErrorCode::FileCorrupted,
+                                                std::string("AssetRegistryCache: failed to parse importer settings JSON: ") + exception.what());
+                        }
+                        if (!record.ImporterSettings.is_object())
+                        {
+                            return Result<void>(ErrorCode::FileCorrupted, "AssetRegistryCache: importer settings payload is not a JSON object");
+                        }
+                    }
+                    else
+                    {
+                        record.ImporterSettings = nlohmann::json::object();
+                    }
+                    record.Dependencies = entry.Dependencies;
+                    record.SourceSizeBytes = entry.SourceSizeBytes;
+                    record.SourceLastWriteTimeTicks = entry.SourceLastWriteTimeTicks;
+                    record.ImporterSettingsHash64 = entry.ImporterSettingsHash64;
+                    record.ImporterVersion = entry.ImporterVersion;
+
+                    if (record.Guid.empty() || record.Key.empty())
+                    {
+                        continue;
+                    }
+
+                    if (record.ResolvedPath.empty() || !IsPathUnderRoot(std::filesystem::path(record.ResolvedPath), projectAssetsRoot))
+                    {
+                        continue;
+                    }
+
+                    m_GuidByKey[record.Key] = record.Guid;
+                    m_ByGuid[record.Guid] = std::move(record);
+                }
+
+                RebuildDependentsIndexLocked();
+                return Result<void>();
+            };
+
+            const auto cacheResult = loadFromCache();
+            if (cacheResult.IsSuccess())
+            {
+                ++m_Revision;
+                return Result<void>();
+            }
+
+            const ErrorCode cacheErrorCode = cacheResult.GetError().GetCode();
+            if (cacheErrorCode != ErrorCode::FileNotFound &&
+                cacheErrorCode != ErrorCode::ResourceVersionMismatch)
+            {
+                LT_CORE_WARN("AssetDatabase: binary cache load failed, falling back to JSON: {}",
+                             cacheResult.GetError().GetErrorMessage());
+            }
+
             std::ifstream in(dbPath, std::ios::in | std::ios::binary);
             if (!in.is_open())
             {
@@ -570,6 +716,15 @@ namespace Limitless::Assets
             }
             RebuildDependentsIndexLocked();
             ++m_Revision;
+
+            const auto cacheSaveResult = AssetRegistryCache::SaveToFile(
+                cachePath,
+                BuildRegistryCacheSnapshot(m_ByGuid, sourceSizeBytes, sourceLastWriteTimeTicks));
+            if (cacheSaveResult.IsFailure())
+            {
+                LT_CORE_WARN("AssetDatabase: failed to save binary cache: {}",
+                             cacheSaveResult.GetError().GetErrorMessage());
+            }
         }
         catch (const std::exception& e)
         {
@@ -596,7 +751,7 @@ namespace Limitless::Assets
             }
 
             nlohmann::json root;
-            root["version"] = 2;
+            root["version"] = kAssetDatabaseJsonVersion;
             root["records"] = nlohmann::json::array();
 
             for (const auto& [guid, record] : m_ByGuid)
@@ -638,6 +793,18 @@ namespace Limitless::Assets
                     // Leave temp for debugging if rename fails.
                     return Result<void>(ErrorCode::FileAccessDenied, "Failed to replace AssetDatabase: " + ec.message());
                 }
+            }
+
+            const auto cacheSaveResult = AssetRegistryCache::SaveToFile(
+                AssetRegistryCache::GetCacheFilePath(dbPath),
+                BuildRegistryCacheSnapshot(
+                    m_ByGuid,
+                    GetFileSizeOrZero(dbPath),
+                    GetLastWriteTimeTicksOrZero(dbPath)));
+            if (cacheSaveResult.IsFailure())
+            {
+                LT_CORE_WARN("AssetDatabase: failed to save binary cache: {}",
+                             cacheSaveResult.GetError().GetErrorMessage());
             }
         }
         catch (const std::exception& e)

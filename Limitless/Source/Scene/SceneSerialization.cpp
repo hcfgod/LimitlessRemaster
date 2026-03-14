@@ -1,6 +1,7 @@
 #include "Scene/SceneSerialization.h"
 
 #include "Assets/AssetDatabase.h"
+#include "Assets/AssetImporterVersion.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetUtils.h"
 
@@ -54,7 +55,11 @@ namespace Limitless::SceneSerialization
             if (guidResult.IsSuccess())
             {
                 ref["guid"] = guidResult.GetValue();
-                (void)Assets::AssetDatabase::GetInstance().ImportOrUpdate(assetKey, type);
+                (void)Assets::AssetDatabase::GetInstance().ImportOrUpdate(
+                    assetKey,
+                    type,
+                    nlohmann::json::object(),
+                    Assets::GetCurrentAssetImporterVersion(type));
             }
         }
 

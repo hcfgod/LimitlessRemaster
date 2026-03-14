@@ -38,12 +38,18 @@ namespace Limitless
     {
         // External OS drop import (Explorer/Finder -> Project panel).
         std::vector<std::filesystem::path> PendingExternalDropPaths;
+        std::filesystem::path PendingExternalDropTargetFolderRelativePath;
         // Multi-select state for Project assets (Ctrl/Shift click + multi-drag).
         std::vector<std::string> MultiSelectedAssetKeys;
         // Multi-select state for texture sub-sprites (virtual keys: "Texture.png#idx").
         std::vector<std::string> MultiSelectedSubSpriteKeys;
         bool RequestFocusAnimationClipEditor = false;
         bool RequestFocusAnimatorControllerEditor = false;
+        bool IsProjectPanelHoveredForExternalDrop = false;
+        float ExternalDropPanelMinX = 0.0f;
+        float ExternalDropPanelMinY = 0.0f;
+        float ExternalDropPanelMaxX = 0.0f;
+        float ExternalDropPanelMaxY = 0.0f;
 
         std::string SelectionAnchorAssetKey;
         std::string SubSpriteSelectionAnchorKey;

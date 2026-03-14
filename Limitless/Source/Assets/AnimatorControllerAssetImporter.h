@@ -15,6 +15,7 @@ namespace Limitless::Assets
         using Settings = AnimatorControllerAsset::Settings;
 
         static constexpr AssetType Type = AssetType::AnimatorController;
+        static constexpr uint32_t Version = 1u;
 
         static nlohmann::json SettingsToJson(const Settings& settings)
         {
@@ -27,7 +28,7 @@ namespace Limitless::Assets
                                           const Settings& settings = Settings{},
                                           uint64_t generation = AssetLoadCoordinator::GetGeneration())
         {
-            const auto importResult = AssetDatabase::GetInstance().ImportOrUpdate(key, Type, SettingsToJson(settings));
+            const auto importResult = AssetDatabase::GetInstance().ImportOrUpdate(key, Type, SettingsToJson(settings), Version);
             if (importResult.IsSuccess())
             {
                 AssetDatabase::GetInstance().SetDependencies(importResult.GetValue().Guid, {});

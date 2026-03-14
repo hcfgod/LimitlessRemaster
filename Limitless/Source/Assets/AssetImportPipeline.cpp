@@ -1,6 +1,7 @@
 #include "Assets/AssetImportPipeline.h"
 
 #include "Assets/AssetManager.h"
+#include "Assets/AssetImporterVersion.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetTypes.h"
 #include "Project/ProjectManager.h"
@@ -11,6 +12,8 @@
 
 #include <algorithm>
 #include <deque>
+#include <functional>
+#include <numeric>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
@@ -95,20 +98,20 @@ namespace Limitless::Assets::AssetImportPipeline
             return ec ? 0ull : size;
         }
 
-        bool IsUpToDate(const AssetDatabase::Record& record, const std::filesystem::path& filePath)
+        bool IsUpToDate(const AssetDatabase::Record& record,
+                        const std::filesystem::path& filePath,
+                        uint32_t currentImporterVersion)
         {
-            // Best-effort incremental import based on size + last-write ticks + settings hash + importer version.
             const uint64_t sizeBytes = GetFileSizeOrZero(filePath);
             const int64_t lastWrite = GetLastWriteTimeTicksOrZero(filePath);
             if (sizeBytes == 0 || lastWrite == 0)
             {
-                // If we can't stat the file reliably, force import.
                 return false;
             }
 
             return record.SourceSizeBytes == sizeBytes &&
                    record.SourceLastWriteTimeTicks == lastWrite &&
-                   record.ImporterVersion == 1;
+                   record.ImporterVersion == currentImporterVersion;
         }
 
         void ReloadIfCached(const std::string& key)
@@ -201,6 +204,8 @@ namespace Limitless::Assets::AssetImportPipeline
                     continue;
                 }
 
+                const uint32_t importerVersion = GetCurrentAssetImporterVersion(job.Type);
+
                 const std::filesystem::path abs = projectRoot / job.Key;
                 if (!std::filesystem::exists(abs))
                 {
@@ -215,13 +220,13 @@ namespace Limitless::Assets::AssetImportPipeline
                     settings = existingRecord.GetValue().ImporterSettings;
                 }
 
-                if (changedOnly && existingRecord.IsSuccess() && IsUpToDate(existingRecord.GetValue(), abs))
+                if (changedOnly && existingRecord.IsSuccess() && IsUpToDate(existingRecord.GetValue(), abs, importerVersion))
                 {
                     stats.SkippedUpToDate++;
                     continue;
                 }
 
-                const auto importResult = AssetDatabase::GetInstance().ImportOrUpdate(job.Key, job.Type, settings);
+                const auto importResult = AssetDatabase::GetInstance().ImportOrUpdate(job.Key, job.Type, settings, importerVersion);
                 if (importResult.IsFailure())
                 {
                     stats.Errors++;
@@ -268,7 +273,11 @@ namespace Limitless::Assets::AssetImportPipeline
                 for (const auto& dep : dependents)
                 {
                     // Re-import dependent metadata (ensures GUID + refreshed fingerprints).
-                    const auto reimport = AssetDatabase::GetInstance().ImportOrUpdate(dep.Key, dep.Type, dep.ImporterSettings);
+                    const auto reimport = AssetDatabase::GetInstance().ImportOrUpdate(
+                        dep.Key,
+                        dep.Type,
+                        dep.ImporterSettings,
+                        GetCurrentAssetImporterVersion(dep.Type));
                     if (reimport.IsSuccess())
                     {
                         stats.ImportedKeys.push_back(dep.Key);
@@ -382,8 +391,21 @@ namespace Limitless::Assets::AssetImportPipeline
         std::vector<AssetDatabaseValidationIssue> issues;
         const auto records = AssetDatabase::GetInstance().GetAllRecords();
 
+        std::unordered_map<std::string, const AssetDatabase::Record*> recordsByGuid;
+        recordsByGuid.reserve(records.size());
+
         std::unordered_map<std::string, std::string> firstKeyByGuid;
         firstKeyByGuid.reserve(records.size());
+
+        for (const auto& r : records)
+        {
+            if (r.Guid.empty() || r.Key.empty())
+            {
+                continue;
+            }
+
+            recordsByGuid.emplace(r.Guid, &r);
+        }
 
         for (const auto& r : records)
         {
@@ -422,6 +444,153 @@ namespace Limitless::Assets::AssetImportPipeline
             {
                 firstKeyByGuid.emplace(r.Guid, r.Key);
             }
+        }
+
+        for (const auto& r : records)
+        {
+            if (r.Guid.empty() || r.Key.empty())
+            {
+                continue;
+            }
+
+            for (const auto& dependencyGuid : r.Dependencies)
+            {
+                if (dependencyGuid.empty())
+                {
+                    continue;
+                }
+
+                if (dependencyGuid == r.Guid)
+                {
+                    AssetDatabaseValidationIssue issue;
+                    issue.IssueType = AssetDatabaseValidationIssue::Type::SelfDependency;
+                    issue.Guid = r.Guid;
+                    issue.Key = r.Key;
+                    issue.ResolvedPath = r.ResolvedPath;
+                    issue.Message = "Asset depends on itself";
+                    issues.push_back(std::move(issue));
+                    continue;
+                }
+
+                if (recordsByGuid.find(dependencyGuid) == recordsByGuid.end())
+                {
+                    AssetDatabaseValidationIssue issue;
+                    issue.IssueType = AssetDatabaseValidationIssue::Type::MissingDependencyRecord;
+                    issue.Guid = r.Guid;
+                    issue.Key = r.Key;
+                    issue.ResolvedPath = r.ResolvedPath;
+                    issue.Message = "Missing dependency GUID record '" + dependencyGuid + "'";
+                    issues.push_back(std::move(issue));
+                }
+            }
+        }
+
+        std::unordered_map<std::string, uint8_t> visitState;
+        visitState.reserve(records.size());
+        std::vector<std::string> traversalStack;
+        traversalStack.reserve(records.size());
+        std::unordered_set<std::string> reportedCycleSignatures;
+        reportedCycleSignatures.reserve(16);
+
+        std::function<void(const std::string&)> visit = [&](const std::string& guid)
+        {
+            const auto recordIt = recordsByGuid.find(guid);
+            if (recordIt == recordsByGuid.end())
+            {
+                return;
+            }
+
+            uint8_t& state = visitState[guid];
+            if (state == 2u)
+            {
+                return;
+            }
+            if (state == 1u)
+            {
+                return;
+            }
+
+            state = 1u;
+            traversalStack.push_back(guid);
+
+            for (const auto& dependencyGuid : recordIt->second->Dependencies)
+            {
+                if (dependencyGuid.empty() || dependencyGuid == guid)
+                {
+                    continue;
+                }
+
+                const auto dependencyRecordIt = recordsByGuid.find(dependencyGuid);
+                if (dependencyRecordIt == recordsByGuid.end())
+                {
+                    continue;
+                }
+
+                const auto dependencyStateIt = visitState.find(dependencyGuid);
+                const uint8_t dependencyState = dependencyStateIt != visitState.end() ? dependencyStateIt->second : 0u;
+                if (dependencyState == 1u)
+                {
+                    auto cycleBegin = std::find(traversalStack.begin(), traversalStack.end(), dependencyGuid);
+                    if (cycleBegin != traversalStack.end())
+                    {
+                        std::vector<std::string> cycleGuids(cycleBegin, traversalStack.end());
+                        std::vector<std::string> sortedGuids = cycleGuids;
+                        std::sort(sortedGuids.begin(), sortedGuids.end());
+                        const std::string signature = std::accumulate(
+                            sortedGuids.begin(),
+                            sortedGuids.end(),
+                            std::string(),
+                            [](std::string value, const std::string& part)
+                            {
+                                if (!value.empty())
+                                {
+                                    value += "|";
+                                }
+                                value += part;
+                                return value;
+                            });
+
+                        if (reportedCycleSignatures.emplace(signature).second)
+                        {
+                            std::string message = "Dependency cycle detected: ";
+                            for (size_t index = 0; index < cycleGuids.size(); ++index)
+                            {
+                                if (index > 0)
+                                {
+                                    message += " -> ";
+                                }
+
+                                const auto cycleRecordIt = recordsByGuid.find(cycleGuids[index]);
+                                message += cycleRecordIt != recordsByGuid.end() ? cycleRecordIt->second->Key : cycleGuids[index];
+                            }
+
+                            message += " -> ";
+                            message += dependencyRecordIt->second->Key;
+
+                            AssetDatabaseValidationIssue issue;
+                            issue.IssueType = AssetDatabaseValidationIssue::Type::DependencyCycle;
+                            issue.Guid = guid;
+                            issue.Key = recordIt->second->Key;
+                            issue.ResolvedPath = recordIt->second->ResolvedPath;
+                            issue.Message = std::move(message);
+                            issues.push_back(std::move(issue));
+                        }
+                    }
+
+                    continue;
+                }
+
+                visit(dependencyGuid);
+            }
+
+            traversalStack.pop_back();
+            state = 2u;
+        };
+
+        for (const auto& [guid, record] : recordsByGuid)
+        {
+            (void)record;
+            visit(guid);
         }
 
         return issues;

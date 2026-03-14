@@ -1,6 +1,7 @@
 #include "Assets/AssetHotReloadManager.h"
 
 #include "Assets/AssetManager.h"
+#include "Assets/AssetImporterVersion.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetBundle.h"
 
@@ -288,7 +289,11 @@ namespace Limitless::Assets
 
                 // Root asset: reimport its metadata (source changed).
                 LT_CORE_INFO("AssetHotReload: reimporting key='{}'", record.Key);
-                const auto reimportResult = AssetDatabase::GetInstance().ImportOrUpdate(record.Key, record.Type, record.ImporterSettings);
+                const auto reimportResult = AssetDatabase::GetInstance().ImportOrUpdate(
+                    record.Key,
+                    record.Type,
+                    record.ImporterSettings,
+                    GetCurrentAssetImporterVersion(record.Type));
                 if (reimportResult.IsFailure())
                 {
                     LT_CORE_WARN("AssetHotReload: reimport failed for '{}': {}", record.Key, reimportResult.GetError().GetErrorMessage());

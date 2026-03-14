@@ -631,6 +631,8 @@ namespace Limitless
     void SDLWindow::OnUpdate()
     {
         std::vector<std::filesystem::path> droppedFilesThisFrame;
+        float dropX = -1.0f;
+        float dropY = -1.0f;
 
         // Process SDL events
         SDL_Event event;
@@ -688,6 +690,8 @@ namespace Limitless
                     if (event.drop.data && event.drop.data[0] != '\0')
                     {
                         droppedFilesThisFrame.emplace_back(std::filesystem::path(event.drop.data));
+                        dropX = event.drop.x;
+                        dropY = event.drop.y;
                     }
                     break;
                 }
@@ -696,7 +700,7 @@ namespace Limitless
 
         if (!droppedFilesThisFrame.empty() && m_FileDropCallback)
         {
-            m_FileDropCallback(droppedFilesThisFrame);
+            m_FileDropCallback(droppedFilesThisFrame, dropX, dropY);
         }
     }
 

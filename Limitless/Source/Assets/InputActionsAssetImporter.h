@@ -15,6 +15,7 @@ namespace Limitless::Assets
         using Settings = InputActionsAssetResource::Settings;
 
         static constexpr AssetType Type = AssetType::InputActions;
+        static constexpr uint32_t Version = 1u;
 
         static nlohmann::json SettingsToJson(const Settings&)
         {
@@ -23,7 +24,7 @@ namespace Limitless::Assets
 
         static Async::Task<Ptr> LoadAsync(const std::string& key, const Settings& settings = Settings{}, uint64_t generation = AssetLoadCoordinator::GetGeneration())
         {
-            const auto recordResult = AssetDatabase::GetInstance().ImportOrUpdate(key, Type, SettingsToJson(settings));
+            const auto recordResult = AssetDatabase::GetInstance().ImportOrUpdate(key, Type, SettingsToJson(settings), Version);
             if (recordResult.IsSuccess())
             {
                 AssetDatabase::GetInstance().SetDependencies(recordResult.GetValue().Guid, {});
