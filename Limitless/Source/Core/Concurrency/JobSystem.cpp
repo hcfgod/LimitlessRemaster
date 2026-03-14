@@ -95,6 +95,7 @@ namespace Limitless::Concurrency
         Wait();
 
         m_ShutdownRequested.store(true, std::memory_order_release);
+        { std::lock_guard<std::mutex> lock(m_WakeMutex); }
         m_WakeCondition.notify_all();
         for (auto& worker : m_Workers)
         {
@@ -124,13 +125,17 @@ namespace Limitless::Concurrency
         m_PendingJobs.Value.fetch_add(1, std::memory_order_acq_rel);
         if (TryEnqueue(queuedJob))
         {
+            { std::lock_guard<std::mutex> lock(m_WakeMutex); }
             m_WakeCondition.notify_one();
             return true;
         }
 
         const uint64_t remaining = m_PendingJobs.Value.fetch_sub(1, std::memory_order_acq_rel) - 1;
         if (remaining == 0)
+        {
+            { std::lock_guard<std::mutex> lock(m_IdleMutex); }
             m_IdleCondition.notify_all();
+        }
 
         return false;
     }
@@ -152,13 +157,17 @@ namespace Limitless::Concurrency
             m_PendingJobs.Value.fetch_add(1, std::memory_order_acq_rel);
             if (TryEnqueue(queuedJob))
             {
+                { std::lock_guard<std::mutex> lock(m_WakeMutex); }
                 m_WakeCondition.notify_one();
                 return true;
             }
 
             const uint64_t remaining = m_PendingJobs.Value.fetch_sub(1, std::memory_order_acq_rel) - 1;
             if (remaining == 0)
+            {
+                { std::lock_guard<std::mutex> lock(m_IdleMutex); }
                 m_IdleCondition.notify_all();
+            }
 
             if (!m_Initialized.load(std::memory_order_acquire) ||
                 !m_AcceptingJobs.load(std::memory_order_acquire))
@@ -232,13 +241,17 @@ namespace Limitless::Concurrency
                     std::memory_order_acquire))
             {
                 if (pending == 1)
+                {
+                    { std::lock_guard<std::mutex> lock(m_IdleMutex); }
                     m_IdleCondition.notify_all();
+                }
                 return;
             }
         }
 
         // Defensive: avoid underflow if a completion races with shutdown edge cases.
         // Keep waiters from blocking indefinitely.
+        { std::lock_guard<std::mutex> lock(m_IdleMutex); }
         m_IdleCondition.notify_all();
     }
 
