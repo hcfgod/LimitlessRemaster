@@ -4,9 +4,12 @@
 #include "Assets/AssetImporterVersion.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetTypes.h"
+#include "Assets/AssetUtils.h"
 #include "Project/ProjectManager.h"
 
+#include "Core/Concurrency/JobSystem.h"
 #include "Core/Debug/Log.h"
+#include "Core/Hash/XxHash64.h"
 
 #include <nlohmann/json.hpp>
 
@@ -122,6 +125,31 @@ namespace Limitless::Assets::AssetImportPipeline
             }
         }
 
+        bool IsPathUnderRoot(const std::filesystem::path& candidatePath,
+                             const std::filesystem::path& rootPath)
+        {
+            std::error_code ec;
+            const std::filesystem::path candidate = std::filesystem::weakly_canonical(candidatePath, ec);
+            if (ec) return false;
+            ec.clear();
+            const std::filesystem::path root = std::filesystem::weakly_canonical(rootPath, ec);
+            if (ec) return false;
+            ec.clear();
+            const std::filesystem::path rel = std::filesystem::relative(candidate, root, ec);
+            if (ec) return false;
+            if (rel.empty()) return true;
+            const std::string relText = rel.generic_string();
+            return !(relText == ".." || relText.rfind("../", 0) == 0);
+        }
+
+        uint64_t ComputeImporterSettingsHash64(const nlohmann::json& importerSettings)
+        {
+            const std::string settingsText = importerSettings.dump();
+            ::Limitless::Hash::XxHash64::State hasher(0);
+            hasher.Update(settingsText.data(), settingsText.size());
+            return hasher.Digest();
+        }
+
         struct ImportJob
         {
             std::string Key;
@@ -183,70 +211,225 @@ namespace Limitless::Assets::AssetImportPipeline
             return jobs;
         }
 
-        Result<AssetImportStatistics> ImportJobs(const std::filesystem::path& projectRoot, const std::vector<ImportJob>& jobs, bool changedOnly, bool includeDependents)
+        // ------------------------------------------------------------------
+        // Parallel import implementation
+        // ------------------------------------------------------------------
+
+        struct PreparedImport
+        {
+            enum class Status { NeedsCommit, UpToDate, MissingOnDisk, Error, Skipped };
+            Status ImportStatus = Status::Skipped;
+            std::string Key;
+            std::string ErrorMessage;
+            AssetDatabase::Record Record;
+        };
+
+        Result<AssetImportStatistics> ImportJobs(
+            const std::filesystem::path& projectRoot,
+            const std::vector<ImportJob>& jobs,
+            bool changedOnly,
+            bool includeDependents,
+            const ParallelImportConfig& config)
         {
             AssetImportStatistics stats;
             stats.DiscoveredFiles = jobs.size();
 
-            std::vector<std::string> changedGuids;
-            changedGuids.reserve(64);
+            if (jobs.empty())
+                return stats;
 
-            for (const auto& job : jobs)
+            // ---- Stage 1: Snapshot existing records (read-only reference) ----
+            auto& db = AssetDatabase::GetInstance();
+            db.EnsureLoaded();
+            const auto existingRecords = db.GetAllRecords();
+
+            std::unordered_map<std::string, AssetDatabase::Record> snapshotByKey;
+            snapshotByKey.reserve(existingRecords.size());
+            for (const auto& r : existingRecords)
             {
-                if (!IsImportRootStillActiveProject(projectRoot))
-                {
-                    LT_CORE_INFO("AssetImportPipeline: stopping reimport because active project root changed.");
-                    break;
-                }
+                if (!r.Key.empty())
+                    snapshotByKey.emplace(r.Key, r);
+            }
+
+            const std::filesystem::path projectAssetsRoot = projectRoot / "Assets";
+
+            // ---- Stage 2: Parallel prep (resolve, stat, GUID per asset) ----
+            std::vector<PreparedImport> prepared(jobs.size());
+
+            const bool useParallel =
+                !config.ForceSequential &&
+                Concurrency::GetJobSystem().IsInitialized() &&
+                jobs.size() > 1;
+
+            auto prepareOne = [&](size_t index)
+            {
+                const auto& job = jobs[index];
+                auto& prep = prepared[index];
+                prep.Key = job.Key;
 
                 if (job.Key.empty())
                 {
-                    continue;
+                    prep.ImportStatus = PreparedImport::Status::Skipped;
+                    return;
                 }
 
                 const uint32_t importerVersion = GetCurrentAssetImporterVersion(job.Type);
-
                 const std::filesystem::path abs = projectRoot / job.Key;
+
                 if (!std::filesystem::exists(abs))
                 {
-                    stats.MissingOnDisk++;
-                    continue;
+                    prep.ImportStatus = PreparedImport::Status::MissingOnDisk;
+                    return;
                 }
 
+                // Check up-to-date against snapshot (no database lock needed).
                 nlohmann::json settings = nlohmann::json::object();
-                auto existingRecord = AssetDatabase::GetInstance().FindByKey(job.Key);
-                if (existingRecord.IsSuccess())
+                auto snapshotIt = snapshotByKey.find(job.Key);
+                if (snapshotIt != snapshotByKey.end())
+                    settings = snapshotIt->second.ImporterSettings;
+
+                if (changedOnly && snapshotIt != snapshotByKey.end() &&
+                    IsUpToDate(snapshotIt->second, abs, importerVersion))
                 {
-                    settings = existingRecord.GetValue().ImporterSettings;
+                    prep.ImportStatus = PreparedImport::Status::UpToDate;
+                    return;
                 }
 
-                if (changedOnly && existingRecord.IsSuccess() && IsUpToDate(existingRecord.GetValue(), abs, importerVersion))
+                // Resolve key to absolute path.
+                const auto resolvedPathResult = ResolveAssetKeyToPath(job.Key);
+                if (resolvedPathResult.IsFailure())
                 {
-                    stats.SkippedUpToDate++;
-                    continue;
+                    prep.ImportStatus = PreparedImport::Status::Error;
+                    prep.ErrorMessage = resolvedPathResult.GetError().GetErrorMessage();
+                    return;
+                }
+                const std::filesystem::path resolvedPath = resolvedPathResult.GetValue();
+
+                if (!std::filesystem::exists(resolvedPath))
+                {
+                    prep.ImportStatus = PreparedImport::Status::Error;
+                    prep.ErrorMessage = "Asset file not found: " + resolvedPath.string();
+                    return;
                 }
 
-                const auto importResult = AssetDatabase::GetInstance().ImportOrUpdate(job.Key, job.Type, settings, importerVersion);
-                if (importResult.IsFailure())
+                // Validate path is under project Assets/.
+                if (!IsPathUnderRoot(resolvedPath, projectAssetsRoot))
                 {
-                    stats.Errors++;
-                    LT_CORE_WARN("AssetImportPipeline: import failed key='{}': {}", job.Key, importResult.GetError().GetErrorMessage());
-                    continue;
+                    prep.ImportStatus = PreparedImport::Status::Error;
+                    prep.ErrorMessage = "Resolved path outside Assets/: " + resolvedPath.string();
+                    return;
                 }
 
-                stats.Imported++;
-                stats.ImportedKeys.push_back(job.Key);
-                changedGuids.push_back(importResult.GetValue().Guid);
+                // Stat file.
+                std::error_code sizeEc;
+                const uint64_t sizeBytes = std::filesystem::file_size(resolvedPath, sizeEc);
+                const int64_t lastWriteTicks = GetLastWriteTimeTicksOrZero(resolvedPath);
 
-                ReloadIfCached(job.Key);
+                // Load or create .meta GUID (per-asset file, parallel-safe).
+                const auto guidResult = LoadOrCreateGuid(
+                    resolvedPath.string(),
+                    {{"key", job.Key}, {"type", ToString(job.Type)}});
+                if (guidResult.IsFailure())
+                {
+                    prep.ImportStatus = PreparedImport::Status::Error;
+                    prep.ErrorMessage = guidResult.GetError().GetErrorMessage();
+                    return;
+                }
+
+                // Build record.
+                auto& record = prep.Record;
+                record.Guid = guidResult.GetValue();
+                record.Key = job.Key;
+                record.ResolvedPath = resolvedPath.string();
+                record.Type = job.Type;
+                record.ImporterSettings = settings;
+                record.SourceSizeBytes = sizeEc ? 0ull : sizeBytes;
+                record.SourceLastWriteTimeTicks = lastWriteTicks;
+                record.ImporterSettingsHash64 = ComputeImporterSettingsHash64(settings);
+                record.ImporterVersion = importerVersion != 0u ? importerVersion : 1u;
+
+                prep.ImportStatus = PreparedImport::Status::NeedsCommit;
+            };
+
+            if (useParallel)
+            {
+                LT_CORE_INFO("AssetImportPipeline: parallel prep for {} jobs ({} workers)",
+                             jobs.size(), Concurrency::GetJobSystem().GetWorkerCount());
+                Concurrency::GetJobSystem().ParallelFor(0, jobs.size(), config.GrainSize, prepareOne);
+            }
+            else
+            {
+                for (size_t i = 0; i < jobs.size(); ++i)
+                {
+                    if (!IsImportRootStillActiveProject(projectRoot))
+                    {
+                        LT_CORE_INFO("AssetImportPipeline: stopping reimport because active project root changed.");
+                        break;
+                    }
+                    prepareOne(i);
+                }
             }
 
-            if (!includeDependents || changedGuids.empty())
+            // ---- Stage 3: Gather, sort by key for determinism, batch commit ----
+            if (!IsImportRootStillActiveProject(projectRoot))
             {
+                LT_CORE_INFO("AssetImportPipeline: aborting commit because active project root changed.");
                 return stats;
             }
 
-            // Cascade to dependents via reverse dependency graph.
+            std::vector<AssetDatabase::Record> toCommit;
+            toCommit.reserve(jobs.size());
+
+            for (auto& prep : prepared)
+            {
+                switch (prep.ImportStatus)
+                {
+                    case PreparedImport::Status::MissingOnDisk:
+                        stats.MissingOnDisk++;
+                        break;
+                    case PreparedImport::Status::UpToDate:
+                        stats.SkippedUpToDate++;
+                        break;
+                    case PreparedImport::Status::Error:
+                        stats.Errors++;
+                        LT_CORE_WARN("AssetImportPipeline: import prep failed key='{}': {}",
+                                     prep.Key, prep.ErrorMessage);
+                        break;
+                    case PreparedImport::Status::NeedsCommit:
+                        toCommit.push_back(std::move(prep.Record));
+                        break;
+                    case PreparedImport::Status::Skipped:
+                        break;
+                }
+            }
+
+            // Sort by key for deterministic commit order and stable log output.
+            std::sort(toCommit.begin(), toCommit.end(),
+                      [](const AssetDatabase::Record& a, const AssetDatabase::Record& b)
+                      { return a.Key < b.Key; });
+
+            const auto committed = db.CommitRecordBatch(toCommit);
+
+            std::vector<std::string> changedGuids;
+            changedGuids.reserve(committed.size());
+            for (const auto& r : committed)
+            {
+                stats.Imported++;
+                stats.ImportedKeys.push_back(r.Key);
+                changedGuids.push_back(r.Guid);
+            }
+
+            LT_CORE_INFO("AssetImportPipeline: committed {} record(s) (discovered={}, skipped={}, missing={}, errors={})",
+                         committed.size(), stats.DiscoveredFiles, stats.SkippedUpToDate,
+                         stats.MissingOnDisk, stats.Errors);
+
+            // ---- Stage 4: Reload cached assets ----
+            for (const auto& r : committed)
+                ReloadIfCached(r.Key);
+
+            // ---- Stage 5: Cascade to dependents via reverse dependency graph ----
+            if (!includeDependents || changedGuids.empty())
+                return stats;
+
             std::deque<std::string> queue;
             std::unordered_set<std::string> visited;
             visited.reserve(512);
@@ -254,9 +437,7 @@ namespace Limitless::Assets::AssetImportPipeline
             for (const auto& guid : changedGuids)
             {
                 if (!guid.empty())
-                {
                     queue.push_back(guid);
-                }
             }
 
             while (!queue.empty())
@@ -265,15 +446,12 @@ namespace Limitless::Assets::AssetImportPipeline
                 queue.pop_front();
 
                 if (!visited.emplace(currentGuid).second)
-                {
                     continue;
-                }
 
-                const auto dependents = AssetDatabase::GetInstance().GetDependentsOf(currentGuid);
+                const auto dependents = db.GetDependentsOf(currentGuid);
                 for (const auto& dep : dependents)
                 {
-                    // Re-import dependent metadata (ensures GUID + refreshed fingerprints).
-                    const auto reimport = AssetDatabase::GetInstance().ImportOrUpdate(
+                    const auto reimport = db.ImportOrUpdate(
                         dep.Key,
                         dep.Type,
                         dep.ImporterSettings,
@@ -326,7 +504,7 @@ namespace Limitless::Assets::AssetImportPipeline
         }
     }
 
-    Result<AssetImportStatistics> ReimportAll(bool includeDependents)
+    Result<AssetImportStatistics> ReimportAll(bool includeDependents, const ParallelImportConfig& config)
     {
         const auto rootResult = FindProjectRootFromWorkingDirectory();
         if (rootResult.IsFailure())
@@ -341,7 +519,7 @@ namespace Limitless::Assets::AssetImportPipeline
             return Result<AssetImportStatistics>(jobsResult.GetError());
         }
 
-        auto importResult = ImportJobs(projectRoot, jobsResult.GetValue(), /*changedOnly=*/false, includeDependents);
+        auto importResult = ImportJobs(projectRoot, jobsResult.GetValue(), /*changedOnly=*/false, includeDependents, config);
         if (importResult.IsFailure())
             return importResult;
 
@@ -352,7 +530,7 @@ namespace Limitless::Assets::AssetImportPipeline
         return importResult;
     }
 
-    Result<AssetImportStatistics> ReimportChanged(bool includeDependents)
+    Result<AssetImportStatistics> ReimportChanged(bool includeDependents, const ParallelImportConfig& config)
     {
         const auto rootResult = FindProjectRootFromWorkingDirectory();
         if (rootResult.IsFailure())
@@ -367,7 +545,7 @@ namespace Limitless::Assets::AssetImportPipeline
             return Result<AssetImportStatistics>(jobsResult.GetError());
         }
 
-        auto importResult = ImportJobs(projectRoot, jobsResult.GetValue(), /*changedOnly=*/true, includeDependents);
+        auto importResult = ImportJobs(projectRoot, jobsResult.GetValue(), /*changedOnly=*/true, includeDependents, config);
         if (importResult.IsFailure())
             return importResult;
 

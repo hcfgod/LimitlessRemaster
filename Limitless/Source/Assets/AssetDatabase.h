@@ -80,6 +80,14 @@ namespace Limitless::Assets
         Result<void> RemoveByGuid(const std::string& guid);
         Result<void> RemoveByKey(const std::string& key);
 
+        // Batch-commit prepared records with a single save-to-disk at the end.
+        // Records must have Guid, Key, ResolvedPath, Type, and fingerprint fields populated.
+        // The same merge logic as ImportOrUpdate is applied per record (GUID changes,
+        // dependency preservation, stale alias cleanup) but the expensive disk save
+        // happens only once after all records are committed.
+        // Returns the list of successfully committed records.
+        std::vector<Record> CommitRecordBatch(std::vector<Record>& records);
+
         // Snapshot all records (for tooling/debug).
         std::vector<Record> GetAllRecords();
 

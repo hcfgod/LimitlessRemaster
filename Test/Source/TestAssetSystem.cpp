@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <unordered_set>
 
 namespace
 {
@@ -236,6 +237,192 @@ TEST_SUITE("Asset System")
         CHECK(hasSelfDependency);
         CHECK(hasMissingDependency);
         CHECK(hasDependencyCycle);
+
+        Project::ProjectManager::GetInstance().CloseProject();
+        std::filesystem::remove_all(projectRoot, errorCode);
+    }
+
+    TEST_CASE("AssetDatabase CommitRecordBatch commits multiple records with single save")
+    {
+        using namespace Limitless;
+
+        const std::filesystem::path projectRoot = MakeTempProjectRoot("CommitRecordBatch");
+        std::error_code errorCode;
+        Project::ProjectManager::GetInstance().CloseProject();
+        std::filesystem::remove_all(projectRoot, errorCode);
+        errorCode.clear();
+
+        const auto createProjectResult = Project::ProjectManager::GetInstance().CreateProjectRoot(projectRoot, "CommitRecordBatch");
+        REQUIRE(createProjectResult.IsSuccess());
+
+        const std::filesystem::path shadersDir = projectRoot / "Assets" / "Shaders";
+        std::filesystem::create_directories(shadersDir, errorCode);
+        REQUIRE_FALSE(errorCode);
+
+        constexpr size_t kAssetCount = 5;
+        std::vector<std::string> keys;
+        keys.reserve(kAssetCount);
+        for (size_t i = 0; i < kAssetCount; ++i)
+        {
+            const std::string name = "BatchShader" + std::to_string(i) + ".glsl";
+            const std::filesystem::path path = shadersDir / name;
+            std::ofstream out(path, std::ios::out | std::ios::binary | std::ios::trunc);
+            REQUIRE(out.is_open());
+            out << "#version 330 core\nvoid main() {}\n";
+            keys.push_back("Assets/Shaders/" + name);
+        }
+
+        // Import individually first to establish GUIDs.
+        for (const auto& key : keys)
+        {
+            const auto result = Assets::AssetDatabase::GetInstance().ImportOrUpdate(key, Assets::AssetType::Shader, nlohmann::json::object(), 1u);
+            REQUIRE(result.IsSuccess());
+        }
+
+        const uint64_t revisionBefore = Assets::AssetDatabase::GetInstance().GetRevision();
+
+        // Build records for batch commit with updated importer version.
+        std::vector<Assets::AssetDatabase::Record> records;
+        records.reserve(kAssetCount);
+        for (const auto& key : keys)
+        {
+            const auto existing = Assets::AssetDatabase::GetInstance().FindByKey(key);
+            REQUIRE(existing.IsSuccess());
+            Assets::AssetDatabase::Record r = existing.GetValue();
+            r.ImporterVersion = 5u;
+            records.push_back(std::move(r));
+        }
+
+        const auto committed = Assets::AssetDatabase::GetInstance().CommitRecordBatch(records);
+        CHECK(committed.size() == kAssetCount);
+
+        // Revision should have incremented exactly once (single save).
+        const uint64_t revisionAfter = Assets::AssetDatabase::GetInstance().GetRevision();
+        CHECK(revisionAfter == revisionBefore + 1);
+
+        // Verify all records have the new version.
+        for (const auto& key : keys)
+        {
+            const auto record = Assets::AssetDatabase::GetInstance().FindByKey(key);
+            REQUIRE(record.IsSuccess());
+            CHECK(record.GetValue().ImporterVersion == 5u);
+        }
+
+        // Verify no duplicate GUIDs.
+        std::unordered_set<std::string> guids;
+        for (const auto& r : committed)
+        {
+            CHECK(guids.insert(r.Guid).second);
+        }
+
+        Project::ProjectManager::GetInstance().CloseProject();
+        std::filesystem::remove_all(projectRoot, errorCode);
+    }
+
+    TEST_CASE("AssetImportPipeline ReimportAll produces deterministic results in sequential and parallel modes")
+    {
+        using namespace Limitless;
+
+        const std::filesystem::path projectRoot = MakeTempProjectRoot("ParallelImportDeterminism");
+        std::error_code errorCode;
+        Project::ProjectManager::GetInstance().CloseProject();
+        std::filesystem::remove_all(projectRoot, errorCode);
+        errorCode.clear();
+
+        const auto createProjectResult = Project::ProjectManager::GetInstance().CreateProjectRoot(projectRoot, "ParallelImportDeterminism");
+        REQUIRE(createProjectResult.IsSuccess());
+
+        const std::filesystem::path shadersDir = projectRoot / "Assets" / "Shaders";
+        std::filesystem::create_directories(shadersDir, errorCode);
+        REQUIRE_FALSE(errorCode);
+
+        constexpr size_t kAssetCount = 8;
+        for (size_t i = 0; i < kAssetCount; ++i)
+        {
+            const std::string name = "DetShader" + std::to_string(i) + ".glsl";
+            std::ofstream out(shadersDir / name, std::ios::out | std::ios::binary | std::ios::trunc);
+            REQUIRE(out.is_open());
+            out << "#version 330 core\nvoid main() { /* " << i << " */ }\n";
+        }
+
+        // Run 1: sequential (ForceSequential = true)
+        Assets::AssetDatabase::GetInstance().Reset();
+        Assets::ParallelImportConfig seqConfig;
+        seqConfig.ForceSequential = true;
+        const auto seqResult = Assets::AssetImportPipeline::ReimportAll(false, seqConfig);
+        REQUIRE(seqResult.IsSuccess());
+        const auto& seqStats = seqResult.GetValue();
+        auto seqKeys = seqStats.ImportedKeys;
+        std::sort(seqKeys.begin(), seqKeys.end());
+
+        // Run 2: parallel (ForceSequential = false, default)
+        Assets::AssetDatabase::GetInstance().Reset();
+        Assets::ParallelImportConfig parConfig;
+        parConfig.ForceSequential = false;
+        const auto parResult = Assets::AssetImportPipeline::ReimportAll(false, parConfig);
+        REQUIRE(parResult.IsSuccess());
+        const auto& parStats = parResult.GetValue();
+        auto parKeys = parStats.ImportedKeys;
+        std::sort(parKeys.begin(), parKeys.end());
+
+        // Both runs should import the same set of keys.
+        CHECK(seqStats.DiscoveredFiles == parStats.DiscoveredFiles);
+        CHECK(seqStats.Imported == parStats.Imported);
+        CHECK(seqStats.SkippedUpToDate == parStats.SkippedUpToDate);
+        CHECK(seqStats.Errors == parStats.Errors);
+        CHECK(seqKeys == parKeys);
+
+        // Verify no duplicate GUIDs across all records.
+        const auto allRecords = Assets::AssetDatabase::GetInstance().GetAllRecords();
+        std::unordered_set<std::string> guids;
+        for (const auto& r : allRecords)
+        {
+            if (!r.Guid.empty())
+            {
+                CHECK(guids.insert(r.Guid).second);
+            }
+        }
+
+        Project::ProjectManager::GetInstance().CloseProject();
+        std::filesystem::remove_all(projectRoot, errorCode);
+    }
+
+    TEST_CASE("AssetImportPipeline ReimportChanged skips up-to-date assets after initial import")
+    {
+        using namespace Limitless;
+
+        const std::filesystem::path projectRoot = MakeTempProjectRoot("ParallelReimportChanged");
+        std::error_code errorCode;
+        Project::ProjectManager::GetInstance().CloseProject();
+        std::filesystem::remove_all(projectRoot, errorCode);
+        errorCode.clear();
+
+        const auto createProjectResult = Project::ProjectManager::GetInstance().CreateProjectRoot(projectRoot, "ParallelReimportChanged");
+        REQUIRE(createProjectResult.IsSuccess());
+
+        const std::filesystem::path shadersDir = projectRoot / "Assets" / "Shaders";
+        std::filesystem::create_directories(shadersDir, errorCode);
+        REQUIRE_FALSE(errorCode);
+
+        constexpr size_t kAssetCount = 4;
+        for (size_t i = 0; i < kAssetCount; ++i)
+        {
+            const std::string name = "ChangedShader" + std::to_string(i) + ".glsl";
+            std::ofstream out(shadersDir / name, std::ios::out | std::ios::binary | std::ios::trunc);
+            REQUIRE(out.is_open());
+            out << "#version 330 core\nvoid main() {}\n";
+        }
+
+        // First import: all assets should be imported.
+        const auto firstResult = Assets::AssetImportPipeline::ReimportAll(false);
+        REQUIRE(firstResult.IsSuccess());
+        CHECK(firstResult.GetValue().Imported == kAssetCount);
+
+        // Second import (changed only): all should be skipped.
+        const auto secondResult = Assets::AssetImportPipeline::ReimportChanged(false);
+        REQUIRE(secondResult.IsSuccess());
+        CHECK(secondResult.GetValue().Imported == 0);
+        CHECK(secondResult.GetValue().SkippedUpToDate == kAssetCount);
 
         Project::ProjectManager::GetInstance().CloseProject();
         std::filesystem::remove_all(projectRoot, errorCode);

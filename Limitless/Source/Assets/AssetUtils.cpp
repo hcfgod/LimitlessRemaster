@@ -26,9 +26,8 @@ namespace Limitless::Assets
 
     static std::string RandomHex(uint32_t byteCount)
     {
-        static std::random_device rd;
-        static std::mt19937 gen(rd());
-        static std::uniform_int_distribution<uint32_t> dist(0, 255);
+        static thread_local std::mt19937 gen(std::random_device{}());
+        std::uniform_int_distribution<uint32_t> dist(0, 255);
 
         std::ostringstream oss;
         for (uint32_t i = 0; i < byteCount; ++i)

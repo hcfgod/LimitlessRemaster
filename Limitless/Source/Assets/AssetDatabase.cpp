@@ -463,6 +463,94 @@ namespace Limitless::Assets
         return out;
     }
 
+    std::vector<AssetDatabase::Record> AssetDatabase::CommitRecordBatch(std::vector<Record>& records)
+    {
+        if (records.empty())
+            return {};
+
+        EnsureLoaded();
+
+        std::vector<Record> committed;
+        committed.reserve(records.size());
+
+        {
+            std::lock_guard<std::mutex> lock(m_Mutex);
+            bool rebuildDependentsIndex = false;
+
+            for (auto& record : records)
+            {
+                if (record.Guid.empty() || record.Key.empty())
+                    continue;
+
+                // Compute settings hash if not provided.
+                if (record.ImporterSettingsHash64 == 0 && !record.ImporterSettings.empty())
+                    record.ImporterSettingsHash64 = ComputeImporterSettingsHash64(record.ImporterSettings);
+
+                if (record.ImporterVersion == 0)
+                    record.ImporterVersion = 1u;
+
+                // Handle key->GUID change (same logic as ImportOrUpdate).
+                if (auto keyIt = m_GuidByKey.find(record.Key); keyIt != m_GuidByKey.end() && keyIt->second != record.Guid)
+                {
+                    const std::string oldGuid = keyIt->second;
+                    if (auto oldIt = m_ByGuid.find(oldGuid); oldIt != m_ByGuid.end())
+                    {
+                        if (record.Dependencies.empty())
+                            record.Dependencies = oldIt->second.Dependencies;
+                        if (record.ImporterSettings.is_object() && record.ImporterSettings.empty())
+                        {
+                            record.ImporterSettings = oldIt->second.ImporterSettings;
+                            record.ImporterSettingsHash64 = oldIt->second.ImporterSettingsHash64;
+                        }
+                        m_ByGuid.erase(oldIt);
+                        rebuildDependentsIndex = true;
+                    }
+                }
+
+                // Preserve existing data from current record (same logic as ImportOrUpdate).
+                if (auto it = m_ByGuid.find(record.Guid); it != m_ByGuid.end())
+                {
+                    record.Dependencies = it->second.Dependencies;
+                    if (record.SourceSizeBytes == 0) record.SourceSizeBytes = it->second.SourceSizeBytes;
+                    if (record.SourceLastWriteTimeTicks == 0) record.SourceLastWriteTimeTicks = it->second.SourceLastWriteTimeTicks;
+                    if (record.ImporterSettingsHash64 == 0) record.ImporterSettingsHash64 = it->second.ImporterSettingsHash64;
+                    if (record.ImporterVersion == 0) record.ImporterVersion = it->second.ImporterVersion;
+                    if (record.ImporterSettings.is_object() && record.ImporterSettings.empty())
+                    {
+                        record.ImporterSettings = it->second.ImporterSettings;
+                        record.ImporterSettingsHash64 = it->second.ImporterSettingsHash64;
+                    }
+                }
+
+                // Clean stale key aliases (same logic as ImportOrUpdate).
+                for (auto keyIt = m_GuidByKey.begin(); keyIt != m_GuidByKey.end();)
+                {
+                    if (keyIt->second == record.Guid && keyIt->first != record.Key)
+                        keyIt = m_GuidByKey.erase(keyIt);
+                    else
+                        ++keyIt;
+                }
+
+                m_ByGuid[record.Guid] = record;
+                m_GuidByKey[record.Key] = record.Guid;
+                committed.push_back(record);
+            }
+
+            if (rebuildDependentsIndex)
+                RebuildDependentsIndexLocked();
+
+            ++m_Revision;
+
+            const auto saveResult = SaveToDiskLocked();
+            if (saveResult.IsFailure())
+            {
+                LT_CORE_WARN("AssetDatabase: failed to save database after batch commit: {}", saveResult.GetError().GetErrorMessage());
+            }
+        }
+
+        return committed;
+    }
+
     Result<void> AssetDatabase::RemoveByGuid(const std::string& guid)
     {
         if (guid.empty())
