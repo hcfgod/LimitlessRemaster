@@ -331,15 +331,17 @@ namespace Limitless
             auto command = m_Queue.TryPop();
             if (!command)
                 break;
-            
-            m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
+
+            {
+                std::lock_guard<std::mutex> idleLock(m_IdleMutex);
+                m_InFlightExecutions.fetch_add(1, std::memory_order_relaxed);
+                m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
+            }
             commands.push_back(std::make_unique<QueuedCommand>(std::move(command.value())));
         }
 
         if (commands.empty())
             return;
-
-        m_InFlightExecutions.fetch_add(static_cast<uint32_t>(commands.size()), std::memory_order_relaxed);
 
         // Sort by priority if enabled
         if (m_Config.enablePrioritySorting)
@@ -421,15 +423,17 @@ namespace Limitless
             auto command = m_Queue.TryPop();
             if (!command)
                 break;
-            
-            m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
+
+            {
+                std::lock_guard<std::mutex> idleLock(m_IdleMutex);
+                m_InFlightExecutions.fetch_add(1, std::memory_order_relaxed);
+                m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
+            }
             commands.push_back(std::make_unique<QueuedCommand>(std::move(command.value())));
         }
 
         if (commands.empty())
             return;
-
-        m_InFlightExecutions.fetch_add(static_cast<uint32_t>(commands.size()), std::memory_order_relaxed);
 
         // Sort by priority if enabled
         if (m_Config.enablePrioritySorting)
@@ -511,8 +515,11 @@ namespace Limitless
             if (!command)
                 break;
 
-            m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
-            m_InFlightExecutions.fetch_add(1, std::memory_order_relaxed);
+            {
+                std::lock_guard<std::mutex> idleLock(m_IdleMutex);
+                m_InFlightExecutions.fetch_add(1, std::memory_order_relaxed);
+                m_ApproxSize.fetch_sub(1, std::memory_order_relaxed);
+            }
 
             auto commandStartTime = std::chrono::high_resolution_clock::now();
             

@@ -204,11 +204,14 @@ namespace Limitless
         {
             const auto& mip = mipLevels[i];
             LT_VERIFY(mip.Width > 0 && mip.Height > 0, "OpenGLDevice::CreateTexture2DFromMipChain: invalid mip dimensions");
-            LT_VERIFY(mip.PixelsRGBA8 != nullptr, "OpenGLDevice::CreateTexture2DFromMipChain: mip pixels are null");
-
             const size_t sizeBytes = static_cast<size_t>(mip.Width) * static_cast<size_t>(mip.Height) * 4u;
             const size_t offset = allPixels.size();
             const uint8_t* src = static_cast<const uint8_t*>(mip.PixelsRGBA8);
+            if (src == nullptr)
+            {
+                LT_VERIFY(false, "OpenGLDevice::CreateTexture2DFromMipChain: mip pixels are null");
+                return nullptr;
+            }
             allPixels.insert(allPixels.end(), src, src + sizeBytes);
             copied.push_back(CopiedMip{ mip.Width, mip.Height, offset });
         }
