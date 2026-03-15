@@ -1033,7 +1033,7 @@ namespace Limitless::Assets
             return Result<Record>(ErrorCode::InvalidArgument, "Record must be an object");
         }
 
-        Record r;
+        Record r{};
         if (j.contains("guid") && j["guid"].is_string()) r.Guid = j["guid"].get<std::string>();
         if (j.contains("key") && j["key"].is_string()) r.Key = j["key"].get<std::string>();
         if (j.contains("resolvedPath") && j["resolvedPath"].is_string()) r.ResolvedPath = j["resolvedPath"].get<std::string>();

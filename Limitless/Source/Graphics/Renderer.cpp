@@ -2,13 +2,8 @@
 #include "Core/Debug/Log.h"
 #include "Core/ConfigManager.h"
 #include "Graphics/GraphicsAPIDetector.h"
-#include "Graphics/OpenGL/OpenGLContext.h"
-#include "Graphics/OpenGL/OpenGLGPUMetrics.h"
-#include "Graphics/OpenGL/OpenGLSharedContext.h"
-
-#if __has_include(<glad/glad.h>)
-    #include <glad/glad.h>
-#endif
+#include "Graphics/RenderCommandExecutor.h"
+#include "Graphics/SharedResourceContext.h"
 
 namespace Limitless
 {
@@ -40,43 +35,13 @@ namespace Limitless
         };
     }
 
-    void Renderer::SynchronizeOpenGLResourceWorkForCrossContextVisibility()
+    void Renderer::SynchronizeCrossContextResourceVisibility()
     {
-#if __has_include(<glad/glad.h>)
-        // Create a GPU fence and wait for completion on the CPU.
-        // This is intentionally conservative: it provides a clear "safe-to-use" boundary when
-        // sharing resources across multiple OpenGL contexts.
-        GLsync fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-        if (!fence)
+        auto* device = GetInstance().GetDevice();
+        if (device)
         {
-            LT_CORE_WARN("Renderer: glFenceSync failed; falling back to glFinish");
-            glFinish();
-            return;
+            device->SynchronizeResourceVisibility();
         }
-
-        glFlush();
-
-        for (;;)
-        {
-            const GLenum result = glClientWaitSync(fence, GL_SYNC_FLUSH_COMMANDS_BIT, 1'000'000'000ull);
-            if (result == GL_ALREADY_SIGNALED || result == GL_CONDITION_SATISFIED)
-            {
-                break;
-            }
-            if (result == GL_WAIT_FAILED)
-            {
-                LT_CORE_WARN("Renderer: glClientWaitSync failed; falling back to glFinish");
-                glFinish();
-                break;
-            }
-        }
-
-        glDeleteSync(fence);
-#else
-        // If GL sync APIs are not available in this build, we can't safely provide cross-context
-        // visibility semantics. This build should be configured with GLAD or equivalent.
-        LT_CORE_WARN("Renderer: OpenGL sync APIs not available; cross-context resource visibility may be unsafe");
-#endif
     }
 
     Renderer& Renderer::GetInstance()
@@ -108,6 +73,16 @@ namespace Limitless
         }
 
         m_GraphicsContext = context;
+
+        // Create backend-neutral device for the active graphics API.
+        m_Device = GraphicsDevice::Create(context->GetAPI());
+        if (m_Device)
+        {
+            m_Device->Initialize(nullptr);
+        }
+        
+        // Create the command executor that abstracts context acquisition.
+        m_Executor = RenderBackendExecutor::Create(context);
         
         // Create render command queue with default configuration
         RenderQueueConfig config;
@@ -129,43 +104,39 @@ namespace Limitless
         m_FrameUploadAllocator.Initialize();
         m_FrameCommandArena.Initialize();
 
-        // Default behavior: enable render thread for OpenGL unless explicitly disabled.
-        // This allows OpenGL work to be executed on a dedicated thread (context-affine) while
+        // Default behavior: enable render thread unless explicitly disabled.
+        // This allows GPU work to be executed on a dedicated thread while
         // still supporting multi-threaded submission.
         const bool enableRenderThread = ConfigManager::GetInstance().GetValue<bool>("graphics.render_thread_enabled", true);
 
-        // Optional OpenGL shared-context resource thread (GPU resource execution in parallel).
+        // Optional shared-context resource thread (GPU resource execution in parallel).
         // We create the shared context on the init thread before the render thread takes ownership
         // of the primary context.
         if (enableRenderThread)
         {
-            const bool enableResourceThread = ConfigManager::GetInstance().GetValue<bool>("graphics.opengl.resource_thread_enabled", true);
-            const bool enableSharedContext = ConfigManager::GetInstance().GetValue<bool>("graphics.opengl.shared_context_enabled", true);
+            const bool enableResourceThread = ConfigManager::GetInstance().GetValue<bool>("graphics.resource_thread_enabled", true);
 
-            if (enableResourceThread && enableSharedContext)
+            if (enableResourceThread && m_Device && m_Device->SupportsSharedResourceContext())
             {
-                if (auto* glContext = dynamic_cast<OpenGLContext*>(m_GraphicsContext))
+                std::unique_ptr<SharedResourceContext> shared = m_Device->CreateSharedResourceContext();
+                if (shared)
                 {
-                    std::unique_ptr<OpenGLSharedContext> shared = glContext->CreateSharedContext();
-                    if (shared)
+                    try
                     {
-                        try
-                        {
-                            m_OpenGLResourceThread = std::make_unique<RenderResourceThread>(m_ResourceQueue, m_GraphicsContext, std::move(shared));
-                            m_OpenGLResourceThread->Start();
-                            m_OpenGLResourceThreadEnabled.store(true, std::memory_order_relaxed);
-                        }
-                        catch (const std::exception& e)
-                        {
-                            LT_CORE_WARN("Renderer: failed to start OpenGL resource thread: {}", e.what());
-                            m_OpenGLResourceThread.reset();
-                            m_OpenGLResourceThreadEnabled.store(false, std::memory_order_relaxed);
-                        }
+                        m_ResourceThread = std::make_unique<RenderResourceThread>(m_ResourceQueue, m_GraphicsContext, std::move(shared));
+                        m_ResourceThread->Start();
+                        m_ResourceThreadEnabled.store(true, std::memory_order_relaxed);
                     }
-                    else
+                    catch (const std::exception& e)
                     {
-                        LT_CORE_WARN("Renderer: shared OpenGL context creation failed; resource thread disabled");
+                        LT_CORE_WARN("Renderer: failed to start resource thread: {}", e.what());
+                        m_ResourceThread.reset();
+                        m_ResourceThreadEnabled.store(false, std::memory_order_relaxed);
                     }
+                }
+                else
+                {
+                    LT_CORE_WARN("Renderer: shared resource context creation failed; resource thread disabled");
                 }
             }
         }
@@ -210,9 +181,9 @@ namespace Limitless
         {
             ProcessCommands();
 
-            if (auto* glContext = dynamic_cast<OpenGLContext*>(m_GraphicsContext))
+            if (m_Executor)
             {
-                OpenGLContext::ScopedCurrentContext scope(*glContext);
+                auto scope = m_Executor->AcquireContext();
                 while (!m_PrimaryResourceQueue.IsEmpty() || !m_ResourceQueue.IsEmpty())
                 {
                     m_PrimaryResourceQueue.Process(m_GraphicsContext, 4096);
@@ -226,16 +197,25 @@ namespace Limitless
         // draining avoids the "Flush() drops commands because there is no context" failure mode.
         StopRenderThread();
 
-        if (m_OpenGLResourceThread)
+        if (m_ResourceThread)
         {
-            m_OpenGLResourceThread->Stop();
-            m_OpenGLResourceThread.reset();
+            m_ResourceThread->Stop();
+            m_ResourceThread.reset();
         }
-        m_OpenGLResourceThreadEnabled.store(false, std::memory_order_relaxed);
+        m_ResourceThreadEnabled.store(false, std::memory_order_relaxed);
 
         m_RenderQueue.reset();
         m_FrameUploadAllocator.Shutdown();
         m_FrameCommandArena.Shutdown();
+
+        m_Executor.reset();
+
+        if (m_Device)
+        {
+            m_Device->Shutdown();
+            m_Device.reset();
+        }
+
         m_GraphicsContext = nullptr; // Don't delete, we don't own it
         m_Initialized = false;
         
@@ -389,9 +369,9 @@ namespace Limitless
             return;
         }
 
-        if (auto* glContext = dynamic_cast<OpenGLContext*>(m_GraphicsContext))
+        if (m_Executor)
         {
-            OpenGLContext::ScopedCurrentContext scope(*glContext);
+            auto scope = m_Executor->AcquireContext();
             m_RenderQueue->ExecuteImmediate(m_GraphicsContext, std::move(command));
             return;
         }
@@ -408,19 +388,18 @@ namespace Limitless
             return;
         }
 
-        if (auto* glContext = dynamic_cast<OpenGLContext*>(m_GraphicsContext))
+        if (m_Executor)
         {
-            OpenGLContext::ScopedCurrentContext scope(*glContext);
+            auto scope = m_Executor->AcquireContext();
             ProcessPendingResourceRetirements(m_GraphicsContext, false);
             m_RenderQueue->ProcessCommands(m_GraphicsContext);
-            UpdateGPUMetricsFromOpenGL();
+            m_Executor->UpdateGPUMetrics();
             return;
         }
 
         m_GraphicsContext->MakeCurrent();
         ProcessPendingResourceRetirements(m_GraphicsContext, false);
         m_RenderQueue->ProcessCommands(m_GraphicsContext);
-        UpdateGPUMetricsFromOpenGL();
     }
 
     void Renderer::BeginFrame()
@@ -490,9 +469,9 @@ namespace Limitless
             return;
         }
 
-        if (auto* glContext = dynamic_cast<OpenGLContext*>(graphicsContext))
+        if (m_Executor)
         {
-            OpenGLContext::ScopedCurrentContext scope(*glContext);
+            auto scope = m_Executor->AcquireContext();
             graphicsContext->SwapBuffers();
             m_ResourceRetirementCompletedFrameId.store(m_ResourceRetirementSubmissionFrameId.load(std::memory_order_relaxed), std::memory_order_relaxed);
             ProcessPendingResourceRetirements(graphicsContext, false);
@@ -559,10 +538,10 @@ namespace Limitless
             return;
         }
 
-        // Only enable for OpenGL today (context affinity model).
-        if (dynamic_cast<OpenGLContext*>(m_GraphicsContext) == nullptr)
+        // Only enable for backends that support a dedicated render thread.
+        if (!m_Executor || !m_Executor->SupportsRenderThread())
         {
-            LT_CORE_WARN("Renderer: render thread enabled, but graphics context is not OpenGL; disabling render thread");
+            LT_CORE_WARN("Renderer: render thread enabled, but backend does not support it; disabling render thread");
             m_RenderThreadEnabled.store(false, std::memory_order_relaxed);
             return;
         }
@@ -612,9 +591,9 @@ namespace Limitless
     {
         NotifyRenderThreadResourceWorkAvailable();
 
-        if (m_OpenGLResourceThread && m_OpenGLResourceThreadEnabled.load(std::memory_order_relaxed))
+        if (m_ResourceThread && m_ResourceThreadEnabled.load(std::memory_order_relaxed))
         {
-            m_OpenGLResourceThread->NotifyWorkAvailable();
+            m_ResourceThread->NotifyWorkAvailable();
             return;
         }
     }
@@ -656,8 +635,8 @@ namespace Limitless
             const bool dispatchToSharedQueue =
                 !forceAll &&
                 entry.Context == ResourceRetirementContext::Shared &&
-                m_OpenGLResourceThread &&
-                m_OpenGLResourceThreadEnabled.load(std::memory_order_relaxed) &&
+                m_ResourceThread &&
+                m_ResourceThreadEnabled.load(std::memory_order_relaxed) &&
                 m_RenderThreadRunning.load(std::memory_order_relaxed);
 
             if (dispatchToSharedQueue)
@@ -687,8 +666,7 @@ namespace Limitless
 
     void Renderer::RenderThreadMain()
     {
-        auto* glContext = dynamic_cast<OpenGLContext*>(m_GraphicsContext);
-        if (!glContext)
+        if (!m_Executor)
         {
             return;
         }
@@ -730,7 +708,7 @@ namespace Limitless
 
             try
             {
-                OpenGLContext::ScopedCurrentContext scope(*glContext);
+                auto scope = m_Executor->AcquireContext();
 
                 m_PrimaryResourceQueue.Process(m_GraphicsContext, 256);
                 m_ResourceQueue.Process(m_GraphicsContext, 256);
@@ -739,7 +717,7 @@ namespace Limitless
                 if (frameIdToComplete != 0)
                 {
                     m_RenderQueue->ProcessCommands(m_GraphicsContext);
-                    UpdateGPUMetricsFromOpenGL();
+                    m_Executor->UpdateGPUMetrics();
                     m_GraphicsContext->SwapBuffers();
                     m_ResourceRetirementCompletedFrameId.store(frameIdToComplete, std::memory_order_relaxed);
                     ProcessPendingResourceRetirements(m_GraphicsContext, false);

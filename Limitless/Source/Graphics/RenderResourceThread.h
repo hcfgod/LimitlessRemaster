@@ -12,11 +12,11 @@
 namespace Limitless
 {
     class GraphicsContext;
-    class OpenGLSharedContext;
+    class SharedResourceContext;
 
-    /// Dedicated GPU resource execution thread for OpenGL.
+    /// Dedicated GPU resource execution thread.
     ///
-    /// This thread owns a shared OpenGL context (sharing objects with the primary render context)
+    /// This thread owns a SharedResourceContext (backend-neutral secondary context)
     /// and drains `RenderResourceCommandQueue`.
     ///
     /// Why:
@@ -32,7 +32,7 @@ namespace Limitless
     public:
         RenderResourceThread(RenderResourceCommandQueue& queue,
                              GraphicsContext* primaryGraphicsContext,
-                             std::unique_ptr<OpenGLSharedContext> sharedContext);
+                             std::unique_ptr<SharedResourceContext> sharedContext);
         ~RenderResourceThread();
 
         RenderResourceThread(const RenderResourceThread&) = delete;
@@ -52,7 +52,7 @@ namespace Limitless
     private:
         RenderResourceCommandQueue& m_Queue;
         GraphicsContext* m_PrimaryGraphicsContext = nullptr; // Borrowed, used only as an execution parameter for commands.
-        std::unique_ptr<OpenGLSharedContext> m_SharedContext;
+        std::unique_ptr<SharedResourceContext> m_SharedContext;
 
         std::atomic<bool> m_Running{false};
         std::atomic<bool> m_Shutdown{false};

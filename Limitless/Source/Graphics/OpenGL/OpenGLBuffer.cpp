@@ -2,7 +2,6 @@
 #include "Core/Error.h"
 #include "Core/Debug/Log.h"
 #include "Graphics/Renderer.h"
-#include "Graphics/OpenGL/OpenGLContext.h"
 #include <cstring>
 
 namespace Limitless
@@ -53,27 +52,14 @@ namespace Limitless
     {
         if (m_RendererID)
         {
-            auto& renderer = Renderer::GetInstance();
             const GLuint bufferToDelete = m_RendererID;
-            const bool retired = renderer.IsInitialized() && renderer.GetGraphicsContext() != nullptr &&
-                renderer.RetireResource("OpenGLBuffer/DeleteBuffer",
-                                        Renderer::ResourceRetirementContext::Shared,
-                                        [bufferToDelete](GraphicsContext*) {
-                                            GLuint id = bufferToDelete;
-                                            glDeleteBuffers(1, &id);
-                                        });
-            if (!retired)
+            if (auto* device = Renderer::GetInstance().GetDevice())
             {
-                if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
-                {
-                    OpenGLContext::ScopedCurrentContext scope(*glContext);
-                    GLuint id = bufferToDelete;
-                    glDeleteBuffers(1, &id);
-                }
-                else
-                {
-                    LT_CORE_WARN("OpenGLVertexBuffer destroyed after renderer/context teardown; leaking GL buffer {}", bufferToDelete);
-                }
+                device->RetireNativeResource("OpenGLBuffer/DeleteVertexBuffer", false,
+                    [bufferToDelete]() {
+                        GLuint id = bufferToDelete;
+                        glDeleteBuffers(1, &id);
+                    });
             }
             m_RendererID = 0;
         }
@@ -151,27 +137,14 @@ namespace Limitless
     {
         if (m_RendererID)
         {
-            auto& renderer = Renderer::GetInstance();
             const GLuint bufferToDelete = m_RendererID;
-            const bool retired = renderer.IsInitialized() && renderer.GetGraphicsContext() != nullptr &&
-                renderer.RetireResource("OpenGLBuffer/DeleteBuffer",
-                                        Renderer::ResourceRetirementContext::Shared,
-                                        [bufferToDelete](GraphicsContext*) {
-                                            GLuint id = bufferToDelete;
-                                            glDeleteBuffers(1, &id);
-                                        });
-            if (!retired)
+            if (auto* device = Renderer::GetInstance().GetDevice())
             {
-                if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
-                {
-                    OpenGLContext::ScopedCurrentContext scope(*glContext);
-                    GLuint id = bufferToDelete;
-                    glDeleteBuffers(1, &id);
-                }
-                else
-                {
-                    LT_CORE_WARN("OpenGLIndexBuffer destroyed after renderer/context teardown; leaking GL buffer {}", bufferToDelete);
-                }
+                device->RetireNativeResource("OpenGLBuffer/DeleteIndexBuffer", false,
+                    [bufferToDelete]() {
+                        GLuint id = bufferToDelete;
+                        glDeleteBuffers(1, &id);
+                    });
             }
             m_RendererID = 0;
         }

@@ -86,27 +86,14 @@ namespace Limitless
     {
         if (m_RendererID)
         {
-            auto& renderer = Renderer::GetInstance();
             const GLuint vaoToDelete = m_RendererID;
-            const bool retired = renderer.IsInitialized() && renderer.GetGraphicsContext() != nullptr &&
-                renderer.RetireResource("OpenGLVertexArray/Delete",
-                                        Renderer::ResourceRetirementContext::Primary,
-                                        [vaoToDelete](GraphicsContext*) {
-                                            GLuint id = vaoToDelete;
-                                            glDeleteVertexArrays(1, &id);
-                                        });
-            if (!retired)
+            if (auto* device = Renderer::GetInstance().GetDevice())
             {
-                if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
-                {
-                    OpenGLContext::ScopedCurrentContext scope(*glContext);
-                    GLuint id = vaoToDelete;
-                    glDeleteVertexArrays(1, &id);
-                }
-                else
-                {
-                    LT_CORE_WARN("OpenGLVertexArray destroyed after renderer/context teardown; leaking GL VAO {}", vaoToDelete);
-                }
+                device->RetireNativeResource("OpenGLVertexArray/Delete", true,
+                    [vaoToDelete]() {
+                        GLuint id = vaoToDelete;
+                        glDeleteVertexArrays(1, &id);
+                    });
             }
             m_RendererID = 0;
         }

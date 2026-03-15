@@ -1,8 +1,10 @@
 #include "Buffer.h"
 #include "Graphics/GraphicsContext.h"
 #include "Graphics/GraphicsAPIDetector.h"
+#include "Graphics/GraphicsDevice.h"
 #include "Core/Error.h"
 
+// Legacy fallback
 #include "Graphics/OpenGL/OpenGLBuffer.h"
 #include "Graphics/Renderer.h"
 #include "Graphics/OpenGL/OpenGLContext.h"
@@ -14,6 +16,13 @@ namespace Limitless
         LT_VERIFY(specification.Size > 0, "VertexBuffer::Create: specification size must be non-zero");
 
         auto& renderer = Renderer::GetInstance();
+
+        if (auto* device = renderer.GetDevice())
+        {
+            return device->CreateVertexBuffer(specification, initialData);
+        }
+
+        // Legacy fallback
         const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
@@ -42,6 +51,13 @@ namespace Limitless
         LT_VERIFY(specification.Count > 0, "IndexBuffer::Create: specification count must be non-zero");
 
         auto& renderer = Renderer::GetInstance();
+
+        if (auto* device = renderer.GetDevice())
+        {
+            return device->CreateIndexBuffer(specification, indices);
+        }
+
+        // Legacy fallback
         const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {

@@ -47,6 +47,11 @@ namespace Limitless
     public:
         virtual ~Texture() = default;
 
+        /// @deprecated Texture binding is now handled internally by the render
+        /// command system via RenderTextureBinding + native handles. Direct
+        /// slot-based binding is an OpenGL-ism. Prefer submitting textures
+        /// through RenderBindingSet / ApplyRenderBindingsCommand instead.
+        [[deprecated("Use RenderBindingSet instead of direct Texture::Bind(slot)")]]
         virtual void Bind(uint32_t slot) const = 0;
         virtual uint32_t GetWidth() const = 0;
         virtual uint32_t GetHeight() const = 0;

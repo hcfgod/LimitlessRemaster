@@ -60,6 +60,9 @@ project "Limitless"
     filter "files:Source/ImGui/ImGuiOpenGL3Backend.cpp"
         flags { "NoPCH" }
 
+    filter "files:Source/ImGui/ImGuiOpenGLBackend.cpp"
+        flags { "NoPCH" }
+
     filter "files:Vendor/**"
         flags { "NoPCH" }
         -- Keep build logs focused on engine/game code.

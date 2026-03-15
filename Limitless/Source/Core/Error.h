@@ -219,6 +219,11 @@ namespace Limitless
         Error(ErrorCode code, const std::string& message, 
               const std::source_location& location,
               ErrorSeverity severity = ErrorSeverity::Error);
+        Error(const Error&) = default;
+        Error(Error&&) noexcept = default;
+        Error& operator=(const Error&) = default;
+        Error& operator=(Error&&) noexcept = default;
+        ~Error() override = default;
         
         ErrorCode GetCode() const { return m_Code; }
         const std::string& GetErrorMessage() const { return m_Message; }
@@ -256,13 +261,13 @@ namespace Limitless
         std::string GetContextValue(const std::string& key) const;
 
     private:
-        ErrorCode m_Code;
-        std::string m_Message;
-        std::string m_Location;
-        ErrorSeverity m_Severity;
-        ErrorContext m_Context;
-        int m_SystemErrorCode;
-        mutable std::string m_WhatBuffer;
+        ErrorCode m_Code{ErrorCode::Success};
+        std::string m_Message{};
+        std::string m_Location{};
+        ErrorSeverity m_Severity{ErrorSeverity::Info};
+        ErrorContext m_Context{};
+        int m_SystemErrorCode{0};
+        mutable std::string m_WhatBuffer{};
         
         void BuildContext();
         std::string GetSeverityString() const;

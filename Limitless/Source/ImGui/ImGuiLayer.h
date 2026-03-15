@@ -1,9 +1,11 @@
 #pragma once
 
 #include "Core/Layer.h"
+#include "ImGuiBackend.h"
 #include "Graphics/GraphicsContext.h"
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <unordered_map>
 
@@ -38,7 +40,7 @@ namespace Limitless
         bool HasPendingLayoutLoad() const { return !m_PendingLayoutLoadPath.empty(); }
 
     private:
-        void OnAttachOpenGL(class Window& window, class GraphicsContext* context);
+        std::unique_ptr<ImGuiBackend> m_Backend;
 
         bool m_Initialized = false;
         GraphicsAPI m_GraphicsAPI = GraphicsAPI::OpenGL;  ///< Active backend (set at attach).

@@ -1,8 +1,10 @@
 #include "Framebuffer.h"
 #include "Graphics/GraphicsAPIDetector.h"
+#include "Graphics/GraphicsDevice.h"
 #include "Graphics/Renderer.h"
 #include "Core/Error.h"
 
+// Legacy fallback
 #include "Graphics/OpenGL/OpenGLFramebuffer.h"
 
 namespace Limitless
@@ -13,6 +15,13 @@ namespace Limitless
         LT_VERIFY(specification.ColorAttachmentCount > 0, "Framebuffer must have at least one color attachment");
 
         auto& renderer = Renderer::GetInstance();
+
+        if (auto* device = renderer.GetDevice())
+        {
+            return device->CreateFramebuffer(specification);
+        }
+
+        // Legacy fallback
         const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
@@ -34,6 +43,13 @@ namespace Limitless
         LT_VERIFY(specification.ColorAttachmentCount > 0, "Framebuffer must have at least one color attachment");
 
         auto& renderer = Renderer::GetInstance();
+
+        if (auto* device = renderer.GetDevice())
+        {
+            return device->CreateFramebufferAsync(specification);
+        }
+
+        // Legacy fallback
         const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {

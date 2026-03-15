@@ -2,7 +2,6 @@
 #include "Core/Error.h"
 #include "Core/Debug/Log.h"
 #include "Graphics/Renderer.h"
-#include "Graphics/OpenGL/OpenGLContext.h"
 
 #include "stb/stb_image/stb_image.h"
 #include <string>
@@ -201,27 +200,14 @@ namespace Limitless
     {
         if (m_RendererID)
         {
-            auto& renderer = Renderer::GetInstance();
             const GLuint textureToDelete = m_RendererID;
-            const bool retired = renderer.IsInitialized() && renderer.GetGraphicsContext() != nullptr &&
-                renderer.RetireResource("OpenGLTexture/DeleteTexture",
-                                        Renderer::ResourceRetirementContext::Shared,
-                                        [textureToDelete](GraphicsContext*) {
-                                            GLuint id = textureToDelete;
-                                            glDeleteTextures(1, &id);
-                                        });
-            if (!retired)
+            if (auto* device = Renderer::GetInstance().GetDevice())
             {
-                if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
-                {
-                    OpenGLContext::ScopedCurrentContext scope(*glContext);
-                    GLuint id = textureToDelete;
-                    glDeleteTextures(1, &id);
-                }
-                else
-                {
-                    LT_CORE_WARN("OpenGLTexture2D destroyed after renderer/context teardown; leaking GL texture {}", textureToDelete);
-                }
+                device->RetireNativeResource("OpenGLTexture/DeleteTexture", false,
+                    [textureToDelete]() {
+                        GLuint id = textureToDelete;
+                        glDeleteTextures(1, &id);
+                    });
             }
             m_RendererID = 0;
         }

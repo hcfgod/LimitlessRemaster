@@ -1,7 +1,7 @@
 #include "Graphics/RenderResourceThread.h"
 
 #include "Core/Debug/Log.h"
-#include "Graphics/OpenGL/OpenGLSharedContext.h"
+#include "Graphics/SharedResourceContext.h"
 
 #include <stdexcept>
 
@@ -9,7 +9,7 @@ namespace Limitless
 {
     RenderResourceThread::RenderResourceThread(RenderResourceCommandQueue& queue,
                                                GraphicsContext* primaryGraphicsContext,
-                                               std::unique_ptr<OpenGLSharedContext> sharedContext)
+                                               std::unique_ptr<SharedResourceContext> sharedContext)
         : m_Queue(queue)
         , m_PrimaryGraphicsContext(primaryGraphicsContext)
         , m_SharedContext(std::move(sharedContext))
@@ -20,7 +20,7 @@ namespace Limitless
         }
         if (!m_SharedContext)
         {
-            throw std::runtime_error("RenderResourceThread: shared OpenGL context is null");
+            throw std::runtime_error("RenderResourceThread: shared resource context is null");
         }
     }
 
@@ -89,7 +89,7 @@ namespace Limitless
             try
             {
                 // Make the shared context current for this thread and drain resource work.
-                OpenGLSharedContext::ScopedCurrentContext scope(*m_SharedContext);
+                SharedResourceContext::ScopedCurrent scope(*m_SharedContext);
                 m_Queue.Process(m_PrimaryGraphicsContext, 2048);
             }
             catch (const std::exception& e)

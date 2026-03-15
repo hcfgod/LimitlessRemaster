@@ -1,26 +1,20 @@
 #include "ImGuiLayer.h"
+#include "ImGuiBackend.h"
 #include "Core/Application.h"
 #include "Core/Debug/Log.h"
 #include "Platform/Window.h"
 #include "Platform/SDL/SDLWindow.h"
 #include "Platform/Platform.h"
 #include "Graphics/GraphicsContext.h"
-#include "Graphics/OpenGL/OpenGLContext.h"
-#include <glad/glad.h>
 #include <SDL3/SDL.h>
 #include <filesystem>
 
 #include <cmath>
 #include <system_error>
 
-// ImGui headers (backend expects imgui before their includes)
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
 #include "imgui/backends/imgui_impl_sdl3.h"
-#include "imgui/backends/imgui_impl_opengl3.h"
-
-// Vulkan renderer backend - add when Vulkan is implemented:
-// #include "imgui/backends/imgui_impl_vulkan.h"
 
 namespace Limitless
 {
@@ -313,44 +307,13 @@ namespace Limitless
 
         m_GraphicsAPI = context->GetAPI();
 
-        switch (m_GraphicsAPI)
-        {
-            case GraphicsAPI::OpenGL:
-                OnAttachOpenGL(window, context);
-                break;
-            case GraphicsAPI::Vulkan:
-                LT_CORE_ERROR("ImGuiLayer: Vulkan backend not yet implemented. Add imgui_impl_vulkan and wire it up.");
-                return;
-            case GraphicsAPI::DirectX:
-                LT_CORE_ERROR("ImGuiLayer: DirectX backend not yet implemented.");
-                return;
-            case GraphicsAPI::Metal:
-                LT_CORE_ERROR("ImGuiLayer: Metal backend not yet implemented.");
-                return;
-            default:
-                LT_CORE_ERROR("ImGuiLayer: Unknown graphics API.");
-                return;
-        }
-    }
-
-    void ImGuiLayer::OnAttachOpenGL(Window& window, GraphicsContext* context)
-    {
-        if (!context->GetNativeContext())
-        {
-            LT_CORE_ERROR("ImGuiLayer: OpenGL context has no native handle.");
-            return;
-        }
-
-        SDL_Window* sdlWindow = static_cast<SDL_Window*>(window.GetNativeWindow());
-        void* glContext = context->GetNativeContext();
-
+        // Create the ImGui context and configure it (backend-neutral).
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;  // Docking enabled by default
-        // Persist layout alongside the running editor executable so startup layout
-        // is stable regardless of current working directory.
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
         const std::filesystem::path layoutDirectory = ResolveImGuiLayoutDirectory();
         const std::filesystem::path activeLayoutPath = layoutDirectory / "imgui.ini";
         const std::filesystem::path defaultLayoutPath = ResolveDefaultLayoutPath(layoutDirectory);
@@ -361,31 +324,21 @@ namespace Limitless
 
         ApplyModernEditorImGuiTheme();
 
-        if (!ImGui_ImplSDL3_InitForOpenGL(sdlWindow, glContext))
+        // Create and initialise the API-specific renderer backend.
+        m_Backend = ImGuiBackend::Create(m_GraphicsAPI);
+        if (!m_Backend)
         {
-            LT_CORE_ERROR("ImGuiLayer: ImGui_ImplSDL3_InitForOpenGL failed.");
+            LT_CORE_ERROR("ImGuiLayer: Failed to create ImGui backend for active API.");
             ImGui::DestroyContext();
             return;
         }
 
-        OpenGLContext* glContextObj = dynamic_cast<OpenGLContext*>(context);
-        if (!glContextObj)
+        if (!m_Backend->Init(window, context))
         {
-            LT_CORE_ERROR("ImGuiLayer: Expected OpenGL context.");
-            ImGui_ImplSDL3_Shutdown();
+            LT_CORE_ERROR("ImGuiLayer: Backend initialisation failed.");
+            m_Backend.reset();
             ImGui::DestroyContext();
             return;
-        }
-
-        {
-            OpenGLContext::ScopedCurrentContext scope(*glContextObj);
-            if (!ImGui_ImplOpenGL3_Init("#version 150"))
-            {
-                LT_CORE_ERROR("ImGuiLayer: ImGui_ImplOpenGL3_Init failed.");
-                ImGui_ImplSDL3_Shutdown();
-                ImGui::DestroyContext();
-                return;
-            }
         }
 
         m_Initialized = true;
@@ -403,7 +356,7 @@ namespace Limitless
             [this]() { EndFrame(); }
         );
 
-        LT_CORE_INFO("ImGuiLayer attached successfully (OpenGL backend)");
+        LT_CORE_INFO("ImGuiLayer attached successfully");
     }
 
     bool ImGuiLayer::SetLayoutIniPath(const std::filesystem::path& layoutIniPath)
@@ -466,20 +419,10 @@ namespace Limitless
         if (sdlWindowObj)
             sdlWindowObj->SetSdlEventCallback(nullptr);
 
-        switch (m_GraphicsAPI)
+        if (m_Backend)
         {
-            case GraphicsAPI::OpenGL:
-                ImGui_ImplOpenGL3_Shutdown();
-                ImGui_ImplSDL3_Shutdown();
-                break;
-            case GraphicsAPI::Vulkan:
-                // ImGui_ImplVulkan_Shutdown();
-                break;
-            case GraphicsAPI::DirectX:
-            case GraphicsAPI::Metal:
-                break;
-            default:
-                break;
+            m_Backend->Shutdown();
+            m_Backend.reset();
         }
 
         ImGui::DestroyContext();
@@ -489,37 +432,11 @@ namespace Limitless
 
     void ImGuiLayer::BeginFrame()
     {
-        if (!m_Initialized)
+        if (!m_Initialized || !m_Backend)
             return;
 
         ImGui_ImplSDL3_NewFrame();
-
-        switch (m_GraphicsAPI)
-        {
-            case GraphicsAPI::OpenGL:
-            {
-                auto& app = Application::GetInstance();
-                if (auto* glContext = dynamic_cast<OpenGLContext*>(app.GetWindow().GetGraphicsContext()))
-                {
-                    OpenGLContext::ScopedCurrentContext scope(*glContext);
-                    ImGui_ImplOpenGL3_NewFrame();
-                }
-                else
-                {
-                    ImGui_ImplOpenGL3_NewFrame();
-                }
-                break;
-            }
-            case GraphicsAPI::Vulkan:
-                // ImGui_ImplVulkan_NewFrame();
-                break;
-            case GraphicsAPI::DirectX:
-            case GraphicsAPI::Metal:
-                break;
-            default:
-                break;
-        }
-
+        m_Backend->NewFrame();
         ImGui::NewFrame();
 
         m_SubmittedDockspaceThisFrame = false;
@@ -569,43 +486,11 @@ namespace Limitless
 
     void ImGuiLayer::EndFrame()
     {
-        if (!m_Initialized)
+        if (!m_Initialized || !m_Backend)
             return;
 
         ImGui::Render();
-
-        switch (m_GraphicsAPI)
-        {
-            case GraphicsAPI::OpenGL:
-            {
-                auto& app = Application::GetInstance();
-                if (auto* glContext = dynamic_cast<OpenGLContext*>(app.GetWindow().GetGraphicsContext()))
-                {
-                    OpenGLContext::ScopedCurrentContext scope(*glContext);
-                    // Ensure we're on the default framebuffer before clear (avoids GL_INVALID_OPERATION
-                    // when ProcessCommands left a custom framebuffer bound).
-                    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-                    // Clear the framebuffer before drawing. The Editor has no game layer that clears;
-                    // without this, previous frames persist and cause ghosting when moving the window.
-                    glClearColor(0.15f, 0.15f, 0.18f, 1.0f);
-                    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-                    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-                }
-                else
-                {
-                    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-                }
-                break;
-            }
-            case GraphicsAPI::Vulkan:
-                // ImGui_ImplVulkan_RenderDrawData(...);
-                break;
-            case GraphicsAPI::DirectX:
-            case GraphicsAPI::Metal:
-                break;
-            default:
-                break;
-        }
+        m_Backend->RenderDrawData(ImGui::GetDrawData());
     }
 
     void ImGuiLayer::OnRender()

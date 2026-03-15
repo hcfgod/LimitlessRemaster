@@ -1,7 +1,9 @@
 #include "Texture.h"
 #include "Graphics/GraphicsAPIDetector.h"
+#include "Graphics/GraphicsDevice.h"
 #include "Core/Error.h"
 
+// Legacy fallback
 #include "Graphics/OpenGL/OpenGLTexture.h"
 #include "Graphics/Renderer.h"
 #include "Graphics/OpenGL/OpenGLContext.h"
@@ -12,6 +14,13 @@ namespace Limitless
     std::shared_ptr<Texture2D> Texture2D::CreateFromFile(const std::string& path, const TextureSpecification& specification)
     {
         auto& renderer = Renderer::GetInstance();
+
+        if (auto* device = renderer.GetDevice())
+        {
+            return device->CreateTexture2DFromFile(path, specification);
+        }
+
+        // Legacy fallback
         const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
@@ -32,6 +41,13 @@ namespace Limitless
         const TextureSpecification& specification)
     {
         auto& renderer = Renderer::GetInstance();
+
+        if (auto* device = renderer.GetDevice())
+        {
+            return device->CreateTexture2DFromRGBA8(width, height, rgbaPixels, specification);
+        }
+
+        // Legacy fallback
         const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
@@ -55,6 +71,16 @@ namespace Limitless
         const std::span<const TextureMipLevelRGBA8View> mipLevels,
         const TextureSpecification& specification)
     {
+        auto& renderer = Renderer::GetInstance();
+
+        if (auto* device = renderer.GetDevice())
+        {
+            if (!mipLevels.empty())
+            {
+                return device->CreateTexture2DFromMipChain(mipLevels.data(), static_cast<uint32_t>(mipLevels.size()), specification);
+            }
+        }
+
         if (mipLevels.empty())
         {
             LT_VERIFY(false, "Texture2D::CreateFromRGBA8MipChain: mipLevels is empty");
@@ -91,7 +117,6 @@ namespace Limitless
             copied.push_back(CopiedMip{ mip.Width, mip.Height, offset });
         }
 
-        auto& renderer = Renderer::GetInstance();
         const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
@@ -120,6 +145,13 @@ namespace Limitless
         const TextureSpecification& specification)
     {
         auto& renderer = Renderer::GetInstance();
+
+        if (auto* device = renderer.GetDevice())
+        {
+            return device->CreateTexture2DFromFileAsync(path, specification);
+        }
+
+        // Legacy fallback
         const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
@@ -140,6 +172,13 @@ namespace Limitless
         const TextureSpecification& specification)
     {
         auto& renderer = Renderer::GetInstance();
+
+        if (auto* device = renderer.GetDevice())
+        {
+            return device->CreateTexture2DFromRGBA8Async(width, height, rgbaPixels, specification);
+        }
+
+        // Legacy fallback
         const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {
@@ -167,6 +206,13 @@ namespace Limitless
         LT_VERIFY(width > 0 && height > 0, "Texture2D::CreateForRenderTarget: dimensions must be non-zero");
 
         auto& renderer = Renderer::GetInstance();
+
+        if (auto* device = renderer.GetDevice())
+        {
+            return device->CreateTexture2DForRenderTarget(width, height);
+        }
+
+        // Legacy fallback
         const GraphicsAPI api = renderer.GetActiveAPI();
         switch (api)
         {

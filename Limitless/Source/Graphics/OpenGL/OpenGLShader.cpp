@@ -2,7 +2,6 @@
 #include "Core/Error.h"
 #include "Core/Debug/Log.h"
 #include "Graphics/Renderer.h"
-#include "Graphics/OpenGL/OpenGLContext.h"
 
 namespace Limitless
 {
@@ -70,26 +69,11 @@ namespace Limitless
     {
         if (m_RendererID)
         {
-            auto& renderer = Renderer::GetInstance();
             const GLuint programToDelete = m_RendererID;
-            const bool retired = renderer.IsInitialized() && renderer.GetGraphicsContext() != nullptr &&
-                renderer.RetireResource("OpenGLShader/DeleteProgram",
-                                        Renderer::ResourceRetirementContext::Shared,
-                                        [programToDelete](GraphicsContext*) {
-                                            glDeleteProgram(programToDelete);
-                                        });
-            if (!retired)
+            if (auto* device = Renderer::GetInstance().GetDevice())
             {
-                // Enforce: never call glDelete* without a valid current context.
-                if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
-                {
-                    OpenGLContext::ScopedCurrentContext scope(*glContext);
-                    glDeleteProgram(programToDelete);
-                }
-                else
-                {
-                    LT_CORE_WARN("OpenGLShader '{}' destroyed after renderer/context teardown; leaking GL program {}", m_Name, programToDelete);
-                }
+                device->RetireNativeResource("OpenGLShader/DeleteProgram", false,
+                    [programToDelete]() { glDeleteProgram(programToDelete); });
             }
             m_RendererID = 0;
         }

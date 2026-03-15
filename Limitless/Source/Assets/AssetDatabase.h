@@ -65,13 +65,13 @@ namespace Limitless::Assets
             Record& operator=(const Record&) = default;
             Record& operator=(Record&&) noexcept = default;
 
-            std::string Guid;
-            std::string Key; // Unity-style key (example: "Assets/Textures/X.png")
-            std::string ResolvedPath; // absolute path used for I/O (empty for generated assets)
+            std::string Guid{};
+            std::string Key{}; // Unity-style key (example: "Assets/Textures/X.png")
+            std::string ResolvedPath{}; // absolute path used for I/O (empty for generated assets)
             AssetType Type{AssetType::Unknown};
             AssetSourceKind SourceKind{AssetSourceKind::FileBacked};
             nlohmann::json ImporterSettings{nlohmann::json::object()};
-            std::vector<std::string> Dependencies; // GUIDs
+            std::vector<std::string> Dependencies{}; // GUIDs
 
             // Import fingerprint (tooling/editor):
             // Used to support incremental reimport/cooking decisions.

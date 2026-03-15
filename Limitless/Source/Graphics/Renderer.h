@@ -1,6 +1,8 @@
 #pragma once
 
 #include "GraphicsContext.h"
+#include "GraphicsDevice.h"
+#include "RenderCommandExecutor.h"
 #include "RenderCommandQueue.h"
 #include "RenderResourceCommandQueue.h"
 #include "RenderResourceThread.h"
@@ -42,6 +44,9 @@ namespace Limitless
         // Get the graphics context
         GraphicsContext* GetGraphicsContext() const { return m_GraphicsContext; }
         GraphicsAPI GetActiveAPI() const;
+
+        // Backend-neutral device interface. Created during Initialize() based on the active API.
+        GraphicsDevice* GetDevice() const { return m_Device.get(); }
         
         // Get the render command queue
         RenderCommandQueue* GetRenderQueue() const { return m_RenderQueue.get(); }
@@ -99,10 +104,10 @@ namespace Limitless
         // Primary-context-only resource submission helpers.
         //
         // IMPORTANT:
-        // Some OpenGL object types are NOT shared across contexts even when context sharing is enabled
+        // Some GPU object types are NOT shared across contexts even when context sharing is enabled
         // (notably: Vertex Array Objects, and typically FBO-related state).
         //
-        // Any GPU work that creates/modifies such objects must be executed on the **primary** OpenGL context,
+        // Any GPU work that creates/modifies such objects must be executed on the **primary** context,
         // which this engine owns on the render thread.
         template<typename Func>
         auto SubmitPrimaryResourceAndWait(const char* debugName, Func&& func) -> decltype(func(static_cast<GraphicsContext*>(nullptr)))
@@ -302,10 +307,10 @@ namespace Limitless
             return SubmitPrimaryResourceAsync("PrimaryResource", std::forward<Func>(func));
         }
 
-        // Returns true when the OpenGL shared-context resource thread is active.
+        // Returns true when the shared-context resource thread is active.
         // When enabled, GPU resource work executes on a dedicated thread with its own shared
-        // OpenGL context (in parallel with frame rendering on the render thread).
-        bool IsOpenGLResourceThreadEnabled() const { return m_OpenGLResourceThreadEnabled.load(std::memory_order_relaxed); }
+        // context (in parallel with frame rendering on the render thread).
+        bool IsResourceThreadEnabled() const { return m_ResourceThreadEnabled.load(std::memory_order_relaxed); }
 
         // -------------------------------------------------------------------------
         // Resource queue statistics (debug/telemetry)
@@ -380,7 +385,7 @@ namespace Limitless
 
             auto state = std::make_shared<SharedState>();
             state->function = std::forward<Func>(func);
-            state->RequiresCrossContextSynchronization = IsOpenGLResourceThreadEnabled();
+            state->RequiresCrossContextSynchronization = IsResourceThreadEnabled();
             state->debugName = (debugName && debugName[0] != '\0') ? debugName : "Resource";
             std::future<ResultT> future = state->promise.get_future();
 
@@ -406,7 +411,7 @@ namespace Limitless
                             m_Shared->function(context);
                             if (m_Shared->RequiresCrossContextSynchronization)
                             {
-                                Renderer::SynchronizeOpenGLResourceWorkForCrossContextVisibility();
+                                Renderer::SynchronizeCrossContextResourceVisibility();
                             }
                             m_Shared->promise.set_value();
                         }
@@ -415,7 +420,7 @@ namespace Limitless
                             ResultT result = m_Shared->function(context);
                             if (m_Shared->RequiresCrossContextSynchronization)
                             {
-                                Renderer::SynchronizeOpenGLResourceWorkForCrossContextVisibility();
+                                Renderer::SynchronizeCrossContextResourceVisibility();
                             }
                             m_Shared->promise.set_value(std::move(result));
                         }
@@ -481,7 +486,7 @@ namespace Limitless
 
             auto state = std::make_shared<SharedState>();
             state->function = std::forward<Func>(func);
-            state->RequiresCrossContextSynchronization = IsOpenGLResourceThreadEnabled();
+            state->RequiresCrossContextSynchronization = IsResourceThreadEnabled();
             state->debugName = (debugName && debugName[0] != '\0') ? debugName : "Resource";
             std::future<ResultT> future = state->promise.get_future();
 
@@ -507,7 +512,7 @@ namespace Limitless
                             m_Shared->function(context);
                             if (m_Shared->RequiresCrossContextSynchronization)
                             {
-                                Renderer::SynchronizeOpenGLResourceWorkForCrossContextVisibility();
+                                Renderer::SynchronizeCrossContextResourceVisibility();
                             }
                             m_Shared->promise.set_value();
                         }
@@ -516,7 +521,7 @@ namespace Limitless
                             ResultT result = m_Shared->function(context);
                             if (m_Shared->RequiresCrossContextSynchronization)
                             {
-                                Renderer::SynchronizeOpenGLResourceWorkForCrossContextVisibility();
+                                Renderer::SynchronizeCrossContextResourceVisibility();
                             }
                             m_Shared->promise.set_value(std::move(result));
                         }
@@ -570,9 +575,11 @@ namespace Limitless
         RenderResourceCommandQueue m_ResourceQueue;
 
         GraphicsContext* m_GraphicsContext = nullptr; // Borrowed, not owned
+        std::unique_ptr<GraphicsDevice> m_Device;
+        std::unique_ptr<RenderBackendExecutor> m_Executor;
         std::unique_ptr<RenderCommandQueue> m_RenderQueue;
 
-        // Dedicated render thread model (OpenGL-friendly):
+        // Dedicated render thread model (backend-friendly):
         // - Submission: any thread (RenderCommandQueue is MPMC)
         // - Execution/present: render thread owns "frame execution + SwapBuffers"
         std::thread m_RenderThread;
@@ -585,8 +592,8 @@ namespace Limitless
         uint64_t m_PrimaryProcessedTotalAtFrameStart = 0;
         uint64_t m_SharedProcessedTotalAtFrameStart = 0;
 
-        // Optional OpenGL shared-context resource thread (multi-threaded GPU resource execution).
-        std::unique_ptr<RenderResourceThread> m_OpenGLResourceThread;
+        // Optional shared-context resource thread (multi-threaded GPU resource execution).
+        std::unique_ptr<RenderResourceThread> m_ResourceThread;
 
         uint64_t m_FrameUploadFrameId = 0;
         std::atomic<uint64_t> m_ResourceRetirementSubmissionFrameId{0};
@@ -624,7 +631,7 @@ namespace Limitless
         std::atomic<bool> m_RenderThreadShutdown{false};
         
         bool m_FrameRequested = false;
-        std::atomic<bool> m_OpenGLResourceThreadEnabled{false};
+        std::atomic<bool> m_ResourceThreadEnabled{false};
 
         void StartRenderThread();
         void StopRenderThread();
@@ -635,9 +642,9 @@ namespace Limitless
         void NotifyRenderThreadResourceWorkAvailable();
         void NotifyResourceWorkAvailable();
 
-        // When a shared OpenGL context is used for resource work, the producer context must
+        // When a shared resource context is used for resource work, the producer context must
         // synchronize before a resource is safe to use in the consumer context.
-        // This must be called while an OpenGL context is current on the calling thread.
-        static void SynchronizeOpenGLResourceWorkForCrossContextVisibility();
+        // Delegates to GraphicsDevice::SynchronizeResourceVisibility().
+        static void SynchronizeCrossContextResourceVisibility();
     };
 } 
