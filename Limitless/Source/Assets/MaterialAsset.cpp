@@ -2,6 +2,7 @@
 
 #include "Assets/AssetBundle.h"
 #include "Assets/AssetDatabase.h"
+#include "Assets/GeneratedAssetRuntimeRegistry.h"
 #include "Assets/AssetLoadProgress.h"
 #include "Assets/AssetLoadCoordinator.h"
 #include "Assets/AssetManager.h"
@@ -383,8 +384,23 @@ namespace Limitless::Assets
                 std::string resolvedPath;
                 std::string guid;
 
+                const auto generatedRecordResult = FindGeneratedAssetRecord(key, AssetType::Material);
+                if (generatedRecordResult.IsSuccess())
+                {
+                    if (auto existing = GeneratedAssetRuntimeRegistry::GetInstance().GetAsset<MaterialAsset>(key))
+                    {
+                        auto cached = AssetManager::GetOrLoad<MaterialAsset>(key, [&]() -> Ptr { return existing; });
+                        AssetLoadProgress::ClearProgress(key);
+                        promise.set_value(std::move(cached));
+                        return;
+                    }
+
+                    guid = generatedRecordResult.GetValue().Guid;
+                    resolvedPath = "<Generated>";
+                }
+
                 auto& bundle = AssetBundle::GetInstance();
-                if (bundle.IsEnabled() && bundle.IsLoaded())
+                if (!generatedRecordResult.IsSuccess() && bundle.IsEnabled() && bundle.IsLoaded())
                 {
                     const auto entry = bundle.FindEntryByKey(key);
                     if (entry.has_value())
@@ -395,7 +411,7 @@ namespace Limitless::Assets
                     }
                 }
 
-                if (!fromBundle)
+                if (!generatedRecordResult.IsSuccess() && !fromBundle)
                 {
                     const auto resolvedResult = ResolveAssetKeyToPath(key);
                     if (resolvedResult.IsFailure())
@@ -433,6 +449,8 @@ namespace Limitless::Assets
                     AssetLoadProgress::ClearProgress(key);
                     return created;
                 });
+                if (generatedRecordResult.IsSuccess() && asset)
+                    GeneratedAssetRuntimeRegistry::GetInstance().RegisterAsset(key, asset);
 
                 AssetLoadProgress::ClearProgress(key);
                 promise.set_value(std::move(asset));
@@ -473,8 +491,81 @@ namespace Limitless::Assets
                 deps.push_back(m_NormalTexture.GetGuid());
             (void)AssetDatabase::GetInstance().SetDependencies(GetGuid(), deps);
         };
+        auto applyRoot = [&](const json& root, const std::string& suppressionKey) -> bool {
+            const auto shaderAssetResult = ResolveShaderAsset(root);
+            if (shaderAssetResult.IsFailure())
+            {
+                LT_CORE_ERROR("MaterialAsset: {}", shaderAssetResult.GetError().GetErrorMessage());
+                return false;
+            }
 
-        // Bundle-first: read JSON text from bundle if available.
+            const auto texAssetResult = ResolveMainTextureAsset(root);
+            if (texAssetResult.IsFailure())
+            {
+                LT_CORE_ERROR("MaterialAsset: {}", texAssetResult.GetError().GetErrorMessage());
+                return false;
+            }
+
+            const auto normalTexAssetResult = ResolveNormalTextureAsset(root);
+            if (normalTexAssetResult.IsFailure())
+            {
+                LT_CORE_ERROR("MaterialAsset: {}", normalTexAssetResult.GetError().GetErrorMessage());
+                return false;
+            }
+
+            m_ShaderResolved = shaderAssetResult.GetValue();
+            m_MainTextureResolved = texAssetResult.GetValue();
+            m_NormalTextureResolved = normalTexAssetResult.GetValue();
+
+            m_Shader = m_ShaderResolved ? AssetHandle<ShaderAsset>(m_ShaderResolved) : AssetHandle<ShaderAsset>();
+            m_MainTexture = m_MainTextureResolved ? AssetHandle<TextureAsset>(m_MainTextureResolved) : AssetHandle<TextureAsset>();
+            m_NormalTexture = m_NormalTextureResolved ? AssetHandle<TextureAsset>(m_NormalTextureResolved) : AssetHandle<TextureAsset>();
+
+            m_NormalStrength = std::clamp(root.value("normalStrength", 1.0f), 0.0f, 8.0f);
+            m_Roughness = std::clamp(root.value("roughness", 0.5f), 0.0f, 1.0f);
+            m_SpecularIntensity = std::clamp(root.value("specularIntensity", root.value("specular", 0.5f)), 0.0f, 8.0f);
+
+            const auto specOverride = ParseTextureSpecificationOverride(root);
+            if (specOverride.IsSuccess())
+            {
+                m_HasMainTextureSpecOverride = true;
+                m_MainTextureSpecOverride = specOverride.GetValue();
+            }
+            else
+            {
+                m_HasMainTextureSpecOverride = false;
+            }
+
+            ParseMainTextureSubRect(root, m_HasMainTextureSubRect, m_MainTextureUvMin, m_MainTextureUvMax);
+            updateDependencies();
+            ClearMaterialOpenFailureSuppression(suppressionKey);
+            return true;
+        };
+
+        if (IsGeneratedAssetKey(key, AssetType::Material))
+        {
+            const auto textResult = GeneratedAssetRuntimeRegistry::GetInstance().LoadText(key);
+            if (textResult.IsFailure())
+            {
+                LT_CORE_ERROR("MaterialAsset: generated payload failed '{}': {}", key, textResult.GetError().GetErrorMessage());
+                return false;
+            }
+
+            m_ResolvedPath = "<Generated>";
+            json root;
+            try
+            {
+                root = json::parse(textResult.GetValue());
+            }
+            catch (const std::exception& e)
+            {
+                LT_CORE_ERROR("MaterialAsset: JSON parse error (generated) '{}': {}", key, e.what());
+                return false;
+            }
+
+            return applyRoot(root, key);
+        }
+
         auto& bundle = AssetBundle::GetInstance();
         if (bundle.IsEnabled() && bundle.IsLoaded())
         {
@@ -495,55 +586,7 @@ namespace Limitless::Assets
                         LT_CORE_ERROR("MaterialAsset: JSON parse error (bundle) '{}': {}", key, e.what());
                         return false;
                     }
-
-                    const auto shaderAssetResult = ResolveShaderAsset(root);
-                    if (shaderAssetResult.IsFailure())
-                    {
-                        LT_CORE_ERROR("MaterialAsset: {}", shaderAssetResult.GetError().GetErrorMessage());
-                        return false;
-                    }
-
-                    const auto texAssetResult = ResolveMainTextureAsset(root);
-                    if (texAssetResult.IsFailure())
-                    {
-                        LT_CORE_ERROR("MaterialAsset: {}", texAssetResult.GetError().GetErrorMessage());
-                        return false;
-                    }
-
-                    const auto normalTexAssetResult = ResolveNormalTextureAsset(root);
-                    if (normalTexAssetResult.IsFailure())
-                    {
-                        LT_CORE_ERROR("MaterialAsset: {}", normalTexAssetResult.GetError().GetErrorMessage());
-                        return false;
-                    }
-
-                    m_ShaderResolved = shaderAssetResult.GetValue();
-                    m_MainTextureResolved = texAssetResult.GetValue();
-                    m_NormalTextureResolved = normalTexAssetResult.GetValue();
-
-                    m_Shader = m_ShaderResolved ? AssetHandle<ShaderAsset>(m_ShaderResolved) : AssetHandle<ShaderAsset>();
-                    m_MainTexture = m_MainTextureResolved ? AssetHandle<TextureAsset>(m_MainTextureResolved) : AssetHandle<TextureAsset>();
-                    m_NormalTexture = m_NormalTextureResolved ? AssetHandle<TextureAsset>(m_NormalTextureResolved) : AssetHandle<TextureAsset>();
-
-                    m_NormalStrength = std::clamp(root.value("normalStrength", 1.0f), 0.0f, 8.0f);
-                    m_Roughness = std::clamp(root.value("roughness", 0.5f), 0.0f, 1.0f);
-                    m_SpecularIntensity = std::clamp(root.value("specularIntensity", root.value("specular", 0.5f)), 0.0f, 8.0f);
-
-                    const auto specOverride = ParseTextureSpecificationOverride(root);
-                    if (specOverride.IsSuccess())
-                    {
-                        m_HasMainTextureSpecOverride = true;
-                        m_MainTextureSpecOverride = specOverride.GetValue();
-                    }
-                    else
-                    {
-                        m_HasMainTextureSpecOverride = false;
-                    }
-                    ParseMainTextureSubRect(root, m_HasMainTextureSubRect, m_MainTextureUvMin, m_MainTextureUvMax);
-
-                    updateDependencies();
-                    ClearMaterialOpenFailureSuppression(key);
-                    return true;
+                    return applyRoot(root, key);
                 }
             }
         }
@@ -579,54 +622,7 @@ namespace Limitless::Assets
             LT_CORE_ERROR("MaterialAsset: JSON parse error '{}': {}", m_ResolvedPath, e.what());
             return false;
         }
-
-        const auto shaderAssetResult = ResolveShaderAsset(root);
-        if (shaderAssetResult.IsFailure())
-        {
-            LT_CORE_ERROR("MaterialAsset: {}", shaderAssetResult.GetError().GetErrorMessage());
-            return false;
-        }
-
-        const auto texAssetResult = ResolveMainTextureAsset(root);
-        if (texAssetResult.IsFailure())
-        {
-            LT_CORE_ERROR("MaterialAsset: {}", texAssetResult.GetError().GetErrorMessage());
-            return false;
-        }
-
-        const auto normalTexAssetResult = ResolveNormalTextureAsset(root);
-        if (normalTexAssetResult.IsFailure())
-        {
-            LT_CORE_ERROR("MaterialAsset: {}", normalTexAssetResult.GetError().GetErrorMessage());
-            return false;
-        }
-
-        m_ShaderResolved = shaderAssetResult.GetValue();
-        m_MainTextureResolved = texAssetResult.GetValue();
-        m_NormalTextureResolved = normalTexAssetResult.GetValue();
-
-        m_Shader = m_ShaderResolved ? AssetHandle<ShaderAsset>(m_ShaderResolved) : AssetHandle<ShaderAsset>();
-        m_MainTexture = m_MainTextureResolved ? AssetHandle<TextureAsset>(m_MainTextureResolved) : AssetHandle<TextureAsset>();
-        m_NormalTexture = m_NormalTextureResolved ? AssetHandle<TextureAsset>(m_NormalTextureResolved) : AssetHandle<TextureAsset>();
-
-        m_NormalStrength = std::clamp(root.value("normalStrength", 1.0f), 0.0f, 8.0f);
-        m_Roughness = std::clamp(root.value("roughness", 0.5f), 0.0f, 1.0f);
-        m_SpecularIntensity = std::clamp(root.value("specularIntensity", root.value("specular", 0.5f)), 0.0f, 8.0f);
-
-        const auto specOverride = ParseTextureSpecificationOverride(root);
-        if (specOverride.IsSuccess())
-        {
-            m_HasMainTextureSpecOverride = true;
-            m_MainTextureSpecOverride = specOverride.GetValue();
-        }
-        else
-        {
-            m_HasMainTextureSpecOverride = false;
-        }
-        ParseMainTextureSubRect(root, m_HasMainTextureSubRect, m_MainTextureUvMin, m_MainTextureUvMax);
-        updateDependencies();
-        ClearMaterialOpenFailureSuppression(m_ResolvedPath);
-        return true;
+        return applyRoot(root, m_ResolvedPath);
     }
 
     bool MaterialAsset::Reload()

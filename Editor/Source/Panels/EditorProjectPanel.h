@@ -5,6 +5,7 @@
 #include "Limitless.h"
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -104,6 +105,14 @@ namespace Limitless
         bool BrowseLocationChanged = false;
         bool GridScaleChanged = false;
         bool TreeExpansionStateChanged = false;
+
+        // Cached grid entries to avoid per-frame rebuild.
+        uint64_t GridEntryCacheGeneration = 0;
+        uint64_t GridEntryDirCacheGeneration = 0;
+        std::filesystem::path GridEntryCachedFolder;
+        std::string GridEntryCachedSearchFilter;
+        std::unordered_set<std::string> GridEntryCachedExpansions;
+        bool GridEntryDirty = true;
 
         std::array<char, 256> FolderPopupBuffer{};
         std::array<char, 256> RenameAssetBuffer{};

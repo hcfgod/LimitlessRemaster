@@ -88,14 +88,14 @@ namespace Limitless
         {
             auto& renderer = Renderer::GetInstance();
             const GLuint vaoToDelete = m_RendererID;
-            if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
-            {
-                renderer.SubmitPrimaryResourceAndWait("DeleteVertexArray", [vaoToDelete](GraphicsContext*) {
-                    GLuint id = vaoToDelete;
-                    glDeleteVertexArrays(1, &id);
-                });
-            }
-            else
+            const bool retired = renderer.IsInitialized() && renderer.GetGraphicsContext() != nullptr &&
+                renderer.RetireResource("OpenGLVertexArray/Delete",
+                                        Renderer::ResourceRetirementContext::Primary,
+                                        [vaoToDelete](GraphicsContext*) {
+                                            GLuint id = vaoToDelete;
+                                            glDeleteVertexArrays(1, &id);
+                                        });
+            if (!retired)
             {
                 if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
                 {

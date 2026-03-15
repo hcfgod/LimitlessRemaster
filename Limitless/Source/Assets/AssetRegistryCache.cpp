@@ -13,7 +13,7 @@ namespace Limitless::Assets
     namespace
     {
         constexpr std::array<char, 4> kMagic{{'L', 'T', 'A', 'R'}};
-        constexpr uint32_t kSchemaVersion = 1;
+        constexpr uint32_t kSchemaVersion = 2;
 
         template<typename TValue>
         Result<void> WriteValue(std::ostream& stream, const TValue& value)
@@ -251,6 +251,11 @@ namespace Limitless::Assets
             {
                 return Result<AssetRegistryCacheSnapshot>(readImporterVersion.GetError());
             }
+            auto readSourceKind = ReadValue(stream, entry.SourceKind);
+            if (readSourceKind.IsFailure())
+            {
+                return Result<AssetRegistryCacheSnapshot>(readSourceKind.GetError());
+            }
 
             snapshot.Entries.push_back(std::move(entry));
         }
@@ -387,6 +392,11 @@ namespace Limitless::Assets
                 if (writeImporterVersion.IsFailure())
                 {
                     return writeImporterVersion;
+                }
+                auto writeSourceKind = WriteValue(stream, entry.SourceKind);
+                if (writeSourceKind.IsFailure())
+                {
+                    return writeSourceKind;
                 }
             }
 

@@ -107,10 +107,19 @@ namespace Limitless::EditorTilePalettePanel
             auto& cachedTex = state.CachedTextures[textureKey];
             if (!cachedTex)
             {
-                cachedTex = std::dynamic_pointer_cast<Assets::TextureAsset>(
-                    Assets::AssetManager::GetCachedByKey(textureKey));
-                if (!cachedTex)
-                    (void)Assets::TextureAsset::LoadAsync(textureKey);
+                auto taskIt = state.PendingTextureTasks.find(textureKey);
+                if (taskIt != state.PendingTextureTasks.end() && taskIt->second.IsDone())
+                {
+                    cachedTex = taskIt->second.Get();
+                    state.PendingTextureTasks.erase(taskIt);
+                }
+                else if (taskIt == state.PendingTextureTasks.end())
+                {
+                    cachedTex = std::dynamic_pointer_cast<Assets::TextureAsset>(
+                        Assets::AssetManager::GetCachedByKey(textureKey));
+                    if (!cachedTex)
+                        state.PendingTextureTasks[textureKey] = Assets::TextureAsset::LoadAsync(textureKey);
+                }
             }
 
             if (!cachedTex || !cachedTex->GetTexture())
@@ -179,10 +188,19 @@ namespace Limitless::EditorTilePalettePanel
                     auto& cachedTex = state.CachedTextures[tile.SpriteTextureKey];
                     if (!cachedTex)
                     {
-                        cachedTex = std::dynamic_pointer_cast<Assets::TextureAsset>(
-                            Assets::AssetManager::GetCachedByKey(tile.SpriteTextureKey));
-                        if (!cachedTex)
-                            (void)Assets::TextureAsset::LoadAsync(tile.SpriteTextureKey);
+                        auto taskIt = state.PendingTextureTasks.find(tile.SpriteTextureKey);
+                        if (taskIt != state.PendingTextureTasks.end() && taskIt->second.IsDone())
+                        {
+                            cachedTex = taskIt->second.Get();
+                            state.PendingTextureTasks.erase(taskIt);
+                        }
+                        else if (taskIt == state.PendingTextureTasks.end())
+                        {
+                            cachedTex = std::dynamic_pointer_cast<Assets::TextureAsset>(
+                                Assets::AssetManager::GetCachedByKey(tile.SpriteTextureKey));
+                            if (!cachedTex)
+                                state.PendingTextureTasks[tile.SpriteTextureKey] = Assets::TextureAsset::LoadAsync(tile.SpriteTextureKey);
+                        }
                     }
 
                     if (cachedTex && cachedTex->GetTexture())
@@ -207,11 +225,24 @@ namespace Limitless::EditorTilePalettePanel
                 auto& cachedTex = state.CachedTextures[tile.SpriteTextureKey];
                 if (!cachedTex)
                 {
-                    cachedTex = std::dynamic_pointer_cast<Assets::TextureAsset>(
-                        Assets::AssetManager::GetCachedByKey(tile.SpriteTextureKey));
-                    if (!cachedTex)
+                    auto taskIt = state.PendingTextureTasks.find(tile.SpriteTextureKey);
+                    if (taskIt != state.PendingTextureTasks.end() && taskIt->second.IsDone())
                     {
-                        (void)Assets::TextureAsset::LoadAsync(tile.SpriteTextureKey);
+                        cachedTex = taskIt->second.Get();
+                        state.PendingTextureTasks.erase(taskIt);
+                    }
+                    else if (taskIt == state.PendingTextureTasks.end())
+                    {
+                        cachedTex = std::dynamic_pointer_cast<Assets::TextureAsset>(
+                            Assets::AssetManager::GetCachedByKey(tile.SpriteTextureKey));
+                        if (!cachedTex)
+                        {
+                            state.PendingTextureTasks[tile.SpriteTextureKey] = Assets::TextureAsset::LoadAsync(tile.SpriteTextureKey);
+                            allTexturesResolved = false;
+                        }
+                    }
+                    else
+                    {
                         allTexturesResolved = false;
                     }
                 }

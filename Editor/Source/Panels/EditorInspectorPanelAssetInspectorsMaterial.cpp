@@ -1,5 +1,7 @@
 #include "EditorInspectorPanelAssetInspectorsShared.h"
 
+#include "Assets/AssetLoadProgress.h"
+
 namespace Limitless::EditorInspectorPanel::Internal
 {
     void DrawMaterialInspectorInternal(const char* texturePayloadId,
@@ -8,9 +10,17 @@ namespace Limitless::EditorInspectorPanel::Internal
                                        std::string& selectedMaterialAssetKey,
                                        Assets::MaterialAsset::Ptr& cachedMaterialAsset)
     {
+        struct MaterialLoadState
+        {
+            std::string PendingMaterialKey;
+            Async::Task<Assets::MaterialAsset::Ptr> PendingTask;
+        };
+        static MaterialLoadState s_LoadState;
+
         struct State
         {
             std::string LoadedKey;
+            std::string FileName;
             std::filesystem::path ResolvedPath;
             nlohmann::json Json = nlohmann::json::object();
             bool Loaded = false;
@@ -21,12 +31,42 @@ namespace Limitless::EditorInspectorPanel::Internal
             return;
 
         if (!cachedMaterialAsset || cachedMaterialAsset->GetKey() != selectedMaterialAssetKey)
-            cachedMaterialAsset = Assets::AssetManager::LoadBlocking<Assets::MaterialAsset>(selectedMaterialAssetKey);
+        {
+            // Poll the pending task first — it holds the strong ref that keeps
+            // the MaterialAsset alive (AssetManager stores only weak_ptr).
+            if (s_LoadState.PendingMaterialKey == selectedMaterialAssetKey &&
+                s_LoadState.PendingTask.IsValid() && s_LoadState.PendingTask.IsDone())
+            {
+                auto result = s_LoadState.PendingTask.Get();
+                s_LoadState.PendingTask = {};
+                s_LoadState.PendingMaterialKey.clear();
+                if (result)
+                    cachedMaterialAsset = std::move(result);
+            }
+            else if (s_LoadState.PendingMaterialKey != selectedMaterialAssetKey)
+            {
+                // Selection changed — check cache first, then fire async load.
+                auto cached = Assets::AssetManager::GetCachedByKey(selectedMaterialAssetKey);
+                if (cached)
+                {
+                    cachedMaterialAsset = std::dynamic_pointer_cast<Assets::MaterialAsset>(cached);
+                    s_LoadState.PendingMaterialKey.clear();
+                    s_LoadState.PendingTask = {};
+                }
+                else
+                {
+                    cachedMaterialAsset.reset();
+                    s_LoadState.PendingMaterialKey = selectedMaterialAssetKey;
+                    s_LoadState.PendingTask = Assets::MaterialAsset::LoadAsync(selectedMaterialAssetKey);
+                }
+            }
+        }
 
         if (!s_State.Loaded || s_State.LoadedKey != selectedMaterialAssetKey)
         {
             s_State = {};
             s_State.LoadedKey = selectedMaterialAssetKey;
+            s_State.FileName = std::filesystem::path(selectedMaterialAssetKey).filename().string();
             s_State.Loaded = LoadMaterialJson(selectedMaterialAssetKey, s_State.Json, s_State.ResolvedPath);
             if (!s_State.Loaded)
             {
@@ -35,11 +75,27 @@ namespace Limitless::EditorInspectorPanel::Internal
             }
         }
 
-        const std::string fileName = std::filesystem::path(selectedMaterialAssetKey).filename().string();
-        ImGui::Text("Material: %s", fileName.c_str());
+        ImGui::Text("Material: %s", s_State.FileName.c_str());
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
+
+        if (!cachedMaterialAsset)
+        {
+            if (const auto loadInfo = Assets::AssetLoadProgress::GetProgress(selectedMaterialAssetKey); loadInfo.has_value())
+            {
+                const float progress = std::clamp(loadInfo->Progress, 0.0f, 1.0f);
+                ImGui::ProgressBar(progress, ImVec2(-1.0f, 0.0f));
+                if (!loadInfo->Status.empty())
+                    ImGui::TextDisabled("%s", loadInfo->Status.c_str());
+                else
+                    ImGui::TextDisabled("Loading material...");
+            }
+            else
+            {
+                ImGui::TextDisabled("Loading material...");
+            }
+        }
 
         if (const EditorAssetPreview::MaterialPreviewData* materialPreview = EditorAssetPreview::GetCachedMaterialPreview(materialPreviewCache, selectedMaterialAssetKey))
         {

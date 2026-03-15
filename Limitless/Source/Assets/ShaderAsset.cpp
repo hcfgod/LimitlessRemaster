@@ -1,6 +1,7 @@
 #include "Assets/ShaderAsset.h"
 
 #include "Assets/AssetBundle.h"
+#include "Assets/GeneratedAssetRuntimeRegistry.h"
 #include "Assets/AssetLoadProgress.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetUtils.h"
@@ -177,6 +178,7 @@ namespace Limitless::Assets
                 }
 
                 bool fromBundle = false;
+                bool fromGenerated = false;
                 AssetBundlePayloadFormat bundlePayloadFormat = AssetBundlePayloadFormat::Raw;
                 std::vector<uint8_t> bundleBytes;
                 std::string resolvedPath;
@@ -184,8 +186,36 @@ namespace Limitless::Assets
                 std::string fileText;
                 ParsedShaderStages parsed{};
 
+                const auto generatedRecordResult = FindGeneratedAssetRecord(key, AssetType::Shader);
+                if (generatedRecordResult.IsSuccess())
+                {
+                    if (auto existing = GeneratedAssetRuntimeRegistry::GetInstance().GetAsset<ShaderAsset>(key))
+                    {
+                        auto cached = AssetManager::GetOrLoad<ShaderAsset>(key, [&]() -> Ptr { return existing; });
+                        AssetLoadProgress::ClearProgress(key);
+                        promise.set_value(std::move(cached));
+                        return;
+                    }
+
+                    const auto generatedTextResult = GeneratedAssetRuntimeRegistry::GetInstance().LoadText(key);
+                    if (generatedTextResult.IsFailure())
+                    {
+                        AssetLoadProgress::ClearProgress(key);
+                        LT_CORE_ERROR("ShaderAsset::LoadAsync: generated payload failed for '{}': {}",
+                                      key, generatedTextResult.GetError().GetErrorMessage());
+                        promise.set_value(nullptr);
+                        return;
+                    }
+
+                    fromGenerated = true;
+                    guid = generatedRecordResult.GetValue().Guid;
+                    resolvedPath = "<Generated>";
+                    fileText = generatedTextResult.GetValue();
+                    AssetLoadProgress::SetProgress(key, 0.20f, "Reading generated payload...");
+                }
+
                 auto& bundle = AssetBundle::GetInstance();
-                if (bundle.IsEnabled() && bundle.IsLoaded())
+                if (!fromGenerated && bundle.IsEnabled() && bundle.IsLoaded())
                 {
                     const auto entry = bundle.FindEntryByKey(key);
                     if (entry.has_value())
@@ -218,7 +248,7 @@ namespace Limitless::Assets
                     }
                 }
 
-                if (!fromBundle)
+                if (!fromGenerated && !fromBundle)
                 {
                     const auto resolvedResult = ResolveAssetKeyToPath(key);
                     if (resolvedResult.IsFailure())
@@ -332,6 +362,7 @@ namespace Limitless::Assets
                     std::string guid;
                     ParsedShaderStages parsed;
                     Settings settings;
+                    bool registerGenerated = false;
                     uint64_t generation = 0;
                 };
 
@@ -341,6 +372,7 @@ namespace Limitless::Assets
                 state->guid = guid;
                 state->parsed = std::move(parsed);
                 state->settings = settings;
+                state->registerGenerated = fromGenerated;
                 state->generation = generation;
 
                 class Command final : public RenderResourceCommandQueue::Command
@@ -377,9 +409,10 @@ namespace Limitless::Assets
 
                             // Ensure it is visible to the global cache for hot reload (key -> asset).
                             auto asset = AssetManager::GetOrLoad<ShaderAsset>(m_State->key, [&]() -> Ptr {
-                                // Keep constructor private.
                                 return Ptr(new ShaderAsset(m_State->key, m_State->guid, std::move(shader), m_State->settings));
                             });
+                            if (m_State->registerGenerated && asset)
+                                GeneratedAssetRuntimeRegistry::GetInstance().RegisterAsset(m_State->key, asset);
 
                             AssetLoadProgress::ClearProgress(m_State->key);
                             m_State->promise.set_value(std::move(asset));
@@ -436,13 +469,28 @@ namespace Limitless::Assets
         const std::string key = GetKey();
 
         bool fromBundle = false;
+        bool fromGenerated = false;
         AssetBundlePayloadFormat bundlePayloadFormat = AssetBundlePayloadFormat::Raw;
         std::string resolvedPath;
         std::string fileText;
         std::vector<uint8_t> bundleBytes;
 
+        if (const auto generatedRecordResult = FindGeneratedAssetRecord(key, AssetType::Shader); generatedRecordResult.IsSuccess())
+        {
+            const auto generatedTextResult = GeneratedAssetRuntimeRegistry::GetInstance().LoadText(key);
+            if (generatedTextResult.IsFailure())
+            {
+                LT_CORE_ERROR("ShaderAsset::Reload: generated payload failed for '{}': {}", key, generatedTextResult.GetError().GetErrorMessage());
+                return false;
+            }
+
+            fromGenerated = true;
+            resolvedPath = "<Generated>";
+            fileText = generatedTextResult.GetValue();
+        }
+
         auto& bundle = AssetBundle::GetInstance();
-        if (bundle.IsEnabled() && bundle.IsLoaded())
+        if (!fromGenerated && bundle.IsEnabled() && bundle.IsLoaded())
         {
             const auto entry = bundle.FindEntryByKey(key);
             if (entry.has_value())
@@ -471,7 +519,7 @@ namespace Limitless::Assets
             }
         }
 
-        if (!fromBundle)
+        if (!fromGenerated && !fromBundle)
         {
             const auto resolvedResult = ResolveAssetKeyToPath(key);
             if (resolvedResult.IsFailure())

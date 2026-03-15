@@ -1,6 +1,7 @@
 #include "Assets/TilePaletteAsset.h"
 #include "Assets/TileAsset.h"
 #include "Assets/AssetDatabase.h"
+#include "Assets/GeneratedAssetRuntimeRegistry.h"
 #include "Assets/AssetImporterVersion.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/SpriteImportSettings.h"
@@ -67,6 +68,24 @@ namespace Limitless::Assets
     {
         if (paletteAssetKey.empty())
             return Result<TilePaletteData>(ErrorCode::InvalidArgument, "Palette asset key is empty.");
+
+        if (IsGeneratedAssetKey(paletteAssetKey, AssetType::TilePalette))
+        {
+            const auto textResult = GeneratedAssetRuntimeRegistry::GetInstance().LoadText(paletteAssetKey);
+            if (textResult.IsFailure())
+                return Result<TilePaletteData>(textResult.GetError());
+
+            try
+            {
+                const nlohmann::json j = nlohmann::json::parse(textResult.GetValue());
+                return Result<TilePaletteData>(TilePaletteDataFromJson(j));
+            }
+            catch (const std::exception& e)
+            {
+                return Result<TilePaletteData>(ErrorCode::FileCorrupted,
+                    "Failed to parse generated palette JSON: " + std::string(e.what()));
+            }
+        }
 
         const auto pathResult = ResolveAssetKeyToPath(paletteAssetKey);
         if (pathResult.IsFailure())

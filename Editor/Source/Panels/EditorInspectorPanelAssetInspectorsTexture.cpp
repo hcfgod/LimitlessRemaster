@@ -1,11 +1,20 @@
 #include "EditorInspectorPanelAssetInspectorsShared.h"
 
+#include "Assets/AssetLoadProgress.h"
+
 namespace Limitless::EditorInspectorPanel::Internal
 {
     void DrawTextureInspectorInternal(Scene* scene,
                                       std::string& selectedTextureAssetKey,
                                       Assets::TextureAsset::Ptr& cachedTextureAsset)
     {
+        struct TextureLoadState
+        {
+            std::string PendingTextureKey;
+            Async::Task<Assets::TextureAsset::Ptr> PendingTask;
+        };
+        static TextureLoadState s_LoadState;
+
         std::string resolvedTextureAssetKey = selectedTextureAssetKey;
         int32_t selectedSubSpriteIndex = -1;
         std::string parsedTextureAssetKey;
@@ -19,13 +28,59 @@ namespace Limitless::EditorInspectorPanel::Internal
         }
 
         if (!cachedTextureAsset || cachedTextureAsset->GetKey() != resolvedTextureAssetKey)
-            cachedTextureAsset = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(resolvedTextureAssetKey);
+        {
+            // Poll the pending task first — it holds the strong ref that keeps
+            // the TextureAsset alive (AssetManager stores only weak_ptr).
+            if (s_LoadState.PendingTextureKey == resolvedTextureAssetKey &&
+                s_LoadState.PendingTask.IsValid() && s_LoadState.PendingTask.IsDone())
+            {
+                auto result = s_LoadState.PendingTask.Get();
+                s_LoadState.PendingTask = {};
+                s_LoadState.PendingTextureKey.clear();
+                if (result)
+                    cachedTextureAsset = std::move(result);
+            }
+            else if (s_LoadState.PendingTextureKey != resolvedTextureAssetKey)
+            {
+                // Selection changed — check cache first, then fire async load.
+                auto cached = Assets::AssetManager::GetCachedByKey(resolvedTextureAssetKey);
+                if (cached)
+                {
+                    cachedTextureAsset = std::dynamic_pointer_cast<Assets::TextureAsset>(cached);
+                    s_LoadState.PendingTextureKey.clear();
+                    s_LoadState.PendingTask = {};
+                }
+                else
+                {
+                    cachedTextureAsset.reset();
+                    TextureSpecification loadSpecification{};
+                    const auto recordResult = Assets::AssetDatabase::GetInstance().FindByKey(resolvedTextureAssetKey);
+                    if (recordResult.IsSuccess())
+                        loadSpecification = Assets::TextureSpecificationFromImporterSettingsJson(recordResult.GetValue().ImporterSettings);
+
+                    s_LoadState.PendingTextureKey = resolvedTextureAssetKey;
+                    s_LoadState.PendingTask = Assets::TextureAsset::LoadAsync(resolvedTextureAssetKey, loadSpecification);
+                }
+            }
+        }
 
         auto textureAsset = cachedTextureAsset;
         if (!textureAsset)
         {
-            ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Failed to load texture: %s", resolvedTextureAssetKey.c_str());
-            cachedTextureAsset.reset();
+            const std::string fileName = std::filesystem::path(resolvedTextureAssetKey).filename().string();
+            ImGui::Text("Texture: %s", fileName.c_str());
+            if (const auto loadInfo = Assets::AssetLoadProgress::GetProgress(resolvedTextureAssetKey); loadInfo.has_value())
+            {
+                ImGui::ProgressBar(std::clamp(loadInfo->Progress, 0.0f, 1.0f), ImVec2(-1.0f, 0.0f));
+                if (!loadInfo->Status.empty())
+                    ImGui::TextDisabled("%s", loadInfo->Status.c_str());
+                else
+                    ImGui::TextDisabled("Loading...");
+            }
+            else
+            {
+                ImGui::TextDisabled("Loading...");
+            }
             return;
         }
 
@@ -36,30 +91,38 @@ namespace Limitless::EditorInspectorPanel::Internal
             return;
         }
 
-        const std::string fileName = std::filesystem::path(resolvedTextureAssetKey).filename().string();
-        ImGui::Text("Texture: %s", fileName.c_str());
-        ImGui::Text("%u x %u", texture->GetWidth(), texture->GetHeight());
-        ImGui::Spacing();
-
         struct SpriteSettingsCache
         {
             std::string TextureKey;
+            std::string FileName;
             Assets::SpriteImportSettings Settings;
             bool Loaded = false;
         };
         static SpriteSettingsCache s_SpriteCache;
 
-        if (!s_SpriteCache.Loaded || s_SpriteCache.TextureKey != resolvedTextureAssetKey)
+        if (s_SpriteCache.TextureKey != resolvedTextureAssetKey)
         {
+            s_SpriteCache = {};
             s_SpriteCache.TextureKey = resolvedTextureAssetKey;
+            s_SpriteCache.FileName = std::filesystem::path(resolvedTextureAssetKey).filename().string();
+        }
+
+        ImGui::Text("Texture: %s", s_SpriteCache.FileName.c_str());
+        ImGui::Text("%u x %u", texture->GetWidth(), texture->GetHeight());
+        ImGui::Spacing();
+
+        const bool needSpriteSettingsForPreview = selectedSubSpriteIndex >= 0;
+        if (needSpriteSettingsForPreview && !s_SpriteCache.Loaded)
+        {
             s_SpriteCache.Settings = Assets::LoadSpriteImportSettings(resolvedTextureAssetKey);
             s_SpriteCache.Loaded = true;
         }
 
-        auto& spriteSettings = s_SpriteCache.Settings;
+        Assets::SpriteImportSettings* spriteSettingsPtr = s_SpriteCache.Loaded ? &s_SpriteCache.Settings : nullptr;
         const bool showingSubSpritePreview =
+            spriteSettingsPtr &&
             selectedSubSpriteIndex >= 0 &&
-            selectedSubSpriteIndex < static_cast<int32_t>(spriteSettings.SubSprites.size());
+            selectedSubSpriteIndex < static_cast<int32_t>(spriteSettingsPtr->SubSprites.size());
 
         float previewSourceWidth = static_cast<float>(texture->GetWidth());
         float previewSourceHeight = static_cast<float>(texture->GetHeight());
@@ -67,7 +130,7 @@ namespace Limitless::EditorInspectorPanel::Internal
         ImVec2 uv1(1.0f, 0.0f);
         if (showingSubSpritePreview)
         {
-            const auto& sub = spriteSettings.SubSprites[static_cast<size_t>(selectedSubSpriteIndex)];
+            const auto& sub = spriteSettingsPtr->SubSprites[static_cast<size_t>(selectedSubSpriteIndex)];
             previewSourceWidth = static_cast<float>(std::max(1, sub.RectPixels.z));
             previewSourceHeight = static_cast<float>(std::max(1, sub.RectPixels.w));
             const glm::vec4 subUvs = Assets::ComputeSubSpriteUvs(
@@ -105,38 +168,50 @@ namespace Limitless::EditorInspectorPanel::Internal
         ImGui::Separator();
         ImGui::Spacing();
 
-        const char* spriteModeNames[] = { "Single", "Multiple" };
-        int spriteModeIndex = static_cast<int>(spriteSettings.Mode);
-        if (ImGui::Combo("Sprite Mode", &spriteModeIndex, spriteModeNames, 2))
+        const bool spriteSettingsOpen = ImGui::CollapsingHeader("Sprite Import Settings");
+        if (spriteSettingsOpen)
         {
-            spriteSettings.Mode = static_cast<Assets::SpriteImportSettings::SpriteMode>(spriteModeIndex);
-            const auto saveResult = Assets::SaveSpriteImportSettings(resolvedTextureAssetKey, spriteSettings);
-            if (!saveResult.IsSuccess())
-                LT_CORE_WARN("Failed to save sprite import settings for '{}': {}", resolvedTextureAssetKey, saveResult.GetError().GetErrorMessage());
-        }
-
-        float ppu = spriteSettings.PixelsPerUnit;
-        if (ImGui::DragFloat("Pixels Per Unit", &ppu, 0.5f, 0.01f, 4096.0f, "%.1f"))
-        {
-            spriteSettings.PixelsPerUnit = std::max(0.01f, ppu);
-            const auto saveResult = Assets::SaveSpriteImportSettings(resolvedTextureAssetKey, spriteSettings);
-            if (!saveResult.IsSuccess())
-                LT_CORE_WARN("Failed to save sprite import settings for '{}': {}", resolvedTextureAssetKey, saveResult.GetError().GetErrorMessage());
-        }
-
-        if (spriteSettings.Mode == Assets::SpriteImportSettings::SpriteMode::Multiple)
-        {
-            ImGui::Spacing();
-            if (ImGui::Button("Open Sprite Editor", ImVec2(-1, 0)))
-                SetPendingSpriteEditorRequestState(resolvedTextureAssetKey);
-
-            if (!spriteSettings.SubSprites.empty())
+            if (!s_SpriteCache.Loaded)
             {
-                ImGui::TextDisabled("%zu sub-sprites defined", spriteSettings.SubSprites.size());
+                s_SpriteCache.Settings = Assets::LoadSpriteImportSettings(resolvedTextureAssetKey);
+                s_SpriteCache.Loaded = true;
             }
-            else
+
+            auto& spriteSettings = s_SpriteCache.Settings;
+
+            const char* spriteModeNames[] = { "Single", "Multiple" };
+            int spriteModeIndex = static_cast<int>(spriteSettings.Mode);
+            if (ImGui::Combo("Sprite Mode", &spriteModeIndex, spriteModeNames, 2))
             {
-                ImGui::TextDisabled("No sub-sprites. Open Sprite Editor to slice.");
+                spriteSettings.Mode = static_cast<Assets::SpriteImportSettings::SpriteMode>(spriteModeIndex);
+                const auto saveResult = Assets::SaveSpriteImportSettings(resolvedTextureAssetKey, spriteSettings);
+                if (!saveResult.IsSuccess())
+                    LT_CORE_WARN("Failed to save sprite import settings for '{}': {}", resolvedTextureAssetKey, saveResult.GetError().GetErrorMessage());
+            }
+
+            float ppu = spriteSettings.PixelsPerUnit;
+            if (ImGui::DragFloat("Pixels Per Unit", &ppu, 0.5f, 0.01f, 4096.0f, "%.1f"))
+            {
+                spriteSettings.PixelsPerUnit = std::max(0.01f, ppu);
+                const auto saveResult = Assets::SaveSpriteImportSettings(resolvedTextureAssetKey, spriteSettings);
+                if (!saveResult.IsSuccess())
+                    LT_CORE_WARN("Failed to save sprite import settings for '{}': {}", resolvedTextureAssetKey, saveResult.GetError().GetErrorMessage());
+            }
+
+            if (spriteSettings.Mode == Assets::SpriteImportSettings::SpriteMode::Multiple)
+            {
+                ImGui::Spacing();
+                if (ImGui::Button("Open Sprite Editor", ImVec2(-1, 0)))
+                    SetPendingSpriteEditorRequestState(resolvedTextureAssetKey);
+
+                if (!spriteSettings.SubSprites.empty())
+                {
+                    ImGui::TextDisabled("%zu sub-sprites defined", spriteSettings.SubSprites.size());
+                }
+                else
+                {
+                    ImGui::TextDisabled("No sub-sprites. Open Sprite Editor to slice.");
+                }
             }
         }
 

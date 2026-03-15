@@ -2,6 +2,7 @@
 
 #include "Assets/AssetBundle.h"
 #include "Assets/AssetDatabase.h"
+#include "Assets/GeneratedAssetRuntimeRegistry.h"
 #include "Assets/AssetLoadCoordinator.h"
 #include "Assets/AssetLoadProgress.h"
 #include "Assets/AssetManager.h"
@@ -330,6 +331,22 @@ namespace Limitless::Assets
         {
             std::string jsonText;
             bool loadedFromBundle = false;
+            if (const auto generatedRecordResult = FindGeneratedAssetRecord(key, AssetType::AnimationClip); generatedRecordResult.IsSuccess())
+            {
+                const auto textResult = GeneratedAssetRuntimeRegistry::GetInstance().LoadText(key);
+                if (textResult.IsFailure())
+                {
+                    return Result<AnimationClipAsset::Data>(
+                        textResult.GetError().GetCode(),
+                        "AnimationClipAsset::Load failed reading generated payload for '" + key + "': " + textResult.GetError().GetErrorMessage());
+                }
+
+                outGuid = generatedRecordResult.GetValue().Guid;
+                outResolvedPath = "<Generated>";
+                jsonText = textResult.GetValue();
+                return ParseClipJsonText(jsonText, outResolvedPath);
+            }
+
             auto& bundle = AssetBundle::GetInstance();
 
             if (bundle.IsEnabled() && bundle.IsLoaded())
@@ -419,6 +436,17 @@ namespace Limitless::Assets
                 return;
             }
 
+            const auto generatedRecordResult = FindGeneratedAssetRecord(key, AssetType::AnimationClip);
+            if (generatedRecordResult.IsSuccess())
+            {
+                if (auto existing = GeneratedAssetRuntimeRegistry::GetInstance().GetAsset<AnimationClipAsset>(key))
+                {
+                    auto cached = AssetManager::GetOrLoad<AnimationClipAsset>(key, [&]() -> Ptr { return existing; });
+                    promise.set_value(std::move(cached));
+                    return;
+                }
+            }
+
             AssetLoadProgress::SetProgress(key, 0.1f, "Loading animation clip...");
 
             std::string resolvedPath;
@@ -440,6 +468,8 @@ namespace Limitless::Assets
                 (void)AssetDatabase::GetInstance().SetDependencies(created->GetGuid(), BuildDependencyGuids(created->m_Data));
                 return created;
             });
+            if (generatedRecordResult.IsSuccess() && asset)
+                GeneratedAssetRuntimeRegistry::GetInstance().RegisterAsset(key, asset);
 
             AssetLoadProgress::ClearProgress(key);
             promise.set_value(std::move(asset));

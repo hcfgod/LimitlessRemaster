@@ -117,6 +117,7 @@ namespace Limitless::EditorAssetDiagnosticsPanel
         static bool loaded = false;
         static std::string status;
         static bool statusIsError = false;
+        static std::optional<Assets::AssetImportStatistics> lastImportStats;
 
         auto Refresh = [&]() {
             const auto result = Assets::AssetImportPipeline::ValidateAssetDatabase();
@@ -134,6 +135,22 @@ namespace Limitless::EditorAssetDiagnosticsPanel
             status = issues.empty() ? "No issues found." : ("Issues found: " + std::to_string(issues.size()));
             loaded = true;
         };
+        auto RunImport = [&](bool changedOnly) {
+            const auto result = changedOnly
+                ? Assets::AssetImportPipeline::ReimportChanged()
+                : Assets::AssetImportPipeline::ReimportAll();
+            if (result.IsFailure())
+            {
+                statusIsError = true;
+                status = result.GetError().GetErrorMessage();
+                return;
+            }
+
+            lastImportStats = result.GetValue();
+            Refresh();
+            statusIsError = false;
+            status = changedOnly ? "Reimported changed assets." : "Reimported all assets.";
+        };
 
         if (!loaded)
         {
@@ -146,13 +163,39 @@ namespace Limitless::EditorAssetDiagnosticsPanel
         }
 
         ImGui::SameLine();
+        if (ImGui::Button("Reimport Changed", ImVec2(140, 0)))
+        {
+            RunImport(true);
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Reimport All", ImVec2(120, 0)))
+        {
+            RunImport(false);
+        }
+
+        ImGui::SameLine();
         ImGui::TextDisabled("Records: %zu", Assets::AssetDatabase::GetInstance().GetRecordCount());
+
+        const auto cacheTelemetry = Assets::AssetDatabase::GetInstance().GetCacheTelemetry();
+        ImGui::TextDisabled("Cache hits: %llu  misses: %llu",
+            static_cast<unsigned long long>(cacheTelemetry.CacheHits),
+            static_cast<unsigned long long>(cacheTelemetry.CacheMisses));
 
         if (!status.empty())
         {
-            ImGui::SameLine();
             const ImVec4 color = statusIsError ? ImVec4(1.0f, 0.35f, 0.35f, 1.0f) : ImVec4(0.35f, 1.0f, 0.35f, 1.0f);
             ImGui::TextColored(color, "%s", status.c_str());
+        }
+
+        if (lastImportStats.has_value())
+        {
+            const auto& stats = *lastImportStats;
+            ImGui::TextDisabled("Last Import");
+            ImGui::Text("Files: discovered %zu  imported %zu  skipped %zu  missing %zu  errors %zu",
+                stats.DiscoveredFiles, stats.Imported, stats.SkippedUpToDate, stats.MissingOnDisk, stats.Errors);
+            ImGui::Text("Workers: %zu  discovery %.2f ms  prep %.2f ms  commit %.2f ms  cascade %.2f ms  total %.2f ms",
+                stats.WorkerCount, stats.DiscoveryMs, stats.PrepMs, stats.CommitMs, stats.CascadeMs, stats.TotalMs);
         }
 
         ImGui::Separator();

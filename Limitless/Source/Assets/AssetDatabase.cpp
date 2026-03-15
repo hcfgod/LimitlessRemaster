@@ -1,6 +1,7 @@
 #include "Assets/AssetDatabase.h"
 
 #include "Assets/AssetBundle.h"
+#include "Assets/AssetImporterVersion.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetRegistryCache.h"
 #include "Assets/AssetUtils.h"
@@ -87,6 +88,7 @@ namespace Limitless::Assets
             entry.SourceLastWriteTimeTicks = record->SourceLastWriteTimeTicks;
             entry.ImporterSettingsHash64 = record->ImporterSettingsHash64;
             entry.ImporterVersion = record->ImporterVersion;
+            entry.SourceKind = static_cast<uint8_t>(record->SourceKind);
             snapshot.Entries.push_back(std::move(entry));
         }
 
@@ -266,6 +268,9 @@ namespace Limitless::Assets
             return Result<Record>(guidResult.GetError());
         }
 
+        const uint32_t resolvedImporterVersion =
+            importerVersion != 0u ? importerVersion : GetCurrentAssetImporterVersion(type);
+
         Record record;
         record.Guid = guidResult.GetValue();
         record.Key = key;
@@ -275,7 +280,7 @@ namespace Limitless::Assets
         record.SourceSizeBytes = sizeEc ? 0ull : sizeBytes;
         record.SourceLastWriteTimeTicks = lastWriteTicks;
         record.ImporterSettingsHash64 = ComputeImporterSettingsHash64(record.ImporterSettings);
-        record.ImporterVersion = importerVersion != 0u ? importerVersion : 1u;
+        record.ImporterVersion = resolvedImporterVersion != 0u ? resolvedImporterVersion : 1u;
 
         {
             std::lock_guard<std::mutex> lock(m_Mutex);
@@ -415,6 +420,12 @@ namespace Limitless::Assets
             ++m_Revision;
         }
 
+        // Generated assets have no .meta file; deps are stored in the database only.
+        if (resolvedPath.empty())
+        {
+            return Result<void>();
+        }
+
         // Write deps into .meta next to the real asset.
         return WriteDependencies(resolvedPath.string(), dependencies);
     }
@@ -487,7 +498,10 @@ namespace Limitless::Assets
                     record.ImporterSettingsHash64 = ComputeImporterSettingsHash64(record.ImporterSettings);
 
                 if (record.ImporterVersion == 0)
-                    record.ImporterVersion = 1u;
+                {
+                    const uint32_t resolvedImporterVersion = GetCurrentAssetImporterVersion(record.Type);
+                    record.ImporterVersion = resolvedImporterVersion != 0u ? resolvedImporterVersion : 1u;
+                }
 
                 // Handle key->GUID change (same logic as ImportOrUpdate).
                 if (auto keyIt = m_GuidByKey.find(record.Key); keyIt != m_GuidByKey.end() && keyIt->second != record.Guid)
@@ -549,6 +563,81 @@ namespace Limitless::Assets
         }
 
         return committed;
+    }
+
+    Result<AssetDatabase::Record> AssetDatabase::RegisterGeneratedAsset(const std::string& guid,
+                                                                        const std::string& virtualKey,
+                                                                        AssetType type,
+                                                                        const nlohmann::json& importerSettings,
+                                                                        uint32_t importerVersion)
+    {
+        if (guid.empty())
+        {
+            return Result<Record>(ErrorCode::InvalidArgument, "AssetDatabase::RegisterGeneratedAsset: guid is empty");
+        }
+        if (virtualKey.empty())
+        {
+            return Result<Record>(ErrorCode::InvalidArgument, "AssetDatabase::RegisterGeneratedAsset: virtualKey is empty");
+        }
+
+        EnsureLoaded();
+
+        const uint32_t resolvedImporterVersion =
+            importerVersion != 0u ? importerVersion : GetCurrentAssetImporterVersion(type);
+
+        Record record;
+        record.Guid = guid;
+        record.Key = virtualKey;
+        record.ResolvedPath = {};  // no file on disk
+        record.Type = type;
+        record.SourceKind = AssetSourceKind::Generated;
+        record.ImporterSettings = importerSettings;
+        record.ImporterSettingsHash64 = ComputeImporterSettingsHash64(importerSettings);
+        record.ImporterVersion = resolvedImporterVersion != 0u ? resolvedImporterVersion : 1u;
+
+        {
+            std::lock_guard<std::mutex> lock(m_Mutex);
+
+            // If the key previously mapped to a different GUID, clean up the old record.
+            if (auto keyIt = m_GuidByKey.find(record.Key); keyIt != m_GuidByKey.end() && keyIt->second != record.Guid)
+            {
+                const std::string oldGuid = keyIt->second;
+                m_ByGuid.erase(oldGuid);
+            }
+
+            // Preserve existing dependencies if this GUID already exists.
+            if (auto it = m_ByGuid.find(record.Guid); it != m_ByGuid.end())
+            {
+                if (record.Dependencies.empty())
+                    record.Dependencies = it->second.Dependencies;
+                if (record.ImporterSettings.is_object() && record.ImporterSettings.empty())
+                {
+                    record.ImporterSettings = it->second.ImporterSettings;
+                    record.ImporterSettingsHash64 = it->second.ImporterSettingsHash64;
+                }
+            }
+
+            // Clean stale key aliases.
+            for (auto keyIt = m_GuidByKey.begin(); keyIt != m_GuidByKey.end();)
+            {
+                if (keyIt->second == record.Guid && keyIt->first != record.Key)
+                    keyIt = m_GuidByKey.erase(keyIt);
+                else
+                    ++keyIt;
+            }
+
+            m_ByGuid[record.Guid] = record;
+            m_GuidByKey[record.Key] = record.Guid;
+            ++m_Revision;
+
+            const auto saveResult = SaveToDiskLocked();
+            if (saveResult.IsFailure())
+            {
+                LT_CORE_WARN("AssetDatabase: failed to save database: {}", saveResult.GetError().GetErrorMessage());
+            }
+        }
+
+        return record;
     }
 
     Result<void> AssetDatabase::RemoveByGuid(const std::string& guid)
@@ -631,6 +720,12 @@ namespace Limitless::Assets
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
         return m_Revision;
+    }
+
+    AssetDatabase::CacheTelemetry AssetDatabase::GetCacheTelemetry() const
+    {
+        std::lock_guard<std::mutex> lock(m_Mutex);
+        return { m_CacheHits, m_CacheMisses };
     }
 
     Result<std::filesystem::path> AssetDatabase::GetDatabaseFilePathLocked()
@@ -725,15 +820,20 @@ namespace Limitless::Assets
                     record.SourceLastWriteTimeTicks = entry.SourceLastWriteTimeTicks;
                     record.ImporterSettingsHash64 = entry.ImporterSettingsHash64;
                     record.ImporterVersion = entry.ImporterVersion;
+                    record.SourceKind = static_cast<AssetSourceKind>(entry.SourceKind);
 
                     if (record.Guid.empty() || record.Key.empty())
                     {
                         continue;
                     }
 
-                    if (record.ResolvedPath.empty() || !IsPathUnderRoot(std::filesystem::path(record.ResolvedPath), projectAssetsRoot))
+                    // Generated assets have no ResolvedPath and are not scoped to Assets/.
+                    if (record.SourceKind != AssetSourceKind::Generated)
                     {
-                        continue;
+                        if (record.ResolvedPath.empty() || !IsPathUnderRoot(std::filesystem::path(record.ResolvedPath), projectAssetsRoot))
+                        {
+                            continue;
+                        }
                     }
 
                     m_GuidByKey[record.Key] = record.Guid;
@@ -747,9 +847,12 @@ namespace Limitless::Assets
             const auto cacheResult = loadFromCache();
             if (cacheResult.IsSuccess())
             {
+                ++m_CacheHits;
                 ++m_Revision;
                 return Result<void>();
             }
+
+            ++m_CacheMisses;
 
             const ErrorCode cacheErrorCode = cacheResult.GetError().GetCode();
             if (cacheErrorCode != ErrorCode::FileNotFound &&
@@ -794,9 +897,12 @@ namespace Limitless::Assets
 
                 // Keep database scoped to the currently opened project even if
                 // stale/mixed records are present in the loaded file.
-                if (r.ResolvedPath.empty() || !IsPathUnderRoot(std::filesystem::path(r.ResolvedPath), projectAssetsRoot))
+                if (r.SourceKind != AssetSourceKind::Generated)
                 {
-                    continue;
+                    if (r.ResolvedPath.empty() || !IsPathUnderRoot(std::filesystem::path(r.ResolvedPath), projectAssetsRoot))
+                    {
+                        continue;
+                    }
                 }
 
                 m_GuidByKey[r.Key] = r.Guid;
@@ -916,6 +1022,7 @@ namespace Limitless::Assets
         j["sourceLastWriteTimeTicks"] = r.SourceLastWriteTimeTicks;
         j["importerSettingsHash64"] = r.ImporterSettingsHash64;
         j["importerVersion"] = r.ImporterVersion;
+        j["sourceKind"] = ToString(r.SourceKind);
         return j;
     }
 
@@ -946,6 +1053,7 @@ namespace Limitless::Assets
         if (j.contains("sourceLastWriteTimeTicks") && j["sourceLastWriteTimeTicks"].is_number_integer()) r.SourceLastWriteTimeTicks = j["sourceLastWriteTimeTicks"].get<int64_t>();
         if (j.contains("importerSettingsHash64") && j["importerSettingsHash64"].is_number_unsigned()) r.ImporterSettingsHash64 = j["importerSettingsHash64"].get<uint64_t>();
         if (j.contains("importerVersion") && j["importerVersion"].is_number_unsigned()) r.ImporterVersion = j["importerVersion"].get<uint32_t>();
+        if (j.contains("sourceKind") && j["sourceKind"].is_string()) r.SourceKind = AssetSourceKindFromString(j["sourceKind"].get<std::string>());
 
         if (r.Guid.empty() || r.Key.empty())
         {

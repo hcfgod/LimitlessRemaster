@@ -29,19 +29,18 @@ namespace Limitless
             const GLuint fboToDelete = m_RendererID;
             const GLuint depthToDelete = m_DepthAttachment;
 
-            if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
-            {
-                // FBO deletion must happen on primary context (same as creation).
-                renderer.SubmitPrimaryResourceAndWait("OpenGLFramebuffer/Delete", [fboToDelete, depthToDelete](GraphicsContext*) {
-                    if (depthToDelete != 0)
-                    {
-                        glDeleteRenderbuffers(1, &depthToDelete);
-                    }
-                    GLuint id = fboToDelete;
-                    glDeleteFramebuffers(1, &id);
-                });
-            }
-            else
+            const bool retired = renderer.IsInitialized() && renderer.GetGraphicsContext() != nullptr &&
+                renderer.RetireResource("OpenGLFramebuffer/Delete",
+                                        Renderer::ResourceRetirementContext::Primary,
+                                        [fboToDelete, depthToDelete](GraphicsContext*) {
+                                            if (depthToDelete != 0)
+                                            {
+                                                glDeleteRenderbuffers(1, &depthToDelete);
+                                            }
+                                            GLuint id = fboToDelete;
+                                            glDeleteFramebuffers(1, &id);
+                                        });
+            if (!retired)
             {
                 if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
                 {
@@ -67,13 +66,40 @@ namespace Limitless
     {
         if (m_RendererID != 0)
         {
-            glDeleteFramebuffers(1, &m_RendererID);
-            if (m_DepthAttachment != 0)
-            {
-                glDeleteRenderbuffers(1, &m_DepthAttachment);
-                m_DepthAttachment = 0;
-            }
+            auto& renderer = Renderer::GetInstance();
+            const GLuint fboToDelete = m_RendererID;
+            const GLuint depthToDelete = m_DepthAttachment;
             m_RendererID = 0;
+            m_DepthAttachment = 0;
+
+            const bool retired = renderer.IsInitialized() && renderer.GetGraphicsContext() != nullptr &&
+                renderer.RetireResource("OpenGLFramebuffer/Delete",
+                                        Renderer::ResourceRetirementContext::Primary,
+                                        [fboToDelete, depthToDelete](GraphicsContext*) {
+                                            GLuint framebufferId = fboToDelete;
+                                            glDeleteFramebuffers(1, &framebufferId);
+                                            if (depthToDelete != 0)
+                                            {
+                                                GLuint depthId = depthToDelete;
+                                                glDeleteRenderbuffers(1, &depthId);
+                                            }
+                                        });
+            if (!retired)
+            {
+                if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
+                {
+                    OpenGLContext::ScopedCurrentContext scope(*glContext);
+                    glDeleteFramebuffers(1, &fboToDelete);
+                    if (depthToDelete != 0)
+                    {
+                        glDeleteRenderbuffers(1, &depthToDelete);
+                    }
+                }
+                else
+                {
+                    LT_CORE_WARN("OpenGLFramebuffer invalidated after renderer/context teardown; leaking GL FBO {}", fboToDelete);
+                }
+            }
         }
 
         glGenFramebuffers(1, &m_RendererID);

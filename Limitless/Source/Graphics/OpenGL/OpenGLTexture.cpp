@@ -203,14 +203,14 @@ namespace Limitless
         {
             auto& renderer = Renderer::GetInstance();
             const GLuint textureToDelete = m_RendererID;
-            if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
-            {
-                renderer.SubmitResourceAndWait("OpenGLTexture/DeleteTexture", [textureToDelete](GraphicsContext*) {
-                    GLuint id = textureToDelete;
-                    glDeleteTextures(1, &id);
-                });
-            }
-            else
+            const bool retired = renderer.IsInitialized() && renderer.GetGraphicsContext() != nullptr &&
+                renderer.RetireResource("OpenGLTexture/DeleteTexture",
+                                        Renderer::ResourceRetirementContext::Shared,
+                                        [textureToDelete](GraphicsContext*) {
+                                            GLuint id = textureToDelete;
+                                            glDeleteTextures(1, &id);
+                                        });
+            if (!retired)
             {
                 if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
                 {

@@ -1,6 +1,7 @@
 #include "Assets/TilesetAsset.h"
 
 #include "Assets/AssetDatabase.h"
+#include "Assets/GeneratedAssetRuntimeRegistry.h"
 #include "Assets/ImageDecode.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetTypes.h"
@@ -390,33 +391,57 @@ namespace Limitless::Assets
             return false;
         }
 
-        const auto resolvedPathResult = ResolveAssetKeyToPath(tilesetAssetKey);
-        if (resolvedPathResult.IsFailure())
-        {
-            if (outError)
-                *outError = resolvedPathResult.GetError().GetErrorMessage();
-            return false;
-        }
-
-        const std::filesystem::path tilesetPath = resolvedPathResult.GetValue();
-        std::ifstream input(tilesetPath, std::ios::in | std::ios::binary);
-        if (!input.is_open())
-        {
-            if (outError)
-                *outError = "Failed to open tileset file: " + tilesetPath.string();
-            return false;
-        }
-
         nlohmann::json json;
-        try
+        if (IsGeneratedAssetKey(tilesetAssetKey, AssetType::Tileset))
         {
-            input >> json;
+            const auto textResult = GeneratedAssetRuntimeRegistry::GetInstance().LoadText(tilesetAssetKey);
+            if (textResult.IsFailure())
+            {
+                if (outError)
+                    *outError = textResult.GetError().GetErrorMessage();
+                return false;
+            }
+
+            try
+            {
+                json = nlohmann::json::parse(textResult.GetValue());
+            }
+            catch (const std::exception& exception)
+            {
+                if (outError)
+                    *outError = "Failed to parse generated tileset JSON: " + std::string(exception.what());
+                return false;
+            }
         }
-        catch (const std::exception& exception)
+        else
         {
-            if (outError)
-                *outError = "Failed to parse tileset JSON: " + std::string(exception.what());
-            return false;
+            const auto resolvedPathResult = ResolveAssetKeyToPath(tilesetAssetKey);
+            if (resolvedPathResult.IsFailure())
+            {
+                if (outError)
+                    *outError = resolvedPathResult.GetError().GetErrorMessage();
+                return false;
+            }
+
+            const std::filesystem::path tilesetPath = resolvedPathResult.GetValue();
+            std::ifstream input(tilesetPath, std::ios::in | std::ios::binary);
+            if (!input.is_open())
+            {
+                if (outError)
+                    *outError = "Failed to open tileset file: " + tilesetPath.string();
+                return false;
+            }
+
+            try
+            {
+                input >> json;
+            }
+            catch (const std::exception& exception)
+            {
+                if (outError)
+                    *outError = "Failed to parse tileset JSON: " + std::string(exception.what());
+                return false;
+            }
         }
 
         TilesetAssetDefinition definition{};

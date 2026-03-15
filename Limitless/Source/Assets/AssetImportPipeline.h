@@ -19,6 +19,14 @@ namespace Limitless::Assets
 
         // Keys imported or reimported (includes dependents triggered by cascade).
         std::vector<std::string> ImportedKeys;
+
+        // Telemetry: wall-time in milliseconds for each import stage.
+        double DiscoveryMs = 0.0;
+        double PrepMs = 0.0;
+        double CommitMs = 0.0;
+        double CascadeMs = 0.0;
+        double TotalMs = 0.0;
+        size_t WorkerCount = 0;
     };
 
     struct AssetDatabaseValidationIssue final
@@ -65,8 +73,8 @@ namespace Limitless::Assets
     ///    (uses the engine JobSystem when available).
     /// 3. Sorted commit – deterministic batch upsert into AssetDatabase
     ///    with a single save-to-disk.
-    /// 4. Cascade – BFS through reverse dependency graph.
-    /// 5. Reload – notify in-memory asset caches.
+    /// 4. Reload – notify in-memory asset caches.
+    /// 5. Cascade – BFS through reverse dependency graph.
     namespace AssetImportPipeline
     {
         Result<AssetImportStatistics> ReimportAll(bool includeDependents = true,

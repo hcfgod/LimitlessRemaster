@@ -55,14 +55,14 @@ namespace Limitless
         {
             auto& renderer = Renderer::GetInstance();
             const GLuint bufferToDelete = m_RendererID;
-            if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
-            {
-                renderer.SubmitResourceAndWait("OpenGLBuffer/DeleteBuffer", [bufferToDelete](GraphicsContext*) {
-                    GLuint id = bufferToDelete;
-                    glDeleteBuffers(1, &id);
-                });
-            }
-            else
+            const bool retired = renderer.IsInitialized() && renderer.GetGraphicsContext() != nullptr &&
+                renderer.RetireResource("OpenGLBuffer/DeleteBuffer",
+                                        Renderer::ResourceRetirementContext::Shared,
+                                        [bufferToDelete](GraphicsContext*) {
+                                            GLuint id = bufferToDelete;
+                                            glDeleteBuffers(1, &id);
+                                        });
+            if (!retired)
             {
                 if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
                 {
@@ -153,14 +153,14 @@ namespace Limitless
         {
             auto& renderer = Renderer::GetInstance();
             const GLuint bufferToDelete = m_RendererID;
-            if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
-            {
-                renderer.SubmitResourceAndWait("OpenGLBuffer/DeleteBuffer", [bufferToDelete](GraphicsContext*) {
-                    GLuint id = bufferToDelete;
-                    glDeleteBuffers(1, &id);
-                });
-            }
-            else
+            const bool retired = renderer.IsInitialized() && renderer.GetGraphicsContext() != nullptr &&
+                renderer.RetireResource("OpenGLBuffer/DeleteBuffer",
+                                        Renderer::ResourceRetirementContext::Shared,
+                                        [bufferToDelete](GraphicsContext*) {
+                                            GLuint id = bufferToDelete;
+                                            glDeleteBuffers(1, &id);
+                                        });
+            if (!retired)
             {
                 if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))
                 {

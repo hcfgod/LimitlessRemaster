@@ -385,8 +385,23 @@ namespace Limitless::EditorProjectPanel::Internal
                                                          isManagedScriptFile);
                     if (isTexture)
                     {
-                        const Assets::SpriteImportSettings& spriteSettings = GetCachedSpriteImportSettings(state, entry.AssetKey);
-                        const bool hasSubSprites = spriteSettings.Mode == Assets::SpriteImportSettings::SpriteMode::Multiple && !spriteSettings.SubSprites.empty();
+                        // Only look up sprite settings when the user has explicitly
+                        // expanded this texture or during a search.  This avoids
+                        // loading .meta files for every texture during grid rebuild.
+                        const bool isExplicitlyExpanded = state.ExpandedSubSpriteTextureKeys.count(entry.AssetKey) > 0;
+                        const bool needSpriteSettings = isExplicitlyExpanded || searchActive;
+                        const Assets::SpriteImportSettings* spriteSettings = nullptr;
+                        bool hasSubSprites = false;
+
+                        if (needSpriteSettings)
+                        {
+                            spriteSettings = &GetCachedSpriteImportSettings(state, entry.AssetKey);
+                            hasSubSprites = spriteSettings->Mode == Assets::SpriteImportSettings::SpriteMode::Multiple && !spriteSettings->SubSprites.empty();
+                        }
+
+                        // Mark as expandable only when we know; when sprite settings
+                        // haven't been loaded yet the expand arrow will appear once
+                        // the user expands the first time (or during search).
                         fileEntry.HasExpandableSubSprites = hasSubSprites;
 
                         if (!matchesSearch)
@@ -395,13 +410,13 @@ namespace Limitless::EditorProjectPanel::Internal
                         output.push_back(std::move(fileEntry));
 
                         const bool isExpanded = hasSubSprites &&
-                            (searchActive || state.ExpandedSubSpriteTextureKeys.count(entry.AssetKey) > 0);
-                        if (isExpanded)
+                            (searchActive || isExplicitlyExpanded);
+                        if (isExpanded && spriteSettings)
                         {
                             const std::string textureBaseName = entry.AbsolutePath.stem().string();
-                            for (size_t subSpriteIndex = 0; subSpriteIndex < spriteSettings.SubSprites.size(); ++subSpriteIndex)
+                            for (size_t subSpriteIndex = 0; subSpriteIndex < spriteSettings->SubSprites.size(); ++subSpriteIndex)
                             {
-                                const Assets::SpriteSubRect& subSprite = spriteSettings.SubSprites[subSpriteIndex];
+                                const Assets::SpriteSubRect& subSprite = spriteSettings->SubSprites[subSpriteIndex];
                                 const std::string subSpriteAssetKey = entry.AssetKey + "#" + std::to_string(subSpriteIndex);
                                 const std::string subSpriteDisplayName = subSprite.Name.empty()
                                     ? (textureBaseName + "_" + std::to_string(subSpriteIndex))
@@ -485,16 +500,38 @@ namespace Limitless::EditorProjectPanel::Internal
                 ImGui::EndPopup();
             }
 
-            std::vector<ProjectGridEntry> gridEntries;
-            appendGridEntries(state.ActiveFolderRelativePath, gridEntries);
+            // Only rebuild grid entries when something actually changed.
+            ProjectPanelCacheState& cacheState = GetProjectPanelCacheState(state);
+            const uint64_t dirGen = cacheState.DirectoryCacheGeneration;
+            const std::string& currentSearchFilter = GetProjectSearchFilterLower(state);
+            const bool gridDirty = state.GridEntryDirty
+                || state.GridEntryDirCacheGeneration != dirGen
+                || state.GridEntryCachedFolder != state.ActiveFolderRelativePath
+                || state.GridEntryCachedSearchFilter != currentSearchFilter
+                || state.GridEntryCachedExpansions != state.ExpandedSubSpriteTextureKeys;
 
-            std::vector<std::string> visibleAssetKeys;
-            visibleAssetKeys.reserve(gridEntries.size());
-            for (const ProjectGridEntry& entry : gridEntries)
+            if (gridDirty)
             {
-                if (!entry.IsDirectory && !entry.PrimaryAssetKey.empty())
-                    visibleAssetKeys.push_back(entry.PrimaryAssetKey);
+                cacheState.CachedGridEntries.clear();
+                appendGridEntries(state.ActiveFolderRelativePath, cacheState.CachedGridEntries);
+
+                cacheState.CachedVisibleAssetKeys.clear();
+                cacheState.CachedVisibleAssetKeys.reserve(cacheState.CachedGridEntries.size());
+                for (const ProjectGridEntry& entry : cacheState.CachedGridEntries)
+                {
+                    if (!entry.IsDirectory && !entry.PrimaryAssetKey.empty())
+                        cacheState.CachedVisibleAssetKeys.push_back(entry.PrimaryAssetKey);
+                }
+
+                state.GridEntryDirCacheGeneration = dirGen;
+                state.GridEntryCachedFolder = state.ActiveFolderRelativePath;
+                state.GridEntryCachedSearchFilter = currentSearchFilter;
+                state.GridEntryCachedExpansions = state.ExpandedSubSpriteTextureKeys;
+                state.GridEntryDirty = false;
             }
+
+            std::vector<ProjectGridEntry>& gridEntries = cacheState.CachedGridEntries;
+            std::vector<std::string>& visibleAssetKeys = cacheState.CachedVisibleAssetKeys;
 
             if (gridEntries.empty())
             {
@@ -536,134 +573,138 @@ namespace Limitless::EditorProjectPanel::Internal
                 const float expandArrowSize = 10.0f;
                 const float expandArrowPad = 4.0f;
 
-                for (size_t index = 0; index < gridEntries.size(); ++index)
+                ImGuiListClipper listClipper;
+                listClipper.Begin(static_cast<int>(gridEntries.size()), rowHeight + rowSpacing);
+                while (listClipper.Step())
                 {
-                    ProjectGridEntry& entry = gridEntries[index];
-                    if (entry.IsSubSprite)
-                        ImGui::Indent(18.0f);
-                    ImGui::PushID(static_cast<int>(index));
-                    const float rowWidth = std::max(1.0f, ImGui::GetContentRegionAvail().x);
-                    const ImVec2 rowMin = ImGui::GetCursorScreenPos();
-                    ImGui::InvisibleButton("##AssetRow", ImVec2(rowWidth, rowHeight));
-                    const bool hovered = ImGui::IsItemHovered();
-                    const bool releasedOnItemWithoutDrag = hovered && ImGui::IsMouseReleased(0) && (ImGui::GetDragDropPayload() == nullptr);
-                    const bool isMultiSelected = !entry.IsDirectory &&
-                        std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey) != state.MultiSelectedAssetKeys.end();
-                    const bool isSelected = !entry.IsDirectory && (IsGridEntryPrimarySelected(entry, selection) || isMultiSelected);
-
-                    const ImVec2 rowMax(rowMin.x + rowWidth, rowMin.y + rowHeight);
-                    ImDrawList* drawList = ImGui::GetWindowDrawList();
-                    const ImU32 fillColor = isSelected ? IM_COL32(44, 79, 138, 240) : (hovered ? IM_COL32(29, 39, 60, 240) : IM_COL32(19, 26, 40, 225));
-                    const ImU32 borderColor = isSelected ? IM_COL32(92, 145, 230, 255) : IM_COL32(56, 72, 104, 210);
-                    drawList->AddRectFilled(rowMin, rowMax, fillColor, 6.0f);
-                    drawList->AddRect(rowMin, rowMax, borderColor, 6.0f, 0, isSelected ? 2.0f : 1.0f);
-
-                    float contentStartX = rowMin.x + rowPaddingX;
-
-                    if (entry.HasExpandableSubSprites)
+                    for (int index = listClipper.DisplayStart; index < listClipper.DisplayEnd; ++index)
                     {
-                        const std::string& parentKey = entry.Entry.AssetKey.empty() ? entry.PrimaryAssetKey : entry.Entry.AssetKey;
-                        const bool isExpanded = state.ExpandedSubSpriteTextureKeys.count(parentKey) > 0;
-                        const float arrowCenterX = contentStartX + expandArrowSize * 0.5f;
-                        const float arrowCenterY = rowMin.y + rowHeight * 0.5f;
-                        const float halfSize = expandArrowSize * 0.4f;
-                        if (isExpanded)
+                        ProjectGridEntry& entry = gridEntries[index];
+                        if (entry.IsSubSprite)
+                            ImGui::Indent(18.0f);
+                        ImGui::PushID(index);
+                        const float rowWidth = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+                        const ImVec2 rowMin = ImGui::GetCursorScreenPos();
+                        ImGui::InvisibleButton("##AssetRow", ImVec2(rowWidth, rowHeight));
+                        const bool hovered = ImGui::IsItemHovered();
+                        const bool releasedOnItemWithoutDrag = hovered && ImGui::IsMouseReleased(0) && (ImGui::GetDragDropPayload() == nullptr);
+                        const bool isMultiSelected = !entry.IsDirectory &&
+                            std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey) != state.MultiSelectedAssetKeys.end();
+                        const bool isSelected = !entry.IsDirectory && (IsGridEntryPrimarySelected(entry, selection) || isMultiSelected);
+
+                        const ImVec2 rowMax(rowMin.x + rowWidth, rowMin.y + rowHeight);
+                        ImDrawList* drawList = ImGui::GetWindowDrawList();
+                        const ImU32 fillColor = isSelected ? IM_COL32(44, 79, 138, 240) : (hovered ? IM_COL32(29, 39, 60, 240) : IM_COL32(19, 26, 40, 225));
+                        const ImU32 borderColor = isSelected ? IM_COL32(92, 145, 230, 255) : IM_COL32(56, 72, 104, 210);
+                        drawList->AddRectFilled(rowMin, rowMax, fillColor, 6.0f);
+                        drawList->AddRect(rowMin, rowMax, borderColor, 6.0f, 0, isSelected ? 2.0f : 1.0f);
+
+                        float contentStartX = rowMin.x + rowPaddingX;
+
+                        if (entry.HasExpandableSubSprites)
                         {
-                            const ImVec2 p1(arrowCenterX - halfSize, arrowCenterY - halfSize * 0.5f);
-                            const ImVec2 p2(arrowCenterX + halfSize, arrowCenterY - halfSize * 0.5f);
-                            const ImVec2 p3(arrowCenterX, arrowCenterY + halfSize * 0.5f);
-                            drawList->AddTriangleFilled(p1, p2, p3, IM_COL32(200, 210, 225, 255));
+                            const std::string& parentKey = entry.Entry.AssetKey.empty() ? entry.PrimaryAssetKey : entry.Entry.AssetKey;
+                            const bool isExpanded = state.ExpandedSubSpriteTextureKeys.count(parentKey) > 0;
+                            const float arrowCenterX = contentStartX + expandArrowSize * 0.5f;
+                            const float arrowCenterY = rowMin.y + rowHeight * 0.5f;
+                            const float halfSize = expandArrowSize * 0.4f;
+                            if (isExpanded)
+                            {
+                                const ImVec2 p1(arrowCenterX - halfSize, arrowCenterY - halfSize * 0.5f);
+                                const ImVec2 p2(arrowCenterX + halfSize, arrowCenterY - halfSize * 0.5f);
+                                const ImVec2 p3(arrowCenterX, arrowCenterY + halfSize * 0.5f);
+                                drawList->AddTriangleFilled(p1, p2, p3, IM_COL32(200, 210, 225, 255));
+                            }
+                            else
+                            {
+                                const ImVec2 p1(arrowCenterX - halfSize * 0.5f, arrowCenterY - halfSize);
+                                const ImVec2 p2(arrowCenterX + halfSize * 0.5f, arrowCenterY);
+                                const ImVec2 p3(arrowCenterX - halfSize * 0.5f, arrowCenterY + halfSize);
+                                drawList->AddTriangleFilled(p1, p2, p3, IM_COL32(200, 210, 225, 255));
+                            }
+                            const ImVec2 arrowHitMin(rowMin.x, rowMin.y);
+                            const ImVec2 arrowHitMax(contentStartX + expandArrowSize + expandArrowPad, rowMax.y);
+                            if (hovered && ImGui::IsMouseClicked(0))
+                            {
+                                const ImVec2 mousePos = ImGui::GetMousePos();
+                                if (mousePos.x >= arrowHitMin.x && mousePos.x <= arrowHitMax.x &&
+                                    mousePos.y >= arrowHitMin.y && mousePos.y <= arrowHitMax.y)
+                                {
+                                    if (isExpanded)
+                                        state.ExpandedSubSpriteTextureKeys.erase(parentKey);
+                                    else
+                                        state.ExpandedSubSpriteTextureKeys.insert(parentKey);
+                                }
+                            }
+                            contentStartX += expandArrowSize + expandArrowPad;
+                        }
+
+                        const AssetTypeBadgeInfo& badge = *entry.Badge;
+                        const ImVec2 badgeTextSize = ImGui::CalcTextSize(badge.Label);
+                        const float badgeHeight = badgeTextSize.y + badgePadY * 2.0f;
+                        const ImVec2 badgeMin(contentStartX, rowMin.y + (rowHeight - badgeHeight) * 0.5f);
+                        const ImVec2 badgeMax(badgeMin.x + badgeTextSize.x + badgePadX * 2.0f, badgeMin.y + badgeHeight);
+                        drawList->AddRectFilled(badgeMin, badgeMax, badge.FillColor, 4.0f);
+                        drawList->AddRect(badgeMin, badgeMax, badge.BorderColor, 4.0f, 0, 1.0f);
+                        drawList->AddText(ImVec2(badgeMin.x + badgePadX, badgeMin.y + badgePadY), badge.TextColor, badge.Label);
+
+                        const float nameStartX = badgeMax.x + textGap;
+                        const float textY = rowMin.y + (rowHeight - ImGui::GetTextLineHeight()) * 0.5f;
+                        const std::string secondaryText = searchActive
+                            ? (entry.IsDirectory
+                                ? (entry.Entry.RelativePath.empty() ? std::string("Assets") : std::string("Assets/") + entry.Entry.RelativePath.generic_string())
+                                : (entry.Entry.RelativePath.parent_path().empty() ? std::string("Assets") : std::string("Assets/") + entry.Entry.RelativePath.parent_path().generic_string()))
+                            : std::string{};
+                        std::string fittedSecondaryText;
+                        float secondaryTextWidth = 0.0f;
+                        bool drawSecondaryText = false;
+                        if (!secondaryText.empty())
+                        {
+                            fittedSecondaryText = fitRowTextToWidth(secondaryText, std::max(120.0f, rowWidth * 0.35f));
+                            secondaryTextWidth = ImGui::CalcTextSize(fittedSecondaryText.c_str()).x;
+                            drawSecondaryText = !fittedSecondaryText.empty() &&
+                                (rowMax.x - nameStartX - rightPadding) > (secondaryTextWidth + textGap + minNameWidth);
+                        }
+
+                        const float nameMaxX = rowMax.x - rightPadding - (drawSecondaryText ? (secondaryTextWidth + textGap) : 0.0f);
+                        const float nameWidth = std::max(0.0f, nameMaxX - nameStartX);
+                        const std::string fittedDisplayName = fitRowTextToWidth(entry.DisplayName, nameWidth);
+                        drawList->PushClipRect(ImVec2(nameStartX, rowMin.y), ImVec2(nameMaxX, rowMax.y), true);
+                        drawList->AddText(ImVec2(nameStartX, textY), IM_COL32(230, 236, 245, 255), fittedDisplayName.c_str());
+                        drawList->PopClipRect();
+                        if (drawSecondaryText)
+                        {
+                            drawList->AddText(ImVec2(rowMax.x - rightPadding - secondaryTextWidth, textY), IM_COL32(145, 156, 176, 255), fittedSecondaryText.c_str());
+                        }
+
+                        if (entry.IsDirectory)
+                        {
+                            if (hovered)
+                                state.HoveredFolderRelativePathForExternalDrop = entry.Entry.RelativePath;
+                            if (hovered && ImGui::IsMouseDoubleClicked(0))
+                                SetActiveFolder(state, entry.Entry.RelativePath);
+                            beginFolderContextMenu(entry.Entry.RelativePath, entry.Entry.FileName, false);
+                            acceptFolderDropTarget(entry.Entry.RelativePath);
+                            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                            {
+                                ImGui::SetDragDropPayload(callbacks.AssetMovePayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                ImGui::Text("%s", entry.DisplayName.c_str());
+                                ImGui::EndDragDropSource();
+                            }
                         }
                         else
                         {
-                            const ImVec2 p1(arrowCenterX - halfSize * 0.5f, arrowCenterY - halfSize);
-                            const ImVec2 p2(arrowCenterX + halfSize * 0.5f, arrowCenterY);
-                            const ImVec2 p3(arrowCenterX - halfSize * 0.5f, arrowCenterY + halfSize);
-                            drawList->AddTriangleFilled(p1, p2, p3, IM_COL32(200, 210, 225, 255));
+                            HandleProjectGridItemSelection(state, selection, visibleAssetKeys, entry, releasedOnItemWithoutDrag);
+                            HandleProjectGridItemActivation(state, selection, entry, hovered, callbacks);
+                            DrawProjectGridItemContextMenu(assetsDirectory, state, selection, entry, callbacks);
+                            DrawProjectGridItemDragDropSource(state, entry, callbacks);
                         }
-                        const ImVec2 arrowHitMin(rowMin.x, rowMin.y);
-                        const ImVec2 arrowHitMax(contentStartX + expandArrowSize + expandArrowPad, rowMax.y);
-                        if (hovered && ImGui::IsMouseClicked(0))
-                        {
-                            const ImVec2 mousePos = ImGui::GetMousePos();
-                            if (mousePos.x >= arrowHitMin.x && mousePos.x <= arrowHitMax.x &&
-                                mousePos.y >= arrowHitMin.y && mousePos.y <= arrowHitMax.y)
-                            {
-                                if (isExpanded)
-                                    state.ExpandedSubSpriteTextureKeys.erase(parentKey);
-                                else
-                                    state.ExpandedSubSpriteTextureKeys.insert(parentKey);
-                            }
-                        }
-                        contentStartX += expandArrowSize + expandArrowPad;
-                    }
 
-                    const AssetTypeBadgeInfo& badge = *entry.Badge;
-                    const ImVec2 badgeTextSize = ImGui::CalcTextSize(badge.Label);
-                    const float badgeHeight = badgeTextSize.y + badgePadY * 2.0f;
-                    const ImVec2 badgeMin(contentStartX, rowMin.y + (rowHeight - badgeHeight) * 0.5f);
-                    const ImVec2 badgeMax(badgeMin.x + badgeTextSize.x + badgePadX * 2.0f, badgeMin.y + badgeHeight);
-                    drawList->AddRectFilled(badgeMin, badgeMax, badge.FillColor, 4.0f);
-                    drawList->AddRect(badgeMin, badgeMax, badge.BorderColor, 4.0f, 0, 1.0f);
-                    drawList->AddText(ImVec2(badgeMin.x + badgePadX, badgeMin.y + badgePadY), badge.TextColor, badge.Label);
-
-                    const float nameStartX = badgeMax.x + textGap;
-                    const float textY = rowMin.y + (rowHeight - ImGui::GetTextLineHeight()) * 0.5f;
-                    const std::string secondaryText = searchActive
-                        ? (entry.IsDirectory
-                            ? (entry.Entry.RelativePath.empty() ? std::string("Assets") : std::string("Assets/") + entry.Entry.RelativePath.generic_string())
-                            : (entry.Entry.RelativePath.parent_path().empty() ? std::string("Assets") : std::string("Assets/") + entry.Entry.RelativePath.parent_path().generic_string()))
-                        : std::string{};
-                    std::string fittedSecondaryText;
-                    float secondaryTextWidth = 0.0f;
-                    bool drawSecondaryText = false;
-                    if (!secondaryText.empty())
-                    {
-                        fittedSecondaryText = fitRowTextToWidth(secondaryText, std::max(120.0f, rowWidth * 0.35f));
-                        secondaryTextWidth = ImGui::CalcTextSize(fittedSecondaryText.c_str()).x;
-                        drawSecondaryText = !fittedSecondaryText.empty() &&
-                            (rowMax.x - nameStartX - rightPadding) > (secondaryTextWidth + textGap + minNameWidth);
-                    }
-
-                    const float nameMaxX = rowMax.x - rightPadding - (drawSecondaryText ? (secondaryTextWidth + textGap) : 0.0f);
-                    const float nameWidth = std::max(0.0f, nameMaxX - nameStartX);
-                    const std::string fittedDisplayName = fitRowTextToWidth(entry.DisplayName, nameWidth);
-                    drawList->PushClipRect(ImVec2(nameStartX, rowMin.y), ImVec2(nameMaxX, rowMax.y), true);
-                    drawList->AddText(ImVec2(nameStartX, textY), IM_COL32(230, 236, 245, 255), fittedDisplayName.c_str());
-                    drawList->PopClipRect();
-                    if (drawSecondaryText)
-                    {
-                        drawList->AddText(ImVec2(rowMax.x - rightPadding - secondaryTextWidth, textY), IM_COL32(145, 156, 176, 255), fittedSecondaryText.c_str());
-                    }
-
-                    if (entry.IsDirectory)
-                    {
-                        if (hovered)
-                            state.HoveredFolderRelativePathForExternalDrop = entry.Entry.RelativePath;
-                        if (hovered && ImGui::IsMouseDoubleClicked(0))
-                            SetActiveFolder(state, entry.Entry.RelativePath);
-                        beginFolderContextMenu(entry.Entry.RelativePath, entry.Entry.FileName, false);
-                        acceptFolderDropTarget(entry.Entry.RelativePath);
-                        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
-                        {
-                            ImGui::SetDragDropPayload(callbacks.AssetMovePayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
-                            ImGui::Text("%s", entry.DisplayName.c_str());
-                            ImGui::EndDragDropSource();
-                        }
-                    }
-                    else
-                    {
-                        HandleProjectGridItemSelection(state, selection, visibleAssetKeys, entry, releasedOnItemWithoutDrag);
-                        HandleProjectGridItemActivation(state, selection, entry, hovered, callbacks);
-                        DrawProjectGridItemContextMenu(assetsDirectory, state, selection, entry, callbacks);
-                        DrawProjectGridItemDragDropSource(state, entry, callbacks);
-                    }
-
-                    ImGui::PopID();
-                    if (entry.IsSubSprite)
-                        ImGui::Unindent(18.0f);
-                    if (index + 1 < gridEntries.size())
+                        ImGui::PopID();
+                        if (entry.IsSubSprite)
+                            ImGui::Unindent(18.0f);
                         ImGui::Dummy(ImVec2(0.0f, rowSpacing));
+                    }
                 }
             }
             else
@@ -705,115 +746,130 @@ namespace Limitless::EditorProjectPanel::Internal
 
                 const float expandArrowSize = std::max(10.0f, 12.0f * gridScale);
 
-                for (size_t index = 0; index < gridEntries.size(); ++index)
+                const int entryCount = static_cast<int>(gridEntries.size());
+                const int totalRows = (entryCount + columns - 1) / columns;
+                const float rowStepHeight = tileHeight + ImGui::GetStyle().ItemSpacing.y;
+
+                ImGuiListClipper gridClipper;
+                gridClipper.Begin(totalRows, rowStepHeight);
+                while (gridClipper.Step())
                 {
-                    ProjectGridEntry& entry = gridEntries[index];
-                    if (index > 0 && static_cast<int>(index % static_cast<size_t>(columns)) != 0)
-                        ImGui::SameLine(0.0f, tileSpacing);
-
-                    ImGui::PushID(static_cast<int>(index));
-                    const ImVec2 tileMin = ImGui::GetCursorScreenPos();
-                    ImGui::InvisibleButton("##AssetTile", ImVec2(tileWidth, tileHeight));
-                    const bool hovered = ImGui::IsItemHovered();
-                    const bool releasedOnItemWithoutDrag = hovered && ImGui::IsMouseReleased(0) && (ImGui::GetDragDropPayload() == nullptr);
-                    const bool isMultiSelected = !entry.IsDirectory &&
-                        std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey) != state.MultiSelectedAssetKeys.end();
-                    const bool isSelected = !entry.IsDirectory && (IsGridEntryPrimarySelected(entry, selection) || isMultiSelected);
-
-                    const ImVec2 tileMax(tileMin.x + tileWidth, tileMin.y + tileHeight);
-                    ImDrawList* drawList = ImGui::GetWindowDrawList();
-                    const auto drawCrispText = [&](const ImVec2& pos, const ImU32 color, const std::string& text) {
-                        drawList->AddText(pos, color, text.c_str());
-                    };
-                    const ImU32 fillColor = isSelected ? IM_COL32(44, 79, 138, 240) : (hovered ? IM_COL32(29, 39, 60, 240) : IM_COL32(19, 26, 40, 225));
-                    const ImU32 borderColor = isSelected ? IM_COL32(92, 145, 230, 255) : IM_COL32(56, 72, 104, 210);
-                    drawList->AddRectFilled(tileMin, tileMax, fillColor, 8.0f);
-                    drawList->AddRect(tileMin, tileMax, borderColor, 8.0f, 0, isSelected ? 2.0f : 1.0f);
-
-                    const ImVec2 previewMin(tileMin.x + previewInset, tileMin.y + previewInset + previewTopOffset);
-                    const ImVec2 previewMax(tileMax.x - previewInset, previewMin.y + previewHeight);
-                    drawList->AddRectFilled(previewMin, previewMax, IM_COL32(13, 18, 29, 240), 6.0f);
-                    drawList->AddRect(previewMin, previewMax, IM_COL32(48, 61, 90, 220), 6.0f, 0, 1.0f);
-
-                    DrawProjectGridEntryPreview(state, materialPreviewCache, entry, previewMin, previewMax);
-
-                    if (entry.HasExpandableSubSprites)
+                    for (int row = gridClipper.DisplayStart; row < gridClipper.DisplayEnd; ++row)
                     {
-                        const std::string& parentKey = entry.Entry.AssetKey.empty() ? entry.PrimaryAssetKey : entry.Entry.AssetKey;
-                        const bool isExpanded = state.ExpandedSubSpriteTextureKeys.count(parentKey) > 0;
-                        const float arrowCenterX = tileMax.x - previewInset - expandArrowSize * 0.5f;
-                        const float arrowCenterY = tileMin.y + previewInset * 0.5f + previewTopOffset * 0.5f;
-                        const float halfSize = expandArrowSize * 0.4f;
+                        const int rowStartIdx = row * columns;
+                        const int rowEndIdx = std::min(rowStartIdx + columns, entryCount);
 
-                        drawList->AddCircleFilled(ImVec2(arrowCenterX, arrowCenterY), expandArrowSize * 0.7f, IM_COL32(20, 28, 45, 200));
-                        if (isExpanded)
+                        for (int index = rowStartIdx; index < rowEndIdx; ++index)
                         {
-                            const ImVec2 p1(arrowCenterX - halfSize, arrowCenterY - halfSize * 0.4f);
-                            const ImVec2 p2(arrowCenterX + halfSize, arrowCenterY - halfSize * 0.4f);
-                            const ImVec2 p3(arrowCenterX, arrowCenterY + halfSize * 0.6f);
-                            drawList->AddTriangleFilled(p1, p2, p3, IM_COL32(220, 230, 245, 255));
-                        }
-                        else
-                        {
-                            const ImVec2 p1(arrowCenterX - halfSize * 0.4f, arrowCenterY - halfSize);
-                            const ImVec2 p2(arrowCenterX + halfSize * 0.6f, arrowCenterY);
-                            const ImVec2 p3(arrowCenterX - halfSize * 0.4f, arrowCenterY + halfSize);
-                            drawList->AddTriangleFilled(p1, p2, p3, IM_COL32(220, 230, 245, 255));
-                        }
+                            ProjectGridEntry& entry = gridEntries[index];
+                            if (index > rowStartIdx)
+                                ImGui::SameLine(0.0f, tileSpacing);
 
-                        const ImVec2 arrowHitMin(arrowCenterX - expandArrowSize, tileMin.y);
-                        const ImVec2 arrowHitMax(tileMax.x, tileMin.y + previewInset + previewTopOffset);
-                        if (hovered && ImGui::IsMouseClicked(0))
-                        {
-                            const ImVec2 mousePos = ImGui::GetMousePos();
-                            if (mousePos.x >= arrowHitMin.x && mousePos.x <= arrowHitMax.x &&
-                                mousePos.y >= arrowHitMin.y && mousePos.y <= arrowHitMax.y)
+                            ImGui::PushID(index);
+                            const ImVec2 tileMin = ImGui::GetCursorScreenPos();
+                            ImGui::InvisibleButton("##AssetTile", ImVec2(tileWidth, tileHeight));
+                            const bool hovered = ImGui::IsItemHovered();
+                            const bool releasedOnItemWithoutDrag = hovered && ImGui::IsMouseReleased(0) && (ImGui::GetDragDropPayload() == nullptr);
+                            const bool isMultiSelected = !entry.IsDirectory &&
+                                std::find(state.MultiSelectedAssetKeys.begin(), state.MultiSelectedAssetKeys.end(), entry.PrimaryAssetKey) != state.MultiSelectedAssetKeys.end();
+                            const bool isSelected = !entry.IsDirectory && (IsGridEntryPrimarySelected(entry, selection) || isMultiSelected);
+
+                            const ImVec2 tileMax(tileMin.x + tileWidth, tileMin.y + tileHeight);
+                            ImDrawList* drawList = ImGui::GetWindowDrawList();
+                            const auto drawCrispText = [&](const ImVec2& pos, const ImU32 color, const std::string& text) {
+                                drawList->AddText(pos, color, text.c_str());
+                            };
+                            const ImU32 fillColor = isSelected ? IM_COL32(44, 79, 138, 240) : (hovered ? IM_COL32(29, 39, 60, 240) : IM_COL32(19, 26, 40, 225));
+                            const ImU32 borderColor = isSelected ? IM_COL32(92, 145, 230, 255) : IM_COL32(56, 72, 104, 210);
+                            drawList->AddRectFilled(tileMin, tileMax, fillColor, 8.0f);
+                            drawList->AddRect(tileMin, tileMax, borderColor, 8.0f, 0, isSelected ? 2.0f : 1.0f);
+
+                            const ImVec2 previewMin(tileMin.x + previewInset, tileMin.y + previewInset + previewTopOffset);
+                            const ImVec2 previewMax(tileMax.x - previewInset, previewMin.y + previewHeight);
+                            drawList->AddRectFilled(previewMin, previewMax, IM_COL32(13, 18, 29, 240), 6.0f);
+                            drawList->AddRect(previewMin, previewMax, IM_COL32(48, 61, 90, 220), 6.0f, 0, 1.0f);
+
+                            DrawProjectGridEntryPreview(state, materialPreviewCache, entry, previewMin, previewMax);
+
+                            if (entry.HasExpandableSubSprites)
                             {
+                                const std::string& parentKey = entry.Entry.AssetKey.empty() ? entry.PrimaryAssetKey : entry.Entry.AssetKey;
+                                const bool isExpanded = state.ExpandedSubSpriteTextureKeys.count(parentKey) > 0;
+                                const float arrowCenterX = tileMax.x - previewInset - expandArrowSize * 0.5f;
+                                const float arrowCenterY = tileMin.y + previewInset * 0.5f + previewTopOffset * 0.5f;
+                                const float halfSize = expandArrowSize * 0.4f;
+
+                                drawList->AddCircleFilled(ImVec2(arrowCenterX, arrowCenterY), expandArrowSize * 0.7f, IM_COL32(20, 28, 45, 200));
                                 if (isExpanded)
-                                    state.ExpandedSubSpriteTextureKeys.erase(parentKey);
+                                {
+                                    const ImVec2 p1(arrowCenterX - halfSize, arrowCenterY - halfSize * 0.4f);
+                                    const ImVec2 p2(arrowCenterX + halfSize, arrowCenterY - halfSize * 0.4f);
+                                    const ImVec2 p3(arrowCenterX, arrowCenterY + halfSize * 0.6f);
+                                    drawList->AddTriangleFilled(p1, p2, p3, IM_COL32(220, 230, 245, 255));
+                                }
                                 else
-                                    state.ExpandedSubSpriteTextureKeys.insert(parentKey);
+                                {
+                                    const ImVec2 p1(arrowCenterX - halfSize * 0.4f, arrowCenterY - halfSize);
+                                    const ImVec2 p2(arrowCenterX + halfSize * 0.6f, arrowCenterY);
+                                    const ImVec2 p3(arrowCenterX - halfSize * 0.4f, arrowCenterY + halfSize);
+                                    drawList->AddTriangleFilled(p1, p2, p3, IM_COL32(220, 230, 245, 255));
+                                }
+
+                                const ImVec2 arrowHitMin(arrowCenterX - expandArrowSize, tileMin.y);
+                                const ImVec2 arrowHitMax(tileMax.x, tileMin.y + previewInset + previewTopOffset);
+                                if (hovered && ImGui::IsMouseClicked(0))
+                                {
+                                    const ImVec2 mousePos = ImGui::GetMousePos();
+                                    if (mousePos.x >= arrowHitMin.x && mousePos.x <= arrowHitMax.x &&
+                                        mousePos.y >= arrowHitMin.y && mousePos.y <= arrowHitMax.y)
+                                    {
+                                        if (isExpanded)
+                                            state.ExpandedSubSpriteTextureKeys.erase(parentKey);
+                                        else
+                                            state.ExpandedSubSpriteTextureKeys.insert(parentKey);
+                                    }
+                                }
                             }
+
+                            const std::string secondaryText = entry.IsDirectory
+                                ? (entry.Entry.RelativePath.empty() ? std::string("Assets") : std::string("Assets/") + entry.Entry.RelativePath.generic_string())
+                                : (entry.Entry.RelativePath.parent_path().empty() ? std::string("Assets") : std::string("Assets/") + entry.Entry.RelativePath.parent_path().generic_string());
+                            const float availableTextWidth = std::max(0.0f, tileWidth - tileTextPadX * 2.0f);
+                            const std::string fittedDisplayName = fitTextToWidth(entry.DisplayName, availableTextWidth);
+                            const std::string fittedSecondaryText = fitTextToWidth(secondaryText, availableTextWidth);
+                            const float nameTextY = previewMax.y + textBlockTopPadding;
+                            const float pathTextY = nameTextY + nameLineHeight + textLineGap;
+                            drawList->PushClipRect(tileMin, tileMax, true);
+                            drawCrispText(ImVec2(tileMin.x + tileTextPadX, nameTextY), IM_COL32(230, 236, 245, 255), fittedDisplayName);
+                            drawCrispText(ImVec2(tileMin.x + tileTextPadX, pathTextY), IM_COL32(145, 156, 176, 255), fittedSecondaryText);
+                            drawList->PopClipRect();
+
+                            if (entry.IsDirectory)
+                            {
+                                if (hovered)
+                                    state.HoveredFolderRelativePathForExternalDrop = entry.Entry.RelativePath;
+                                if (hovered && ImGui::IsMouseDoubleClicked(0))
+                                    SetActiveFolder(state, entry.Entry.RelativePath);
+                                beginFolderContextMenu(entry.Entry.RelativePath, entry.Entry.FileName, false);
+                                acceptFolderDropTarget(entry.Entry.RelativePath);
+                                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
+                                {
+                                    ImGui::SetDragDropPayload(callbacks.AssetMovePayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
+                                    ImGui::Text("%s", entry.DisplayName.c_str());
+                                    ImGui::EndDragDropSource();
+                                }
+                            }
+                            else
+                            {
+                                HandleProjectGridItemSelection(state, selection, visibleAssetKeys, entry, releasedOnItemWithoutDrag);
+                                HandleProjectGridItemActivation(state, selection, entry, hovered, callbacks);
+                                DrawProjectGridItemContextMenu(assetsDirectory, state, selection, entry, callbacks);
+                                DrawProjectGridItemDragDropSource(state, entry, callbacks);
+                            }
+
+                            ImGui::PopID();
                         }
                     }
-
-                    const std::string secondaryText = entry.IsDirectory
-                        ? (entry.Entry.RelativePath.empty() ? std::string("Assets") : std::string("Assets/") + entry.Entry.RelativePath.generic_string())
-                        : (entry.Entry.RelativePath.parent_path().empty() ? std::string("Assets") : std::string("Assets/") + entry.Entry.RelativePath.parent_path().generic_string());
-                    const float availableTextWidth = std::max(0.0f, tileWidth - tileTextPadX * 2.0f);
-                    const std::string fittedDisplayName = fitTextToWidth(entry.DisplayName, availableTextWidth);
-                    const std::string fittedSecondaryText = fitTextToWidth(secondaryText, availableTextWidth);
-                    const float nameTextY = previewMax.y + textBlockTopPadding;
-                    const float pathTextY = nameTextY + nameLineHeight + textLineGap;
-                    drawList->PushClipRect(tileMin, tileMax, true);
-                    drawCrispText(ImVec2(tileMin.x + tileTextPadX, nameTextY), IM_COL32(230, 236, 245, 255), fittedDisplayName);
-                    drawCrispText(ImVec2(tileMin.x + tileTextPadX, pathTextY), IM_COL32(145, 156, 176, 255), fittedSecondaryText);
-                    drawList->PopClipRect();
-
-                    if (entry.IsDirectory)
-                    {
-                        if (hovered)
-                            state.HoveredFolderRelativePathForExternalDrop = entry.Entry.RelativePath;
-                        if (hovered && ImGui::IsMouseDoubleClicked(0))
-                            SetActiveFolder(state, entry.Entry.RelativePath);
-                        beginFolderContextMenu(entry.Entry.RelativePath, entry.Entry.FileName, false);
-                        acceptFolderDropTarget(entry.Entry.RelativePath);
-                        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None))
-                        {
-                            ImGui::SetDragDropPayload(callbacks.AssetMovePayloadId, entry.PrimaryAssetKey.c_str(), static_cast<uint32_t>(entry.PrimaryAssetKey.size() + 1), ImGuiCond_Once);
-                            ImGui::Text("%s", entry.DisplayName.c_str());
-                            ImGui::EndDragDropSource();
-                        }
-                    }
-                    else
-                    {
-                        HandleProjectGridItemSelection(state, selection, visibleAssetKeys, entry, releasedOnItemWithoutDrag);
-                        HandleProjectGridItemActivation(state, selection, entry, hovered, callbacks);
-                        DrawProjectGridItemContextMenu(assetsDirectory, state, selection, entry, callbacks);
-                        DrawProjectGridItemDragDropSource(state, entry, callbacks);
-                    }
-
-                    ImGui::PopID();
                 }
             }
         }

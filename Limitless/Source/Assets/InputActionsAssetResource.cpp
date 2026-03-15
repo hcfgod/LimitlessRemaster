@@ -2,6 +2,7 @@
 
 #include "Assets/AssetBundle.h"
 #include "Assets/AssetDatabase.h"
+#include "Assets/GeneratedAssetRuntimeRegistry.h"
 #include "Assets/AssetLoadCoordinator.h"
 #include "Assets/AssetLoadProgress.h"
 #include "Assets/AssetManager.h"
@@ -67,6 +68,7 @@ namespace Limitless::Assets
             }
 
             bool fromBundle = false;
+            bool fromGenerated = false;
             bool fromOverride = false;
             std::string resolvedPath;
             std::string sourceResolvedPath;
@@ -75,8 +77,34 @@ namespace Limitless::Assets
 
             auto& bundle = AssetBundle::GetInstance();
 
-            // Shipping-safe override: if a user override file exists, it wins over both bundle and source assets.
-            // This allows runtime rebinding persistence without writing into `Assets/...`.
+            const auto generatedRecordResult = FindGeneratedAssetRecord(key, AssetType::InputActions);
+            if (generatedRecordResult.IsSuccess())
+            {
+                if (auto existing = GeneratedAssetRuntimeRegistry::GetInstance().GetAsset<InputActionsAssetResource>(key))
+                {
+                    auto cached = AssetManager::GetOrLoad<InputActionsAssetResource>(key, [&]() -> Ptr { return existing; });
+                    AssetLoadProgress::ClearProgress(key);
+                    promise.set_value(std::move(cached));
+                    return;
+                }
+
+                const auto generatedTextResult = GeneratedAssetRuntimeRegistry::GetInstance().LoadText(key);
+                if (generatedTextResult.IsFailure())
+                {
+                    AssetLoadProgress::ClearProgress(key);
+                    LT_CORE_ERROR("InputActionsAssetResource::LoadAsync: generated payload failed for '{}': {}",
+                        key, generatedTextResult.GetError().GetErrorMessage());
+                    promise.set_value(nullptr);
+                    return;
+                }
+
+                fromGenerated = true;
+                guid = generatedRecordResult.GetValue().Guid;
+                resolvedPath = "<Generated>";
+                jsonText = generatedTextResult.GetValue();
+            }
+
+            if (!fromGenerated)
             {
                 const std::filesystem::path overridePath = GetInputActionsUserOverridePathForKey(key);
                 if (!overridePath.empty() && std::filesystem::exists(overridePath))
@@ -89,7 +117,7 @@ namespace Limitless::Assets
                 }
             }
 
-            if (bundle.IsEnabled() && bundle.IsLoaded())
+            if (!fromGenerated && bundle.IsEnabled() && bundle.IsLoaded())
             {
                 const auto entry = bundle.FindEntryByKey(key);
                 if (entry.has_value())
@@ -111,7 +139,7 @@ namespace Limitless::Assets
                 }
             }
 
-            if (!fromBundle && !fromOverride)
+            if (!fromGenerated && !fromBundle && !fromOverride)
             {
                 const auto resolvedResult = ResolveAssetKeyToPath(key);
                 if (resolvedResult.IsFailure())
@@ -175,7 +203,7 @@ namespace Limitless::Assets
                 // This allows InputSystem and other holders of shared_ptr<InputActionAsset> to see updates
                 // without pointer swaps.
                 auto stable = std::make_shared<Limitless::InputActionAsset>();
-                const auto loaded = (fromBundle || fromOverride)
+                const auto loaded = (fromBundle || fromOverride || fromGenerated)
                     ? Limitless::InputActionAssetSerializer::LoadIntoFromString(*stable, jsonText, fromOverride ? resolvedPath : key)
                     : Limitless::InputActionAssetSerializer::LoadInto(*stable, resolvedPath);
                 if (loaded.IsFailure())
@@ -192,6 +220,8 @@ namespace Limitless::Assets
                 created->m_Revision.fetch_add(1, std::memory_order_relaxed);
                 return created;
             });
+            if (fromGenerated && asset)
+                GeneratedAssetRuntimeRegistry::GetInstance().RegisterAsset(key, asset);
 
             // Ensure transient loading UI state is cleared even when the asset came from cache
             // and the creation lambda did not execute.
@@ -214,12 +244,26 @@ namespace Limitless::Assets
         const std::string key = GetKey();
 
         bool fromBundle = false;
+        bool fromGenerated = false;
         bool fromOverride = false;
         std::string jsonText;
 
         auto& bundle = AssetBundle::GetInstance();
 
-        // User override wins over bundle/source.
+        if (IsGeneratedAssetKey(key, AssetType::InputActions))
+        {
+            const auto textResult = GeneratedAssetRuntimeRegistry::GetInstance().LoadText(key);
+            if (textResult.IsFailure())
+            {
+                LT_CORE_ERROR("InputActionsAssetResource::Reload: generated payload failed for '{}': {}", key, textResult.GetError().GetErrorMessage());
+                return false;
+            }
+
+            fromGenerated = true;
+            m_ResolvedPath = "<Generated>";
+            jsonText = textResult.GetValue();
+        }
+        else
         {
             const std::filesystem::path overridePath = GetInputActionsUserOverridePathForKey(key);
             if (!overridePath.empty() && std::filesystem::exists(overridePath))
@@ -232,7 +276,7 @@ namespace Limitless::Assets
             }
         }
 
-        if (bundle.IsEnabled() && bundle.IsLoaded())
+        if (!fromGenerated && bundle.IsEnabled() && bundle.IsLoaded())
         {
             const auto entry = bundle.FindEntryByKey(key);
             if (entry.has_value())
@@ -250,7 +294,7 @@ namespace Limitless::Assets
             }
         }
 
-        if (!fromBundle && !fromOverride)
+        if (!fromGenerated && !fromBundle && !fromOverride)
         {
             const auto resolvedResult = ResolveAssetKeyToPath(key);
             if (resolvedResult.IsFailure())
@@ -263,7 +307,7 @@ namespace Limitless::Assets
         // Keep identity stable across reloads:
         // - If the bundle is providing a GUID, `Asset` identity is already stable.
         // - Otherwise, ensure the base `.meta` exists for the source asset key (do NOT create `.meta` next to overrides).
-        if (!fromBundle)
+        if (!fromBundle && !fromGenerated)
         {
             const auto resolvedResult = ResolveAssetKeyToPath(key);
             if (resolvedResult.IsSuccess())
@@ -278,7 +322,7 @@ namespace Limitless::Assets
             m_Value = std::make_shared<Limitless::InputActionAsset>();
         }
 
-        const auto loaded = (fromBundle || fromOverride)
+        const auto loaded = (fromBundle || fromOverride || fromGenerated)
             ? Limitless::InputActionAssetSerializer::LoadIntoFromString(*m_Value, jsonText, fromOverride ? m_ResolvedPath : key)
             : Limitless::InputActionAssetSerializer::LoadInto(*m_Value, m_ResolvedPath);
         if (loaded.IsFailure())

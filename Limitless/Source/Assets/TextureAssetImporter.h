@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Assets/AssetImporter.h"
+#include "Assets/GeneratedAssetRuntimeRegistry.h"
 #include "Assets/TextureAsset.h"
 #include "Assets/AssetHotReloadManager.h"
 #include "Assets/AssetLoadCoordinator.h"
@@ -41,24 +42,30 @@ namespace Limitless::Assets
             // from overwriting a texture's canonical importer settings stored in the database.
             const bool isDefaultSettings = IsDefaultTextureSpecification(settings);
 
-            const auto recordResult = AssetDatabase::GetInstance().ImportOrUpdate(
-                key,
-                Type,
-                isDefaultSettings ? nlohmann::json::object() : SettingsToJson(settings),
-                Version);
             Settings resolvedSettings = settings;
-            if (recordResult.IsSuccess())
+            const auto generatedRecordResult = FindGeneratedAssetRecord(key, Type);
+            if (generatedRecordResult.IsSuccess())
             {
-                // No deps for textures, but make sure we clear the field for correctness.
-                AssetDatabase::GetInstance().SetDependencies(recordResult.GetValue().Guid, {});
+                AssetDatabase::GetInstance().SetDependencies(generatedRecordResult.GetValue().Guid, {});
 
-                // For default caller settings, prefer persisted importer settings from AssetDatabase.
-                // This ensures inspector-edited texture specs survive full editor restarts.
                 if (isDefaultSettings)
-                    resolvedSettings = TextureSpecificationFromImporterSettingsJson(recordResult.GetValue().ImporterSettings);
+                    resolvedSettings = TextureSpecificationFromImporterSettingsJson(generatedRecordResult.GetValue().ImporterSettings);
+            }
+            else
+            {
+                const auto recordResult = AssetDatabase::GetInstance().ImportOrUpdate(
+                    key,
+                    Type,
+                    isDefaultSettings ? nlohmann::json::object() : SettingsToJson(settings),
+                    Version);
+                if (recordResult.IsSuccess())
+                {
+                    AssetDatabase::GetInstance().SetDependencies(recordResult.GetValue().Guid, {});
+                    if (isDefaultSettings)
+                        resolvedSettings = TextureSpecificationFromImporterSettingsJson(recordResult.GetValue().ImporterSettings);
+                }
             }
             AssetHotReloadManager::GetInstance().WatchKey(key);
-            // Load actual asset.
             return TextureAsset::LoadAsync(key, resolvedSettings, generation);
         }
     };

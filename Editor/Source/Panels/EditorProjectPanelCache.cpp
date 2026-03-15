@@ -3,9 +3,11 @@
 
 #include "EditorAssetNaming.h"
 #include "EditorAssetPreview.h"
+#include "Assets/AssetDatabase.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/MaterialAsset.h"
 #include "Assets/TextureAssetImporter.h"
+#include "Assets/TextureSpecificationJson.h"
 #include "Core/Debug/Log.h"
 #include "Graphics/Camera/PerspectiveCamera3D.h"
 #include "Graphics/Framebuffer.h"
@@ -26,13 +28,6 @@ namespace Limitless::EditorProjectPanel::Internal
 {
     namespace
     {
-        ProjectPanelCacheState& GetProjectPanelCacheState(EditorProjectPanelState& state)
-        {
-            if (!state.CacheState)
-                state.CacheState = std::make_shared<ProjectPanelCacheState>();
-            return *state.CacheState;
-        }
-
         std::string NormalizeLooseAssetKey(std::string assetKey)
         {
             for (char& character : assetKey)
@@ -121,6 +116,15 @@ namespace Limitless::EditorProjectPanel::Internal
             }
 
             return loadedSceneResult;
+        }
+
+        TextureSpecification ResolveTextureLoadSpecification(const std::string& textureAssetKey)
+        {
+            const auto recordResult = Assets::AssetDatabase::GetInstance().FindByKey(textureAssetKey);
+            if (recordResult.IsSuccess())
+                return Assets::TextureSpecificationFromImporterSettingsJson(recordResult.GetValue().ImporterSettings);
+
+            return TextureSpecification{};
         }
 
         void PreloadPrefabThumbnailSceneAssets(EditorProjectPanelState& state, Scene& prefabScene)
@@ -488,19 +492,97 @@ namespace Limitless::EditorProjectPanel::Internal
         if (textureAssetKey.empty())
             return nullptr;
 
+        constexpr int32_t kMaxRetries = 3;
+        constexpr auto kRetryCooldown = std::chrono::seconds(3);
+        constexpr int32_t kMaxAsyncLoadsPerFrame = 16;
+
         ProjectPanelCacheState& cacheState = GetProjectPanelCacheState(state);
         const auto now = std::chrono::steady_clock::now();
-        if (auto it = cacheState.TextureThumbnailCache.find(textureAssetKey); it != cacheState.TextureThumbnailCache.end())
+        auto it = cacheState.TextureThumbnailCache.find(textureAssetKey);
+        if (it != cacheState.TextureThumbnailCache.end())
         {
-            if ((now - it->second.LoadTime) < kTextureThumbnailCacheLifetime)
+            // Already have a texture — return it.
+            if (it->second.TextureAsset)
                 return it->second.TextureAsset;
+
+            // Permanently failed — don't retry.
+            if (it->second.Failed)
+                return nullptr;
+
+            // Async load in flight — poll the Task for completion.
+            if (it->second.ReloadInFlight)
+            {
+                if (it->second.PendingTask.IsValid() && it->second.PendingTask.IsDone())
+                {
+                    auto result = it->second.PendingTask.Get();
+                    it->second.PendingTask = {};
+                    it->second.ReloadInFlight = false;
+
+                    if (result)
+                    {
+                        it->second.TextureAsset = std::move(result);
+                        it->second.LoadTime = now;
+                        return it->second.TextureAsset;
+                    }
+
+                    // Load failed.
+                    it->second.RetryCount++;
+                    it->second.LoadTime = now;
+                    if (it->second.RetryCount >= kMaxRetries)
+                    {
+                        it->second.Failed = true;
+                        LT_CORE_WARN("Thumbnail load failed after {} retries: '{}'", kMaxRetries, textureAssetKey);
+                    }
+                    return nullptr;
+                }
+
+                // Still in flight — keep waiting.
+                return nullptr;
+            }
+
+            // Entry exists but no texture and not in flight — respect retry cooldown.
+            if (it->second.RetryCount > 0 && (now - it->second.LoadTime) < kRetryCooldown)
+                return nullptr;
         }
 
+        // Check if the AssetManager already has this texture (e.g. loaded by a
+        // SpriteRenderer or scene prewarm).  Avoids redundant disk I/O and GPU uploads.
+        {
+            auto existing = Assets::AssetManager::GetCachedByKey(textureAssetKey);
+            if (existing)
+            {
+                auto asTexture = std::dynamic_pointer_cast<Assets::TextureAsset>(existing);
+                if (asTexture)
+                {
+                    TextureThumbnailCacheEntry entry;
+                    entry.TextureAsset = asTexture;
+                    entry.LoadTime = now;
+                    cacheState.TextureThumbnailCache.insert_or_assign(textureAssetKey, std::move(entry));
+                    return asTexture;
+                }
+            }
+        }
+
+        // Per-frame throttle: limit new async texture loads to avoid flooding the
+        // IO thread pool.  Reset counter on new frame.
+        const uint64_t thumbFrameId = static_cast<uint64_t>(ImGui::GetFrameCount());
+        if (cacheState.ThumbnailLoadFrameId != thumbFrameId)
+        {
+            cacheState.ThumbnailLoadFrameId = thumbFrameId;
+            cacheState.ThumbnailLoadsThisFrame = 0;
+        }
+        if (cacheState.ThumbnailLoadsThisFrame >= kMaxAsyncLoadsPerFrame)
+            return nullptr;
+        ++cacheState.ThumbnailLoadsThisFrame;
+
+        const int32_t prevRetryCount = (it != cacheState.TextureThumbnailCache.end()) ? it->second.RetryCount : 0;
         TextureThumbnailCacheEntry entry;
-        entry.TextureAsset = Assets::AssetManager::LoadBlocking<Assets::TextureAsset>(textureAssetKey);
         entry.LoadTime = now;
-        auto [insertedIt, _] = cacheState.TextureThumbnailCache.insert_or_assign(textureAssetKey, std::move(entry));
-        return insertedIt->second.TextureAsset;
+        entry.ReloadInFlight = true;
+        entry.RetryCount = prevRetryCount;
+        entry.PendingTask = Assets::TextureAsset::LoadAsync(textureAssetKey, ResolveTextureLoadSpecification(textureAssetKey));
+        cacheState.TextureThumbnailCache.insert_or_assign(textureAssetKey, std::move(entry));
+        return nullptr;
     }
 
     const PrefabThumbnailCacheEntry* GetCachedPrefabThumbnail(EditorProjectPanelState& state, const std::string& prefabAssetKey)
@@ -510,12 +592,25 @@ namespace Limitless::EditorProjectPanel::Internal
 
         ProjectPanelCacheState& cacheState = GetProjectPanelCacheState(state);
         const auto now = std::chrono::steady_clock::now();
-        if (auto it = cacheState.PrefabThumbnailCache.find(prefabAssetKey); it != cacheState.PrefabThumbnailCache.end())
+        auto it = cacheState.PrefabThumbnailCache.find(prefabAssetKey);
+        if (it != cacheState.PrefabThumbnailCache.end())
         {
-            if ((now - it->second.LoadTime) < kPrefabThumbnailCacheLifetime)
+            const bool fresh = (now - it->second.LoadTime) < kPrefabThumbnailCacheLifetime;
+            if (fresh)
                 return it->second.HasPreview ? &it->second : nullptr;
+
+            // Cache expired — return stale preview if we have one, and skip
+            // the expensive scene-load + render until the user explicitly refreshes.
+            // Prefab thumbnails are the heaviest to regenerate so we only redo them
+            // on manual Refresh or when the cache entry is first created.
+            if (it->second.HasPreview)
+            {
+                it->second.LoadTime = now;
+                return &it->second;
+            }
         }
 
+        // First-time load — must block once.
         PrefabThumbnailCacheEntry entry;
         entry.LoadTime = now;
 
@@ -535,17 +630,53 @@ namespace Limitless::EditorProjectPanel::Internal
                                                                                 const std::filesystem::path& relativePath)
     {
         ProjectPanelCacheState& cacheState = GetProjectPanelCacheState(state);
-        const std::filesystem::path currentDirectory = assetsDirectory / relativePath;
-        const std::string cacheKey = currentDirectory.lexically_normal().generic_string();
+        const std::string cacheKey = relativePath.generic_string();
         ProjectAssetDirectoryCacheEntry& cacheEntry = cacheState.ProjectAssetDirectoryCache[cacheKey];
 
         const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-        const bool shouldRefresh = cacheEntry.Entries.empty() ||
+        const bool expired = !cacheEntry.Entries.empty() &&
             (now - cacheEntry.LastRefreshTime) >= kDirectoryCacheRefreshInterval;
+        const bool mustPopulate = cacheEntry.Entries.empty();
+
+        // Per-frame throttle: reset the flag on a new frame.
+        const uint64_t frameId = static_cast<uint64_t>(ImGui::GetFrameCount());
+        if (cacheState.DirScanFrameId != frameId)
+        {
+            cacheState.DirScanFrameId = frameId;
+            cacheState.DirScanDoneThisFrame = false;
+        }
+
+        // Only scan if either (a) the cache is empty (must block to populate) or
+        // (b) the cache expired AND we haven't scanned a directory yet this frame.
+        const bool shouldRefresh = mustPopulate ||
+            (expired && !cacheState.DirScanDoneThisFrame);
+
         if (shouldRefresh)
         {
-            cacheEntry.Entries = ScanProjectDirectoryEntries(assetsDirectory, relativePath);
+            cacheState.DirScanDoneThisFrame = true;
+            auto freshEntries = ScanProjectDirectoryEntries(assetsDirectory, relativePath);
             cacheEntry.LastRefreshTime = now;
+
+            // Only bump generation (and trigger grid rebuild) if entries actually changed.
+            bool changed = freshEntries.size() != cacheEntry.Entries.size();
+            if (!changed)
+            {
+                for (size_t i = 0; i < freshEntries.size(); ++i)
+                {
+                    if (freshEntries[i].FileName != cacheEntry.Entries[i].FileName ||
+                        freshEntries[i].IsDirectory != cacheEntry.Entries[i].IsDirectory)
+                    {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+
+            if (changed)
+            {
+                cacheEntry.Entries = std::move(freshEntries);
+                ++cacheState.DirectoryCacheGeneration;
+            }
         }
 
         return cacheEntry.Entries;
@@ -1075,7 +1206,18 @@ namespace Limitless::EditorProjectPanel
 {
     void InvalidateProjectDirectoryCache(EditorProjectPanelState& state)
     {
-        Internal::ClearProjectPanelCaches(state);
+        // Only clear the directory listing cache and grid entries.
+        // Preserve thumbnail, sprite settings, and material preview caches —
+        // they are expensive to rebuild (GPU loads, file I/O) and don't need
+        // to be invalidated when files are added/renamed/moved.
+        if (state.CacheState)
+        {
+            state.CacheState->ProjectAssetDirectoryCache.clear();
+            state.CacheState->CachedGridEntries.clear();
+            state.CacheState->CachedVisibleAssetKeys.clear();
+            ++state.CacheState->DirectoryCacheGeneration;
+        }
         Internal::ClearProjectSearchMatchCache(state);
+        state.GridEntryDirty = true;
     }
 }

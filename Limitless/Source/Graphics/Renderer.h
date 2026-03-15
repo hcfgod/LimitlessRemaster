@@ -7,6 +7,7 @@
 #include "FrameUploadAllocator.h"
 #include "FrameCommandArena.h"
 #include "Core/Debug/Log.h"
+#include <deque>
 #include <memory>
 #include <atomic>
 #include <condition_variable>
@@ -21,6 +22,12 @@ namespace Limitless
     class Renderer
     {
     public:
+        enum class ResourceRetirementContext
+        {
+            Shared,
+            Primary
+        };
+
         static Renderer& GetInstance();
         
         // Initialize the renderer with a graphics context (borrowed, not owned)
@@ -318,6 +325,9 @@ namespace Limitless
             uint64_t PrimaryTotalProcessed = 0;
             uint64_t SharedTotalSubmitted = 0;
             uint64_t SharedTotalProcessed = 0;
+
+            // GPU resource retirement queue depth.
+            uint32_t PendingRetirementCount = 0;
         };
 
         // Thread-safe snapshot of last-frame resource work.
@@ -544,6 +554,10 @@ namespace Limitless
             return SubmitResourceAndWait("Resource", std::forward<Func>(func));
         }
 
+        bool RetireResource(const char* debugName,
+                            ResourceRetirementContext context,
+                            std::function<void(GraphicsContext*)> callback);
+
     private:
         Renderer() = default;
         ~Renderer() = default;
@@ -575,6 +589,8 @@ namespace Limitless
         std::unique_ptr<RenderResourceThread> m_OpenGLResourceThread;
 
         uint64_t m_FrameUploadFrameId = 0;
+        std::atomic<uint64_t> m_ResourceRetirementSubmissionFrameId{0};
+        std::atomic<uint64_t> m_ResourceRetirementCompletedFrameId{0};
 
         // Frame-local upload staging (reduces per-upload heap allocations).
         FrameUploadAllocator m_FrameUploadAllocator;
@@ -589,17 +605,31 @@ namespace Limitless
         std::atomic<uint32_t> m_SharedProcessedLastFrame{0};
         std::atomic<uint32_t> m_PrimaryApproxSizeLastFrame{0};
         std::atomic<uint32_t> m_SharedApproxSizeLastFrame{0};
+        std::atomic<uint32_t> m_PendingResourceRetirementCount{0};
+
+        struct ResourceRetirementEntry
+        {
+            uint64_t TargetCompletedFrameId = 0;
+            ResourceRetirementContext Context = ResourceRetirementContext::Shared;
+            const char* DebugName = "RetiredResource";
+            std::function<void(GraphicsContext*)> Callback;
+        };
+
+        std::mutex m_ResourceRetirementMutex;
+        std::deque<ResourceRetirementEntry> m_PendingResourceRetirements;
 
         bool m_Initialized = false;
         std::atomic<bool> m_RenderThreadEnabled{false};
         std::atomic<bool> m_RenderThreadRunning{false};
         std::atomic<bool> m_RenderThreadShutdown{false};
+        
         bool m_FrameRequested = false;
         std::atomic<bool> m_OpenGLResourceThreadEnabled{false};
 
         void StartRenderThread();
         void StopRenderThread();
         void RenderThreadMain();
+        void ProcessPendingResourceRetirements(GraphicsContext* context, bool forceAll);
 
         bool IsOnRenderThread() const { return m_RenderThreadRunning.load() && (std::this_thread::get_id() == m_RenderThreadId); }
         void NotifyRenderThreadResourceWorkAvailable();

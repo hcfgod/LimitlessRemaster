@@ -154,51 +154,89 @@ namespace Limitless::EditorInspectorPanel::Internal
             return;
         }
 
-        const auto resolvedPathResult = Assets::ResolveAssetKeyToPath(selectedPrefabAssetKey);
-        if (resolvedPathResult.IsFailure())
+        // Cache the loaded prefab scene so we only load from disk once per key.
+        struct PrefabInspectorCache
         {
-            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Could not resolve prefab path.");
+            std::string LoadedKey;
+            std::string DisplayName;
+            std::string ResolvedPathStr;
+            uint32_t EntityCount = 0;
+            std::vector<std::string> RootLabels;
+            bool LoadFailed = false;
+        };
+        static PrefabInspectorCache s_Cache;
+
+        if (s_Cache.LoadedKey != selectedPrefabAssetKey)
+        {
+            s_Cache = {};
+            s_Cache.LoadedKey = selectedPrefabAssetKey;
+            s_Cache.DisplayName = EditorAssetNaming::GetAssetDisplayNameFromAssetKey(selectedPrefabAssetKey);
+
+            const auto resolvedPathResult = Assets::ResolveAssetKeyToPath(selectedPrefabAssetKey);
+            if (resolvedPathResult.IsFailure())
+            {
+                s_Cache.LoadFailed = true;
+            }
+            else
+            {
+                const std::filesystem::path resolvedPath = resolvedPathResult.GetValue();
+                s_Cache.ResolvedPathStr = resolvedPath.string();
+
+                const auto loadedSceneResult = Scene::LoadFromFile(resolvedPath);
+                if (loadedSceneResult.IsFailure() || !loadedSceneResult.GetValue())
+                {
+                    s_Cache.LoadFailed = true;
+                }
+                else
+                {
+                    const Scene& prefabScene = *loadedSceneResult.GetValue();
+                    const auto& registry = prefabScene.GetRegistry();
+                    auto tagView = registry.view<TagComponent>();
+                    for (entt::entity entity : tagView)
+                    {
+                        (void)entity;
+                        ++s_Cache.EntityCount;
+                    }
+                    const auto rootEntities = prefabScene.GetChildren(entt::null);
+                    s_Cache.RootLabels.reserve(rootEntities.size());
+                    for (entt::entity root : rootEntities)
+                    {
+                        const auto* tag = registry.try_get<TagComponent>(root);
+                        s_Cache.RootLabels.push_back((tag && !tag->Tag.empty()) ? tag->Tag : std::string("Entity"));
+                    }
+                }
+            }
+        }
+
+        if (s_Cache.LoadFailed)
+        {
+            if (s_Cache.ResolvedPathStr.empty())
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Could not resolve prefab path.");
+            }
+            else
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Failed to load prefab.");
+            }
             ImGui::TextDisabled("%s", selectedPrefabAssetKey.c_str());
             return;
         }
 
-        const std::filesystem::path resolvedPath = resolvedPathResult.GetValue();
-        const auto loadedSceneResult = Scene::LoadFromFile(resolvedPath);
-        if (loadedSceneResult.IsFailure() || !loadedSceneResult.GetValue())
-        {
-            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Failed to load prefab.");
-            ImGui::TextDisabled("%s", selectedPrefabAssetKey.c_str());
-            return;
-        }
-
-        const Scene& prefabScene = *loadedSceneResult.GetValue();
-        const auto& registry = prefabScene.GetRegistry();
-        auto tagView = registry.view<TagComponent>();
-        const auto rootEntities = prefabScene.GetChildren(entt::null);
-        uint32_t entityCount = 0;
-        for (entt::entity entity : tagView)
-        {
-            (void)entity;
-            ++entityCount;
-        }
-
-        ImGui::Text("Prefab: %s", EditorAssetNaming::GetAssetDisplayNameFromAssetKey(selectedPrefabAssetKey).c_str());
+        ImGui::Text("Prefab: %s", s_Cache.DisplayName.c_str());
         ImGui::TextDisabled("Asset Key: %s", selectedPrefabAssetKey.c_str());
-        ImGui::TextDisabled("Path: %s", resolvedPath.string().c_str());
+        ImGui::TextDisabled("Path: %s", s_Cache.ResolvedPathStr.c_str());
         ImGui::Separator();
 
-        ImGui::Text("Entities: %u", entityCount);
-        ImGui::Text("Root Objects: %u", static_cast<uint32_t>(rootEntities.size()));
+        ImGui::Text("Entities: %u", s_Cache.EntityCount);
+        ImGui::Text("Root Objects: %u", static_cast<uint32_t>(s_Cache.RootLabels.size()));
 
-        if (!rootEntities.empty())
+        if (!s_Cache.RootLabels.empty())
         {
             ImGui::Spacing();
             ImGui::Text("Root Preview");
             ImGui::BeginChild("PrefabRootPreview", ImVec2(0.0f, 120.0f), true);
-            for (entt::entity root : rootEntities)
+            for (const std::string& label : s_Cache.RootLabels)
             {
-                const auto* tag = registry.try_get<TagComponent>(root);
-                const std::string label = (tag && !tag->Tag.empty()) ? tag->Tag : "Entity";
                 ImGui::BulletText("%s", label.c_str());
             }
             ImGui::EndChild();

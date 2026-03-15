@@ -12,6 +12,34 @@
 
 namespace Limitless
 {
+    namespace
+    {
+        class ResourceRetirementCommand final : public RenderResourceCommandQueue::Command
+        {
+        public:
+            ResourceRetirementCommand(const char* debugName, std::function<void(GraphicsContext*)> callback)
+                : m_DebugName((debugName && debugName[0] != '\0') ? debugName : "RetiredResource")
+                , m_Callback(std::move(callback))
+            {
+            }
+
+            const char* GetDebugName() const override
+            {
+                return m_DebugName;
+            }
+
+            void Execute(GraphicsContext* context) override
+            {
+                if (m_Callback)
+                    m_Callback(context);
+            }
+
+        private:
+            const char* m_DebugName = "RetiredResource";
+            std::function<void(GraphicsContext*)> m_Callback;
+        };
+    }
+
     void Renderer::SynchronizeOpenGLResourceWorkForCrossContextVisibility()
     {
 #if __has_include(<glad/glad.h>)
@@ -92,6 +120,9 @@ namespace Limitless
         m_RenderQueue = std::make_unique<RenderCommandQueue>(config);
         
         m_Initialized = true;
+        m_ResourceRetirementSubmissionFrameId.store(0, std::memory_order_relaxed);
+        m_ResourceRetirementCompletedFrameId.store(0, std::memory_order_relaxed);
+        m_PendingResourceRetirementCount.store(0, std::memory_order_relaxed);
         LT_CORE_INFO("Renderer initialized successfully");
 
         // Upload staging allocator (frame-local). This is purely CPU memory.
@@ -155,14 +186,19 @@ namespace Limitless
         {
             try
             {
-                // Run the drain on the render thread (context-affine).
-                SubmitResourceAndWait("Renderer/Shutdown/DrainRenderCommands", [this](GraphicsContext* context) {
-                    // Drain render commands until the queue is empty. ProcessCommands has a per-call
-                    // cap (maxCommandsPerFrame), so loop to guarantee we fully drain during shutdown.
+                SubmitPrimaryResourceAndWait("Renderer/Shutdown/DrainGpuWork", [this](GraphicsContext* context) {
                     while (m_RenderQueue && m_RenderQueue->GetSize() != 0)
                     {
                         m_RenderQueue->ProcessCommands(context);
                     }
+
+                    while (!m_PrimaryResourceQueue.IsEmpty() || !m_ResourceQueue.IsEmpty())
+                    {
+                        m_PrimaryResourceQueue.Process(context, 4096);
+                        m_ResourceQueue.Process(context, 4096);
+                    }
+
+                    ProcessPendingResourceRetirements(context, true);
                 });
             }
             catch (const std::exception& e)
@@ -172,9 +208,18 @@ namespace Limitless
         }
         else
         {
-            // Single-thread fallback: process queued commands directly on the calling thread.
-            // (Requires a valid context; ProcessCommands performs its own checks.)
             ProcessCommands();
+
+            if (auto* glContext = dynamic_cast<OpenGLContext*>(m_GraphicsContext))
+            {
+                OpenGLContext::ScopedCurrentContext scope(*glContext);
+                while (!m_PrimaryResourceQueue.IsEmpty() || !m_ResourceQueue.IsEmpty())
+                {
+                    m_PrimaryResourceQueue.Process(m_GraphicsContext, 4096);
+                    m_ResourceQueue.Process(m_GraphicsContext, 4096);
+                }
+                ProcessPendingResourceRetirements(m_GraphicsContext, true);
+            }
         }
 
         // At this point, the render command queue should be idle. Stopping the render thread after
@@ -277,6 +322,29 @@ namespace Limitless
         return true;
     }
 
+    bool Renderer::RetireResource(const char* debugName,
+                                  ResourceRetirementContext context,
+                                  std::function<void(GraphicsContext*)> callback)
+    {
+        if (!callback || !m_Initialized || m_GraphicsContext == nullptr)
+            return false;
+
+        ResourceRetirementEntry entry{};
+        entry.TargetCompletedFrameId = m_ResourceRetirementSubmissionFrameId.load(std::memory_order_relaxed);
+        entry.Context = context;
+        entry.DebugName = (debugName && debugName[0] != '\0') ? debugName : "RetiredResource";
+        entry.Callback = std::move(callback);
+
+        {
+            std::lock_guard<std::mutex> lock(m_ResourceRetirementMutex);
+            m_PendingResourceRetirements.push_back(std::move(entry));
+        }
+
+        m_PendingResourceRetirementCount.fetch_add(1, std::memory_order_relaxed);
+        NotifyRenderThreadResourceWorkAvailable();
+        return true;
+    }
+
     void Renderer::ExecuteImmediate(std::unique_ptr<RenderCommand> command)
     {
         if (!m_Initialized || !m_RenderQueue)
@@ -343,12 +411,14 @@ namespace Limitless
         if (auto* glContext = dynamic_cast<OpenGLContext*>(m_GraphicsContext))
         {
             OpenGLContext::ScopedCurrentContext scope(*glContext);
+            ProcessPendingResourceRetirements(m_GraphicsContext, false);
             m_RenderQueue->ProcessCommands(m_GraphicsContext);
             UpdateGPUMetricsFromOpenGL();
             return;
         }
 
         m_GraphicsContext->MakeCurrent();
+        ProcessPendingResourceRetirements(m_GraphicsContext, false);
         m_RenderQueue->ProcessCommands(m_GraphicsContext);
         UpdateGPUMetricsFromOpenGL();
     }
@@ -366,6 +436,7 @@ namespace Limitless
         // The current engine frame model blocks in SwapBuffers(), so there is only one
         // frame in flight; the allocator remains triple-buffered defensively.
         m_FrameUploadFrameId++;
+        m_ResourceRetirementSubmissionFrameId.store(m_FrameUploadFrameId, std::memory_order_relaxed);
         m_FrameUploadAllocator.BeginFrame(m_FrameUploadFrameId);
         m_FrameCommandArena.BeginFrame(m_FrameUploadFrameId);
 
@@ -423,11 +494,15 @@ namespace Limitless
         {
             OpenGLContext::ScopedCurrentContext scope(*glContext);
             graphicsContext->SwapBuffers();
+            m_ResourceRetirementCompletedFrameId.store(m_ResourceRetirementSubmissionFrameId.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            ProcessPendingResourceRetirements(graphicsContext, false);
             return;
         }
 
         graphicsContext->MakeCurrent();
         graphicsContext->SwapBuffers();
+        m_ResourceRetirementCompletedFrameId.store(m_ResourceRetirementSubmissionFrameId.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        ProcessPendingResourceRetirements(graphicsContext, false);
     }
 
     void Renderer::SetViewport(int x, int y, int width, int height)
@@ -529,30 +604,85 @@ namespace Limitless
             return;
         }
 
-        // Wake the render thread even if there is no pending frame request yet.
         std::lock_guard<std::mutex> lock(m_RenderThreadMutex);
         m_RenderThreadCV.notify_one();
     }
 
     void Renderer::NotifyResourceWorkAvailable()
     {
-        // Always wake the render thread as a safety net.
-        //
-        // IMPORTANT:
-        // On some platforms/driver stacks, the shared-context resource thread can stall inside
-        // SDL_GL_MakeCurrent (WGL contention, window message pump interactions, etc).
-        // Many engine startup paths use SubmitResourceAndWait(), so if the render thread is not
-        // also woken it can sleep indefinitely and deadlock the engine before the first frame.
         NotifyRenderThreadResourceWorkAvailable();
 
-        // Prefer resource thread when enabled; otherwise the render thread drains resource work.
         if (m_OpenGLResourceThread && m_OpenGLResourceThreadEnabled.load(std::memory_order_relaxed))
         {
             m_OpenGLResourceThread->NotifyWorkAvailable();
             return;
         }
+    }
 
-        // Fallback wake already handled above.
+    void Renderer::ProcessPendingResourceRetirements(GraphicsContext* context, bool forceAll)
+    {
+        if (!context)
+        {
+            return;
+        }
+
+        const uint64_t completedFrameId = m_ResourceRetirementCompletedFrameId.load(std::memory_order_relaxed);
+        std::deque<ResourceRetirementEntry> ready;
+
+        {
+            std::lock_guard<std::mutex> lock(m_ResourceRetirementMutex);
+            for (auto it = m_PendingResourceRetirements.begin(); it != m_PendingResourceRetirements.end();)
+            {
+                if (forceAll || it->TargetCompletedFrameId <= completedFrameId)
+                {
+                    ready.push_back(std::move(*it));
+                    it = m_PendingResourceRetirements.erase(it);
+                    m_PendingResourceRetirementCount.fetch_sub(1, std::memory_order_relaxed);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+        }
+
+        for (auto& entry : ready)
+        {
+            if (!entry.Callback)
+            {
+                continue;
+            }
+
+            const bool dispatchToSharedQueue =
+                !forceAll &&
+                entry.Context == ResourceRetirementContext::Shared &&
+                m_OpenGLResourceThread &&
+                m_OpenGLResourceThreadEnabled.load(std::memory_order_relaxed) &&
+                m_RenderThreadRunning.load(std::memory_order_relaxed);
+
+            if (dispatchToSharedQueue)
+            {
+                auto command = std::make_unique<ResourceRetirementCommand>(entry.DebugName, entry.Callback);
+                if (m_ResourceQueue.Submit(std::move(command)))
+                {
+                    NotifyResourceWorkAvailable();
+                    continue;
+                }
+            }
+
+            try
+            {
+                entry.Callback(context);
+            }
+            catch (const std::exception& e)
+            {
+                LT_CORE_WARN("Renderer resource retirement '{}' failed: {}", entry.DebugName, e.what());
+            }
+            catch (...)
+            {
+                LT_CORE_WARN("Renderer resource retirement '{}' failed", entry.DebugName);
+            }
+        }
     }
 
     void Renderer::RenderThreadMain()
@@ -571,36 +701,23 @@ namespace Limitless
             bool executingAFrame = false;
             bool shouldShutdown = false;
 
-            // Wait for frame request.
             {
                 std::unique_lock<std::mutex> lock(m_RenderThreadMutex);
 
                 m_RenderThreadCV.wait(lock, [this]() {
-                    // IMPORTANT:
-                    // We must always wake for resource work, even if the optional OpenGL resource thread is enabled.
-                    //
-                    // Why:
-                    // - Many engine subsystems call SubmitResourceAndWait() during startup (VAOs/VBOs/textures/shaders).
-                    // - If the resource thread fails to run (driver/SDL quirks, context make-current stalls, etc),
-                    //   ignoring resource work here can deadlock the entire engine before the first frame.
-                    //
-                    // The render thread can always act as a safe fallback consumer for the resource queue.
-                    return m_FrameRequested || m_RenderThreadShutdown.load() || !m_PrimaryResourceQueue.IsEmpty() || !m_ResourceQueue.IsEmpty();
+                    return m_FrameRequested ||
+                           m_RenderThreadShutdown.load(std::memory_order_relaxed) ||
+                           !m_PrimaryResourceQueue.IsEmpty() ||
+                           !m_ResourceQueue.IsEmpty() ||
+                           m_PendingResourceRetirementCount.load(std::memory_order_relaxed) > 0;
                 });
+
                 shouldShutdown = m_RenderThreadShutdown.load(std::memory_order_relaxed);
-
-
-                // Always process any pending resource work before frame execution.
-                // (We keep the lock only for the wait/flags; resource processing happens outside.)
-
-                // Consume the request.
                 if (m_FrameRequested)
                 {
                     m_FrameRequested = false;
                     frameIdToComplete = m_FrameRequestedId;
                     executingAFrame = true;
-
-                    // Snapshot processed totals so we can compute per-frame deltas.
                     m_PrimaryProcessedTotalAtFrameStart = m_PrimaryResourceQueue.GetTotalProcessed();
                     m_SharedProcessedTotalAtFrameStart = m_ResourceQueue.GetTotalProcessed();
                 }
@@ -611,31 +728,23 @@ namespace Limitless
                 break;
             }
 
-            // Execute resource commands + frame commands under a context-current scope.
-
             try
             {
                 OpenGLContext::ScopedCurrentContext scope(*glContext);
 
-                // Primary-context-only resource work must be drained on the render thread.
                 m_PrimaryResourceQueue.Process(m_GraphicsContext, 256);
-
-                // Drain some resource work on the render thread.
-                // This acts as:
-                // - startup safety net for SubmitResourceAndWait() callers
-                // - fallback if the optional OpenGL shared-context resource thread is stalled
-                //
-                // When the resource thread is healthy, it can also drain in parallel; the queue is MPMC.
                 m_ResourceQueue.Process(m_GraphicsContext, 256);
+                ProcessPendingResourceRetirements(m_GraphicsContext, false);
 
                 if (frameIdToComplete != 0)
                 {
-                m_RenderQueue->ProcessCommands(m_GraphicsContext);
-                UpdateGPUMetricsFromOpenGL();
-                m_GraphicsContext->SwapBuffers();
+                    m_RenderQueue->ProcessCommands(m_GraphicsContext);
+                    UpdateGPUMetricsFromOpenGL();
+                    m_GraphicsContext->SwapBuffers();
+                    m_ResourceRetirementCompletedFrameId.store(frameIdToComplete, std::memory_order_relaxed);
+                    ProcessPendingResourceRetirements(m_GraphicsContext, false);
                 }
 
-                // Record last-frame resource stats when we actually executed/presented a frame.
                 if (executingAFrame)
                 {
                     const uint64_t primaryProcessedNow = m_PrimaryResourceQueue.GetTotalProcessed();
@@ -655,7 +764,6 @@ namespace Limitless
                 LT_CORE_ERROR("Renderer render thread exception: {}", e.what());
             }
 
-            // Mark completion and notify waiters (`SwapBuffers()`).
             {
                 std::lock_guard<std::mutex> lock(m_RenderThreadMutex);
                 if (frameIdToComplete != 0 && frameIdToComplete > m_FrameCompletedId)
@@ -677,11 +785,11 @@ namespace Limitless
         s.SharedProcessedLastFrame = m_SharedProcessedLastFrame.load(std::memory_order_relaxed);
         s.PrimaryApproxSize = m_PrimaryApproxSizeLastFrame.load(std::memory_order_relaxed);
         s.SharedApproxSize = m_SharedApproxSizeLastFrame.load(std::memory_order_relaxed);
-
         s.PrimaryTotalSubmitted = m_PrimaryResourceQueue.GetTotalSubmitted();
         s.PrimaryTotalProcessed = m_PrimaryResourceQueue.GetTotalProcessed();
         s.SharedTotalSubmitted = m_ResourceQueue.GetTotalSubmitted();
         s.SharedTotalProcessed = m_ResourceQueue.GetTotalProcessed();
+        s.PendingRetirementCount = m_PendingResourceRetirementCount.load(std::memory_order_relaxed);
         return s;
     }
 
@@ -694,4 +802,4 @@ namespace Limitless
     {
         return m_ResourceQueue.GetDebugLabelSnapshot();
     }
-} 
+}

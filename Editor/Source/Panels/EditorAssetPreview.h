@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Assets/MaterialAsset.h"
 #include "Graphics/Texture.h"
 #include "imgui/imgui.h"
 
@@ -22,7 +23,12 @@ namespace Limitless::EditorAssetPreview
 
     struct MaterialPreviewCacheEntry : MaterialPreviewData
     {
+        Assets::MaterialAsset::Ptr CachedMaterialAsset;
+        Async::Task<Assets::MaterialAsset::Ptr> PendingTask;
         std::chrono::steady_clock::time_point LoadTime = {};
+        bool ReloadInFlight = false;
+        int32_t RetryCount = 0;
+        bool Failed = false;
     };
 
     struct MaterialPreviewCache

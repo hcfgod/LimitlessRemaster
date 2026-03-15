@@ -694,7 +694,7 @@ fi
 # Run tests if they exist
 if [[ -f "${OUTPUT_DIR}/Test/Test" ]]; then
     echo "Running tests..."
-    "./${OUTPUT_DIR}/Test/Test" --success
+    "./${OUTPUT_DIR}/Test/Test" --failure
     if [[ $? -ne 0 ]]; then
         echo "Warning: Some tests failed"
     else

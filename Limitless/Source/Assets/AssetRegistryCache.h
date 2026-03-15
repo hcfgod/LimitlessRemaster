@@ -22,6 +22,7 @@ namespace Limitless::Assets
         int64_t SourceLastWriteTimeTicks = 0;
         uint64_t ImporterSettingsHash64 = 0;
         uint32_t ImporterVersion = 1;
+        uint8_t SourceKind = 0; // 0 = FileBacked, 1 = Generated
     };
 
     struct AssetRegistryCacheSnapshot final

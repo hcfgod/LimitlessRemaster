@@ -72,13 +72,13 @@ namespace Limitless
         {
             auto& renderer = Renderer::GetInstance();
             const GLuint programToDelete = m_RendererID;
-            if (renderer.IsInitialized() && renderer.IsRenderThreadEnabled() && renderer.GetGraphicsContext() != nullptr)
-            {
-                renderer.SubmitResourceAndWait("OpenGLShader/DeleteProgram", [programToDelete](GraphicsContext*) {
-                    glDeleteProgram(programToDelete);
-                });
-            }
-            else
+            const bool retired = renderer.IsInitialized() && renderer.GetGraphicsContext() != nullptr &&
+                renderer.RetireResource("OpenGLShader/DeleteProgram",
+                                        Renderer::ResourceRetirementContext::Shared,
+                                        [programToDelete](GraphicsContext*) {
+                                            glDeleteProgram(programToDelete);
+                                        });
+            if (!retired)
             {
                 // Enforce: never call glDelete* without a valid current context.
                 if (auto* glContext = dynamic_cast<OpenGLContext*>(renderer.GetGraphicsContext()))

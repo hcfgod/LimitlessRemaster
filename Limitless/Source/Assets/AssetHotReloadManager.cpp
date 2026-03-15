@@ -1,9 +1,10 @@
 #include "Assets/AssetHotReloadManager.h"
 
-#include "Assets/AssetManager.h"
-#include "Assets/AssetImporterVersion.h"
-#include "Assets/AssetPaths.h"
 #include "Assets/AssetBundle.h"
+#include "Assets/GeneratedAssetRuntimeRegistry.h"
+#include "Assets/AssetImporterVersion.h"
+#include "Assets/AssetManager.h"
+#include "Assets/AssetPaths.h"
 
 #include "Core/Debug/Log.h"
 
@@ -55,9 +56,11 @@ namespace Limitless::Assets
 
         const auto record = recordResult.GetValue();
 
-        // IMPORTANT:
-        // Do NOT start the tree watcher while holding `m_Mutex` because the watcher can invoke
-        // callbacks (ScanOnce) that call back into AssetHotReloadManager and try to lock `m_Mutex`.
+        if (record.IsGenerated() || record.ResolvedPath.empty())
+        {
+            return;
+        }
+
         bool shouldStartWatcher = false;
         bool shouldStartReloadThread = false;
         std::filesystem::path assetsRoot;
@@ -287,16 +290,25 @@ namespace Limitless::Assets
 
                 const auto record = recordResult.GetValue();
 
-                // Root asset: reimport its metadata (source changed).
-                LT_CORE_INFO("AssetHotReload: reimporting key='{}'", record.Key);
-                const auto reimportResult = AssetDatabase::GetInstance().ImportOrUpdate(
-                    record.Key,
-                    record.Type,
-                    record.ImporterSettings,
-                    GetCurrentAssetImporterVersion(record.Type));
-                if (reimportResult.IsFailure())
+                if (record.IsGenerated())
                 {
-                    LT_CORE_WARN("AssetHotReload: reimport failed for '{}': {}", record.Key, reimportResult.GetError().GetErrorMessage());
+                    if (!GeneratedAssetRuntimeRegistry::GetInstance().Reload(record.Key))
+                    {
+                        LT_CORE_WARN("AssetHotReload: generated reload failed for '{}'", record.Key);
+                    }
+                }
+                else
+                {
+                    LT_CORE_INFO("AssetHotReload: reimporting key='{}'", record.Key);
+                    const auto reimportResult = AssetDatabase::GetInstance().ImportOrUpdate(
+                        record.Key,
+                        record.Type,
+                        record.ImporterSettings,
+                        GetCurrentAssetImporterVersion(record.Type));
+                    if (reimportResult.IsFailure())
+                    {
+                        LT_CORE_WARN("AssetHotReload: reimport failed for '{}': {}", record.Key, reimportResult.GetError().GetErrorMessage());
+                    }
                 }
 
                 queue.push_back(record);
@@ -317,13 +329,18 @@ namespace Limitless::Assets
                     continue; // cycle guard + coalescing
                 }
 
-                if (const std::shared_ptr<Asset> cached = AssetManager::GetCachedByKey(current.Key))
+                bool reloaded = false;
+                if (current.IsGenerated())
                 {
-                    const bool ok = cached->Reload();
-                    LT_CORE_INFO("AssetHotReload: reload key='{}' result={}", current.Key, ok ? "success" : "no-op");
+                    reloaded = GeneratedAssetRuntimeRegistry::GetInstance().Reload(current.Key);
+                }
+                else if (const std::shared_ptr<Asset> cached = AssetManager::GetCachedByKey(current.Key))
+                {
+                    reloaded = cached->Reload();
                 }
 
-                // Cascade to dependents.
+                LT_CORE_INFO("AssetHotReload: reload key='{}' result={}", current.Key, reloaded ? "success" : "no-op");
+
                 const auto& dependents = getDependentsCached(current.Guid);
                 for (const auto& dep : dependents)
                 {

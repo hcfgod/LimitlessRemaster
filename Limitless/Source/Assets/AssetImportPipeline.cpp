@@ -2,6 +2,7 @@
 
 #include "Assets/AssetManager.h"
 #include "Assets/AssetImporterVersion.h"
+#include "Assets/GeneratedAssetRuntimeRegistry.h"
 #include "Assets/AssetPaths.h"
 #include "Assets/AssetTypes.h"
 #include "Assets/AssetUtils.h"
@@ -14,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <deque>
 #include <functional>
 #include <numeric>
@@ -123,6 +125,14 @@ namespace Limitless::Assets::AssetImportPipeline
             {
                 (void)cached->Reload();
             }
+        }
+
+        bool ReloadGenerated(const AssetDatabase::Record& record)
+        {
+            if (!record.IsGenerated() || record.Key.empty())
+                return false;
+
+            return GeneratedAssetRuntimeRegistry::GetInstance().Reload(record.Key);
         }
 
         bool IsPathUnderRoot(const std::filesystem::path& candidatePath,
@@ -237,6 +247,8 @@ namespace Limitless::Assets::AssetImportPipeline
             if (jobs.empty())
                 return stats;
 
+            const auto totalStart = std::chrono::steady_clock::now();
+
             // ---- Stage 1: Snapshot existing records (read-only reference) ----
             auto& db = AssetDatabase::GetInstance();
             db.EnsureLoaded();
@@ -259,6 +271,10 @@ namespace Limitless::Assets::AssetImportPipeline
                 !config.ForceSequential &&
                 Concurrency::GetJobSystem().IsInitialized() &&
                 jobs.size() > 1;
+
+            stats.WorkerCount = useParallel ? Concurrency::GetJobSystem().GetWorkerCount() : 1;
+
+            const auto prepStart = std::chrono::steady_clock::now();
 
             auto prepareOne = [&](size_t index)
             {
@@ -369,6 +385,9 @@ namespace Limitless::Assets::AssetImportPipeline
                 }
             }
 
+            const auto prepEnd = std::chrono::steady_clock::now();
+            stats.PrepMs = std::chrono::duration<double, std::milli>(prepEnd - prepStart).count();
+
             // ---- Stage 3: Gather, sort by key for determinism, batch commit ----
             if (!IsImportRootStillActiveProject(projectRoot))
             {
@@ -407,6 +426,7 @@ namespace Limitless::Assets::AssetImportPipeline
                       [](const AssetDatabase::Record& a, const AssetDatabase::Record& b)
                       { return a.Key < b.Key; });
 
+            const auto commitStart = std::chrono::steady_clock::now();
             const auto committed = db.CommitRecordBatch(toCommit);
 
             std::vector<std::string> changedGuids;
@@ -422,13 +442,20 @@ namespace Limitless::Assets::AssetImportPipeline
                          committed.size(), stats.DiscoveredFiles, stats.SkippedUpToDate,
                          stats.MissingOnDisk, stats.Errors);
 
+            const auto commitEnd = std::chrono::steady_clock::now();
+            stats.CommitMs = std::chrono::duration<double, std::milli>(commitEnd - commitStart).count();
+
             // ---- Stage 4: Reload cached assets ----
             for (const auto& r : committed)
                 ReloadIfCached(r.Key);
 
             // ---- Stage 5: Cascade to dependents via reverse dependency graph ----
+            const auto cascadeStart = std::chrono::steady_clock::now();
             if (!includeDependents || changedGuids.empty())
+            {
+                stats.TotalMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - totalStart).count();
                 return stats;
+            }
 
             std::deque<std::string> queue;
             std::unordered_set<std::string> visited;
@@ -451,6 +478,17 @@ namespace Limitless::Assets::AssetImportPipeline
                 const auto dependents = db.GetDependentsOf(currentGuid);
                 for (const auto& dep : dependents)
                 {
+                    if (dep.IsGenerated())
+                    {
+                        if (ReloadGenerated(dep))
+                        {
+                            stats.Imported++;
+                            stats.ImportedKeys.push_back(dep.Key);
+                            queue.push_back(dep.Guid);
+                        }
+                        continue;
+                    }
+
                     const auto reimport = db.ImportOrUpdate(
                         dep.Key,
                         dep.Type,
@@ -458,12 +496,17 @@ namespace Limitless::Assets::AssetImportPipeline
                         GetCurrentAssetImporterVersion(dep.Type));
                     if (reimport.IsSuccess())
                     {
+                        stats.Imported++;
                         stats.ImportedKeys.push_back(dep.Key);
                         ReloadIfCached(dep.Key);
-                        queue.push_back(dep.Guid);
+                        queue.push_back(reimport.GetValue().Guid.empty() ? dep.Guid : reimport.GetValue().Guid);
                     }
                 }
             }
+
+            const auto cascadeEnd = std::chrono::steady_clock::now();
+            stats.CascadeMs = std::chrono::duration<double, std::milli>(cascadeEnd - cascadeStart).count();
+            stats.TotalMs = std::chrono::duration<double, std::milli>(cascadeEnd - totalStart).count();
 
             return stats;
         }
@@ -474,6 +517,10 @@ namespace Limitless::Assets::AssetImportPipeline
             const auto records = AssetDatabase::GetInstance().GetAllRecords();
             for (const auto& record : records)
             {
+                // Generated assets have no source file; never prune them.
+                if (record.IsGenerated())
+                    continue;
+
                 std::filesystem::path resolvedPath;
                 if (!record.ResolvedPath.empty())
                 {
@@ -513,7 +560,9 @@ namespace Limitless::Assets::AssetImportPipeline
         }
 
         const std::filesystem::path projectRoot = rootResult.GetValue();
+        const auto discoveryStart = std::chrono::steady_clock::now();
         const auto jobsResult = DiscoverKnownAssets(projectRoot);
+        const auto discoveryEnd = std::chrono::steady_clock::now();
         if (jobsResult.IsFailure())
         {
             return Result<AssetImportStatistics>(jobsResult.GetError());
@@ -522,6 +571,10 @@ namespace Limitless::Assets::AssetImportPipeline
         auto importResult = ImportJobs(projectRoot, jobsResult.GetValue(), /*changedOnly=*/false, includeDependents, config);
         if (importResult.IsFailure())
             return importResult;
+
+        importResult.GetValue().DiscoveryMs =
+            std::chrono::duration<double, std::milli>(discoveryEnd - discoveryStart).count();
+        importResult.GetValue().TotalMs += importResult.GetValue().DiscoveryMs;
 
         const size_t removed = PruneMissingRecords();
         if (removed > 0)
@@ -539,7 +592,9 @@ namespace Limitless::Assets::AssetImportPipeline
         }
 
         const std::filesystem::path projectRoot = rootResult.GetValue();
+        const auto discoveryStart = std::chrono::steady_clock::now();
         const auto jobsResult = DiscoverKnownAssets(projectRoot);
+        const auto discoveryEnd = std::chrono::steady_clock::now();
         if (jobsResult.IsFailure())
         {
             return Result<AssetImportStatistics>(jobsResult.GetError());
@@ -548,6 +603,10 @@ namespace Limitless::Assets::AssetImportPipeline
         auto importResult = ImportJobs(projectRoot, jobsResult.GetValue(), /*changedOnly=*/true, includeDependents, config);
         if (importResult.IsFailure())
             return importResult;
+
+        importResult.GetValue().DiscoveryMs =
+            std::chrono::duration<double, std::milli>(discoveryEnd - discoveryStart).count();
+        importResult.GetValue().TotalMs += importResult.GetValue().DiscoveryMs;
 
         const size_t removed = PruneMissingRecords();
         if (removed > 0)

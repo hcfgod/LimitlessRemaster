@@ -32,11 +32,11 @@ namespace Limitless::EditorProjectPanel::Internal
     inline constexpr const char* kSubSpritePayloadId = "SUB_SPRITE_KEY";
     inline constexpr uint8_t kScriptPairHeaderBit = 1u << 0u;
     inline constexpr uint8_t kScriptPairSourceBit = 1u << 1u;
-    inline constexpr std::chrono::milliseconds kDirectoryCacheRefreshInterval(250);
+    inline constexpr std::chrono::milliseconds kDirectoryCacheRefreshInterval(10000);
     inline constexpr float kCompactListScaleThreshold = 0.20f;
-    inline constexpr std::chrono::milliseconds kSpriteSettingsCacheLifetime(2000);
-    inline constexpr std::chrono::milliseconds kTextureThumbnailCacheLifetime(2000);
-    inline constexpr std::chrono::milliseconds kPrefabThumbnailCacheLifetime(2000);
+    inline constexpr std::chrono::milliseconds kSpriteSettingsCacheLifetime(30000);
+    inline constexpr std::chrono::milliseconds kTextureThumbnailCacheLifetime(30000);
+    inline constexpr std::chrono::milliseconds kPrefabThumbnailCacheLifetime(60000);
     inline constexpr uint32_t kPrefabThumbnailSnapshotSize = 256;
 
     struct ProjectAssetTreeEntry
@@ -65,7 +65,11 @@ namespace Limitless::EditorProjectPanel::Internal
     struct TextureThumbnailCacheEntry
     {
         Assets::TextureAsset::Ptr TextureAsset;
+        Async::Task<Assets::TextureAsset::Ptr> PendingTask;
         std::chrono::steady_clock::time_point LoadTime = {};
+        bool ReloadInFlight = false;
+        int32_t RetryCount = 0;
+        bool Failed = false;
     };
 
     struct PrefabThumbnailCacheEntry
@@ -77,14 +81,7 @@ namespace Limitless::EditorProjectPanel::Internal
         float SourceHeight = 1.0f;
         bool HasPreview = false;
         std::chrono::steady_clock::time_point LoadTime = {};
-    };
-
-    struct ProjectPanelCacheState
-    {
-        std::unordered_map<std::string, ProjectAssetDirectoryCacheEntry> ProjectAssetDirectoryCache;
-        std::unordered_map<std::string, SpriteSettingsCacheEntry> SpriteSettingsCache;
-        std::unordered_map<std::string, TextureThumbnailCacheEntry> TextureThumbnailCache;
-        std::unordered_map<std::string, PrefabThumbnailCacheEntry> PrefabThumbnailCache;
+        bool ReloadInFlight = false;
     };
 
     struct AssetTypeBadgeInfo
@@ -146,6 +143,38 @@ namespace Limitless::EditorProjectPanel::Internal
         ImVec2 ThumbnailUvMin = ImVec2(0.0f, 1.0f);
         ImVec2 ThumbnailUvMax = ImVec2(1.0f, 0.0f);
     };
+
+    struct ProjectPanelCacheState
+    {
+        std::unordered_map<std::string, ProjectAssetDirectoryCacheEntry> ProjectAssetDirectoryCache;
+        std::unordered_map<std::string, SpriteSettingsCacheEntry> SpriteSettingsCache;
+        std::unordered_map<std::string, TextureThumbnailCacheEntry> TextureThumbnailCache;
+        std::unordered_map<std::string, PrefabThumbnailCacheEntry> PrefabThumbnailCache;
+
+        // Monotonic generation counter incremented when any directory cache refreshes.
+        uint64_t DirectoryCacheGeneration = 0;
+
+        // Cached grid entry list to avoid per-frame rebuild.
+        std::vector<ProjectGridEntry> CachedGridEntries;
+        std::vector<std::string> CachedVisibleAssetKeys;
+
+        // Per-frame throttle: allow at most one directory filesystem scan per frame
+        // to prevent multiple expired caches from all scanning on the same frame.
+        uint64_t DirScanFrameId = 0;
+        bool DirScanDoneThisFrame = false;
+
+        // Per-frame throttle for async thumbnail texture loads.
+        uint64_t ThumbnailLoadFrameId = 0;
+        int32_t ThumbnailLoadsThisFrame = 0;
+
+    };
+
+    inline ProjectPanelCacheState& GetProjectPanelCacheState(EditorProjectPanelState& state)
+    {
+        if (!state.CacheState)
+            state.CacheState = std::make_shared<ProjectPanelCacheState>();
+        return *state.CacheState;
+    }
 
     struct ProjectPanelSelectionRefs
     {

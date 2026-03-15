@@ -9,6 +9,7 @@
 #include "EditorInspectorPanelAssetInspectors.h"
 #include "EditorPanelStyle.h"
 #include "Graphics/Lighting2DRenderer.h"
+#include "Graphics/Renderer.h"
 #include "Scene/Components/CoreComponents.h"
 #include "Scene/Components/ScriptingComponents.h"
 #include "imgui/imgui.h"
@@ -242,6 +243,14 @@ namespace Limitless
             ImGui::Text("Usage: %.1f%%", metrics.gpuUsage);
         if (metrics.gpuTemperature > 0.0)
             ImGui::Text("Temperature: %.0f C", metrics.gpuTemperature);
+        const auto resourceStats = Renderer::GetInstance().GetLastFrameResourceQueueStatistics();
+        ImGui::Text("Primary queue processed: %u  approx size: %u",
+            resourceStats.PrimaryProcessedLastFrame,
+            resourceStats.PrimaryApproxSize);
+        ImGui::Text("Shared queue processed: %u  approx size: %u",
+            resourceStats.SharedProcessedLastFrame,
+            resourceStats.SharedApproxSize);
+        ImGui::Text("Pending retirements: %u", resourceStats.PendingRetirementCount);
         ImGui::Separator();
 
         ImGui::TextDisabled("Process memory");

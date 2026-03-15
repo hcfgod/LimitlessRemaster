@@ -141,7 +141,7 @@ echo Output directory: %OUTPUT_DIR%\
 REM Run tests if they exist
 if exist "%OUTPUT_DIR%\Test\Test.exe" (
     echo Running tests...
-    "%OUTPUT_DIR%\Test\Test.exe" --success
+    "%OUTPUT_DIR%\Test\Test.exe" --failure
     if errorlevel 1 (
         echo Warning: Some tests failed
     ) else (

@@ -1,5 +1,6 @@
 #include "Assets/TileAsset.h"
 #include "Assets/AssetBundle.h"
+#include "Assets/GeneratedAssetRuntimeRegistry.h"
 #include "Assets/AssetPaths.h"
 #include "Core/Debug/Log.h"
 
@@ -91,7 +92,28 @@ namespace Limitless::Assets
                 return Result<TileAssetData>(it->second);
         }
 
-        // Built/shipped games read authored tile JSON from AssetBundle.
+        if (IsGeneratedAssetKey(tileAssetKey, AssetType::Tile))
+        {
+            const auto textResult = GeneratedAssetRuntimeRegistry::GetInstance().LoadText(tileAssetKey);
+            if (textResult.IsFailure())
+                return Result<TileAssetData>(textResult.GetError());
+
+            try
+            {
+                const nlohmann::json j = nlohmann::json::parse(textResult.GetValue());
+                TileAssetData data = TileAssetDataFromJson(j);
+                {
+                    std::lock_guard<std::mutex> lock(s_TileCacheMutex);
+                    s_TileDataCache[tileAssetKey] = data;
+                }
+                return Result<TileAssetData>(std::move(data));
+            }
+            catch (const std::exception& e)
+            {
+                return Result<TileAssetData>(ErrorCode::FileCorrupted, "Failed to parse generated tile JSON: " + std::string(e.what()));
+            }
+        }
+
         auto& bundle = AssetBundle::GetInstance();
         if (bundle.IsEnabled() && bundle.IsLoaded())
         {

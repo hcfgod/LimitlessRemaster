@@ -1,8 +1,10 @@
 #include "Assets/TextureAsset.h"
+
 #include "Assets/AssetBundle.h"
+#include "Assets/GeneratedAssetRuntimeRegistry.h"
+#include "Assets/AssetLoadCoordinator.h"
 #include "Assets/AssetLoadProgress.h"
 #include "Assets/AssetPaths.h"
-#include "Assets/AssetLoadCoordinator.h"
 #include "Assets/ImageDecode.h"
 #include "Assets/Cooking/CookedTexture2DFormat.h"
 
@@ -671,14 +673,43 @@ namespace Limitless::Assets
 
                 // Bundle-first loading: allows shipped builds without `Assets/` source files.
                 bool fromBundle = false;
+                bool fromGenerated = false;
                 std::vector<uint8_t> bundleBytes;
                 std::string guid;
                 std::string resolvedPath;
                 std::string debugName = assetPath;
                 AssetBundlePayloadFormat bundlePayloadFormat = AssetBundlePayloadFormat::Raw;
 
+                const auto generatedRecordResult = FindGeneratedAssetRecord(assetPath, AssetType::Texture2D);
+                if (generatedRecordResult.IsSuccess())
+                {
+                    if (auto existing = GeneratedAssetRuntimeRegistry::GetInstance().GetAsset<TextureAsset>(assetPath))
+                    {
+                        auto cached = AssetManager::GetOrLoad<TextureAsset>(assetPath, [&]() -> Ptr { return existing; });
+                        AssetLoadProgress::ClearProgress(assetPath);
+                        promise.set_value(std::move(cached));
+                        return;
+                    }
+
+                    const auto generatedBytesResult = GeneratedAssetRuntimeRegistry::GetInstance().LoadBytes(assetPath);
+                    if (generatedBytesResult.IsFailure())
+                    {
+                        AssetLoadProgress::ClearProgress(assetPath);
+                        LT_CORE_ERROR("TextureAsset::LoadAsync: generated payload failed for '{}': {}",
+                                      assetPath, generatedBytesResult.GetError().GetErrorMessage());
+                        promise.set_value(nullptr);
+                        return;
+                    }
+
+                    fromGenerated = true;
+                    bundleBytes = generatedBytesResult.GetValue();
+                    guid = generatedRecordResult.GetValue().Guid;
+                    resolvedPath = "<Generated>";
+                    debugName = assetPath;
+                }
+
                 auto& bundle = AssetBundle::GetInstance();
-                if (bundle.IsEnabled() && bundle.IsLoaded())
+                if (!fromGenerated && bundle.IsEnabled() && bundle.IsLoaded())
                 {
                     const auto entry = bundle.FindEntryByKey(assetPath);
                     if (entry.has_value())
@@ -695,14 +726,14 @@ namespace Limitless::Assets
                     }
                 }
 
-                if (!fromBundle)
+                if (!fromGenerated && !fromBundle)
                 {
                     const auto resolvedPathResult = ResolveAssetKeyToPath(assetPath);
                     if (resolvedPathResult.IsFailure())
                     {
                         AssetLoadProgress::ClearProgress(assetPath);
-                        LT_CORE_ERROR("TextureAsset::LoadAsync: failed to resolve key '{}': {}",
-                                      assetPath, resolvedPathResult.GetError().GetErrorMessage());
+                        LT_CORE_ERROR("TextureAsset::LoadAsync: {}",
+                                      std::string("failed to resolve key '") + assetPath + "': " + resolvedPathResult.GetError().GetErrorMessage());
                         promise.set_value(nullptr);
                         return;
                     }
@@ -734,14 +765,12 @@ namespace Limitless::Assets
                 if (!isCookedTexture2DFromBundle)
                 {
                     // CPU decode on this AsyncIO worker thread.
-                    auto decodedResult = fromBundle
+                    auto decodedResult = (fromBundle || fromGenerated)
                         ? DecodeToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName, specification.FlipVerticallyOnLoad)
                         : DecodeToRGBA8(resolvedPath, specification.FlipVerticallyOnLoad);
                     if (decodedResult.IsFailure())
                     {
-                        // stb_image can't decode ASCII PPM (P3) reliably across builds.
-                        // For our dev/test checkerboard, fall back to a tiny P3 parser.
-                        auto ppmFallback = fromBundle
+                        auto ppmFallback = (fromBundle || fromGenerated)
                             ? TryDecodePpmP3ToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName)
                             : TryDecodePpmP3ToRGBA8(resolvedPath);
                         if (ppmFallback.IsSuccess())
@@ -788,6 +817,7 @@ namespace Limitless::Assets
                     DecodedImageRGBA8 decoded;
                     std::vector<uint8_t> cookedBytes;
                     bool isCookedTexture2D = false;
+                    bool registerGenerated = false;
                     uint64_t generation = 0;
                 };
 
@@ -802,6 +832,7 @@ namespace Limitless::Assets
                 {
                     state->cookedBytes = std::move(bundleBytes);
                 }
+                state->registerGenerated = fromGenerated;
                 state->generation = generation;
 
                 class Command final : public RenderResourceCommandQueue::Command
@@ -885,6 +916,8 @@ namespace Limitless::Assets
                             auto asset = AssetManager::GetOrLoad<TextureAsset>(m_State->key, [&]() -> Ptr {
                                 return Ptr(new TextureAsset(m_State->key, m_State->guid, std::move(texture), m_State->spec));
                             });
+                            if (m_State->registerGenerated && asset)
+                                GeneratedAssetRuntimeRegistry::GetInstance().RegisterAsset(m_State->key, asset);
 
                             AssetLoadProgress::ClearProgress(m_State->key);
                             m_State->promise.set_value(std::move(asset));
@@ -940,13 +973,28 @@ namespace Limitless::Assets
         const std::string key = GetKey();
 
         bool fromBundle = false;
+        bool fromGenerated = false;
         std::vector<uint8_t> bundleBytes;
         std::string resolvedPath;
         std::string debugName = key;
         AssetBundlePayloadFormat bundlePayloadFormat = AssetBundlePayloadFormat::Raw;
 
+        if (const auto generatedRecordResult = FindGeneratedAssetRecord(key, AssetType::Texture2D); generatedRecordResult.IsSuccess())
+        {
+            const auto generatedBytesResult = GeneratedAssetRuntimeRegistry::GetInstance().LoadBytes(key);
+            if (generatedBytesResult.IsFailure())
+            {
+                LT_CORE_ERROR("TextureAsset::Reload: generated payload failed for '{}': {}", key, generatedBytesResult.GetError().GetErrorMessage());
+                return false;
+            }
+
+            fromGenerated = true;
+            bundleBytes = generatedBytesResult.GetValue();
+            resolvedPath = "<Generated>";
+        }
+
         auto& bundle = AssetBundle::GetInstance();
-        if (bundle.IsEnabled() && bundle.IsLoaded())
+        if (!fromGenerated && bundle.IsEnabled() && bundle.IsLoaded())
         {
             const auto entry = bundle.FindEntryByKey(key);
             if (entry.has_value())
@@ -961,12 +1009,13 @@ namespace Limitless::Assets
             }
         }
 
-        if (!fromBundle)
+        if (!fromGenerated && !fromBundle)
         {
             const auto resolvedPathResult = ResolveAssetKeyToPath(key);
             if (resolvedPathResult.IsFailure())
             {
-                LT_CORE_ERROR("TextureAsset::Reload: failed to resolve key '{}': {}", key, resolvedPathResult.GetError().GetErrorMessage());
+                LT_CORE_ERROR("TextureAsset::Reload: {}",
+                    std::string("failed to resolve key '") + key + "': " + resolvedPathResult.GetError().GetErrorMessage());
                 return false;
             }
             resolvedPath = resolvedPathResult.GetValue().string();
@@ -979,12 +1028,12 @@ namespace Limitless::Assets
         DecodedImageRGBA8 decoded{};
         if (!isCookedTexture2DFromBundle)
         {
-            auto decodedResult = fromBundle
+            auto decodedResult = (fromBundle || fromGenerated)
                 ? DecodeToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName, m_Specification.FlipVerticallyOnLoad)
                 : DecodeToRGBA8(resolvedPath, m_Specification.FlipVerticallyOnLoad);
             if (decodedResult.IsFailure())
             {
-                auto ppmFallback = fromBundle
+                auto ppmFallback = (fromBundle || fromGenerated)
                     ? TryDecodePpmP3ToRGBA8FromMemory(bundleBytes.data(), bundleBytes.size(), debugName)
                     : TryDecodePpmP3ToRGBA8(resolvedPath);
                 if (ppmFallback.IsSuccess())

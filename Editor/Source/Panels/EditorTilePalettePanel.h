@@ -36,6 +36,8 @@ namespace Limitless::EditorTilePalettePanel
 
         /// Cached textures for rendering palette tiles (keyed by texture asset key).
         std::unordered_map<std::string, Assets::TextureAsset::Ptr> CachedTextures;
+        /// Pending async loads — kept alive so the weak_ptr in AssetManager doesn't expire.
+        std::unordered_map<std::string, Async::Task<Assets::TextureAsset::Ptr>> PendingTextureTasks;
 
         /// Cached per-tile UV data (parallel to CachedPaletteData.TileAssetKeys).
         struct TileRenderInfo
@@ -69,6 +71,7 @@ namespace Limitless::EditorTilePalettePanel
             TileRenderInfoDirty = true;
             CachedTileRenderInfo.clear();
             CachedTextures.clear();
+            PendingTextureTasks.clear();
         }
     };
 

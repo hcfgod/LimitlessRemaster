@@ -1,6 +1,7 @@
 #include "Assets/AudioClipAsset.h"
 
 #include "Assets/AssetBundle.h"
+#include "Assets/GeneratedAssetRuntimeRegistry.h"
 #include "Assets/AssetLoadProgress.h"
 #include "Assets/AssetLoadCoordinator.h"
 #include "Assets/AssetPaths.h"
@@ -45,13 +46,41 @@ namespace Limitless::Assets
 
                 // Bundle-first loading (shipping mode).
                 bool fromBundle = false;
+                bool fromGenerated = false;
                 std::vector<uint8_t> bundleBytes;
                 std::string guid;
                 std::string resolvedPath;
                 std::string debugName = assetPath;
 
+                const auto generatedRecordResult = FindGeneratedAssetRecord(assetPath, AssetType::AudioClip);
+                if (generatedRecordResult.IsSuccess())
+                {
+                    if (auto existing = GeneratedAssetRuntimeRegistry::GetInstance().GetAsset<AudioClipAsset>(assetPath))
+                    {
+                        auto cached = AssetManager::GetOrLoad<AudioClipAsset>(assetPath, [&]() -> Ptr { return existing; });
+                        AssetLoadProgress::ClearProgress(assetPath);
+                        promise.set_value(std::move(cached));
+                        return;
+                    }
+
+                    const auto generatedBytesResult = GeneratedAssetRuntimeRegistry::GetInstance().LoadBytes(assetPath);
+                    if (generatedBytesResult.IsFailure())
+                    {
+                        AssetLoadProgress::ClearProgress(assetPath);
+                        LT_CORE_ERROR("AudioClipAsset::LoadAsync: generated payload failed for '{}': {}",
+                                      assetPath, generatedBytesResult.GetError().GetErrorMessage());
+                        promise.set_value(nullptr);
+                        return;
+                    }
+
+                    fromGenerated = true;
+                    bundleBytes = generatedBytesResult.GetValue();
+                    guid = generatedRecordResult.GetValue().Guid;
+                    resolvedPath = "<Generated>";
+                }
+
                 auto& bundle = AssetBundle::GetInstance();
-                if (bundle.IsEnabled() && bundle.IsLoaded())
+                if (!fromGenerated && bundle.IsEnabled() && bundle.IsLoaded())
                 {
                     const auto entry = bundle.FindEntryByKey(assetPath);
                     if (entry.has_value())
@@ -67,7 +96,7 @@ namespace Limitless::Assets
                     }
                 }
 
-                if (!fromBundle)
+                if (!fromGenerated && !fromBundle)
                 {
                     const auto resolvedPathResult = ResolveAssetKeyToPath(assetPath);
                     if (resolvedPathResult.IsFailure())
@@ -103,7 +132,7 @@ namespace Limitless::Assets
                 decodeSettings.TargetChannelCount = settings.TargetChannelCount;
 
                 Result<std::shared_ptr<Audio::AudioClip>> decodedResult(ErrorCode::Unknown, "not decoded");
-                if (fromBundle)
+                if (fromBundle || fromGenerated)
                 {
                     decodedResult = Audio::Decoders::FfmpegAudioDecoder::DecodeFromMemory(bundleBytes.data(), bundleBytes.size(), debugName, decodeSettings);
                 }
@@ -133,6 +162,8 @@ namespace Limitless::Assets
                 auto asset = AssetManager::GetOrLoad<AudioClipAsset>(assetPath, [&]() -> Ptr {
                     return Ptr(new AudioClipAsset(assetPath, guid, clip, settings));
                 });
+                if (fromGenerated && asset)
+                    GeneratedAssetRuntimeRegistry::GetInstance().RegisterAsset(assetPath, asset);
                 promise.set_value(std::move(asset));
             }
             catch (const std::exception& e)
@@ -169,12 +200,27 @@ namespace Limitless::Assets
         const std::string key = GetKey();
 
         bool fromBundle = false;
+        bool fromGenerated = false;
         std::vector<uint8_t> bundleBytes;
         std::string resolvedPath;
         std::string debugName = key;
 
+        if (const auto generatedRecordResult = FindGeneratedAssetRecord(key, AssetType::AudioClip); generatedRecordResult.IsSuccess())
+        {
+            const auto generatedBytesResult = GeneratedAssetRuntimeRegistry::GetInstance().LoadBytes(key);
+            if (generatedBytesResult.IsFailure())
+            {
+                LT_CORE_ERROR("AudioClipAsset::Reload: generated payload failed for '{}': {}", key, generatedBytesResult.GetError().GetErrorMessage());
+                return false;
+            }
+
+            fromGenerated = true;
+            bundleBytes = generatedBytesResult.GetValue();
+            resolvedPath = "<Generated>";
+        }
+
         auto& bundle = AssetBundle::GetInstance();
-        if (bundle.IsEnabled() && bundle.IsLoaded())
+        if (!fromGenerated && bundle.IsEnabled() && bundle.IsLoaded())
         {
             const auto entry = bundle.FindEntryByKey(key);
             if (entry.has_value())
@@ -188,7 +234,7 @@ namespace Limitless::Assets
             }
         }
 
-        if (!fromBundle)
+        if (!fromGenerated && !fromBundle)
         {
             const auto resolvedPathResult = ResolveAssetKeyToPath(key);
             if (resolvedPathResult.IsFailure())
@@ -205,7 +251,7 @@ namespace Limitless::Assets
         decodeSettings.TargetChannelCount = m_Settings.TargetChannelCount;
 
         Result<std::shared_ptr<Audio::AudioClip>> decodedResult(ErrorCode::Unknown, "not decoded");
-        if (fromBundle)
+        if (fromBundle || fromGenerated)
         {
             decodedResult = Audio::Decoders::FfmpegAudioDecoder::DecodeFromMemory(bundleBytes.data(), bundleBytes.size(), debugName, decodeSettings);
         }
