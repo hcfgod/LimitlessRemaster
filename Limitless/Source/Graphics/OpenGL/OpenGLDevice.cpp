@@ -434,9 +434,10 @@ namespace Limitless
             ? Renderer::ResourceRetirementContext::Primary
             : Renderer::ResourceRetirementContext::Shared;
 
+        auto deleteFuncForRetirement = deleteFunc;
         const bool retired = renderer.IsInitialized() && renderer.GetGraphicsContext() != nullptr &&
             renderer.RetireResource(debugName, retirementContext,
-                [fn = std::move(deleteFunc)](GraphicsContext*) { fn(); });
+                [fn = std::move(deleteFuncForRetirement)](GraphicsContext*) { fn(); });
 
         if (!retired)
         {

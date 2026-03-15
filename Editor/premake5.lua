@@ -60,6 +60,7 @@ project "Editor"
     links
     {
         "Limitless",
+        "VendorSpirvCross",
         "VendorZstd",
         -- NOTE: Static library dependencies from Limitless are not reliably transitive
         -- on Unix toolchains; link text rendering stack explicitly.

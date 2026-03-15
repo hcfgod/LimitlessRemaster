@@ -47,6 +47,7 @@ project "Runtime"
     {
         "Limitless",
         -- NOTE: `Limitless` is a static lib; link dependencies explicitly for non-MSVC toolchains.
+        "VendorSpirvCross",
         "VendorZstd",
         "msdf-atlas-gen",
         "msdfgen",
@@ -113,7 +114,6 @@ project "Runtime"
         links
         {
             "SDL3-static",
-            "VendorSpirvCross",
             "vulkan-1",
             "user32",
             "gdi32",
@@ -126,7 +126,8 @@ project "Runtime"
             "advapi32",
             "setupapi",
             "shell32",
-            "psapi"
+            "psapi",
+            "VendorSpirvCross"
         }
 
         -- Select the correct shaderc library for each configuration.
