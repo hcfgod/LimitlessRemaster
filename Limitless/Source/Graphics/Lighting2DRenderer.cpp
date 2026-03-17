@@ -213,7 +213,6 @@ namespace Limitless
             renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::One, true));
         }
         const bool clampDirectionalShadowToViewport =
-            camera.GetUsage() == CameraUsage::Editor &&
             camera.GetType() == CameraType::Perspective3D;
         for (const ScreenDirectionalLight& directionalLight : directionalLights)
         {
