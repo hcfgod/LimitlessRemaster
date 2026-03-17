@@ -98,7 +98,7 @@ namespace Limitless
         const uint32_t cullingMask = GetEffectiveCameraCullingMask(camera);
 
         const glm::mat4 cameraViewMatrix = camera.GetViewMatrix();
-        std::vector<NormalPassSpriteDraw> normalPassDraws = BuildNormalPassDrawList(scene, interpolationAlpha, cullingMask);
+        std::vector<NormalPassSpriteDraw> normalPassDraws = BuildNormalPassDrawList(scene, interpolationAlpha, pixelsPerUnit, cullingMask);
         uint32_t occluderCount = 0;
         const uint32_t maxShadowSegments = ClampSegmentsByQuality(g_State->Settings);
         float effectiveShadowSegmentSnapPixels = std::max(0.0f, g_State->Settings.ShadowSegmentSnapPixels);
@@ -173,6 +173,8 @@ namespace Limitless
         SubmitSelectGBufferDrawBuffers();
         SubmitClearNormalAttachment();
         SubmitClearEntityIdAttachment();
+        SubmitClearCasterMaskAttachment();
+        SubmitClearCasterEntityIdAttachment();
 
         SubmitSelectAlbedoAttachmentOnly();
         if (renderWorldAlbedoPass)
@@ -188,6 +190,8 @@ namespace Limitless
         const auto gBufferAlbedo = g_State->GBufferFramebuffer->GetColorAttachment(0);
         const auto gBufferNormal = g_State->GBufferFramebuffer->GetColorAttachment(1);
         const auto gBufferEntityId = g_State->GBufferFramebuffer->GetColorAttachment(2);
+        const auto gBufferCasterMask = g_State->GBufferFramebuffer->GetColorAttachment(3);
+        const auto gBufferCasterEntityId = g_State->GBufferFramebuffer->GetColorAttachment(4);
         auto directionalShader = ResolveShaderFromAsset(g_State->DirectionalLightShaderAsset, kDirectionalLightShaderKey);
         EnsureLightingPipeline(g_State->DirectionalLightPipeline,
                                g_State->DirectionalLightPipelineShader,
@@ -210,7 +214,7 @@ namespace Limitless
         }
         for (const ScreenDirectionalLight& directionalLight : directionalLights)
         {
-            SubmitDirectionalLightPass(gBufferAlbedo, gBufferNormal, gBufferEntityId, shadowSegments, directionalLight, width, height, effectiveShadowSegmentSnapPixels);
+            SubmitDirectionalLightPass(gBufferAlbedo, gBufferNormal, gBufferEntityId, gBufferCasterMask, gBufferCasterEntityId, shadowSegments, directionalLight, width, height, effectiveShadowSegmentSnapPixels);
         }
 
         auto pointShader = ResolveShaderFromAsset(g_State->PointLightShaderAsset, kPointLightShaderKey);

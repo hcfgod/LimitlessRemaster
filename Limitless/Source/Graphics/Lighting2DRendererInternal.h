@@ -4,6 +4,7 @@
 // NOT part of the public engine API.
 
 #include "Graphics/Lighting2DRenderer.h"
+#include "Graphics/SpriteAlphaHull.h"
 
 #include "Assets/AssetManager.h"
 #include "Assets/MaterialAssetImporter.h"
@@ -59,6 +60,7 @@ namespace Limitless::Lighting2DInternal
     constexpr uint32_t kShaderShadowSegmentCap = 128;
     constexpr uint32_t kPhysicsCircleSegmentApproximation = 12;
     constexpr float kEpsilon = 0.0001f;
+    constexpr int32_t kShadowSegmentFlagOffscreenOnly = 1 << 0;
 
     // -------------------------------------------------------------------------
     // Structs
@@ -68,9 +70,12 @@ namespace Limitless::Lighting2DInternal
     {
         glm::mat4 Model = glm::mat4(1.0f);
         glm::vec4 Color = glm::vec4(1.0f);
+        glm::vec2 UvMin = glm::vec2(0.0f, 0.0f);
+        glm::vec2 UvMax = glm::vec2(1.0f, 1.0f);
         float NormalStrength = 1.0f;
         bool ReceiveShadows = true;
-        glm::vec2 CasterEntityId = glm::vec2(0.0f);
+        float CasterHeightPixels = 0.0f;
+        glm::vec4 CasterEntityId = glm::vec4(0.0f);
         std::shared_ptr<Texture2D> AlbedoTexture;
         std::shared_ptr<Texture2D> NormalTexture;
     };
@@ -78,7 +83,8 @@ namespace Limitless::Lighting2DInternal
     struct ShadowSegment
     {
         glm::vec4 Endpoints = glm::vec4(0.0f);
-        glm::vec2 CasterEntityId = glm::vec2(0.0f);
+        glm::vec4 CasterEntityId = glm::vec4(0.0f);
+        int32_t Flags = 0;
     };
 
     struct ScreenDirectionalLight
@@ -173,13 +179,13 @@ namespace Limitless::Lighting2DInternal
         const int qualityCappedSamples = [&]() -> int {
             switch (settings.ShadowQualityLevel)
             {
-            case 0: return 3;
-            case 1: return 6;
+            case 0: return 4;
+            case 1: return 8;
             case 2:
-            default: return std::max(1, settings.MaxShadowSamplesPerLight);
+            default: return std::max(2, settings.MaxShadowSamplesPerLight);
             }
         }();
-        return std::clamp(requestedSamples, 1, std::max(1, qualityCappedSamples));
+        return std::clamp(std::max(requestedSamples, 2), 2, std::max(2, qualityCappedSamples));
     }
 
     inline uint32_t ClampSegmentsByQuality(const Lighting2DSettings& settings)
@@ -218,18 +224,18 @@ namespace Limitless::Lighting2DInternal
         return std::min<uint32_t>(userMax, 8);
     }
 
-    inline glm::vec2 EncodeEntityIdToUnitVec2(entt::entity entity)
+    inline glm::vec4 EncodeEntityIdToUnitVec4(entt::entity entity)
     {
         if (entity == entt::null)
-            return glm::vec2(0.0f);
+            return glm::vec4(0.0f);
 
-        // 16-bit encoded entity id in two 8-bit channels (R,G).
-        // This is robust on standard RGBA8 framebuffer attachments.
         const uint32_t raw = static_cast<uint32_t>(entt::to_integral(entity));
-        const uint32_t id16 = (raw & 0xFFFFu);
-        const float r = static_cast<float>(id16 & 0xFFu) / 255.0f;
-        const float g = static_cast<float>((id16 >> 8) & 0xFFu) / 255.0f;
-        return glm::vec2(r, g);
+        const uint32_t id32 = raw + 1u;
+        const float r = static_cast<float>(id32 & 0xFFu) / 255.0f;
+        const float g = static_cast<float>((id32 >> 8) & 0xFFu) / 255.0f;
+        const float b = static_cast<float>((id32 >> 16) & 0xFFu) / 255.0f;
+        const float a = static_cast<float>((id32 >> 24) & 0xFFu) / 255.0f;
+        return glm::vec4(r, g, b, a);
     }
 
     // -------------------------------------------------------------------------
@@ -292,7 +298,7 @@ namespace Limitless::Lighting2DInternal
     // -------------------------------------------------------------------------
 
     std::vector<entt::entity> BuildSortedSpriteRenderList(Scene& scene, float interpolationAlpha, uint32_t cullingMask);
-    std::vector<NormalPassSpriteDraw> BuildNormalPassDrawList(Scene& scene, float interpolationAlpha, uint32_t cullingMask);
+    std::vector<NormalPassSpriteDraw> BuildNormalPassDrawList(Scene& scene, float interpolationAlpha, float pixelsPerUnit, uint32_t cullingMask);
 
     void BuildPhysicsOccluderPolygon(const entt::registry& registry, entt::entity entity, std::vector<glm::vec2>& outPoints);
     std::vector<glm::vec2> ResolveOccluderLocalPolygon(const entt::registry& registry, entt::entity entity, const ShadowOccluder2DComponent& occluder);
@@ -337,6 +343,8 @@ namespace Limitless::Lighting2DInternal
     void SubmitSelectNormalAndEntityAttachments();
     void SubmitClearNormalAttachment();
     void SubmitClearEntityIdAttachment();
+    void SubmitClearCasterMaskAttachment();
+    void SubmitClearCasterEntityIdAttachment();
 
     RenderPassDescriptor BuildGBufferRenderPassDescriptor(const std::shared_ptr<Framebuffer>& framebuffer,
                                                           uint32_t width,
@@ -358,6 +366,8 @@ namespace Limitless::Lighting2DInternal
     void SubmitDirectionalLightPass(const std::shared_ptr<Texture2D>& albedoTexture,
                                     const std::shared_ptr<Texture2D>& normalTexture,
                                     const std::shared_ptr<Texture2D>& entityIdTexture,
+                                    const std::shared_ptr<Texture2D>& casterMaskTexture,
+                                    const std::shared_ptr<Texture2D>& casterEntityIdTexture,
                                     const std::vector<ShadowSegment>& shadowSegments,
                                     const ScreenDirectionalLight& light,
                                     uint32_t width,

@@ -327,7 +327,7 @@ namespace Limitless::Lighting2DInternal
             gBufferSpec.Width = width;
             gBufferSpec.Height = height;
             gBufferSpec.Samples = 1;
-            gBufferSpec.ColorAttachmentCount = 3;
+            gBufferSpec.ColorAttachmentCount = 5;
             gBufferSpec.DepthAttachment = true;
             gBufferSpec.StencilAttachment = false;
             gBufferSpec.SwapChainTarget = false;

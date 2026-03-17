@@ -42,7 +42,7 @@ uniform int u_ShadowSegmentCount;
 
 const int MAX_SHADOW_SEGMENTS = 128;
 uniform vec4 u_ShadowSegments[MAX_SHADOW_SEGMENTS];
-uniform vec2 u_ShadowSegmentCasterIds[MAX_SHADOW_SEGMENTS];
+uniform vec4 u_ShadowSegmentCasterIds[MAX_SHADOW_SEGMENTS];
 
 float Cross2D(vec2 a, vec2 b)
 {
@@ -63,9 +63,58 @@ bool IntersectSegment(vec2 p0, vec2 p1, vec2 q0, vec2 q1)
     return (t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0);
 }
 
-float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 fragmentCasterId)
+bool IsAlphaOccluderAtScreenPos(vec2 screenPos, vec4 fragmentCasterId)
 {
-    if (u_UseShadows == 0 || u_ShadowSegmentCount <= 0 || u_ShadowStrength <= 0.001)
+    ivec2 texel = ivec2(floor(screenPos));
+    if (texel.x < 0 || texel.y < 0 ||
+        texel.x >= int(u_ViewportSize.x) || texel.y >= int(u_ViewportSize.y))
+    {
+        return false;
+    }
+
+    vec4 albedoSample = texelFetch(u_AlbedoTexture, texel, 0);
+    if (albedoSample.a < max(0.01, u_ShadowAlphaCutoff))
+        return false;
+
+    vec4 casterId = texelFetch(u_EntityIdTexture, texel, 0);
+    if (casterId.x <= 0.0001 && casterId.y <= 0.0001 && casterId.z <= 0.0001 && casterId.w <= 0.0001)
+        return false;
+
+    if ((fragmentCasterId.x > 0.0001 || fragmentCasterId.y > 0.0001 || fragmentCasterId.z > 0.0001 || fragmentCasterId.w > 0.0001) &&
+        all(lessThan(abs(casterId - fragmentCasterId), vec4(0.001))))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool RaymarchAlphaOcclusion(vec2 sampleOrigin, vec2 sampleEnd, vec4 fragmentCasterId)
+{
+    vec2 ray = sampleEnd - sampleOrigin;
+    float rayLength = length(ray);
+    if (rayLength <= 0.0001)
+        return false;
+
+    const int MAX_ALPHA_STEPS = 96;
+    int stepCount = min(MAX_ALPHA_STEPS, max(1, int(rayLength / 1.5)));
+    for (int stepIndex = 0; stepIndex < MAX_ALPHA_STEPS; ++stepIndex)
+    {
+        if (stepIndex >= stepCount)
+            break;
+
+        float phase = (float(stepIndex) + 0.5) / float(stepCount);
+        vec2 samplePos = mix(sampleOrigin, sampleEnd, phase);
+        if (IsAlphaOccluderAtScreenPos(samplePos, fragmentCasterId))
+            return true;
+    }
+
+    return false;
+}
+
+float ComputeShadowFactor(vec2 fragmentScreenPosition, vec4 fragmentCasterId)
+{
+    if (u_UseShadows == 0 || u_ShadowStrength <= 0.001)
         return 1.0;
 
     float snapPixels = max(u_ShadowSegmentSnapPixels, 0.0);
@@ -87,14 +136,24 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 fragmentCasterId)
     float weightedBlocked = 0.0;
     float totalWeight = 0.0;
     float softness = max(u_ShadowSoftness, 0.0);
-    float halfSoftness = max(softness * 0.5, 0.0001);
+    float halfSpread = max(softness * 0.5, 0.0001);
+
+    // Run the alpha raymarch once from the centered light position.
+    // Using a single ray avoids the artifact where each soft-shadow sample
+    // independently resolves the full caster silhouette from slightly different
+    // perpendicular positions, producing N shifted copies of the shadow.
+    vec2 alphaRayEnd = fragmentScreenPosition - directionToFragment * max(u_ShadowBias, 0.0);
+    if (snapPixels > 0.0001)
+        alphaRayEnd = round(alphaRayEnd / snapPixels) * snapPixels;
+    bool alphaOccluded = RaymarchAlphaOcclusion(stableLightPosition, alphaRayEnd, fragmentCasterId);
 
     for (int sampleIndex = 0; sampleIndex < samples; ++sampleIndex)
     {
         float phase = (float(sampleIndex) + 0.5) / float(samples);
         float sampleOffset = (phase - 0.5) * softness;
-        float sampleWeight = 1.0 - clamp(abs(sampleOffset) / halfSoftness, 0.0, 1.0);
-        sampleWeight = max(sampleWeight, 0.01);
+        float t = clamp(abs(sampleOffset) / halfSpread, 0.0, 1.0);
+        float sampleWeight = 1.0 - smoothstep(0.0, 1.0, t);
+        sampleWeight = max(sampleWeight, 0.02);
         vec2 sampleLightPosition = stableLightPosition + perpendicular * sampleOffset;
         vec2 sampleRayEnd = fragmentScreenPosition - directionToFragment * max(u_ShadowBias, 0.0);
         if (snapPixels > 0.0001)
@@ -103,12 +162,12 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 fragmentCasterId)
             sampleRayEnd = round(sampleRayEnd / snapPixels) * snapPixels;
         }
 
-        bool occluded = false;
+        bool occluded = alphaOccluded;
         int segmentCount = min(u_ShadowSegmentCount, MAX_SHADOW_SEGMENTS);
-        for (int segmentIndex = 0; segmentIndex < segmentCount; ++segmentIndex)
+        for (int segmentIndex = 0; !occluded && segmentIndex < segmentCount; ++segmentIndex)
         {
-            if (fragmentCasterId.x > 0.0001 &&
-                length(u_ShadowSegmentCasterIds[segmentIndex] - fragmentCasterId) < 0.001)
+            if ((fragmentCasterId.x > 0.0001 || fragmentCasterId.y > 0.0001 || fragmentCasterId.z > 0.0001 || fragmentCasterId.w > 0.0001) &&
+                all(lessThan(abs(u_ShadowSegmentCasterIds[segmentIndex] - fragmentCasterId), vec4(0.001))))
             {
                 continue;
             }
@@ -157,7 +216,7 @@ void main()
     }
 
     vec4 normalSample = texture(u_NormalTexture, v_UV);
-    vec2 fragmentCasterId = texture(u_EntityIdTexture, v_UV).rg;
+    vec4 fragmentCasterId = texelFetch(u_EntityIdTexture, ivec2(gl_FragCoord.xy), 0);
 
     // Read GBuffer normal for future normal-mapped bump lighting support.
     // For 2D sprites, N dot L is disabled by default: point lights radiate

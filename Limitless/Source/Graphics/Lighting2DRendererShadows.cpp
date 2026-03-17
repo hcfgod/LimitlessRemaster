@@ -46,34 +46,106 @@ namespace Limitless::Lighting2DInternal
         return entities;
     }
 
-    std::vector<NormalPassSpriteDraw> BuildNormalPassDrawList(Scene& scene, float interpolationAlpha, uint32_t cullingMask)
+    std::vector<NormalPassSpriteDraw> BuildNormalPassDrawList(Scene& scene, float interpolationAlpha, float pixelsPerUnit, uint32_t cullingMask)
     {
         std::vector<NormalPassSpriteDraw> drawList;
         auto sortedEntities = BuildSortedSpriteRenderList(scene, interpolationAlpha, cullingMask);
         drawList.reserve(sortedEntities.size());
+        static bool s_loggedGBufferSpriteDrawParity = false;
+        const bool logGBufferSpriteDrawParity = !s_loggedGBufferSpriteDrawParity;
 
         auto& registry = scene.GetRegistry();
         for (entt::entity entity : sortedEntities)
         {
             auto& sprite = registry.get<SpriteComponent>(entity);
+            auto* animator = registry.try_get<AnimatorComponent>(entity);
 
             NormalPassSpriteDraw draw{};
             draw.Model = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
             draw.Color = sprite.Color;
             draw.AlbedoTexture = g_State->WhiteTexture;
             draw.NormalTexture = g_State->FlatNormalTexture;
+            const glm::vec2 safeTilingFactor(
+                std::max(0.001f, sprite.TilingFactor.x),
+                std::max(0.001f, sprite.TilingFactor.y));
+            draw.UvMin = glm::vec2(0.0f, 0.0f);
+            draw.UvMax = safeTilingFactor;
             draw.NormalStrength = 1.0f;
             draw.ReceiveShadows = sprite.ReceiveShadows;
-            draw.CasterEntityId = EncodeEntityIdToUnitVec2(entity);
+            draw.CasterHeightPixels = 0.0f;
+            draw.CasterEntityId = glm::vec4(0.0f);
+            const char* uvSource = "default";
+            const char* textureSource = "white";
+            std::string resolvedTextureKey;
+
+            const bool hasAnimatorSubRect =
+                animator && animator->Enabled && animator->ApplyToSprite && animator->RuntimeHasSpriteSubRect;
+            const bool hasSpriteSubRect = sprite.SubSpriteIndex >= 0;
+            if (hasAnimatorSubRect)
+            {
+                uvSource = "animator_subrect";
+                draw.UvMin = animator->RuntimeSpriteUvMin;
+                glm::vec2 frameSpan = animator->RuntimeSpriteUvMax - animator->RuntimeSpriteUvMin;
+                if (frameSpan.x <= 0.0001f || frameSpan.y <= 0.0001f)
+                    frameSpan = glm::vec2(1.0f, 1.0f);
+                draw.UvMax = animator->RuntimeSpriteUvMin + frameSpan * safeTilingFactor;
+            }
+            else if (hasSpriteSubRect)
+            {
+                uvSource = "sprite_subrect";
+                draw.UvMin = sprite.UvMin;
+                glm::vec2 subSpan = sprite.UvMax - sprite.UvMin;
+                if (subSpan.x <= 0.0001f || subSpan.y <= 0.0001f)
+                    subSpan = glm::vec2(1.0f, 1.0f);
+                draw.UvMax = sprite.UvMin + subSpan * safeTilingFactor;
+            }
 
             bool hasMaterialButFailed = false;
+            bool hasAnimatedTextureOverride = false;
+            if (animator && animator->Enabled && animator->ApplyToSprite && !animator->RuntimeSpriteTextureOverrideKey.empty())
+            {
+                if (!animator->RuntimeCachedSpriteTextureOverride)
+                {
+                    animator->RuntimeCachedSpriteTextureOverride = std::dynamic_pointer_cast<Assets::TextureAsset>(
+                        Assets::AssetManager::GetCachedByKey(animator->RuntimeSpriteTextureOverrideKey));
+                }
+
+                if (animator->RuntimeCachedSpriteTextureOverride &&
+                    animator->RuntimeCachedSpriteTextureOverride->GetTexture())
+                {
+                    draw.AlbedoTexture = animator->RuntimeCachedSpriteTextureOverride->GetTexture();
+                    hasAnimatedTextureOverride = true;
+                    textureSource = "animator_texture";
+                    resolvedTextureKey = animator->RuntimeSpriteTextureOverrideKey;
+                }
+            }
+
             if (auto* material = registry.try_get<MaterialComponent>(entity))
             {
                 RefreshSpriteMaterialCache(*material);
                 if (material->CachedMaterial)
                 {
-                    if (auto mainTexture = material->CachedMaterial->GetMainTexture())
-                        draw.AlbedoTexture = mainTexture;
+                    if (!hasAnimatedTextureOverride)
+                    {
+                        if (auto mainTexture = material->CachedMaterial->GetMainTexture())
+                        {
+                            draw.AlbedoTexture = mainTexture;
+                            textureSource = "material_texture";
+                            if (auto handle = material->CachedMaterial->GetMainTextureHandle().Lock())
+                                resolvedTextureKey = handle->GetKey();
+                        }
+                    }
+
+                    if (!hasAnimatorSubRect && !hasSpriteSubRect && !hasAnimatedTextureOverride &&
+                        material->CachedMaterial->HasMainTextureSubRect())
+                    {
+                        uvSource = "material_subrect";
+                        draw.UvMin = material->CachedMaterial->GetMainTextureUvMin();
+                        glm::vec2 subSpan = material->CachedMaterial->GetMainTextureUvMax() - material->CachedMaterial->GetMainTextureUvMin();
+                        if (subSpan.x <= 0.0001f || subSpan.y <= 0.0001f)
+                            subSpan = glm::vec2(1.0f, 1.0f);
+                        draw.UvMax = material->CachedMaterial->GetMainTextureUvMin() + subSpan * safeTilingFactor;
+                    }
 
                     if (g_State->Settings.EnableNormalMaps)
                     {
@@ -92,14 +164,49 @@ namespace Limitless::Lighting2DInternal
             {
                 RefreshSpriteTextureCache(sprite);
                 if (sprite.CachedTexture && sprite.CachedTexture->GetTexture())
+                {
                     draw.AlbedoTexture = sprite.CachedTexture->GetTexture();
+                    textureSource = "sprite_texture";
+                    resolvedTextureKey = sprite.TextureKey;
+                }
             }
 
             if (hasMaterialButFailed)
                 draw.Color = glm::vec4(1.0f, 0.0f, 1.0f, sprite.Color.a);
 
+            draw.CasterHeightPixels = 4.0f;
+
+            const bool hasExplicitShadowOccluder = registry.any_of<ShadowOccluder2DComponent>(entity);
+            if (sprite.CastShadows &&
+                draw.Color.a > 0.01f &&
+                (draw.AlbedoTexture != g_State->WhiteTexture || hasExplicitShadowOccluder))
+                draw.CasterEntityId = EncodeEntityIdToUnitVec4(entity);
+
+            if (logGBufferSpriteDrawParity && (sprite.ReceiveShadows || sprite.CastShadows))
+            {
+                LT_CORE_WARN("SpritePass[GBuffer]: id={} texSource={} uvSource={} uvMin=({:.4f},{:.4f}) uvMax=({:.4f},{:.4f}) receive={} cast={} order={} texture='{}' casterId=({:.4f},{:.4f},{:.4f},{:.4f})",
+                    static_cast<uint32_t>(entity),
+                    textureSource,
+                    uvSource,
+                    draw.UvMin.x,
+                    draw.UvMin.y,
+                    draw.UvMax.x,
+                    draw.UvMax.y,
+                    draw.ReceiveShadows ? 1 : 0,
+                    sprite.CastShadows ? 1 : 0,
+                    sprite.RenderOrder,
+                    resolvedTextureKey,
+                    draw.CasterEntityId.x,
+                    draw.CasterEntityId.y,
+                    draw.CasterEntityId.z,
+                    draw.CasterEntityId.w);
+            }
+
             drawList.push_back(std::move(draw));
         }
+
+        if (logGBufferSpriteDrawParity)
+            s_loggedGBufferSpriteDrawParity = true;
 
         return drawList;
     }
@@ -184,12 +291,12 @@ namespace Limitless::Lighting2DInternal
         std::unordered_set<entt::entity> explicitOccluderEntities;
         explicitOccluderEntities.reserve(64);
 
-        auto appendOccluderSegments = [&](entt::entity entity, const std::vector<glm::vec2>& localPoints, bool closed) {
+        auto appendOccluderSegments = [&](entt::entity entity, const std::vector<glm::vec2>& localPoints, bool closed, int32_t segmentFlags) {
             if (segments.size() >= maxSegments || localPoints.size() < 2)
                 return;
 
             const glm::mat4 worldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
-            const glm::vec2 casterEntityId = EncodeEntityIdToUnitVec2(entity);
+            const glm::vec4 casterEntityId = EncodeEntityIdToUnitVec4(entity);
 
             // Work in clip space so we can clip edges at the near plane
             // instead of clamping vertices to extreme off-screen positions.
@@ -283,7 +390,7 @@ namespace Limitless::Lighting2DInternal
                 if (edgeLength <= kEpsilon)
                     return;
 
-                segments.push_back(ShadowSegment{ glm::vec4(screenA.x, screenA.y, screenB.x, screenB.y), casterEntityId });
+                segments.push_back(ShadowSegment{ glm::vec4(screenA.x, screenA.y, screenB.x, screenB.y), casterEntityId, segmentFlags });
             };
 
             for (size_t index = 0; index + 1 < clipPoints.size(); ++index)
@@ -293,7 +400,7 @@ namespace Limitless::Lighting2DInternal
                 addClippedEdge(clipPoints.back(), clipPoints.front());
         };
 
-        auto appendWorldEdge = [&](const glm::vec3& worldStart, const glm::vec3& worldEnd, const glm::vec2& casterEntityId) {
+        auto appendWorldEdge = [&](const glm::vec3& worldStart, const glm::vec3& worldEnd, const glm::vec4& casterEntityId, int32_t segmentFlags) {
             if (segments.size() >= maxSegments)
                 return;
 
@@ -345,6 +452,112 @@ namespace Limitless::Lighting2DInternal
             segments.push_back(ShadowSegment{ glm::vec4(screenA.x, screenA.y, screenB.x, screenB.y), casterEntityId });
         };
 
+        auto resolveSpriteShadowTextureKey = [&](entt::entity entity, const SpriteComponent& sprite) -> std::string {
+            std::string textureKey = sprite.TextureKey;
+
+            const auto* animator = registry.try_get<AnimatorComponent>(entity);
+            const bool animatorActive = animator && animator->Enabled && animator->ApplyToSprite;
+            if (animatorActive && !animator->RuntimeSpriteTextureOverrideKey.empty())
+                textureKey = animator->RuntimeSpriteTextureOverrideKey;
+
+            if (textureKey.empty())
+            {
+                const auto* material = registry.try_get<MaterialComponent>(entity);
+                if (material && material->CachedMaterial)
+                {
+                    auto mainTex = material->CachedMaterial->GetMainTextureHandle().Lock();
+                    if (mainTex)
+                        textureKey = mainTex->GetKey();
+                }
+            }
+
+            return textureKey;
+        };
+
+        static bool s_loggedSpriteCasterPaths = false;
+        const bool logSpriteCasterPaths = !s_loggedSpriteCasterPaths;
+        s_loggedSpriteCasterPaths = true;
+
+        auto getEntityDebugName = [&](entt::entity entity) -> std::string {
+            if (const auto* tag = registry.try_get<TagComponent>(entity); tag && !tag->Tag.empty())
+                return tag->Tag;
+            return std::to_string(static_cast<uint32_t>(entity));
+        };
+
+        auto logSpriteCasterPath = [&](entt::entity entity, const char* pathName, const std::string& textureKey, size_t pointCount) {
+            if (!logSpriteCasterPaths)
+                return;
+            LT_CORE_WARN("ShadowCaster path: entity='{}' id={} path={} texture='{}' points={}",
+                getEntityDebugName(entity),
+                static_cast<uint32_t>(entity),
+                pathName,
+                textureKey,
+                pointCount);
+        };
+
+        auto shouldAutoCastFromSprite = [&](entt::entity entity, const SpriteComponent& sprite) -> bool {
+            if (!sprite.CastShadows || sprite.Color.a <= 0.01f)
+                return false;
+            return !resolveSpriteShadowTextureKey(entity, sprite).empty();
+        };
+
+        auto shouldUseAlphaRaymarchOnly = [&](entt::entity /*entity*/, const SpriteComponent& /*sprite*/) -> bool {
+            return false;
+        };
+
+        // Try to resolve an alpha-based convex hull for a sprite entity.
+        // Returns a non-empty vector (in local [-0.5,0.5] space) when the
+        // sprite texture has a non-trivial silhouette; empty on failure/cache-miss
+        // so callers fall back to the collider or quad shape.
+        auto tryGetSpriteAlphaHull = [&](entt::entity entity, const SpriteComponent& sprite) -> std::vector<glm::vec2> {
+            std::string textureKey = resolveSpriteShadowTextureKey(entity, sprite);
+            int32_t subIndex = sprite.SubSpriteIndex;
+
+            const auto* animator = registry.try_get<AnimatorComponent>(entity);
+            const bool animatorActive = animator && animator->Enabled && animator->ApplyToSprite;
+
+            if (textureKey.empty())
+                return {};
+
+            // When the animator provides a sub-rect (sprite sheet frame), pass the
+            // UV rect directly.  The hull function decodes the image from disk and
+            // resolves pixel coordinates internally, so it works even when the GPU
+            // texture hasn't been cached yet.
+            if (animatorActive && animator->RuntimeHasSpriteSubRect)
+            {
+                return GetOrBuildSpriteAlphaHullForUvRect(
+                    textureKey,
+                    animator->RuntimeSpriteUvMin,
+                    animator->RuntimeSpriteUvMax);
+            }
+
+            // Non-animated sprite or sprite with a known sub-sprite index.
+            return GetOrBuildSpriteAlphaHull(textureKey, subIndex);
+        };
+
+        auto isDefaultUnitQuadOccluder = [&](const ShadowOccluder2DComponent& occluder) -> bool {
+            if (occluder.Source != ShadowOccluder2DComponent::SourceMode::ManualPolygon ||
+                occluder.PolygonPoints.size() != 4)
+            {
+                return false;
+            }
+
+            static const glm::vec2 kDefaultPoints[4] = {
+                glm::vec2(-0.5f, -0.5f),
+                glm::vec2(0.5f, -0.5f),
+                glm::vec2(0.5f, 0.5f),
+                glm::vec2(-0.5f, 0.5f)
+            };
+
+            for (size_t i = 0; i < 4; ++i)
+            {
+                if (glm::length(occluder.PolygonPoints[i] - kDefaultPoints[i]) > kEpsilon)
+                    return false;
+            }
+
+            return true;
+        };
+
         auto occluderView = registry.view<ShadowOccluder2DComponent>();
         for (entt::entity entity : occluderView)
         {
@@ -359,21 +572,68 @@ namespace Limitless::Lighting2DInternal
             explicitOccluderEntities.insert(entity);
             if (!occluder.Enabled)
                 continue;
-            if (const auto* sprite = registry.try_get<SpriteComponent>(entity); sprite && !sprite->CastShadows)
+            const auto* sprite = registry.try_get<SpriteComponent>(entity);
+            if (sprite && !sprite->CastShadows)
                 continue;
 
-            std::vector<glm::vec2> localPoints = ResolveOccluderLocalPolygon(registry, entity, occluder);
-            appendOccluderSegments(entity, localPoints, occluder.Closed);
-        }
+            std::vector<glm::vec2> localPoints;
+            if (sprite &&
+                (occluder.Source == ShadowOccluder2DComponent::SourceMode::PhysicsCollider ||
+                 isDefaultUnitQuadOccluder(occluder)))
+            {
+                localPoints = tryGetSpriteAlphaHull(entity, *sprite);
+            }
 
-        auto shouldAutoCastFromSprite = [&](const SpriteComponent& sprite) -> bool {
-            if (!sprite.CastShadows || sprite.Color.a <= 0.01f)
-                return false;
-            return true;
-        };
+            if (localPoints.empty())
+                localPoints = ResolveOccluderLocalPolygon(registry, entity, occluder);
+            else if (occluder.Extrusion > 0.0f && localPoints.size() >= 3)
+            {
+                // Apply extrusion to hull points (same logic as ResolveOccluderLocalPolygon).
+                glm::vec2 centroid(0.0f);
+                for (const glm::vec2& point : localPoints)
+                    centroid += point;
+                centroid /= static_cast<float>(localPoints.size());
+                for (glm::vec2& point : localPoints)
+                {
+                    const glm::vec2 direction = point - centroid;
+                    const float length = glm::length(direction);
+                    if (length > kEpsilon)
+                        point += (direction / length) * occluder.Extrusion;
+                }
+            }
+
+            if (sprite)
+            {
+                const std::string textureKey = resolveSpriteShadowTextureKey(entity, *sprite);
+                if (!localPoints.empty() &&
+                    (occluder.Source == ShadowOccluder2DComponent::SourceMode::PhysicsCollider ||
+                     isDefaultUnitQuadOccluder(occluder)))
+                {
+                    logSpriteCasterPath(entity, "explicit_alpha_hull_raymarch_only", textureKey, localPoints.size());
+                    if (shouldUseAlphaRaymarchOnly(entity, *sprite))
+                        continue;
+                }
+                else
+                {
+                    logSpriteCasterPath(entity,
+                        occluder.Source == ShadowOccluder2DComponent::SourceMode::PhysicsCollider ? "explicit_physics_polygon" : "explicit_manual_polygon",
+                        textureKey,
+                        localPoints.size());
+                }
+            }
+
+            const int32_t segmentFlags = (sprite &&
+                (occluder.Source == ShadowOccluder2DComponent::SourceMode::PhysicsCollider ||
+                 isDefaultUnitQuadOccluder(occluder)))
+                ? kShadowSegmentFlagOffscreenOnly
+                : 0;
+            appendOccluderSegments(entity, localPoints, occluder.Closed, segmentFlags);
+        }
 
         // Hybrid fallback: collider-backed occluders for entities without an explicit ShadowOccluder2D.
         // This keeps scene authoring fast while preserving explicit component control when present.
+        // When the sprite has an alpha hull available, prefer that over the box collider shape
+        // so shadows match the visible silhouette instead of the physics bounds.
         auto boxColliderView = registry.view<BoxCollider2DComponent>();
         for (entt::entity entity : boxColliderView)
         {
@@ -390,12 +650,29 @@ namespace Limitless::Lighting2DInternal
             const auto* sprite = registry.try_get<SpriteComponent>(entity);
             if (!sprite)
                 continue;
-            if (!shouldAutoCastFromSprite(*sprite))
+            if (!shouldAutoCastFromSprite(entity, *sprite))
                 continue;
 
-            std::vector<glm::vec2> localPoints;
-            BuildPhysicsOccluderPolygon(registry, entity, localPoints);
-            appendOccluderSegments(entity, localPoints, true);
+            std::vector<glm::vec2> localPoints = tryGetSpriteAlphaHull(entity, *sprite);
+            if (localPoints.empty())
+            {
+                if (shouldUseAlphaRaymarchOnly(entity, *sprite))
+                {
+                    logSpriteCasterPath(entity, "box_collider_raymarch_only_no_hull", resolveSpriteShadowTextureKey(entity, *sprite), 0);
+                    continue;
+                }
+                LT_CORE_TRACE("SpriteAlphaHull: no hull for entity {} (textureKey='{}', sub={}), using box collider",
+                    static_cast<uint32_t>(entity), sprite->TextureKey, sprite->SubSpriteIndex);
+                BuildPhysicsOccluderPolygon(registry, entity, localPoints);
+                logSpriteCasterPath(entity, "box_collider_fallback", resolveSpriteShadowTextureKey(entity, *sprite), localPoints.size());
+                appendOccluderSegments(entity, localPoints, true, kShadowSegmentFlagOffscreenOnly);
+            }
+            else
+            {
+                logSpriteCasterPath(entity, "box_alpha_hull_raymarch_only", resolveSpriteShadowTextureKey(entity, *sprite), localPoints.size());
+                if (!shouldUseAlphaRaymarchOnly(entity, *sprite))
+                    appendOccluderSegments(entity, localPoints, true, kShadowSegmentFlagOffscreenOnly);
+            }
         }
 
         auto circleColliderView = registry.view<CircleCollider2DComponent>();
@@ -414,20 +691,33 @@ namespace Limitless::Lighting2DInternal
             const auto* sprite = registry.try_get<SpriteComponent>(entity);
             if (!sprite)
                 continue;
-            if (!shouldAutoCastFromSprite(*sprite))
+            if (!shouldAutoCastFromSprite(entity, *sprite))
                 continue;
 
-            std::vector<glm::vec2> localPoints;
-            BuildPhysicsOccluderPolygon(registry, entity, localPoints);
-            appendOccluderSegments(entity, localPoints, true);
+            std::vector<glm::vec2> localPoints = tryGetSpriteAlphaHull(entity, *sprite);
+            if (localPoints.empty())
+            {
+                if (shouldUseAlphaRaymarchOnly(entity, *sprite))
+                {
+                    logSpriteCasterPath(entity, "circle_collider_raymarch_only_no_hull", resolveSpriteShadowTextureKey(entity, *sprite), 0);
+                    continue;
+                }
+                BuildPhysicsOccluderPolygon(registry, entity, localPoints);
+                logSpriteCasterPath(entity, "circle_collider_fallback", resolveSpriteShadowTextureKey(entity, *sprite), localPoints.size());
+                appendOccluderSegments(entity, localPoints, true, kShadowSegmentFlagOffscreenOnly);
+            }
+            else
+            {
+                logSpriteCasterPath(entity, "circle_alpha_hull_raymarch_only", resolveSpriteShadowTextureKey(entity, *sprite), localPoints.size());
+                if (!shouldUseAlphaRaymarchOnly(entity, *sprite))
+                    appendOccluderSegments(entity, localPoints, true, kShadowSegmentFlagOffscreenOnly);
+            }
         }
 
         // Sprite fallback: allow regular sprite entities to cast shadows even
         // without explicit ShadowOccluder2D/physics collider components.
-        // The shadow shape is a unit quad scaled by the entity transform, so
-        // its size matches the rendered sprite.  Shadow *length* is governed
-        // by the per-light ShadowDistance setting -- keep that value reasonable
-        // (e.g. 2-10 world units) for top-down games.
+        // When an alpha hull is available, use it for accurate silhouette shadows.
+        // Otherwise fall back to a unit quad (clamped to a max world extent).
         auto spriteView = registry.view<TransformComponent, SpriteComponent>();
         for (entt::entity entity : spriteView)
         {
@@ -447,8 +737,25 @@ namespace Limitless::Lighting2DInternal
                 continue;
 
             const auto& sprite = spriteView.get<SpriteComponent>(entity);
-            if (!shouldAutoCastFromSprite(sprite))
+            if (!shouldAutoCastFromSprite(entity, sprite))
                 continue;
+
+            std::vector<glm::vec2> alphaHull = tryGetSpriteAlphaHull(entity, sprite);
+            if (!alphaHull.empty())
+            {
+                logSpriteCasterPath(entity, "sprite_alpha_hull_raymarch_only", resolveSpriteShadowTextureKey(entity, sprite), alphaHull.size());
+                if (!shouldUseAlphaRaymarchOnly(entity, sprite))
+                    appendOccluderSegments(entity, alphaHull, true, kShadowSegmentFlagOffscreenOnly);
+                continue;
+            }
+
+            // Sprites that rely on alpha raymarching should not fall back
+            // to rectangular quad segments when the alpha hull is unavailable.
+            if (shouldUseAlphaRaymarchOnly(entity, sprite))
+            {
+                logSpriteCasterPath(entity, "sprite_fallback_raymarch_only_no_hull", resolveSpriteShadowTextureKey(entity, sprite), 0);
+                continue;
+            }
 
             // Automatic sprite fallback should not produce map-sized caster
             // quads when users scale sprites up for visual reasons (common
@@ -471,7 +778,8 @@ namespace Limitless::Lighting2DInternal
                 glm::vec2( localHalfExtents.x,  localHalfExtents.y),
                 glm::vec2(-localHalfExtents.x,  localHalfExtents.y)
             };
-            appendOccluderSegments(entity, localQuad, true);
+            logSpriteCasterPath(entity, "sprite_quad_fallback", resolveSpriteShadowTextureKey(entity, sprite), localQuad.size());
+            appendOccluderSegments(entity, localQuad, true, kShadowSegmentFlagOffscreenOnly);
         }
 
         // Tilemap fallback: emit edge segments for occupied cells in Grid2D
@@ -596,7 +904,7 @@ namespace Limitless::Lighting2DInternal
 
                 // Frustum-cull chunks and append cached edges for visible chunks.
                 bool emittedAnySegment = false;
-                const glm::vec2 casterEntityId = EncodeEntityIdToUnitVec2(layerEntity);
+                const glm::vec4 casterEntityId = EncodeEntityIdToUnitVec4(layerEntity);
                 for (int32_t cy = 0; cy < chunkCountY && segments.size() < maxSegments; ++cy)
                 {
                     for (int32_t cx = 0; cx < chunkCountX && segments.size() < maxSegments; ++cx)
@@ -627,7 +935,7 @@ namespace Limitless::Lighting2DInternal
                             const glm::vec3 worldA = glm::vec3(gridWorldTransform * glm::vec4(edge.x, edge.y, 0.0f, 1.0f));
                             const glm::vec3 worldB = glm::vec3(gridWorldTransform * glm::vec4(edge.z, edge.w, 0.0f, 1.0f));
                             const size_t beforeCount = segments.size();
-                            appendWorldEdge(worldA, worldB, casterEntityId);
+                            appendWorldEdge(worldA, worldB, casterEntityId, 0);
                             if (segments.size() > beforeCount)
                                 emittedAnySegment = true;
                         }
@@ -680,6 +988,7 @@ namespace Limitless::Lighting2DInternal
     {
         std::vector<ScreenDirectionalLight> lights;
         lights.reserve(std::max(0, g_State->Settings.MaxDirectionalLights));
+        static bool s_loggedDirectionalLights = false;
 
         const uint32_t maxDirectionalLights = ClampDirectionalLightsByQuality(g_State->Settings);
         if (maxDirectionalLights == 0)
@@ -731,13 +1040,36 @@ namespace Limitless::Lighting2DInternal
             screenLight.ShadingDirection = worldDirection;
             screenLight.CastShadows = g_State->Settings.EnableShadows && directional.CastShadows;
             screenLight.ShadowStrength = std::clamp(directional.ShadowStrength, 0.0f, 1.0f);
-            screenLight.ShadowSoftnessPixels = std::max(0.0f, directional.ShadowSoftness * g_State->Settings.ShadowSoftnessScale * pixelsPerUnit);
+            screenLight.ShadowSoftnessPixels = std::max(0.0f, directional.ShadowSoftness * g_State->Settings.ShadowSoftnessScale * std::sqrt(std::max(1.0f, pixelsPerUnit)));
             screenLight.ShadowSamples = ClampShadowSamplesByQuality(g_State->Settings, directional.ShadowSamples);
             screenLight.ShadowDistancePixels = std::max(1.0f, directional.ShadowDistance * pixelsPerUnit);
             // Screen-space directional ray tests need a bias to avoid self-occlusion on receiver quads.
             const float biasScale = std::max(0.0f, g_State->Settings.DirectionalShadowBiasScale);
             screenLight.ShadowBiasPixels = std::max(0.0f, directional.ShadowBias * biasScale * pixelsPerUnit);
             lights.push_back(screenLight);
+        }
+
+        if (!s_loggedDirectionalLights)
+        {
+            LT_CORE_WARN("Lighting2D[Directional]: count={}", lights.size());
+            for (size_t i = 0; i < lights.size(); ++i)
+            {
+                const auto& light = lights[i];
+                LT_CORE_WARN("Lighting2D[Directional][{}]: dir=({:.4f},{:.4f}) shadeDir=({:.4f},{:.4f}) intensity={:.4f} cast={} strength={:.4f} softnessPx={:.4f} samples={} distancePx={:.4f} biasPx={:.4f}",
+                    i,
+                    light.ShadowDirection.x,
+                    light.ShadowDirection.y,
+                    light.ShadingDirection.x,
+                    light.ShadingDirection.y,
+                    light.Intensity,
+                    light.CastShadows ? 1 : 0,
+                    light.ShadowStrength,
+                    light.ShadowSoftnessPixels,
+                    light.ShadowSamples,
+                    light.ShadowDistancePixels,
+                    light.ShadowBiasPixels);
+            }
+            s_loggedDirectionalLights = true;
         }
 
         return lights;
@@ -753,6 +1085,7 @@ namespace Limitless::Lighting2DInternal
     {
         std::vector<ScreenPointLight> lights;
         lights.reserve(std::max(0, g_State->Settings.MaxPointLights));
+        static bool s_loggedPointLights = false;
 
         const uint32_t maxPointLights = ClampPointLightsByQuality(g_State->Settings);
         if (maxPointLights == 0)
@@ -797,10 +1130,32 @@ namespace Limitless::Lighting2DInternal
             screenLight.Falloff = std::max(0.1f, pointLight.Falloff);
             screenLight.CastShadows = g_State->Settings.EnableShadows && pointLight.CastShadows;
             screenLight.ShadowStrength = std::clamp(pointLight.ShadowStrength, 0.0f, 1.0f);
-            screenLight.ShadowSoftnessPixels = std::max(0.0f, pointLight.ShadowSoftness * g_State->Settings.ShadowSoftnessScale * pixelsPerUnit);
+            screenLight.ShadowSoftnessPixels = std::max(0.0f, pointLight.ShadowSoftness * g_State->Settings.ShadowSoftnessScale * std::sqrt(std::max(1.0f, pixelsPerUnit)));
             screenLight.ShadowSamples = ClampShadowSamplesByQuality(g_State->Settings, pointLight.ShadowSamples);
             screenLight.ShadowBiasPixels = std::max(0.0f, pointLight.ShadowBias * pixelsPerUnit);
             lights.push_back(screenLight);
+        }
+
+        if (!s_loggedPointLights)
+        {
+            LT_CORE_WARN("Lighting2D[Point]: count={}", lights.size());
+            for (size_t i = 0; i < lights.size(); ++i)
+            {
+                const auto& light = lights[i];
+                LT_CORE_WARN("Lighting2D[Point][{}]: pos=({:.4f},{:.4f}) intensity={:.4f} radiusPx={:.4f} falloff={:.4f} cast={} strength={:.4f} softnessPx={:.4f} samples={} biasPx={:.4f}",
+                    i,
+                    light.Position.x,
+                    light.Position.y,
+                    light.Intensity,
+                    light.RadiusPixels,
+                    light.Falloff,
+                    light.CastShadows ? 1 : 0,
+                    light.ShadowStrength,
+                    light.ShadowSoftnessPixels,
+                    light.ShadowSamples,
+                    light.ShadowBiasPixels);
+            }
+            s_loggedPointLights = true;
         }
 
         return lights;

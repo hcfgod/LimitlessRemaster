@@ -1334,6 +1334,9 @@ namespace Limitless
             }
         };
 
+        static bool s_loggedWorldSpriteDrawParity = false;
+        const bool logWorldSpriteDrawParity = !s_loggedWorldSpriteDrawParity;
+
         auto drawSpriteEntity = [&](entt::entity entity) {
             if (!scene.IsEntityEnabledInHierarchy(entity))
                 return;
@@ -1355,11 +1358,13 @@ namespace Limitless
                 std::max(0.001f, sprite.TilingFactor.y));
             glm::vec2 renderUvMin(0.0f, 0.0f);
             glm::vec2 renderUvMax = safeTilingFactor;
+            const char* uvSource = "default";
             const bool hasAnimatorSubRect =
                 animator && animator->Enabled && animator->ApplyToSprite && animator->RuntimeHasSpriteSubRect;
             const bool hasSpriteSubRect = sprite.SubSpriteIndex >= 0;
             if (hasAnimatorSubRect)
             {
+                uvSource = "animator_subrect";
                 renderUvMin = animator->RuntimeSpriteUvMin;
                 glm::vec2 frameSpan = animator->RuntimeSpriteUvMax - animator->RuntimeSpriteUvMin;
                 if (frameSpan.x <= 0.0001f || frameSpan.y <= 0.0001f)
@@ -1368,6 +1373,7 @@ namespace Limitless
             }
             else if (hasSpriteSubRect)
             {
+                uvSource = "sprite_subrect";
                 renderUvMin = sprite.UvMin;
                 glm::vec2 subSpan = sprite.UvMax - sprite.UvMin;
                 if (subSpan.x <= 0.0001f || subSpan.y <= 0.0001f)
@@ -1452,10 +1458,12 @@ namespace Limitless
                 }
             }
 
+            const char* textureSource = "none";
             if (!hasAnimatorSubRect && !hasSpriteSubRect &&
                 materialMainTextureAsset && material &&
                 material->CachedMaterial && material->CachedMaterial->HasMainTextureSubRect())
             {
+                uvSource = "material_subrect";
                 renderUvMin = material->CachedMaterial->GetMainTextureUvMin();
                 glm::vec2 subSpan = material->CachedMaterial->GetMainTextureUvMax() - material->CachedMaterial->GetMainTextureUvMin();
                 if (subSpan.x <= 0.0001f || subSpan.y <= 0.0001f)
@@ -1464,6 +1472,17 @@ namespace Limitless
             }
 
             Assets::TextureAsset::Ptr resolvedTextureAsset = animatedTextureAsset ? animatedTextureAsset : materialMainTextureAsset;
+            std::string resolvedTextureKey;
+            if (animatedTextureAsset)
+            {
+                textureSource = "animator_texture";
+                resolvedTextureKey = animatedTextureKey;
+            }
+            else if (materialMainTextureAsset)
+            {
+                textureSource = "material_texture";
+                resolvedTextureKey = materialMainTextureAsset->GetKey();
+            }
 
             // Fallback to Sprite texture when no animated texture override/material texture is active/ready.
             if (!resolvedTextureAsset && !sprite.TextureKey.empty())
@@ -1495,6 +1514,27 @@ namespace Limitless
                     }
                 }
                 resolvedTextureAsset = sprite.CachedTexture;
+                if (resolvedTextureAsset)
+                {
+                    textureSource = "sprite_texture";
+                    resolvedTextureKey = sprite.TextureKey;
+                }
+            }
+
+            if (logWorldSpriteDrawParity && (sprite.ReceiveShadows || sprite.CastShadows))
+            {
+                LT_CORE_WARN("SpritePass[World]: id={} texSource={} uvSource={} uvMin=({:.4f},{:.4f}) uvMax=({:.4f},{:.4f}) receive={} cast={} order={} texture='{}'",
+                    static_cast<uint32_t>(entity),
+                    textureSource,
+                    uvSource,
+                    renderUvMin.x,
+                    renderUvMin.y,
+                    renderUvMax.x,
+                    renderUvMax.y,
+                    sprite.ReceiveShadows ? 1 : 0,
+                    sprite.CastShadows ? 1 : 0,
+                    sprite.RenderOrder,
+                    resolvedTextureKey);
             }
 
             if (resolvedTextureAsset)
@@ -1692,6 +1732,9 @@ namespace Limitless
 
         if (!particlesRendered)
             drawParticleEmitters();
+
+        if (logWorldSpriteDrawParity)
+            s_loggedWorldSpriteDrawParity = true;
 
         Renderer2D::Default().EndScene();
         scene.SetRuntimePhase(Scene::RuntimePhase::Idle);
