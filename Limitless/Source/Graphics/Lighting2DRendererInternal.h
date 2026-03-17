@@ -372,7 +372,8 @@ namespace Limitless::Lighting2DInternal
                                     const ScreenDirectionalLight& light,
                                     uint32_t width,
                                     uint32_t height,
-                                    float shadowSegmentSnapPixels);
+                                    float shadowSegmentSnapPixels,
+                                    bool clampShadowToViewport);
 
     void SubmitPointLightPass(const std::shared_ptr<Texture2D>& albedoTexture,
                               const std::shared_ptr<Texture2D>& normalTexture,

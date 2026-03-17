@@ -174,7 +174,10 @@ namespace Limitless::Lighting2DInternal
             if (hasMaterialButFailed)
                 draw.Color = glm::vec4(1.0f, 0.0f, 1.0f, sprite.Color.a);
 
-            draw.CasterHeightPixels = 4.0f;
+            const float spriteWorldWidth = glm::length(glm::vec3(draw.Model[0]));
+            const float spriteWorldHeight = glm::length(glm::vec3(draw.Model[1]));
+            const float spriteScreenExtentPixels = std::max(spriteWorldWidth, spriteWorldHeight) * pixelsPerUnit;
+            draw.CasterHeightPixels = std::clamp(spriteScreenExtentPixels * 0.35f, 8.0f, 24.0f);
 
             const bool hasExplicitShadowOccluder = registry.any_of<ShadowOccluder2DComponent>(entity);
             if (sprite.CastShadows &&
@@ -290,6 +293,21 @@ namespace Limitless::Lighting2DInternal
         auto& registry = scene.GetRegistry();
         std::unordered_set<entt::entity> explicitOccluderEntities;
         explicitOccluderEntities.reserve(64);
+        float maxDirectionalShadowDistanceWorld = 0.0f;
+        auto directionalLightView = registry.view<DirectionalLight2DComponent>();
+        for (entt::entity entity : directionalLightView)
+        {
+            if (!scene.IsEntityEnabledInHierarchy(entity))
+                continue;
+            if (!IsEntityVisibleToCameraCullingMask(registry, entity, cullingMask))
+                continue;
+
+            const auto& directional = directionalLightView.get<DirectionalLight2DComponent>(entity);
+            if (!directional.Enabled || !directional.CastShadows || directional.Intensity <= 0.0f)
+                continue;
+
+            maxDirectionalShadowDistanceWorld = std::max(maxDirectionalShadowDistanceWorld, std::max(0.0f, directional.ShadowDistance));
+        }
 
         auto appendOccluderSegments = [&](entt::entity entity, const std::vector<glm::vec2>& localPoints, bool closed, int32_t segmentFlags) {
             if (segments.size() >= maxSegments || localPoints.size() < 2)
@@ -334,12 +352,11 @@ namespace Limitless::Lighting2DInternal
             const float fHeight = static_cast<float>(height);
 
             // Project a clip-space point (with w >= kNearW) to screen space.
-            // Coordinates are clamped to a generous off-screen range to
-            // keep the shader's ray-segment intersection numerically stable.
-            // For visible pixels the intersection point is always near the
-            // on-screen segment endpoint, so this clamp does not affect
-            // shadow correctness on screen.
-            const float coordLimit = std::max(fWidth, fHeight) * 4.0f;
+            // Coordinates are clamped to a moderate off-screen range to
+            // keep the shader's ray-segment intersection numerically stable
+            // and prevent degenerate near-plane projections from creating
+            // huge segments that cause edge-of-viewport shadow artifacts.
+            const float coordLimit = std::max(fWidth, fHeight) * 2.0f;
             auto projectToScreen = [fWidth, fHeight, snappedPixels, coordLimit](const glm::vec4& clip) -> glm::vec2 {
                 const float ndcX = clip.x / clip.w;
                 const float ndcY = clip.y / clip.w;
@@ -390,6 +407,10 @@ namespace Limitless::Lighting2DInternal
                 if (edgeLength <= kEpsilon)
                     return;
 
+                const float maxSegmentScreenLength = std::max(fWidth, fHeight) * 1.5f;
+                if (edgeLength > maxSegmentScreenLength)
+                    return;
+
                 segments.push_back(ShadowSegment{ glm::vec4(screenA.x, screenA.y, screenB.x, screenB.y), casterEntityId, segmentFlags });
             };
 
@@ -428,7 +449,7 @@ namespace Limitless::Lighting2DInternal
 
             const float fWidth = static_cast<float>(width);
             const float fHeight = static_cast<float>(height);
-            const float coordLimit = std::max(fWidth, fHeight) * 4.0f;
+            const float coordLimit = std::max(fWidth, fHeight) * 2.0f;
             auto projectToScreen = [fWidth, fHeight, snappedPixels, coordLimit](const glm::vec4& clip) -> glm::vec2 {
                 const float ndcX = clip.x / clip.w;
                 const float ndcY = clip.y / clip.w;
@@ -446,7 +467,12 @@ namespace Limitless::Lighting2DInternal
 
             const glm::vec2 screenA = projectToScreen(ca);
             const glm::vec2 screenB = projectToScreen(cb);
-            if (glm::length(screenB - screenA) <= kEpsilon)
+            const float edgeLen = glm::length(screenB - screenA);
+            if (edgeLen <= kEpsilon)
+                return;
+
+            const float maxSegLen = std::max(fWidth, fHeight) * 1.5f;
+            if (edgeLen > maxSegLen)
                 return;
 
             segments.push_back(ShadowSegment{ glm::vec4(screenA.x, screenA.y, screenB.x, screenB.y), casterEntityId });
@@ -916,7 +942,10 @@ namespace Limitless::Lighting2DInternal
                         if (lc.Empty)
                             continue;
 
-                        // Frustum-cull using persistent chunk bounds.
+                        // Frustum-cull using persistent chunk bounds, but pad by
+                        // the active directional shadow distance so offscreen
+                        // tile occluders just outside the view can still cast
+                        // into the viewport instead of popping at the edge.
                         const glm::vec3 worldCorners[4] = {
                             glm::vec3(gridWorldTransform * glm::vec4(lc.LocalMin.x, lc.LocalMin.y, 0.0f, 1.0f)),
                             glm::vec3(gridWorldTransform * glm::vec4(lc.LocalMax.x, lc.LocalMin.y, 0.0f, 1.0f)),
@@ -924,9 +953,12 @@ namespace Limitless::Lighting2DInternal
                             glm::vec3(gridWorldTransform * glm::vec4(lc.LocalMin.x, lc.LocalMax.y, 0.0f, 1.0f))
                         };
                         glm::vec3 aabbMin(0.0f), aabbMax(0.0f);
-                        if (ComputeSceneRenderAabbFromPoints(worldCorners, 4, aabbMin, aabbMax) &&
-                            !IsSceneRenderAabbVisible(shadowFrustum, aabbMin, aabbMax))
-                            continue;
+                        if (ComputeSceneRenderAabbFromPoints(worldCorners, 4, aabbMin, aabbMax))
+                        {
+                            const glm::vec3 shadowCullPadding(maxDirectionalShadowDistanceWorld);
+                            if (!IsSceneRenderAabbVisible(shadowFrustum, aabbMin - shadowCullPadding, aabbMax + shadowCullPadding))
+                                continue;
+                        }
 
                         for (const glm::vec4& edge : lc.OccluderEdges)
                         {
@@ -996,6 +1028,18 @@ namespace Limitless::Lighting2DInternal
 
         auto& registry = scene.GetRegistry();
         auto directionalView = registry.view<DirectionalLight2DComponent>();
+        glm::vec3 screenDirectionReferencePoint = glm::vec3(0.0f);
+        {
+            const glm::mat4 cameraWorld = glm::inverse(camera.GetViewMatrix());
+            const glm::vec3 cameraPosition = glm::vec3(cameraWorld[3]);
+            const glm::vec3 cameraForward = glm::normalize(-glm::vec3(cameraWorld[2]));
+            if (std::abs(cameraForward.z) > kEpsilon)
+            {
+                const float t = (0.0f - cameraPosition.z) / cameraForward.z;
+                if (t > 0.0f && std::isfinite(t))
+                    screenDirectionReferencePoint = cameraPosition + cameraForward * t;
+            }
+        }
         for (entt::entity entity : directionalView)
         {
             if (lights.size() >= maxDirectionalLights)
@@ -1019,13 +1063,21 @@ namespace Limitless::Lighting2DInternal
                 worldDirection = glm::vec2(0.0f, -1.0f);
             worldDirection = glm::normalize(worldDirection);
 
-            glm::vec4 viewDirection4 = camera.GetViewMatrix() * glm::vec4(worldDirection, 0.0f, 0.0f);
-            glm::vec2 screenDirection(viewDirection4.x, viewDirection4.y);
+            const glm::vec2 referenceScreen = ProjectWorldToScreenClamped(
+                viewProjection,
+                screenDirectionReferencePoint,
+                width,
+                height);
+            const glm::vec2 offsetScreen = ProjectWorldToScreenClamped(
+                viewProjection,
+                screenDirectionReferencePoint + glm::vec3(worldDirection, 0.0f),
+                width,
+                height);
+            glm::vec2 screenDirection = offsetScreen - referenceScreen;
             if (glm::length(screenDirection) <= kEpsilon)
             {
-                const glm::vec2 originScreen = ProjectWorldToScreenClamped(viewProjection, glm::vec3(0.0f, 0.0f, 0.0f), width, height);
-                const glm::vec2 endScreen = ProjectWorldToScreenClamped(viewProjection, glm::vec3(worldDirection, 0.0f), width, height);
-                screenDirection = endScreen - originScreen;
+                glm::vec4 viewDirection4 = camera.GetViewMatrix() * glm::vec4(worldDirection, 0.0f, 0.0f);
+                screenDirection = glm::vec2(viewDirection4.x, viewDirection4.y);
             }
             if (glm::length(screenDirection) <= kEpsilon)
                 screenDirection = glm::vec2(0.0f, -1.0f);

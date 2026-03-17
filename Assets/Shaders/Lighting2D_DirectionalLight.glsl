@@ -41,6 +41,7 @@ uniform float u_ShadowBias;
 uniform float u_ShadowAlphaCutoff;
 uniform float u_CasterHeightEncodeMaxPixels;
 uniform float u_ShadowSegmentSnapPixels;
+uniform int u_ClampShadowToViewport;
 uniform int u_ShadowSegmentCount;
 
 const int MAX_SHADOW_SEGMENTS = 128;
@@ -273,10 +274,23 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 rayDirection, vec4 f
             sampleOrigin = round(sampleOrigin / snapPixels) * snapPixels;
             sampleEnd = round(sampleEnd / snapPixels) * snapPixels;
         }
+        if (u_ClampShadowToViewport != 0 && !IsScreenPosInsideViewport(sampleOrigin))
+            continue;
+        float sampleShadowDistance = effectiveShadowDistance;
+        bool sampleEndInsideViewport = IsScreenPosInsideViewport(sampleEnd);
+        float viewportExitPhase = 1.0;
+        bool hasOffscreenRayPortion = !sampleEndInsideViewport &&
+                                      ComputeViewportExitPhase(sampleOrigin, sampleEnd, viewportExitPhase);
+        if (u_ClampShadowToViewport != 0 && hasOffscreenRayPortion)
+        {
+            sampleShadowDistance *= clamp(viewportExitPhase, 0.0, 1.0);
+            sampleEnd = mix(sampleOrigin, sampleEnd, viewportExitPhase);
+            hasOffscreenRayPortion = false;
+        }
         bool alphaOccluded = ProjectedAlphaOcclusion(
             fragmentScreenPosition,
             rayDirection,
-            effectiveShadowDistance,
+            sampleShadowDistance,
             u_ShadowBias,
             sampleOffset,
             snapPixels,
@@ -284,13 +298,34 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 rayDirection, vec4 f
 
         bool occluded = alphaOccluded;
         int segmentCount = min(u_ShadowSegmentCount, MAX_SHADOW_SEGMENTS);
-        bool sampleEndInsideViewport = IsScreenPosInsideViewport(sampleEnd);
-        float viewportExitPhase = 1.0;
-        bool hasOffscreenRayPortion = !sampleEndInsideViewport &&
-                                      ComputeViewportExitPhase(sampleOrigin, sampleEnd, viewportExitPhase);
         vec2 offscreenSampleOrigin = sampleOrigin;
+        int viewportExitSide = 0;
         if (hasOffscreenRayPortion)
-            offscreenSampleOrigin = mix(sampleOrigin, sampleEnd, viewportExitPhase) + rayDirection * max(0.5, snapPixels * 0.5);
+        {
+            vec2 viewportExitPoint = mix(sampleOrigin, sampleEnd, viewportExitPhase);
+            offscreenSampleOrigin = viewportExitPoint + rayDirection * max(0.5, snapPixels * 0.5);
+
+            float minDistanceToBoundary = abs(viewportExitPoint.x);
+            viewportExitSide = 1;
+
+            float candidateDistance = abs(viewportExitPoint.x - u_ViewportSize.x);
+            if (candidateDistance < minDistanceToBoundary)
+            {
+                minDistanceToBoundary = candidateDistance;
+                viewportExitSide = 2;
+            }
+
+            candidateDistance = abs(viewportExitPoint.y);
+            if (candidateDistance < minDistanceToBoundary)
+            {
+                minDistanceToBoundary = candidateDistance;
+                viewportExitSide = 3;
+            }
+
+            candidateDistance = abs(viewportExitPoint.y - u_ViewportSize.y);
+            if (candidateDistance < minDistanceToBoundary)
+                viewportExitSide = 4;
+        }
         for (int segmentIndex = 0; !occluded && segmentIndex < segmentCount; ++segmentIndex)
         {
             if ((fragmentCasterId.x > 0.0001 || fragmentCasterId.y > 0.0001 || fragmentCasterId.z > 0.0001 || fragmentCasterId.w > 0.0001) &&
@@ -298,18 +333,37 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 rayDirection, vec4 f
             {
                 continue;
             }
+            vec4 segment = u_ShadowSegments[segmentIndex];
             bool offscreenOnlySegment = (u_ShadowSegmentFlags[segmentIndex] & 1) != 0;
             vec2 segmentSampleOrigin = sampleOrigin;
             if (offscreenOnlySegment)
             {
                 if (!hasOffscreenRayPortion)
                     continue;
+                float viewportEdgeThreshold = max(1.0, snapPixels);
+                bool segmentOutsideExitSide = false;
+                if (viewportExitSide == 1)
+                    segmentOutsideExitSide = segment.x <= -viewportEdgeThreshold &&
+                                             segment.z <= -viewportEdgeThreshold;
+                else if (viewportExitSide == 2)
+                    segmentOutsideExitSide = segment.x >= u_ViewportSize.x + viewportEdgeThreshold &&
+                                             segment.z >= u_ViewportSize.x + viewportEdgeThreshold;
+                else if (viewportExitSide == 3)
+                    segmentOutsideExitSide = segment.y <= -viewportEdgeThreshold &&
+                                             segment.w <= -viewportEdgeThreshold;
+                else if (viewportExitSide == 4)
+                    segmentOutsideExitSide = segment.y >= u_ViewportSize.y + viewportEdgeThreshold &&
+                                             segment.w >= u_ViewportSize.y + viewportEdgeThreshold;
+                if (!segmentOutsideExitSide)
+                    continue;
                 segmentSampleOrigin = offscreenSampleOrigin;
             }
-            vec4 segment = u_ShadowSegments[segmentIndex];
             vec2 edge = segment.zw - segment.xy;
             float edgeLength = length(edge);
             if (edgeLength <= 0.0001)
+                continue;
+            float maxSegScreenLen = max(u_ViewportSize.x, u_ViewportSize.y) * 1.5;
+            if (edgeLength > maxSegScreenLen)
                 continue;
             vec2 outwardNormal = vec2(edge.y, -edge.x) / edgeLength;
             // Ignore back-facing/exit intersections. This greatly reduces

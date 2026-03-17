@@ -189,7 +189,8 @@ namespace Limitless::Lighting2DInternal
                                     const ScreenDirectionalLight& light,
                                     uint32_t width,
                                     uint32_t height,
-                                    float shadowSegmentSnapPixels)
+                                    float shadowSegmentSnapPixels,
+                                    bool clampShadowToViewport)
     {
         auto shader = ResolveShaderFromAsset(g_State->DirectionalLightShaderAsset, kDirectionalLightShaderKey);
         if (!shader || !g_State->UnitQuadVertexArray)
@@ -214,6 +215,7 @@ namespace Limitless::Lighting2DInternal
         const float shadowBias = light.ShadowBiasPixels;
         const float shadowAlphaCutoff = std::clamp(g_State->Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
         const float shadowSegmentSnapPixelsClamped = std::max(0.0f, shadowSegmentSnapPixels);
+        const int clampShadowToViewportInt = clampShadowToViewport ? 1 : 0;
         const float viewportWidth = static_cast<float>(std::max<uint32_t>(width, 1u));
         const float viewportHeight = static_cast<float>(std::max<uint32_t>(height, 1u));
         const float casterHeightEncodeMaxPixels = std::max(std::sqrt(viewportWidth * viewportWidth + viewportHeight * viewportHeight), 1.0f);
@@ -257,6 +259,7 @@ namespace Limitless::Lighting2DInternal
         directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowAlphaCutoff", shadowAlphaCutoff });
         directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_CasterHeightEncodeMaxPixels", casterHeightEncodeMaxPixels });
         directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSegmentSnapPixels", shadowSegmentSnapPixelsClamped });
+        directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ClampShadowToViewport", static_cast<int32_t>(clampShadowToViewportInt) });
         directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSegmentCount", static_cast<int32_t>(segmentEndpoints.size()) });
         directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSegments", std::move(segmentEndpoints) });
         directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSegmentCasterIds", std::move(segmentCasterIds) });

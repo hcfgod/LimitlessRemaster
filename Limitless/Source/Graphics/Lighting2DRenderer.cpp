@@ -212,9 +212,22 @@ namespace Limitless
             renderer.SubmitCommand(std::make_unique<SetCullFaceCommand>(false));
             renderer.SubmitCommand(std::make_unique<SetBlendModeCommand>(BlendFactor::One, BlendFactor::One, true));
         }
+        const bool clampDirectionalShadowToViewport =
+            camera.GetUsage() == CameraUsage::Editor &&
+            camera.GetType() == CameraType::Perspective3D;
         for (const ScreenDirectionalLight& directionalLight : directionalLights)
         {
-            SubmitDirectionalLightPass(gBufferAlbedo, gBufferNormal, gBufferEntityId, gBufferCasterMask, gBufferCasterEntityId, shadowSegments, directionalLight, width, height, effectiveShadowSegmentSnapPixels);
+            SubmitDirectionalLightPass(gBufferAlbedo,
+                                       gBufferNormal,
+                                       gBufferEntityId,
+                                       gBufferCasterMask,
+                                       gBufferCasterEntityId,
+                                       shadowSegments,
+                                       directionalLight,
+                                       width,
+                                       height,
+                                       effectiveShadowSegmentSnapPixels,
+                                       clampDirectionalShadowToViewport);
         }
 
         auto pointShader = ResolveShaderFromAsset(g_State->PointLightShaderAsset, kPointLightShaderKey);
