@@ -203,6 +203,33 @@ namespace Limitless::EditorScenePanel
                 entities.push_back(entity);
         }
 
+        entt::entity ResolveSelectableEntity(const Scene* scene, entt::entity entity)
+        {
+            if (!scene || entity == entt::null)
+                return entt::null;
+
+            const entt::entity resolvedEntity = scene->ResolveEntityReference(entity);
+            return scene->IsValid(resolvedEntity) ? resolvedEntity : entt::null;
+        }
+
+        void SetMultiEntitySelection(const Scene* scene,
+                                     EditorScenePanelState& state,
+                                     entt::entity& selectedEntity,
+                                     const std::vector<entt::entity>& entities)
+        {
+            state.MultiSelectedEntities.clear();
+            state.MultiSelectedEntities.reserve(entities.size());
+            for (entt::entity entity : entities)
+            {
+                const entt::entity resolvedEntity = ResolveSelectableEntity(scene, entity);
+                if (resolvedEntity != entt::null)
+                    AddEntityIfMissing(state.MultiSelectedEntities, resolvedEntity);
+            }
+
+            selectedEntity = state.MultiSelectedEntities.empty() ? entt::null : state.MultiSelectedEntities.back();
+            state.SelectionAnchorEntity = selectedEntity;
+        }
+
         void SelectSingleEntity(EditorScenePanelState& state, entt::entity& selectedEntity, entt::entity entity)
         {
             selectedEntity = entity;
@@ -227,12 +254,16 @@ namespace Limitless::EditorScenePanel
                 return;
             }
 
-            entities.erase(
-                std::remove_if(
-                    entities.begin(),
-                    entities.end(),
-                    [&](entt::entity entity) { return !scene->IsValid(entity); }),
-                entities.end());
+            std::vector<entt::entity> normalizedEntities;
+            normalizedEntities.reserve(entities.size());
+            for (entt::entity entity : entities)
+            {
+                const entt::entity resolvedEntity = ResolveSelectableEntity(scene, entity);
+                if (resolvedEntity != entt::null)
+                    AddEntityIfMissing(normalizedEntities, resolvedEntity);
+            }
+
+            entities = std::move(normalizedEntities);
         }
 
         bool HasSelectedAncestor(const Scene& scene, entt::entity entity, const std::unordered_set<uint32_t>& selectedIds)
@@ -293,8 +324,11 @@ namespace Limitless::EditorScenePanel
                                                                       entt::entity selectedEntity)
         {
             std::vector<entt::entity> selectedEntities = state.MultiSelectedEntities;
-            if (selectedEntities.empty() && scene.IsValid(selectedEntity))
-                selectedEntities.push_back(selectedEntity);
+            PruneInvalidEntitySelection(&scene, selectedEntities);
+
+            const entt::entity resolvedSelectedEntity = ResolveSelectableEntity(&scene, selectedEntity);
+            if (selectedEntities.empty() && resolvedSelectedEntity != entt::null)
+                selectedEntities.push_back(resolvedSelectedEntity);
 
             return BuildSelectionRoots(scene, selectedEntities, state.DrawOrderEntities);
         }
@@ -770,10 +804,10 @@ namespace Limitless::EditorScenePanel
 
         state.DrawOrderEntities.clear();
         PruneInvalidEntitySelection(scene, state.MultiSelectedEntities);
-        if (scene && !scene->IsValid(state.SelectionAnchorEntity))
-            state.SelectionAnchorEntity = entt::null;
+        selectedEntity = ResolveSelectableEntity(scene, selectedEntity);
+        state.SelectionAnchorEntity = ResolveSelectableEntity(scene, state.SelectionAnchorEntity);
 
-        if (scene && !scene->IsValid(selectedEntity))
+        if (scene && selectedEntity == entt::null)
         {
             if (!state.MultiSelectedEntities.empty())
                 selectedEntity = state.MultiSelectedEntities.back();
@@ -785,6 +819,10 @@ namespace Limitless::EditorScenePanel
         {
             state.MultiSelectedEntities.clear();
             state.MultiSelectedEntities.push_back(selectedEntity);
+            state.SelectionAnchorEntity = selectedEntity;
+        }
+        else if (scene && state.SelectionAnchorEntity == entt::null)
+        {
             state.SelectionAnchorEntity = selectedEntity;
         }
 
@@ -1177,8 +1215,9 @@ namespace Limitless::EditorScenePanel
 
                     if (!clipboardScenes.empty())
                     {
+                        const entt::entity resolvedSelectedEntity = ResolveSelectableEntity(scene, selectedEntity);
                         const entt::entity destinationParent =
-                            scene->IsValid(selectedEntity) ? scene->GetParent(selectedEntity) : entt::null;
+                            resolvedSelectedEntity != entt::null ? scene->GetParent(resolvedSelectedEntity) : entt::null;
                         std::vector<entt::entity> pastedEntities;
                         pastedEntities.reserve(clipboardScenes.size());
 
@@ -1216,9 +1255,7 @@ namespace Limitless::EditorScenePanel
 
                         if (pasted)
                         {
-                            selectedEntity = pastedEntities.back();
-                            state.MultiSelectedEntities = pastedEntities;
-                            state.SelectionAnchorEntity = selectedEntity;
+                            SetMultiEntitySelection(scene, state, selectedEntity, pastedEntities);
                             ClearAssetSelectionState(
                                 selectedTextureAssetKey,
                                 cachedTextureAsset,
@@ -1294,9 +1331,7 @@ namespace Limitless::EditorScenePanel
 
                         if (duplicated)
                         {
-                            selectedEntity = duplicatedEntities.back();
-                            state.MultiSelectedEntities = duplicatedEntities;
-                            state.SelectionAnchorEntity = selectedEntity;
+                            SetMultiEntitySelection(scene, state, selectedEntity, duplicatedEntities);
                             ClearAssetSelectionState(
                                 selectedTextureAssetKey,
                                 cachedTextureAsset,

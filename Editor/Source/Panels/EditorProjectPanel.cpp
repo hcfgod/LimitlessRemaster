@@ -124,6 +124,7 @@ namespace Limitless::EditorProjectPanel
         state.GridScaleChanged = false;
         state.RequestFocusAnimationClipEditor = false;
         state.RequestFocusAnimatorControllerEditor = false;
+        state.RequestFocusInputActionsEditor = false;
         state.IsProjectPanelHoveredForExternalDrop = false;
         state.HoveredFolderRelativePathForExternalDrop.clear();
         Internal::SetProjectSearchFilter(state, std::string(state.SearchBuffer.data()));

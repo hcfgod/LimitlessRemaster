@@ -662,6 +662,7 @@ namespace Limitless
         AdditionalProjectPanelInstance instance;
         instance.WindowName = "Project##" + std::to_string(m_NextProjectPanelInstanceId++);
         instance.IsOpen = true;
+        instance.State.GridScale = m_ProjectPanelState.GridScale;
         m_AdditionalProjectPanels.push_back(std::move(instance));
     }
 
@@ -775,6 +776,14 @@ namespace Limitless
             m_SelectedAnimatorControllerAssetKey,
             &m_EditorUndoService,
             m_ProjectPanelState.RequestFocusAnimatorControllerEditor);
+    }
+
+    void EditorLayer::DrawInputActionsPanel()
+    {
+        EditorInputActionsPanel::Draw(
+            m_ShowInputActionsPanel,
+            m_SelectedInputActionsAssetKey,
+            m_ProjectPanelState.RequestFocusInputActionsEditor);
     }
 
     void EditorLayer::DrawSpriteEditorPanel()

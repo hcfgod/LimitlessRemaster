@@ -377,6 +377,11 @@ namespace Limitless::EditorProjectPanel::Internal
         {
             selection.SelectedAudioMixerAssetKey = entry.PrimaryAssetKey;
         }
+        else if (entry.IsInputActions)
+        {
+            selection.SelectedInputActionsAssetKey = entry.PrimaryAssetKey;
+            state.RequestFocusInputActionsEditor = true;
+        }
         else if (entry.IsAnimationClip)
         {
             selection.SelectedAnimationClipAssetKey = entry.PrimaryAssetKey;

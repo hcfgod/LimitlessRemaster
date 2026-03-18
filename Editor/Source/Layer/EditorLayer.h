@@ -8,6 +8,7 @@
 #include "EditorPlayMode.h"
 #include "EditorAnimationTimelinePanel.h"
 #include "EditorAnimatorGraphPanel.h"
+#include "EditorInputActionsPanel.h"
 #include "EditorPreferencesPanel.h"
 #include "EditorProjectPanel.h"
 #include "EditorProjectDialog.h"
@@ -81,8 +82,10 @@ namespace Limitless
         void DrawAdditionalProjectPanels();
         void SpawnAdditionalInspectorPanel();
         void SpawnAdditionalProjectPanel();
+        void SynchronizeProjectPanelGridScale(float gridScale);
         void DrawAnimationTimelinePanel();
         void DrawAnimatorGraphPanel();
+        void DrawInputActionsPanel();
         void DrawPhysicsDiagnosticsPanel();
         void DrawPerformancePanel();
         void DrawConsolePanel();
@@ -294,6 +297,7 @@ namespace Limitless
         bool m_ShowPerformancePanel = false;
         bool m_ShowAnimationTimelinePanel = true;
         bool m_ShowAnimatorGraphPanel = true;
+        bool m_ShowInputActionsPanel = true;
         bool m_ShowBuildSettingsWindow = false;
         std::string m_ActiveLayoutName = Editor::EditorLayoutManager::GetDefaultLayoutName();
         bool m_RequestOpenSaveLayoutPopup = false;

@@ -23,6 +23,7 @@ namespace Limitless::EditorMenuBar
               bool& showPerformancePanel,
               bool& showAnimationTimelinePanel,
               bool& showAnimatorGraphPanel,
+              bool& showInputActionsPanel,
               bool& showTilePalettePanel,
               const std::function<void()>& onOpenProject,
               const std::function<void()>& onCreateProject,

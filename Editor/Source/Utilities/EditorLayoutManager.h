@@ -25,9 +25,11 @@ namespace Limitless::Editor
         bool ShowPerformancePanel = false;
         bool ShowAnimationTimelinePanel = true;
         bool ShowAnimatorGraphPanel = true;
+        bool ShowInputActionsPanel = true;
         bool ShowTilePalettePanel = true;
         bool ShowSpriteEditorWindow = false;
         bool ShowDemoWindow = false;
+        float ProjectGridScale = 1.0f;
     };
 
     struct EditorLayoutDescriptor final

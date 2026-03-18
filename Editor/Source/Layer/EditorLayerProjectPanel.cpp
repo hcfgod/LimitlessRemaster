@@ -38,6 +38,19 @@ namespace Limitless
         constexpr const char* kAssetFontPayload = "ASSET_FONT";
     }
 
+    void EditorLayer::SynchronizeProjectPanelGridScale(float gridScale)
+    {
+        const float clampedGridScale = std::clamp(gridScale, 0.0f, 1.80f);
+        m_ProjectPanelState.GridScale = clampedGridScale;
+        m_ProjectPanelState.GridScaleChanged = false;
+
+        for (auto& additionalProjectPanel : m_AdditionalProjectPanels)
+        {
+            additionalProjectPanel.State.GridScale = clampedGridScale;
+            additionalProjectPanel.State.GridScaleChanged = false;
+        }
+    }
+
     void EditorLayer::DrawProjectPanel()
     {
         if (!m_ShowProjectPanel)
@@ -45,6 +58,7 @@ namespace Limitless
 
         const std::string prevClipKey = m_SelectedAnimationClipAssetKey;
         const std::string prevControllerKey = m_SelectedAnimatorControllerAssetKey;
+        const std::string prevInputActionsKey = m_SelectedInputActionsAssetKey;
 
         EditorProjectPanel::Draw(
             "Project",
@@ -663,21 +677,33 @@ namespace Limitless
                 (void)EditorInspectorPanel::OpenNativeScriptEditorForAssetKey(scriptAssetKey);
             });
 
-        if (m_ProjectPanelState.TreeExpansionStateChanged || m_ProjectPanelState.BrowseLocationChanged || m_ProjectPanelState.GridScaleChanged)
+        const bool shouldPersistProjectSessionState =
+            m_ProjectPanelState.TreeExpansionStateChanged ||
+            m_ProjectPanelState.BrowseLocationChanged ||
+            m_ProjectPanelState.GridScaleChanged;
+        if (m_ProjectPanelState.GridScaleChanged)
+            SynchronizeProjectPanelGridScale(m_ProjectPanelState.GridScale);
+
+        if (shouldPersistProjectSessionState)
             PersistProjectSessionState();
 
         if (!m_SelectedAnimationClipAssetKey.empty() && m_SelectedAnimationClipAssetKey != prevClipKey)
             m_ShowAnimationTimelinePanel = true;
         if (!m_SelectedAnimatorControllerAssetKey.empty() && m_SelectedAnimatorControllerAssetKey != prevControllerKey)
             m_ShowAnimatorGraphPanel = true;
+        if (!m_SelectedInputActionsAssetKey.empty() && m_SelectedInputActionsAssetKey != prevInputActionsKey)
+            m_ShowInputActionsPanel = true;
         if (m_ProjectPanelState.RequestFocusAnimationClipEditor && !m_SelectedAnimationClipAssetKey.empty())
             m_ShowAnimationTimelinePanel = true;
         if (m_ProjectPanelState.RequestFocusAnimatorControllerEditor && !m_SelectedAnimatorControllerAssetKey.empty())
             m_ShowAnimatorGraphPanel = true;
+        if (m_ProjectPanelState.RequestFocusInputActionsEditor && !m_SelectedInputActionsAssetKey.empty())
+            m_ShowInputActionsPanel = true;
     }
 
     void EditorLayer::DrawAdditionalProjectPanels()
     {
+        bool shouldPersistProjectSessionState = false;
         for (auto& additional : m_AdditionalProjectPanels)
         {
             if (!additional.IsOpen)
@@ -752,7 +778,20 @@ namespace Limitless
                 [this](const std::string& scriptAssetKey) {
                     (void)EditorInspectorPanel::OpenNativeScriptEditorForAssetKey(scriptAssetKey);
                 });
+
+            if (additional.State.GridScaleChanged)
+            {
+                SynchronizeProjectPanelGridScale(additional.State.GridScale);
+                shouldPersistProjectSessionState = true;
+            }
+            else if (additional.State.TreeExpansionStateChanged || additional.State.BrowseLocationChanged)
+            {
+                shouldPersistProjectSessionState = true;
+            }
         }
+
+        if (shouldPersistProjectSessionState)
+            PersistProjectSessionState();
 
         // Remove closed instances.
         m_AdditionalProjectPanels.erase(

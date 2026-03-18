@@ -88,9 +88,11 @@ namespace Limitless::Editor
             outState.ShowPerformancePanel = root.value("showPerformancePanel", outState.ShowPerformancePanel);
             outState.ShowAnimationTimelinePanel = root.value("showAnimationTimelinePanel", outState.ShowAnimationTimelinePanel);
             outState.ShowAnimatorGraphPanel = root.value("showAnimatorGraphPanel", outState.ShowAnimatorGraphPanel);
+            outState.ShowInputActionsPanel = root.value("showInputActionsPanel", outState.ShowInputActionsPanel);
             outState.ShowTilePalettePanel = root.value("showTilePalettePanel", outState.ShowTilePalettePanel);
             outState.ShowSpriteEditorWindow = root.value("showSpriteEditorWindow", outState.ShowSpriteEditorWindow);
             outState.ShowDemoWindow = root.value("showDemoWindow", outState.ShowDemoWindow);
+            outState.ProjectGridScale = std::clamp(root.value("projectGridScale", outState.ProjectGridScale), 0.0f, 1.80f);
             return true;
         }
 
@@ -113,9 +115,11 @@ namespace Limitless::Editor
             root["showPerformancePanel"] = state.ShowPerformancePanel;
             root["showAnimationTimelinePanel"] = state.ShowAnimationTimelinePanel;
             root["showAnimatorGraphPanel"] = state.ShowAnimatorGraphPanel;
+            root["showInputActionsPanel"] = state.ShowInputActionsPanel;
             root["showTilePalettePanel"] = state.ShowTilePalettePanel;
             root["showSpriteEditorWindow"] = state.ShowSpriteEditorWindow;
             root["showDemoWindow"] = state.ShowDemoWindow;
+            root["projectGridScale"] = std::clamp(state.ProjectGridScale, 0.0f, 1.80f);
             return root;
         }
 

@@ -412,11 +412,10 @@ namespace Limitless::EditorInspectorPanel
 
         const bool hasValidSelectedEntity = scene && selectedEntity != entt::null && scene->IsValid(selectedEntity);
 
-        // Animation clip/controller selections live in their own dedicated panels,
+        // Animation clip/controller/input actions selections live in their own dedicated panels,
         // so they must NOT prevent the entity inspector from appearing and must NOT
         // be cleared when an entity is selected.
         const bool hasSelectedAsset =
-            !selectedInputActionsAssetKey.empty() ||
             !selectedAudioMixerAssetKey.empty() ||
             !selectedMaterialAssetKey.empty() ||
             !selectedTextureAssetKey.empty() ||
@@ -428,7 +427,6 @@ namespace Limitless::EditorInspectorPanel
         if (showEntityInspector)
         {
             persistentState.ActiveEntityContextKey = BuildEntityContextKey(sceneAssetKey, scene, selectedEntity);
-            selectedInputActionsAssetKey.clear();
             selectedAudioMixerAssetKey.clear();
             selectedMaterialAssetKey.clear();
             selectedTextureAssetKey.clear();
@@ -485,10 +483,6 @@ namespace Limitless::EditorInspectorPanel
             DrawAddComponentPopup(scene, registry, selectedEntity, undoService);
 
             ApplyPendingEntityComponentRemovals(scene, registry, selectedEntity, pendingRemovals, undoService);
-        }
-        else if (!selectedInputActionsAssetKey.empty())
-        {
-            DrawInputActionsAssetInspector(selectedInputActionsAssetKey);
         }
         else if (!selectedAnimationClipAssetKey.empty())
         {
@@ -634,10 +628,9 @@ namespace Limitless::EditorInspectorPanel
             }
         }
 
-        // Animation clip/controller selections live in their own dedicated panels,
+        // Animation clip/controller/input actions selections live in their own dedicated panels,
         // so they must NOT prevent the entity inspector from appearing.
         const bool hasSelectedAsset =
-            !effectiveInputActionsKey.empty() ||
             !effectiveAudioMixerKey.empty() ||
             !effectiveMaterialKey.empty() ||
             !effectiveTextureKey.empty() ||
@@ -697,10 +690,6 @@ namespace Limitless::EditorInspectorPanel
 
             DrawAddComponentPopup(scene, registry, effectiveEntity, undoService);
             ApplyPendingEntityComponentRemovals(scene, registry, effectiveEntity, pendingRemovals, undoService);
-        }
-        else if (!effectiveInputActionsKey.empty())
-        {
-            DrawInputActionsAssetInspector(effectiveInputActionsKey);
         }
         else if (!effectiveAnimationClipKey.empty())
         {

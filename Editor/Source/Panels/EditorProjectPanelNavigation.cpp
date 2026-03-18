@@ -153,6 +153,22 @@ namespace Limitless::EditorProjectPanel::Internal
             {
                 MoveAssetOrFolderToTargetFolder(state, static_cast<const char*>(payload->Data), folderRelativePath);
             }
+            else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(callbacks.ScenePayloadId))
+            {
+                MoveAssetOrFolderToTargetFolder(state, static_cast<const char*>(payload->Data), folderRelativePath);
+            }
+            else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(callbacks.MaterialPayloadId))
+            {
+                MoveAssetOrFolderToTargetFolder(state, static_cast<const char*>(payload->Data), folderRelativePath);
+            }
+            else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(callbacks.PrefabPayloadId))
+            {
+                MoveAssetOrFolderToTargetFolder(state, static_cast<const char*>(payload->Data), folderRelativePath);
+            }
+            else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(callbacks.ShaderPayloadId))
+            {
+                MoveAssetOrFolderToTargetFolder(state, static_cast<const char*>(payload->Data), folderRelativePath);
+            }
             else if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(callbacks.AssetMovePayloadId))
             {
                 MoveAssetOrFolderToTargetFolder(state, static_cast<const char*>(payload->Data), folderRelativePath);
@@ -474,6 +490,7 @@ namespace Limitless::EditorProjectPanel::Internal
 
             if (ImGui::SmallButton("Assets"))
                 SetActiveFolder(state, "");
+            acceptFolderDropTarget("");
 
             const std::filesystem::path activeFolderPathForBreadcrumbs = state.ActiveFolderRelativePath;
             std::optional<std::filesystem::path> pendingBreadcrumbFolder;

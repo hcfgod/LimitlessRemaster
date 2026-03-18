@@ -270,6 +270,8 @@ namespace Limitless
                         root.value("showAnimationTimelinePanel", state.LayoutWindowState.ShowAnimationTimelinePanel);
                     state.LayoutWindowState.ShowAnimatorGraphPanel =
                         root.value("showAnimatorGraphPanel", state.LayoutWindowState.ShowAnimatorGraphPanel);
+                    state.LayoutWindowState.ShowInputActionsPanel =
+                        root.value("showInputActionsPanel", state.LayoutWindowState.ShowInputActionsPanel);
                     state.LayoutWindowState.ShowTilePalettePanel =
                         root.value("showTilePalettePanel", state.LayoutWindowState.ShowTilePalettePanel);
                     state.LayoutWindowState.ShowSpriteEditorWindow =
@@ -404,6 +406,7 @@ namespace Limitless
                 root["showGizmoToolbar"] = state.LayoutWindowState.ShowGizmoToolbar;
                 root["showAnimationTimelinePanel"] = state.LayoutWindowState.ShowAnimationTimelinePanel;
                 root["showAnimatorGraphPanel"] = state.LayoutWindowState.ShowAnimatorGraphPanel;
+                root["showInputActionsPanel"] = state.LayoutWindowState.ShowInputActionsPanel;
                 root["showTilePalettePanel"] = state.LayoutWindowState.ShowTilePalettePanel;
                 root["showSpriteEditorWindow"] = state.LayoutWindowState.ShowSpriteEditorWindow;
                 root["showDemoWindow"] = state.LayoutWindowState.ShowDemoWindow;
@@ -473,9 +476,11 @@ namespace Limitless
         state.ShowPerformancePanel = m_ShowPerformancePanel;
         state.ShowAnimationTimelinePanel = m_ShowAnimationTimelinePanel;
         state.ShowAnimatorGraphPanel = m_ShowAnimatorGraphPanel;
+        state.ShowInputActionsPanel = m_ShowInputActionsPanel;
         state.ShowTilePalettePanel = m_TilePaletteState.PanelOpen;
         state.ShowSpriteEditorWindow = m_SpriteEditorState.Open;
         state.ShowDemoWindow = m_ShowDemoWindow;
+        state.ProjectGridScale = std::clamp(m_ProjectPanelState.GridScale, 0.0f, 1.80f);
         return state;
     }
 
@@ -497,9 +502,13 @@ namespace Limitless
         m_ShowPerformancePanel = state.ShowPerformancePanel;
         m_ShowAnimationTimelinePanel = state.ShowAnimationTimelinePanel;
         m_ShowAnimatorGraphPanel = state.ShowAnimatorGraphPanel;
+        m_ShowInputActionsPanel = state.ShowInputActionsPanel;
         m_TilePaletteState.PanelOpen = state.ShowTilePalettePanel;
         m_SpriteEditorState.Open = state.ShowSpriteEditorWindow;
         m_ShowDemoWindow = state.ShowDemoWindow;
+        m_ProjectPanelState.GridScale = std::clamp(state.ProjectGridScale, 0.0f, 1.80f);
+        for (auto& additionalProjectPanel : m_AdditionalProjectPanels)
+            additionalProjectPanel.State.GridScale = m_ProjectPanelState.GridScale;
     }
 
     ImGuiLayer* EditorLayer::GetImGuiLayer() const

@@ -22,6 +22,7 @@ namespace Limitless::EditorMenuBar
               bool& showPerformancePanel,
               bool& showAnimationTimelinePanel,
               bool& showAnimatorGraphPanel,
+              bool& showInputActionsPanel,
               bool& showTilePalettePanel,
               const std::function<void()>& onOpenProject,
               const std::function<void()>& onCreateProject,
@@ -148,6 +149,7 @@ namespace Limitless::EditorMenuBar
             ImGui::MenuItem("Performance", nullptr, &showPerformancePanel);
             ImGui::MenuItem("Animation Timeline", nullptr, &showAnimationTimelinePanel);
             ImGui::MenuItem("Animator Graph", nullptr, &showAnimatorGraphPanel);
+            ImGui::MenuItem("Input Actions", nullptr, &showInputActionsPanel);
             ImGui::MenuItem("Tile Palette", nullptr, &showTilePalettePanel);
             ImGui::Separator();
             if (ImGui::MenuItem("Add Inspector Panel") && onAddInspectorPanel)

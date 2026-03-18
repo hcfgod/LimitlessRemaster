@@ -1169,6 +1169,7 @@ namespace Limitless
         DrawAdditionalProjectPanels();
         DrawAnimationTimelinePanel();
         DrawAnimatorGraphPanel();
+        DrawInputActionsPanel();
         DrawPhysicsDiagnosticsPanel();
         DrawPerformancePanel();
         DrawConsolePanel();

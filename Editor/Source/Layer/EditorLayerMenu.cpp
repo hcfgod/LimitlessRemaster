@@ -57,6 +57,7 @@ namespace Limitless
             m_ShowPerformancePanel,
             m_ShowAnimationTimelinePanel,
             m_ShowAnimatorGraphPanel,
+            m_ShowInputActionsPanel,
             m_TilePaletteState.PanelOpen,
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Open); },
             [this]() { EditorProjectDialog::RequestOpen(m_ProjectDialogState, EditorProjectDialog::ProjectDialogMode::Create); },

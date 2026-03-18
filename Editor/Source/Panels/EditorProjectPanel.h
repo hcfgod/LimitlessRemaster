@@ -46,6 +46,7 @@ namespace Limitless
         std::vector<std::string> MultiSelectedSubSpriteKeys;
         bool RequestFocusAnimationClipEditor = false;
         bool RequestFocusAnimatorControllerEditor = false;
+        bool RequestFocusInputActionsEditor = false;
         bool IsProjectPanelHoveredForExternalDrop = false;
         float ExternalDropPanelMinX = 0.0f;
         float ExternalDropPanelMinY = 0.0f;
