@@ -219,22 +219,49 @@ namespace Limitless::Lighting2DInternal
         const float viewportWidth = static_cast<float>(std::max<uint32_t>(width, 1u));
         const float viewportHeight = static_cast<float>(std::max<uint32_t>(height, 1u));
         const float casterHeightEncodeMaxPixels = std::max(std::sqrt(viewportWidth * viewportWidth + viewportHeight * viewportHeight), 1.0f);
-        // Use all shadow segments without screen-space facing filter.
-        // The ray-segment intersection in the shader is geometrically
-        // correct regardless of edge orientation, so the filter was purely
-        // a performance optimization.  Under perspective camera rotation
-        // the screen-space edge normals shift rapidly, causing the filter
-        // to pop edges in/out and produce shadow flicker.
-        const size_t segmentCountClamped = std::min<size_t>(shadowSegments.size(), kShaderShadowSegmentCap);
+        const float influencePadding = std::max(2.0f, shadowSoftness + shadowBias + shadowSegmentSnapPixelsClamped + 1.0f);
+        const glm::vec2 viewportCorners[4] = {
+            glm::vec2(0.0f, 0.0f),
+            glm::vec2(viewportWidth, 0.0f),
+            glm::vec2(viewportWidth, viewportHeight),
+            glm::vec2(0.0f, viewportHeight)
+        };
+        glm::vec2 influenceMin(viewportWidth, viewportHeight);
+        glm::vec2 influenceMax(0.0f, 0.0f);
+        for (const glm::vec2& corner : viewportCorners)
+        {
+            influenceMin = glm::min(influenceMin, corner);
+            influenceMax = glm::max(influenceMax, corner);
+            const glm::vec2 projectedCorner = corner + shadowDirection * std::max(1.0f, shadowDistance);
+            influenceMin = glm::min(influenceMin, projectedCorner);
+            influenceMax = glm::max(influenceMax, projectedCorner);
+        }
+        influenceMin -= glm::vec2(influencePadding);
+        influenceMax += glm::vec2(influencePadding);
         std::vector<glm::vec4> segmentEndpoints;
         std::vector<glm::vec4> segmentCasterIds;
         std::vector<int32_t> segmentFlags;
-        segmentEndpoints.reserve(segmentCountClamped);
-        segmentCasterIds.reserve(segmentCountClamped);
-        segmentFlags.reserve(segmentCountClamped);
-        for (size_t i = 0; i < segmentCountClamped; ++i)
+        segmentEndpoints.reserve(std::min<size_t>(shadowSegments.size(), kShaderShadowSegmentCap));
+        segmentCasterIds.reserve(std::min<size_t>(shadowSegments.size(), kShaderShadowSegmentCap));
+        segmentFlags.reserve(std::min<size_t>(shadowSegments.size(), kShaderShadowSegmentCap));
+        for (size_t i = 0; i < shadowSegments.size() && segmentEndpoints.size() < kShaderShadowSegmentCap; ++i)
         {
-            segmentEndpoints.push_back(shadowSegments[i].Endpoints);
+            const glm::vec4 endpoints = shadowSegments[i].Endpoints;
+            const glm::vec2 segmentMin(
+                std::min(endpoints.x, endpoints.z),
+                std::min(endpoints.y, endpoints.w));
+            const glm::vec2 segmentMax(
+                std::max(endpoints.x, endpoints.z),
+                std::max(endpoints.y, endpoints.w));
+            const bool intersectsInfluence =
+                segmentMax.x >= influenceMin.x &&
+                segmentMin.x <= influenceMax.x &&
+                segmentMax.y >= influenceMin.y &&
+                segmentMin.y <= influenceMax.y;
+            if (!intersectsInfluence)
+                continue;
+
+            segmentEndpoints.push_back(endpoints);
             segmentCasterIds.push_back(shadowSegments[i].CasterEntityId);
             segmentFlags.push_back(shadowSegments[i].Flags);
         }
@@ -298,14 +325,31 @@ namespace Limitless::Lighting2DInternal
         const float shadowBias = light.ShadowBiasPixels;
         const float shadowAlphaCutoff = std::clamp(g_State->Settings.ShadowAlphaCutoff, 0.0f, 1.0f);
         const float shadowSegmentSnapPixelsClamped = std::max(0.0f, shadowSegmentSnapPixels);
-        const size_t segmentCountClamped = std::min<size_t>(shadowSegments.size(), kShaderShadowSegmentCap);
+        const float influencePadding = std::max(2.0f, shadowSoftness + shadowBias + shadowSegmentSnapPixelsClamped + 1.0f);
+        const glm::vec2 influenceMin = lightPosition - glm::vec2(std::max(1.0f, lightRadius + influencePadding));
+        const glm::vec2 influenceMax = lightPosition + glm::vec2(std::max(1.0f, lightRadius + influencePadding));
         std::vector<glm::vec4> segmentEndpoints;
         std::vector<glm::vec4> segmentCasterIds;
-        segmentEndpoints.reserve(segmentCountClamped);
-        segmentCasterIds.reserve(segmentCountClamped);
-        for (size_t i = 0; i < segmentCountClamped; ++i)
+        segmentEndpoints.reserve(std::min<size_t>(shadowSegments.size(), kShaderShadowSegmentCap));
+        segmentCasterIds.reserve(std::min<size_t>(shadowSegments.size(), kShaderShadowSegmentCap));
+        for (size_t i = 0; i < shadowSegments.size() && segmentEndpoints.size() < kShaderShadowSegmentCap; ++i)
         {
-            segmentEndpoints.push_back(shadowSegments[i].Endpoints);
+            const glm::vec4 endpoints = shadowSegments[i].Endpoints;
+            const glm::vec2 segmentMin(
+                std::min(endpoints.x, endpoints.z),
+                std::min(endpoints.y, endpoints.w));
+            const glm::vec2 segmentMax(
+                std::max(endpoints.x, endpoints.z),
+                std::max(endpoints.y, endpoints.w));
+            const bool intersectsInfluence =
+                segmentMax.x >= influenceMin.x &&
+                segmentMin.x <= influenceMax.x &&
+                segmentMax.y >= influenceMin.y &&
+                segmentMin.y <= influenceMax.y;
+            if (!intersectsInfluence)
+                continue;
+
+            segmentEndpoints.push_back(endpoints);
             segmentCasterIds.push_back(shadowSegments[i].CasterEntityId);
         }
 
@@ -334,7 +378,9 @@ namespace Limitless::Lighting2DInternal
     }
 
     void SubmitCompositePass(const std::shared_ptr<Texture2D>& albedoTexture,
-                             const std::shared_ptr<Texture2D>& lightTexture)
+                             const std::shared_ptr<Texture2D>& lightTexture,
+                             const glm::vec2& uvOffset,
+                             const glm::vec2& uvScale)
     {
         auto shader = ResolveShaderFromAsset(g_State->CompositeShaderAsset, kCompositeShaderKey);
         if (!shader || !g_State->UnitQuadVertexArray || !albedoTexture || !lightTexture)
@@ -347,6 +393,8 @@ namespace Limitless::Lighting2DInternal
         RenderBindingSet compositeBindings{};
         compositeBindings.Textures.push_back(RenderTextureBinding{ "u_AlbedoTexture", albedoRef, 0u });
         compositeBindings.Textures.push_back(RenderTextureBinding{ "u_LightTexture", lightRef, 1u });
+        compositeBindings.Parameters.push_back(RenderParameterBinding{ "u_SceneUvOffset", uvOffset });
+        compositeBindings.Parameters.push_back(RenderParameterBinding{ "u_SceneUvScale", uvScale });
         Renderer::GetInstance().SubmitCommand(std::make_unique<ApplyRenderBindingsCommand>(shaderRef, vertexArrayRef, std::move(compositeBindings)));
         Renderer::GetInstance().SubmitCommand(std::make_unique<DrawArraysCommand>(DrawMode::TriangleStrip, 0, 4));
     }

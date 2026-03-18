@@ -51,8 +51,6 @@ namespace Limitless::Lighting2DInternal
         std::vector<NormalPassSpriteDraw> drawList;
         auto sortedEntities = BuildSortedSpriteRenderList(scene, interpolationAlpha, cullingMask);
         drawList.reserve(sortedEntities.size());
-        static bool s_loggedGBufferSpriteDrawParity = false;
-        const bool logGBufferSpriteDrawParity = !s_loggedGBufferSpriteDrawParity;
 
         auto& registry = scene.GetRegistry();
         for (entt::entity entity : sortedEntities)
@@ -74,16 +72,12 @@ namespace Limitless::Lighting2DInternal
             draw.ReceiveShadows = sprite.ReceiveShadows;
             draw.CasterHeightPixels = 0.0f;
             draw.CasterEntityId = glm::vec4(0.0f);
-            const char* uvSource = "default";
-            const char* textureSource = "white";
-            std::string resolvedTextureKey;
 
             const bool hasAnimatorSubRect =
                 animator && animator->Enabled && animator->ApplyToSprite && animator->RuntimeHasSpriteSubRect;
             const bool hasSpriteSubRect = sprite.SubSpriteIndex >= 0;
             if (hasAnimatorSubRect)
             {
-                uvSource = "animator_subrect";
                 draw.UvMin = animator->RuntimeSpriteUvMin;
                 glm::vec2 frameSpan = animator->RuntimeSpriteUvMax - animator->RuntimeSpriteUvMin;
                 if (frameSpan.x <= 0.0001f || frameSpan.y <= 0.0001f)
@@ -92,7 +86,6 @@ namespace Limitless::Lighting2DInternal
             }
             else if (hasSpriteSubRect)
             {
-                uvSource = "sprite_subrect";
                 draw.UvMin = sprite.UvMin;
                 glm::vec2 subSpan = sprite.UvMax - sprite.UvMin;
                 if (subSpan.x <= 0.0001f || subSpan.y <= 0.0001f)
@@ -115,8 +108,6 @@ namespace Limitless::Lighting2DInternal
                 {
                     draw.AlbedoTexture = animator->RuntimeCachedSpriteTextureOverride->GetTexture();
                     hasAnimatedTextureOverride = true;
-                    textureSource = "animator_texture";
-                    resolvedTextureKey = animator->RuntimeSpriteTextureOverrideKey;
                 }
             }
 
@@ -130,16 +121,12 @@ namespace Limitless::Lighting2DInternal
                         if (auto mainTexture = material->CachedMaterial->GetMainTexture())
                         {
                             draw.AlbedoTexture = mainTexture;
-                            textureSource = "material_texture";
-                            if (auto handle = material->CachedMaterial->GetMainTextureHandle().Lock())
-                                resolvedTextureKey = handle->GetKey();
                         }
                     }
 
                     if (!hasAnimatorSubRect && !hasSpriteSubRect && !hasAnimatedTextureOverride &&
                         material->CachedMaterial->HasMainTextureSubRect())
                     {
-                        uvSource = "material_subrect";
                         draw.UvMin = material->CachedMaterial->GetMainTextureUvMin();
                         glm::vec2 subSpan = material->CachedMaterial->GetMainTextureUvMax() - material->CachedMaterial->GetMainTextureUvMin();
                         if (subSpan.x <= 0.0001f || subSpan.y <= 0.0001f)
@@ -166,8 +153,6 @@ namespace Limitless::Lighting2DInternal
                 if (sprite.CachedTexture && sprite.CachedTexture->GetTexture())
                 {
                     draw.AlbedoTexture = sprite.CachedTexture->GetTexture();
-                    textureSource = "sprite_texture";
-                    resolvedTextureKey = sprite.TextureKey;
                 }
             }
 
@@ -185,31 +170,8 @@ namespace Limitless::Lighting2DInternal
                 (draw.AlbedoTexture != g_State->WhiteTexture || hasExplicitShadowOccluder))
                 draw.CasterEntityId = EncodeEntityIdToUnitVec4(entity);
 
-            if (logGBufferSpriteDrawParity && (sprite.ReceiveShadows || sprite.CastShadows))
-            {
-                LT_CORE_WARN("SpritePass[GBuffer]: id={} texSource={} uvSource={} uvMin=({:.4f},{:.4f}) uvMax=({:.4f},{:.4f}) receive={} cast={} order={} texture='{}' casterId=({:.4f},{:.4f},{:.4f},{:.4f})",
-                    static_cast<uint32_t>(entity),
-                    textureSource,
-                    uvSource,
-                    draw.UvMin.x,
-                    draw.UvMin.y,
-                    draw.UvMax.x,
-                    draw.UvMax.y,
-                    draw.ReceiveShadows ? 1 : 0,
-                    sprite.CastShadows ? 1 : 0,
-                    sprite.RenderOrder,
-                    resolvedTextureKey,
-                    draw.CasterEntityId.x,
-                    draw.CasterEntityId.y,
-                    draw.CasterEntityId.z,
-                    draw.CasterEntityId.w);
-            }
-
             drawList.push_back(std::move(draw));
         }
-
-        if (logGBufferSpriteDrawParity)
-            s_loggedGBufferSpriteDrawParity = true;
 
         return drawList;
     }
@@ -294,6 +256,13 @@ namespace Limitless::Lighting2DInternal
         std::unordered_set<entt::entity> explicitOccluderEntities;
         explicitOccluderEntities.reserve(64);
         float maxDirectionalShadowDistanceWorld = 0.0f;
+        glm::vec2 directionalShadowCullPaddingMinWorld(0.0f);
+        glm::vec2 directionalShadowCullPaddingMaxWorld(0.0f);
+        bool hasShadowCastingLights = false;
+        float maxPointShadowRadiusWorld = 0.0f;
+        const bool useGameplayShadowWarmMargin = camera.GetUsage() == CameraUsage::Gameplay;
+        if (!g_State->Settings.EnableShadows)
+            return segments;
         auto directionalLightView = registry.view<DirectionalLight2DComponent>();
         for (entt::entity entity : directionalLightView)
         {
@@ -306,14 +275,102 @@ namespace Limitless::Lighting2DInternal
             if (!directional.Enabled || !directional.CastShadows || directional.Intensity <= 0.0f)
                 continue;
 
-            maxDirectionalShadowDistanceWorld = std::max(maxDirectionalShadowDistanceWorld, std::max(0.0f, directional.ShadowDistance));
+            glm::vec2 worldDirection = directional.Direction;
+            if (directional.UseEntityRotation)
+            {
+                const glm::mat4 worldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
+                worldDirection = glm::vec2(worldTransform[0].x, worldTransform[0].y);
+            }
+            if (glm::length(worldDirection) <= kEpsilon)
+                worldDirection = glm::vec2(0.0f, -1.0f);
+            worldDirection = glm::normalize(worldDirection);
+
+            hasShadowCastingLights = true;
+            const float shadowDistanceWorld = std::max(0.0f, directional.ShadowDistance);
+            maxDirectionalShadowDistanceWorld = std::max(maxDirectionalShadowDistanceWorld, shadowDistanceWorld);
+            directionalShadowCullPaddingMinWorld.x = std::max(directionalShadowCullPaddingMinWorld.x, std::max(0.0f, worldDirection.x) * shadowDistanceWorld);
+            directionalShadowCullPaddingMinWorld.y = std::max(directionalShadowCullPaddingMinWorld.y, std::max(0.0f, worldDirection.y) * shadowDistanceWorld);
+            directionalShadowCullPaddingMaxWorld.x = std::max(directionalShadowCullPaddingMaxWorld.x, std::max(0.0f, -worldDirection.x) * shadowDistanceWorld);
+            directionalShadowCullPaddingMaxWorld.y = std::max(directionalShadowCullPaddingMaxWorld.y, std::max(0.0f, -worldDirection.y) * shadowDistanceWorld);
+        }
+        const float baseShadowCullPaddingWorld = maxDirectionalShadowDistanceWorld * 0.2f;
+        directionalShadowCullPaddingMinWorld = glm::max(directionalShadowCullPaddingMinWorld, glm::vec2(baseShadowCullPaddingWorld));
+        directionalShadowCullPaddingMaxWorld = glm::max(directionalShadowCullPaddingMaxWorld, glm::vec2(baseShadowCullPaddingWorld));
+
+        auto pointLightView = registry.view<PointLight2DComponent, TransformComponent>();
+        for (entt::entity entity : pointLightView)
+        {
+            if (!scene.IsEntityEnabledInHierarchy(entity))
+                continue;
+            if (!IsEntityVisibleToCameraCullingMask(registry, entity, cullingMask))
+                continue;
+
+            const auto& pointLight = pointLightView.get<PointLight2DComponent>(entity);
+            if (!pointLight.Enabled || !pointLight.CastShadows || pointLight.Intensity <= 0.0f || pointLight.Radius <= 0.01f)
+                continue;
+
+            hasShadowCastingLights = true;
+            const glm::mat4 worldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
+            const float worldRadiusScaleX = glm::length(glm::vec3(worldTransform[0]));
+            const float worldRadiusScaleY = glm::length(glm::vec3(worldTransform[1]));
+            const float lightRadiusWorld = std::max(pointLight.Radius * std::max(worldRadiusScaleX, worldRadiusScaleY), pointLight.Radius);
+            maxPointShadowRadiusWorld = std::max(maxPointShadowRadiusWorld, lightRadiusWorld);
         }
 
-        auto appendOccluderSegments = [&](entt::entity entity, const std::vector<glm::vec2>& localPoints, bool closed, int32_t segmentFlags) {
+        if (!hasShadowCastingLights)
+            return segments;
+
+        const SceneRenderCullingFrustum shadowFrustum = BuildSceneRenderCullingFrustum(camera);
+        const glm::vec3 shadowCullPaddingMinBase(
+            directionalShadowCullPaddingMinWorld.x + maxPointShadowRadiusWorld,
+            directionalShadowCullPaddingMinWorld.y + maxPointShadowRadiusWorld,
+            maxDirectionalShadowDistanceWorld + maxPointShadowRadiusWorld);
+        const glm::vec3 shadowCullPaddingMaxBase(
+            directionalShadowCullPaddingMaxWorld.x + maxPointShadowRadiusWorld,
+            directionalShadowCullPaddingMaxWorld.y + maxPointShadowRadiusWorld,
+            maxDirectionalShadowDistanceWorld + maxPointShadowRadiusWorld);
+        auto isWorldBoundsShadowRelevant = [&](const glm::mat4& worldTransform, const glm::vec2& localMinimum, const glm::vec2& localMaximum) {
+            const glm::vec3 worldCorners[4] = {
+                glm::vec3(worldTransform * glm::vec4(localMinimum.x, localMinimum.y, 0.0f, 1.0f)),
+                glm::vec3(worldTransform * glm::vec4(localMaximum.x, localMinimum.y, 0.0f, 1.0f)),
+                glm::vec3(worldTransform * glm::vec4(localMaximum.x, localMaximum.y, 0.0f, 1.0f)),
+                glm::vec3(worldTransform * glm::vec4(localMinimum.x, localMaximum.y, 0.0f, 1.0f))
+            };
+            glm::vec3 aabbMin(0.0f), aabbMax(0.0f);
+            if (!ComputeSceneRenderAabbFromPoints(worldCorners, 4, aabbMin, aabbMax))
+                return true;
+
+            glm::vec3 shadowCullPaddingMin = shadowCullPaddingMinBase;
+            glm::vec3 shadowCullPaddingMax = shadowCullPaddingMaxBase;
+            if (useGameplayShadowWarmMargin)
+            {
+                const glm::vec3 boundsExtents = glm::max(aabbMax - aabbMin, glm::vec3(0.0f));
+                const glm::vec3 shadowWarmPadding = glm::max(boundsExtents * 0.2f, glm::vec3(1.5f, 1.5f, 0.5f));
+                shadowCullPaddingMin += shadowWarmPadding;
+                shadowCullPaddingMax += shadowWarmPadding;
+            }
+
+            return IsSceneRenderAabbVisible(shadowFrustum, aabbMin - shadowCullPaddingMin, aabbMax + shadowCullPaddingMax);
+        };
+        auto isWorldPolygonShadowRelevant = [&](const glm::mat4& worldTransform, const std::vector<glm::vec2>& localPoints) {
+            if (localPoints.empty())
+                return true;
+
+            glm::vec2 localMinimum = localPoints.front();
+            glm::vec2 localMaximum = localPoints.front();
+            for (size_t index = 1; index < localPoints.size(); ++index)
+            {
+                localMinimum = glm::min(localMinimum, localPoints[index]);
+                localMaximum = glm::max(localMaximum, localPoints[index]);
+            }
+
+            return isWorldBoundsShadowRelevant(worldTransform, localMinimum, localMaximum);
+        };
+
+        auto appendOccluderSegments = [&](entt::entity entity, const glm::mat4& worldTransform, const std::vector<glm::vec2>& localPoints, bool closed, int32_t segmentFlags) {
             if (segments.size() >= maxSegments || localPoints.size() < 2)
                 return;
 
-            const glm::mat4 worldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
             const glm::vec4 casterEntityId = EncodeEntityIdToUnitVec4(entity);
 
             // Work in clip space so we can clip edges at the near plane
@@ -321,23 +378,28 @@ namespace Limitless::Lighting2DInternal
             // Clamping caused discontinuous segment jumps when clip.w
             // crossed the threshold, which was the main source of shadow
             // flicker during camera rotation.
+            // Compute world points once and reuse for both clip projection
+            // and signed area to avoid redundant matrix-vector multiplies.
+            std::vector<glm::vec3> worldPoints;
             std::vector<glm::vec4> clipPoints;
+            worldPoints.reserve(localPoints.size());
             clipPoints.reserve(localPoints.size());
             for (const glm::vec2& localPoint : localPoints)
             {
-                const glm::vec4 worldPoint = worldTransform * glm::vec4(localPoint, 0.0f, 1.0f);
-                clipPoints.push_back(viewProjection * worldPoint);
+                const glm::vec3 wp(worldTransform * glm::vec4(localPoint, 0.0f, 1.0f));
+                worldPoints.push_back(wp);
+                clipPoints.push_back(viewProjection * glm::vec4(wp, 1.0f));
             }
 
-            if (closed && clipPoints.size() >= 3)
+            if (closed && worldPoints.size() >= 3)
             {
                 // Compute signed area from world-space XY so the winding
                 // stays stable regardless of perspective camera orientation.
                 float worldSignedArea = 0.0f;
-                for (size_t index = 0; index < localPoints.size(); ++index)
+                for (size_t index = 0; index < worldPoints.size(); ++index)
                 {
-                    const glm::vec4 wa = worldTransform * glm::vec4(localPoints[index], 0.0f, 1.0f);
-                    const glm::vec4 wb = worldTransform * glm::vec4(localPoints[(index + 1) % localPoints.size()], 0.0f, 1.0f);
+                    const glm::vec3& wa = worldPoints[index];
+                    const glm::vec3& wb = worldPoints[(index + 1) % worldPoints.size()];
                     worldSignedArea += (wa.x * wb.y) - (wb.x * wa.y);
                 }
 
@@ -500,27 +562,6 @@ namespace Limitless::Lighting2DInternal
             return textureKey;
         };
 
-        static bool s_loggedSpriteCasterPaths = false;
-        const bool logSpriteCasterPaths = !s_loggedSpriteCasterPaths;
-        s_loggedSpriteCasterPaths = true;
-
-        auto getEntityDebugName = [&](entt::entity entity) -> std::string {
-            if (const auto* tag = registry.try_get<TagComponent>(entity); tag && !tag->Tag.empty())
-                return tag->Tag;
-            return std::to_string(static_cast<uint32_t>(entity));
-        };
-
-        auto logSpriteCasterPath = [&](entt::entity entity, const char* pathName, const std::string& textureKey, size_t pointCount) {
-            if (!logSpriteCasterPaths)
-                return;
-            LT_CORE_WARN("ShadowCaster path: entity='{}' id={} path={} texture='{}' points={}",
-                getEntityDebugName(entity),
-                static_cast<uint32_t>(entity),
-                pathName,
-                textureKey,
-                pointCount);
-        };
-
         auto shouldAutoCastFromSprite = [&](entt::entity entity, const SpriteComponent& sprite) -> bool {
             if (!sprite.CastShadows || sprite.Color.a <= 0.01f)
                 return false;
@@ -628,23 +669,18 @@ namespace Limitless::Lighting2DInternal
                 }
             }
 
+            const glm::mat4 occluderWorldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
+            if (!isWorldPolygonShadowRelevant(occluderWorldTransform, localPoints))
+                continue;
+
             if (sprite)
             {
-                const std::string textureKey = resolveSpriteShadowTextureKey(entity, *sprite);
                 if (!localPoints.empty() &&
                     (occluder.Source == ShadowOccluder2DComponent::SourceMode::PhysicsCollider ||
                      isDefaultUnitQuadOccluder(occluder)))
                 {
-                    logSpriteCasterPath(entity, "explicit_alpha_hull_raymarch_only", textureKey, localPoints.size());
                     if (shouldUseAlphaRaymarchOnly(entity, *sprite))
                         continue;
-                }
-                else
-                {
-                    logSpriteCasterPath(entity,
-                        occluder.Source == ShadowOccluder2DComponent::SourceMode::PhysicsCollider ? "explicit_physics_polygon" : "explicit_manual_polygon",
-                        textureKey,
-                        localPoints.size());
                 }
             }
 
@@ -653,7 +689,7 @@ namespace Limitless::Lighting2DInternal
                  isDefaultUnitQuadOccluder(occluder)))
                 ? kShadowSegmentFlagOffscreenOnly
                 : 0;
-            appendOccluderSegments(entity, localPoints, occluder.Closed, segmentFlags);
+            appendOccluderSegments(entity, occluderWorldTransform, localPoints, occluder.Closed, segmentFlags);
         }
 
         // Hybrid fallback: collider-backed occluders for entities without an explicit ShadowOccluder2D.
@@ -679,25 +715,26 @@ namespace Limitless::Lighting2DInternal
             if (!shouldAutoCastFromSprite(entity, *sprite))
                 continue;
 
+            const auto& boxCollider = boxColliderView.get<BoxCollider2DComponent>(entity);
+            const glm::vec2 boxHalfSize = boxCollider.Size * 0.5f;
+            const glm::mat4 boxWorldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
+            if (!isWorldBoundsShadowRelevant(boxWorldTransform, boxCollider.Offset - boxHalfSize, boxCollider.Offset + boxHalfSize))
+                continue;
+
             std::vector<glm::vec2> localPoints = tryGetSpriteAlphaHull(entity, *sprite);
             if (localPoints.empty())
             {
                 if (shouldUseAlphaRaymarchOnly(entity, *sprite))
-                {
-                    logSpriteCasterPath(entity, "box_collider_raymarch_only_no_hull", resolveSpriteShadowTextureKey(entity, *sprite), 0);
                     continue;
-                }
                 LT_CORE_TRACE("SpriteAlphaHull: no hull for entity {} (textureKey='{}', sub={}), using box collider",
                     static_cast<uint32_t>(entity), sprite->TextureKey, sprite->SubSpriteIndex);
                 BuildPhysicsOccluderPolygon(registry, entity, localPoints);
-                logSpriteCasterPath(entity, "box_collider_fallback", resolveSpriteShadowTextureKey(entity, *sprite), localPoints.size());
-                appendOccluderSegments(entity, localPoints, true, kShadowSegmentFlagOffscreenOnly);
+                appendOccluderSegments(entity, boxWorldTransform, localPoints, true, kShadowSegmentFlagOffscreenOnly);
             }
             else
             {
-                logSpriteCasterPath(entity, "box_alpha_hull_raymarch_only", resolveSpriteShadowTextureKey(entity, *sprite), localPoints.size());
                 if (!shouldUseAlphaRaymarchOnly(entity, *sprite))
-                    appendOccluderSegments(entity, localPoints, true, kShadowSegmentFlagOffscreenOnly);
+                    appendOccluderSegments(entity, boxWorldTransform, localPoints, true, kShadowSegmentFlagOffscreenOnly);
             }
         }
 
@@ -720,23 +757,24 @@ namespace Limitless::Lighting2DInternal
             if (!shouldAutoCastFromSprite(entity, *sprite))
                 continue;
 
+            const auto& circleCollider = circleColliderView.get<CircleCollider2DComponent>(entity);
+            const float circleRadius = std::max(0.01f, circleCollider.Radius);
+            const glm::mat4 circleWorldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
+            if (!isWorldBoundsShadowRelevant(circleWorldTransform, circleCollider.Offset - glm::vec2(circleRadius), circleCollider.Offset + glm::vec2(circleRadius)))
+                continue;
+
             std::vector<glm::vec2> localPoints = tryGetSpriteAlphaHull(entity, *sprite);
             if (localPoints.empty())
             {
                 if (shouldUseAlphaRaymarchOnly(entity, *sprite))
-                {
-                    logSpriteCasterPath(entity, "circle_collider_raymarch_only_no_hull", resolveSpriteShadowTextureKey(entity, *sprite), 0);
                     continue;
-                }
                 BuildPhysicsOccluderPolygon(registry, entity, localPoints);
-                logSpriteCasterPath(entity, "circle_collider_fallback", resolveSpriteShadowTextureKey(entity, *sprite), localPoints.size());
-                appendOccluderSegments(entity, localPoints, true, kShadowSegmentFlagOffscreenOnly);
+                appendOccluderSegments(entity, circleWorldTransform, localPoints, true, kShadowSegmentFlagOffscreenOnly);
             }
             else
             {
-                logSpriteCasterPath(entity, "circle_alpha_hull_raymarch_only", resolveSpriteShadowTextureKey(entity, *sprite), localPoints.size());
                 if (!shouldUseAlphaRaymarchOnly(entity, *sprite))
-                    appendOccluderSegments(entity, localPoints, true, kShadowSegmentFlagOffscreenOnly);
+                    appendOccluderSegments(entity, circleWorldTransform, localPoints, true, kShadowSegmentFlagOffscreenOnly);
             }
         }
 
@@ -765,31 +803,29 @@ namespace Limitless::Lighting2DInternal
             const auto& sprite = spriteView.get<SpriteComponent>(entity);
             if (!shouldAutoCastFromSprite(entity, sprite))
                 continue;
+            const glm::mat4 spriteWorldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
+            if (!isWorldBoundsShadowRelevant(spriteWorldTransform, glm::vec2(-0.5f, -0.5f), glm::vec2(0.5f, 0.5f)))
+                continue;
 
             std::vector<glm::vec2> alphaHull = tryGetSpriteAlphaHull(entity, sprite);
             if (!alphaHull.empty())
             {
-                logSpriteCasterPath(entity, "sprite_alpha_hull_raymarch_only", resolveSpriteShadowTextureKey(entity, sprite), alphaHull.size());
                 if (!shouldUseAlphaRaymarchOnly(entity, sprite))
-                    appendOccluderSegments(entity, alphaHull, true, kShadowSegmentFlagOffscreenOnly);
+                    appendOccluderSegments(entity, spriteWorldTransform, alphaHull, true, kShadowSegmentFlagOffscreenOnly);
                 continue;
             }
 
             // Sprites that rely on alpha raymarching should not fall back
             // to rectangular quad segments when the alpha hull is unavailable.
             if (shouldUseAlphaRaymarchOnly(entity, sprite))
-            {
-                logSpriteCasterPath(entity, "sprite_fallback_raymarch_only_no_hull", resolveSpriteShadowTextureKey(entity, sprite), 0);
                 continue;
-            }
 
             // Automatic sprite fallback should not produce map-sized caster
             // quads when users scale sprites up for visual reasons (common
             // with pixel-art imports). Clamp fallback caster extents in
             // world space; explicit colliders/occluders remain exact.
-            const glm::mat4 worldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
-            const float worldScaleX = std::max(glm::length(glm::vec2(worldTransform[0].x, worldTransform[0].y)), kEpsilon);
-            const float worldScaleY = std::max(glm::length(glm::vec2(worldTransform[1].x, worldTransform[1].y)), kEpsilon);
+            const float worldScaleX = std::max(glm::length(glm::vec2(spriteWorldTransform[0].x, spriteWorldTransform[0].y)), kEpsilon);
+            const float worldScaleY = std::max(glm::length(glm::vec2(spriteWorldTransform[1].x, spriteWorldTransform[1].y)), kEpsilon);
 
             constexpr float kAutoSpriteCasterMaxWorldExtent = 1.5f;
             const float clampedWorldWidth = std::min(worldScaleX, kAutoSpriteCasterMaxWorldExtent);
@@ -804,13 +840,112 @@ namespace Limitless::Lighting2DInternal
                 glm::vec2( localHalfExtents.x,  localHalfExtents.y),
                 glm::vec2(-localHalfExtents.x,  localHalfExtents.y)
             };
-            logSpriteCasterPath(entity, "sprite_quad_fallback", resolveSpriteShadowTextureKey(entity, sprite), localQuad.size());
-            appendOccluderSegments(entity, localQuad, true, kShadowSegmentFlagOffscreenOnly);
+            appendOccluderSegments(entity, spriteWorldTransform, localQuad, true, kShadowSegmentFlagOffscreenOnly);
         }
 
         // Tilemap fallback: emit edge segments for occupied cells in Grid2D
         // layers so tilemaps can cast directional/point shadows without
         // requiring explicit collider/occluder authoring.
+        const auto mergeTileOccluderEdges = [](std::vector<glm::vec4>& edges) {
+            if (edges.size() < 2)
+                return;
+
+            struct EdgeRun
+            {
+                bool Horizontal = false;
+                bool Forward = false;
+                float Line = 0.0f;
+                float Start = 0.0f;
+                float End = 0.0f;
+            };
+
+            std::vector<EdgeRun> runs;
+            std::vector<glm::vec4> passthrough;
+            runs.reserve(edges.size());
+            passthrough.reserve(edges.size());
+            for (const glm::vec4& edge : edges)
+            {
+                const bool horizontal = std::abs(edge.y - edge.w) <= kEpsilon;
+                const bool vertical = std::abs(edge.x - edge.z) <= kEpsilon;
+                if (!horizontal && !vertical)
+                {
+                    passthrough.push_back(edge);
+                    continue;
+                }
+
+                EdgeRun run{};
+                run.Horizontal = horizontal;
+                if (horizontal)
+                {
+                    run.Forward = edge.z >= edge.x;
+                    run.Line = (edge.y + edge.w) * 0.5f;
+                    run.Start = std::min(edge.x, edge.z);
+                    run.End = std::max(edge.x, edge.z);
+                }
+                else
+                {
+                    run.Forward = edge.w >= edge.y;
+                    run.Line = (edge.x + edge.z) * 0.5f;
+                    run.Start = std::min(edge.y, edge.w);
+                    run.End = std::max(edge.y, edge.w);
+                }
+                runs.push_back(run);
+            }
+
+            std::sort(runs.begin(), runs.end(), [](const EdgeRun& left, const EdgeRun& right) {
+                if (left.Horizontal != right.Horizontal)
+                    return left.Horizontal < right.Horizontal;
+                if (left.Forward != right.Forward)
+                    return left.Forward < right.Forward;
+                if (std::abs(left.Line - right.Line) > kEpsilon)
+                    return left.Line < right.Line;
+                if (std::abs(left.Start - right.Start) > kEpsilon)
+                    return left.Start < right.Start;
+                return left.End < right.End;
+            });
+
+            std::vector<EdgeRun> mergedRuns;
+            mergedRuns.reserve(runs.size());
+            for (const EdgeRun& run : runs)
+            {
+                if (!mergedRuns.empty())
+                {
+                    EdgeRun& merged = mergedRuns.back();
+                    if (merged.Horizontal == run.Horizontal &&
+                        merged.Forward == run.Forward &&
+                        std::abs(merged.Line - run.Line) <= kEpsilon &&
+                        run.Start <= merged.End + kEpsilon)
+                    {
+                        merged.End = std::max(merged.End, run.End);
+                        continue;
+                    }
+                }
+
+                mergedRuns.push_back(run);
+            }
+
+            edges.clear();
+            edges.reserve(mergedRuns.size() + passthrough.size());
+            for (const EdgeRun& run : mergedRuns)
+            {
+                if (run.Horizontal)
+                {
+                    if (run.Forward)
+                        edges.emplace_back(run.Start, run.Line, run.End, run.Line);
+                    else
+                        edges.emplace_back(run.End, run.Line, run.Start, run.Line);
+                }
+                else
+                {
+                    if (run.Forward)
+                        edges.emplace_back(run.Line, run.Start, run.Line, run.End);
+                    else
+                        edges.emplace_back(run.Line, run.End, run.Line, run.Start);
+                }
+            }
+            edges.insert(edges.end(), passthrough.begin(), passthrough.end());
+        };
+
         auto gridView = registry.view<TransformComponent, Grid2DComponent>();
         for (entt::entity gridEntity : gridView)
         {
@@ -858,7 +993,6 @@ namespace Limitless::Lighting2DInternal
                 if (layer.ChunkTopologyDirty)
                     RebuildChunkTopology(grid, layer);
 
-                const SceneRenderCullingFrustum shadowFrustum = BuildSceneRenderCullingFrustum(camera);
                 const int32_t chunkCountX = std::max(1, layer.ChunkGridSize.x);
                 const int32_t chunkCountY = std::max(1, layer.ChunkGridSize.y);
 
@@ -923,6 +1057,7 @@ namespace Limitless::Lighting2DInternal
                             }
                         }
 
+                        mergeTileOccluderEdges(lc.OccluderEdges);
                         lc.Empty = lc.OccluderEdges.empty();
                         lc.Dirty = false;
                     }
@@ -955,8 +1090,16 @@ namespace Limitless::Lighting2DInternal
                         glm::vec3 aabbMin(0.0f), aabbMax(0.0f);
                         if (ComputeSceneRenderAabbFromPoints(worldCorners, 4, aabbMin, aabbMax))
                         {
-                            const glm::vec3 shadowCullPadding(maxDirectionalShadowDistanceWorld);
-                            if (!IsSceneRenderAabbVisible(shadowFrustum, aabbMin - shadowCullPadding, aabbMax + shadowCullPadding))
+                            glm::vec3 shadowCullPaddingMin = shadowCullPaddingMinBase;
+                            glm::vec3 shadowCullPaddingMax = shadowCullPaddingMaxBase;
+                            if (useGameplayShadowWarmMargin)
+                            {
+                                const glm::vec3 chunkExtents = glm::max(aabbMax - aabbMin, glm::vec3(0.0f));
+                                const glm::vec3 shadowWarmPadding = glm::max(chunkExtents * 0.2f, glm::vec3(1.5f, 1.5f, 0.5f));
+                                shadowCullPaddingMin += shadowWarmPadding;
+                                shadowCullPaddingMax += shadowWarmPadding;
+                            }
+                            if (!IsSceneRenderAabbVisible(shadowFrustum, aabbMin - shadowCullPaddingMin, aabbMax + shadowCullPaddingMax))
                                 continue;
                         }
 
@@ -1020,7 +1163,6 @@ namespace Limitless::Lighting2DInternal
     {
         std::vector<ScreenDirectionalLight> lights;
         lights.reserve(std::max(0, g_State->Settings.MaxDirectionalLights));
-        static bool s_loggedDirectionalLights = false;
 
         const uint32_t maxDirectionalLights = ClampDirectionalLightsByQuality(g_State->Settings);
         if (maxDirectionalLights == 0)
@@ -1101,34 +1243,12 @@ namespace Limitless::Lighting2DInternal
             lights.push_back(screenLight);
         }
 
-        if (!s_loggedDirectionalLights)
-        {
-            LT_CORE_WARN("Lighting2D[Directional]: count={}", lights.size());
-            for (size_t i = 0; i < lights.size(); ++i)
-            {
-                const auto& light = lights[i];
-                LT_CORE_WARN("Lighting2D[Directional][{}]: dir=({:.4f},{:.4f}) shadeDir=({:.4f},{:.4f}) intensity={:.4f} cast={} strength={:.4f} softnessPx={:.4f} samples={} distancePx={:.4f} biasPx={:.4f}",
-                    i,
-                    light.ShadowDirection.x,
-                    light.ShadowDirection.y,
-                    light.ShadingDirection.x,
-                    light.ShadingDirection.y,
-                    light.Intensity,
-                    light.CastShadows ? 1 : 0,
-                    light.ShadowStrength,
-                    light.ShadowSoftnessPixels,
-                    light.ShadowSamples,
-                    light.ShadowDistancePixels,
-                    light.ShadowBiasPixels);
-            }
-            s_loggedDirectionalLights = true;
-        }
-
         return lights;
     }
 
     std::vector<ScreenPointLight> BuildPointLights(Scene& scene,
                                                     float interpolationAlpha,
+                                                    const Camera& camera,
                                                     const glm::mat4& viewProjection,
                                                     uint32_t width,
                                                     uint32_t height,
@@ -1137,7 +1257,6 @@ namespace Limitless::Lighting2DInternal
     {
         std::vector<ScreenPointLight> lights;
         lights.reserve(std::max(0, g_State->Settings.MaxPointLights));
-        static bool s_loggedPointLights = false;
 
         const uint32_t maxPointLights = ClampPointLightsByQuality(g_State->Settings);
         if (maxPointLights == 0)
@@ -1145,6 +1264,7 @@ namespace Limitless::Lighting2DInternal
 
         auto& registry = scene.GetRegistry();
         auto pointView = registry.view<PointLight2DComponent, TransformComponent>();
+        const SceneRenderCullingFrustum lightFrustum = BuildSceneRenderCullingFrustum(camera);
         for (entt::entity entity : pointView)
         {
             if (lights.size() >= maxPointLights)
@@ -1160,6 +1280,16 @@ namespace Limitless::Lighting2DInternal
 
             const glm::mat4 worldTransform = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
             const glm::vec3 worldPosition = glm::vec3(worldTransform[3]);
+            const float worldRadiusScaleX = glm::length(glm::vec3(worldTransform[0]));
+            const float worldRadiusScaleY = glm::length(glm::vec3(worldTransform[1]));
+            const float lightRadiusWorld = std::max(pointLight.Radius * std::max(worldRadiusScaleX, worldRadiusScaleY), pointLight.Radius);
+            const glm::vec3 lightBoundsExtent(lightRadiusWorld);
+            if (!IsSceneRenderAabbVisible(lightFrustum, worldPosition - lightBoundsExtent, worldPosition + lightBoundsExtent))
+            {
+                pointLight.RuntimeViewportPosition = glm::vec2(0.0f);
+                pointLight.RuntimeViewportRadius = 0.0f;
+                continue;
+            }
 
             // Use the clamped projection so lights near the camera's near
             // plane are pushed off-screen instead of being dropped entirely.
@@ -1185,29 +1315,9 @@ namespace Limitless::Lighting2DInternal
             screenLight.ShadowSoftnessPixels = std::max(0.0f, pointLight.ShadowSoftness * g_State->Settings.ShadowSoftnessScale * std::sqrt(std::max(1.0f, pixelsPerUnit)));
             screenLight.ShadowSamples = ClampShadowSamplesByQuality(g_State->Settings, pointLight.ShadowSamples);
             screenLight.ShadowBiasPixels = std::max(0.0f, pointLight.ShadowBias * pixelsPerUnit);
+            pointLight.RuntimeViewportPosition = screenPosition;
+            pointLight.RuntimeViewportRadius = screenLight.RadiusPixels;
             lights.push_back(screenLight);
-        }
-
-        if (!s_loggedPointLights)
-        {
-            LT_CORE_WARN("Lighting2D[Point]: count={}", lights.size());
-            for (size_t i = 0; i < lights.size(); ++i)
-            {
-                const auto& light = lights[i];
-                LT_CORE_WARN("Lighting2D[Point][{}]: pos=({:.4f},{:.4f}) intensity={:.4f} radiusPx={:.4f} falloff={:.4f} cast={} strength={:.4f} softnessPx={:.4f} samples={} biasPx={:.4f}",
-                    i,
-                    light.Position.x,
-                    light.Position.y,
-                    light.Intensity,
-                    light.RadiusPixels,
-                    light.Falloff,
-                    light.CastShadows ? 1 : 0,
-                    light.ShadowStrength,
-                    light.ShadowSoftnessPixels,
-                    light.ShadowSamples,
-                    light.ShadowBiasPixels);
-            }
-            s_loggedPointLights = true;
         }
 
         return lights;

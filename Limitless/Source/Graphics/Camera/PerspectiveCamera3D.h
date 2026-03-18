@@ -35,6 +35,9 @@ namespace Limitless
         glm::vec3 GetPosition() const { return m_Position; }
         float GetYawDegrees() const { return m_YawDegrees; }
         float GetPitchDegrees() const { return m_PitchDegrees; }
+        float GetFieldOfViewYDegrees() const { return m_Settings.FieldOfViewYDegrees; }
+        float GetNearPlane() const { return m_Settings.NearPlane; }
+        float GetFarPlane() const { return m_Settings.FarPlane; }
 
         glm::vec3 GetForwardDirection() const;
 

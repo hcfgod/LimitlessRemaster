@@ -21,16 +21,19 @@ in vec2 v_UV;
 
 uniform sampler2D u_AlbedoTexture;
 uniform sampler2D u_LightTexture;
+uniform vec2 u_SceneUvOffset;
+uniform vec2 u_SceneUvScale;
 
 void main()
 {
-    vec4 albedo = texture(u_AlbedoTexture, v_UV);
+    vec2 sceneUv = u_SceneUvOffset + v_UV * u_SceneUvScale;
+    vec4 albedo = texture(u_AlbedoTexture, sceneUv);
     if (albedo.a <= 0.01)
     {
         FragColor = vec4(0.0);
         return;
     }
-    vec3 lighting = texture(u_LightTexture, v_UV).rgb;
+    vec3 lighting = texture(u_LightTexture, sceneUv).rgb;
     FragColor = vec4(albedo.rgb * lighting, albedo.a);
 }
 

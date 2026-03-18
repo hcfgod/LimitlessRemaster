@@ -248,11 +248,6 @@ namespace Limitless
                 hull.size(), textureAssetKey, subSpriteIndex, img.Width, img.Height, regionW, regionH);
             hull.clear();
         }
-        else
-        {
-            LT_CORE_INFO("SpriteAlphaHull: built hull with {} vertices for '{}' (sub={})",
-                hull.size(), textureAssetKey, subSpriteIndex);
-        }
 
         {
             std::lock_guard<std::mutex> lock(s_HullCacheMutex);
@@ -346,11 +341,6 @@ namespace Limitless
             LT_CORE_WARN("SpriteAlphaHull(uv): hull too small ({} verts) for '{}' rect=({},{},{},{})",
                 hull.size(), textureAssetKey, regionX, regionY, regionW, regionH);
             hull.clear();
-        }
-        else
-        {
-            LT_CORE_INFO("SpriteAlphaHull(uv): built hull with {} vertices for '{}' rect=({},{},{},{})",
-                hull.size(), textureAssetKey, regionX, regionY, regionW, regionH);
         }
 
         {

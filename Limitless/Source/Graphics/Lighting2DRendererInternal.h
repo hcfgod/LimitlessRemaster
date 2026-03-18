@@ -159,7 +159,11 @@ namespace Limitless::Lighting2DInternal
         uint32_t CachedShadowOccluderCount = 0;
         bool HasPreviousCameraRotation = false;
         glm::quat PreviousCameraRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        bool HasPreviousCameraPosition = false;
+        glm::vec3 PreviousCameraPosition = glm::vec3(0.0f);
+        uint32_t FramesSinceShadowSegmentBuild = 0;
         uint32_t ShadowFreezeFramesRemaining = 0;
+        uint32_t ShadowSurgeCadenceFramesRemaining = 0;
     };
 
     // C++17 inline variable — single definition shared across all TUs.
@@ -327,6 +331,7 @@ namespace Limitless::Lighting2DInternal
 
     std::vector<ScreenPointLight> BuildPointLights(Scene& scene,
                                                     float interpolationAlpha,
+                                                    const Camera& camera,
                                                     const glm::mat4& viewProjection,
                                                     uint32_t width,
                                                     uint32_t height,
@@ -385,5 +390,7 @@ namespace Limitless::Lighting2DInternal
                               float shadowSegmentSnapPixels);
 
     void SubmitCompositePass(const std::shared_ptr<Texture2D>& albedoTexture,
-                             const std::shared_ptr<Texture2D>& lightTexture);
+                             const std::shared_ptr<Texture2D>& lightTexture,
+                             const glm::vec2& uvOffset,
+                             const glm::vec2& uvScale);
 }

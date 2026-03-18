@@ -1005,6 +1005,35 @@ namespace Limitless
         auto& registry = scene.GetRegistry();
         const uint32_t activeCullingMask = GetEffectiveCameraCullingMask(camera);
         const SceneRenderCullingFrustum cameraFrustum = BuildSceneRenderCullingFrustum(camera);
+        const bool useGameplayVisibilityWarmMargin = camera.GetUsage() == CameraUsage::Gameplay;
+        const auto expandVisibilityBounds = [useGameplayVisibilityWarmMargin](glm::vec3& minimum, glm::vec3& maximum) {
+            if (!useGameplayVisibilityWarmMargin)
+                return;
+            const glm::vec3 extents = glm::max(maximum - minimum, glm::vec3(0.0f));
+            const glm::vec3 padding = glm::max(extents * 0.2f, glm::vec3(1.5f, 1.5f, 0.5f));
+            minimum -= padding;
+            maximum += padding;
+        };
+        const auto isWarmQuadVisible = [&cameraFrustum, &expandVisibilityBounds](const glm::mat4& transform) {
+            const glm::vec4 localCorners[4] = {
+                glm::vec4(-0.5f, -0.5f, 0.0f, 1.0f),
+                glm::vec4(0.5f, -0.5f, 0.0f, 1.0f),
+                glm::vec4(0.5f, 0.5f, 0.0f, 1.0f),
+                glm::vec4(-0.5f, 0.5f, 0.0f, 1.0f)
+            };
+
+            glm::vec3 worldCorners[4]{};
+            for (std::size_t index = 0; index < 4; ++index)
+                worldCorners[index] = glm::vec3(transform * localCorners[index]);
+
+            glm::vec3 minimum(0.0f);
+            glm::vec3 maximum(0.0f);
+            if (!ComputeSceneRenderAabbFromPoints(worldCorners, 4, minimum, maximum))
+                return true;
+
+            expandVisibilityBounds(minimum, maximum);
+            return IsSceneRenderAabbVisible(cameraFrustum, minimum, maximum);
+        };
         // ---- Grid2D + TilemapLayer rendering path ----------------------------
         // Renders entities using the new Grid2DComponent + child TilemapLayerComponent
         // architecture. Each Grid2D entity defines the cell layout; its children
@@ -1311,9 +1340,12 @@ namespace Limitless
                                 glm::vec3(gridWorldTransform * glm::vec4(rc.LocalMin.x, rc.LocalMax.y, 0.0f, 1.0f))
                             };
                             glm::vec3 aabbMin(0.0f), aabbMax(0.0f);
-                            if (ComputeSceneRenderAabbFromPoints(worldCorners, 4, aabbMin, aabbMax) &&
-                                !IsSceneRenderAabbVisible(cameraFrustum, aabbMin, aabbMax))
-                                continue;
+                            if (ComputeSceneRenderAabbFromPoints(worldCorners, 4, aabbMin, aabbMax))
+                            {
+                                expandVisibilityBounds(aabbMin, aabbMax);
+                                if (!IsSceneRenderAabbVisible(cameraFrustum, aabbMin, aabbMax))
+                                    continue;
+                            }
 
                             // Collect GPU texture handles for the chunk's texture slots.
                             std::vector<std::shared_ptr<Texture2D>> gpuTextures;
@@ -1334,9 +1366,6 @@ namespace Limitless
             }
         };
 
-        static bool s_loggedWorldSpriteDrawParity = false;
-        const bool logWorldSpriteDrawParity = !s_loggedWorldSpriteDrawParity;
-
         auto drawSpriteEntity = [&](entt::entity entity) {
             if (!scene.IsEntityEnabledInHierarchy(entity))
                 return;
@@ -1349,7 +1378,7 @@ namespace Limitless
             auto* animator = registry.try_get<AnimatorComponent>(entity);
 
             glm::mat4 model = scene.GetWorldTransformMatrixForRendering(entity, interpolationAlpha);
-            if (!IsSceneRenderQuadVisible(cameraFrustum, model))
+            if (!isWarmQuadVisible(model))
                 return;
             bool useMissingAssetFallback = false;
 
@@ -1358,13 +1387,11 @@ namespace Limitless
                 std::max(0.001f, sprite.TilingFactor.y));
             glm::vec2 renderUvMin(0.0f, 0.0f);
             glm::vec2 renderUvMax = safeTilingFactor;
-            const char* uvSource = "default";
             const bool hasAnimatorSubRect =
                 animator && animator->Enabled && animator->ApplyToSprite && animator->RuntimeHasSpriteSubRect;
             const bool hasSpriteSubRect = sprite.SubSpriteIndex >= 0;
             if (hasAnimatorSubRect)
             {
-                uvSource = "animator_subrect";
                 renderUvMin = animator->RuntimeSpriteUvMin;
                 glm::vec2 frameSpan = animator->RuntimeSpriteUvMax - animator->RuntimeSpriteUvMin;
                 if (frameSpan.x <= 0.0001f || frameSpan.y <= 0.0001f)
@@ -1373,7 +1400,6 @@ namespace Limitless
             }
             else if (hasSpriteSubRect)
             {
-                uvSource = "sprite_subrect";
                 renderUvMin = sprite.UvMin;
                 glm::vec2 subSpan = sprite.UvMax - sprite.UvMin;
                 if (subSpan.x <= 0.0001f || subSpan.y <= 0.0001f)
@@ -1457,13 +1483,10 @@ namespace Limitless
                     }
                 }
             }
-
-            const char* textureSource = "none";
             if (!hasAnimatorSubRect && !hasSpriteSubRect &&
                 materialMainTextureAsset && material &&
                 material->CachedMaterial && material->CachedMaterial->HasMainTextureSubRect())
             {
-                uvSource = "material_subrect";
                 renderUvMin = material->CachedMaterial->GetMainTextureUvMin();
                 glm::vec2 subSpan = material->CachedMaterial->GetMainTextureUvMax() - material->CachedMaterial->GetMainTextureUvMin();
                 if (subSpan.x <= 0.0001f || subSpan.y <= 0.0001f)
@@ -1472,17 +1495,6 @@ namespace Limitless
             }
 
             Assets::TextureAsset::Ptr resolvedTextureAsset = animatedTextureAsset ? animatedTextureAsset : materialMainTextureAsset;
-            std::string resolvedTextureKey;
-            if (animatedTextureAsset)
-            {
-                textureSource = "animator_texture";
-                resolvedTextureKey = animatedTextureKey;
-            }
-            else if (materialMainTextureAsset)
-            {
-                textureSource = "material_texture";
-                resolvedTextureKey = materialMainTextureAsset->GetKey();
-            }
 
             // Fallback to Sprite texture when no animated texture override/material texture is active/ready.
             if (!resolvedTextureAsset && !sprite.TextureKey.empty())
@@ -1514,27 +1526,6 @@ namespace Limitless
                     }
                 }
                 resolvedTextureAsset = sprite.CachedTexture;
-                if (resolvedTextureAsset)
-                {
-                    textureSource = "sprite_texture";
-                    resolvedTextureKey = sprite.TextureKey;
-                }
-            }
-
-            if (logWorldSpriteDrawParity && (sprite.ReceiveShadows || sprite.CastShadows))
-            {
-                LT_CORE_WARN("SpritePass[World]: id={} texSource={} uvSource={} uvMin=({:.4f},{:.4f}) uvMax=({:.4f},{:.4f}) receive={} cast={} order={} texture='{}'",
-                    static_cast<uint32_t>(entity),
-                    textureSource,
-                    uvSource,
-                    renderUvMin.x,
-                    renderUvMin.y,
-                    renderUvMax.x,
-                    renderUvMax.y,
-                    sprite.ReceiveShadows ? 1 : 0,
-                    sprite.CastShadows ? 1 : 0,
-                    sprite.RenderOrder,
-                    resolvedTextureKey);
             }
 
             if (resolvedTextureAsset)
@@ -1733,9 +1724,6 @@ namespace Limitless
         if (!particlesRendered)
             drawParticleEmitters();
 
-        if (logWorldSpriteDrawParity)
-            s_loggedWorldSpriteDrawParity = true;
-
         Renderer2D::Default().EndScene();
         scene.SetRuntimePhase(Scene::RuntimePhase::Idle);
     }
@@ -1781,24 +1769,24 @@ namespace Limitless
         if (!renderer.IsInitialized())
             return;
 
-        auto renderWorldAndWorldSpaceCanvasPasses = [&]() {
+        auto renderWorldAndWorldSpaceCanvasPasses = [&](const Camera& renderCamera, uint32_t renderWidth, uint32_t renderHeight) {
             RenderCanvasUiPass(scene,
-                               camera,
-                               width,
-                               height,
+                               renderCamera,
+                               renderWidth,
+                               renderHeight,
                                CanvasUiRenderPhase::WorldSpaceNegativeSortOrderOnly);
 
-            SceneRenderer::Render(scene, camera);
+            SceneRenderer::Render(scene, renderCamera);
 
             RenderCanvasUiPass(scene,
-                               camera,
-                               width,
-                               height,
+                               renderCamera,
+                               renderWidth,
+                               renderHeight,
                                CanvasUiRenderPhase::WorldSpaceNonNegativeSortOrderOnly);
         };
 
-        const bool renderedWithLighting = Lighting2DRenderer::Default().RenderToViewport(scene, camera, framebuffer, width, height, [&]() {
-            renderWorldAndWorldSpaceCanvasPasses();
+        const bool renderedWithLighting = Lighting2DRenderer::Default().RenderToViewport(scene, camera, framebuffer, width, height, [&](const Camera& renderCamera, uint32_t renderWidth, uint32_t renderHeight) {
+            renderWorldAndWorldSpaceCanvasPasses(renderCamera, renderWidth, renderHeight);
         }, clearViewport);
 
         if (!renderedWithLighting)
@@ -1810,7 +1798,7 @@ namespace Limitless
                 SceneRenderer::GetViewportClearColor(),
                 clearViewport);
             RenderPass::Begin(renderer, worldPass);
-            renderWorldAndWorldSpaceCanvasPasses();
+            renderWorldAndWorldSpaceCanvasPasses(camera, width, height);
             RenderPass::End(renderer, worldPass);
         }
 
