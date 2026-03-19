@@ -295,7 +295,10 @@ namespace Limitless::Lighting2DInternal
             directionalShadowCullPaddingMaxWorld.x = std::max(directionalShadowCullPaddingMaxWorld.x, std::max(0.0f, -worldDirection.x) * shadowDistanceWorld);
             directionalShadowCullPaddingMaxWorld.y = std::max(directionalShadowCullPaddingMaxWorld.y, std::max(0.0f, -worldDirection.y) * shadowDistanceWorld);
         }
-        const float baseShadowCullPaddingWorld = maxDirectionalShadowDistanceWorld * 0.2f;
+        const float baseShadowCullPaddingWorld =
+            camera.GetType() == CameraType::Perspective3D
+                ? maxDirectionalShadowDistanceWorld
+                : maxDirectionalShadowDistanceWorld * 0.2f;
         directionalShadowCullPaddingMinWorld = glm::max(directionalShadowCullPaddingMinWorld, glm::vec2(baseShadowCullPaddingWorld));
         directionalShadowCullPaddingMaxWorld = glm::max(directionalShadowCullPaddingMaxWorld, glm::vec2(baseShadowCullPaddingWorld));
 

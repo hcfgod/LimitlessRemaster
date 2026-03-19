@@ -120,11 +120,12 @@ namespace Limitless
         glm::vec2 compositeUvOffset(0.0f);
         glm::vec2 compositeUvScale(1.0f);
         const bool allowPerspectiveDirectionalShadowOverscan =
-            camera.GetType() == CameraType::Perspective3D && camera.GetUsage() != CameraUsage::Editor;
+            camera.GetType() == CameraType::Perspective3D;
         if (allowPerspectiveDirectionalShadowOverscan)
         {
             if (const auto* perspectiveCamera = dynamic_cast<const PerspectiveCamera3D*>(&camera))
             {
+                const bool isEditorCamera = camera.GetUsage() == CameraUsage::Editor;
                 constexpr float kGuardFraction = 0.06f;
                 constexpr float kMaxGuardPerSide = 28.0f;
                 const glm::mat4& viewMatrix = camera.GetViewMatrix();
@@ -140,6 +141,14 @@ namespace Limitless
                     auto& directional = directionalView.get<DirectionalLight2DComponent>(entity);
                     if (!directional.Enabled || !directional.CastShadows || directional.Intensity <= 0.0f)
                         continue;
+                    const float distPx = std::max(0.0f, directional.ShadowDistance) * basePixelsPerUnit;
+                    if (isEditorCamera)
+                    {
+                        const float fixedGuard = std::min(distPx * 0.15f + 8.0f, kMaxGuardPerSide);
+                        guardBandPixels.x = std::max(guardBandPixels.x, fixedGuard);
+                        guardBandPixels.y = std::max(guardBandPixels.y, fixedGuard);
+                        continue;
+                    }
                     glm::vec2 worldDir = directional.Direction;
                     if (directional.UseEntityRotation)
                     {
@@ -154,7 +163,6 @@ namespace Limitless
                     const float sdLen = glm::length(screenDir);
                     if (sdLen <= kEpsilon) continue;
                     screenDir /= sdLen;
-                    const float distPx = std::max(0.0f, directional.ShadowDistance) * basePixelsPerUnit;
                     guardBandPixels.x = std::max(guardBandPixels.x, std::min(std::abs(screenDir.x) * distPx * kGuardFraction + 4.0f, kMaxGuardPerSide));
                     guardBandPixels.y = std::max(guardBandPixels.y, std::min(std::abs(screenDir.y) * distPx * kGuardFraction + 4.0f, kMaxGuardPerSide));
                 }

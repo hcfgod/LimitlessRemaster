@@ -222,6 +222,7 @@ namespace Limitless::Lighting2DInternal
         const float viewportHeight = static_cast<float>(std::max<uint32_t>(height, 1u));
         const float casterHeightEncodeMaxPixels = std::max(std::sqrt(viewportWidth * viewportWidth + viewportHeight * viewportHeight), 1.0f);
         const float influencePadding = std::max(2.0f, shadowSoftness + shadowBias + shadowSegmentSnapPixelsClamped + 1.0f);
+        const glm::vec2 shadowRayDirection(-shadowDirection.x, -shadowDirection.y);
         const glm::vec2 viewportCorners[4] = {
             glm::vec2(0.0f, 0.0f),
             glm::vec2(viewportWidth, 0.0f),
@@ -234,7 +235,7 @@ namespace Limitless::Lighting2DInternal
         {
             influenceMin = glm::min(influenceMin, corner);
             influenceMax = glm::max(influenceMax, corner);
-            const glm::vec2 projectedCorner = corner + shadowDirection * std::max(1.0f, shadowDistance);
+            const glm::vec2 projectedCorner = corner + shadowRayDirection * std::max(1.0f, shadowDistance);
             influenceMin = glm::min(influenceMin, projectedCorner);
             influenceMax = glm::max(influenceMax, projectedCorner);
         }
@@ -271,8 +272,7 @@ namespace Limitless::Lighting2DInternal
             if (edgeLen > 0.0001f)
             {
                 const glm::vec2 outwardNormal(edge.y / edgeLen, -edge.x / edgeLen);
-                const glm::vec2 rayDir(-shadowDirection.x, -shadowDirection.y);
-                if (glm::dot(outwardNormal, rayDir) >= 0.0f)
+                if (glm::dot(outwardNormal, shadowRayDirection) >= 0.0f)
                     continue;
             }
 
