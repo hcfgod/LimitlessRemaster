@@ -162,7 +162,7 @@ namespace Limitless::Lighting2DInternal
             const float spriteWorldWidth = glm::length(glm::vec3(draw.Model[0]));
             const float spriteWorldHeight = glm::length(glm::vec3(draw.Model[1]));
             const float spriteScreenExtentPixels = std::max(spriteWorldWidth, spriteWorldHeight) * pixelsPerUnit;
-            draw.CasterHeightPixels = std::clamp(spriteScreenExtentPixels * 0.35f, 8.0f, 24.0f);
+            draw.CasterHeightPixels = std::max(spriteScreenExtentPixels * 0.35f, 2.0f);
 
             const bool hasExplicitShadowOccluder = registry.any_of<ShadowOccluder2DComponent>(entity);
             if (sprite.CastShadows &&
@@ -261,6 +261,8 @@ namespace Limitless::Lighting2DInternal
         bool hasShadowCastingLights = false;
         float maxPointShadowRadiusWorld = 0.0f;
         const bool useGameplayShadowWarmMargin = camera.GetUsage() == CameraUsage::Gameplay;
+        const bool useEditorPerspectiveShadowWarmMargin =
+            camera.GetUsage() == CameraUsage::Editor && camera.GetType() == CameraType::Perspective3D;
         if (!g_State->Settings.EnableShadows)
             return segments;
         auto directionalLightView = registry.view<DirectionalLight2DComponent>();
@@ -329,6 +331,13 @@ namespace Limitless::Lighting2DInternal
             directionalShadowCullPaddingMaxWorld.x + maxPointShadowRadiusWorld,
             directionalShadowCullPaddingMaxWorld.y + maxPointShadowRadiusWorld,
             maxDirectionalShadowDistanceWorld + maxPointShadowRadiusWorld);
+        const auto computeShadowWarmPadding = [&](const glm::vec3& boundsExtents) {
+            if (useGameplayShadowWarmMargin)
+                return glm::max(boundsExtents * 0.2f, glm::vec3(1.5f, 1.5f, 0.5f));
+            if (useEditorPerspectiveShadowWarmMargin)
+                return glm::max(boundsExtents * 0.08f, glm::vec3(0.75f, 0.75f, 0.25f));
+            return glm::vec3(0.0f);
+        };
         auto isWorldBoundsShadowRelevant = [&](const glm::mat4& worldTransform, const glm::vec2& localMinimum, const glm::vec2& localMaximum) {
             const glm::vec3 worldCorners[4] = {
                 glm::vec3(worldTransform * glm::vec4(localMinimum.x, localMinimum.y, 0.0f, 1.0f)),
@@ -342,13 +351,10 @@ namespace Limitless::Lighting2DInternal
 
             glm::vec3 shadowCullPaddingMin = shadowCullPaddingMinBase;
             glm::vec3 shadowCullPaddingMax = shadowCullPaddingMaxBase;
-            if (useGameplayShadowWarmMargin)
-            {
-                const glm::vec3 boundsExtents = glm::max(aabbMax - aabbMin, glm::vec3(0.0f));
-                const glm::vec3 shadowWarmPadding = glm::max(boundsExtents * 0.2f, glm::vec3(1.5f, 1.5f, 0.5f));
-                shadowCullPaddingMin += shadowWarmPadding;
-                shadowCullPaddingMax += shadowWarmPadding;
-            }
+            const glm::vec3 boundsExtents = glm::max(aabbMax - aabbMin, glm::vec3(0.0f));
+            const glm::vec3 shadowWarmPadding = computeShadowWarmPadding(boundsExtents);
+            shadowCullPaddingMin += shadowWarmPadding;
+            shadowCullPaddingMax += shadowWarmPadding;
 
             return IsSceneRenderAabbVisible(shadowFrustum, aabbMin - shadowCullPaddingMin, aabbMax + shadowCullPaddingMax);
         };
@@ -1092,13 +1098,10 @@ namespace Limitless::Lighting2DInternal
                         {
                             glm::vec3 shadowCullPaddingMin = shadowCullPaddingMinBase;
                             glm::vec3 shadowCullPaddingMax = shadowCullPaddingMaxBase;
-                            if (useGameplayShadowWarmMargin)
-                            {
-                                const glm::vec3 chunkExtents = glm::max(aabbMax - aabbMin, glm::vec3(0.0f));
-                                const glm::vec3 shadowWarmPadding = glm::max(chunkExtents * 0.2f, glm::vec3(1.5f, 1.5f, 0.5f));
-                                shadowCullPaddingMin += shadowWarmPadding;
-                                shadowCullPaddingMax += shadowWarmPadding;
-                            }
+                            const glm::vec3 chunkExtents = glm::max(aabbMax - aabbMin, glm::vec3(0.0f));
+                            const glm::vec3 shadowWarmPadding = computeShadowWarmPadding(chunkExtents);
+                            shadowCullPaddingMin += shadowWarmPadding;
+                            shadowCullPaddingMax += shadowWarmPadding;
                             if (!IsSceneRenderAabbVisible(shadowFrustum, aabbMin - shadowCullPaddingMin, aabbMax + shadowCullPaddingMax))
                                 continue;
                         }

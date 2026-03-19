@@ -96,8 +96,8 @@ bool RaymarchAlphaOcclusion(vec2 sampleOrigin, vec2 sampleEnd, vec4 fragmentCast
     if (rayLength <= 0.0001)
         return false;
 
-    const int MAX_ALPHA_STEPS = 96;
-    int stepCount = min(MAX_ALPHA_STEPS, max(1, int(rayLength / 1.5)));
+    const int MAX_ALPHA_STEPS = 64;
+    int stepCount = min(MAX_ALPHA_STEPS, max(1, int(rayLength / 2.0)));
     for (int stepIndex = 0; stepIndex < MAX_ALPHA_STEPS; ++stepIndex)
     {
         if (stepIndex >= stepCount)
@@ -138,14 +138,15 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec4 fragmentCasterId)
     float softness = max(u_ShadowSoftness, 0.0);
     float halfSpread = max(softness * 0.5, 0.0001);
 
-    // Run the alpha raymarch once from the centered light position.
-    // Using a single ray avoids the artifact where each soft-shadow sample
-    // independently resolves the full caster silhouette from slightly different
-    // perpendicular positions, producing N shifted copies of the shadow.
+    // Defer the alpha raymarch until actually needed. Using a single ray from
+    // the centered light position avoids the artifact where each soft-shadow
+    // sample independently resolves the full caster silhouette from slightly
+    // different perpendicular positions, producing N shifted copies of the shadow.
     vec2 alphaRayEnd = fragmentScreenPosition - directionToFragment * max(u_ShadowBias, 0.0);
     if (snapPixels > 0.0001)
         alphaRayEnd = round(alphaRayEnd / snapPixels) * snapPixels;
-    bool alphaOccluded = RaymarchAlphaOcclusion(stableLightPosition, alphaRayEnd, fragmentCasterId);
+    bool alphaOccludedChecked = false;
+    bool alphaOccluded = false;
 
     for (int sampleIndex = 0; sampleIndex < samples; ++sampleIndex)
     {
@@ -162,7 +163,8 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec4 fragmentCasterId)
             sampleRayEnd = round(sampleRayEnd / snapPixels) * snapPixels;
         }
 
-        bool occluded = alphaOccluded;
+        // Check segment intersections first (cheap — no texture fetches).
+        bool occluded = false;
         int segmentCount = min(u_ShadowSegmentCount, MAX_SHADOW_SEGMENTS);
         for (int segmentIndex = 0; !occluded && segmentIndex < segmentCount; ++segmentIndex)
         {
@@ -185,6 +187,18 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec4 fragmentCasterId)
                 occluded = true;
                 break;
             }
+        }
+
+        // Only run expensive alpha raymarch if segments didn't find occlusion.
+        // Cache the result so it runs at most once across all samples.
+        if (!occluded)
+        {
+            if (!alphaOccludedChecked)
+            {
+                alphaOccluded = RaymarchAlphaOcclusion(stableLightPosition, alphaRayEnd, fragmentCasterId);
+                alphaOccludedChecked = true;
+            }
+            occluded = alphaOccluded;
         }
 
         if (occluded)
@@ -230,7 +244,7 @@ void main()
     float shadowAlphaCutoff = clamp(u_ShadowAlphaCutoff, 0.0, 1.0);
     float shadowReceiver = clamp(normalSample.a, 0.0, 1.0);
     // Soft receiver weight from GBuffer prevents edge threshold popping.
-    float computedShadowFactor = (albedo.a >= max(0.01, shadowAlphaCutoff - 0.12)) ? ComputeShadowFactor(fragmentScreenPosition, fragmentCasterId) : 1.0;
+    float computedShadowFactor = (shadowReceiver > 0.001 && albedo.a >= max(0.01, shadowAlphaCutoff - 0.12)) ? ComputeShadowFactor(fragmentScreenPosition, fragmentCasterId) : 1.0;
     float shadowFactor = mix(1.0, computedShadowFactor, shadowReceiver);
 
     vec3 lighting = u_LightColor * (u_LightIntensity * ndotl * attenuation * shadowFactor);

@@ -190,7 +190,9 @@ namespace Limitless::Lighting2DInternal
                                     uint32_t width,
                                     uint32_t height,
                                     float shadowSegmentSnapPixels,
-                                    bool clampShadowToViewport)
+                                    bool clampShadowToViewport,
+                                    float maxCasterHeightPixels,
+                                    bool hasAnyCasters)
     {
         auto shader = ResolveShaderFromAsset(g_State->DirectionalLightShaderAsset, kDirectionalLightShaderKey);
         if (!shader || !g_State->UnitQuadVertexArray)
@@ -261,6 +263,19 @@ namespace Limitless::Lighting2DInternal
             if (!intersectsInfluence)
                 continue;
 
+            // CPU-side back-face culling: the shader skips segments whose
+            // outward normal faces the same direction as the shadow ray
+            // (dot(normal, rayDir) >= 0). The ray direction is -shadowDirection.
+            const glm::vec2 edge(endpoints.z - endpoints.x, endpoints.w - endpoints.y);
+            const float edgeLen = glm::length(edge);
+            if (edgeLen > 0.0001f)
+            {
+                const glm::vec2 outwardNormal(edge.y / edgeLen, -edge.x / edgeLen);
+                const glm::vec2 rayDir(-shadowDirection.x, -shadowDirection.y);
+                if (glm::dot(outwardNormal, rayDir) >= 0.0f)
+                    continue;
+            }
+
             segmentEndpoints.push_back(endpoints);
             segmentCasterIds.push_back(shadowSegments[i].CasterEntityId);
             segmentFlags.push_back(shadowSegments[i].Flags);
@@ -285,6 +300,8 @@ namespace Limitless::Lighting2DInternal
         directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowBias", shadowBias });
         directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowAlphaCutoff", shadowAlphaCutoff });
         directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_CasterHeightEncodeMaxPixels", casterHeightEncodeMaxPixels });
+        directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_MaxCasterHeightPixels", std::max(maxCasterHeightPixels, 1.0f) });
+        directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_HasAnyCasters", static_cast<int32_t>(hasAnyCasters ? 1 : 0) });
         directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSegmentSnapPixels", shadowSegmentSnapPixelsClamped });
         directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ClampShadowToViewport", static_cast<int32_t>(clampShadowToViewportInt) });
         directionalBindings.Parameters.push_back(RenderParameterBinding{ "u_ShadowSegmentCount", static_cast<int32_t>(segmentEndpoints.size()) });

@@ -55,13 +55,7 @@ namespace Limitless
         g_State->Settings.ShadowFreezeAngularVelocityDegreesPerSecond = std::max(1.0f, g_State->Settings.ShadowFreezeAngularVelocityDegreesPerSecond);
         g_State->Settings.ShadowFreezeFrameCount = std::max(1, g_State->Settings.ShadowFreezeFrameCount);
         if (!g_State->Settings.EnableHighAngularVelocityShadowFreeze)
-        {
-            g_State->ShadowFreezeFramesRemaining = 0;
-            g_State->HasPreviousCameraRotation = false;
-            g_State->HasPreviousCameraPosition = false;
-            g_State->FramesSinceShadowSegmentBuild = 0;
-            g_State->ShadowSurgeCadenceFramesRemaining = 0;
-        }
+            g_State->ShadowCacheEntries.clear();
     }
 
     const Lighting2DSettings& Lighting2DRenderer::GetSettings() const
@@ -95,6 +89,24 @@ namespace Limitless
         if (ShouldBypassDeferredLightingForDriver())
             return false;
 
+        auto& shadowCacheEntry = g_State->ShadowCacheEntries[&camera];
+        shadowCacheEntry.LastUsedTick = ++g_State->ShadowCacheUseTick;
+        constexpr size_t kMaxShadowCacheEntries = 8;
+        if (g_State->ShadowCacheEntries.size() > kMaxShadowCacheEntries)
+        {
+            auto evictIt = g_State->ShadowCacheEntries.end();
+            for (auto it = g_State->ShadowCacheEntries.begin(); it != g_State->ShadowCacheEntries.end(); ++it)
+            {
+                if (it->first == &camera)
+                    continue;
+                if (evictIt == g_State->ShadowCacheEntries.end() || it->second.LastUsedTick < evictIt->second.LastUsedTick)
+                    evictIt = it;
+            }
+            if (evictIt != g_State->ShadowCacheEntries.end())
+                g_State->ShadowCacheEntries.erase(evictIt);
+        }
+        auto& shadowCache = shadowCacheEntry.State;
+
         const uint32_t cullingMask = GetEffectiveCameraCullingMask(camera);
         const float interpolationAlpha = ComputeInterpolationAlpha();
 
@@ -107,7 +119,9 @@ namespace Limitless
         uint32_t lightingHeight = height;
         glm::vec2 compositeUvOffset(0.0f);
         glm::vec2 compositeUvScale(1.0f);
-        if (camera.GetType() == CameraType::Perspective3D)
+        const bool allowPerspectiveDirectionalShadowOverscan =
+            camera.GetType() == CameraType::Perspective3D && camera.GetUsage() != CameraUsage::Editor;
+        if (allowPerspectiveDirectionalShadowOverscan)
         {
             if (const auto* perspectiveCamera = dynamic_cast<const PerspectiveCamera3D*>(&camera))
             {
@@ -191,6 +205,17 @@ namespace Limitless
 
         const glm::mat4 cameraViewMatrix = lightingCamera->GetViewMatrix();
         std::vector<NormalPassSpriteDraw> normalPassDraws = BuildNormalPassDrawList(scene, interpolationAlpha, pixelsPerUnit, cullingMask);
+        float maxCasterHeightPixels = 0.0f;
+        bool hasAnyCasters = false;
+        for (const auto& draw : normalPassDraws)
+        {
+            if (draw.CasterEntityId.x > 0.0001f || draw.CasterEntityId.y > 0.0001f ||
+                draw.CasterEntityId.z > 0.0001f || draw.CasterEntityId.w > 0.0001f)
+            {
+                hasAnyCasters = true;
+                maxCasterHeightPixels = std::max(maxCasterHeightPixels, draw.CasterHeightPixels);
+            }
+        }
         uint32_t occluderCount = 0;
         const uint32_t maxShadowSegments = ClampSegmentsByQuality(g_State->Settings);
         float effectiveShadowSegmentSnapPixels = std::max(0.0f, g_State->Settings.ShadowSegmentSnapPixels);
@@ -198,40 +223,43 @@ namespace Limitless
         {
             effectiveShadowSegmentSnapPixels = 0.0f;
         }
+        const bool allowEditorPerspectiveShadowFreeze =
+            camera.GetUsage() == CameraUsage::Editor && camera.GetType() == CameraType::Perspective3D;
         const bool allowAngularVelocityShadowFreeze =
-            g_State->Settings.EnableHighAngularVelocityShadowFreeze && camera.GetUsage() == CameraUsage::Gameplay;
+            g_State->Settings.EnableHighAngularVelocityShadowFreeze &&
+            (camera.GetUsage() == CameraUsage::Gameplay || allowEditorPerspectiveShadowFreeze);
         const glm::quat currentCameraRotation = ExtractCameraRotationFromViewMatrix(cameraViewMatrix);
         const glm::mat4 cameraWorldMatrix = glm::inverse(cameraViewMatrix);
         const glm::vec3 currentCameraPosition = glm::vec3(cameraWorldMatrix[3]);
         float cameraAngularVelocityDegreesPerSecond = 0.0f;
         float cameraTranslationPixelsPerSecond = 0.0f;
-        if (allowAngularVelocityShadowFreeze && g_State->HasPreviousCameraRotation)
+        if (allowAngularVelocityShadowFreeze && shadowCache.HasPreviousCameraRotation)
         {
             const float deltaTimeSeconds = std::max(Time::GetUnscaledDeltaTimeSeconds(), kEpsilon);
             cameraAngularVelocityDegreesPerSecond = ComputeAngularVelocityDegreesPerSecond(
-                g_State->PreviousCameraRotation,
+                shadowCache.PreviousCameraRotation,
                 currentCameraRotation,
                 deltaTimeSeconds);
-            if (g_State->HasPreviousCameraPosition)
+            if (shadowCache.HasPreviousCameraPosition)
             {
-                const float worldDistance = glm::length(currentCameraPosition - g_State->PreviousCameraPosition);
+                const float worldDistance = glm::length(currentCameraPosition - shadowCache.PreviousCameraPosition);
                 cameraTranslationPixelsPerSecond = (worldDistance * pixelsPerUnit) / deltaTimeSeconds;
             }
         }
         if (allowAngularVelocityShadowFreeze)
         {
-            g_State->HasPreviousCameraRotation = true;
-            g_State->PreviousCameraRotation = currentCameraRotation;
-            g_State->HasPreviousCameraPosition = true;
-            g_State->PreviousCameraPosition = currentCameraPosition;
+            shadowCache.HasPreviousCameraRotation = true;
+            shadowCache.PreviousCameraRotation = currentCameraRotation;
+            shadowCache.HasPreviousCameraPosition = true;
+            shadowCache.PreviousCameraPosition = currentCameraPosition;
         }
         else
         {
-            g_State->HasPreviousCameraRotation = false;
-            g_State->HasPreviousCameraPosition = false;
-            g_State->FramesSinceShadowSegmentBuild = 0;
-            g_State->ShadowFreezeFramesRemaining = 0;
-            g_State->ShadowSurgeCadenceFramesRemaining = 0;
+            shadowCache.HasPreviousCameraRotation = false;
+            shadowCache.HasPreviousCameraPosition = false;
+            shadowCache.FramesSinceShadowSegmentBuild = 0;
+            shadowCache.ShadowFreezeFramesRemaining = 0;
+            shadowCache.ShadowSurgeCadenceFramesRemaining = 0;
         }
 
         const float freezeThreshold = g_State->Settings.ShadowFreezeAngularVelocityDegreesPerSecond;
@@ -246,13 +274,13 @@ namespace Limitless
         if (highMotionShadowFreezeTriggered)
         {
             const uint32_t requestedFreezeFrames = static_cast<uint32_t>(std::max(1, freezeFrameCount));
-            g_State->ShadowFreezeFramesRemaining = std::max(g_State->ShadowFreezeFramesRemaining, requestedFreezeFrames);
+            shadowCache.ShadowFreezeFramesRemaining = std::max(shadowCache.ShadowFreezeFramesRemaining, requestedFreezeFrames);
         }
 
         std::vector<ShadowSegment> shadowSegments;
         const bool motionAwareShadowCadenceActive = allowAngularVelocityShadowFreeze &&
             !highMotionShadowFreezeTriggered &&
-            !g_State->CachedShadowSegments.empty() &&
+            !shadowCache.CachedShadowSegments.empty() &&
             (cameraAngularVelocityDegreesPerSecond >= cadenceAngularVelocityThreshold ||
              cameraTranslationPixelsPerSecond >= cadenceTranslationThresholdPixelsPerSecond);
         uint32_t shadowRebuildIntervalFrames = 1;
@@ -268,33 +296,33 @@ namespace Limitless
             shadowRebuildIntervalFrames = motionStress >= 0.8f ? 3u : 2u;
         }
         const bool useFrozenShadowSegments = allowAngularVelocityShadowFreeze &&
-            !g_State->CachedShadowSegments.empty() &&
-            (g_State->ShadowFreezeFramesRemaining > 0 ||
-             g_State->ShadowSurgeCadenceFramesRemaining > 0 ||
-             (motionAwareShadowCadenceActive && (g_State->FramesSinceShadowSegmentBuild + 1u) < shadowRebuildIntervalFrames));
+            !shadowCache.CachedShadowSegments.empty() &&
+            (shadowCache.ShadowFreezeFramesRemaining > 0 ||
+             shadowCache.ShadowSurgeCadenceFramesRemaining > 0 ||
+             (motionAwareShadowCadenceActive && (shadowCache.FramesSinceShadowSegmentBuild + 1u) < shadowRebuildIntervalFrames));
         if (useFrozenShadowSegments)
         {
-            shadowSegments = g_State->CachedShadowSegments;
-            occluderCount = g_State->CachedShadowOccluderCount;
-            ++g_State->FramesSinceShadowSegmentBuild;
-            if (g_State->ShadowSurgeCadenceFramesRemaining > 0)
-                --g_State->ShadowSurgeCadenceFramesRemaining;
+            shadowSegments = shadowCache.CachedShadowSegments;
+            occluderCount = shadowCache.CachedShadowOccluderCount;
+            ++shadowCache.FramesSinceShadowSegmentBuild;
+            if (shadowCache.ShadowSurgeCadenceFramesRemaining > 0)
+                --shadowCache.ShadowSurgeCadenceFramesRemaining;
         }
         else
         {
-            const uint32_t previousOccluderCount = g_State->CachedShadowOccluderCount;
+            const uint32_t previousOccluderCount = shadowCache.CachedShadowOccluderCount;
             shadowSegments = BuildShadowSegments(scene, interpolationAlpha, *lightingCamera, viewProjection, lightingWidth, lightingHeight, maxShadowSegments, cullingMask, occluderCount, effectiveShadowSegmentSnapPixels);
-            g_State->CachedShadowSegments = shadowSegments;
-            g_State->CachedShadowOccluderCount = occluderCount;
-            g_State->FramesSinceShadowSegmentBuild = 0;
+            shadowCache.CachedShadowSegments = shadowSegments;
+            shadowCache.CachedShadowOccluderCount = occluderCount;
+            shadowCache.FramesSinceShadowSegmentBuild = 0;
             if (occluderCount > previousOccluderCount + 5u &&
                 occluderCount > static_cast<uint32_t>(static_cast<float>(previousOccluderCount) * 1.5f))
             {
-                g_State->ShadowSurgeCadenceFramesRemaining = 3;
+                shadowCache.ShadowSurgeCadenceFramesRemaining = 3;
             }
         }
-        if (allowAngularVelocityShadowFreeze && g_State->ShadowFreezeFramesRemaining > 0)
-            --g_State->ShadowFreezeFramesRemaining;
+        if (allowAngularVelocityShadowFreeze && shadowCache.ShadowFreezeFramesRemaining > 0)
+            --shadowCache.ShadowFreezeFramesRemaining;
         std::vector<ScreenDirectionalLight> directionalLights = BuildDirectionalLights(scene, interpolationAlpha, *lightingCamera, viewProjection, lightingWidth, lightingHeight, pixelsPerUnit, cullingMask);
         std::vector<ScreenPointLight> pointLights = BuildPointLights(scene, interpolationAlpha, *lightingCamera, viewProjection, lightingWidth, lightingHeight, pixelsPerUnit, cullingMask);
 
@@ -406,7 +434,9 @@ namespace Limitless
                                        lightingWidth,
                                        lightingHeight,
                                        effectiveShadowSegmentSnapPixels,
-                                       clampDirectionalShadowToViewport);
+                                       clampDirectionalShadowToViewport,
+                                       maxCasterHeightPixels,
+                                       hasAnyCasters);
         }
 
         auto pointShader = ResolveShaderFromAsset(g_State->PointLightShaderAsset, kPointLightShaderKey);

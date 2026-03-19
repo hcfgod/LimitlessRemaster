@@ -117,6 +117,25 @@ namespace Limitless::Lighting2DInternal
         float ShadowBiasPixels = 0.0f;
     };
 
+    struct ShadowCacheState
+    {
+        std::vector<ShadowSegment> CachedShadowSegments;
+        uint32_t CachedShadowOccluderCount = 0;
+        bool HasPreviousCameraRotation = false;
+        glm::quat PreviousCameraRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        bool HasPreviousCameraPosition = false;
+        glm::vec3 PreviousCameraPosition = glm::vec3(0.0f);
+        uint32_t FramesSinceShadowSegmentBuild = 0;
+        uint32_t ShadowFreezeFramesRemaining = 0;
+        uint32_t ShadowSurgeCadenceFramesRemaining = 0;
+    };
+
+    struct ShadowCacheEntry
+    {
+        ShadowCacheState State{};
+        uint64_t LastUsedTick = 0;
+    };
+
     struct Lighting2DRendererState
     {
         Lighting2DSettings Settings{};
@@ -155,15 +174,8 @@ namespace Limitless::Lighting2DInternal
         std::shared_ptr<RenderPipeline> CompositePipeline;
         std::shared_ptr<Shader> CompositePipelineShader;
 
-        std::vector<ShadowSegment> CachedShadowSegments;
-        uint32_t CachedShadowOccluderCount = 0;
-        bool HasPreviousCameraRotation = false;
-        glm::quat PreviousCameraRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-        bool HasPreviousCameraPosition = false;
-        glm::vec3 PreviousCameraPosition = glm::vec3(0.0f);
-        uint32_t FramesSinceShadowSegmentBuild = 0;
-        uint32_t ShadowFreezeFramesRemaining = 0;
-        uint32_t ShadowSurgeCadenceFramesRemaining = 0;
+        uint64_t ShadowCacheUseTick = 0;
+        std::unordered_map<const Camera*, ShadowCacheEntry> ShadowCacheEntries;
     };
 
     // C++17 inline variable — single definition shared across all TUs.
@@ -378,7 +390,9 @@ namespace Limitless::Lighting2DInternal
                                     uint32_t width,
                                     uint32_t height,
                                     float shadowSegmentSnapPixels,
-                                    bool clampShadowToViewport);
+                                    bool clampShadowToViewport,
+                                    float maxCasterHeightPixels,
+                                    bool hasAnyCasters);
 
     void SubmitPointLightPass(const std::shared_ptr<Texture2D>& albedoTexture,
                               const std::shared_ptr<Texture2D>& normalTexture,

@@ -48,6 +48,8 @@ const int MAX_SHADOW_SEGMENTS = 128;
 uniform vec4 u_ShadowSegments[MAX_SHADOW_SEGMENTS];
 uniform vec4 u_ShadowSegmentCasterIds[MAX_SHADOW_SEGMENTS];
 uniform int u_ShadowSegmentFlags[MAX_SHADOW_SEGMENTS];
+uniform float u_MaxCasterHeightPixels;
+uniform int u_HasAnyCasters;
 
 float Cross2D(vec2 a, vec2 b)
 {
@@ -187,8 +189,8 @@ bool RaymarchAlphaOcclusion(vec2 sampleOrigin, vec2 sampleEnd, vec4 fragmentCast
     if (rayLength <= 0.0001)
         return false;
 
-    const int MAX_ALPHA_STEPS = 96;
-    int stepCount = min(MAX_ALPHA_STEPS, max(1, int(rayLength / 1.5)));
+    const int MAX_ALPHA_STEPS = 64;
+    int stepCount = min(MAX_ALPHA_STEPS, max(1, int(rayLength / 2.0)));
     for (int stepIndex = 0; stepIndex < MAX_ALPHA_STEPS; ++stepIndex)
     {
         if (stepIndex >= stepCount)
@@ -213,8 +215,8 @@ bool ProjectedAlphaOcclusion(vec2 fragmentScreenPosition,
 {
     vec2 perpendicular = vec2(-rayDirection.y, rayDirection.x);
     float biasDistance = max(shadowBias, 0.0);
-    const int MAX_PROJECTED_STEPS = 256;
-    float maxDistance = min(max(shadowDistance + u_CasterHeightEncodeMaxPixels, 1.0), float(MAX_PROJECTED_STEPS) * 1.5);
+    const int MAX_PROJECTED_STEPS = 128;
+    float maxDistance = min(max(shadowDistance + u_MaxCasterHeightPixels, 1.0), float(MAX_PROJECTED_STEPS) * 2.0);
     if (maxDistance <= biasDistance + 0.0001)
         return false;
 
@@ -222,19 +224,25 @@ bool ProjectedAlphaOcclusion(vec2 fragmentScreenPosition,
     if (snapPixels > 0.0001)
         receiverSamplePosition = round(receiverSamplePosition / snapPixels) * snapPixels;
 
-    int stepCount = min(MAX_PROJECTED_STEPS, max(1, int((maxDistance - biasDistance) / 1.5)));
-    float stepDistance = (maxDistance - biasDistance) / float(stepCount);
-    float matchTolerance = max(max(1.5, u_ShadowSoftness * 0.35 + 0.75), stepDistance * 0.85);
+    float marchRange = maxDistance - biasDistance;
+
+    // Fixed step size keeps step positions stable across zoom levels.
+    const float FINE_STEP_SIZE = 2.0;
+    int stepCount = min(MAX_PROJECTED_STEPS, max(1, int(marchRange / FINE_STEP_SIZE)));
+    float matchTolerance = max(max(1.5, u_ShadowSoftness * 0.35 + 0.75), FINE_STEP_SIZE * 0.85);
     for (int stepIndex = 0; stepIndex < MAX_PROJECTED_STEPS; ++stepIndex)
     {
         if (stepIndex >= stepCount)
             break;
 
-        float phase = (float(stepIndex) + 0.5) / float(stepCount);
-        float sampleDistance = mix(biasDistance, maxDistance, phase);
+        float sampleDistance = biasDistance + FINE_STEP_SIZE * (float(stepIndex) + 0.5);
+        if (sampleDistance > maxDistance) break;
         vec2 samplePos = receiverSamplePosition + rayDirection * sampleDistance;
         if (snapPixels > 0.0001)
             samplePos = round(samplePos / snapPixels) * snapPixels;
+        if (samplePos.x < -1.0 || samplePos.y < -1.0 ||
+            samplePos.x >= u_ViewportSize.x + 1.0 || samplePos.y >= u_ViewportSize.y + 1.0)
+            break;
         float projectedDistance = dot(samplePos - receiverSamplePosition, rayDirection);
         if (IsAlphaOccluderAtScreenPosProjected(samplePos, projectedDistance, matchTolerance, fragmentCasterId))
             return true;
@@ -287,16 +295,7 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 rayDirection, vec4 f
             sampleEnd = mix(sampleOrigin, sampleEnd, viewportExitPhase);
             hasOffscreenRayPortion = false;
         }
-        bool alphaOccluded = ProjectedAlphaOcclusion(
-            fragmentScreenPosition,
-            rayDirection,
-            sampleShadowDistance,
-            u_ShadowBias,
-            sampleOffset,
-            snapPixels,
-            fragmentCasterId);
-
-        bool occluded = alphaOccluded;
+        // Setup offscreen data for segment intersection tests.
         int segmentCount = min(u_ShadowSegmentCount, MAX_SHADOW_SEGMENTS);
         vec2 offscreenSampleOrigin = sampleOrigin;
         int viewportExitSide = 0;
@@ -326,6 +325,8 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 rayDirection, vec4 f
             if (candidateDistance < minDistanceToBoundary)
                 viewportExitSide = 4;
         }
+        // Check segment intersections first (cheap — no texture fetches).
+        bool occluded = false;
         for (int segmentIndex = 0; !occluded && segmentIndex < segmentCount; ++segmentIndex)
         {
             if ((fragmentCasterId.x > 0.0001 || fragmentCasterId.y > 0.0001 || fragmentCasterId.z > 0.0001 || fragmentCasterId.w > 0.0001) &&
@@ -375,6 +376,20 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 rayDirection, vec4 f
                 occluded = true;
                 break;
             }
+        }
+
+        // Only run expensive projected alpha occlusion when segments
+        // did not already find occlusion and the scene has casters.
+        if (!occluded && u_HasAnyCasters != 0)
+        {
+            occluded = ProjectedAlphaOcclusion(
+                fragmentScreenPosition,
+                rayDirection,
+                sampleShadowDistance,
+                u_ShadowBias,
+                sampleOffset,
+                snapPixels,
+                fragmentCasterId);
         }
 
         if (occluded)
@@ -427,7 +442,7 @@ void main()
 
     float shadowAlphaCutoff = clamp(u_ShadowAlphaCutoff, 0.0, 1.0);
     float shadowReceiver = clamp(normalSample.a, 0.0, 1.0);
-    float computedShadowFactor = (albedo.a >= max(0.01, shadowAlphaCutoff - 0.12)) ? ComputeShadowFactor(fragmentScreenPosition, shadowRayDir, fragmentCasterId) : 1.0;
+    float computedShadowFactor = (shadowReceiver > 0.001 && albedo.a >= max(0.01, shadowAlphaCutoff - 0.12)) ? ComputeShadowFactor(fragmentScreenPosition, shadowRayDir, fragmentCasterId) : 1.0;
     float shadowFactor = mix(1.0, computedShadowFactor, shadowReceiver);
 
     vec3 lighting = u_LightColor * (u_LightIntensity * ndotl * shadowFactor);

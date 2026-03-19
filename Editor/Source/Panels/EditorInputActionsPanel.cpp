@@ -66,6 +66,14 @@ namespace Limitless::EditorInputActionsPanel
             bool RenamingMap = false;
             bool RenamingAction = false;
             std::array<char, 128> RenameBuffer{};
+
+            bool ListeningForScancode = false;
+            int ListeningMapIndex = -1;
+            int ListeningActionIndex = -1;
+            int ListeningBindingIndex = -1;
+            std::string ListeningScancodeKey;
+            std::string ListeningNameKey;
+            std::array<bool, SDL_SCANCODE_COUNT> ListeningKeyboardState{};
         };
 
         PanelState& GetPanelState()
@@ -179,17 +187,161 @@ namespace Limitless::EditorInputActionsPanel
             return pressed;
         }
 
-        bool ScancodeSelector(const char* label, json& bindingJson, const char* scancodeKey, const char* nameKey)
+        void StopScancodeListening(PanelState& state)
+        {
+            state.ListeningForScancode = false;
+            state.ListeningMapIndex = -1;
+            state.ListeningActionIndex = -1;
+            state.ListeningBindingIndex = -1;
+            state.ListeningScancodeKey.clear();
+            state.ListeningNameKey.clear();
+            state.ListeningKeyboardState.fill(false);
+        }
+
+        void SnapshotListeningKeyboardState(PanelState& state)
+        {
+            state.ListeningKeyboardState.fill(false);
+            int keyCount = 0;
+            const auto* keyboardState = SDL_GetKeyboardState(&keyCount);
+            if (!keyboardState)
+                return;
+
+            const int maxCount = std::min(keyCount, static_cast<int>(SDL_SCANCODE_COUNT));
+            for (int sc = 0; sc < maxCount; ++sc)
+                state.ListeningKeyboardState[static_cast<size_t>(sc)] = keyboardState[sc] != 0;
+        }
+
+        bool IsListeningForScancodeField(const PanelState& state,
+                                         const char* scancodeKey,
+                                         const char* nameKey)
+        {
+            return state.ListeningForScancode &&
+                   state.ListeningMapIndex == state.SelectedMapIndex &&
+                   state.ListeningActionIndex == state.SelectedActionIndex &&
+                   state.ListeningBindingIndex == state.SelectedBindingIndex &&
+                   state.ListeningScancodeKey == scancodeKey &&
+                   state.ListeningNameKey == nameKey;
+        }
+
+        void StartScancodeListening(PanelState& state,
+                                    const char* scancodeKey,
+                                    const char* nameKey)
+        {
+            state.ListeningForScancode = true;
+            state.ListeningMapIndex = state.SelectedMapIndex;
+            state.ListeningActionIndex = state.SelectedActionIndex;
+            state.ListeningBindingIndex = state.SelectedBindingIndex;
+            state.ListeningScancodeKey = scancodeKey;
+            state.ListeningNameKey = nameKey;
+            SnapshotListeningKeyboardState(state);
+        }
+
+        bool DrawListenButton(const char* id, bool listening)
+        {
+            constexpr float buttonSize = 28.0f;
+            const ImVec2 pos = ImGui::GetCursorScreenPos();
+            const ImVec2 size(buttonSize, buttonSize);
+            const ImVec2 center(pos.x + buttonSize * 0.5f, pos.y + buttonSize * 0.5f);
+
+            ImGui::InvisibleButton(id, size);
+            const bool hovered = ImGui::IsItemHovered();
+            const bool held = ImGui::IsItemActive();
+            const bool pressed = ImGui::IsItemClicked();
+
+            const ImVec4 bgColor = listening
+                ? (held ? kAccentActiveColor : (hovered ? kAccentHoverColor : kAccentColor))
+                : (held ? ImVec4(0.18f, 0.21f, 0.27f, 1.0f)
+                        : (hovered ? ImVec4(0.26f, 0.29f, 0.36f, 1.0f) : ImVec4(0.22f, 0.25f, 0.31f, 1.0f)));
+            const ImVec4 borderColor = listening ? kAccentHoverColor : ImVec4(0.34f, 0.38f, 0.45f, 1.0f);
+
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), ImGui::ColorConvertFloat4ToU32(bgColor), 6.0f);
+            dl->AddRect(pos, ImVec2(pos.x + size.x, pos.y + size.y), ImGui::ColorConvertFloat4ToU32(borderColor), 6.0f, 0, 1.0f);
+
+            const ImU32 iconColor = IM_COL32(240, 244, 255, 235);
+            const ImVec2 keyMin(center.x - 7.0f, center.y - 5.5f);
+            const ImVec2 keyMax(center.x + 1.5f, center.y + 3.0f);
+            dl->AddRect(keyMin, keyMax, iconColor, 2.5f, 0, 1.3f);
+            dl->AddLine(ImVec2(keyMin.x + 2.0f, keyMin.y + 2.8f), ImVec2(keyMax.x - 2.0f, keyMin.y + 2.8f), iconColor, 1.1f);
+
+            const ImVec2 arcCenter(center.x + 1.5f, center.y + 0.8f);
+            dl->PathArcTo(arcCenter, 6.0f, -0.55f, 1.95f, 18);
+            dl->PathStroke(iconColor, 0, 1.4f);
+
+            const ImVec2 arrowTip(center.x + 1.5f, center.y + 6.8f);
+            dl->AddTriangleFilled(
+                arrowTip,
+                ImVec2(arrowTip.x - 3.8f, arrowTip.y - 1.4f),
+                ImVec2(arrowTip.x - 0.9f, arrowTip.y - 4.4f),
+                iconColor);
+
+            if (listening)
+            {
+                const ImU32 pulseColor = IM_COL32(255, 255, 255, 110);
+                dl->AddCircle(center, 10.0f, pulseColor, 24, 1.2f);
+            }
+
+            if (hovered)
+            {
+                ImGui::BeginTooltip();
+                ImGui::TextUnformatted(listening ? "Listening for input" : "Listen for input");
+                ImGui::TextDisabled(listening ? "Press any keyboard key to assign it. Click again to cancel." : "Click to capture the next keyboard key.");
+                ImGui::EndTooltip();
+            }
+
+            return pressed;
+        }
+
+        bool PollScancodeListening(PanelState& state,
+                                   json& bindingJson,
+                                   const char* scancodeKey,
+                                   const char* nameKey)
+        {
+            if (!IsListeningForScancodeField(state, scancodeKey, nameKey))
+                return false;
+
+            int keyCount = 0;
+            const auto* keyboardState = SDL_GetKeyboardState(&keyCount);
+            if (!keyboardState)
+                return false;
+
+            const int maxCount = std::min(keyCount, static_cast<int>(SDL_SCANCODE_COUNT));
+            for (int sc = 0; sc < maxCount; ++sc)
+            {
+                const bool isDown = keyboardState[sc] != 0;
+                const bool wasDown = state.ListeningKeyboardState[static_cast<size_t>(sc)];
+                if (isDown && !wasDown && sc != static_cast<int>(SDL_SCANCODE_UNKNOWN))
+                {
+                    WriteScancodeValue(bindingJson, scancodeKey, nameKey, sc);
+                    StopScancodeListening(state);
+                    return true;
+                }
+            }
+
+            SnapshotListeningKeyboardState(state);
+            return false;
+        }
+
+        bool ScancodeSelector(const char* label,
+                              json& bindingJson,
+                              const char* scancodeKey,
+                              const char* nameKey,
+                              PanelState& state)
         {
             int scancode = ReadScancodeValue(bindingJson, scancodeKey, nameKey);
-            std::string currentName = GetScancodeDisplayName(scancode);
+            const bool listening = IsListeningForScancodeField(state, scancodeKey, nameKey);
+            std::string currentName = listening ? std::string("Listening...") : GetScancodeDisplayName(scancode);
             bool changed = false;
 
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted(label);
             ImGui::SameLine(100.0f);
-            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-            if (ImGui::BeginCombo((std::string("##") + label).c_str(), currentName.c_str()))
+
+            const float buttonWidth = 28.0f;
+            const float spacing = ImGui::GetStyle().ItemSpacing.x;
+            const float comboWidth = std::max(80.0f, ImGui::GetContentRegionAvail().x - buttonWidth - spacing);
+            ImGui::SetNextItemWidth(comboWidth);
+            if (ImGui::BeginCombo((std::string("##") + scancodeKey).c_str(), currentName.c_str()))
             {
                 for (int sc = 4; sc < 232; ++sc)
                 {
@@ -199,22 +351,45 @@ namespace Limitless::EditorInputActionsPanel
                     if (ImGui::Selectable(name, selected))
                     {
                         WriteScancodeValue(bindingJson, scancodeKey, nameKey, sc);
+                        StopScancodeListening(state);
                         changed = true;
                     }
                     if (selected) ImGui::SetItemDefaultFocus();
                 }
                 ImGui::EndCombo();
             }
+
+            ImGui::SameLine(0.0f, spacing);
+            if (DrawListenButton((std::string("##Listen") + scancodeKey).c_str(), listening))
+            {
+                if (listening)
+                    StopScancodeListening(state);
+                else
+                    StartScancodeListening(state, scancodeKey, nameKey);
+            }
+
+            if (PollScancodeListening(state, bindingJson, scancodeKey, nameKey))
+                changed = true;
+
             return changed;
         }
 
-        bool DrawImprovedBindingEditor(json& bindingJson)
+        bool DrawImprovedBindingEditor(json& bindingJson, PanelState& state)
         {
             if (!bindingJson.is_object())
             {
                 bindingJson = CreateDefaultBindingJson("KeyboardButton");
                 return true;
             }
+
+            if (state.ListeningForScancode &&
+                (state.ListeningMapIndex != state.SelectedMapIndex ||
+                 state.ListeningActionIndex != state.SelectedActionIndex ||
+                 state.ListeningBindingIndex != state.SelectedBindingIndex))
+            {
+                StopScancodeListening(state);
+            }
+
             bool modified = false;
             std::string bindingType = bindingJson.value("binding", std::string("KeyboardButton"));
             int bindingTypeIndex = 0;
@@ -231,13 +406,14 @@ namespace Limitless::EditorInputActionsPanel
             {
                 bindingType = kInputBindingTypes[static_cast<size_t>(bindingTypeIndex)];
                 bindingJson = CreateDefaultBindingJson(bindingType);
+                StopScancodeListening(state);
                 modified = true;
             }
             ImGui::Spacing();
 
             if (bindingType == "KeyboardButton")
             {
-                if (ScancodeSelector("Key", bindingJson, "scancode", "key")) modified = true;
+                if (ScancodeSelector("Key", bindingJson, "scancode", "key", state)) modified = true;
             }
             else if (bindingType == "MouseButton")
             {
@@ -253,8 +429,8 @@ namespace Limitless::EditorInputActionsPanel
             }
             else if (bindingType == "KeyboardAxis1D")
             {
-                if (ScancodeSelector("Negative", bindingJson, "negative_scancode", "negative")) modified = true;
-                if (ScancodeSelector("Positive", bindingJson, "positive_scancode", "positive")) modified = true;
+                if (ScancodeSelector("Negative", bindingJson, "negative_scancode", "negative", state)) modified = true;
+                if (ScancodeSelector("Positive", bindingJson, "positive_scancode", "positive", state)) modified = true;
                 float negScale = bindingJson.value("negative_scale", -1.0f);
                 float posScale = bindingJson.value("positive_scale", 1.0f);
                 ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted("Neg Scale"); ImGui::SameLine(100.0f);
@@ -266,10 +442,10 @@ namespace Limitless::EditorInputActionsPanel
             }
             else if (bindingType == "KeyboardAxis2D")
             {
-                if (ScancodeSelector("Up", bindingJson, "up_scancode", "up")) modified = true;
-                if (ScancodeSelector("Down", bindingJson, "down_scancode", "down")) modified = true;
-                if (ScancodeSelector("Left", bindingJson, "left_scancode", "left")) modified = true;
-                if (ScancodeSelector("Right", bindingJson, "right_scancode", "right")) modified = true;
+                if (ScancodeSelector("Up", bindingJson, "up_scancode", "up", state)) modified = true;
+                if (ScancodeSelector("Down", bindingJson, "down_scancode", "down", state)) modified = true;
+                if (ScancodeSelector("Left", bindingJson, "left_scancode", "left", state)) modified = true;
+                if (ScancodeSelector("Right", bindingJson, "right_scancode", "right", state)) modified = true;
                 float scale = bindingJson.value("scale", 1.0f);
                 ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted("Scale"); ImGui::SameLine(100.0f);
                 ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
@@ -428,7 +604,7 @@ namespace Limitless::EditorInputActionsPanel
                     dl->AddRectFilled(cardMin, cardMax, ImGui::ColorConvertFloat4ToU32(kHoveredBgColor), 4.0f);
 
                 // Double-click to rename
-                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                if (mapItemHovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                 {
                     state.RenamingMap = true;
                     state.RenamingAction = false;
@@ -581,7 +757,7 @@ namespace Limitless::EditorInputActionsPanel
                     dl->AddRectFilled(acMin, acMax, ImGui::ColorConvertFloat4ToU32(kHoveredBgColor), 4.0f);
 
                 // Double-click to rename
-                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                if (actionItemHovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
                 {
                     state.RenamingAction = true;
                     state.RenamingMap = false;
@@ -692,7 +868,8 @@ namespace Limitless::EditorInputActionsPanel
             {
                 state.SelectedBindingIndex = isSelected ? -1 : bindingIndex;
             }
-            if (ImGui::IsItemHovered() && !isSelected)
+            const bool bindingHeaderHovered = ImGui::IsItemHovered();
+            if (bindingHeaderHovered && !isSelected)
                 drawList->AddRectFilled(headerMin, headerMax, ImGui::ColorConvertFloat4ToU32(kHoveredBgColor), kCardRounding);
 
             // Context menu
@@ -740,16 +917,13 @@ namespace Limitless::EditorInputActionsPanel
             // Expanded detail area
             if (isSelected)
             {
-                ImGui::SetCursorScreenPos(ImVec2(cardMin.x, headerMax.y + 6.0f));
-                ImGui::Spacing();
-                ImGui::Indent(10.0f);
-                ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x - 20.0f);
+                ImGui::SetCursorScreenPos(ImVec2(cardMin.x + 10.0f, headerMax.y + 8.0f));
+                ImGui::PushItemWidth(cardWidth - 20.0f);
 
-                if (DrawImprovedBindingEditor(bindingJson))
+                if (DrawImprovedBindingEditor(bindingJson, state))
                     modified = true;
 
                 ImGui::PopItemWidth();
-                ImGui::Unindent(10.0f);
                 ImGui::Spacing();
 
                 // Delete button
@@ -999,7 +1173,10 @@ namespace Limitless::EditorInputActionsPanel
         if (modified)
             state.PendingSave = true;
 
-        if (state.PendingSave && !ImGui::IsAnyItemActive())
+        if (state.PendingSave &&
+            !ImGui::IsAnyItemActive() &&
+            !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId) &&
+            !state.ListeningForScancode)
         {
             if (SaveInputActionsJsonAndReload(inputActionsAssetKey, state.Json, state.ResolvedPath))
                 state.PendingSave = false;

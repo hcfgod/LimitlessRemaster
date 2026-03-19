@@ -86,6 +86,11 @@ namespace Limitless
             kAssetShaderPayload,
             kAssetFontPayload,
             [this](const std::string& assetKey) { LoadSceneFromAssetKey(assetKey); },
+            [this](const std::string& assetKey) {
+                m_SelectedInputActionsAssetKey = assetKey;
+                m_ProjectPanelState.RequestFocusInputActionsEditor = true;
+                m_ShowInputActionsPanel = true;
+            },
             [this](const std::filesystem::path& relativeFolderPath) {
                 const std::string createdSceneAssetKey = CreateSceneAssetInFolder(relativeFolderPath);
                 if (!createdSceneAssetKey.empty())
@@ -735,6 +740,12 @@ namespace Limitless
                 kAssetShaderPayload,
                 kAssetFontPayload,
                 [this](const std::string& assetKey) { LoadSceneFromAssetKey(assetKey); },
+                [this, &additional](const std::string& assetKey) {
+                    m_SelectedInputActionsAssetKey = assetKey;
+                    additional.State.RequestFocusInputActionsEditor = true;
+                    m_ProjectPanelState.RequestFocusInputActionsEditor = true;
+                    m_ShowInputActionsPanel = true;
+                },
                 [this](const std::filesystem::path& relativeFolderPath) {
                     const std::string createdSceneAssetKey = CreateSceneAssetInFolder(relativeFolderPath);
                     if (!createdSceneAssetKey.empty())

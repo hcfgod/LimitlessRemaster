@@ -160,6 +160,7 @@ namespace Limitless
                   const char* shaderPayloadId,
                   const char* fontPayloadId,
                   const std::function<void(const std::string&)>& onSceneActivated,
+                  const std::function<void(const std::string&)>& onInputActionsAssetActivated,
                   const std::function<void(const std::filesystem::path&)>& onCreateSceneRequested,
                   const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateMaterialRequested,
                   const std::function<void(const std::filesystem::path&, const std::string&)>& onCreateTilesetRequested,

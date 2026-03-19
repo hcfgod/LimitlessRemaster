@@ -203,6 +203,7 @@ namespace Limitless::EditorProjectPanel::Internal
         const char* ShaderPayloadId;
         const char* FontPayloadId;
         const std::function<void(const std::string&)>& OnSceneActivated;
+        const std::function<void(const std::string&)>& OnInputActionsAssetActivated;
         const std::function<void(const std::filesystem::path&)>& OnCreateSceneRequested;
         const std::function<void(const std::filesystem::path&, const std::string&)>& OnCreateMaterialRequested;
         const std::function<void(const std::filesystem::path&, const std::string&)>& OnCreateTilesetRequested;

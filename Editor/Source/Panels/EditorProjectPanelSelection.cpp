@@ -381,6 +381,8 @@ namespace Limitless::EditorProjectPanel::Internal
         {
             selection.SelectedInputActionsAssetKey = entry.PrimaryAssetKey;
             state.RequestFocusInputActionsEditor = true;
+            if (callbacks.OnInputActionsAssetActivated)
+                callbacks.OnInputActionsAssetActivated(entry.PrimaryAssetKey);
         }
         else if (entry.IsAnimationClip)
         {
