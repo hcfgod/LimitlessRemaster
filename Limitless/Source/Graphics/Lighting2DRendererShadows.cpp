@@ -1176,18 +1176,7 @@ namespace Limitless::Lighting2DInternal
 
         auto& registry = scene.GetRegistry();
         auto directionalView = registry.view<DirectionalLight2DComponent>();
-        glm::vec3 screenDirectionReferencePoint = glm::vec3(0.0f);
-        {
-            const glm::mat4 cameraWorld = glm::inverse(camera.GetViewMatrix());
-            const glm::vec3 cameraPosition = glm::vec3(cameraWorld[3]);
-            const glm::vec3 cameraForward = glm::normalize(-glm::vec3(cameraWorld[2]));
-            if (std::abs(cameraForward.z) > kEpsilon)
-            {
-                const float t = (0.0f - cameraPosition.z) / cameraForward.z;
-                if (t > 0.0f && std::isfinite(t))
-                    screenDirectionReferencePoint = cameraPosition + cameraForward * t;
-            }
-        }
+        const glm::mat4& viewMatrix = camera.GetViewMatrix();
         for (entt::entity entity : directionalView)
         {
             if (lights.size() >= maxDirectionalLights)
@@ -1211,22 +1200,8 @@ namespace Limitless::Lighting2DInternal
                 worldDirection = glm::vec2(0.0f, -1.0f);
             worldDirection = glm::normalize(worldDirection);
 
-            const glm::vec2 referenceScreen = ProjectWorldToScreenClamped(
-                viewProjection,
-                screenDirectionReferencePoint,
-                width,
-                height);
-            const glm::vec2 offsetScreen = ProjectWorldToScreenClamped(
-                viewProjection,
-                screenDirectionReferencePoint + glm::vec3(worldDirection, 0.0f),
-                width,
-                height);
-            glm::vec2 screenDirection = offsetScreen - referenceScreen;
-            if (glm::length(screenDirection) <= kEpsilon)
-            {
-                glm::vec4 viewDirection4 = camera.GetViewMatrix() * glm::vec4(worldDirection, 0.0f, 0.0f);
-                screenDirection = glm::vec2(viewDirection4.x, viewDirection4.y);
-            }
+            const glm::vec4 viewDirection4 = viewMatrix * glm::vec4(worldDirection, 0.0f, 0.0f);
+            glm::vec2 screenDirection(viewDirection4.x, viewDirection4.y);
             if (glm::length(screenDirection) <= kEpsilon)
                 screenDirection = glm::vec2(0.0f, -1.0f);
             screenDirection = glm::normalize(screenDirection);

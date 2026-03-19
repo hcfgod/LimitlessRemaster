@@ -89,6 +89,11 @@ bool IsScreenPosInsideViewport(vec2 screenPos)
            screenPos.y < u_ViewportSize.y;
 }
 
+vec2 SnapScreenPosToTexelCenter(vec2 screenPos)
+{
+    return floor(screenPos) + vec2(0.5);
+}
+
 bool ComputeViewportExitPhase(vec2 sampleOrigin, vec2 sampleEnd, out float exitPhase)
 {
     if (!IsScreenPosInsideViewport(sampleOrigin))
@@ -176,6 +181,8 @@ bool IsAlphaOccluderAtScreenPosProjected(vec2 screenPos,
     }
 
     float casterHeightPixels = DecodeCasterHeightPixels(casterMaskSample);
+    if (u_ClampShadowToViewport != 0)
+        casterHeightPixels = floor(casterHeightPixels) + 0.5;
     if (abs(projectedDistance - casterHeightPixels) > matchTolerance)
         return false;
 
@@ -221,7 +228,9 @@ bool ProjectedAlphaOcclusion(vec2 fragmentScreenPosition,
         return false;
 
     vec2 receiverSamplePosition = fragmentScreenPosition + perpendicular * sampleOffset;
-    if (snapPixels > 0.0001)
+    if (u_ClampShadowToViewport != 0)
+        receiverSamplePosition = SnapScreenPosToTexelCenter(receiverSamplePosition);
+    else if (snapPixels > 0.0001)
         receiverSamplePosition = round(receiverSamplePosition / snapPixels) * snapPixels;
 
     float marchRange = maxDistance - biasDistance;
@@ -230,6 +239,8 @@ bool ProjectedAlphaOcclusion(vec2 fragmentScreenPosition,
     const float FINE_STEP_SIZE = 2.0;
     int stepCount = min(MAX_PROJECTED_STEPS, max(1, int(marchRange / FINE_STEP_SIZE)));
     float matchTolerance = max(max(1.5, u_ShadowSoftness * 0.35 + 0.75), FINE_STEP_SIZE * 0.85);
+    if (u_ClampShadowToViewport != 0)
+        matchTolerance = max(matchTolerance, 2.75);
     for (int stepIndex = 0; stepIndex < MAX_PROJECTED_STEPS; ++stepIndex)
     {
         if (stepIndex >= stepCount)
@@ -238,12 +249,16 @@ bool ProjectedAlphaOcclusion(vec2 fragmentScreenPosition,
         float sampleDistance = biasDistance + FINE_STEP_SIZE * (float(stepIndex) + 0.5);
         if (sampleDistance > maxDistance) break;
         vec2 samplePos = receiverSamplePosition + rayDirection * sampleDistance;
-        if (snapPixels > 0.0001)
+        if (u_ClampShadowToViewport != 0)
+            samplePos = SnapScreenPosToTexelCenter(samplePos);
+        else if (snapPixels > 0.0001)
             samplePos = round(samplePos / snapPixels) * snapPixels;
         if (samplePos.x < -1.0 || samplePos.y < -1.0 ||
             samplePos.x >= u_ViewportSize.x + 1.0 || samplePos.y >= u_ViewportSize.y + 1.0)
             break;
         float projectedDistance = dot(samplePos - receiverSamplePosition, rayDirection);
+        if (u_ClampShadowToViewport != 0)
+            projectedDistance = floor(projectedDistance) + 0.5;
         if (IsAlphaOccluderAtScreenPosProjected(samplePos, projectedDistance, matchTolerance, fragmentCasterId))
             return true;
     }
@@ -257,7 +272,9 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 rayDirection, vec4 f
         return 1.0;
 
     float snapPixels = max(u_ShadowSegmentSnapPixels, 0.0);
-    if (snapPixels > 0.0001)
+    if (u_ClampShadowToViewport != 0)
+        fragmentScreenPosition = SnapScreenPosToTexelCenter(fragmentScreenPosition);
+    else if (snapPixels > 0.0001)
         fragmentScreenPosition = round(fragmentScreenPosition / snapPixels) * snapPixels;
 
     int samples = max(u_ShadowSamples, 1);
@@ -277,7 +294,12 @@ float ComputeShadowFactor(vec2 fragmentScreenPosition, vec2 rayDirection, vec4 f
         vec2 perpendicular = vec2(-rayDirection.y, rayDirection.x);
         vec2 sampleOrigin = fragmentScreenPosition + rayDirection * max(u_ShadowBias, 0.0) + perpendicular * sampleOffset;
         vec2 sampleEnd = sampleOrigin + rayDirection * effectiveShadowDistance;
-        if (snapPixels > 0.0001)
+        if (u_ClampShadowToViewport != 0)
+        {
+            sampleOrigin = SnapScreenPosToTexelCenter(sampleOrigin);
+            sampleEnd = SnapScreenPosToTexelCenter(sampleEnd);
+        }
+        else if (snapPixels > 0.0001)
         {
             sampleOrigin = round(sampleOrigin / snapPixels) * snapPixels;
             sampleEnd = round(sampleEnd / snapPixels) * snapPixels;
